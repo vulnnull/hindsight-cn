@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import asyncio
 import argparse
 import subprocess
+import logging
 from rich.console import Console
 from memora import TemporalSemanticMemory
 from longmemeval_benchmark import LongMemEvalDataset, LongMemEvalAnswerGenerator, LongMemEvalAnswerEvaluator
@@ -97,8 +98,8 @@ async def run_benchmark(
 
     # Initialize components
     dataset = LongMemEvalDataset()
-    answer_generator = LongMemEvalAnswerGenerator(model="gpt-4o-mini")
-    answer_evaluator = LongMemEvalAnswerEvaluator(model="gpt-4o")
+    answer_generator = LongMemEvalAnswerGenerator()
+    answer_evaluator = LongMemEvalAnswerEvaluator()
     memory = TemporalSemanticMemory()
 
     # Create benchmark runner
@@ -172,6 +173,8 @@ def generate_type_report(results: dict):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+
     parser = argparse.ArgumentParser(description="Run LongMemEval benchmark")
     parser.add_argument(
         "--max-instances",

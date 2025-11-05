@@ -2,28 +2,20 @@
 Test think function for opinion generation and consistency.
 """
 import pytest
-import os
 from datetime import datetime, timezone
-from memora import TemporalSemanticMemory
 
 
 @pytest.mark.asyncio
-async def test_think_opinion_consistency():
+async def test_think_opinion_consistency(memory):
     """
     Test that think function:
     1. Generates an opinion
     2. Stores the opinion in the database
     3. Returns consistent response on subsequent calls with the same query
     """
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        pytest.skip("DATABASE_URL not set")
-
-    memory = TemporalSemanticMemory(db_url=db_url)
-    await memory.initialize()
+    agent_id = f"test_think_{datetime.now(timezone.utc).timestamp()}"
 
     try:
-        agent_id = f"test_think_{datetime.now(timezone.utc).timestamp()}"
 
         # Store some initial facts to give context for opinion formation
         await memory.put_async(
@@ -137,41 +129,29 @@ async def test_think_opinion_consistency():
             await memory.delete_agent(agent_id)
         except Exception as e:
             print(f"Warning: Error during cleanup: {e}")
-        await memory.close()
 
 
 @pytest.mark.asyncio
-async def test_think_without_prior_context():
+async def test_think_without_prior_context(memory):
     """
     Test that think function handles queries when there's no relevant context.
     """
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        pytest.skip("DATABASE_URL not set")
+    agent_id = f"test_think_no_context_{datetime.now(timezone.utc).timestamp()}"
 
-    memory = TemporalSemanticMemory(db_url=db_url)
-    await memory.initialize()
+    # Call think without storing any prior facts
+    result = await memory.think_async(
+        agent_id=agent_id,
+        query="What is the capital of France?",
+        thinking_budget=20,
+        top_k=5
+    )
 
-    try:
-        agent_id = f"test_think_no_context_{datetime.now(timezone.utc).timestamp()}"
+    print(f"\n=== Think Without Context ===")
+    print(f"Answer: {result['text']}")
 
-        # Call think without storing any prior facts
-        result = await memory.think_async(
-            agent_id=agent_id,
-            query="What is the capital of France?",
-            thinking_budget=20,
-            top_k=5
-        )
-
-        print(f"\n=== Think Without Context ===")
-        print(f"Answer: {result['text']}")
-
-        # Should still return an answer (even if it says it doesn't have enough info)
-        assert result['text'], "Should return some answer"
-        assert 'based_on' in result, "Should return based_on structure"
-
-    finally:
-        await memory.close()
+    # Should still return an answer (even if it says it doesn't have enough info)
+    assert result['text'], "Should return some answer"
+    assert 'based_on' in result, "Should return based_on structure"
 
 
 if __name__ == "__main__":

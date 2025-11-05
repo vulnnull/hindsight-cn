@@ -16,13 +16,11 @@ import asyncio
 import pydantic
 from openai import AsyncOpenAI
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Import common framework
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from common.benchmark_runner import BenchmarkDataset, LLMAnswerGenerator, LLMAnswerEvaluator
+from memora.llm_wrapper import LLMConfig
 
 class LoComoDataset(BenchmarkDataset):
     """LoComo dataset implementation."""
@@ -113,19 +111,13 @@ class QuestionAnswer(pydantic.BaseModel):
 
 
 class LoComoAnswerGenerator(LLMAnswerGenerator):
-    """LoComo-specific answer generator using Groq."""
+    """LoComo-specific answer generator using configurable LLM provider."""
 
     def __init__(self):
-        """Initialize with Groq client."""
-        groq_api_key = os.getenv('GROQ_API_KEY')
-        if not groq_api_key:
-            raise ValueError("GROQ_API_KEY environment variable not set")
-
-        base_url = os.getenv('GROQ_BASE_URL', 'https://api.groq.com/openai/v1')
-        self.client = AsyncOpenAI(
-            api_key=groq_api_key,
-            base_url=base_url
-        )
+        """Initialize with LLM configuration for memory operations."""
+        self.llm_config = LLMConfig.for_memory()
+        self.client = self.llm_config.client
+        self.model = self.llm_config.model
 
     async def generate_answer(
         self,
@@ -146,10 +138,9 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
 
         context = json.dumps(context_parts)
 
-        # Use Groq to generate answer
+        # Use LLM to generate answer
         try:
-            response = await self.client.beta.chat.completions.parse(
-                model="openai/gpt-oss-120b",
+            answer_obj = await self.llm_config.call(
                 messages=[
                     {
                         "role": "system",
@@ -201,9 +192,9 @@ Answer:
 """
                     }
                 ],
-                response_format=QuestionAnswer
+                response_format=QuestionAnswer,
+                scope="memory"
             )
-            answer_obj = response.choices[0].message.parsed
             return answer_obj.answer, answer_obj.reasoning, None
         except Exception as e:
             return f"Error generating answer: {str(e)}", "Error occurred during answer generation.", None
@@ -260,7 +251,6 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
                 query=question,
                 thinking_budget=self.thinking_budget,
                 top_k=self.top_k,
-                model="openai/gpt-oss-120b",
                 temperature=0.7,
                 max_tokens=1000
             )
@@ -329,19 +319,13 @@ class JudgeResponse(pydantic.BaseModel):
 
 
 class LoComoAnswerEvaluator(LLMAnswerEvaluator):
-    """LoComo-specific answer evaluator using Groq."""
+    """LoComo-specific answer evaluator using configurable LLM provider."""
 
     def __init__(self):
-        """Initialize with Groq client."""
-        groq_api_key = os.getenv('GROQ_API_KEY')
-        if not groq_api_key:
-            raise ValueError("GROQ_API_KEY environment variable not set")
-
-        base_url = os.getenv('GROQ_BASE_URL', 'https://api.groq.com/openai/v1')
-        self.client = AsyncOpenAI(
-            api_key=groq_api_key,
-            base_url=base_url
-        )
+        """Initialize with LLM configuration for judge/evaluator."""
+        self.llm_config = LLMConfig.for_judge()
+        self.client = self.llm_config.client
+        self.model = self.llm_config.model
 
     async def judge_answer(
         self,
@@ -358,8 +342,7 @@ class LoComoAnswerEvaluator(LLMAnswerEvaluator):
         """
         async with semaphore:
             try:
-                response = await self.client.beta.chat.completions.parse(
-                    model="openai/gpt-oss-120b",
+                judgement = await self.llm_config.call(
                     messages=[
                         {
                             "role": "system",
@@ -368,9 +351,9 @@ class LoComoAnswerEvaluator(LLMAnswerEvaluator):
                         {
                             "role": "user",
                             "content": f"""
-Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You williolw23 be given the following data:
-        (1) a question (posed by one user to another user), 
-        (2) a ’gold’ (ground truth) answer, 
+Your task is to label an answer to a question as 'CORRECT' or 'WRONG'. You williolw23 be given the following data:
+        (1) a question (posed by one user to another user),
+        (2) a 'gold' (ground truth) answer,
         (3) a generated answer
     which you will score as CORRECT/WRONG.
 
@@ -378,11 +361,11 @@ Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. Y
     The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
     Question: Do you remember what I got the last time I went to Hawaii?
     Gold answer: A shell necklace
-    The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT. 
+    The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT.
 
     For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
 
-    Now it’s time for the real question:
+    Now it's time for the real question:
     Question: {question}
     Gold answer: {correct_answer}
     Generated answer: {predicted_answer}
@@ -392,12 +375,12 @@ Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. Y
 """
                         }
                     ],
+                    response_format=JudgeResponse,
+                    scope="judge",
                     temperature=0,
-                    max_tokens=4096,
-                    response_format=JudgeResponse
+                    max_tokens=4096
                 )
 
-                judgement = response.choices[0].message.parsed
                 return judgement.correct, judgement.reasoning
 
             except Exception as e:

@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import asyncio
 import argparse
+import logging
 from memora import TemporalSemanticMemory
 from locomo_benchmark import LoComoDataset, LoComoAnswerGenerator, LoComoThinkAnswerGenerator, LoComoAnswerEvaluator
 from common.benchmark_runner import BenchmarkRunner
@@ -149,7 +150,6 @@ def generate_markdown_table(results: dict, use_think: bool = False):
 
 
 if __name__ == "__main__":
-    import logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
     parser = argparse.ArgumentParser(description='Run LoComo benchmark')

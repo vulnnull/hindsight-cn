@@ -326,6 +326,13 @@ function updateDataTable(factType, data) {
                 <td>${row.context}</td>
                 <td>${row.date}</td>
                 <td>${row.entities}</td>
+                <td>
+                    <button onclick="deleteRecord('${factType}', '${row.id}')"
+                            class="delete-button"
+                            title="Delete this record and all its links">
+                        Delete
+                    </button>
+                </td>
             </tr>
         `).join('');
     }
@@ -348,6 +355,33 @@ function updateDataTable(factType, data) {
             });
         };
         filterInput.addEventListener('input', filterInput._filterHandler);
+    }
+}
+
+// Delete a record and all its links
+window.deleteRecord = async function(factType, recordId) {
+    if (!confirm('Are you sure you want to delete this record and all its links? This action cannot be undone.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`api/memory/${encodeURIComponent(recordId)}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || `HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+        alert(result.message || 'Record deleted successfully');
+
+        // Reload the table data
+        await loadDataView(factType);
+    } catch (e) {
+        console.error('Error deleting record:', e);
+        alert('Error deleting record: ' + e.message);
     }
 }
 
@@ -626,6 +660,7 @@ function addDebugPane() {
                         <option value="all">All Facts</option>
                         <option value="world">World Facts</option>
                         <option value="agent">Agent Facts</option>
+                        <option value="opinion">Opinion Facts</option>
                     </select>
                 </div>
                 <div>
@@ -801,29 +836,29 @@ window.runSearchInPane = async function(paneId) {
     }
 
     try {
-        // Determine endpoint based on search type
-        let endpoint = 'api/search';
-        if (searchType === 'world') {
-            endpoint = 'api/world_search';
-        } else if (searchType === 'agent') {
-            endpoint = 'api/agent_search';
+        // Prepare request body with optional fact_type
+        const requestBody = {
+            query: query,
+            agent_id: agentId,
+            thinking_budget: thinkingBudget,
+            top_k: topK,
+            mmr_lambda: mmrLambda,
+            trace: true
+        };
+
+        // Add fact_type if not 'all'
+        if (searchType !== 'all') {
+            requestBody.fact_type = searchType;
         }
 
         statusBar.innerHTML = '<span style="color: #ff9800;">🔄 Searching...</span>';
 
-        const response = await fetch(endpoint, {
+        const response = await fetch('api/search', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                query: query,
-                agent_id: agentId,
-                thinking_budget: thinkingBudget,
-                top_k: topK,
-                mmr_lambda: mmrLambda,
-                trace: true
-            })
+            body: JSON.stringify(requestBody)
         });
 
         const data = await response.json();

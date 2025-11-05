@@ -2,24 +2,16 @@
 Tests for document tracking and upsert functionality.
 """
 import logging
-import os
 import pytest
 from datetime import datetime, timezone
-from memora import TemporalSemanticMemory
 
 
 @pytest.mark.asyncio
-async def test_document_creation_and_retrieval():
+async def test_document_creation_and_retrieval(memory):
     """Test that documents are created and can be retrieved."""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        pytest.skip("DATABASE_URL not set")
-
-    memory = TemporalSemanticMemory(db_url=db_url)
-    await memory.initialize()
+    agent_id = f"test_doc_{datetime.now(timezone.utc).timestamp()}"
 
     try:
-        agent_id = f"test_doc_{datetime.now(timezone.utc).timestamp()}"
         document_id = "meeting-001"
 
         # Store memory with document tracking
@@ -42,21 +34,15 @@ async def test_document_creation_and_retrieval():
         assert doc["unit_count"] > 0
 
     finally:
-        await memory.close()
+        await memory.delete_agent(agent_id)
 
 
 @pytest.mark.asyncio
-async def test_document_upsert():
+async def test_document_upsert(memory):
     """Test that upsert deletes old units and creates new ones."""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        pytest.skip("DATABASE_URL not set")
-
-    memory = TemporalSemanticMemory(db_url=db_url)
-    await memory.initialize()
+    agent_id = f"test_upsert_{datetime.now(timezone.utc).timestamp()}"
 
     try:
-        agent_id = f"test_upsert_{datetime.now(timezone.utc).timestamp()}"
         document_id = "meeting-002"
 
         # First version
@@ -92,21 +78,15 @@ async def test_document_upsert():
         assert set(units_v1).isdisjoint(set(units_v2))
 
     finally:
-        await memory.close()
+        await memory.delete_agent(agent_id)
 
 
 @pytest.mark.asyncio
-async def test_document_deletion():
+async def test_document_deletion(memory):
     """Test that deleting a document cascades to memory units."""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        pytest.skip("DATABASE_URL not set")
-
-    memory = TemporalSemanticMemory(db_url=db_url)
-    await memory.initialize()
+    agent_id = f"test_delete_{datetime.now(timezone.utc).timestamp()}"
 
     try:
-        agent_id = f"test_delete_{datetime.now(timezone.utc).timestamp()}"
         document_id = "meeting-003"
 
         # Create document
@@ -132,22 +112,15 @@ async def test_document_deletion():
         assert doc_after is None
 
     finally:
-        await memory.close()
+        await memory.delete_agent(agent_id)
 
 
 @pytest.mark.asyncio
-async def test_memory_without_document():
+async def test_memory_without_document(memory):
     """Test that memories can still be created without document tracking."""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        pytest.skip("DATABASE_URL not set")
-
-    memory = TemporalSemanticMemory(db_url=db_url)
-    await memory.initialize()
+    agent_id = f"test_no_doc_{datetime.now(timezone.utc).timestamp()}"
 
     try:
-        agent_id = f"test_no_doc_{datetime.now(timezone.utc).timestamp()}"
-
         # Create memory without document_id (backward compatibility)
         units = await memory.put_async(
             agent_id=agent_id,
@@ -158,4 +131,4 @@ async def test_memory_without_document():
         assert len(units) > 0
 
     finally:
-        await memory.close()
+        await memory.delete_agent(agent_id)

@@ -1,0 +1,6 @@
+# Environment files
+.env
+.env.local
+
+# Docker volumes (data persistence)
+postgres_data/

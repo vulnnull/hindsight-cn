@@ -217,6 +217,7 @@ class BenchmarkRunner:
                 weight_semantic=weight_semantic,
                 weight_recency=weight_recency,
                 weight_frequency=weight_frequency,
+                fact_type="world"
             )
 
             if not results:

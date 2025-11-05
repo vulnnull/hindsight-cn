@@ -2,26 +2,17 @@
 Test search tracing functionality.
 """
 import pytest
-import asyncio
-import os
-from memora.temporal_semantic_memory import TemporalSemanticMemory
 from memora.search_trace import SearchTrace
 from datetime import datetime, timezone
 
 
 @pytest.mark.asyncio
-async def test_search_with_trace():
+async def test_search_with_trace(memory):
     """Test that search with enable_trace=True returns a valid SearchTrace."""
-    # Use test database
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        pytest.skip("DATABASE_URL not set")
-
-    memory = TemporalSemanticMemory(db_url=db_url)
+    # Generate a unique agent ID for this test
+    agent_id = f"test_trace_{datetime.now(timezone.utc).timestamp()}"
 
     try:
-        # Generate a unique agent ID for this test
-        agent_id = f"test_trace_{datetime.now(timezone.utc).timestamp()}"
 
         # Store some test memories
         await memory.put_async(
@@ -131,24 +122,17 @@ async def test_search_with_trace():
         print(f"  - Results returned: {trace.summary.results_returned}")
         print(f"  - Duration: {trace.summary.total_duration_seconds:.3f}s")
 
+    finally:
         # Cleanup
         await memory.delete_agent(agent_id)
 
-    finally:
-        await memory.close()
-
 
 @pytest.mark.asyncio
-async def test_search_without_trace():
+async def test_search_without_trace(memory):
     """Test that search with enable_trace=False returns None for trace."""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        pytest.skip("DATABASE_URL not set")
-
-    memory = TemporalSemanticMemory(db_url=db_url)
+    agent_id = f"test_no_trace_{datetime.now(timezone.utc).timestamp()}"
 
     try:
-        agent_id = f"test_no_trace_{datetime.now(timezone.utc).timestamp()}"
 
         # Store a test memory
         await memory.put_async(
@@ -172,14 +156,6 @@ async def test_search_without_trace():
 
         print("\n✓ Search without trace test passed!")
 
+    finally:
         # Cleanup
         await memory.delete_agent(agent_id)
-
-    finally:
-        await memory.close()
-
-
-if __name__ == "__main__":
-    # Run tests directly
-    asyncio.run(test_search_with_trace())
-    asyncio.run(test_search_without_trace())

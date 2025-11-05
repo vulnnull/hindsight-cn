@@ -20,9 +20,6 @@ class ThinkOperationsMixin:
         query: str,
         thinking_budget: int = 50,
         top_k: int = 10,
-        model: str = "openai/gpt-oss-120b",
-        temperature: float = 0.7,
-        max_tokens: int = 1000,
     ) -> Dict[str, Any]:
         """
         Think and formulate an answer using agent identity, world facts, and opinions.
@@ -31,7 +28,7 @@ class ThinkOperationsMixin:
         1. Retrieves agent facts (agent's identity and past actions)
         2. Retrieves world facts (general knowledge)
         3. Retrieves existing opinions (agent's formed perspectives)
-        4. Uses Groq LLM to formulate an answer
+        4. Uses LLM to formulate an answer
         5. Extracts and stores any new opinions formed during thinking
         6. Returns plain text answer and the facts used
 
@@ -40,9 +37,6 @@ class ThinkOperationsMixin:
             query: Question to answer
             thinking_budget: Number of memory units to explore
             top_k: Maximum facts to retrieve
-            model: LLM model to use (default: openai/gpt-oss-120b)
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens in response
 
         Returns:
             Dict with:
@@ -50,11 +44,9 @@ class ThinkOperationsMixin:
                 - based_on: Dict with 'world', 'agent', and 'opinion' fact lists
                 - new_opinions: List of newly formed opinions
         """
-        # Use cached LLM client
-        if self._llm_client is None:
-            raise ValueError("GROQ_API_KEY environment variable not set")
-
-        client = self._llm_client
+        # Use cached LLM config
+        if self._llm_config is None:
+            raise ValueError("Memory LLM API key not set. Set MEMORY_LLM_API_KEY environment variable.")
 
         # Steps 1-3: Run all three searches in parallel
         (agent_results, _), (world_results, _), (opinion_results, _) = await asyncio.gather(
@@ -148,44 +140,27 @@ Provide a helpful, accurate answer based on the facts above. Be consistent with 
 
 If you form any new opinions while thinking about this question, state them clearly in your answer."""
 
-        response = await client.chat.completions.create(
-            model=model,
+        answer_text = await self._llm_config.call(
             messages=[
                 {"role": "system", "content": "You are a helpful AI assistant. Always respond in plain text without markdown formatting. You can form and express opinions based on facts."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=temperature,
-            max_tokens=max_tokens
+            scope="memory_think",
+            temperature=0.7,
+            max_tokens=1000
         )
 
-        answer_text = response.choices[0].message.content.strip()
+        answer_text = answer_text.strip()
 
-        # Step 6: Extract new opinions from the answer
-        new_opinions = await self._extract_opinions_from_text(
-            client=client,
-            text=answer_text,
-            model=model
-        )
+        # Step 6: Extract and store new opinions asynchronously (fire and forget)
+        await self._task_backend.submit_task({
+            'type': 'form_opinion',
+            'agent_id': agent_id,
+            'answer_text': answer_text,
+            'query': query
+        })
 
-        # Step 7: Store new opinions (schedule as background tasks, don't wait)
-        if new_opinions:
-            current_time = datetime.now(timezone.utc)
-            for opinion_dict in new_opinions:
-                task = asyncio.create_task(
-                    self.put_async(
-                        agent_id=agent_id,
-                        content=opinion_dict["text"],
-                        context=f"formed during thinking about: {query}",
-                        event_date=current_time,
-                        fact_type_override='opinion',
-                        confidence_score=opinion_dict["confidence"]
-                    )
-                )
-                # Track task and auto-remove when done
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
-
-        # Step 8: Return response with facts split by type
+        # Step 7: Return response with facts split by type (don't wait for opinions)
         return {
             "text": answer_text,
             "based_on": {
@@ -193,22 +168,57 @@ If you form any new opinions while thinking about this question, state them clea
                 "agent": agent_results,
                 "opinion": opinion_results
             },
-            "new_opinions": new_opinions
+            "new_opinions": []  # Opinions are being extracted asynchronously
         }
+
+    async def _extract_and_store_opinions_async(
+        self,
+        agent_id: str,
+        answer_text: str,
+        query: str
+    ):
+        """
+        Background task to extract and store opinions from think response.
+
+        This runs asynchronously and does not block the think response.
+
+        Args:
+            agent_id: Agent identifier
+            answer_text: The generated answer text
+            query: The original query
+        """
+        try:
+            # Extract opinions from the answer
+            new_opinions = await self._extract_opinions_from_text(text=answer_text, query=query)
+
+            # Store new opinions
+            if new_opinions:
+                current_time = datetime.now(timezone.utc)
+                for opinion_dict in new_opinions:
+                    await self.put_async(
+                        agent_id=agent_id,
+                        content=opinion_dict["text"],
+                        context=f"formed during thinking about: {query}",
+                        event_date=current_time,
+                        fact_type_override='opinion',
+                        confidence_score=opinion_dict["confidence"]
+                    )
+
+                logger.debug(f"[THINK] Extracted and stored {len(new_opinions)} new opinions")
+        except Exception as e:
+            logger.warning(f"[THINK] Failed to extract/store opinions: {str(e)}")
 
     async def _extract_opinions_from_text(
         self,
-        client,
         text: str,
-        model: str
+        query: str
     ) -> List[Dict[str, Any]]:
         """
         Extract opinions with reasons and confidence from text using LLM.
 
         Args:
-            client: OpenAI client
             text: Text to extract opinions from
-            model: LLM model to use
+            query: The original query that prompted this response
 
         Returns:
             List of dicts with keys: 'text' (opinion with reasons), 'confidence' (score 0-1)
@@ -226,30 +236,40 @@ If you form any new opinions while thinking about this question, state them clea
                 description="List of opinions formed with their supporting reasons and confidence scores"
             )
 
-        extraction_prompt = f"""Extract any opinions or perspectives that were formed in the following text.
-An opinion is a judgment, viewpoint, or conclusion that goes beyond just stating facts.
+        extraction_prompt = f"""Extract any NEW opinions or perspectives that were formed while answering the following question.
 
-TEXT:
+ORIGINAL QUESTION:
+{query}
+
+ANSWER PROVIDED:
 {text}
 
-For each opinion found, provide:
-1. The opinion itself
-2. The reasons or facts that support it
-3. A confidence score (0.0 to 1.0) indicating how confident the agent is in this opinion based on the available information
+An opinion is a judgment, viewpoint, or conclusion that goes beyond just stating facts. It represents a formed perspective or belief.
 
-If no clear opinions are expressed, return an empty list."""
+IMPORTANT: Do NOT extract statements like:
+- "I don't have enough information"
+- "The facts don't contain information about X"
+- "I cannot answer because..."
+- Simple acknowledgments or meta-statements about the query itself
+
+ONLY extract actual opinions, judgments, or perspectives about substantive topics.
+
+For each opinion found, provide:
+1. The opinion itself (what the agent believes or concludes)
+2. The reasons or facts that support it
+3. A confidence score (0.0 to 1.0) indicating how confident the agent is in this opinion
+
+If no genuine opinions are expressed (e.g., the response just says "I don't know"), return an empty list."""
 
         try:
-            response = await client.beta.chat.completions.parse(
-                model=model,
+            result = await self._llm_config.call(
                 messages=[
                     {"role": "system", "content": "You extract opinions and perspectives from text."},
                     {"role": "user", "content": extraction_prompt}
                 ],
-                response_format=OpinionExtractionResponse
+                response_format=OpinionExtractionResponse,
+                scope="memory_extract_opinion"
             )
-
-            result = response.choices[0].message.parsed
 
             # Format opinions with reasons included in the text and confidence score
             formatted_opinions = []

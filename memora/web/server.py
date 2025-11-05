@@ -22,8 +22,10 @@ from memora.embeddings import Embeddings
 
 import logging
 
-load_dotenv()
 logging.basicConfig(level=logging.INFO)
+
+# Environment variables are loaded by the shell script that calls this module
+# No need to load .env files here as they're sourced by start-server.sh
 
 
 def create_app(embeddings: Optional[Embeddings] = None, db_url: Optional[str] = None) -> FastAPI:
@@ -105,6 +107,7 @@ class SearchRequest(BaseModel):
     top_k: int = 10
     mmr_lambda: float = 0.5
     trace: bool = False
+    fact_type: Optional[str] = None
 
     class Config:
         json_schema_extra = {
@@ -114,7 +117,8 @@ class SearchRequest(BaseModel):
                 "thinking_budget": 100,
                 "top_k": 10,
                 "mmr_lambda": 0.5,
-                "trace": True
+                "trace": True,
+                "fact_type": "world"
             }
         }
 
@@ -325,8 +329,8 @@ def _register_routes(app: FastAPI):
         "/api/search",
         response_model=SearchResponse,
         tags=["Search"],
-        summary="Search all memory types",
-        description="Search across all memory types (world, agent, opinion) using semantic similarity and spreading activation"
+        summary="Search memory",
+        description="Search memory using semantic similarity and spreading activation. Optionally filter by fact_type (world, agent, opinion)"
     )
     async def api_search(request: SearchRequest):
         """Run a search and return results with trace."""
@@ -338,7 +342,8 @@ def _register_routes(app: FastAPI):
                 thinking_budget=request.thinking_budget,
                 top_k=request.top_k,
                 enable_trace=request.trace,
-                mmr_lambda=request.mmr_lambda
+                mmr_lambda=request.mmr_lambda,
+                fact_type=request.fact_type
             )
 
             # Convert trace to dict
@@ -582,6 +587,30 @@ def _register_routes(app: FastAPI):
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             print(f"Error in /api/memories/batch: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    @app.delete(
+        "/api/memory/{unit_id}",
+        tags=["Memory Storage"],
+        summary="Delete a memory unit",
+        description="Delete a single memory unit and all its associated links (temporal, semantic, and entity links)"
+    )
+    async def api_delete_memory_unit(unit_id: str):
+        """Delete a memory unit and all its links."""
+        try:
+            result = await app.state.memory.delete_memory_unit(unit_id)
+
+            if not result["success"]:
+                raise HTTPException(status_code=404, detail=result["message"])
+
+            return result
+        except HTTPException:
+            raise
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/memory/{unit_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 

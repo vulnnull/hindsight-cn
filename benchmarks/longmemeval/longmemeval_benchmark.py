@@ -15,13 +15,11 @@ from typing import List, Dict, Any, Tuple, Optional
 import asyncio
 from openai import AsyncOpenAI
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Import common framework
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from common.benchmark_runner import BenchmarkDataset, LLMAnswerGenerator, LLMAnswerEvaluator
+from memora.llm_wrapper import LLMConfig
 
 
 class LongMemEvalDataset(BenchmarkDataset):
@@ -126,15 +124,13 @@ class LongMemEvalDataset(BenchmarkDataset):
 
 
 class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
-    """LongMemEval-specific answer generator using OpenAI."""
+    """LongMemEval-specific answer generator using configurable LLM provider."""
 
-    def __init__(self, model: str = "gpt-4o-mini"):
-        """Initialize with OpenAI client."""
-        self.model = model
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
-            raise ValueError("OPENAI_API_KEY environment variable not set")
-        self.client = AsyncOpenAI(api_key=openai_api_key)
+    def __init__(self):
+        """Initialize with LLM configuration for memory operations."""
+        self.llm_config = LLMConfig.for_memory()
+        self.client = self.llm_config.client
+        self.model = self.llm_config.model
 
     async def generate_answer(
         self,
@@ -170,28 +166,25 @@ Instructions:
 Answer:"""
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
+            answer = await self.llm_config.call(
                 messages=[{"role": "user", "content": prompt}],
+                scope="memory",
                 temperature=0.0,
                 max_tokens=300
             )
-            answer = response.choices[0].message.content.strip()
-            return answer, ""  # LongMemEval doesn't use reasoning
+            return answer.strip(), ""  # LongMemEval doesn't use reasoning
         except Exception as e:
             return f"Error generating answer: {str(e)}", ""
 
 
 class LongMemEvalAnswerEvaluator(LLMAnswerEvaluator):
-    """LongMemEval-specific answer evaluator using OpenAI."""
+    """LongMemEval-specific answer evaluator using configurable LLM provider."""
 
-    def __init__(self, model: str = "gpt-4o"):
-        """Initialize with OpenAI client."""
-        self.model = model
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
-            raise ValueError("OPENAI_API_KEY environment variable not set")
-        self.client = AsyncOpenAI(api_key=openai_api_key)
+    def __init__(self):
+        """Initialize with LLM configuration for judge/evaluator."""
+        self.llm_config = LLMConfig.for_judge()
+        self.client = self.llm_config.client
+        self.model = self.llm_config.model
 
     async def judge_answer(
         self,
@@ -227,14 +220,14 @@ Score: [0 or 1]
 Explanation: [brief explanation]"""
 
             try:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
+                content = await self.llm_config.call(
                     messages=[{"role": "user", "content": prompt}],
+                    scope="judge",
                     temperature=0.0,
                     max_tokens=200
                 )
 
-                content = response.choices[0].message.content.strip()
+                content = content.strip()
 
                 # Parse score and explanation
                 lines = content.split('\n')

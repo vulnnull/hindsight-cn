@@ -1,625 +1,410 @@
-# Entity-Aware Memory System for AI Agents
+# Memora - Entity-Aware Memory System for AI Agents
 
-A proof-of-concept memory system that enables AI agents to store, retrieve, and connect memories using temporal, semantic, and entity-based relationships.
-
-## Overview
-
-This system implements a sophisticated graph-based memory architecture where memories are connected through three complementary networks:
-
-1. **Temporal Network** - Memories linked by time proximity
-2. **Semantic Network** - Memories linked by meaning similarity
-3. **Entity Network** - Memories linked by shared entities (people, organizations, places)
-
-The combination of these three networks enables powerful memory retrieval that goes beyond simple vector search, allowing agents to find relevant memories through multiple pathways.
+A temporal-semantic-entity memory system that enables AI agents to store, retrieve, and reason over memories using graph-based spreading activation search.
 
 ## Architecture
 
-### Triple Network Design
+### Three Memory Networks
 
 The system maintains three separate but interconnected memory networks:
 
-1. **World Network** (`fact_type='world'`)
-   - General knowledge and facts about the world
-   - Information not specific to the agent's actions
-   - Example: "Alice works at Google", "Yosemite is in California"
+**1. World Network** (`fact_type='world'`)
+- General knowledge and facts about the world
+- Information not specific to the agent's actions
+- Example: "Alice works at Google", "Yosemite is in California"
 
-2. **Agent Network** (`fact_type='agent'`)
-   - Facts about what the AI agent specifically did
-   - Agent's own actions and experiences
-   - Example: "The agent helped debug a Python script", "The agent recommended Yosemite"
+**2. Agent Network** (`fact_type='agent'`)
+- Facts about what the AI agent specifically did
+- Agent's own actions and experiences
+- Example: "The agent helped debug a Python script", "The agent recommended Yosemite"
 
-3. **Opinion Network** (`fact_type='opinion'`)
-   - Agent's formed opinions and perspectives
-   - Automatically extracted during think operations
-   - Includes reasons and confidence scores (0.0-1.0)
-   - Immutable once formed (event_date = when opinion was formed)
-   - Example: "Python is better for data science than JavaScript (Reasons: has better libraries like pandas and numpy) [confidence: 0.85]"
+**3. Opinion Network** (`fact_type='opinion'`)
+- Agent's formed opinions and perspectives
+- Automatically extracted during think operations
+- Includes reasons and confidence scores (0.0-1.0)
+- Immutable once formed (event_date = when opinion was formed)
+- Example: "Python is better for data science than JavaScript (Reasons: has better libraries like pandas and numpy) [confidence: 0.85]"
 
-All three networks share the same infrastructure (temporal/semantic/entity links) but can be searched independently or together. The **think** operation combines all three networks to formulate consistent, contextual answers while forming new opinions.
+All three networks share the same infrastructure (temporal/semantic/entity links) but can be searched independently or together.
 
-### Core Concepts
+### Core Components
 
 **Memory Units**: Individual sentence-level memories that are:
-- Self-contained (pronouns resolved to actual referents)
+- Self-contained (pronouns resolved to actual referents by LLM)
 - Validated to have subject + verb (complete thoughts)
-- Embedded as vectors for semantic similarity
+- Embedded as 384-dim vectors using `BAAI/bge-small-en-v1.5`
 - Timestamped for temporal relationships
-- Linked to extracted entities
-- Classified as either 'world' or 'agent' fact type
+- Linked to extracted entities via spaCy NER
+- Classified as 'world', 'agent', or 'opinion'
 
-**Entity Resolution**: Named entities (PERSON, ORG, GPE, etc.) are:
+**Entity Resolution**: Named entities (PERSON, ORG, PLACE, PRODUCT, CONCEPT, OTHER) are:
 - Extracted using spaCy NER
-- Disambiguated using a scoring algorithm
+- Disambiguated using scoring algorithm (name similarity 50%, co-occurrence 30%, temporal proximity 20%)
 - Tracked with canonical IDs across all memories
 - Used to create strong connections between related memories
 
 ### Three Types of Memory Links
 
-#### 1. Temporal Links (Time-Based)
-**Purpose**: Connect memories that occurred close together in time
-
-**How it works**:
-- When storing a new memory, find all memories within a time window (default: 24 hours)
-- Create weighted links based on temporal proximity
-- Weight formula: `weight = max(0.3, 1.0 - (time_diff / window_size))`
+**1. Temporal Links** (Time-Based)
+- Connect memories within time window (default: 24 hours)
+- Weight: `max(0.3, 1.0 - (time_diff / window_size))`
 - Closer in time = stronger link
+- Use case: "What happened recently?" or understanding sequences
 
-**Visualization**: Cyan, dashed lines
-
-**Use case**: "What happened recently?" or understanding sequences of events
-
-#### 2. Semantic Links (Meaning-Based)
-**Purpose**: Connect memories with similar content/meaning
-
-**How it works**:
-- Generate embeddings using local `bge-small-en-v1.5` model (384 dimensions)
-- Store embeddings in PostgreSQL with pgvector extension
-- When storing a new memory, find top-k similar memories using cosine similarity
-- Create links only if similarity exceeds threshold (default: 0.7)
+**2. Semantic Links** (Meaning-Based)
+- Connect memories with similar embeddings
+- Uses pgvector with HNSW index for fast nearest neighbor search
+- Create links only if cosine similarity > threshold (default: 0.7)
 - Weight = cosine similarity score
+- Use case: "Tell me about hiking" retrieves all semantically related activities
 
-**Visualization**: Pink, solid lines
-
-**Technology**:
-- **SentenceTransformers** - Local embedding model (BAAI/bge-small-en-v1.5)
-- **pgvector** - PostgreSQL extension for vector operations
-- **HNSW index** - Fast approximate nearest neighbor search
-
-**Use case**: "Tell me about hiking" retrieves all semantically related outdoor activities
-
-#### 3. Entity Links (Identity-Based)
-**Purpose**: Connect ALL memories about the same person, organization, or place
-
-**How it works**:
-- Extract entities from text using spaCy NER
-- Resolve entity identity using disambiguation algorithm:
-  - Name similarity (50% weight) - using SequenceMatcher
-  - Co-occurring entities (30% weight) - entities that appear together
-  - Temporal proximity (20% weight) - recent mentions more likely same entity
-- If score > threshold (0.4 for PERSON with exact match, 0.6 otherwise): reuse existing entity
-- If score < threshold: create new entity
-- Link all memories mentioning the same entity with weight 1.0 (no decay)
-
-**Visualization**: Gold, thick lines
-
-**Technology**:
-- **spaCy** (`en_core_web_sm`) - Named Entity Recognition
-- **difflib.SequenceMatcher** - String similarity matching
-
-**Use case**: "What does Alice do?" returns ALL memories about Alice (hiking, work at Google, Python project) even if semantically distant
-
-**Critical advantage**: Solves the problem where "Alice loves hiking" wouldn't normally connect to "Alice works at Google" through semantic similarity alone.
+**3. Entity Links** (Identity-Based)
+- Connect ALL memories mentioning the same entity
+- No decay over time (weight 1.0)
+- Critical advantage: Solves the problem where "Alice loves hiking" wouldn't normally connect to "Alice works at Google" through semantic similarity alone
+- Use case: "What does Alice do?" returns ALL memories about Alice
 
 ### Spreading Activation Search
 
-The search algorithm explores the memory graph using spreading activation:
+The search algorithm explores the memory graph using spreading activation with backpressure limiting (max 32 concurrent searches):
 
-1. **Entry Points**: Find top-3 semantically similar memories to the query (vector search, similarity ≥ 0.5)
-2. **Activation Spreading**: Start with activation = actual similarity score (0.5 to 1.0) at entry points
+1. **Entry Points**: Find top-3 semantically similar memories (vector search, similarity ≥ 0.5)
+2. **Activation Spreading**: Start with activation = actual similarity score at entry points
 3. **Graph Traversal**: Follow links to neighbors, spreading activation with decay (0.8 factor)
 4. **Thinking Budget**: Limit exploration to N units (controls computational cost)
 5. **Dynamic Weighting**: Combine activation, semantic similarity, recency, and frequency:
    ```
    final_weight = w_a × activation + w_s × semantic_similarity + w_r × recency + w_f × frequency
 
-   # Default weights (configurable via search parameters):
-   w_a = 0.30  # Activation weight
+   Default weights (configurable):
+   w_a = 0.30  # Activation weight (graph structure)
    w_s = 0.30  # Semantic similarity weight
-   w_r = 0.25  # Recency weight
-   w_f = 0.15  # Frequency weight
-
-   semantic_similarity = cosine_similarity(query_embedding, memory_embedding)
-   recency = 1 / (1 + log(1 + days_since/365))  # Logarithmic decay with 1-year half-life
-   frequency = normalized to [0, 1] from log(access_count + 1) / log(10)
+   w_r = 0.25  # Recency weight (logarithmic decay, 1-year half-life)
+   w_f = 0.15  # Frequency weight (normalized access_count)
    ```
-
-   **Weight Tuning**: All weights are configurable via `search_async()` parameters, enabling benchmark experiments with different scoring strategies (e.g., emphasizing graph structure vs semantic similarity).
-
-   Recency uses logarithmic decay to provide meaningful differentiation over years:
-     - Today: 1.000 (100% weight)
-       - 1 week: 0.981 (barely any decay)
-       - 1 month: 0.927 (still very recent)
-       - 3 months: 0.819 (recent)
-       - 6 months: 0.714
-       - 1 year: 0.591 (half-life point)
-       - 2 years: 0.477 ✓
-       - 5 years: 0.358 ✓ (clearly different from 2 years!)
-       - 10 years: 0.294 ✓
-
-   This ensures old memories (2yr vs 5yr) have different weights, unlike exponential decay.
-6. **Return Top-K**: Sort by final weight and return top results
+6. **MMR Diversification**: Optional Maximal Marginal Relevance to balance relevance with diversity
+7. **Return Top-K**: Sort by final weight and return top results
 
 This approach ensures:
-- Semantic relevance to query is always considered (default 30% weight)
-- Graph structure influences results through activation (default 30% weight)
-- Recently accessed memories get boosted (default 25% weight - recency bias)
-- Frequently accessed memories get boosted (default 15% weight - importance signal)
-
-### Search Tracing & Debugging
-
-The system includes comprehensive search tracing to understand and debug the search process:
-
-**Enable tracing**:
-```python
-results, trace = memory.search(
-    agent_id="agent_1",
-    query="Who works at Google?",
-    enable_trace=True  # Returns detailed SearchTrace object
-)
-```
-
-**Trace captures**:
-- Every node visited with parent/child relationships
-- All links explored (followed or pruned) with reasons
-- Weight calculations broken down by component
-- Entry points selected and their similarity scores
-- Pruning decisions (already visited, activation too low, budget exhausted)
-- Performance metrics for each search phase
-
-**Export trace for visualization**:
-```python
-# Save trace as JSON for external visualization tools
-trace_json = trace.to_json()
-with open("trace.json", "w") as f:
-    f.write(trace_json)
-```
-
-**Use cases**:
-- Understanding why certain memories were/weren't retrieved
-- Debugging search behavior
-- Analyzing link type effectiveness
-- Performance profiling
-- Building custom visualization layers
-
-See `SEARCH_TRACE.md` for complete trace API documentation and `examples/trace_example.py` for a working demo.
-
-### Self-Contained Memory Units
-
-Every memory unit is self-contained through LLM fact extraction:
-
-**Problem**: "She joined Google last year" - unclear who "she" is
-
-**Solution**: LLM-based fact extraction that:
-- Resolves pronouns to actual referents during extraction
-- Makes facts readable without original context
-- Includes all relevant details (WHO, WHAT, WHERE, WHEN, WHY, HOW)
-- Processes facts in parallel for speed
-
-**Result**: "Alice joined Google last year" - fully self-contained
-
-**Technology**:
-- LLM fact extraction with detailed prompts for pronoun resolution
-- Structured output using Pydantic models
-- Batch processing for efficiency
+- Semantic relevance to query is always considered (30%)
+- Graph structure influences results through activation (30%)
+- Recently accessed memories get boosted (25%)
+- Frequently accessed memories get boosted (15%)
 
 ### LLM-Based Fact Extraction
 
-Raw content is processed through an LLM to extract meaningful facts before storage:
+Raw content is processed through an LLM (Groq by default) to extract meaningful facts:
 
-**Problem**: Raw text contains noise (greetings, filler words, reactions) that waste storage and reduce retrieval quality
-
-**Solution**: LLM-based extraction with optimized prompting:
-- Filters out social pleasantries and non-informative content
-- Extracts only facts with substance (biographical, events, opinions, recommendations, descriptions, relationships)
+- Filters out noise (greetings, filler words)
+- Extracts only substantive facts (biographical, events, opinions, recommendations)
 - Creates self-contained statements with subject+action+context
-- Categorizes and attributes facts to speakers
-
-**Technology**:
-- **OpenAI-compatible API** - Supports Groq (default), OpenAI, and other providers
-- **Structured output** - Uses Pydantic models for reliable fact extraction
-- **Optimized prompting** - Concise prompts (~300 chars) emphasize dense output with no fluff
-- **Automatic chunking** - Large documents (>120k chars) split at sentence boundaries
-- **Fast sentence splitting** - Regex-based splitter (no heavy NLP models)
-- **Progress tracking** - Logs chunk processing for transparency
-
-**For large documents (e.g., podcast transcripts)**:
-- Documents <120k chars: processed in one pass
-- Documents >120k chars: automatically chunked at sentence boundaries
-- Each chunk kept under ~30k tokens to avoid output token limits
-- Facts aggregated across all chunks
+- Resolves pronouns to actual referents
+- Automatic chunking for large documents (>120k chars)
+- Structured output using Pydantic models
+- Retry logic for JSON validation failures
 
 ### Technology Stack
 
 **Database**:
-- PostgreSQL 15+ with extensions:
-  - `pgvector` - Vector similarity operations
-  - `uuid-ossp` - UUID generation
+- PostgreSQL 15+ with `pgvector` and `uuid-ossp` extensions
 
 **Python Libraries**:
-- `psycopg2-binary` - PostgreSQL client
-- `sentence-transformers` - Local embedding model (bge-small-en-v1.5)
-- `torch` - Deep learning framework (for embeddings)
-- `spacy` - NLP (NER, dependency parsing, tokenization)
-- `langchain-text-splitters` - Intelligent text chunking
-- `networkx` - Graph operations
-- `pyvis` - Interactive HTML graph visualization
-- `rich` - Terminal UI
+- `asyncpg` - Async PostgreSQL client with connection pooling
+- `sentence-transformers` - Local embedding model (BAAI/bge-small-en-v1.5)
+- `openai` - LLM API client (supports Groq, OpenAI)
+- `fastapi` - Web API framework
 
-**Models**:
-- BAAI/bge-small-en-v1.5 - Local embedding model (384 dimensions)
+**Architecture Patterns**:
+- Mixin pattern for code organization
+- Connection pooling with backpressure (32 concurrent searches max)
+- Background task management for opinion storage
+- Cached LLM client for performance
 
 ## Quick Start
 
 ### Prerequisites
 
-1. PostgreSQL 15+ with pgvector extension
-2. Python 3.11+
-
-### Setup
-
 1. Install dependencies:
-   ```bash
-   uv sync
-   ```
-
-2. Install spaCy model:
-   ```bash
-   uv pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
-   ```
-
-3. Create database and run schema:
-   ```bash
-   psql -U postgres -c "CREATE DATABASE memory_poc"
-   psql -U postgres -d memory_poc -f schema.sql
-   ```
-
-4. Configure environment:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your DATABASE_URL
-   ```
-
-### Run Tests
-
-Run the full test suite:
 ```bash
-uv run pytest tests/ -v
+uv sync
 ```
 
-Run specific test files:
+2. Configure environment files:
+
+Create `.env.local` for local development:
 ```bash
-uv run pytest tests/test_memory_operations.py -v
-uv run pytest tests/test_entity_linking.py -v
+cat > .env.local << 'EOF'
+# Database
+DATABASE_URL=postgresql://memora:memora_dev@localhost:5432/memora
+
+# LLM Provider: "openai", "groq", or "ollama"
+LLM_PROVIDER=groq
+
+# API Key (not needed for ollama)
+LLM_API_KEY=your_api_key_here
+
+# Optional: Custom base URL (for ollama or custom endpoints)
+# LLM_BASE_URL=http://localhost:11434/v1
+EOF
 ```
 
-Run a single test:
+Create `.env.dev` for dev/production environment:
 ```bash
-uv run pytest tests/test_memory_operations.py::test_put_creates_memory_units -v
+cat > .env.dev << 'EOF'
+# Database
+DATABASE_URL=postgresql://user:password@host:5432/memora
+
+# LLM Provider: "openai", "groq", or "ollama"
+LLM_PROVIDER=groq
+
+# API Key (not needed for ollama)
+LLM_API_KEY=your_api_key_here
+
+# Optional: Custom base URL
+# LLM_BASE_URL=https://api.custom-provider.com/v1
+EOF
 ```
 
-### Run Demo
+### LLM Provider Configuration
 
+The system supports multiple LLM providers with separate configuration for main operations and benchmark evaluation:
+
+#### Main LLM (for memory operations)
+
+**Groq** (default, fast inference):
 ```bash
-uv run python demos/demo_entity.py
+LLM_PROVIDER=groq
+LLM_API_KEY=your_groq_api_key
 ```
 
-This will:
-1. Clear previous demo data
-2. Store sample memories about Alice, Bob, Google, Yosemite
-3. Search for "What does Alice do?"
-4. Show entity resolution results
-5. Generate interactive HTML graph visualization
-
-Open `memory_graph_interactive.html` in your browser to explore the memory graph!
-
-## Using as a Library (Local Import)
-
-You can import this project from another Poetry project using a local path dependency:
-
-### 1. Add to your project's `pyproject.toml`:
-
-```toml
-[tool.poetry.dependencies]
-memory-poc = {path = "../memory-poc", develop = true}
-```
-
-Or using poetry CLI:
+**OpenAI**:
 ```bash
-poetry add ../memory-poc --editable
+LLM_PROVIDER=openai
+LLM_API_KEY=your_openai_api_key
 ```
 
-### 2. Import the memory system:
-
-```python
-from memora import TemporalSemanticMemory
-
-# Initialize memory
-memory = TemporalSemanticMemory()
-await memory.initialize()
-
-# Use the memory system
-await memory.put_batch_async(
-    agent_id="my_agent",
-    contents=["Alice works at Google", "Bob loves hiking"],
-    event_date=datetime.now(timezone.utc)
-)
-
-results, trace = await memory.search_async(
-    agent_id="my_agent",
-    query="Who works at Google?"
-)
+**Ollama** (local, no API key needed):
+```bash
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://localhost:11434/v1  # Default, can be customized
 ```
 
-### 3. Import the FastAPI app:
+#### Judge LLM (for benchmark evaluation)
 
-```python
-from memora.web import app, memory
-
-# Use the FastAPI app in your own project
-# You can mount it as a sub-application or run it directly
-import uvicorn
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-```
-
-### 4. Example: Extending the FastAPI app
-
-```python
-from fastapi import FastAPI
-from memora.web import app as memory_app, memory
-
-# Create your own app
-my_app = FastAPI()
-
-# Mount the memory app as a sub-application
-my_app.mount("/memory", memory_app)
-
-# Add your own endpoints that use the memory system
-@my_app.post("/my-custom-endpoint")
-async def my_endpoint():
-    # Use the shared memory instance
-    results, _ = await memory.search_async(
-        agent_id="my_agent",
-        query="some query"
-    )
-    return {"results": results}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(my_app, host="0.0.0.0", port=8000)
-```
-
-### Available Exports
-
-**From `memory` package:**
-- `TemporalSemanticMemory` - Main memory system class
-- `SearchTrace`, `SearchTracer` - Search tracing utilities
-- `QueryInfo`, `EntryPoint`, `NodeVisit`, etc. - Trace data structures
-
-**From `memory.web` package:**
-- `app` - FastAPI application instance
-- `memory` - Shared TemporalSemanticMemory instance
-
-### Web Server
-
-To run the web interface:
+Benchmarks can use a separate LLM for evaluation (e.g., using Groq for fast answer generation but OpenAI GPT-4 for accurate judging):
 
 ```bash
-# Development mode with auto-reload
-uvicorn memora.web.server:app --reload --port 8000
-
-# Production mode
-uvicorn memora.web.server:app --host 0.0.0.0 --port 8000 --workers 4
+# If not set, falls back to main LLM configuration
+JUDGE_LLM_PROVIDER=openai
+JUDGE_LLM_API_KEY=your_openai_api_key
+# JUDGE_LLM_BASE_URL=https://api.custom.com/v1  # Optional
 ```
 
-Then open http://localhost:8000 in your browser to access the visualization interface.
+**Example: Fast generation, accurate judging**:
+```bash
+# Main LLM - Groq for speed
+LLM_PROVIDER=groq
+LLM_API_KEY=your_groq_key
 
-## Project Structure
-
-```
-memory-poc/
-├── memory/                          # Core memory system package
-│   ├── temporal_semantic_memory.py  # Main memory system class
-│   ├── operations/                  # Modular operation mixins
-│   │   ├── embedding_operations.py  # Embedding generation with process pool
-│   │   ├── link_operations.py       # Entity, temporal, semantic links
-│   │   ├── batch_operations.py      # Placeholder for future extraction
-│   │   └── search_operations.py     # Placeholder for future extraction
-│   ├── entity_resolver.py           # Entity extraction and disambiguation
-│   ├── llm_client.py                # LLM-based fact extraction
-│   └── utils.py                     # Utility functions
-│
-├── demos/                           # Demo scripts
-│   └── demo_entity.py              # Main entity-aware demo
-│
-├── visualizations/                  # Visualization tools
-│   └── interactive_graph.py        # Interactive HTML graph (pyvis)
-│
-├── schema.sql                       # Database schema
-├── pyproject.toml                  # Dependencies
-└── README.md                       # This file
+# Judge LLM - OpenAI GPT-4 for accuracy
+JUDGE_LLM_PROVIDER=openai
+JUDGE_LLM_API_KEY=your_openai_key
 ```
 
-The memory system uses a **mixin pattern** for code organization:
-- `TemporalSemanticMemory` inherits from `EmbeddingOperationsMixin` and `LinkOperationsMixin`
-- This reduced the main file from 1,720 lines to 1,420 lines (17% reduction)
-- See `memory/operations/README.md` for detailed refactoring documentation
+### Local Development
 
-## Key Features
+```bash
+# Start local PostgreSQL (with initialization)
+./scripts/start-local-db.sh
 
-✅ **Triple network architecture**: Separate networks for world knowledge, agent actions, and opinions
-✅ **Opinion formation**: Automatically extracts and stores opinions with confidence scores during thinking
-✅ **Three-layered linking**: Temporal + Semantic + Entity
-✅ **Entity disambiguation**: Resolves "Alice" across different contexts
-✅ **Self-contained units**: Pronouns resolved to actual referents
-✅ **Spreading activation**: Graph-aware search beyond vector similarity
-✅ **Think operation**: Combines all three networks for consistent, contextual answers
-✅ **Confidence scores**: Opinions include confidence ratings (0.0-1.0) based on supporting evidence
-✅ **Interactive visualization**: Explore memory graph in browser
-✅ **Recency & frequency weighting**: Recent and important memories boosted
-✅ **Linguistic validation**: Memory units verified to have subject + verb
-✅ **Modular architecture**: Mixin pattern with 17% code size reduction
+# Start the server with local environment (default)
+./scripts/start-server.sh --env local
 
-## API Usage
+# Start the server with dev environment
+./scripts/start-server.sh --env dev
 
-### Store Memories
+# Erase local database (stop + cleanup)
+./scripts/erase-local-db.sh
+```
 
-```python
-from memora import TemporalSemanticMemory
+The server will start at http://localhost:8080
 
-memory = TemporalSemanticMemory()
+**API Endpoints**:
+- `GET  /` - Interactive visualization UI
+- `POST /api/memories/batch` - Store memories
+- `POST /api/search` - Search all networks
+- `POST /api/world_search` - Search world facts only
+- `POST /api/agent_search` - Search agent facts only
+- `POST /api/opinion_search` - Search opinions only
+- `POST /api/think` - Think and generate contextual answers
+- `GET  /api/graph` - Get graph data for visualization
+- `GET  /api/agents` - List all agents
 
-memory.put(
-    agent_id="agent_1",
-    content="Alice works at Google as a software engineer. She joined last year.",
-    context="Career discussion",
-    event_date=datetime.now(timezone.utc)
-)
+## API Examples (curl)
+
+### Store Memories (PUT)
+
+```bash
+# Store memories for an agent
+curl -X POST http://localhost:8080/api/memories/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "alice_agent",
+    "items": [
+      {
+        "content": "Alice works at Google as a software engineer. She joined last year and focuses on machine learning infrastructure.",
+        "context": "career discussion",
+        "event_date": "2024-01-15T10:00:00Z"
+      },
+      {
+        "content": "Alice loves hiking in Yosemite National Park. She goes every weekend and has climbed Half Dome three times.",
+        "context": "hobby conversation"
+      }
+    ],
+    "document_id": "conversation_001"
+  }'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Successfully stored 2 memory items",
+  "agent_id": "alice_agent",
+  "document_id": "conversation_001",
+  "items_count": 2
+}
 ```
 
 ### Search Memories
 
-```python
-# Basic search (trace disabled by default)
-results, trace = memory.search(
-    agent_id="agent_1",
-    query="What does Alice do?",
-    thinking_budget=50,  # How many units to explore
-    top_k=10             # Number of results to return
-)
-
-for result in results:
-    print(f"{result['text']} (weight: {result['weight']:.3f})")
-
-# Search only world facts
-results, trace = memory.search(
-    agent_id="agent_1",
-    query="What does Alice do?",
-    fact_type="world"  # Only search world network
-)
-
-# Search only agent facts
-results, trace = memory.search(
-    agent_id="agent_1",
-    query="What have I done?",
-    fact_type="agent"  # Only search agent network
-)
-
-# Search only opinions
-results, trace = memory.search(
-    agent_id="agent_1",
-    query="What do I think about Python?",
-    fact_type="opinion"  # Only search opinion network
-)
-
-# Search with tracing for debugging
-results, trace = memory.search(
-    agent_id="agent_1",
-    query="What does Alice do?",
-    thinking_budget=50,
-    top_k=10,
-    enable_trace=True  # Returns detailed SearchTrace object
-)
-
-# Analyze trace
-print(f"Nodes visited: {trace.summary.total_nodes_visited}")
-print(f"Entry points: {len(trace.entry_points)}")
-trace_json = trace.to_json()  # Export for visualization
-
-# Search with custom weight tuning
-results, trace = memory.search(
-    agent_id="agent_1",
-    query="What does Alice do?",
-    thinking_budget=50,
-    top_k=10,
-    weight_activation=0.40,   # Emphasize graph structure
-    weight_semantic=0.40,     # Emphasize semantic similarity
-    weight_recency=0.10,      # De-emphasize recency
-    weight_frequency=0.10     # De-emphasize frequency
-)
+```bash
+# Search across all networks
+curl -X POST http://localhost:8080/api/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "alice_agent",
+    "query": "What does Alice do?",
+    "thinking_budget": 100,
+    "top_k": 10,
+    "mmr_lambda": 0.5,
+    "trace": false
+  }'
 ```
 
-### Think and Formulate Answers
-
-The `think` operation combines all three networks to formulate consistent, contextual answers:
-
-```python
-result = await memory.think_async(
-    agent_id="agent_1",
-    query="What do you think about Python?",
-    thinking_budget=50,
-    top_k=10
-)
-
-print(result["text"])  # Plain text answer from LLM
-
-# Access facts used to formulate the answer
-for fact in result["based_on"]["world"]:
-    print(f"World: {fact['text']}")
-
-for fact in result["based_on"]["agent"]:
-    print(f"Agent: {fact['text']}")
-
-for fact in result["based_on"]["opinion"]:
-    print(f"Opinion: {fact['text']} (confidence: {fact.get('confidence_score', 'N/A')})")
-
-# Check for newly formed opinions
-for opinion in result["new_opinions"]:
-    print(f"New opinion formed: {opinion['text']} (confidence: {opinion['confidence']})")
+Response:
+```json
+{
+  "results": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "text": "Alice works at Google as a software engineer",
+      "context": "career discussion",
+      "event_date": "2024-01-15T10:00:00Z",
+      "weight": 0.95,
+      "fact_type": "world"
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "text": "Alice joined Google last year",
+      "weight": 0.87,
+      "fact_type": "world"
+    }
+  ],
+  "trace": null
+}
 ```
 
-The think operation:
-1. Searches the agent network to understand the agent's identity and actions
-2. Searches the world network for relevant general knowledge
-3. Searches the opinion network for existing perspectives
-4. Uses an LLM (Groq by default) to formulate a coherent answer, being consistent with existing opinions
-5. Extracts any new opinions formed during thinking with confidence scores
-6. Stores new opinions with the current timestamp and query context
-7. Returns plain text response with supporting facts from all networks and new opinions
+### Think and Generate Answer
 
-## How It Works: Example
+```bash
+# Think operation: combines agent identity, world knowledge, and opinions
+curl -X POST http://localhost:8080/api/think \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "alice_agent",
+    "query": "What do you know about Alice?",
+    "thinking_budget": 50,
+    "top_k": 10
+  }'
+```
 
-**Input memories**:
-1. "Alice loves hiking in the mountains" (7 days ago)
-2. "She goes hiking every weekend in Yosemite" (7 days ago)
-3. "Alice works at Google as a software engineer" (3 days ago)
-4. "She joined Google last year" (3 days ago)
+Response:
+```json
+{
+  "text": "Alice is a software engineer at Google who joined last year. She specializes in machine learning infrastructure. In her free time, she's an avid hiker who frequents Yosemite National Park on weekends and has climbed Half Dome three times.",
+  "based_on": {
+    "world": [
+      {
+        "text": "Alice works at Google as a software engineer",
+        "weight": 0.95,
+        "id": "550e8400-e29b-41d4-a716-446655440000"
+      },
+      {
+        "text": "Alice loves hiking in Yosemite National Park",
+        "weight": 0.89,
+        "id": "550e8400-e29b-41d4-a716-446655440002"
+      }
+    ],
+    "agent": [],
+    "opinion": []
+  },
+  "new_opinions": []
+}
+```
 
-**Processing**:
-1. ✅ Coreference resolution → "Alice goes hiking...", "Alice joined Google..."
-2. ✅ Entity extraction → Identifies "Alice" (PERSON), "Google" (ORG), "Yosemite" (GPE)
-3. ✅ Entity resolution → All "Alice" mentions = same person
-4. ✅ Create links:
-   - Temporal: Memory 1 ↔ Memory 2 (same day)
-   - Semantic: "hiking" memories link together, "Google" memories link together
-   - Entity: ALL Alice memories strongly linked (weight 1.0)
+## Running Benchmarks
 
-**Query: "What does Alice do?"**
-1. Vector search finds "Alice works at Google" as top entry point
-2. Spreading activation follows entity links to find:
-   - "Alice joined Google..." (entity link: Alice)
-   - "Alice loves hiking..." (entity link: Alice)
-   - "Alice goes hiking..." (entity link: Alice)
-3. Returns ALL Alice memories, properly ranked by relevance
+The system includes two benchmarks for evaluating memory retrieval quality:
 
-## Why This Architecture?
+### LoComo Benchmark
 
-**Problem with vector-only search**: "Alice loves hiking" and "Alice works at Google" are semantically distant - pure vector search might miss this connection.
+Long-term Conversational Memory benchmark - evaluates multi-turn conversation understanding:
 
-**Solution**: Entity links ensure memories about the same person/place/organization are strongly connected regardless of semantic distance.
+```bash
+# Run full benchmark with think API (uses local env by default)
+./scripts/benchmarks/run-locomo.sh --use-think
 
-**Result**: More human-like memory retrieval that understands identity and relationships.
+# Run with dev environment
+./scripts/benchmarks/run-locomo.sh --use-think --env dev
+
+# Run with limits for quick testing
+./scripts/benchmarks/run-locomo.sh --use-think --max-conversations 5 --max-questions 3
+
+# Skip ingestion (use existing data)
+./scripts/benchmarks/run-locomo.sh --use-think --skip-ingestion
+```
+
+### LongMemEval Benchmark
+
+Long-term Memory Evaluation benchmark - tests memory retention and retrieval:
+
+```bash
+# Run full benchmark (uses local env by default)
+./scripts/benchmarks/run-longmemeval.sh
+
+# Run with dev environment
+./scripts/benchmarks/run-longmemeval.sh --env dev
+
+# Run with arguments (pass any args directly)
+./scripts/benchmarks/run-longmemeval.sh --max-instances 10 --max-questions 5
+
+# Skip ingestion
+./scripts/benchmarks/run-longmemeval.sh --skip-ingestion
+```
+
+### Visualizer
+
+View benchmark results in an interactive web interface:
+
+```bash
+# Start the visualizer server
+./scripts/benchmarks/start-visualizer.sh
+```
+
+The visualizer will be available at http://localhost:8001
+
+**Benchmark Results**: Results are saved to `benchmark_results.json` in each benchmark directory with metrics including accuracy, F1 score, and per-question performance.
 
 ## License
 

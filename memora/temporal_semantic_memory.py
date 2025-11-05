@@ -12,7 +12,6 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import asyncpg
-from dotenv import load_dotenv
 import asyncio
 from .embeddings import Embeddings, SentenceTransformersEmbeddings
 import time
@@ -27,6 +26,8 @@ from .utils import (
 )
 from .entity_resolver import EntityResolver
 from .operations import EmbeddingOperationsMixin, LinkOperationsMixin, ThinkOperationsMixin
+from .llm_wrapper import LLMConfig
+from .task_backend import TaskBackend, AsyncIOQueueBackend
 
 
 def utcnow():
@@ -55,30 +56,43 @@ class TemporalSemanticMemory(
     def __init__(
         self,
         db_url: Optional[str] = None,
+        memory_llm_provider: Optional[str] = None,
+        memory_llm_api_key: Optional[str] = None,
+        memory_llm_base_url: Optional[str] = None,
+        memory_llm_model: Optional[str] = None,
         embeddings: Optional[Embeddings] = None,
-        embedding_model: Optional[str] = None,
         pool_min_size: int = 5,
         pool_max_size: int = 100,
+        task_backend: Optional[TaskBackend] = None,
     ):
         """
         Initialize the temporal + semantic memory system.
 
         Args:
-            db_url: PostgreSQL connection URL (postgresql://user:pass@host:port/dbname)
+            db_url: PostgreSQL connection URL (postgresql://user:pass@host:port/dbname).
+                   If not provided, reads from DATABASE_URL environment variable.
+            memory_llm_provider: LLM provider for memory operations: "openai", "groq", or "ollama".
+                                If not provided, reads from MEMORY_LLM_PROVIDER environment variable (default: "groq").
+            memory_llm_api_key: API key for the LLM provider.
+                               If not provided, reads from MEMORY_LLM_API_KEY environment variable.
+            memory_llm_base_url: Base URL for the LLM API (for ollama or custom endpoints).
+                                If not provided, reads from MEMORY_LLM_BASE_URL environment variable.
+                                Defaults: groq="https://api.groq.com/openai/v1", ollama="http://localhost:11434/v1"
+            memory_llm_model: Model name to use for all memory operations (put/think/opinions).
+                             If not provided, reads from MEMORY_LLM_MODEL environment variable (default: "openai/gpt-oss-120b").
             embeddings: Embeddings implementation to use. If not provided, uses SentenceTransformersEmbeddings
             embedding_model: (Deprecated) Name of the SentenceTransformer model to use. Use embeddings parameter instead.
             pool_min_size: Minimum number of connections in the pool (default: 5)
             pool_max_size: Maximum number of connections in the pool (default: 100)
                           Increase for parallel think/search operations (e.g., 200-300 for 100+ parallel thinks)
+            task_backend: Custom task backend for async task execution. If not provided, uses AsyncIOQueueBackend
         """
-        load_dotenv()
-
         # Initialize PostgreSQL connection URL
         self.db_url = db_url or os.getenv("DATABASE_URL")
         if not self.db_url:
             raise ValueError(
                 "Database URL not found. "
-                "Set DATABASE_URL environment variable."
+                "Provide db_url parameter or set DATABASE_URL environment variable."
             )
 
         # Connection pool (will be created in initialize())
@@ -94,75 +108,77 @@ class TemporalSemanticMemory(
         if embeddings is not None:
             self.embeddings = embeddings
         else:
-            # Default to SentenceTransformersEmbeddings
-            model_name = embedding_model or "BAAI/bge-small-en-v1.5"
-            self.embeddings = SentenceTransformersEmbeddings(model_name)
+            self.embeddings = SentenceTransformersEmbeddings("BAAI/bge-small-en-v1.5")
 
-        # Initialize LLM client (cached for reuse across operations)
-        from openai import AsyncOpenAI
-        groq_api_key = os.getenv("GROQ_API_KEY")
-        if groq_api_key:
-            self._llm_client = AsyncOpenAI(
-                api_key=groq_api_key,
-                base_url="https://api.groq.com/openai/v1"
-            )
-        else:
-            self._llm_client = None  # Will be created on-demand if needed
+        # Initialize LLM configuration
+        self._llm_config = LLMConfig(
+            provider=memory_llm_provider,
+            api_key=memory_llm_api_key,
+            base_url=memory_llm_base_url,
+            model=memory_llm_model,
+            provider_env="MEMORY_LLM_PROVIDER",
+            api_key_env="MEMORY_LLM_API_KEY",
+            base_url_env="MEMORY_LLM_BASE_URL",
+            model_env="MEMORY_LLM_MODEL",
+        )
 
-        # Background queue for access count updates (to avoid blocking searches)
-        self._access_count_queue = asyncio.Queue()
-        self._access_count_worker_task = None
-        self._shutdown_event = asyncio.Event()
+        # Store client and model for convenience
+        self._llm_client = self._llm_config.client
+        self._llm_model = self._llm_config.model
 
-        # Track background opinion PUT tasks to ensure clean shutdown
-        self._background_tasks = set()
+        # Initialize task backend
+        self._task_backend = task_backend or AsyncIOQueueBackend(
+            batch_size=100,
+            batch_interval=1.0
+        )
 
         # Backpressure mechanism: limit concurrent searches to prevent overwhelming the database
         self._search_semaphore = asyncio.Semaphore(32)
 
-    async def _access_count_worker(self):
-        """Background worker that processes access count updates in batches."""
-        pool = self._pool  # Pool is guaranteed to exist when worker starts
+    async def _handle_access_count_update(self, task_dict: Dict[str, Any]):
+        """
+        Handler for access count update tasks.
 
-        while not self._shutdown_event.is_set():
-            try:
-                # Collect updates for up to 1 second or 1000 items
-                updates = {}
-                deadline = asyncio.get_event_loop().time() + 1.0
+        Args:
+            task_dict: Dict with 'node_ids' key containing list of node IDs to update
+        """
+        node_ids = task_dict.get('node_ids', [])
+        if not node_ids:
+            return
 
-                while len(updates) < 1000 and asyncio.get_event_loop().time() < deadline:
-                    try:
-                        # Wait for items with short timeout
-                        remaining_time = max(0.1, deadline - asyncio.get_event_loop().time())
-                        node_ids = await asyncio.wait_for(
-                            self._access_count_queue.get(),
-                            timeout=remaining_time
-                        )
-                        # Deduplicate by adding to set
-                        for node_id in node_ids:
-                            updates[node_id] = True
-                    except asyncio.TimeoutError:
-                        break
+        pool = await self._get_pool()
+        try:
+            # Convert string UUIDs to UUID type for faster matching
+            uuid_list = [uuid.UUID(nid) for nid in node_ids]
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE memory_units SET access_count = access_count + 1 WHERE id = ANY($1::uuid[])",
+                    uuid_list
+                )
+        except Exception as e:
+            logger.error(f"Access count handler: Error updating access counts: {e}")
 
-                # Process batch if we have updates
-                if updates:
-                    node_id_list = list(updates.keys())
-                    try:
-                        # Convert string UUIDs to UUID type for faster matching
-                        uuid_list = [uuid.UUID(nid) for nid in node_id_list]
-                        async with pool.acquire() as conn:
-                            await conn.execute(
-                                "UPDATE memory_units SET access_count = access_count + 1 WHERE id = ANY($1::uuid[])",
-                                uuid_list
-                            )
-                    except Exception as e:
-                        logger.error(f"Access count worker: Error updating access counts: {e}")
+    async def execute_task(self, task_dict: Dict[str, Any]):
+        """
+        Execute a task by routing it to the appropriate handler.
 
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Access count worker: Unexpected error: {e}")
-                await asyncio.sleep(1)  # Backoff on error
+        This method is called by the task backend to execute tasks.
+        It receives a plain dict that can be serialized and sent over the network.
+
+        Args:
+            task_dict: Task dictionary with 'type' key and other payload data
+                      Example: {'type': 'access_count_update', 'node_ids': [...]}
+        """
+        task_type = task_dict.get('type')
+
+        if task_type == 'access_count_update':
+            await self._handle_access_count_update(task_dict)
+        elif task_type == 'reinforce_opinion':
+            await self._handle_reinforce_opinion(task_dict)
+        elif task_type == 'form_opinion':
+            await self._handle_form_opinion(task_dict)
+        else:
+            logger.error(f"Unknown task type: {task_type}")
 
     async def initialize(self):
         """Initialize the connection pool and background workers."""
@@ -183,11 +199,12 @@ class TemporalSemanticMemory(
         # Initialize entity resolver with pool
         self.entity_resolver = EntityResolver(self._pool)
 
-        # Start access count worker
-        self._access_count_worker_task = asyncio.create_task(self._access_count_worker())
+        # Set executor for task backend and initialize
+        self._task_backend.set_executor(self.execute_task)
+        await self._task_backend.initialize()
 
         self._initialized = True
-        logger.info("Memory system initialized (pool and workers started)")
+        logger.info("Memory system initialized (pool and task backend started)")
 
     async def _get_pool(self) -> asyncpg.Pool:
         """Get the connection pool (must call initialize() first)."""
@@ -195,37 +212,14 @@ class TemporalSemanticMemory(
             await self.initialize()
         return self._pool
 
-    async def wait_for_background_tasks(self):
-        """Wait for all background tasks (e.g., opinion PUTs) to complete."""
-        if self._background_tasks:
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
-
     async def close(self):
         """Close the connection pool and shutdown background workers."""
         logger.info("close() started")
 
-        # Signal shutdown to worker
-        self._shutdown_event.set()
-        logger.info("shutdown event set")
-
-        # Wait for background opinion PUT tasks to complete
-        if self._background_tasks:
-            logger.debug(f"waiting for {len(self._background_tasks)} background tasks to complete")
-            await self.wait_for_background_tasks()
-            logger.debug("background tasks completed")
-
-        # Cancel and wait for worker task
-        if self._access_count_worker_task is not None:
-            logger.debug("cancelling worker task")
-            self._access_count_worker_task.cancel()
-            try:
-                logger.debug("waiting for worker task to finish")
-                await self._access_count_worker_task
-                logger.debug("worker task finished")
-            except asyncio.CancelledError:
-                logger.debug("worker task cancelled successfully")
-        else:
-            logger.debug("no worker task to cancel")
+        # Shutdown task backend
+        logger.debug("shutting down task backend")
+        await self._task_backend.shutdown()
+        logger.debug("task backend shutdown complete")
 
         # Close pool
         if self._pool is not None:
@@ -236,6 +230,7 @@ class TemporalSemanticMemory(
         else:
             logger.debug("no pool to close")
 
+        self._initialized = False
         logger.debug("close() completed")
 
     async def _find_duplicate_facts_batch(
@@ -466,14 +461,14 @@ class TemporalSemanticMemory(
         # Step 1: Extract facts from ALL contents in parallel
         step_start = time.time()
 
-        # Create tasks for parallel fact extraction
+        # Create tasks for parallel fact extraction using configured LLM
         fact_extraction_tasks = []
         for item in contents:
             content = item["content"]
             context = item.get("context", "")
             event_date = item.get("event_date") or utcnow()
 
-            task = extract_facts(content, event_date, context)
+            task = extract_facts(content, event_date, context, llm_config=self._llm_config)
             fact_extraction_tasks.append((task, event_date, context))
 
         # Wait for all fact extractions to complete
@@ -703,14 +698,13 @@ class TemporalSemanticMemory(
                     # Trigger opinion reinforcement in background (non-blocking)
                     # Only trigger if there are entities in the new units
                     if any(filtered_entities):
-                        asyncio.create_task(
-                            self._reinforce_opinions_async(
-                                agent_id=agent_id,
-                                created_unit_ids=created_unit_ids,
-                                unit_texts=filtered_sentences,
-                                unit_entities=filtered_entities
-                            )
-                        )
+                        await self._task_backend.submit_task({
+                            'type': 'reinforce_opinion',
+                            'agent_id': agent_id,
+                            'created_unit_ids': created_unit_ids,
+                            'unit_texts': filtered_sentences,
+                            'unit_entities': filtered_entities
+                        })
                         logger.debug("[PUT_BATCH_ASYNC] Opinion reinforcement task queued in background")
 
                     return result_unit_ids
@@ -725,6 +719,7 @@ class TemporalSemanticMemory(
         self,
         agent_id: str,
         query: str,
+        fact_type: str,
         thinking_budget: int = 50,
         top_k: int = 10,
         enable_trace: bool = False,
@@ -733,7 +728,6 @@ class TemporalSemanticMemory(
         weight_recency: float = 0.25,
         weight_frequency: float = 0.15,
         mmr_lambda: float = 0.5,
-        fact_type: Optional[str] = None,
     ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
         """
         Search memories using spreading activation (synchronous wrapper).
@@ -744,6 +738,7 @@ class TemporalSemanticMemory(
         Args:
             agent_id: Agent ID to search for
             query: Search query
+            fact_type: Required filter for fact type ('world', 'agent', or 'opinion')
             thinking_budget: How many units to explore (computational budget)
             top_k: Number of results to return
             enable_trace: If True, returns detailed SearchTrace object
@@ -752,21 +747,21 @@ class TemporalSemanticMemory(
             weight_recency: Weight for recency component (default: 0.25)
             weight_frequency: Weight for frequency component (default: 0.15)
             mmr_lambda: Lambda for MMR diversification (0=max diversity, 1=no diversity, default: 0.5)
-            fact_type: Optional filter for fact type ('world' or 'agent')
 
         Returns:
             Tuple of (results, trace)
         """
         # Run async version synchronously
         return asyncio.run(self.search_async(
-            agent_id, query, thinking_budget, top_k, enable_trace,
-            weight_activation, weight_semantic, weight_recency, weight_frequency, mmr_lambda, fact_type
+            agent_id, query, fact_type, thinking_budget, top_k, enable_trace,
+            weight_activation, weight_semantic, weight_recency, weight_frequency, mmr_lambda
         ))
 
     async def search_async(
         self,
         agent_id: str,
         query: str,
+        fact_type: str,
         thinking_budget: int = 50,
         top_k: int = 10,
         enable_trace: bool = False,
@@ -775,7 +770,6 @@ class TemporalSemanticMemory(
         weight_recency: float = 0.25,
         weight_frequency: float = 0.15,
         mmr_lambda: float = 0.5,
-        fact_type: Optional[str] = None,
         max_neighbors_per_node: int = 20,
     ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
         """
@@ -835,36 +829,21 @@ class TemporalSemanticMemory(
                     if conn_acquire_time > 0.1:  # Log if waiting > 100ms
                         log_buffer.append(f"      [2.1] Waited {conn_acquire_time:.3f}s for connection (pool busy)")
 
-                    # Build entry point query with optional fact_type filter
-                    if fact_type:
-                        entry_points = await conn.fetch(
-                            """
-                            SELECT id, text, context, event_date, access_count, embedding,
-                                   1 - (embedding <=> $1::vector) AS similarity
-                            FROM memory_units
-                            WHERE agent_id = $2
-                              AND embedding IS NOT NULL
-                              AND fact_type = $3
-                              AND (1 - (embedding <=> $1::vector)) >= 0.5
-                            ORDER BY embedding <=> $1::vector
-                            LIMIT 3
-                            """,
-                            query_embedding_str, agent_id, fact_type
-                        )
-                    else:
-                        entry_points = await conn.fetch(
-                            """
-                            SELECT id, text, context, event_date, access_count, embedding,
-                                   1 - (embedding <=> $1::vector) AS similarity
-                            FROM memory_units
-                            WHERE agent_id = $2
-                              AND embedding IS NOT NULL
-                              AND (1 - (embedding <=> $1::vector)) >= 0.5
-                            ORDER BY embedding <=> $1::vector
-                            LIMIT 3
-                            """,
-                            query_embedding_str, agent_id
-                        )
+                    # Find entry points using vector similarity
+                    entry_points = await conn.fetch(
+                        """
+                        SELECT id, text, context, event_date, access_count, embedding,
+                               1 - (embedding <=> $1::vector) AS similarity
+                        FROM memory_units
+                        WHERE agent_id = $2
+                          AND embedding IS NOT NULL
+                          AND fact_type = $3
+                          AND (1 - (embedding <=> $1::vector)) >= 0.5
+                        ORDER BY embedding <=> $1::vector
+                        LIMIT 3
+                        """,
+                        query_embedding_str, agent_id, fact_type
+                    )
 
                 step_duration = time.time() - step_start
                 log_buffer.append(f"  [2] Find entry points: {len(entry_points)} found in {step_duration:.3f}s")
@@ -942,49 +921,29 @@ class TemporalSemanticMemory(
                         substep_start = time.time()
                         uuid_array = [uuid.UUID(nid) for nid in node_ids]
 
-                        # Build neighbor query with optional fact_type filter
+                        # Query neighbors for batch, limiting to top N per node
                         # OPTIMIZATION: Limit neighbors per node to reduce data transfer
                         # Dense graphs can have 100+ neighbors per node, but spreading activation
                         # only needs top-weighted neighbors. This reduces query from 9000→1000 rows.
                         # Configurable via max_neighbors_per_node parameter (default: 20)
-
-                        if fact_type:
-                            all_neighbors = await conn.fetch(
-                                """
-                                SELECT * FROM (
-                                    SELECT ml.from_unit_id, ml.to_unit_id, ml.weight, ml.link_type, ml.entity_id,
-                                           mu.text, mu.context, mu.event_date, mu.access_count,
-                                           mu.id as neighbor_id,
-                                           ROW_NUMBER() OVER (PARTITION BY ml.from_unit_id ORDER BY ml.weight DESC) as rn
-                                    FROM memory_links ml
-                                    JOIN memory_units mu ON ml.to_unit_id = mu.id
-                                    WHERE ml.from_unit_id = ANY($1::uuid[])
-                                      AND ml.weight >= 0.1
-                                      AND mu.fact_type = $2
-                                ) sub
-                                WHERE rn <= $3
-                                ORDER BY from_unit_id, weight DESC
-                                """,
-                                uuid_array, fact_type, max_neighbors_per_node
-                            )
-                        else:
-                            all_neighbors = await conn.fetch(
-                                """
-                                SELECT * FROM (
-                                    SELECT ml.from_unit_id, ml.to_unit_id, ml.weight, ml.link_type, ml.entity_id,
-                                           mu.text, mu.context, mu.event_date, mu.access_count,
-                                           mu.id as neighbor_id,
-                                           ROW_NUMBER() OVER (PARTITION BY ml.from_unit_id ORDER BY ml.weight DESC) as rn
-                                    FROM memory_links ml
-                                    JOIN memory_units mu ON ml.to_unit_id = mu.id
-                                    WHERE ml.from_unit_id = ANY($1::uuid[])
-                                      AND ml.weight >= 0.1
-                                ) sub
-                                WHERE rn <= $2
-                                ORDER BY from_unit_id, weight DESC
-                                """,
-                                uuid_array, max_neighbors_per_node
-                            )
+                        all_neighbors = await conn.fetch(
+                            """
+                            SELECT * FROM (
+                                SELECT ml.from_unit_id, ml.to_unit_id, ml.weight, ml.link_type, ml.entity_id,
+                                       mu.text, mu.context, mu.event_date, mu.access_count,
+                                       mu.id as neighbor_id,
+                                       ROW_NUMBER() OVER (PARTITION BY ml.from_unit_id ORDER BY ml.weight DESC) as rn
+                                FROM memory_links ml
+                                JOIN memory_units mu ON ml.to_unit_id = mu.id
+                                WHERE ml.from_unit_id = ANY($1::uuid[])
+                                  AND ml.weight >= 0.1
+                                  AND mu.fact_type = $2
+                            ) sub
+                            WHERE rn <= $3
+                            ORDER BY from_unit_id, weight DESC
+                            """,
+                            uuid_array, fact_type, max_neighbors_per_node
+                        )
                         neighbor_query_time = time.time() - substep_start
                         if neighbor_query_time > 1.0:  # Log slow neighbor queries
                             log_buffer.append(f"      [3.3.3] Slow NEIGHBOR query: {neighbor_query_time:.3f}s for {len(node_ids)} nodes → {len(all_neighbors)} neighbors")
@@ -1190,7 +1149,10 @@ class TemporalSemanticMemory(
 
                 # Step 4: Queue access count updates (background worker will process them)
                 if visited_node_ids:
-                    await self._access_count_queue.put(visited_node_ids)
+                    await self._task_backend.submit_task({
+                        'type': 'access_count_update',
+                        'node_ids': visited_node_ids
+                    })
                     log_buffer.append(f"  [4] Queued access count updates for {len(visited_node_ids)} nodes")
 
                 # Step 5: Sort by final weight and apply MMR for diversity
@@ -1427,6 +1389,36 @@ class TemporalSemanticMemory(
                     "memory_units_deleted": units_count if deleted else 0
                 }
 
+    async def delete_memory_unit(self, unit_id: str) -> Dict[str, Any]:
+        """
+        Delete a single memory unit and all its associated links.
+
+        Due to CASCADE DELETE constraints, this will automatically delete:
+        - All links from this unit (memory_links where from_unit_id = unit_id)
+        - All links to this unit (memory_links where to_unit_id = unit_id)
+        - All entity associations (unit_entities where unit_id = unit_id)
+
+        Args:
+            unit_id: UUID of the memory unit to delete
+
+        Returns:
+            Dictionary with deletion result
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Delete the memory unit (cascades to links and associations)
+                deleted = await conn.fetchval(
+                    "DELETE FROM memory_units WHERE id = $1 RETURNING id",
+                    unit_id
+                )
+
+                return {
+                    "success": deleted is not None,
+                    "unit_id": str(deleted) if deleted else None,
+                    "message": "Memory unit and all its links deleted successfully" if deleted else "Memory unit not found"
+                }
+
     async def delete_agent(self, agent_id: str) -> Dict[str, int]:
         """
         Delete all data for a specific agent (multi-tenant cleanup).
@@ -1649,23 +1641,19 @@ class TemporalSemanticMemory(
 
     async def _evaluate_opinion_update_async(
         self,
-        client,
         opinion_text: str,
         opinion_confidence: float,
         new_event_text: str,
         entity_name: str,
-        model: str = "openai/gpt-oss-120b",
     ) -> Optional[Dict[str, Any]]:
         """
         Evaluate if an opinion should be updated based on a new event.
 
         Args:
-            client: OpenAI client
             opinion_text: Current opinion text (includes reasons)
             opinion_confidence: Current confidence score (0.0-1.0)
             new_event_text: Text of the new event
             entity_name: Name of the entity this opinion is about
-            model: LLM model to use
 
         Returns:
             Dict with 'action' ('keep'|'update'), 'new_confidence', 'new_text' (if action=='update')
@@ -1707,17 +1695,15 @@ Guidelines:
 - Small changes in confidence are normal; large jumps should be rare"""
 
         try:
-            response = await client.beta.chat.completions.parse(
-                model=model,
+            result = await self._llm_config.call(
                 messages=[
                     {"role": "system", "content": "You evaluate and update opinions based on new information."},
                     {"role": "user", "content": evaluation_prompt}
                 ],
                 response_format=OpinionEvaluation,
+                scope="memory_evaluate_opinion",
                 temperature=0.3  # Lower temperature for more consistent evaluation
             )
-
-            result = response.choices[0].message.parsed
 
             # Only return updates if something actually changed
             if result.action == 'keep' and abs(result.new_confidence - opinion_confidence) < 0.01:
@@ -1734,13 +1720,48 @@ Guidelines:
             logger.warning(f"Failed to evaluate opinion update: {str(e)}")
             return None
 
+    async def _handle_form_opinion(self, task_dict: Dict[str, Any]):
+        """
+        Handler for form opinion tasks.
+
+        Args:
+            task_dict: Dict with keys: 'agent_id', 'answer_text', 'query'
+        """
+        agent_id = task_dict['agent_id']
+        answer_text = task_dict['answer_text']
+        query = task_dict['query']
+
+        await self._extract_and_store_opinions_async(
+            agent_id=agent_id,
+            answer_text=answer_text,
+            query=query
+        )
+
+    async def _handle_reinforce_opinion(self, task_dict: Dict[str, Any]):
+        """
+        Handler for reinforce opinion tasks.
+
+        Args:
+            task_dict: Dict with keys: 'agent_id', 'created_unit_ids', 'unit_texts', 'unit_entities'
+        """
+        agent_id = task_dict['agent_id']
+        created_unit_ids = task_dict['created_unit_ids']
+        unit_texts = task_dict['unit_texts']
+        unit_entities = task_dict['unit_entities']
+
+        await self._reinforce_opinions_async(
+            agent_id=agent_id,
+            created_unit_ids=created_unit_ids,
+            unit_texts=unit_texts,
+            unit_entities=unit_entities
+        )
+
     async def _reinforce_opinions_async(
         self,
         agent_id: str,
         created_unit_ids: List[str],
         unit_texts: List[str],
         unit_entities: List[List[Dict[str, str]]],
-        model: str = "openai/gpt-oss-120b",
     ):
         """
         Background task to reinforce opinions based on newly ingested events.
@@ -1752,7 +1773,6 @@ Guidelines:
             created_unit_ids: List of newly created memory unit IDs
             unit_texts: Texts of the newly created units
             unit_entities: Entities extracted from each unit
-            model: LLM model to use for evaluation
         """
         try:
             # Extract all unique entity names from the new units
@@ -1790,11 +1810,10 @@ Guidelines:
 
                 logger.debug(f"[REINFORCE] Found {len(opinions)} opinions to potentially reinforce")
 
-                # Use cached LLM client
-                if self._llm_client is None:
-                    logger.error("[REINFORCE] LLM client not available, skipping opinion reinforcement")
+                # Use cached LLM config
+                if self._llm_config is None:
+                    logger.error("[REINFORCE] LLM config not available, skipping opinion reinforcement")
                     return
-                client = self._llm_client
 
                 # Evaluate each opinion against the new events
                 updates_to_apply = []
@@ -1818,12 +1837,10 @@ Guidelines:
 
                     # Evaluate if opinion should be updated
                     evaluation = await self._evaluate_opinion_update_async(
-                        client,
                         opinion_text,
                         opinion_confidence,
                         combined_events,
-                        entity_name,
-                        model
+                        entity_name
                     )
 
                     if evaluation:

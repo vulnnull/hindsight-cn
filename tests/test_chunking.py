@@ -2,7 +2,7 @@
 Test chunking functionality for large documents.
 """
 import pytest
-from memora.llm_client import chunk_text
+from memora.fact_extraction import chunk_text
 
 
 def test_chunk_text_small():

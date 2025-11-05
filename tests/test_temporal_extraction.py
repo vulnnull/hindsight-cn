@@ -3,11 +3,11 @@ Test temporal extraction and per-fact dating.
 """
 import pytest
 from datetime import datetime, timezone, timedelta
-from memora.llm_client import extract_facts_from_text
+from memora.fact_extraction import extract_facts_from_text
 
 
 @pytest.mark.asyncio
-async def test_extract_facts_with_relative_dates():
+async def test_extract_facts_with_relative_dates(memory):
     """Test that relative dates are converted to absolute dates."""
 
     reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=timezone.utc)
@@ -18,7 +18,7 @@ async def test_extract_facts_with_relative_dates():
     This morning I had coffee with Alice.
     """
 
-    facts = await extract_facts_from_text(text, reference_date, "Personal diary")
+    facts = await extract_facts_from_text(text, reference_date, "Personal diary", llm_config=memory._llm_config)
 
     print(f"\nExtracted {len(facts)} facts:")
     for fact in facts:
@@ -44,14 +44,14 @@ async def test_extract_facts_with_relative_dates():
 
 
 @pytest.mark.asyncio
-async def test_extract_facts_with_no_temporal_info():
+async def test_extract_facts_with_no_temporal_info(memory):
     """Test that facts without temporal info use the reference date."""
 
     reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=timezone.utc)
 
     text = "Alice works at Google. She loves Python programming."
 
-    facts = await extract_facts_from_text(text, reference_date, "General info")
+    facts = await extract_facts_from_text(text, reference_date, "General info", llm_config=memory._llm_config)
 
     print(f"\nExtracted {len(facts)} facts:")
     for fact in facts:
@@ -66,7 +66,7 @@ async def test_extract_facts_with_no_temporal_info():
 
 
 @pytest.mark.asyncio
-async def test_extract_facts_with_absolute_dates():
+async def test_extract_facts_with_absolute_dates(memory):
     """Test that absolute dates in text are preserved."""
 
     reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=timezone.utc)
@@ -76,7 +76,7 @@ async def test_extract_facts_with_absolute_dates():
     Bob will start his vacation on April 1st.
     """
 
-    facts = await extract_facts_from_text(text, reference_date, "Calendar events")
+    facts = await extract_facts_from_text(text, reference_date, "Calendar events", llm_config=memory._llm_config)
 
     print(f"\nExtracted {len(facts)} facts:")
     for fact in facts:

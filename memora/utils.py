@@ -2,11 +2,15 @@
 Utility functions for memory system.
 """
 from datetime import datetime
-from typing import List, Dict
-from .llm_client import extract_facts_from_text
+from typing import List, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .llm_wrapper import LLMConfig
+
+from .fact_extraction import extract_facts_from_text
 
 
-async def extract_facts(text: str, event_date: datetime, context: str = "") -> List[Dict[str, str]]:
+async def extract_facts(text: str, event_date: datetime, context: str = "", llm_config: 'LLMConfig' = None) -> List[Dict[str, str]]:
     """
     Extract semantic facts from text using LLM.
 
@@ -20,6 +24,7 @@ async def extract_facts(text: str, event_date: datetime, context: str = "") -> L
         text: Input text (conversation, article, etc.)
         event_date: Reference date for resolving relative times
         context: Context about the conversation/document
+        llm_config: LLM configuration to use
 
     Returns:
         List of fact dictionaries with keys: 'fact' (text) and 'date' (ISO string)
@@ -30,7 +35,7 @@ async def extract_facts(text: str, event_date: datetime, context: str = "") -> L
     if not text or not text.strip():
         return []
 
-    fact_dicts = await extract_facts_from_text(text, event_date, context)
+    fact_dicts = await extract_facts_from_text(text, event_date, context, llm_config=llm_config)
 
     if not fact_dicts:
         raise Exception(f"LLM extracted 0 facts from text of length {len(text)}. This may indicate the text contains no meaningful information, or the LLM failed to extract facts.")

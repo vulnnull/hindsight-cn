@@ -5,12 +5,10 @@ This test loads a long conversation (419 dialogues across 19 sessions),
 ingests it into memory, and runs searches to measure performance.
 """
 import logging
-import os
 import json
 import pytest
 from datetime import datetime, timezone
 from pathlib import Path
-from memora import TemporalSemanticMemory
 
 
 # Configure logging to show performance metrics
@@ -22,16 +20,12 @@ logging.basicConfig(
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(300)  # 5 minute timeout for performance test
-async def test_batch_ingestion_single_call():
+async def test_batch_ingestion_single_call(memory):
     """
     Test ingesting entire conversation in ONE batch call.
 
     This is the most efficient way - all sessions in one put_batch_async.
     """
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        pytest.skip("DATABASE_URL not set")
-
     # Load conversation fixture
     fixture_path = Path(__file__).parent / "fixtures" / "locomo_conversation_sample.json"
     with open(fixture_path) as f:
@@ -41,10 +35,6 @@ async def test_batch_ingestion_single_call():
     logging.info(f"\n{'='*80}")
     logging.info(f"BATCH INGESTION TEST: {sample_id}")
     logging.info(f"{'='*80}")
-
-    # Initialize memory
-    memory = TemporalSemanticMemory(db_url=db_url)
-    await memory.initialize()
 
     agent_id = f"batch_test_{sample_id}_{datetime.now(timezone.utc).timestamp()}"
 
@@ -121,11 +111,3 @@ async def test_batch_ingestion_single_call():
         # Cleanup
         logging.info("\nCleaning up...")
         await memory.delete_agent(agent_id)
-        await memory.close()
-
-
-if __name__ == "__main__":
-    # Allow running directly for quick perf checks
-    import asyncio
-    logging.info("Running performance test...")
-    asyncio.run(test_batch_ingestion_single_call())

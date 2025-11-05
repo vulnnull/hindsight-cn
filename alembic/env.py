@@ -3,6 +3,8 @@ Alembic environment configuration for SQLAlchemy with pgvector.
 Uses synchronous psycopg2 driver for migrations to avoid pgbouncer issues.
 """
 import os
+import sys
+from pathlib import Path
 from logging.config import fileConfig
 
 from sqlalchemy import pool, engine_from_config
@@ -12,10 +14,26 @@ from alembic import context
 from dotenv import load_dotenv
 
 # Import your models here
-from memory.models import Base
+from memora.models import Base
 
-# Load environment variables
-load_dotenv()
+# Load environment variables based on DATABASE_URL env var or default to local
+def load_env():
+    """Load environment variables from .env.local or .env.dev"""
+    # Check if DATABASE_URL is already set (e.g., by CI/CD)
+    if os.getenv("DATABASE_URL"):
+        return
+
+    # Default to local environment
+    env_file = ".env.local"
+    if Path(env_file).exists():
+        load_dotenv(env_file)
+    else:
+        # Fallback to dev
+        env_file = ".env.dev"
+        if Path(env_file).exists():
+            load_dotenv(env_file)
+
+load_env()
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
