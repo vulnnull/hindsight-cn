@@ -18,6 +18,10 @@ from .search_trace import (
     PruningDecision,
     SearchSummary,
     SearchPhaseMetrics,
+    RetrievalResult,
+    RetrievalMethodResults,
+    RRFMergeResult,
+    RerankedResult,
 )
 
 
@@ -40,18 +44,18 @@ class SearchTracer:
         json_output = trace.to_json()
     """
 
-    def __init__(self, query: str, thinking_budget: int, top_k: int):
+    def __init__(self, query: str, thinking_budget: int, max_tokens: int):
         """
         Initialize tracer.
 
         Args:
             query: Search query text
             thinking_budget: Maximum nodes to explore
-            top_k: Number of results requested
+            max_tokens: Maximum tokens to return in results
         """
         self.query_text = query
         self.thinking_budget = thinking_budget
-        self.top_k = top_k
+        self.max_tokens = max_tokens
 
         # Trace data
         self.query_embedding: Optional[List[float]] = None
@@ -60,6 +64,11 @@ class SearchTracer:
         self.visits: List[NodeVisit] = []
         self.pruned: List[PruningDecision] = []
         self.phase_metrics: List[SearchPhaseMetrics] = []
+
+        # New 4-way retrieval tracking
+        self.retrieval_results: List[RetrievalMethodResults] = []
+        self.rrf_merged: List[RRFMergeResult] = []
+        self.reranked: List[RerankedResult] = []
 
         # Tracking state
         self.current_step = 0
@@ -265,6 +274,104 @@ class SearchTracer:
             )
         )
 
+    def add_retrieval_results(
+        self,
+        method_name: Literal["semantic", "bm25", "graph", "temporal"],
+        results: List[tuple],  # List of (doc_id, data) tuples
+        duration_seconds: float,
+        score_field: str,  # e.g., "similarity", "bm25_score"
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Record results from a single retrieval method.
+
+        Args:
+            method_name: Name of the retrieval method
+            results: List of (doc_id, data) tuples from retrieval
+            duration_seconds: Time taken for this retrieval
+            score_field: Field name containing the score in data dict
+            metadata: Optional metadata about this retrieval method
+        """
+        retrieval_results = []
+        for rank, (doc_id, data) in enumerate(results, start=1):
+            score = data.get(score_field, 0.0)
+            retrieval_results.append(
+                RetrievalResult(
+                    rank=rank,
+                    node_id=doc_id,
+                    text=data.get("text", ""),
+                    context=data.get("context", ""),
+                    event_date=data.get("event_date"),
+                    score=score,
+                    score_name=score_field,
+                )
+            )
+
+        self.retrieval_results.append(
+            RetrievalMethodResults(
+                method_name=method_name,
+                results=retrieval_results,
+                duration_seconds=duration_seconds,
+                metadata=metadata or {},
+            )
+        )
+
+    def add_rrf_merged(self, merged_results: List[tuple]):
+        """
+        Record RRF merged results.
+
+        Args:
+            merged_results: List of (doc_id, data, rrf_meta) tuples from RRF merge
+        """
+        self.rrf_merged = []
+        for rank, (doc_id, data, rrf_meta) in enumerate(merged_results, start=1):
+            self.rrf_merged.append(
+                RRFMergeResult(
+                    node_id=doc_id,
+                    text=data.get("text", ""),
+                    rrf_score=rrf_meta.get("rrf_score", 0.0),
+                    source_ranks=rrf_meta.get("source_ranks", {}),
+                    final_rrf_rank=rank,
+                )
+            )
+
+    def add_reranked(self, reranked_results: List[Dict[str, Any]], rrf_merged: List):
+        """
+        Record reranked results.
+
+        Args:
+            reranked_results: List of result dicts after reranking
+            rrf_merged: Original RRF merged results for comparison
+        """
+        # Build map of node_id -> rrf_rank
+        rrf_rank_map = {}
+        for item in self.rrf_merged:
+            rrf_rank_map[item.node_id] = item.final_rrf_rank
+
+        self.reranked = []
+        for rank, result in enumerate(reranked_results, start=1):
+            node_id = result["id"]
+            rrf_rank = rrf_rank_map.get(node_id, len(rrf_merged) + 1)
+            rank_change = rrf_rank - rank  # Positive = moved up
+
+            # Extract score components
+            score_components = {}
+            for key in ["semantic_similarity", "bm25_score", "rrf_score", "recency_normalized", "frequency_normalized"]:
+                if key in result:
+                    score_components[key] = result[key]
+
+            self.reranked.append(
+                RerankedResult(
+                    node_id=node_id,
+                    text=result.get("text", ""),
+                    rerank_score=result.get("weight", 0.0),
+                    rerank_rank=rank,
+                    rrf_rank=rrf_rank,
+                    rank_change=rank_change,
+                    score_components=score_components,
+                )
+            )
+
     def finalize(self, final_results: List[Dict[str, Any]]) -> SearchTrace:
         """
         Finalize the trace and return the complete SearchTrace object.
@@ -294,7 +401,7 @@ class SearchTracer:
             query_embedding=self.query_embedding or [],
             timestamp=datetime.now(timezone.utc),
             thinking_budget=self.thinking_budget,
-            top_k=self.top_k,
+            max_tokens=self.max_tokens,
         )
 
         # Create summary
@@ -315,6 +422,9 @@ class SearchTracer:
         # Create complete trace
         trace = SearchTrace(
             query=query_info,
+            retrieval_results=self.retrieval_results,
+            rrf_merged=self.rrf_merged,
+            reranked=self.reranked,
             entry_points=self.entry_points,
             visits=self.visits,
             pruned=self.pruned,

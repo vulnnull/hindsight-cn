@@ -1,0 +1,80 @@
+"""
+Cross-encoder abstraction for reranking.
+
+Provides an interface for reranking with different backends.
+"""
+from abc import ABC, abstractmethod
+from typing import List, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class CrossEncoderReranker(ABC):
+    """
+    Abstract base class for cross-encoder reranking.
+
+    Cross-encoders take query-document pairs and return relevance scores.
+    """
+
+    @abstractmethod
+    def predict(self, pairs: List[Tuple[str, str]]) -> List[float]:
+        """
+        Score query-document pairs for relevance.
+
+        Args:
+            pairs: List of (query, document) tuples to score
+
+        Returns:
+            List of relevance scores (higher = more relevant)
+        """
+        pass
+
+
+class SentenceTransformersCrossEncoder(CrossEncoderReranker):
+    """
+    Cross-encoder implementation using SentenceTransformers.
+
+    Uses lazy import so sentence-transformers is not required if another
+    reranking backend is used.
+
+    Default model is cross-encoder/ms-marco-MiniLM-L-6-v2:
+    - Fast inference (~80ms for 100 pairs on CPU)
+    - Small model (80MB)
+    - Trained for passage re-ranking
+    """
+
+    def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
+        """
+        Initialize SentenceTransformers cross-encoder and load model.
+
+        Args:
+            model_name: Name of the CrossEncoder model to use.
+                       Default: cross-encoder/ms-marco-MiniLM-L-6-v2
+        """
+        self.model_name = model_name
+
+        try:
+            from sentence_transformers import CrossEncoder
+        except ImportError:
+            raise ImportError(
+                "sentence-transformers is required for SentenceTransformersCrossEncoder. "
+                "Install it with: pip install sentence-transformers"
+            )
+
+        logger.info(f"Loading cross-encoder model: {self.model_name}...")
+        self._model = CrossEncoder(self.model_name)
+        logger.info("Cross-encoder model loaded")
+
+    def predict(self, pairs: List[Tuple[str, str]]) -> List[float]:
+        """
+        Score query-document pairs for relevance.
+
+        Args:
+            pairs: List of (query, document) tuples to score
+
+        Returns:
+            List of relevance scores (raw logits from the model)
+        """
+        scores = self._model.predict(pairs)
+        return scores.tolist() if hasattr(scores, 'tolist') else list(scores)

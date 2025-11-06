@@ -33,8 +33,8 @@ async function loadLocomoResults(mode = 'search') {
             const errorData = await response.json();
             const modeLabel = mode === 'think' ? 'think' : 'search';
             const runCommand = mode === 'think'
-                ? 'uv run python run_benchmark.py --use-think'
-                : 'uv run python run_benchmark.py';
+                ? 'uv run python locomo_benchmark.py --use-think'
+                : 'uv run python locomo_benchmark.py';
 
             document.getElementById('benchmark-content').innerHTML = `
                 <div class="error-message">
@@ -87,13 +87,18 @@ function renderLocomoResults(mode = 'search') {
         };
 
         // Aggregate across all items
+        let totalInvalid = 0;
         results.forEach(item => {
             if (item.metrics && item.metrics.detailed_results) {
                 item.metrics.detailed_results.forEach(result => {
                     const category = result.category;
                     if (categoryStats[category]) {
                         categoryStats[category].total++;
-                        if (result.is_correct) {
+                        if (result.is_invalid) {
+                            if (!categoryStats[category].invalid) categoryStats[category].invalid = 0;
+                            categoryStats[category].invalid++;
+                            totalInvalid++;
+                        } else if (result.is_correct) {
                             categoryStats[category].correct++;
                         }
                     }
@@ -105,18 +110,30 @@ function renderLocomoResults(mode = 'search') {
         const modeLabel = mode === 'think' ? ' (Think Mode)' : ' (Search Mode)';
 
         // Overall stats
+        const totalInvalidDisplay = totalInvalid > 0
+            ? `<div class="stat-item">
+                <div class="stat-label">Invalid Questions</div>
+                <div class="stat-value" style="color: #ff9800;">${totalInvalid}</div>
+            </div>`
+            : '';
+
         const overallHtml = `
             <div style="background: #f9f9f9; padding: 20px; border: 2px solid #333; border-radius: 8px; margin-bottom: 20px;">
                 <h3 style="margin-top: 0;">LoComo Benchmark${modeLabel} - Overall Performance</h3>
+                ${totalInvalid > 0 ? `<div style="background: #fff3cd; border: 1px solid #ffc107; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                    <strong>⚠️ Note:</strong> ${totalInvalid} question(s) marked as invalid due to errors (excluded from accuracy calculation)
+                </div>` : ''}
                 <div class="stats-grid">
                     <div class="stat-item">
                         <div class="stat-label">Overall Accuracy</div>
                         <div class="stat-value">${benchmarkData.overall_accuracy.toFixed(2)}%</div>
+                        ${totalInvalid > 0 ? `<div style="font-size: 11px; color: #666; margin-top: 4px;">(${benchmarkData.total_correct} / ${benchmarkData.total_valid || (benchmarkData.total_questions - totalInvalid)})</div>` : ''}
                     </div>
                     <div class="stat-item">
                         <div class="stat-label">Correct Answers</div>
                         <div class="stat-value">${benchmarkData.total_correct} / ${benchmarkData.total_questions}</div>
                     </div>
+                    ${totalInvalidDisplay}
                     <div class="stat-item">
                         <div class="stat-label">Items</div>
                         <div class="stat-value">${numItems}</div>
@@ -126,13 +143,16 @@ function renderLocomoResults(mode = 'search') {
                 <h4 style="margin: 20px 0 10px 0; padding-top: 15px; border-top: 1px solid #ddd;">Accuracy by Category</h4>
                 <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
                     ${Object.values(categoryStats).map(cat => {
-                        const accuracy = cat.total > 0 ? ((cat.correct / cat.total) * 100).toFixed(1) : 0;
+                        const invalidCount = cat.invalid || 0;
+                        const validTotal = cat.total - invalidCount;
+                        const accuracy = validTotal > 0 ? ((cat.correct / validTotal) * 100).toFixed(1) : 0;
                         const color = accuracy >= 70 ? '#43a047' : accuracy >= 50 ? '#ff9800' : '#e53935';
+                        const invalidNote = invalidCount > 0 ? ` <span style="color: #ff9800; font-size: 10px;">(${invalidCount} invalid)</span>` : '';
                         return `
                             <div class="stat-item">
                                 <div class="stat-label">${cat.name}</div>
                                 <div class="stat-value" style="color: ${color};">${accuracy}%</div>
-                                <div style="font-size: 11px; color: #666; margin-top: 4px;">${cat.correct} / ${cat.total}</div>
+                                <div style="font-size: 11px; color: #666; margin-top: 4px;">${cat.correct} / ${cat.total}${invalidNote}</div>
                             </div>
                         `;
                     }).join('')}
@@ -147,6 +167,7 @@ function renderLocomoResults(mode = 'search') {
                 <label><input type="radio" name="answer-filter" value="all" checked onchange="filterAnswers()"> All Answers</label>
                 <label><input type="radio" name="answer-filter" value="incorrect" onchange="filterAnswers()"> ❌ Incorrect Only</label>
                 <label><input type="radio" name="answer-filter" value="correct" onchange="filterAnswers()"> ✅ Correct Only</label>
+                ${totalInvalid > 0 ? '<label><input type="radio" name="answer-filter" value="invalid" onchange="filterAnswers()"> ⚠️ Invalid Only</label>' : ''}
             </div>
         `;
 
@@ -200,17 +221,18 @@ function renderConversationDetails(conv) {
     let html = '<div class="qa-results">';
 
     results.forEach((result, idx) => {
+        const isInvalid = result.is_invalid || false;
         const isCorrect = result.is_correct;
-        const bgColor = isCorrect ? '#e8f5e9' : '#ffebee';
-        const icon = isCorrect ? '✅' : '❌';
+        const bgColor = isInvalid ? '#fff3cd' : (isCorrect ? '#e8f5e9' : '#ffebee');
+        const icon = isInvalid ? '⚠️' : (isCorrect ? '✅' : '❌');
         const category = getCategoryName(result.category);
 
         html += `
-            <div class="qa-item" data-correct="${isCorrect}" style="background: ${bgColor}; padding: 15px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px;">
+            <div class="qa-item" data-correct="${isCorrect}" data-invalid="${isInvalid}" style="background: ${bgColor}; padding: 15px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
                     <div style="flex: 1;">
                         <div style="font-weight: bold; font-size: 16px; margin-bottom: 8px;">
-                            ${icon} Question ${idx + 1} <span style="font-size: 12px; background: #666; color: white; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">${category}</span>
+                            ${icon} Question ${idx + 1} ${isInvalid ? '<span style="font-size: 12px; background: #ff9800; color: white; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">INVALID</span>' : ''} <span style="font-size: 12px; background: #666; color: white; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">${category}</span>
                         </div>
                         <div style="margin-bottom: 8px;">
                             <b>Q:</b> ${result.question}
@@ -235,11 +257,15 @@ function renderConversationDetails(conv) {
                     </div>
                 </div>
 
-                <details style="margin-top: 10px;">
+                <details style="margin-top: 10px;" ${isInvalid ? 'open' : ''}>
                     <summary style="cursor: pointer; font-weight: bold; padding: 5px; background: rgba(255,255,255,0.5); border-radius: 4px;">
                         📝 Show Reasoning & Retrieved Memories
                     </summary>
                     <div style="margin-top: 10px; padding: 10px; background: white; border-radius: 4px;">
+                        ${isInvalid ? `<div style="margin-bottom: 10px; padding: 10px; background: #ffebee; border-left: 4px solid #e53935; border-radius: 4px;">
+                            <b style="color: #c62828;">⚠️ Error:</b>
+                            <div style="margin-top: 4px; color: #333;">${result.error || 'Question marked as invalid'}</div>
+                        </div>` : ''}
                         <div style="margin-bottom: 10px;">
                             <b>System Reasoning:</b>
                             <div style="padding: 8px; background: #f5f5f5; border-radius: 4px; margin-top: 4px;">
@@ -328,12 +354,15 @@ function filterAnswers() {
 
     items.forEach(item => {
         const isCorrect = item.dataset.correct === 'true';
+        const isInvalid = item.dataset.invalid === 'true';
 
         if (filter === 'all') {
             item.style.display = 'block';
-        } else if (filter === 'correct' && isCorrect) {
+        } else if (filter === 'correct' && isCorrect && !isInvalid) {
             item.style.display = 'block';
-        } else if (filter === 'incorrect' && !isCorrect) {
+        } else if (filter === 'incorrect' && !isCorrect && !isInvalid) {
+            item.style.display = 'block';
+        } else if (filter === 'invalid' && isInvalid) {
             item.style.display = 'block';
         } else {
             item.style.display = 'none';

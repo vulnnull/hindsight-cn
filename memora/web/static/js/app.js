@@ -7,12 +7,12 @@ let currentAgentId = null; // Global agent context
 let dataGraphs = {
     world: null,
     agent: null,
-    opinions: null
+    opinion: null
 };
 let dataCache = {
     world: null,
     agent: null,
-    opinions: null
+    opinion: null
 };
 let currentDataSubTab = 'world';
 
@@ -657,16 +657,16 @@ function addDebugPane() {
                 <div>
                     <label style="font-weight: bold; display: block; margin-bottom: 3px; font-size: 12px;">Search Type:</label>
                     <select id="search-type-${paneId}" style="width: 120px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
-                        <option value="all">All Facts</option>
                         <option value="world">World Facts</option>
                         <option value="agent">Agent Facts</option>
                         <option value="opinion">Opinion Facts</option>
                     </select>
                 </div>
                 <div>
-                    <label style="font-weight: bold; display: block; margin-bottom: 3px; font-size: 12px;">Agent:</label>
-                    <select id="search-agent-${paneId}" style="width: 120px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
-                        <option value="">Loading...</option>
+                    <label style="font-weight: bold; display: block; margin-bottom: 3px; font-size: 12px;">Reranker:</label>
+                    <select id="search-reranker-${paneId}" style="width: 130px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
+                        <option value="heuristic">Heuristic</option>
+                        <option value="cross-encoder">Cross-Encoder</option>
                     </select>
                 </div>
                 <div>
@@ -674,12 +674,8 @@ function addDebugPane() {
                     <input type="number" id="search-budget-${paneId}" value="100" min="10" max="1000" style="width: 70px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
                 </div>
                 <div>
-                    <label style="font-weight: bold; display: block; margin-bottom: 3px; font-size: 12px;">Top K:</label>
-                    <input type="number" id="search-top-k-${paneId}" value="10" min="1" max="50" style="width: 60px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
-                </div>
-                <div>
-                    <label style="font-weight: bold; display: block; margin-bottom: 3px; font-size: 12px;" title="MMR Lambda: 0=max diversity, 1=no diversity">MMR λ:</label>
-                    <input type="number" id="search-mmr-lambda-${paneId}" value="0.5" min="0" max="1" step="0.1" style="width: 60px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
+                    <label style="font-weight: bold; display: block; margin-bottom: 3px; font-size: 12px;">Max Tokens:</label>
+                    <input type="number" id="search-max-tokens-${paneId}" value="4096" min="128" max="16384" step="128" style="width: 80px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
                 </div>
                 <button onclick="runSearchInPane(${paneId})" style="padding: 6px 16px; background: #42a5f5; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px;">🔍 Search</button>
             </div>
@@ -689,88 +685,73 @@ function addDebugPane() {
         </div>
         <div class="debug-controls">
             <label>
-                <input type="radio" name="viz-mode-${paneId}" id="debug-mode-graph-${paneId}" checked> Graph View
+                <input type="radio" name="viz-mode-${paneId}" id="debug-mode-retrieval-${paneId}" checked> 1. Retrieval
             </label>
             <label>
-                <input type="radio" name="viz-mode-${paneId}" id="debug-mode-log-${paneId}"> Decision Log
+                <input type="radio" name="viz-mode-${paneId}" id="debug-mode-rrf-${paneId}"> 2. RRF Merge
             </label>
             <label>
-                <input type="radio" name="viz-mode-${paneId}" id="debug-mode-table-${paneId}"> Results Table
+                <input type="radio" name="viz-mode-${paneId}" id="debug-mode-rerank-${paneId}"> 3. Reranking
             </label>
-            <span id="graph-controls-${paneId}" style="margin-left: 20px;">
-                <label>
-                    <input type="checkbox" id="debug-show-pruned-${paneId}"> Show pruned nodes
-                </label>
-                <label>
-                    <input type="checkbox" id="debug-highlight-path-${paneId}"> Highlight top result path
-                </label>
-                <span style="margin-left: 15px;">
-                    <input type="text" id="graph-search-${paneId}" placeholder="Find nodes..." style="width: 150px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
-                    <span id="graph-search-count-${paneId}" style="margin-left: 5px; font-size: 12px; color: #666;"></span>
-                </span>
-            </span>
+            <label>
+                <input type="radio" name="viz-mode-${paneId}" id="debug-mode-final-${paneId}"> 4. Final Results
+            </label>
         </div>
         <div class="debug-viz-container">
-            <div class="debug-viz" id="debug-cy-${paneId}" style="display: block;"></div>
-            <div class="decision-log" id="decision-log-${paneId}" style="display: none;"></div>
-            <div class="results-table-container" id="results-table-${paneId}" style="display: none;"></div>
+            <div id="debug-retrieval-${paneId}" class="debug-section" style="display: block;">
+                <div class="retrieval-tabs" style="margin-bottom: 10px;">
+                    <button class="retrieval-tab-btn active" onclick="switchRetrievalTab(${paneId}, 'semantic')">Semantic</button>
+                    <button class="retrieval-tab-btn" onclick="switchRetrievalTab(${paneId}, 'bm25')">BM25</button>
+                    <button class="retrieval-tab-btn" onclick="switchRetrievalTab(${paneId}, 'graph')">Graph</button>
+                    <button class="retrieval-tab-btn" onclick="switchRetrievalTab(${paneId}, 'temporal')">Temporal</button>
+                </div>
+                <div id="retrieval-semantic-${paneId}" class="retrieval-content" style="display: block;"></div>
+                <div id="retrieval-bm25-${paneId}" class="retrieval-content" style="display: none;"></div>
+                <div id="retrieval-graph-${paneId}" class="retrieval-content" style="display: none;"></div>
+                <div id="retrieval-temporal-${paneId}" class="retrieval-content" style="display: none;"></div>
+            </div>
+            <div id="debug-rrf-${paneId}" class="debug-section" style="display: none;"></div>
+            <div id="debug-rerank-${paneId}" class="debug-section" style="display: none;"></div>
+            <div id="debug-final-${paneId}" class="debug-section" style="display: none;"></div>
         </div>
     `;
 
     container.appendChild(paneDiv);
 
-    // Add event listeners for view mode toggle
-    document.getElementById(`debug-mode-graph-${paneId}`).addEventListener('change', function() {
+    // Add event listeners for phase view toggle
+    document.getElementById(`debug-mode-retrieval-${paneId}`).addEventListener('change', function() {
         if (this.checked) {
-            document.getElementById(`debug-cy-${paneId}`).style.display = 'block';
-            document.getElementById(`decision-log-${paneId}`).style.display = 'none';
-            document.getElementById(`results-table-${paneId}`).style.display = 'none';
-            document.getElementById(`graph-controls-${paneId}`).style.display = 'inline';
-            const pane = debugPanes.find(p => p.id === paneId);
-            if (pane && pane.cy) {
-                setTimeout(() => pane.cy.resize(), 10);
-            }
+            document.getElementById(`debug-retrieval-${paneId}`).style.display = 'block';
+            document.getElementById(`debug-rrf-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-rerank-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-final-${paneId}`).style.display = 'none';
         }
     });
 
-    document.getElementById(`debug-mode-log-${paneId}`).addEventListener('change', function() {
+    document.getElementById(`debug-mode-rrf-${paneId}`).addEventListener('change', function() {
         if (this.checked) {
-            document.getElementById(`debug-cy-${paneId}`).style.display = 'none';
-            document.getElementById(`decision-log-${paneId}`).style.display = 'block';
-            document.getElementById(`results-table-${paneId}`).style.display = 'none';
-            document.getElementById(`graph-controls-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-retrieval-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-rrf-${paneId}`).style.display = 'block';
+            document.getElementById(`debug-rerank-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-final-${paneId}`).style.display = 'none';
         }
     });
 
-    document.getElementById(`debug-mode-table-${paneId}`).addEventListener('change', function() {
+    document.getElementById(`debug-mode-rerank-${paneId}`).addEventListener('change', function() {
         if (this.checked) {
-            document.getElementById(`debug-cy-${paneId}`).style.display = 'none';
-            document.getElementById(`decision-log-${paneId}`).style.display = 'none';
-            document.getElementById(`results-table-${paneId}`).style.display = 'block';
-            document.getElementById(`graph-controls-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-retrieval-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-rrf-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-rerank-${paneId}`).style.display = 'block';
+            document.getElementById(`debug-final-${paneId}`).style.display = 'none';
         }
     });
 
-    // Add event listeners for graph controls
-    document.getElementById(`debug-show-pruned-${paneId}`).addEventListener('change', function() {
-        const pane = debugPanes.find(p => p.id === paneId);
-        if (pane && pane.trace) {
-            visualizeTrace(paneId, pane.trace);
-        }
-    });
-
-    document.getElementById(`debug-highlight-path-${paneId}`).addEventListener('change', function() {
-        const pane = debugPanes.find(p => p.id === paneId);
-        if (pane && pane.trace) {
-            visualizeTrace(paneId, pane.trace);
-        }
-    });
-
-    // Add search input listener for finding nodes
-    document.getElementById(`graph-search-${paneId}`).addEventListener('input', function(e) {
-        const pane = debugPanes.find(p => p.id === paneId);
-        if (pane && pane.cy) {
-            highlightMatchingNodes(paneId, e.target.value);
+    document.getElementById(`debug-mode-final-${paneId}`).addEventListener('change', function() {
+        if (this.checked) {
+            document.getElementById(`debug-retrieval-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-rrf-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-rerank-${paneId}`).style.display = 'none';
+            document.getElementById(`debug-final-${paneId}`).style.display = 'block';
         }
     });
 
@@ -781,41 +762,344 @@ function addDebugPane() {
         trace: null
     });
 
-    // Load agents for this pane after DOM is ready
-    setTimeout(() => loadAgentsForPane(paneId), 10);
 }
 
-async function loadAgentsForPane(paneId) {
-    const select = document.getElementById(`search-agent-${paneId}`);
-    if (!select) {
-        console.error(`Could not find select element for pane ${paneId}`);
+// Switch between retrieval method tabs
+window.switchRetrievalTab = function(paneId, method) {
+    // Update button states
+    const buttons = document.querySelectorAll(`#debug-pane-${paneId} .retrieval-tab-btn`);
+    buttons.forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.textContent.toLowerCase() === method) {
+            btn.classList.add('active');
+        }
+    });
+
+    // Show/hide content
+    ['semantic', 'bm25', 'graph', 'temporal'].forEach(m => {
+        const content = document.getElementById(`retrieval-${m}-${paneId}`);
+        if (content) {
+            content.style.display = m === method ? 'block' : 'none';
+        }
+    });
+}
+
+// Render retrieval results for all methods
+function renderRetrievalResults(paneId, trace) {
+    if (!trace || !trace.retrieval_results) return;
+
+    trace.retrieval_results.forEach(method => {
+        const methodName = method.method_name;
+        const contentDiv = document.getElementById(`retrieval-${methodName}-${paneId}`);
+        if (!contentDiv) return;
+
+        if (!method.results || method.results.length === 0) {
+            contentDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No results from this retrieval method</div>';
+            return;
+        }
+
+        let html = `
+            <div style="padding: 15px;">
+                <h3>${methodName.toUpperCase()} Retrieval (${method.results.length} results, ${method.duration_seconds.toFixed(3)}s)</h3>
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px;">
+                    <thead>
+                        <tr style="background: #f0f0f0; border: 2px solid #333;">
+                            <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Rank</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Text</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        method.results.forEach(result => {
+            html += `
+                <tr style="border: 1px solid #ddd;">
+                    <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">#${result.rank}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd; max-width: 500px;">${result.text}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${result.score.toFixed(4)}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        contentDiv.innerHTML = html;
+    });
+}
+
+// Render RRF merge results
+function renderRRFMerge(paneId, trace) {
+    const contentDiv = document.getElementById(`debug-rrf-${paneId}`);
+    if (!contentDiv || !trace || !trace.rrf_merged) return;
+
+    if (trace.rrf_merged.length === 0) {
+        contentDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No RRF merge data available</div>';
         return;
     }
 
-    try {
-        const response = await fetch('api/agents');
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
+    let html = `
+        <div style="padding: 15px;">
+            <h3>RRF Merge Results (${trace.rrf_merged.length} candidates)</h3>
+            <p style="color: #666; font-size: 13px; margin-bottom: 10px;">
+                Reciprocal Rank Fusion combines rankings from different retrieval methods.
+            </p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px;">
+                <thead>
+                    <tr style="background: #f0f0f0; border: 2px solid #333;">
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">RRF Rank</th>
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Text</th>
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">RRF Score</th>
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Source Ranks</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
 
-        const data = await response.json();
+    trace.rrf_merged.forEach(result => {
+        const sourceRanks = Object.entries(result.source_ranks)
+            .map(([method, rank]) => `${method}: #${rank}`)
+            .join(', ');
 
-        select.innerHTML = '';
+        html += `
+            <tr style="border: 1px solid #ddd;">
+                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">#${result.final_rrf_rank}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; max-width: 400px;">${result.text}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${result.rrf_score.toFixed(4)}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; font-size: 11px;">${sourceRanks}</td>
+            </tr>
+        `;
+    });
 
-        if (data.agents && data.agents.length > 0) {
-            data.agents.forEach(agent => {
-                const option = document.createElement('option');
-                option.value = agent;
-                option.textContent = agent;
-                select.appendChild(option);
-            });
-        } else {
-            select.innerHTML = '<option value="default">default</option>';
-        }
-    } catch (e) {
-        console.error('Error loading agents for pane:', paneId, e);
-        select.innerHTML = '<option value="default">default</option>';
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    contentDiv.innerHTML = html;
+}
+
+// Render reranking results
+function renderReranking(paneId, trace) {
+    const contentDiv = document.getElementById(`debug-rerank-${paneId}`);
+    if (!contentDiv || !trace || !trace.reranked) return;
+
+    if (trace.reranked.length === 0) {
+        contentDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No reranking data available</div>';
+        return;
     }
+
+    let html = `
+        <div style="padding: 15px;">
+            <h3>Reranking Results (${trace.reranked.length} results)</h3>
+            <p style="color: #666; font-size: 13px; margin-bottom: 10px;">
+                Reranker adjusts scores based on semantic similarity, BM25, recency, and frequency.
+                <span style="background: #e3f2fd; padding: 2px 6px; border-radius: 3px;">Blue highlight</span> = rank improved vs RRF
+            </p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px;">
+                <thead>
+                    <tr style="background: #f0f0f0; border: 2px solid #333;">
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Rerank</th>
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">RRF Rank</th>
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Change</th>
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Text</th>
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Score</th>
+                        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Components</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    trace.reranked.forEach(result => {
+        const improved = result.rank_change > 0;
+        const rowBg = improved ? '#e3f2fd' : 'white';
+        const changeDisplay = result.rank_change > 0 ? `↑${result.rank_change}` :
+                             result.rank_change < 0 ? `↓${Math.abs(result.rank_change)}` : '=';
+        const changeColor = result.rank_change > 0 ? '#2e7d32' :
+                           result.rank_change < 0 ? '#d32f2f' : '#666';
+
+        const components = Object.entries(result.score_components)
+            .map(([key, val]) => `${key.replace('_', ' ')}: ${val.toFixed(3)}`)
+            .join('<br>');
+
+        html += `
+            <tr style="border: 1px solid #ddd; background: ${rowBg};">
+                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">#${result.rerank_rank}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">#${result.rrf_rank}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; color: ${changeColor}; font-weight: bold;">${changeDisplay}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; max-width: 350px;">${result.text}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>${result.rerank_score.toFixed(4)}</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd; font-size: 10px;">${components}</td>
+            </tr>
+        `;
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    contentDiv.innerHTML = html;
+}
+
+// Render final MMR results
+function renderFinalResults(paneId, results, trace) {
+    const contentDiv = document.getElementById(`debug-final-${paneId}`);
+    if (!contentDiv) return;
+
+    if (!results || results.length === 0) {
+        contentDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No final results</div>';
+        return;
+    }
+
+    // Reuse the existing results table rendering but update it
+    contentDiv.innerHTML = '';
+    const tableDiv = document.createElement('div');
+    tableDiv.style.padding = '15px';
+    contentDiv.appendChild(tableDiv);
+
+    // Call the existing renderResultsTable logic but inline here
+    renderResultsTableInline(tableDiv, results, trace);
+}
+
+// Inline version of results table rendering
+function renderResultsTableInline(tableDiv, results, trace) {
+    if (!results || results.length === 0) {
+        tableDiv.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">No results returned</div>';
+        return;
+    }
+
+    // Check if MMR was used
+    const mmrUsed = results.some(r => r.mmr_score !== null && r.mmr_score !== undefined);
+
+    let html = `
+        <h3>Final Results (${results.length} memories)</h3>
+        <p style="color: #666; font-size: 13px; margin-bottom: 10px;">
+            Query: "${trace.query.query_text}"
+        </p>
+        ${mmrUsed ? `
+        <div style="background: #e3f2fd; padding: 10px; border-left: 4px solid #2196f3; margin-bottom: 15px; font-size: 12px;">
+            <strong>MMR Diversification Active:</strong>
+            🎯 = Diversified pick (selected for variety) |
+            <span style="background: #fff3e0; padding: 2px 6px; border-radius: 3px;">Orange background</span> = Rank changed by MMR |
+            <strong>Orig Rank</strong> shows position before MMR reranking
+        </div>
+        ` : ''}
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <thead>
+                <tr style="background: #f0f0f0; border: 2px solid #333;">
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Rank</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;" title="Original rank before MMR">Orig Rank</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Text</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Context</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Date</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;" title="Final weighted score">Final Score</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;" title="Spreading activation value">Activation</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;" title="Semantic similarity to query">Similarity</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;" title="Recency boost">Recency</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;" title="Frequency boost">Frequency</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;" title="MMR score (relevance - diversity penalty)">MMR Score</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;" title="Normalized relevance component">MMR Rel</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid #ddd;" title="Max similarity to already selected">MMR Sim</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    // Calculate ranks for each metric
+    const calculateRanks = (values) => {
+        const indexed = values.map((val, idx) => ({ idx, val }));
+        indexed.sort((a, b) => b.val - a.val);
+        const ranks = new Map();
+        indexed.forEach((item, rank) => {
+            ranks.set(item.idx, rank + 1);
+        });
+        return ranks;
+    };
+
+    // Extract all metric values for ranking
+    const activations = results.map((result, idx) => {
+        const visit = trace.visits?.find(v => v.node_id === result.id);
+        return visit ? visit.weights.activation : 0;
+    });
+    const similarities = results.map((result, idx) => {
+        const visit = trace.visits?.find(v => v.node_id === result.id);
+        return visit ? visit.weights.semantic_similarity : 0;
+    });
+    const recencies = results.map((result, idx) => {
+        const visit = trace.visits?.find(v => v.node_id === result.id);
+        return visit ? (visit.weights.recency || 0) : 0;
+    });
+    const frequencies = results.map((result, idx) => {
+        const visit = trace.visits?.find(v => v.node_id === result.id);
+        return visit ? (visit.weights.frequency || 0) : 0;
+    });
+
+    // Calculate ranks
+    const activationRanks = calculateRanks(activations);
+    const similarityRanks = calculateRanks(similarities);
+    const recencyRanks = calculateRanks(recencies);
+    const frequencyRanks = calculateRanks(frequencies);
+
+    results.forEach((result, idx) => {
+        // Find corresponding visit in trace
+        const visit = trace.visits?.find(v => v.node_id === result.id);
+
+        // Get scores from visit weights
+        const finalScore = visit ? visit.weights.final_weight : (result.score || 0);
+        const activation = visit ? visit.weights.activation : 0;
+        const similarity = visit ? visit.weights.semantic_similarity : 0;
+        const recency = visit ? (visit.weights.recency || 0) : 0;
+        const frequency = visit ? (visit.weights.frequency || 0) : 0;
+
+        // Get ranks
+        const activationRank = activationRanks.get(idx);
+        const similarityRank = similarityRanks.get(idx);
+        const recencyRank = recencyRanks.get(idx);
+        const frequencyRank = frequencyRanks.get(idx);
+
+        // Get MMR information
+        const originalRank = result.original_rank || (idx + 1);
+        const mmrScore = result.mmr_score;
+        const mmrRelevance = result.mmr_relevance;
+        const mmrMaxSim = result.mmr_max_similarity;
+        const isDiversified = result.mmr_diversified || false;
+
+        // Highlight diversified results
+        const rowBg = isDiversified ? '#fff3e0' : 'white';
+        const rankDisplay = originalRank !== (idx + 1) ? `<span style="color: #ff9800;" title="Rank changed by MMR">↑${originalRank}</span>` : originalRank;
+
+        html += `
+            <tr style="border: 1px solid #ddd; background: ${rowBg};">
+                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">#${idx + 1}${isDiversified ? ' 🎯' : ''}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${rankDisplay}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; max-width: 300px;">${result.text}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; max-width: 150px;">${result.context || 'N/A'}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; white-space: nowrap;">${result.event_date ? new Date(result.event_date).toLocaleDateString() : 'N/A'}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>${finalScore.toFixed(4)}</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${activation.toFixed(4)} <span style="color: #666; font-size: 11px;">(#${activationRank})</span></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${similarity.toFixed(4)} <span style="color: #666; font-size: 11px;">(#${similarityRank})</span></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${recency.toFixed(4)} <span style="color: #666; font-size: 11px;">(#${recencyRank})</span></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${frequency.toFixed(4)} <span style="color: #666; font-size: 11px;">(#${frequencyRank})</span></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${mmrScore !== null && mmrScore !== undefined ? mmrScore.toFixed(4) : '-'}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${mmrRelevance !== null && mmrRelevance !== undefined ? mmrRelevance.toFixed(4) : '-'}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${mmrMaxSim !== null && mmrMaxSim !== undefined ? mmrMaxSim.toFixed(4) : '-'}</td>
+            </tr>
+        `;
+    });
+
+    html += `
+            </tbody>
+        </table>
+    `;
+
+    tableDiv.innerHTML = html;
 }
 
 window.runSearchInPane = async function(paneId) {
@@ -824,25 +1108,33 @@ window.runSearchInPane = async function(paneId) {
 
     const query = document.getElementById(`search-query-${paneId}`).value;
     const searchType = document.getElementById(`search-type-${paneId}`).value;
-    const agentId = document.getElementById(`search-agent-${paneId}`).value;
+    const reranker = document.getElementById(`search-reranker-${paneId}`).value;
     const thinkingBudget = parseInt(document.getElementById(`search-budget-${paneId}`).value);
-    const topK = parseInt(document.getElementById(`search-top-k-${paneId}`).value);
-    const mmrLambda = parseFloat(document.getElementById(`search-mmr-lambda-${paneId}`).value);
+    const maxTokens = parseInt(document.getElementById(`search-max-tokens-${paneId}`).value);
     const statusBar = document.getElementById(`debug-status-${paneId}`);
+
+    // Get agent from global selector
+    const agentSelect = document.getElementById('global-agent-selector');
+    const agentId = agentSelect ? agentSelect.value : null;
 
     if (!query) {
         alert('Please enter a query');
         return;
     }
 
-    try {
+    if (!agentId) {
+        alert('Please select an agent from the breadcrumb');
+        return;
+    }
+
+    try:
         // Prepare request body with optional fact_type
         const requestBody = {
             query: query,
             agent_id: agentId,
             thinking_budget: thinkingBudget,
-            top_k: topK,
-            mmr_lambda: mmrLambda,
+            max_tokens: maxTokens,
+            reranker: reranker,
             trace: true
         };
 
@@ -884,12 +1176,15 @@ window.runSearchInPane = async function(paneId) {
             <span><strong>Duration:</strong> ${summary.total_duration_seconds.toFixed(2)}s</span>
         `;
 
-        // Visualize the trace and results
+        // Store trace and results
         pane.trace = data.trace;
         pane.results = data.results;
-        visualizeTrace(paneId, data.trace);
-        renderDecisionLog(paneId, data.trace);
-        renderResultsTable(paneId, data.results, data.trace);
+
+        // Render all views
+        renderRetrievalResults(paneId, data.trace);
+        renderRRFMerge(paneId, data.trace);
+        renderReranking(paneId, data.trace);
+        renderFinalResults(paneId, data.results, data.trace);
 
     } catch (e) {
         statusBar.innerHTML = `<span style="color: #d32f2f;">❌ Error: ${e.message}</span>`;
@@ -966,6 +1261,44 @@ function renderResultsTable(paneId, results, trace) {
                 <tbody>
     `;
 
+    // Calculate ranks for each metric
+    const calculateRanks = (values) => {
+        // Create array of {index, value} pairs
+        const indexed = values.map((val, idx) => ({ idx, val }));
+        // Sort by value descending (highest first)
+        indexed.sort((a, b) => b.val - a.val);
+        // Create rank map
+        const ranks = new Map();
+        indexed.forEach((item, rank) => {
+            ranks.set(item.idx, rank + 1);
+        });
+        return ranks;
+    };
+
+    // Extract all metric values for ranking
+    const activations = results.map((result, idx) => {
+        const visit = trace.visits.find(v => v.node_id === result.id);
+        return visit ? visit.weights.activation : 0;
+    });
+    const similarities = results.map((result, idx) => {
+        const visit = trace.visits.find(v => v.node_id === result.id);
+        return visit ? visit.weights.semantic_similarity : 0;
+    });
+    const recencies = results.map((result, idx) => {
+        const visit = trace.visits.find(v => v.node_id === result.id);
+        return visit ? (visit.weights.recency || 0) : 0;
+    });
+    const frequencies = results.map((result, idx) => {
+        const visit = trace.visits.find(v => v.node_id === result.id);
+        return visit ? (visit.weights.frequency || 0) : 0;
+    });
+
+    // Calculate ranks
+    const activationRanks = calculateRanks(activations);
+    const similarityRanks = calculateRanks(similarities);
+    const recencyRanks = calculateRanks(recencies);
+    const frequencyRanks = calculateRanks(frequencies);
+
     results.forEach((result, idx) => {
         // Find corresponding visit in trace
         const visit = trace.visits.find(v => v.node_id === result.id);
@@ -976,6 +1309,12 @@ function renderResultsTable(paneId, results, trace) {
         const similarity = visit ? visit.weights.semantic_similarity : 0;
         const recency = visit ? (visit.weights.recency || 0) : 0;
         const frequency = visit ? (visit.weights.frequency || 0) : 0;
+
+        // Get ranks
+        const activationRank = activationRanks.get(idx);
+        const similarityRank = similarityRanks.get(idx);
+        const recencyRank = recencyRanks.get(idx);
+        const frequencyRank = frequencyRanks.get(idx);
 
         // Get MMR information
         const originalRank = result.original_rank || (idx + 1);
@@ -996,10 +1335,10 @@ function renderResultsTable(paneId, results, trace) {
                 <td style="padding: 8px; border: 1px solid #ddd; max-width: 150px;">${result.context || 'N/A'}</td>
                 <td style="padding: 8px; border: 1px solid #ddd; white-space: nowrap;">${result.event_date ? new Date(result.event_date).toLocaleDateString() : 'N/A'}</td>
                 <td style="padding: 8px; border: 1px solid #ddd;"><strong>${finalScore.toFixed(4)}</strong></td>
-                <td style="padding: 8px; border: 1px solid #ddd;">${activation.toFixed(4)}</td>
-                <td style="padding: 8px; border: 1px solid #ddd;">${similarity.toFixed(4)}</td>
-                <td style="padding: 8px; border: 1px solid #ddd;">${recency.toFixed(4)}</td>
-                <td style="padding: 8px; border: 1px solid #ddd;">${frequency.toFixed(4)}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${activation.toFixed(4)} <span style="color: #666; font-size: 11px;">(#${activationRank})</span></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${similarity.toFixed(4)} <span style="color: #666; font-size: 11px;">(#${similarityRank})</span></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${recency.toFixed(4)} <span style="color: #666; font-size: 11px;">(#${recencyRank})</span></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${frequency.toFixed(4)} <span style="color: #666; font-size: 11px;">(#${frequencyRank})</span></td>
                 <td style="padding: 8px; border: 1px solid #ddd;">${mmrScore !== null && mmrScore !== undefined ? mmrScore.toFixed(4) : '-'}</td>
                 <td style="padding: 8px; border: 1px solid #ddd;">${mmrRelevance !== null && mmrRelevance !== undefined ? mmrRelevance.toFixed(4) : '-'}</td>
                 <td style="padding: 8px; border: 1px solid #ddd;">${mmrMaxSim !== null && mmrMaxSim !== undefined ? mmrMaxSim.toFixed(4) : '-'}</td>
@@ -1579,16 +1918,56 @@ function onGlobalAgentChange() {
 function updateUIForAgentSelection() {
     const hasAgent = !!currentAgentId;
 
+    // Update stats section
+    const statsSection = document.getElementById('stats-section');
+    if (statsSection) {
+        statsSection.style.display = hasAgent ? 'block' : 'none';
+    }
+
     // Update each data subtab
-    ['world', 'agent', 'opinions'].forEach(factType => {
+    ['world', 'agent', 'opinion'].forEach(factType => {
         const noAgentMsg = document.getElementById(`${factType}-no-agent-message`);
-        const graphView = document.getElementById(`${factType}-graph-view`);
-        const tableView = document.getElementById(`${factType}-table-view`);
+        const content = document.getElementById(`${factType}-content`);
 
         if (noAgentMsg) noAgentMsg.style.display = hasAgent ? 'none' : 'block';
-        if (graphView) graphView.style.display = hasAgent ? 'none' : 'none'; // Start hidden, load on demand
-        if (tableView) tableView.style.display = hasAgent ? 'none' : 'none'; // Start hidden, load on demand
+        if (content) content.style.display = hasAgent ? 'block' : 'none';
     });
+}
+
+// Load statistics for current agent
+async function loadStats() {
+    if (!currentAgentId) return;
+
+    try {
+        const response = await fetch(`./api/stats/${encodeURIComponent(currentAgentId)}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const stats = await response.json();
+
+        // Update total stats
+        document.getElementById('stat-total-nodes').textContent = stats.total_nodes.toLocaleString();
+        document.getElementById('stat-total-links').textContent = stats.total_links.toLocaleString();
+
+        // Update nodes by type
+        document.getElementById('stat-world-nodes').textContent = (stats.nodes_by_type.world || 0).toLocaleString();
+        document.getElementById('stat-agent-nodes').textContent = (stats.nodes_by_type.agent || 0).toLocaleString();
+        document.getElementById('stat-opinion-nodes').textContent = (stats.nodes_by_type.opinion || 0).toLocaleString();
+
+        // Update links by type
+        document.getElementById('stat-temporal-links').textContent = (stats.links_by_type.temporal || 0).toLocaleString();
+        document.getElementById('stat-semantic-links').textContent = (stats.links_by_type.semantic || 0).toLocaleString();
+        document.getElementById('stat-entity-links').textContent = (stats.links_by_type.entity || 0).toLocaleString();
+
+    } catch (e) {
+        console.error('Error loading stats:', e);
+        // Reset to dashes on error
+        ['stat-total-nodes', 'stat-world-nodes', 'stat-agent-nodes', 'stat-opinion-nodes',
+         'stat-total-links', 'stat-temporal-links', 'stat-semantic-links', 'stat-entity-links'].forEach(id => {
+            document.getElementById(id).textContent = '-';
+        });
+    }
 }
 
 // Refresh all tabs with new agent context
@@ -1597,24 +1976,19 @@ async function refreshAllTabs() {
     dataCache = {
         world: null,
         agent: null,
-        opinions: null
+        opinion: null
     };
 
     // Destroy existing graphs
-    ['world', 'agent', 'opinions'].forEach(factType => {
+    ['world', 'agent', 'opinion'].forEach(factType => {
         if (dataGraphs[factType]) {
             dataGraphs[factType].destroy();
             dataGraphs[factType] = null;
         }
     });
 
-    // Update active debug panes with new agent
-    debugPanes.forEach(pane => {
-        const agentSelect = document.getElementById(`search-agent-${pane.id}`);
-        if (agentSelect && currentAgentId) {
-            agentSelect.value = currentAgentId;
-        }
-    });
+    // Load statistics
+    await loadStats();
 }
 
 // Run Think query
@@ -1625,7 +1999,6 @@ window.runThink = async function() {
     const agentSelect = document.getElementById('global-agent-selector');
     const agentId = agentSelect ? agentSelect.value : null;
     const thinkingBudget = parseInt(document.getElementById('think-budget').value);
-    const topK = parseInt(document.getElementById('think-top-k').value);
 
     console.log('Query:', query, 'Agent:', agentId); // Debug log
 
@@ -1652,7 +2025,7 @@ window.runThink = async function() {
         resultDiv.style.display = 'none';
         loadingDiv.style.display = 'block';
 
-        console.log('Calling api/think with', { query, agentId, thinkingBudget, topK }); // Debug log
+        console.log('Calling api/think with', { query, agentId, thinkingBudget }); // Debug log
 
         const response = await fetch('api/think', {
             method: 'POST',
@@ -1662,8 +2035,7 @@ window.runThink = async function() {
             body: JSON.stringify({
                 query: query,
                 agent_id: agentId,
-                thinking_budget: thinkingBudget,
-                top_k: topK
+                thinking_budget: thinkingBudget
             })
         });
 
@@ -1732,7 +2104,7 @@ window.runThink = async function() {
 
         // Display new opinions
         const newOpinionsDiv = document.getElementById('think-new-opinions');
-        const newOpinionsListDiv = document.getElementById('think-new-opinions-list');
+        const newOpinionsListDiv = document.getElementById('think-new-opinion-list');
         if (data.new_opinions && data.new_opinions.length > 0) {
             newOpinionsListDiv.innerHTML = data.new_opinions.map((opinion, idx) => `
                 <div style="margin-bottom: 15px; padding: 15px; background: white; border-radius: 6px; border-left: 4px solid #4caf50; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">

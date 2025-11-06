@@ -28,14 +28,12 @@ logging.basicConfig(level=logging.INFO)
 # No need to load .env files here as they're sourced by start-server.sh
 
 
-def create_app(embeddings: Optional[Embeddings] = None, db_url: Optional[str] = None) -> FastAPI:
+def create_app(memory: TemporalSemanticMemory) -> FastAPI:
     """
     Create and configure the FastAPI application.
 
     Args:
-        embeddings: Optional custom embeddings implementation. If not provided,
-                   uses default SentenceTransformersEmbeddings.
-        db_url: Optional database URL. If not provided, uses DATABASE_URL env var.
+        memory: TemporalSemanticMemory instance (already initialized with required parameters)
 
     Returns:
         Configured FastAPI application
@@ -75,9 +73,6 @@ The system uses:
     # Mount static files
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
-    # Initialize memory system with custom embeddings if provided
-    memory = TemporalSemanticMemory(db_url=db_url, embeddings=embeddings)
-
     @app.on_event("startup")
     async def startup_event():
         """Initialize memory system on startup."""
@@ -104,8 +99,8 @@ class SearchRequest(BaseModel):
     query: str
     agent_id: str = "default"
     thinking_budget: int = 100
-    top_k: int = 10
-    mmr_lambda: float = 0.5
+    max_tokens: int = 4096
+    reranker: str = "heuristic"
     trace: bool = False
     fact_type: Optional[str] = None
 
@@ -115,8 +110,8 @@ class SearchRequest(BaseModel):
                 "query": "What did Alice say about machine learning?",
                 "agent_id": "user123",
                 "thinking_budget": 100,
-                "top_k": 10,
-                "mmr_lambda": 0.5,
+                "max_tokens": 4096,
+                "reranker": "heuristic",
                 "trace": True,
                 "fact_type": "world"
             }
@@ -216,15 +211,13 @@ class ThinkRequest(BaseModel):
     query: str
     agent_id: str = "default"
     thinking_budget: int = 50
-    top_k: int = 10
 
     class Config:
         json_schema_extra = {
             "example": {
                 "query": "What do you think about artificial intelligence?",
                 "agent_id": "user123",
-                "thinking_budget": 50,
-                "top_k": 10
+                "thinking_budget": 50
             }
         }
 
@@ -340,9 +333,9 @@ def _register_routes(app: FastAPI):
                 agent_id=request.agent_id,
                 query=request.query,
                 thinking_budget=request.thinking_budget,
-                top_k=request.top_k,
+                max_tokens=request.max_tokens,
                 enable_trace=request.trace,
-                mmr_lambda=request.mmr_lambda,
+                reranker=request.reranker,
                 fact_type=request.fact_type
             )
 
@@ -375,9 +368,9 @@ def _register_routes(app: FastAPI):
                 agent_id=request.agent_id,
                 query=request.query,
                 thinking_budget=request.thinking_budget,
-                top_k=request.top_k,
+                max_tokens=request.max_tokens,
                 enable_trace=request.trace,
-                mmr_lambda=request.mmr_lambda,
+                reranker=request.reranker,
                 fact_type='world'
             )
 
@@ -410,9 +403,9 @@ def _register_routes(app: FastAPI):
                 agent_id=request.agent_id,
                 query=request.query,
                 thinking_budget=request.thinking_budget,
-                top_k=request.top_k,
+                max_tokens=request.max_tokens,
                 enable_trace=request.trace,
-                mmr_lambda=request.mmr_lambda,
+                reranker=request.reranker,
                 fact_type='agent'
             )
 
@@ -445,9 +438,9 @@ def _register_routes(app: FastAPI):
                 agent_id=request.agent_id,
                 query=request.query,
                 thinking_budget=request.thinking_budget,
-                top_k=request.top_k,
+                max_tokens=request.max_tokens,
                 enable_trace=request.trace,
-                mmr_lambda=request.mmr_lambda,
+                reranker=request.reranker,
                 fact_type='opinion'
             )
 
@@ -488,8 +481,7 @@ def _register_routes(app: FastAPI):
             result = await app.state.memory.think_async(
                 agent_id=request.agent_id,
                 query=request.query,
-                thinking_budget=request.thinking_budget,
-                top_k=request.top_k
+                thinking_budget=request.thinking_budget
             )
 
             return ThinkResponse(
@@ -523,6 +515,60 @@ def _register_routes(app: FastAPI):
             print(f"Error in /api/agents: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.get(
+        "/api/stats/{agent_id}",
+        tags=["Memory Statistics"],
+        summary="Get memory statistics for an agent",
+        description="Get statistics about nodes and links for a specific agent"
+    )
+    async def api_stats(agent_id: str):
+        """Get statistics about memory nodes and links for an agent."""
+        try:
+            pool = await app.state.memory._get_pool()
+            async with pool.acquire() as conn:
+                # Get node counts by fact_type
+                node_stats = await conn.fetch(
+                    """
+                    SELECT fact_type, COUNT(*) as count
+                    FROM memory_units
+                    WHERE agent_id = $1
+                    GROUP BY fact_type
+                    """,
+                    agent_id
+                )
+
+                # Get link counts by link_type
+                link_stats = await conn.fetch(
+                    """
+                    SELECT ml.link_type, COUNT(*) as count
+                    FROM memory_links ml
+                    JOIN memory_units mu ON ml.from_unit_id = mu.id
+                    WHERE mu.agent_id = $1
+                    GROUP BY ml.link_type
+                    """,
+                    agent_id
+                )
+
+                # Format results
+                nodes_by_type = {row['fact_type']: row['count'] for row in node_stats}
+                links_by_type = {row['link_type']: row['count'] for row in link_stats}
+
+                total_nodes = sum(nodes_by_type.values())
+                total_links = sum(links_by_type.values())
+
+                return {
+                    "agent_id": agent_id,
+                    "total_nodes": total_nodes,
+                    "total_links": total_links,
+                    "nodes_by_type": nodes_by_type,
+                    "links_by_type": links_by_type
+                }
+
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/stats/{agent_id}: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     @app.post(
         "/api/memories/batch",
@@ -617,7 +663,15 @@ def _register_routes(app: FastAPI):
 
 
 # Create default app instance
-app = create_app()
+# Initialize memory system with environment variables
+_memory = TemporalSemanticMemory(
+    db_url=os.getenv("DATABASE_URL"),
+    memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
+    memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
+    memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
+    memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
+)
+app = create_app(_memory)
 
 
 if __name__ == "__main__":

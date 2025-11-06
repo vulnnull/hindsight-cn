@@ -10,6 +10,17 @@ from datetime import timedelta
 logger = logging.getLogger(__name__)
 
 
+def _log(log_buffer, message, level='info'):
+    """Helper to log to buffer if available, otherwise use logger."""
+    if log_buffer is not None:
+        log_buffer.append(message)
+    else:
+        if level == 'info':
+            logger.info(message)
+        else:
+            logger.debug(message)
+
+
 class LinkOperationsMixin:
     """Mixin class for link creation operations."""
 
@@ -22,6 +33,7 @@ class LinkOperationsMixin:
         context: str,
         fact_dates: List,
         llm_entities: List[List[dict]],
+        log_buffer: List[str] = None,
     ) -> List[tuple]:
         """
         Process LLM-extracted entities for ALL facts in batch.
@@ -47,7 +59,7 @@ class LinkOperationsMixin:
                 all_entities.append(formatted_entities)
 
             total_entities = sum(len(ents) for ents in all_entities)
-            logger.info(f"  [6.1] Process LLM entities: {total_entities} entities from {len(sentences)} facts in {time.time() - substep_start:.3f}s")
+            _log(log_buffer, f"  [6.1] Process LLM entities: {total_entities} entities from {len(sentences)} facts in {time.time() - substep_start:.3f}s")
 
             # Step 2: Resolve entities in BATCH (much faster!)
             substep_start = time.time()
@@ -69,7 +81,7 @@ class LinkOperationsMixin:
                         'nearby_entities': entities,
                     })
                     entity_to_unit.append((unit_id, local_idx, fact_date))
-            logger.info(f"    [6.2.1] Prepare entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_1_start:.3f}s")
+            _log(log_buffer, f"    [6.2.1] Prepare entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_1_start:.3f}s")
 
             # Resolve ALL entities in one batch call
             if all_entities_flat:
@@ -83,7 +95,7 @@ class LinkOperationsMixin:
                         entities_by_date[date_key] = []
                     entities_by_date[date_key].append((idx, all_entities_flat[idx]))
 
-                logger.info(f"    [6.2.2] Grouped into {len(entities_by_date)} date buckets, resolving...")
+                _log(log_buffer, f"    [6.2.2] Grouped into {len(entities_by_date)} date buckets, resolving...")
 
                 # Resolve each date group in batch
                 resolved_entity_ids = [None] * len(all_entities_flat)
@@ -103,9 +115,9 @@ class LinkOperationsMixin:
                     for idx, entity_id in zip(indices, batch_resolved):
                         resolved_entity_ids[idx] = entity_id
 
-                    logger.info(f"      [6.2.2.{date_idx}] Resolved {len(entities_data)} entities in {time.time() - date_bucket_start:.3f}s")
+                    _log(log_buffer, f"      [6.2.2.{date_idx}] Resolved {len(entities_data)} entities in {time.time() - date_bucket_start:.3f}s")
 
-                logger.info(f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_2_start:.3f}s")
+                _log(log_buffer, f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_2_start:.3f}s")
 
                 # [6.2.3] Create unit-entity links in BATCH
                 substep_6_2_3_start = time.time()
@@ -122,12 +134,12 @@ class LinkOperationsMixin:
 
                 # Batch insert all unit-entity links (MUCH faster!)
                 await self.entity_resolver.link_units_to_entities_batch(unit_entity_pairs, conn=conn)
-                logger.info(f"    [6.2.3] Create unit-entity links (batched): {len(unit_entity_pairs)} links in {time.time() - substep_6_2_3_start:.3f}s")
+                _log(log_buffer, f"    [6.2.3] Create unit-entity links (batched): {len(unit_entity_pairs)} links in {time.time() - substep_6_2_3_start:.3f}s")
 
-                logger.info(f"  [6.2] Entity resolution (batched): {len(all_entities_flat)} entities resolved in {time.time() - step_6_2_start:.3f}s")
+                _log(log_buffer, f"  [6.2] Entity resolution (batched): {len(all_entities_flat)} entities resolved in {time.time() - step_6_2_start:.3f}s")
             else:
                 unit_to_entity_ids = {}
-                logger.info(f"  [6.2] Entity resolution (batched): 0 entities in {time.time() - step_6_2_start:.3f}s")
+                _log(log_buffer, f"  [6.2] Entity resolution (batched): 0 entities in {time.time() - step_6_2_start:.3f}s")
 
             # Step 3: Create entity links between units that share entities
             substep_start = time.time()
@@ -136,7 +148,7 @@ class LinkOperationsMixin:
             for entity_ids in unit_to_entity_ids.values():
                 all_entity_ids.update(entity_ids)
 
-            logger.info(f"  [6.3] Creating entity links for {len(all_entity_ids)} unique entities...")
+            _log(log_buffer, f"  [6.3] Creating entity links for {len(all_entity_ids)} unique entities...")
 
             # Find all units that reference these entities (ONE batched query)
             entity_to_units = {}
@@ -152,7 +164,7 @@ class LinkOperationsMixin:
                     """,
                     entity_id_list
                 )
-                logger.info(f"      [6.3.1] Query unit_entities: {len(rows)} rows in {time.time() - query_start:.3f}s")
+                _log(log_buffer, f"      [6.3.1] Query unit_entities: {len(rows)} rows in {time.time() - query_start:.3f}s")
 
                 # Group by entity_id
                 group_start = time.time()
@@ -161,7 +173,7 @@ class LinkOperationsMixin:
                     if entity_id not in entity_to_units:
                         entity_to_units[entity_id] = []
                     entity_to_units[entity_id].append(row['unit_id'])
-                logger.info(f"      [6.3.2] Group by entity_id: {time.time() - group_start:.3f}s")
+                _log(log_buffer, f"      [6.3.2] Group by entity_id: {time.time() - group_start:.3f}s")
 
             # Create bidirectional links between units that share entities
             link_gen_start = time.time()
@@ -174,8 +186,8 @@ class LinkOperationsMixin:
                         links.append((unit_id_1, unit_id_2, 'entity', 1.0, entity_id))
                         links.append((unit_id_2, unit_id_1, 'entity', 1.0, entity_id))
 
-            logger.info(f"      [6.3.3] Generate {len(links)} links: {time.time() - link_gen_start:.3f}s")
-            logger.info(f"  [6.3] Entity link creation: {len(links)} links for {len(all_entity_ids)} unique entities in {time.time() - substep_start:.3f}s")
+            _log(log_buffer, f"      [6.3.3] Generate {len(links)} links: {time.time() - link_gen_start:.3f}s")
+            _log(log_buffer, f"  [6.3] Entity link creation: {len(links)} links for {len(all_entity_ids)} unique entities in {time.time() - substep_start:.3f}s")
 
             return links
 
@@ -191,6 +203,7 @@ class LinkOperationsMixin:
         agent_id: str,
         unit_ids: List[str],
         time_window_hours: int = 24,
+        log_buffer: List[str] = None,
     ):
         """
         Create temporal links for multiple units, each with their own event_date.
@@ -215,7 +228,7 @@ class LinkOperationsMixin:
                 unit_ids
             )
             new_units = {str(row['id']): row['event_date'] for row in rows}
-            logger.info(f"      [7.1] Fetch event_dates for {len(unit_ids)} units: {time_mod.time() - fetch_dates_start:.3f}s")
+            _log(log_buffer, f"      [7.1] Fetch event_dates for {len(unit_ids)} units: {time_mod.time() - fetch_dates_start:.3f}s")
 
             # Fetch ALL potential temporal neighbors in ONE query (much faster!)
             # Get time range across all units
@@ -238,7 +251,7 @@ class LinkOperationsMixin:
                 max_date,
                 unit_ids
             )
-            logger.info(f"      [7.2] Fetch {len(all_candidates)} candidate neighbors (1 query): {time_mod.time() - fetch_neighbors_start:.3f}s")
+            _log(log_buffer, f"      [7.2] Fetch {len(all_candidates)} candidate neighbors (1 query): {time_mod.time() - fetch_neighbors_start:.3f}s")
 
             # Filter and create links in memory (much faster than N queries)
             link_gen_start = time_mod.time()
@@ -260,7 +273,7 @@ class LinkOperationsMixin:
                     weight = max(0.3, 1.0 - (time_diff_hours / time_window_hours))
                     links.append((unit_id, str(recent_id), 'temporal', weight, None))
 
-            logger.info(f"      [7.3] Generate {len(links)} temporal links: {time_mod.time() - link_gen_start:.3f}s")
+            _log(log_buffer, f"      [7.3] Generate {len(links)} temporal links: {time_mod.time() - link_gen_start:.3f}s")
 
             if links:
                 insert_start = time_mod.time()
@@ -272,7 +285,7 @@ class LinkOperationsMixin:
                     """,
                     links
                 )
-                logger.info(f"      [7.4] Insert {len(links)} temporal links: {time_mod.time() - insert_start:.3f}s")
+                _log(log_buffer, f"      [7.4] Insert {len(links)} temporal links: {time_mod.time() - insert_start:.3f}s")
 
         except Exception as e:
             logger.error(f"Failed to create temporal links: {str(e)}")
@@ -288,6 +301,7 @@ class LinkOperationsMixin:
         embeddings: List[List[float]],
         top_k: int = 5,
         threshold: float = 0.7,
+        log_buffer: List[str] = None,
     ):
         """
         Create semantic links for multiple units efficiently.
@@ -314,7 +328,7 @@ class LinkOperationsMixin:
                 agent_id,
                 unit_ids
             )
-            logger.info(f"      [8.1] Fetch {len(all_existing)} existing embeddings (1 query): {time_mod.time() - fetch_start:.3f}s")
+            _log(log_buffer, f"      [8.1] Fetch {len(all_existing)} existing embeddings (1 query): {time_mod.time() - fetch_start:.3f}s")
 
             # Convert to numpy for vectorized similarity computation
             compute_start = time_mod.time()
@@ -372,7 +386,7 @@ class LinkOperationsMixin:
                             similarity = float(similarities[idx])
                             all_links.append((unit_id, similar_id, 'semantic', similarity, None))
 
-            logger.info(f"      [8.2] Compute similarities & generate {len(all_links)} semantic links: {time_mod.time() - compute_start:.3f}s")
+            _log(log_buffer, f"      [8.2] Compute similarities & generate {len(all_links)} semantic links: {time_mod.time() - compute_start:.3f}s")
 
             if all_links:
                 insert_start = time_mod.time()
@@ -384,7 +398,7 @@ class LinkOperationsMixin:
                     """,
                     all_links
                 )
-                logger.info(f"      [8.3] Insert {len(all_links)} semantic links: {time_mod.time() - insert_start:.3f}s")
+                _log(log_buffer, f"      [8.3] Insert {len(all_links)} semantic links: {time_mod.time() - insert_start:.3f}s")
 
         except Exception as e:
             logger.error(f"Failed to create semantic links: {str(e)}")

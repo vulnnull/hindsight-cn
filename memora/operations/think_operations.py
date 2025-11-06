@@ -19,7 +19,6 @@ class ThinkOperationsMixin:
         agent_id: str,
         query: str,
         thinking_budget: int = 50,
-        top_k: int = 10,
     ) -> Dict[str, Any]:
         """
         Think and formulate an answer using agent identity, world facts, and opinions.
@@ -36,7 +35,6 @@ class ThinkOperationsMixin:
             agent_id: Agent identifier
             query: Question to answer
             thinking_budget: Number of memory units to explore
-            top_k: Maximum facts to retrieve
 
         Returns:
             Dict with:
@@ -55,7 +53,7 @@ class ThinkOperationsMixin:
                 agent_id=agent_id,
                 query=query,
                 thinking_budget=thinking_budget,
-                top_k=top_k,
+                max_tokens=4096,
                 enable_trace=False,
                 fact_type='agent'
             ),
@@ -64,7 +62,7 @@ class ThinkOperationsMixin:
                 agent_id=agent_id,
                 query=query,
                 thinking_budget=thinking_budget,
-                top_k=top_k,
+                max_tokens=4096,
                 enable_trace=False,
                 fact_type='world'
             ),
@@ -73,7 +71,7 @@ class ThinkOperationsMixin:
                 agent_id=agent_id,
                 query=query,
                 thinking_budget=thinking_budget,
-                top_k=top_k,
+                max_tokens=4096,
                 enable_trace=False,
                 fact_type='opinion'
             )
@@ -153,12 +151,14 @@ If you form any new opinions while thinking about this question, state them clea
         answer_text = answer_text.strip()
 
         # Step 6: Extract and store new opinions asynchronously (fire and forget)
+        logger.debug(f"[THINK] Submitting form_opinion task for agent {agent_id}")
         await self._task_backend.submit_task({
             'type': 'form_opinion',
             'agent_id': agent_id,
             'answer_text': answer_text,
             'query': query
         })
+        logger.debug(f"[THINK] form_opinion task submitted")
 
         # Step 7: Return response with facts split by type (don't wait for opinions)
         return {
@@ -188,8 +188,10 @@ If you form any new opinions while thinking about this question, state them clea
             query: The original query
         """
         try:
+            logger.debug(f"[THINK] Extracting opinions from answer for agent {agent_id}")
             # Extract opinions from the answer
             new_opinions = await self._extract_opinions_from_text(text=answer_text, query=query)
+            logger.debug(f"[THINK] Extracted {len(new_opinions)} opinions")
 
             # Store new opinions
             if new_opinions:

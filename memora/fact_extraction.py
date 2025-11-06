@@ -112,25 +112,25 @@ async def _extract_facts_from_chunk(
 - Current reference date/time: {event_date_str}
 - Context: {context if context else 'no context provided'}
 
-## CRITICAL: Facts must be DETAILED and COMPREHENSIVE
+## CRITICAL: Facts must be DETAILED, COMPREHENSIVE, and CONTEXT-RICH
 
 Each fact should:
 1. Be SELF-CONTAINED - readable without the original context
 2. Include ALL relevant details: WHO, WHAT, WHERE, WHEN, WHY, HOW
 3. **CRITICAL: ALWAYS include the SUBJECT (who is doing/saying/experiencing)**
-4. Preserve specific names, dates, numbers, locations, relationships
-5. Resolve pronouns to actual names/entities (I → speaker name, their → possessor name)
-6. **CRITICAL: Preserve possessive relationships** (their kids → whose kids, his car → whose car)
-7. Include surrounding context that makes the fact meaningful
-8. Capture nuances, reasons, causes, and implications
+4. **Preserve ALL context**: photos/images, "new" things, visual elements, medium of communication
+5. Preserve specific names, dates, numbers, locations, relationships, modifiers (new, old, first, etc.)
+6. Resolve pronouns to actual names/entities (I → speaker name, their → possessor name)
+7. **CRITICAL: Preserve possessive relationships** (their kids → whose kids, his car → whose car)
+8. Capture nuances, reasons, causes, implications, and surrounding context
 
 **COMMON MISTAKES TO AVOID:**
 - ❌ "The kids were excited" → Missing WHO the kids belong to
 - ✅ "Melanie's kids were excited" or "Melanie took her kids who were excited"
-- ❌ "Someone went hiking" → Missing WHO
-- ✅ "Bob went hiking"
-- ❌ "The car broke down" → Missing whose car
-- ✅ "Alice's car broke down"
+- ❌ "Nate chose his hair color because it's bright and bold" → Missing that it's NEW and in a PHOTO
+- ✅ "Nate shared a photo of his new hair color, which he chose because it's bright and bold"
+- ❌ "Alice started a job at Google" → Missing that it's NEW
+- ✅ "Alice started a new job at Google"
 
 ## TEMPORAL INFORMATION (VERY IMPORTANT)
 For each fact, extract the ABSOLUTE date/time when it occurred:
@@ -174,14 +174,23 @@ Examples of date extraction and fact text transformation:
 - **Opinions and beliefs**: who believes what and why
 - **Recommendations and advice**: specific suggestions with reasoning
 - **Descriptions**: detailed explanations of how things work
+- **Social relationships and nicknames (CRITICAL - ALWAYS EXTRACT)**:
+  - Nicknames: how different people refer to someone ("Andrey calls Joanne 'Jo'", "Everyone calls him Bobby")
+  - Terms of address: how people address each other (formal names, nicknames, titles)
+  - Relationship indicators: how people describe their relationships ("considers X as a mentor", "refers to Y as their best friend")
+  - Social dynamics: who knows whom, who interacts with whom
+  - Even if not an "event", these are FACTS about social relationships
+  - Extract BOTH the person using the name AND the person being referred to
 - **Relationships**: connections between people, organizations, concepts
 - **States and conditions**: current status, ongoing situations
 
-## CRITICAL: Extract EVERY event mentioned, even casual ones
-- "here's a photo of X" = someone took/shared a photo of X
+## CRITICAL: Extract EVERY event with FULL CONTEXT
+- "here's a photo of my new car" = shared a photo of their NEW car (preserve "new")
 - "I was with friends last week" = meetup/gathering with friends last week
 - "sent you that link" = action of sending a link
+- "got a new job" = preserve "new" - it's important context
 - DO NOT skip events just because they seem minor or casual
+- DO NOT drop modifiers like "new", "first", "old", "favorite" - they're critical context
 
 ## What to SKIP (ONLY these):
 - Greetings, thank yous, acknowledgments (unless they reveal information)
@@ -246,10 +255,17 @@ GOOD entities: [
 ]
 
 Input: "Here's a photo of me with my friends taken last week at the beach."
-GOOD fact: "Someone shared/took a photo with their friends at the beach"
+GOOD fact: "Someone shared a photo taken last week showing them with their friends at the beach"
 GOOD date: Reference date minus 7 days (last week)
 GOOD entities: []
-NOTE: Extract the event (photo taken/shared with friends at beach), NOT just that a photo exists
+NOTE: Include that it's a PHOTO being shared, when it was taken, and who/what/where is in it
+
+Input: "Nate: Here's a photo of my new hair! Friend: Why that color? Nate: I picked this color because it's bright and bold"
+BAD fact: "Nate chose his hair color because it's bright and bold"
+PROBLEM: Missing that it's NEW hair and he SHARED A PHOTO of it!
+GOOD fact: "Nate shared a photo of his new hair color, which he chose because it's bright and bold"
+GOOD entities: [{{"text": "Nate", "type": "PERSON"}}]
+NOTE: Preserve "new" and "photo" - critical context about what happened
 
 Input: "I sent you that article about AI last Tuesday."
 GOOD fact: "Someone sent an article about AI"
@@ -312,22 +328,65 @@ GOOD facts (extract MULTIPLE facts):
    entities: [{{"text": "Caroline", "type": "PERSON"}}, {{"text": "Sweden", "type": "PLACE"}}, {{"text": "necklace", "type": "PRODUCT"}}]
 NOTE: Extract SEPARATE facts for biographical details (home country) AND events (gift received)
 
+## EXAMPLES of SOCIAL RELATIONSHIPS and NICKNAMES (CRITICAL):
+
+Input: "Joanne was referred to as 'Jo' by Andrey during the meeting."
+GOOD fact: "Andrey calls Joanne 'Jo'"
+GOOD fact_type: "world"
+GOOD date: Reference date (no specific time mentioned)
+GOOD entities: [
+  {{"text": "Andrey", "type": "PERSON"}},
+  {{"text": "Joanne", "type": "PERSON"}}
+]
+NOTE: This is a FACT about their social relationship, even if it's not an "event"
+
+Input: "Everyone calls him Bobby, but his real name is Robert."
+GOOD facts (extract MULTIPLE facts):
+1. "People call Robert by the nickname 'Bobby'"
+   entities: [{{"text": "Robert", "type": "PERSON"}}]
+2. "Robert's real name is Robert (goes by Bobby)"
+   entities: [{{"text": "Robert", "type": "PERSON"}}]
+NOTE: Extract the social fact about how people refer to him
+
+Input: "Sarah introduced me to Dr. Chen, but she told me to just call him Michael."
+GOOD facts (extract MULTIPLE facts):
+1. "Sarah introduced someone to Dr. Chen (Michael)"
+   entities: [{{"text": "Sarah", "type": "PERSON"}}, {{"text": "Dr. Chen", "type": "PERSON"}}, {{"text": "Michael", "type": "PERSON"}}]
+2. "Sarah told someone to call Dr. Chen by his first name Michael"
+   entities: [{{"text": "Sarah", "type": "PERSON"}}, {{"text": "Dr. Chen", "type": "PERSON"}}, {{"text": "Michael", "type": "PERSON"}}]
+NOTE: Extract both the event (introduction) AND the social relationship fact (how to address him)
+
+Input: "Alex considers Maria his mentor and always refers to her as 'the expert'."
+GOOD facts (extract MULTIPLE facts):
+1. "Alex considers Maria his mentor"
+   entities: [{{"text": "Alex", "type": "PERSON"}}, {{"text": "Maria", "type": "PERSON"}}]
+2. "Alex refers to Maria as 'the expert'"
+   entities: [{{"text": "Alex", "type": "PERSON"}}, {{"text": "Maria", "type": "PERSON"}}]
+NOTE: Capture both the relationship and how Alex refers to Maria
+
+Input: "My grandmother - we call her Nana - lives in Boston."
+GOOD facts (extract MULTIPLE facts):
+1. "Someone's grandmother lives in Boston"
+   entities: [{{"text": "Boston", "type": "PLACE"}}]
+2. "Someone and their family call their grandmother 'Nana'"
+   entities: []
+NOTE: Extract both the biographical fact AND the nickname/term of address
+
 ## TEXT TO EXTRACT FROM:
 {chunk}
 
 Remember:
-1. BE EXHAUSTIVE - Extract EVERY event, action, and fact mentioned
-2. DO NOT skip casual mentions like "here's a photo", "I was with X", "sent you Y"
+1. BE EXHAUSTIVE - Extract EVERY event, action, and fact with FULL CONTEXT
+2. **PRESERVE ALL CONTEXT** - photos, visual elements, "new" things, modifiers (new/old/first/favorite)
 3. **ALWAYS include the SUBJECT** - never say "the kids" without saying whose kids
 4. **Preserve possessive relationships** - "their kids" must become "Person's kids"
-5. **Extract biographical details as SEPARATE facts** - "my home country Sweden" should create a fact "Person is from Sweden"
-6. Include ALL details, names, numbers, reasons, and context in the fact text
-7. Extract the absolute date for EACH fact by calculating relative times from the reference date
-8. **CLASSIFY EACH FACT**: 'world' for general facts, 'agent' for AI agent actions
-9. Extract ALL entities with their types (PERSON, ORG, PLACE, PRODUCT, CONCEPT, OTHER) for each fact
-10. Use types to disambiguate entities (Apple the company = ORG, apple the fruit = PRODUCT)
-11. Use OTHER for entities that don't fit other categories (events, time periods, etc.)
-12. When in doubt, EXTRACT IT - better to have too many facts than miss important events"""
+5. **Extract biographical details as SEPARATE facts** - "my home country Sweden" → "Person is from Sweden"
+6. **Extract SOCIAL RELATIONSHIPS and NICKNAMES** - even if not events, these are facts
+7. DO NOT drop modifiers or context - "new hair" stays "new hair", "photo of X" stays "photo of X"
+8. Extract absolute dates by calculating relative times from the reference date
+9. **CLASSIFY EACH FACT**: 'world' for general facts, 'agent' for AI agent actions
+10. Extract ALL entities with types (PERSON, ORG, PLACE, PRODUCT, CONCEPT, OTHER)
+11. When in doubt, EXTRACT IT with MORE CONTEXT rather than less"""
 
     import time
     import logging
@@ -346,7 +405,7 @@ Remember:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an EXHAUSTIVE fact and entity extractor. CRITICAL RULES: 1) ALWAYS include the SUBJECT (never 'the kids' without whose kids), 2) Extract biographical details as SEPARATE facts (if someone mentions 'my home country Sweden', extract 'Person is from Sweden' as its own fact), 3) Extract EVERY event, action, and fact - never skip anything. 4) **TRANSFORM RELATIVE DATES IN FACT TEXT**: Convert 'last year' to 'in [year]', 'last month' to 'in [month year]' using the reference date - DO NOT leave relative temporal expressions like 'last year' or 'last month' in the fact text. For each fact, extract ALL important entities with their types: PERSON, ORG, PLACE, PRODUCT, CONCEPT, OTHER (for entities that don't fit other categories). Use types to disambiguate (Apple=ORG vs apples=PRODUCT). Preserve possessive relationships (their→whose). Include casual mentions (photos, meetups). Calculate absolute dates from relative times. When in doubt, extract it - better too many facts than missing critical biographical/identity information."
+                        "content": "You are an EXHAUSTIVE fact and entity extractor. CRITICAL RULES: 1) ALWAYS include the SUBJECT (never 'the kids' without whose kids), 2) **PRESERVE ALL CONTEXT** - photos, 'new' things, modifiers (new/old/first/favorite), visual elements - DO NOT drop these details, 3) Extract biographical details as SEPARATE facts ('my home country Sweden' → 'Person is from Sweden'), 4) **Extract SOCIAL RELATIONSHIPS and NICKNAMES** as facts even if not events ('Andrey calls Joanne Jo'), 5) Extract EVERY event with FULL CONTEXT - 'photo of my new hair' must preserve 'photo' AND 'new', 6) **TRANSFORM RELATIVE DATES IN FACT TEXT**: 'last year' → 'in [year]', 'last month' → 'in [month year]'. Extract ALL entities with types: PERSON, ORG, PLACE, PRODUCT, CONCEPT, OTHER. Preserve possessive relationships (their→whose). When in doubt, include MORE context rather than less - missing context loses critical information."
                     },
                     {
                         "role": "user",
@@ -405,27 +464,16 @@ async def extract_facts_from_text(
     Returns:
         List of fact dictionaries with 'fact' and 'date' keys
     """
-    import time
-    import logging
     from typing import TYPE_CHECKING
 
     if TYPE_CHECKING:
         from .llm_wrapper import LLMConfig
 
-    logger = logging.getLogger(__name__)
-
     if llm_config is None:
         from .llm_wrapper import LLMConfig
         llm_config = LLMConfig.for_memory()
 
-    # Chunk text if necessary
-    chunk_start = time.time()
     chunks = chunk_text(text, max_chars=chunk_size)
-    chunk_time = time.time() - chunk_start
-    logger.info(f"        [1.1] Text chunking: {len(chunks)} chunks from {len(text)} chars in {chunk_time:.3f}s")
-
-    # Process all chunks in parallel using asyncio.gather
-    task_creation_start = time.time()
     tasks = [
         _extract_facts_from_chunk(
             chunk=chunk,
@@ -437,20 +485,8 @@ async def extract_facts_from_text(
         )
         for i, chunk in enumerate(chunks)
     ]
-    logger.info(f"        [1.2] Task creation: {len(tasks)} tasks in {time.time() - task_creation_start:.3f}s")
-
-    # Wait for all chunks to complete in parallel
-    llm_start = time.time()
     chunk_results = await asyncio.gather(*tasks)
-    llm_time = time.time() - llm_start
-    logger.info(f"        [1.3] LLM extraction (parallel): {len(chunks)} chunks in {llm_time:.3f}s")
-
-    # Flatten results from all chunks
-    flatten_start = time.time()
     all_facts = []
     for chunk_facts in chunk_results:
         all_facts.extend(chunk_facts)
-    flatten_time = time.time() - flatten_start
-    logger.info(f"        [1.4] Result flattening: {len(all_facts)} facts in {flatten_time:.3f}s")
-
     return all_facts

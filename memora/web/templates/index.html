@@ -26,189 +26,228 @@
 
         <!-- Data Tab -->
         <div id="data-tab" class="tab-content active">
+            <!-- Statistics Section -->
+            <div id="stats-section" class="stats-section" style="display: none;">
+                <h3>📊 Memory Statistics</h3>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Nodes</div>
+                        <div class="stat-value" id="stat-total-nodes">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">World Facts</div>
+                        <div class="stat-value" id="stat-world-nodes">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Agent Facts</div>
+                        <div class="stat-value" id="stat-agent-nodes">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Opinions</div>
+                        <div class="stat-value" id="stat-opinion-nodes">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Links</div>
+                        <div class="stat-value" id="stat-total-links">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Temporal Links</div>
+                        <div class="stat-value" id="stat-temporal-links">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Semantic Links</div>
+                        <div class="stat-value" id="stat-semantic-links">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Entity Links</div>
+                        <div class="stat-value" id="stat-entity-links">-</div>
+                    </div>
+                </div>
+            </div>
+
             <div class="data-sub-tabs">
                 <button class="data-sub-tab-button active" onclick="switchDataSubTab('world')">World</button>
                 <button class="data-sub-tab-button" onclick="switchDataSubTab('agent')">Agent</button>
-                <button class="data-sub-tab-button" onclick="switchDataSubTab('opinions')">Opinions</button>
+                <button class="data-sub-tab-button" onclick="switchDataSubTab('opinion')">Opinions</button>
             </div>
 
             <!-- World, Agent, and Opinions subtabs share the same structure -->
             <div id="world-subtab" class="data-subtab-content active">
-                <div class="view-toggle">
-                    <button class="view-toggle-button active" onclick="switchDataView('world', 'graph')">Graph</button>
-                    <button class="view-toggle-button" onclick="switchDataView('world', 'table')">Table</button>
-                </div>
                 <div id="world-no-agent-message" class="no-agent-message">
                     <h3>No Agent Selected</h3>
                     <p>Please select an agent from the dropdown above to view world facts.</p>
                 </div>
-                <div id="world-graph-view" class="data-view" style="display: none;">
-                    <div class="data-controls">
+                <div id="world-content" style="display: none;">
+                    <div class="data-controls" style="margin-bottom: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
                         <button onclick="loadDataView('world')" class="load-button">📊 Load World Facts</button>
-                        <div>
-                            <label>Limit nodes:</label>
-                            <input type="number" id="world-node-limit" value="50" min="10" max="1000" step="10" class="control-input">
-                        </div>
-                        <div>
-                            <label>Layout:</label>
-                            <select id="world-layout-select" class="control-select">
-                                <option value="circle">Circle (fast)</option>
-                                <option value="grid">Grid (fast)</option>
-                                <option value="cose">Force-directed (slow)</option>
-                            </select>
-                        </div>
-                        <button onclick="reloadDataGraph('world')" class="apply-button">Apply</button>
                         <button onclick="loadDataView('world')" class="refresh-button">🔄 Refresh</button>
                         <span id="world-node-count" class="node-count"></span>
                     </div>
-                    <div id="world-cy" class="graph-canvas"></div>
-                    <div class="legend">
-                        <h3>Legend</h3>
-                        <h4>Link Types:</h4>
-                        <div class="legend-item"><div class="legend-line temporal"></div><span><b>Temporal</b></span></div>
-                        <div class="legend-item"><div class="legend-line semantic"></div><span><b>Semantic</b></span></div>
-                        <div class="legend-item"><div class="legend-line entity"></div><span><b>Entity</b></span></div>
-                        <h4>Nodes:</h4>
-                        <div class="legend-item"><div class="legend-node no-entities"></div><span>No entities</span></div>
-                        <div class="legend-item"><div class="legend-node one-entity"></div><span>1 entity</span></div>
-                        <div class="legend-item"><div class="legend-node multi-entities"></div><span>2+ entities</span></div>
+                    <div class="view-toggle">
+                        <button class="view-toggle-button active" onclick="switchDataView('world', 'graph')">Graph</button>
+                        <button class="view-toggle-button" onclick="switchDataView('world', 'table')">Table</button>
                     </div>
-                </div>
-                <div id="world-table-view" class="data-view" style="display: none;">
-                    <div class="data-controls">
-                        <h2>World Facts <span id="world-table-count"></span></h2>
-                        <button onclick="loadDataView('world')" class="load-button">📊 Load World Facts</button>
+                    <div id="world-graph-view" class="data-view">
+                        <div class="data-controls">
+                            <div>
+                                <label>Limit nodes:</label>
+                                <input type="number" id="world-node-limit" value="50" min="10" max="1000" step="10" class="control-input">
+                            </div>
+                            <div>
+                                <label>Layout:</label>
+                                <select id="world-layout-select" class="control-select">
+                                    <option value="circle">Circle (fast)</option>
+                                    <option value="grid">Grid (fast)</option>
+                                    <option value="cose">Force-directed (slow)</option>
+                                </select>
+                            </div>
+                            <button onclick="reloadDataGraph('world')" class="apply-button">Apply</button>
+                        </div>
+                        <div id="world-cy" class="graph-canvas"></div>
+                        <div class="legend">
+                            <h3>Legend</h3>
+                            <h4>Link Types:</h4>
+                            <div class="legend-item"><div class="legend-line temporal"></div><span><b>Temporal</b></span></div>
+                            <div class="legend-item"><div class="legend-line semantic"></div><span><b>Semantic</b></span></div>
+                            <div class="legend-item"><div class="legend-line entity"></div><span><b>Entity</b></span></div>
+                            <h4>Nodes:</h4>
+                            <div class="legend-item"><div class="legend-node no-entities"></div><span>No entities</span></div>
+                            <div class="legend-item"><div class="legend-node one-entity"></div><span>1 entity</span></div>
+                            <div class="legend-item"><div class="legend-node multi-entities"></div><span>2+ entities</span></div>
+                        </div>
                     </div>
-                    <input type="text" id="world-table-filter" placeholder="Filter by text, context, or entities..." class="table-filter">
-                    <div class="table-container">
-                        <table class="memory-table">
-                            <thead>
-                                <tr><th>ID</th><th>Text</th><th>Context</th><th>Date</th><th>Entities</th><th>Actions</th></tr>
-                            </thead>
-                            <tbody id="world-table-body">
-                                <tr><td colspan="6" class="empty-message">Click "Load World Facts" to view data</td></tr>
-                            </tbody>
-                        </table>
+                    <div id="world-table-view" class="data-view" style="display: none;">
+                        <input type="text" id="world-table-filter" placeholder="Filter by text, context, or entities..." class="table-filter">
+                        <div class="table-container">
+                            <table class="memory-table">
+                                <thead>
+                                    <tr><th>ID</th><th>Text</th><th>Context</th><th>Date</th><th>Entities</th><th>Actions</th></tr>
+                                </thead>
+                                <tbody id="world-table-body">
+                                    <tr><td colspan="6" class="empty-message">Click "Load World Facts" to view data</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <div id="agent-subtab" class="data-subtab-content">
-                <div class="view-toggle">
-                    <button class="view-toggle-button active" onclick="switchDataView('agent', 'graph')">Graph</button>
-                    <button class="view-toggle-button" onclick="switchDataView('agent', 'table')">Table</button>
-                </div>
                 <div id="agent-no-agent-message" class="no-agent-message">
                     <h3>No Agent Selected</h3>
                     <p>Please select an agent from the dropdown above to view agent facts.</p>
                 </div>
-                <div id="agent-graph-view" class="data-view" style="display: none;">
-                    <div class="data-controls">
+                <div id="agent-content" style="display: none;">
+                    <div class="data-controls" style="margin-bottom: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
                         <button onclick="loadDataView('agent')" class="load-button">📊 Load Agent Facts</button>
-                        <div>
-                            <label>Limit nodes:</label>
-                            <input type="number" id="agent-node-limit" value="50" min="10" max="1000" step="10" class="control-input">
-                        </div>
-                        <div>
-                            <label>Layout:</label>
-                            <select id="agent-layout-select" class="control-select">
-                                <option value="circle">Circle (fast)</option>
-                                <option value="grid">Grid (fast)</option>
-                                <option value="cose">Force-directed (slow)</option>
-                            </select>
-                        </div>
-                        <button onclick="reloadDataGraph('agent')" class="apply-button">Apply</button>
                         <button onclick="loadDataView('agent')" class="refresh-button">🔄 Refresh</button>
                         <span id="agent-node-count" class="node-count"></span>
                     </div>
-                    <div id="agent-cy" class="graph-canvas"></div>
-                    <div class="legend">
-                        <h3>Legend</h3>
-                        <h4>Link Types:</h4>
-                        <div class="legend-item"><div class="legend-line temporal"></div><span><b>Temporal</b></span></div>
-                        <div class="legend-item"><div class="legend-line semantic"></div><span><b>Semantic</b></span></div>
-                        <div class="legend-item"><div class="legend-line entity"></div><span><b>Entity</b></span></div>
-                        <h4>Nodes:</h4>
-                        <div class="legend-item"><div class="legend-node no-entities"></div><span>No entities</span></div>
-                        <div class="legend-item"><div class="legend-node one-entity"></div><span>1 entity</span></div>
-                        <div class="legend-item"><div class="legend-node multi-entities"></div><span>2+ entities</span></div>
+                    <div class="view-toggle">
+                        <button class="view-toggle-button active" onclick="switchDataView('agent', 'graph')">Graph</button>
+                        <button class="view-toggle-button" onclick="switchDataView('agent', 'table')">Table</button>
                     </div>
-                </div>
-                <div id="agent-table-view" class="data-view" style="display: none;">
-                    <div class="data-controls">
-                        <h2>Agent Facts <span id="agent-table-count"></span></h2>
-                        <button onclick="loadDataView('agent')" class="load-button">📊 Load Agent Facts</button>
+                    <div id="agent-graph-view" class="data-view">
+                        <div class="data-controls">
+                            <div>
+                                <label>Limit nodes:</label>
+                                <input type="number" id="agent-node-limit" value="50" min="10" max="1000" step="10" class="control-input">
+                            </div>
+                            <div>
+                                <label>Layout:</label>
+                                <select id="agent-layout-select" class="control-select">
+                                    <option value="circle">Circle (fast)</option>
+                                    <option value="grid">Grid (fast)</option>
+                                    <option value="cose">Force-directed (slow)</option>
+                                </select>
+                            </div>
+                            <button onclick="reloadDataGraph('agent')" class="apply-button">Apply</button>
+                        </div>
+                        <div id="agent-cy" class="graph-canvas"></div>
+                        <div class="legend">
+                            <h3>Legend</h3>
+                            <h4>Link Types:</h4>
+                            <div class="legend-item"><div class="legend-line temporal"></div><span><b>Temporal</b></span></div>
+                            <div class="legend-item"><div class="legend-line semantic"></div><span><b>Semantic</b></span></div>
+                            <div class="legend-item"><div class="legend-line entity"></div><span><b>Entity</b></span></div>
+                            <h4>Nodes:</h4>
+                            <div class="legend-item"><div class="legend-node no-entities"></div><span>No entities</span></div>
+                            <div class="legend-item"><div class="legend-node one-entity"></div><span>1 entity</span></div>
+                            <div class="legend-item"><div class="legend-node multi-entities"></div><span>2+ entities</span></div>
+                        </div>
                     </div>
-                    <input type="text" id="agent-table-filter" placeholder="Filter by text, context, or entities..." class="table-filter">
-                    <div class="table-container">
-                        <table class="memory-table">
-                            <thead>
-                                <tr><th>ID</th><th>Text</th><th>Context</th><th>Date</th><th>Entities</th><th>Actions</th></tr>
-                            </thead>
-                            <tbody id="agent-table-body">
-                                <tr><td colspan="6" class="empty-message">Click "Load Agent Facts" to view data</td></tr>
-                            </tbody>
-                        </table>
+                    <div id="agent-table-view" class="data-view" style="display: none;">
+                        <input type="text" id="agent-table-filter" placeholder="Filter by text, context, or entities..." class="table-filter">
+                        <div class="table-container">
+                            <table class="memory-table">
+                                <thead>
+                                    <tr><th>ID</th><th>Text</th><th>Context</th><th>Date</th><th>Entities</th><th>Actions</th></tr>
+                                </thead>
+                                <tbody id="agent-table-body">
+                                    <tr><td colspan="6" class="empty-message">Click "Load Agent Facts" to view data</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <div id="opinions-subtab" class="data-subtab-content">
-                <div class="view-toggle">
-                    <button class="view-toggle-button active" onclick="switchDataView('opinions', 'graph')">Graph</button>
-                    <button class="view-toggle-button" onclick="switchDataView('opinions', 'table')">Table</button>
-                </div>
-                <div id="opinions-no-agent-message" class="no-agent-message">
+            <div id="opinion-subtab" class="data-subtab-content">
+                <div id="opinion-no-agent-message" class="no-agent-message">
                     <h3>No Agent Selected</h3>
                     <p>Please select an agent from the dropdown above to view opinions.</p>
                 </div>
-                <div id="opinions-graph-view" class="data-view" style="display: none;">
-                    <div class="data-controls">
-                        <button onclick="loadDataView('opinions')" class="load-button">📊 Load Opinions</button>
-                        <div>
-                            <label>Limit nodes:</label>
-                            <input type="number" id="opinions-node-limit" value="50" min="10" max="1000" step="10" class="control-input">
+                <div id="opinion-content" style="display: none;">
+                    <div class="data-controls" style="margin-bottom: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                        <button onclick="loadDataView('opinion')" class="load-button">📊 Load Opinions</button>
+                        <button onclick="loadDataView('opinion')" class="refresh-button">🔄 Refresh</button>
+                        <span id="opinion-node-count" class="node-count"></span>
+                    </div>
+                    <div class="view-toggle">
+                        <button class="view-toggle-button active" onclick="switchDataView('opinion', 'graph')">Graph</button>
+                        <button class="view-toggle-button" onclick="switchDataView('opinion', 'table')">Table</button>
+                    </div>
+                    <div id="opinion-graph-view" class="data-view">
+                        <div class="data-controls">
+                            <div>
+                                <label>Limit nodes:</label>
+                                <input type="number" id="opinion-node-limit" value="50" min="10" max="1000" step="10" class="control-input">
+                            </div>
+                            <div>
+                                <label>Layout:</label>
+                                <select id="opinion-layout-select" class="control-select">
+                                    <option value="circle">Circle (fast)</option>
+                                    <option value="grid">Grid (fast)</option>
+                                    <option value="cose">Force-directed (slow)</option>
+                                </select>
+                            </div>
+                            <button onclick="reloadDataGraph('opinion')" class="apply-button">Apply</button>
                         </div>
-                        <div>
-                            <label>Layout:</label>
-                            <select id="opinions-layout-select" class="control-select">
-                                <option value="circle">Circle (fast)</option>
-                                <option value="grid">Grid (fast)</option>
-                                <option value="cose">Force-directed (slow)</option>
-                            </select>
+                        <div id="opinion-cy" class="graph-canvas"></div>
+                        <div class="legend">
+                            <h3>Legend</h3>
+                            <h4>Link Types:</h4>
+                            <div class="legend-item"><div class="legend-line temporal"></div><span><b>Temporal</b></span></div>
+                            <div class="legend-item"><div class="legend-line semantic"></div><span><b>Semantic</b></span></div>
+                            <div class="legend-item"><div class="legend-line entity"></div><span><b>Entity</b></span></div>
+                            <h4>Nodes:</h4>
+                            <div class="legend-item"><div class="legend-node no-entities"></div><span>No entities</span></div>
+                            <div class="legend-item"><div class="legend-node one-entity"></div><span>1 entity</span></div>
+                            <div class="legend-item"><div class="legend-node multi-entities"></div><span>2+ entities</span></div>
                         </div>
-                        <button onclick="reloadDataGraph('opinions')" class="apply-button">Apply</button>
-                        <button onclick="loadDataView('opinions')" class="refresh-button">🔄 Refresh</button>
-                        <span id="opinions-node-count" class="node-count"></span>
                     </div>
-                    <div id="opinions-cy" class="graph-canvas"></div>
-                    <div class="legend">
-                        <h3>Legend</h3>
-                        <h4>Link Types:</h4>
-                        <div class="legend-item"><div class="legend-line temporal"></div><span><b>Temporal</b></span></div>
-                        <div class="legend-item"><div class="legend-line semantic"></div><span><b>Semantic</b></span></div>
-                        <div class="legend-item"><div class="legend-line entity"></div><span><b>Entity</b></span></div>
-                        <h4>Nodes:</h4>
-                        <div class="legend-item"><div class="legend-node no-entities"></div><span>No entities</span></div>
-                        <div class="legend-item"><div class="legend-node one-entity"></div><span>1 entity</span></div>
-                        <div class="legend-item"><div class="legend-node multi-entities"></div><span>2+ entities</span></div>
-                    </div>
-                </div>
-                <div id="opinions-table-view" class="data-view" style="display: none;">
-                    <div class="data-controls">
-                        <h2>Opinions <span id="opinions-table-count"></span></h2>
-                        <button onclick="loadDataView('opinions')" class="load-button">📊 Load Opinions</button>
-                    </div>
-                    <input type="text" id="opinions-table-filter" placeholder="Filter by text, context, or entities..." class="table-filter">
-                    <div class="table-container">
-                        <table class="memory-table">
-                            <thead>
-                                <tr><th>ID</th><th>Text</th><th>Context</th><th>Date</th><th>Entities</th><th>Actions</th></tr>
-                            </thead>
-                            <tbody id="opinions-table-body">
-                                <tr><td colspan="6" class="empty-message">Click "Load Opinions" to view data</td></tr>
-                            </tbody>
-                        </table>
+                    <div id="opinion-table-view" class="data-view" style="display: none;">
+                        <input type="text" id="opinion-table-filter" placeholder="Filter by text, context, or entities..." class="table-filter">
+                        <div class="table-container">
+                            <table class="memory-table">
+                                <thead>
+                                    <tr><th>ID</th><th>Text</th><th>Context</th><th>Date</th><th>Entities</th><th>Actions</th></tr>
+                                </thead>
+                                <tbody id="opinion-table-body">
+                                    <tr><td colspan="6" class="empty-message">Click "Load Opinions" to view data</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -238,10 +277,6 @@
                     <div>
                         <label style="font-weight: bold; display: block; margin-bottom: 5px;">Budget:</label>
                         <input type="number" id="think-budget" value="50" min="10" max="1000" style="width: 80px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; font-size: 14px;">
-                    </div>
-                    <div>
-                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">Top K:</label>
-                        <input type="number" id="think-top-k" value="10" min="1" max="50" style="width: 70px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; font-size: 14px;">
                     </div>
                     <button id="think-button" onclick="runThink()" style="padding: 10px 24px; background: #66bb6a; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px;">
                         💭 Think
@@ -273,7 +308,7 @@
                 <div id="think-new-opinions" style="display: none; margin-top: 30px;">
                     <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; border: 2px solid #4caf50;">
                         <h3 style="margin-top: 0; color: #2e7d32; border-bottom: 2px solid #4caf50; padding-bottom: 10px;">✨ New Opinions Formed</h3>
-                        <div id="think-new-opinions-list" style="margin-top: 15px;"></div>
+                        <div id="think-new-opinion-list" style="margin-top: 15px;"></div>
                     </div>
                 </div>
             </div>

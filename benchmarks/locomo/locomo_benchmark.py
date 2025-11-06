@@ -181,6 +181,8 @@ Even though the phrase says "yesterday," the timestamp shows the event was recor
 5. Formulate a precise, concise answer based solely on the evidence in the memories
 6. Double-check that your answer directly addresses the question asked
 7. Ensure your final answer is specific and avoids vague time references
+8. If you're not exactly sure, still try to attempt an answer. Sometimes the terms are sligtly different from the question, so it's better to try with the current evidence than just say you don't know. 
+9. Say that you cannot answer if no evidence is related to the question.
 
 Context:
 
@@ -207,19 +209,17 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
     so it doesn't need external search to be performed by the benchmark runner.
     """
 
-    def __init__(self, memory: 'TemporalSemanticMemory', agent_id: str, thinking_budget: int = 500, top_k: int = 20):
+    def __init__(self, memory: 'TemporalSemanticMemory', agent_id: str, thinking_budget: int = 500):
         """Initialize with memory instance and agent_id.
 
         Args:
             memory: TemporalSemanticMemory instance
             agent_id: Agent identifier for think queries
             thinking_budget: Budget for memory exploration
-            top_k: Maximum number of facts to retrieve
         """
         self.memory = memory
         self.agent_id = agent_id
         self.thinking_budget = thinking_budget
-        self.top_k = top_k
 
     def needs_external_search(self) -> bool:
         """Think API does its own retrieval, so no external search needed."""
@@ -250,9 +250,6 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
                 agent_id=self.agent_id,
                 query=question,
                 thinking_budget=self.thinking_budget,
-                top_k=self.top_k,
-                temperature=0.7,
-                max_tokens=1000
             )
 
             # Extract answer and reasoning
@@ -312,77 +309,170 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
             return f"Error generating answer: {str(e)}", "Error occurred during think API call.", []
 
 
-class JudgeResponse(pydantic.BaseModel):
-    """Judge response format."""
-    correct: bool
-    reasoning: str
+async def run_benchmark(
+    max_conversations: int = None,
+    max_questions_per_conv: int = None,
+    skip_ingestion: bool = False,
+    use_think: bool = False,
+    conversation: str = None
+):
+    """
+    Run the LoComo benchmark.
+
+    Args:
+        max_conversations: Maximum number of conversations to evaluate (None for all)
+        max_questions_per_conv: Maximum questions per conversation (None for all)
+        skip_ingestion: Whether to skip ingestion and use existing data
+        use_think: Whether to use the think API instead of search + LLM
+        conversation: Specific conversation ID to run (e.g., "conv-26")
+    """
+    # Initialize components
+    dataset = LoComoDataset()
+    memory = TemporalSemanticMemory(
+        db_url=os.getenv("DATABASE_URL"),
+        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
+        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
+        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
+        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
+    )
+    await memory.initialize()
+
+    if use_think:
+        answer_generator = LoComoThinkAnswerGenerator(
+            memory=memory,
+            agent_id="locomo",
+            thinking_budget=500
+        )
+        max_concurrent_questions = 4
+        eval_semaphore_size = 4
+    else:
+        answer_generator = LoComoAnswerGenerator()
+        # Reduced from 32 to 10 to match search semaphore limit
+        # Prevents "too many connections" errors
+        max_concurrent_questions = 10
+        eval_semaphore_size = 8
+
+    answer_evaluator = LLMAnswerEvaluator()
+
+    # Create benchmark runner
+    runner = BenchmarkRunner(
+        dataset=dataset,
+        answer_generator=answer_generator,
+        answer_evaluator=answer_evaluator,
+        memory=memory
+    )
+
+    # Run benchmark
+    dataset_path = Path(__file__).parent / 'datasets' / 'locomo10.json'
+    results = await runner.run(
+        dataset_path=dataset_path,
+        agent_id="locomo",
+        max_items=max_conversations,
+        max_questions_per_item=max_questions_per_conv,
+        thinking_budget=500,
+        max_tokens=4096,
+        skip_ingestion=skip_ingestion,
+        max_concurrent_questions=max_concurrent_questions,
+        eval_semaphore_size=eval_semaphore_size,
+        specific_item=conversation
+    )
+
+    # Display and save results
+    runner.display_results(results)
+
+    # Determine output filename based on mode
+    suffix = "_think" if use_think else ""
+    results_filename = f'benchmark_results{suffix}.json'
+
+    # Merge with existing results if running a specific conversation
+    merge_with_existing = conversation is not None
+    runner.save_results(results, Path(__file__).parent / 'results' / results_filename, merge_with_existing=merge_with_existing)
+
+    # Generate markdown table
+    generate_markdown_table(results, use_think)
+
+    return results
 
 
-class LoComoAnswerEvaluator(LLMAnswerEvaluator):
-    """LoComo-specific answer evaluator using configurable LLM provider."""
+def generate_markdown_table(results: dict, use_think: bool = False):
+    """
+    Generate a markdown table with benchmark results.
 
-    def __init__(self):
-        """Initialize with LLM configuration for judge/evaluator."""
-        self.llm_config = LLMConfig.for_judge()
-        self.client = self.llm_config.client
-        self.model = self.llm_config.model
+    Category mapping:
+    1 = Multi-hop
+    2 = Single-hop
+    3 = Temporal
+    4 = Open-domain
+    """
+    from rich.console import Console
+    console = Console()
 
-    async def judge_answer(
-        self,
-        question: str,
-        correct_answer: str,
-        predicted_answer: str,
-        semaphore: asyncio.Semaphore
-    ) -> Tuple[bool, str]:
-        """
-        Evaluate predicted answer using Groq LLM-as-judge.
+    category_names = {
+        '1': 'Multi-hop',
+        '2': 'Single-hop',
+        '3': 'Temporal',
+        '4': 'Open-domain'
+    }
 
-        Returns:
-            Tuple of (is_correct, reasoning)
-        """
-        async with semaphore:
-            try:
-                judgement = await self.llm_config.call(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are an expert grader that determines if answers to questions match a gold standard answer"
-                        },
-                        {
-                            "role": "user",
-                            "content": f"""
-Your task is to label an answer to a question as 'CORRECT' or 'WRONG'. You williolw23 be given the following data:
-        (1) a question (posed by one user to another user),
-        (2) a 'gold' (ground truth) answer,
-        (3) a generated answer
-    which you will score as CORRECT/WRONG.
+    # Build markdown content
+    lines = []
+    mode_str = " (Think Mode)" if use_think else ""
+    lines.append(f"# LoComo Benchmark Results{mode_str}")
+    lines.append("")
+    lines.append(f"**Overall Accuracy**: {results['overall_accuracy']:.2f}% ({results['total_correct']}/{results['total_questions']})")
+    lines.append("")
+    lines.append("| Sample ID | Sessions | Questions | Correct | Accuracy | Multi-hop | Single-hop | Temporal | Open-domain |")
+    lines.append("|-----------|----------|-----------|---------|----------|-----------|------------|----------|-------------|")
 
-    The point of the question is to ask about something one user should know about the other user based on their prior conversations.
-    The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
-    Question: Do you remember what I got the last time I went to Hawaii?
-    Gold answer: A shell necklace
-    The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT.
+    for item_result in results['item_results']:
+        item_id = item_result['item_id']
+        num_sessions = item_result['num_sessions']
+        metrics = item_result['metrics']
 
-    For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
+        # Calculate category accuracies
+        cat_stats = metrics.get('category_stats', {})
+        cat_accuracies = {}
 
-    Now it's time for the real question:
-    Question: {question}
-    Gold answer: {correct_answer}
-    Generated answer: {predicted_answer}
+        for cat_id in ['1', '2', '3', '4']:
+            if cat_id in cat_stats:
+                stats = cat_stats[cat_id]
+                acc = (stats['correct'] / stats['total'] * 100) if stats['total'] > 0 else 0
+                cat_accuracies[cat_id] = f"{acc:.1f}% ({stats['correct']}/{stats['total']})"
+            else:
+                cat_accuracies[cat_id] = "N/A"
 
-    First, provide a short (one sentence) explanation of your reasoning. Short reasoning is preferred.
-    If it's correct, set correct=true.
-"""
-                        }
-                    ],
-                    response_format=JudgeResponse,
-                    scope="judge",
-                    temperature=0,
-                    max_tokens=4096
-                )
+        lines.append(
+            f"| {item_id} | {num_sessions} | {metrics['total']} | {metrics['correct']} | "
+            f"{metrics['accuracy']:.2f}% | {cat_accuracies['1']} | {cat_accuracies['2']} | "
+            f"{cat_accuracies['3']} | {cat_accuracies['4']} |"
+        )
 
-                return judgement.correct, judgement.reasoning
+    # Write to file with suffix
+    suffix = "_think" if use_think else ""
+    output_file = Path(__file__).parent / 'results' / f'results_table{suffix}.md'
+    output_file.write_text('\n'.join(lines))
+    console.print(f"\n[green]✓[/green] Results table saved to {output_file}")
 
-            except Exception as e:
-                print(f"Error judging answer: {e}")
-                return False, f"Error: {str(e)}"
+
+if __name__ == "__main__":
+    import logging
+    import argparse
+
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+
+    parser = argparse.ArgumentParser(description='Run LoComo benchmark')
+    parser.add_argument('--max-conversations', type=int, default=None, help='Maximum conversations to evaluate')
+    parser.add_argument('--max-questions', type=int, default=None, help='Maximum questions per conversation')
+    parser.add_argument('--skip-ingestion', action='store_true', help='Skip ingestion and use existing data')
+    parser.add_argument('--use-think', action='store_true', help='Use think API instead of search + LLM')
+    parser.add_argument('--conversation', type=str, default=None, help='Run only specific conversation (e.g., "conv-26")')
+
+    args = parser.parse_args()
+
+    results = asyncio.run(run_benchmark(
+        max_conversations=args.max_conversations,
+        max_questions_per_conv=args.max_questions,
+        skip_ingestion=args.skip_ingestion,
+        use_think=args.use_think,
+        conversation=args.conversation
+    ))

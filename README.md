@@ -64,32 +64,103 @@ All three networks share the same infrastructure (temporal/semantic/entity links
 - Critical advantage: Solves the problem where "Alice loves hiking" wouldn't normally connect to "Alice works at Google" through semantic similarity alone
 - Use case: "What does Alice do?" returns ALL memories about Alice
 
-### Spreading Activation Search
+### 4-Way Parallel Retrieval with Reranking
 
-The search algorithm explores the memory graph using spreading activation with backpressure limiting (max 32 concurrent searches):
+The search algorithm uses a sophisticated multi-stage pipeline that combines four different retrieval strategies, followed by fusion and reranking:
 
-1. **Entry Points**: Find top-3 semantically similar memories (vector search, similarity ≥ 0.5)
-2. **Activation Spreading**: Start with activation = actual similarity score at entry points
-3. **Graph Traversal**: Follow links to neighbors, spreading activation with decay (0.8 factor)
-4. **Thinking Budget**: Limit exploration to N units (controls computational cost)
-5. **Dynamic Weighting**: Combine activation, semantic similarity, recency, and frequency:
-   ```
-   final_weight = w_a × activation + w_s × semantic_similarity + w_r × recency + w_f × frequency
+#### Stage 1: Parallel Retrieval (4 paths)
 
-   Default weights (configurable):
-   w_a = 0.30  # Activation weight (graph structure)
-   w_s = 0.30  # Semantic similarity weight
-   w_r = 0.25  # Recency weight (logarithmic decay, 1-year half-life)
-   w_f = 0.15  # Frequency weight (normalized access_count)
-   ```
-6. **MMR Diversification**: Optional Maximal Marginal Relevance to balance relevance with diversity
-7. **Return Top-K**: Sort by final weight and return top results
+The system runs **four retrieval methods in parallel** to capture different types of relevance:
 
-This approach ensures:
-- Semantic relevance to query is always considered (30%)
-- Graph structure influences results through activation (30%)
-- Recently accessed memories get boosted (25%)
-- Frequently accessed memories get boosted (15%)
+**1. Semantic Retrieval** (Vector Similarity)
+- Uses embedding cosine similarity via pgvector
+- Finds memories that are conceptually similar to the query
+- Threshold: similarity ≥ 0.3
+- **Why**: Captures meaning and intent, even when exact words don't match
+- Example: "hiking activities" finds "mountain climbing", "trail running"
+
+**2. Keyword Retrieval** (BM25 Full-Text Search)
+- Uses PostgreSQL's full-text search with BM25 ranking
+- Finds memories with matching terms and phrases
+- **Why**: Catches exact terminology and proper nouns that embeddings might miss
+- Example: "Google" query finds all mentions of the company name
+- Complements semantic search: high precision for named entities
+
+**3. Graph Retrieval** (Spreading Activation)
+- Starts from top semantic matches (similarity ≥ 0.5)
+- Spreads activation through temporal, semantic, and entity links
+- Activation decays by 0.8 at each hop
+- Budget-limited exploration (default: thinking_budget nodes)
+- **Why**: Discovers indirectly related memories through relationships
+- Example: Query "Alice" → spreads to "Google" → finds "Mountain View office"
+- Leverages entity links (constant weight 1.0) to traverse the knowledge graph
+
+**4. Temporal Graph Retrieval** (Time-Aware + Spreading)
+- **Activated only when temporal constraint detected** (e.g., "last year", "in June", "last spring")
+- Uses `dateparser` library (<5ms) to extract date ranges
+- Finds memories in date range with semantic threshold (≥ 0.4)
+- Spreads through temporal links to related facts
+- Scores by temporal proximity (closer to range center = higher)
+- **Why**: Enables time-scoped queries while maintaining relevance
+- Example: "What did Alice do last spring?" → finds March-May activities about Alice only
+- Prevents temporal leakage: Mike's June activities won't appear in Alice's June query
+
+**Why All Four?**
+- Semantic captures meaning but misses exact matches
+- Keyword catches proper nouns but misses synonyms
+- Graph discovers indirect relationships via entity/temporal/semantic links
+- Temporal graph enables time-scoped retrieval while filtering by relevance
+- Together they achieve **high recall** (find everything relevant) before reranking refines to **high precision**
+
+#### Stage 2: Reciprocal Rank Fusion (RRF)
+
+Merges the 3-4 ranked lists using RRF algorithm:
+```
+RRF_score(d) = Σ (1 / (k + rank_i(d)))  where k=60
+```
+- Handles ties and missing items gracefully
+- Gives more weight to items appearing in multiple lists
+- Position-based scoring (rank matters more than raw scores)
+
+#### Stage 3: Reranking (2 strategies)
+
+**Heuristic Reranker** (default: fast, ~0ms overhead)
+- Base score: 60% semantic + 40% BM25 (normalized)
+- Boosts: +20% recency (log decay, 1-year half-life), +10% frequency (access_count)
+- **When to use**: Production workloads needing speed
+- **Advantage**: No additional latency, interpretable scoring
+
+**Cross-Encoder Reranker** (optional: accurate, ~80ms for 100 pairs)
+- Neural reranking using `cross-encoder/ms-marco-MiniLM-L-6-v2`
+- Takes query + document pairs, returns relevance scores
+- Includes formatted dates: `[Date: November 06, 2025 (2025-11-06)] {text}`
+- Scores normalized via sigmoid to [0, 1] range
+- **When to use**: Accuracy-critical queries (user-facing search)
+- **Advantage**: 5-10% better precision than heuristic
+- Model loaded once at init (cached for performance)
+- Pluggable: abstract `CrossEncoderReranker` interface for future API-based rerankers
+
+#### Stage 4: MMR Diversification
+
+Applies Maximal Marginal Relevance (λ=0.5) to final results:
+```
+MMR = λ × relevance - (1-λ) × max_similarity_to_selected
+```
+- Balances relevance with diversity
+- Prevents redundant results about the same fact
+- Iteratively selects results that are relevant BUT different
+
+**Final Pipeline Summary**:
+```
+Query → [Semantic, Keyword, Graph, Temporal Graph] → RRF Merge → Reranker → MMR → Top-K Results
+        (4-way parallel, 30-50ms)                   (0-80ms)          (0ms)
+```
+
+This architecture ensures:
+- **High Recall**: 4 retrieval methods cast a wide net (union of all relevant memories)
+- **High Precision**: Reranking and MMR refine to most relevant, diverse results
+- **Flexibility**: Choose heuristic (fast) or cross-encoder (accurate) based on use case
+- **Temporal Awareness**: Automatically activates time-scoped search when needed
 
 ### LLM-Based Fact Extraction
 
@@ -110,8 +181,9 @@ Raw content is processed through an LLM (Groq by default) to extract meaningful 
 
 **Python Libraries**:
 - `asyncpg` - Async PostgreSQL client with connection pooling
-- `sentence-transformers` - Local embedding model (BAAI/bge-small-en-v1.5)
+- `sentence-transformers` - Embedding model (BAAI/bge-small-en-v1.5) + cross-encoder (ms-marco-MiniLM-L-6-v2)
 - `openai` - LLM API client (supports Groq, OpenAI)
+- `dateparser` - Natural language date parsing for temporal queries
 - `fastapi` - Web API framework
 
 **Architecture Patterns**:
@@ -287,7 +359,19 @@ curl -X POST http://localhost:8080/api/search \
     "query": "What does Alice do?",
     "thinking_budget": 100,
     "top_k": 10,
-    "mmr_lambda": 0.5,
+    "reranker": "heuristic",
+    "trace": false
+  }'
+
+# Optional: Use cross-encoder reranker for better accuracy
+curl -X POST http://localhost:8080/api/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "alice_agent",
+    "query": "What does Alice do?",
+    "thinking_budget": 100,
+    "top_k": 10,
+    "reranker": "cross-encoder",
     "trace": false
   }'
 ```
@@ -314,6 +398,28 @@ Response:
   "trace": null
 }
 ```
+
+### Temporal Queries
+
+The system automatically detects temporal constraints and activates temporal graph retrieval:
+
+```bash
+# Temporal query - automatically uses 4-way retrieval with temporal graph
+curl -X POST http://localhost:8080/api/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "alice_agent",
+    "query": "What did Alice do last spring?",
+    "thinking_budget": 100,
+    "top_k": 10
+  }'
+```
+
+Supported temporal expressions:
+- **Seasons**: "last spring", "this summer", "winter 2024"
+- **Months**: "in June", "last March", "this November"
+- **Relative**: "last year", "last month", "last week"
+- **Ranges**: "between March and May"
 
 ### Think and Generate Answer
 

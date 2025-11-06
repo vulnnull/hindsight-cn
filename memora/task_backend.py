@@ -139,6 +139,31 @@ class AsyncIOQueueBackend(TaskBackend):
         task_id = task_dict.get('id')
         logger.debug(f"Task submitted: {task_type} (id: {task_id})")
 
+    async def wait_for_pending_tasks(self, timeout: float = 5.0):
+        """
+        Wait for all pending tasks in the queue to be processed.
+
+        This is useful in tests to ensure background tasks complete before assertions.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+        """
+        if not self._initialized or self._queue is None:
+            return
+
+        # Wait for queue to be empty and give worker time to process
+        start_time = asyncio.get_event_loop().time()
+        while asyncio.get_event_loop().time() - start_time < timeout:
+            if self._queue.empty():
+                # Queue is empty, give worker a bit more time to finish any in-flight task
+                await asyncio.sleep(0.3)
+                # Check again - if still empty, we're done
+                if self._queue.empty():
+                    return
+            else:
+                # Queue not empty, wait a bit
+                await asyncio.sleep(0.1)
+
     async def shutdown(self):
         """Shutdown the worker and drain the queue."""
         if not self._initialized:

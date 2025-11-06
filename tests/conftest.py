@@ -50,7 +50,13 @@ async def memory():
     Tests should handle their own cleanup by calling memory.delete_agent(agent_id)
     in their finally blocks. The fixture will attempt cleanup as a safeguard.
     """
-    mem = TemporalSemanticMemory(db_url=LOCAL_DB_URL)
+    mem = TemporalSemanticMemory(
+        db_url=LOCAL_DB_URL,
+        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
+        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
+        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
+        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
+    )
     await mem.initialize()
     yield mem
     # Attempt cleanup (tests should already have called close, but this is a safeguard)

@@ -13,6 +13,7 @@ import json
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Tuple, Optional
 import asyncio
+import pydantic
 from openai import AsyncOpenAI
 import os
 
@@ -136,12 +137,12 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
         self,
         question: str,
         memories: List[Dict[str, Any]]
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer from retrieved memories using OpenAI.
 
         Returns:
-            Tuple of (answer, reasoning)
+            Tuple of (answer, reasoning, retrieved_memories_override)
         """
         # Format memories as context
         context_parts = []
@@ -172,76 +173,207 @@ Answer:"""
                 temperature=0.0,
                 max_tokens=300
             )
-            return answer.strip(), ""  # LongMemEval doesn't use reasoning
+            return answer.strip(), "", None  # LongMemEval doesn't use reasoning or override memories
         except Exception as e:
-            return f"Error generating answer: {str(e)}", ""
+            return f"Error generating answer: {str(e)}", "", None
 
 
-class LongMemEvalAnswerEvaluator(LLMAnswerEvaluator):
-    """LongMemEval-specific answer evaluator using configurable LLM provider."""
+async def run_benchmark(
+    max_instances: int = None,
+    max_questions_per_instance: int = None,
+    thinking_budget: int = 100,
+    max_tokens: int = 4096,
+    skip_ingestion: bool = False
+):
+    """
+    Run the LongMemEval benchmark.
 
-    def __init__(self):
-        """Initialize with LLM configuration for judge/evaluator."""
-        self.llm_config = LLMConfig.for_judge()
-        self.client = self.llm_config.client
-        self.model = self.llm_config.model
+    Args:
+        max_instances: Maximum number of instances to evaluate (None for all)
+        max_questions_per_instance: Maximum questions per instance (for testing)
+        thinking_budget: Thinking budget for spreading activation search
+        max_tokens: Maximum tokens to retrieve from memories
+        skip_ingestion: Whether to skip ingestion and use existing data
+    """
+    from rich.console import Console
+    console = Console()
 
-    async def judge_answer(
-        self,
-        question: str,
-        correct_answer: str,
-        predicted_answer: str,
-        semaphore: asyncio.Semaphore
-    ) -> Tuple[bool, str]:
-        """
-        Evaluate predicted answer using OpenAI LLM-as-judge.
+    # Check dataset exists, download if needed
+    dataset_path = Path(__file__).parent / "datasets" / "longmemeval_s_cleaned.json"
+    if not dataset_path.exists():
+        if not download_dataset(dataset_path):
+            console.print(f"[red]Failed to download dataset. Please download manually:[/red]")
+            console.print("[yellow]curl -L 'https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json' -o benchmarks/longmemeval/datasets/longmemeval_s_cleaned.json[/yellow]")
+            return
 
-        Returns:
-            Tuple of (is_correct, reasoning)
-        """
-        async with semaphore:
-            prompt = f"""You are an expert evaluator. Evaluate if the predicted answer is semantically equivalent to the gold answer.
+    # Initialize components
+    dataset = LongMemEvalDataset()
+    answer_generator = LongMemEvalAnswerGenerator()
+    answer_evaluator = LLMAnswerEvaluator()
+    memory = TemporalSemanticMemory(
+        db_url=os.getenv("DATABASE_URL"),
+        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
+        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
+        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
+        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
+    )
 
-Question: {question}
+    # Create benchmark runner
+    runner = BenchmarkRunner(
+        dataset=dataset,
+        answer_generator=answer_generator,
+        answer_evaluator=answer_evaluator,
+        memory=memory
+    )
 
-Gold Answer: {correct_answer}
+    # Run benchmark
+    # Note: LongMemEval requires clearing agent per item for isolation
+    results = await runner.run(
+        dataset_path=dataset_path,
+        agent_id="longmemeval",
+        max_items=max_instances,
+        max_questions_per_item=max_questions_per_instance,
+        thinking_budget=thinking_budget,
+        max_tokens=max_tokens,
+        skip_ingestion=skip_ingestion,
+        max_concurrent_questions=8,  # Lower for LongMemEval (each has full conversation)
+        eval_semaphore_size=8,
+        clear_agent_per_item=True  # Clear agent data per item for isolation
+    )
 
-Predicted Answer: {predicted_answer}
+    # Display and save results
+    runner.display_results(results)
+    runner.save_results(results, Path(__file__).parent / 'results' / 'benchmark_results.json')
 
-Instructions:
-- Score 1 if the predicted answer is semantically equivalent (same meaning, different wording is OK)
-- Score 1 if the predicted answer correctly abstains when the gold answer indicates the question is unanswerable
-- Score 0 if the predicted answer is incorrect or contradicts the gold answer
-- Score 0 if the predicted answer provides an answer when it should abstain
-- Provide a brief explanation
+    # Generate detailed report by question type
+    generate_type_report(results)
 
-Output format:
-Score: [0 or 1]
-Explanation: [brief explanation]"""
+    return results
 
-            try:
-                content = await self.llm_config.call(
-                    messages=[{"role": "user", "content": prompt}],
-                    scope="judge",
-                    temperature=0.0,
-                    max_tokens=200
-                )
 
-                content = content.strip()
+def download_dataset(dataset_path: Path) -> bool:
+    """
+    Download the LongMemEval dataset if it doesn't exist.
 
-                # Parse score and explanation
-                lines = content.split('\n')
-                score = 0
-                explanation = ""
+    Returns:
+        True if successful, False otherwise
+    """
+    import subprocess
+    from rich.console import Console
+    console = Console()
 
-                for line in lines:
-                    if line.startswith("Score:"):
-                        score_str = line.replace("Score:", "").strip()
-                        score = int(score_str) if score_str.isdigit() else 0
-                    elif line.startswith("Explanation:"):
-                        explanation = line.replace("Explanation:", "").strip()
+    url = "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json"
 
-                return score == 1, explanation
+    console.print(f"[yellow]Dataset not found. Downloading from HuggingFace...[/yellow]")
+    console.print(f"[dim]URL: {url}[/dim]")
+    console.print(f"[dim]Destination: {dataset_path}[/dim]")
 
-            except Exception as e:
-                return False, f"Evaluation error: {str(e)}"
+    try:
+        # Use curl to download with progress
+        result = subprocess.run(
+            ["curl", "-L", "-o", str(dataset_path), url],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+
+        if result.returncode == 0 and dataset_path.exists():
+            console.print(f"[green]✓ Dataset downloaded successfully[/green]")
+            return True
+        else:
+            console.print(f"[red]✗ Download failed: {result.stderr}[/red]")
+            return False
+
+    except subprocess.TimeoutExpired:
+        console.print(f"[red]✗ Download timed out after 5 minutes[/red]")
+        return False
+    except Exception as e:
+        console.print(f"[red]✗ Download error: {e}[/red]")
+        return False
+
+
+def generate_type_report(results: dict):
+    """Generate a detailed report by question type."""
+    from rich.table import Table
+    from rich.console import Console
+    console = Console()
+
+    # Aggregate stats by question type
+    type_stats = {}
+
+    for item_result in results['item_results']:
+        metrics = item_result['metrics']
+        by_category = metrics.get('category_stats', {})
+
+        for qtype, stats in by_category.items():
+            if qtype not in type_stats:
+                type_stats[qtype] = {'total': 0, 'correct': 0}
+            type_stats[qtype]['total'] += stats['total']
+            type_stats[qtype]['correct'] += stats['correct']
+
+    # Display table
+    table = Table(title="Performance by Question Type")
+    table.add_column("Question Type", style="cyan")
+    table.add_column("Total", justify="right", style="yellow")
+    table.add_column("Correct", justify="right", style="green")
+    table.add_column("Accuracy", justify="right", style="magenta")
+
+    for qtype, stats in sorted(type_stats.items()):
+        acc = (stats['correct'] / stats['total'] * 100) if stats['total'] > 0 else 0
+        table.add_row(
+            qtype,
+            str(stats['total']),
+            str(stats['correct']),
+            f"{acc:.1f}%"
+        )
+
+    console.print("\n")
+    console.print(table)
+
+
+if __name__ == "__main__":
+    import logging
+    import argparse
+
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+
+    parser = argparse.ArgumentParser(description="Run LongMemEval benchmark")
+    parser.add_argument(
+        "--max-instances",
+        type=int,
+        default=None,
+        help="Limit number of instances to evaluate (default: all 500)"
+    )
+    parser.add_argument(
+        "--max-questions",
+        type=int,
+        default=None,
+        help="Limit number of questions per instance (for quick testing)"
+    )
+    parser.add_argument(
+        "--thinking-budget",
+        type=int,
+        default=100,
+        help="Thinking budget for spreading activation search"
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=4096,
+        help="Maximum tokens to retrieve from memories"
+    )
+    parser.add_argument(
+        "--skip-ingestion",
+        action="store_true",
+        help="Skip ingestion and use existing data"
+    )
+
+    args = parser.parse_args()
+
+    results = asyncio.run(run_benchmark(
+        max_instances=args.max_instances,
+        max_questions_per_instance=args.max_questions,
+        thinking_budget=args.thinking_budget,
+        max_tokens=args.max_tokens,
+        skip_ingestion=args.skip_ingestion
+    ))

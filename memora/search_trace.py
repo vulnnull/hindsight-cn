@@ -15,7 +15,7 @@ class QueryInfo(BaseModel):
     query_embedding: List[float] = Field(description="Generated query embedding vector")
     timestamp: datetime = Field(description="When the query was executed")
     thinking_budget: int = Field(description="Maximum nodes to explore")
-    top_k: int = Field(description="Number of results requested")
+    max_tokens: int = Field(description="Maximum tokens to return in results")
 
 
 class EntryPoint(BaseModel):
@@ -93,6 +93,45 @@ class SearchPhaseMetrics(BaseModel):
     details: Dict[str, Any] = Field(default_factory=dict, description="Additional phase-specific metrics")
 
 
+class RetrievalResult(BaseModel):
+    """A single result from a retrieval method."""
+    rank: int = Field(description="Rank in this retrieval method (1-based)")
+    node_id: str = Field(description="Memory unit ID")
+    text: str = Field(description="Memory unit text content")
+    context: str = Field(default="", description="Memory unit context")
+    event_date: Optional[datetime] = Field(default=None, description="When the memory occurred")
+    score: float = Field(description="Score from this retrieval method")
+    score_name: str = Field(description="Name of the score (e.g., 'similarity', 'bm25_score', 'activation')")
+
+
+class RetrievalMethodResults(BaseModel):
+    """Results from a single retrieval method."""
+    method_name: Literal["semantic", "bm25", "graph", "temporal"] = Field(description="Name of retrieval method")
+    results: List[RetrievalResult] = Field(description="Retrieved results with ranks")
+    duration_seconds: float = Field(description="Time taken for this retrieval")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Method-specific metadata")
+
+
+class RRFMergeResult(BaseModel):
+    """A result after RRF merging."""
+    node_id: str = Field(description="Memory unit ID")
+    text: str = Field(description="Memory unit text content")
+    rrf_score: float = Field(description="Reciprocal Rank Fusion score")
+    source_ranks: Dict[str, int] = Field(description="Rank in each source that contributed (method_name -> rank)")
+    final_rrf_rank: int = Field(description="Rank after RRF merge (1-based)")
+
+
+class RerankedResult(BaseModel):
+    """A result after reranking."""
+    node_id: str = Field(description="Memory unit ID")
+    text: str = Field(description="Memory unit text content")
+    rerank_score: float = Field(description="Final reranking score")
+    rerank_rank: int = Field(description="Rank after reranking (1-based)")
+    rrf_rank: int = Field(description="Original RRF rank before reranking")
+    rank_change: int = Field(description="Change in rank (positive = moved up)")
+    score_components: Dict[str, float] = Field(default_factory=dict, description="Score breakdown")
+
+
 class SearchSummary(BaseModel):
     """Summary statistics about the search."""
     total_nodes_visited: int = Field(description="Total nodes visited")
@@ -115,9 +154,17 @@ class SearchSummary(BaseModel):
 class SearchTrace(BaseModel):
     """Complete trace of a search operation."""
     query: QueryInfo = Field(description="Query information")
-    entry_points: List[EntryPoint] = Field(description="Entry points selected for search")
-    visits: List[NodeVisit] = Field(description="All nodes visited during search (in order)")
-    pruned: List[PruningDecision] = Field(default_factory=list, description="Nodes that were pruned")
+
+    # New 4-way retrieval architecture
+    retrieval_results: List[RetrievalMethodResults] = Field(default_factory=list, description="Results from each retrieval method")
+    rrf_merged: List[RRFMergeResult] = Field(default_factory=list, description="Results after RRF merging")
+    reranked: List[RerankedResult] = Field(default_factory=list, description="Results after reranking")
+
+    # Legacy fields (kept for backward compatibility with graph/temporal visualizations)
+    entry_points: List[EntryPoint] = Field(default_factory=list, description="Entry points selected for search (legacy)")
+    visits: List[NodeVisit] = Field(default_factory=list, description="All nodes visited during search (legacy, for graph viz)")
+    pruned: List[PruningDecision] = Field(default_factory=list, description="Nodes that were pruned (legacy)")
+
     summary: SearchSummary = Field(description="Summary statistics")
 
     # Final results (for comparison with visits)

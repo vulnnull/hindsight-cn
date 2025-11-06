@@ -5,7 +5,7 @@ import os
 import time
 import asyncio
 from typing import Optional, Any, Dict, List
-from openai import AsyncOpenAI, RateLimitError, APIError
+from openai import AsyncOpenAI, RateLimitError, APIError, APIStatusError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,32 +19,24 @@ class LLMConfig:
 
     def __init__(
         self,
-        provider: Optional[str] = None,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        model: Optional[str] = None,
-        provider_env: str = "MEMORY_LLM_PROVIDER",
-        api_key_env: str = "MEMORY_LLM_API_KEY",
-        base_url_env: str = "MEMORY_LLM_BASE_URL",
-        model_env: str = "MEMORY_LLM_MODEL",
+        provider: str,
+        api_key: str,
+        base_url: str,
+        model: str,
     ):
         """
         Initialize LLM configuration.
 
         Args:
-            provider: Provider name ("openai", "groq", "ollama"). If None, reads from provider_env.
-            api_key: API key. If None, reads from api_key_env.
-            base_url: Base URL. If None, reads from base_url_env.
-            model: Model name. If None, reads from model_env.
-            provider_env: Environment variable name for provider (default: "MEMORY_LLM_PROVIDER")
-            api_key_env: Environment variable name for API key (default: "MEMORY_LLM_API_KEY")
-            base_url_env: Environment variable name for base URL (default: "MEMORY_LLM_BASE_URL")
-            model_env: Environment variable name for model (default: "MEMORY_LLM_MODEL")
+            provider: Provider name ("openai", "groq", "ollama"). Required.
+            api_key: API key. Required.
+            base_url: Base URL. Required.
+            model: Model name. Required.
         """
-        self.provider = (provider or os.getenv(provider_env, "groq")).lower()
-        self.api_key = api_key or os.getenv(api_key_env)
-        self.base_url = base_url or os.getenv(base_url_env)
-        self.model = model or os.getenv(model_env, "openai/gpt-oss-120b")
+        self.provider = provider.lower()
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model
 
         # Validate provider
         if self.provider not in ["openai", "groq", "ollama"]:
@@ -62,7 +54,7 @@ class LLMConfig:
         # Validate API key (not needed for ollama)
         if self.provider != "ollama" and not self.api_key:
             raise ValueError(
-                f"API key not found for {self.provider}. Set {api_key_env} environment variable."
+                f"API key not found for {self.provider}"
             )
 
         # Create client
@@ -112,6 +104,8 @@ class LLMConfig:
             "messages": messages,
             **kwargs
         }
+        if self.provider == "groq":
+            call_params["extra_body"] = {"service_tier": "auto"}
 
         last_exception = None
 
@@ -140,7 +134,7 @@ class LLMConfig:
 
                 return result
 
-            except RateLimitError as e:
+            except APIStatusError as e:
                 last_exception = e
                 if attempt < max_retries:
                     # Calculate exponential backoff with jitter
@@ -150,42 +144,15 @@ class LLMConfig:
                     sleep_time = backoff + jitter
 
                     logger.warning(
-                        f"Rate limit error (429) on attempt {attempt + 1}/{max_retries + 1}. "
+                        f"LLM error on attempt {attempt + 1}/{max_retries + 1}. "
                         f"Retrying in {sleep_time:.2f}s... Error: {str(e)}"
                     )
                     await asyncio.sleep(sleep_time)
                 else:
-                    logger.error(
-                        f"Rate limit error (429) after {max_retries + 1} attempts. Giving up. Error: {str(e)}"
-                    )
-                    raise
-
-            except APIError as e:
-                last_exception = e
-                # Check if it's a retryable error (5xx server errors)
-                if hasattr(e, 'status_code') and 500 <= e.status_code < 600:
-                    if attempt < max_retries:
-                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
-                        jitter = backoff * 0.2 * (2 * (time.time() % 1) - 1)
-                        sleep_time = backoff + jitter
-
-                        logger.warning(
-                            f"API error ({e.status_code}) on attempt {attempt + 1}/{max_retries + 1}. "
-                            f"Retrying in {sleep_time:.2f}s... Error: {str(e)}"
-                        )
-                        await asyncio.sleep(sleep_time)
-                    else:
-                        logger.error(
-                            f"API error ({e.status_code}) after {max_retries + 1} attempts. Giving up. Error: {str(e)}"
-                        )
-                        raise
-                else:
-                    # Non-retryable API error, raise immediately
-                    logger.error(f"Non-retryable API error: {str(e)}")
+                    logger.error(f"Non-retryable API error after {max_retries + 1} attempts: {str(e)}")
                     raise
 
             except Exception as e:
-                # Any other exception, log and raise immediately
                 logger.error(f"Unexpected error during LLM call: {type(e).__name__}: {str(e)}")
                 raise
 
@@ -196,34 +163,53 @@ class LLMConfig:
 
     @classmethod
     def for_memory(cls) -> "LLMConfig":
-        """Create configuration for memory operations."""
+        """Create configuration for memory operations from environment variables."""
+        provider = os.getenv("MEMORY_LLM_PROVIDER", "groq")
+        api_key = os.getenv("MEMORY_LLM_API_KEY")
+        base_url = os.getenv("MEMORY_LLM_BASE_URL")
+        model = os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b")
+
+        # Set default base URL if not provided
+        if not base_url:
+            if provider == "groq":
+                base_url = "https://api.groq.com/openai/v1"
+            elif provider == "ollama":
+                base_url = "http://localhost:11434/v1"
+            else:
+                base_url = ""
+
         return cls(
-            provider_env="MEMORY_LLM_PROVIDER",
-            api_key_env="MEMORY_LLM_API_KEY",
-            base_url_env="MEMORY_LLM_BASE_URL",
-            model_env="MEMORY_LLM_MODEL",
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
         )
 
     @classmethod
     def for_judge(cls) -> "LLMConfig":
         """
-        Create configuration for judge/evaluator operations.
+        Create configuration for judge/evaluator operations from environment variables.
 
         Falls back to memory LLM config if judge-specific config not set.
         """
         # Check if judge-specific config exists, otherwise fall back to memory config
-        judge_provider = os.getenv("JUDGE_LLM_PROVIDER", os.getenv("MEMORY_LLM_PROVIDER", "groq"))
-        judge_api_key = os.getenv("JUDGE_LLM_API_KEY", os.getenv("MEMORY_LLM_API_KEY"))
-        judge_base_url = os.getenv("JUDGE_LLM_BASE_URL", os.getenv("MEMORY_LLM_BASE_URL"))
-        judge_model = os.getenv("JUDGE_LLM_MODEL", os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"))
+        provider = os.getenv("JUDGE_LLM_PROVIDER", os.getenv("MEMORY_LLM_PROVIDER", "groq"))
+        api_key = os.getenv("JUDGE_LLM_API_KEY", os.getenv("MEMORY_LLM_API_KEY"))
+        base_url = os.getenv("JUDGE_LLM_BASE_URL", os.getenv("MEMORY_LLM_BASE_URL"))
+        model = os.getenv("JUDGE_LLM_MODEL", os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"))
+
+        # Set default base URL if not provided
+        if not base_url:
+            if provider == "groq":
+                base_url = "https://api.groq.com/openai/v1"
+            elif provider == "ollama":
+                base_url = "http://localhost:11434/v1"
+            else:
+                base_url = ""
 
         return cls(
-            provider=judge_provider,
-            api_key=judge_api_key,
-            base_url=judge_base_url,
-            model=judge_model,
-            provider_env="JUDGE_LLM_PROVIDER",
-            api_key_env="JUDGE_LLM_API_KEY",
-            base_url_env="JUDGE_LLM_BASE_URL",
-            model_env="JUDGE_LLM_MODEL",
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
         )

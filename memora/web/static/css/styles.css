@@ -476,6 +476,55 @@ body {
     background: #43a047;
 }
 
+.retrieval-tabs {
+    display: flex;
+    gap: 5px;
+    padding: 10px 15px;
+    background: #f5f5f5;
+    border-bottom: 1px solid #ddd;
+}
+
+.retrieval-tab-btn {
+    padding: 8px 16px;
+    background: #e0e0e0;
+    color: #333;
+    border: 1px solid #ccc;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.retrieval-tab-btn:hover {
+    background: #d0d0d0;
+}
+
+.retrieval-tab-btn.active {
+    background: white;
+    color: #1e88e5;
+    border-bottom: 2px solid white;
+    border-color: #1e88e5 #1e88e5 white #1e88e5;
+}
+
+.retrieval-content {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.debug-section {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.debug-viz-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: white;
+}
+
 .error-message {
     color: #d32f2f;
     padding: 10px;
@@ -774,4 +823,58 @@ body {
 
 .delete-button:hover {
     background: #d32f2f;
+}
+
+/* Statistics Section */
+.stats-section {
+    background: white;
+    border: 2px solid #333;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.stats-section h3 {
+    margin: 0 0 20px 0;
+    color: #333;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+}
+
+.stat-card {
+    background: #f8f9fa;
+    border: 2px solid #dee2e6;
+    border-radius: 6px;
+    padding: 15px;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.stat-card:hover {
+    border-color: #42a5f5;
+    box-shadow: 0 2px 8px rgba(66, 165, 245, 0.2);
+    transform: translateY(-2px);
+}
+
+.stat-label {
+    font-size: 12px;
+    color: #666;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.stat-value {
+    font-size: 28px;
+    font-weight: bold;
+    color: #333;
+    line-height: 1;
 }

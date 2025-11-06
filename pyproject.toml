@@ -26,6 +26,8 @@ dependencies = [
     "greenlet>=3.2.4",
     "psycopg2-binary>=2.9.11",
     "pytest-timeout>=2.4.0",
+    "dateparser>=1.2.0",
+    "tiktoken>=0.12.0",
 ]
 
 [tool.hatch.build.targets.wheel]

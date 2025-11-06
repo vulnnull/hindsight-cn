@@ -98,6 +98,7 @@ async def test_batch_ingestion_single_call(memory):
         results, _ = await memory.search_async(
             agent_id=agent_id,
             query=question,
+            fact_type="world",
             thinking_budget=100,
             top_k=5,
             enable_trace=False

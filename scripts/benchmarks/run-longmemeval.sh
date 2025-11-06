@@ -40,4 +40,4 @@ set -a
 source "$ENV_FILE"
 set +a
 
-uv run python benchmarks/longmemeval/run_benchmark.py "${ARGS[@]}"
+uv run python benchmarks/longmemeval/longmemeval_benchmark.py "${ARGS[@]}"

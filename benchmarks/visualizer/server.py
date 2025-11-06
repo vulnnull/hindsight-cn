@@ -42,7 +42,7 @@ async def get_locomo_results(mode: str = "search") -> dict[str, Any]:
         else:
             filename = "benchmark_results.json"
 
-        results_path = BENCHMARKS_DIR / "locomo" / filename
+        results_path = BENCHMARKS_DIR / "locomo" / "results" / filename
 
         if not results_path.exists():
             raise HTTPException(

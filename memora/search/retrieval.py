@@ -1,0 +1,369 @@
+"""
+Retrieval module for 4-way parallel search.
+
+Implements:
+1. Semantic retrieval (vector similarity)
+2. BM25 retrieval (keyword/full-text search)
+3. Graph retrieval (spreading activation)
+4. Temporal retrieval (time-aware search with spreading)
+"""
+
+from typing import List, Dict, Any, Tuple, Optional
+from datetime import datetime
+import asyncio
+
+
+async def retrieve_semantic(
+    conn,
+    query_emb_str: str,
+    agent_id: str,
+    fact_type: str,
+    limit: int
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """
+    Semantic retrieval via vector similarity.
+
+    Args:
+        conn: Database connection
+        query_emb_str: Query embedding as string
+        agent_id: Agent ID
+        fact_type: Fact type to filter
+        limit: Maximum results to return
+
+    Returns:
+        List of (doc_id, data) tuples
+    """
+    results = await conn.fetch(
+        """
+        SELECT id, text, context, event_date, access_count, embedding,
+               1 - (embedding <=> $1::vector) AS similarity
+        FROM memory_units
+        WHERE agent_id = $2
+          AND embedding IS NOT NULL
+          AND fact_type = $3
+          AND (1 - (embedding <=> $1::vector)) >= 0.3
+        ORDER BY embedding <=> $1::vector
+        LIMIT $4
+        """,
+        query_emb_str, agent_id, fact_type, limit
+    )
+    return [(str(r["id"]), dict(r)) for r in results]
+
+
+async def retrieve_bm25(
+    conn,
+    query_text: str,
+    agent_id: str,
+    fact_type: str,
+    limit: int
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """
+    BM25 keyword retrieval via full-text search.
+
+    Args:
+        conn: Database connection
+        query_text: Query text
+        agent_id: Agent ID
+        fact_type: Fact type to filter
+        limit: Maximum results to return
+
+    Returns:
+        List of (doc_id, data) tuples
+    """
+    # Convert query to tsquery using OR for more flexible matching
+    # This prevents empty results when some terms are missing
+    query_tsquery = " | ".join(query_text.lower().split())
+
+    results = await conn.fetch(
+        """
+        SELECT id, text, context, event_date, access_count, embedding,
+               ts_rank_cd(search_vector, to_tsquery('english', $1)) AS bm25_score
+        FROM memory_units
+        WHERE agent_id = $2
+          AND fact_type = $3
+          AND search_vector @@ to_tsquery('english', $1)
+        ORDER BY bm25_score DESC
+        LIMIT $4
+        """,
+        query_tsquery, agent_id, fact_type, limit
+    )
+    return [(str(r["id"]), dict(r)) for r in results]
+
+
+async def retrieve_graph(
+    conn,
+    query_emb_str: str,
+    agent_id: str,
+    fact_type: str,
+    budget: int
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """
+    Graph retrieval via spreading activation.
+
+    Args:
+        conn: Database connection
+        query_emb_str: Query embedding as string
+        agent_id: Agent ID
+        fact_type: Fact type to filter
+        budget: Node budget for graph traversal
+
+    Returns:
+        List of (doc_id, data) tuples
+    """
+    # Find entry points
+    entry_points = await conn.fetch(
+        """
+        SELECT id, text, context, event_date, access_count, embedding,
+               1 - (embedding <=> $1::vector) AS similarity
+        FROM memory_units
+        WHERE agent_id = $2
+          AND embedding IS NOT NULL
+          AND fact_type = $3
+          AND (1 - (embedding <=> $1::vector)) >= 0.5
+        ORDER BY embedding <=> $1::vector
+        LIMIT 5
+        """,
+        query_emb_str, agent_id, fact_type
+    )
+
+    if not entry_points:
+        return []
+
+    # Simple BFS-style spreading activation
+    visited = set()
+    results = []
+    queue = [(dict(r), r["similarity"]) for r in entry_points]
+    budget_remaining = budget
+
+    while queue and budget_remaining > 0:
+        current, activation = queue.pop(0)
+        unit_id = str(current["id"])
+
+        if unit_id in visited:
+            continue
+
+        visited.add(unit_id)
+        budget_remaining -= 1
+        results.append((unit_id, current))
+
+        # Get neighbors
+        if budget_remaining > 0:
+            neighbors = await conn.fetch(
+                """
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding,
+                       ml.weight
+                FROM memory_links ml
+                JOIN memory_units mu ON ml.to_unit_id = mu.id
+                WHERE ml.from_unit_id = $1
+                  AND ml.weight >= 0.1
+                  AND mu.fact_type = $2
+                ORDER BY ml.weight DESC
+                LIMIT 10
+                """,
+                current["id"], fact_type
+            )
+
+            for n in neighbors:
+                neighbor_id = str(n["id"])
+                if neighbor_id not in visited:
+                    new_activation = activation * n["weight"] * 0.8
+                    if new_activation > 0.1:
+                        queue.append((dict(n), new_activation))
+
+    return results
+
+
+async def retrieve_temporal(
+    conn,
+    query_emb_str: str,
+    agent_id: str,
+    fact_type: str,
+    start_date: datetime,
+    end_date: datetime,
+    budget: int,
+    semantic_threshold: float = 0.4
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """
+    Temporal retrieval with spreading activation.
+
+    Strategy:
+    1. Find entry points (facts in date range with semantic relevance)
+    2. Spread through temporal links to related facts
+    3. Score by temporal proximity + semantic similarity + link weight
+
+    Args:
+        conn: Database connection
+        query_emb_str: Query embedding as string
+        agent_id: Agent ID
+        fact_type: Fact type to filter
+        start_date: Start of time range
+        end_date: End of time range
+        budget: Node budget for spreading
+        semantic_threshold: Minimum semantic similarity to include
+
+    Returns:
+        List of (doc_id, data) tuples with temporal_score
+    """
+    # Find entry points: facts in date range with semantic relevance
+    entry_points = await conn.fetch(
+        """
+        SELECT id, text, context, event_date, access_count, embedding,
+               1 - (embedding <=> $1::vector) AS similarity
+        FROM memory_units
+        WHERE agent_id = $2
+          AND fact_type = $3
+          AND embedding IS NOT NULL
+          AND event_date BETWEEN $4 AND $5
+          AND (1 - (embedding <=> $1::vector)) >= $6
+        ORDER BY event_date DESC, (embedding <=> $1::vector) ASC
+        LIMIT 10
+        """,
+        query_emb_str, agent_id, fact_type, start_date, end_date, semantic_threshold
+    )
+
+    if not entry_points:
+        return []
+
+    # Calculate temporal scores for entry points
+    total_days = (end_date - start_date).total_seconds() / 86400
+    results = []
+    visited = set()
+
+    for ep in entry_points:
+        unit_id = str(ep["id"])
+        visited.add(unit_id)
+
+        # Temporal proximity score (closer to range center = higher score)
+        event_date = ep["event_date"]
+        mid_date = start_date + (end_date - start_date) / 2
+        days_from_mid = abs((event_date - mid_date).total_seconds() / 86400)
+        temporal_proximity = 1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
+
+        data = dict(ep)
+        data["temporal_score"] = temporal_proximity
+        data["temporal_proximity"] = temporal_proximity
+        results.append((unit_id, data))
+
+    # Spread through temporal links
+    queue = [(dict(ep), ep["similarity"], 1.0) for ep in entry_points]  # (unit, semantic_sim, temporal_score)
+    budget_remaining = budget - len(entry_points)
+
+    while queue and budget_remaining > 0:
+        current, semantic_sim, temporal_score = queue.pop(0)
+        current_id = str(current["id"])
+
+        # Get neighbors via temporal links
+        if budget_remaining > 0:
+            neighbors = await conn.fetch(
+                """
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding,
+                       ml.weight, ml.link_type,
+                       1 - (mu.embedding <=> $1::vector) AS similarity
+                FROM memory_links ml
+                JOIN memory_units mu ON ml.to_unit_id = mu.id
+                WHERE ml.from_unit_id = $2
+                  AND ml.link_type = 'temporal'
+                  AND ml.weight >= 0.1
+                  AND mu.fact_type = $3
+                  AND mu.embedding IS NOT NULL
+                  AND (1 - (mu.embedding <=> $1::vector)) >= $4
+                ORDER BY ml.weight DESC
+                LIMIT 10
+                """,
+                query_emb_str, current["id"], fact_type, semantic_threshold
+            )
+
+            for n in neighbors:
+                neighbor_id = str(n["id"])
+                if neighbor_id in visited:
+                    continue
+
+                visited.add(neighbor_id)
+                budget_remaining -= 1
+
+                # Calculate temporal score for neighbor
+                neighbor_date = n["event_date"]
+                days_from_mid = abs((neighbor_date - mid_date).total_seconds() / 86400)
+                neighbor_temporal_proximity = 1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
+
+                # Propagate temporal score through links (decay)
+                propagated_temporal = temporal_score * n["weight"] * 0.7
+
+                # Combined temporal score
+                combined_temporal = max(neighbor_temporal_proximity, propagated_temporal)
+
+                neighbor_data = dict(n)
+                neighbor_data["temporal_score"] = combined_temporal
+                neighbor_data["temporal_proximity"] = neighbor_temporal_proximity
+                results.append((neighbor_id, neighbor_data))
+
+                # Add to queue for further spreading
+                if budget_remaining > 0 and combined_temporal > 0.2:
+                    queue.append((dict(n), n["similarity"], combined_temporal))
+
+                if budget_remaining <= 0:
+                    break
+
+    return results
+
+
+async def retrieve_parallel(
+    pool,
+    query_text: str,
+    query_embedding_str: str,
+    agent_id: str,
+    fact_type: str,
+    thinking_budget: int
+) -> Tuple[List, List, List, Optional[List]]:
+    """
+    Run 3-way or 4-way parallel retrieval (adds temporal if detected).
+
+    Args:
+        pool: Database connection pool
+        query_text: Query text
+        query_embedding_str: Query embedding as string
+        agent_id: Agent ID
+        fact_type: Fact type to filter
+        thinking_budget: Budget for graph traversal and retrieval limits
+
+    Returns:
+        Tuple of (semantic_results, bm25_results, graph_results, temporal_results)
+        temporal_results is None if no temporal constraint detected
+    """
+    # Detect temporal constraint
+    from .temporal_extraction import extract_temporal_constraint
+    temporal_constraint = extract_temporal_constraint(query_text)
+
+    # Each retrieval needs its own connection
+    async def run_semantic():
+        async with pool.acquire() as conn:
+            return await retrieve_semantic(conn, query_embedding_str, agent_id, fact_type, limit=thinking_budget)
+
+    async def run_bm25():
+        async with pool.acquire() as conn:
+            return await retrieve_bm25(conn, query_text, agent_id, fact_type, limit=thinking_budget)
+
+    async def run_graph():
+        async with pool.acquire() as conn:
+            return await retrieve_graph(conn, query_embedding_str, agent_id, fact_type, budget=thinking_budget)
+
+    async def run_temporal(start_date, end_date):
+        async with pool.acquire() as conn:
+            return await retrieve_temporal(
+                conn, query_embedding_str, agent_id, fact_type,
+                start_date, end_date, budget=thinking_budget, semantic_threshold=0.4
+            )
+
+    # Run retrievals in parallel
+    if temporal_constraint:
+        start_date, end_date = temporal_constraint
+        semantic_results, bm25_results, graph_results, temporal_results = await asyncio.gather(
+            run_semantic(), run_bm25(), run_graph(), run_temporal(start_date, end_date)
+        )
+    else:
+        semantic_results, bm25_results, graph_results = await asyncio.gather(
+            run_semantic(), run_bm25(), run_graph()
+        )
+        temporal_results = None
+
+    return semantic_results, bm25_results, graph_results, temporal_results

@@ -35,8 +35,9 @@ async def test_search_with_trace(memory):
         results, trace = await memory.search_async(
             agent_id=agent_id,
             query="Who works at Google?",
+            fact_type="world",
             thinking_budget=20,
-            top_k=5,
+            max_tokens=512,
             enable_trace=True,
         )
 
@@ -50,7 +51,7 @@ async def test_search_with_trace(memory):
         # Verify query info
         assert trace.query.query_text == "Who works at Google?"
         assert trace.query.thinking_budget == 20
-        assert trace.query.top_k == 5
+        assert trace.query.max_tokens == 512
         assert len(trace.query.query_embedding) > 0, "Query embedding should be populated"
 
         # Verify entry points
@@ -85,8 +86,9 @@ async def test_search_with_trace(memory):
         assert len(trace.summary.phase_metrics) > 0, "Should have phase metrics"
         phase_names = {pm.phase_name for pm in trace.summary.phase_metrics}
         assert "generate_query_embedding" in phase_names
-        assert "find_entry_points" in phase_names
-        assert "spreading_activation" in phase_names
+        assert "parallel_retrieval" in phase_names  # New modular architecture
+        assert "rrf_merge" in phase_names  # New modular architecture
+        assert "reranking" in phase_names  # New modular architecture
 
         # Test JSON export
         json_str = trace.to_json()
@@ -145,8 +147,9 @@ async def test_search_without_trace(memory):
         results, trace = await memory.search_async(
             agent_id=agent_id,
             query="test",
+            fact_type="world",
             thinking_budget=10,
-            top_k=5,
+            max_tokens=512,
             enable_trace=False,
         )
 

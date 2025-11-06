@@ -107,10 +107,22 @@ class LLMAnswerGenerator(ABC):
         pass
 
 
-class LLMAnswerEvaluator(ABC):
-    """Abstract base class for LLM-based answer evaluation."""
+class JudgeResponse(pydantic.BaseModel):
+    """Judge response format."""
+    correct: bool
+    reasoning: str
 
-    @abstractmethod
+
+class LLMAnswerEvaluator:
+    """LLM-based answer evaluator with configurable provider."""
+
+    def __init__(self):
+        """Initialize with LLM configuration for judge/evaluator."""
+        from memora.llm_wrapper import LLMConfig
+        self.llm_config = LLMConfig.for_judge()
+        self.client = self.llm_config.client
+        self.model = self.llm_config.model
+
     async def judge_answer(
         self,
         question: str,
@@ -119,7 +131,7 @@ class LLMAnswerEvaluator(ABC):
         semaphore: asyncio.Semaphore
     ) -> Tuple[bool, str]:
         """
-        Evaluate predicted answer against correct answer.
+        Evaluate predicted answer using LLM-as-judge.
 
         Args:
             question: The question
@@ -130,7 +142,52 @@ class LLMAnswerEvaluator(ABC):
         Returns:
             Tuple of (is_correct, reasoning)
         """
-        pass
+        async with semaphore:
+            try:
+                judgement = await self.llm_config.call(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an expert grader that determines if answers to questions match a gold standard answer"
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""
+Your task is to label an answer to a question as 'CORRECT' or 'WRONG'. You will be given the following data:
+        (1) a question (posed by one user to another user),
+        (2) a 'gold' (ground truth) answer,
+        (3) a generated answer
+    which you will score as CORRECT/WRONG.
+
+    The point of the question is to ask about something one user should know about the other user based on their prior conversations.
+    The gold answer will usually be a concise and short answer that includes the referenced topic, for example:
+    Question: Do you remember what I got the last time I went to Hawaii?
+    Gold answer: A shell necklace
+    The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT.
+
+    For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
+
+    Now it's time for the real question:
+    Question: {question}
+    Gold answer: {correct_answer}
+    Generated answer: {predicted_answer}
+
+    First, provide a short (one sentence) explanation of your reasoning. Short reasoning is preferred.
+    If it's correct, set correct=true.
+"""
+                        }
+                    ],
+                    response_format=JudgeResponse,
+                    scope="judge",
+                    temperature=0,
+                    max_tokens=4096
+                )
+
+                return judgement.correct, judgement.reasoning
+
+            except Exception as e:
+                print(f"Error judging answer: {e}")
+                return False, f"Error: {str(e)}"
 
 
 class BenchmarkRunner:
@@ -160,10 +217,17 @@ class BenchmarkRunner:
             answer_evaluator: Answer evaluator implementation
             memory: Memory system instance (creates new if None)
         """
+        import os
         self.dataset = dataset
         self.answer_generator = answer_generator
         self.answer_evaluator = answer_evaluator
-        self.memory = memory or TemporalSemanticMemory()
+        self.memory = memory or TemporalSemanticMemory(
+            db_url=os.getenv("DATABASE_URL"),
+            memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
+            memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
+            memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
+            memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
+        )
 
     async def ingest_conversation(
         self,
@@ -193,11 +257,7 @@ class BenchmarkRunner:
         agent_id: str,
         question: str,
         thinking_budget: int = 500,
-        top_k: int = 20,
-        weight_activation: float = 0.30,
-        weight_semantic: float = 0.30,
-        weight_recency: float = 0.25,
-        weight_frequency: float = 0.15,
+        max_tokens: int = 4096,
     ) -> Tuple[str, str, List[Dict]]:
         """
         Answer a question using memory retrieval.
@@ -212,11 +272,7 @@ class BenchmarkRunner:
                 agent_id=agent_id,
                 query=question,
                 thinking_budget=thinking_budget,
-                top_k=top_k,
-                weight_activation=weight_activation,
-                weight_semantic=weight_semantic,
-                weight_recency=weight_recency,
-                weight_frequency=weight_frequency,
+                max_tokens=max_tokens,
                 fact_type="world"
             )
 
@@ -246,13 +302,9 @@ class BenchmarkRunner:
         qa_pairs: List[Dict],
         item_id: str,
         thinking_budget: int,
-        top_k: int,
+        max_tokens: int,
         max_questions: Optional[int] = None,
         semaphore: asyncio.Semaphore = None,
-        weight_activation: float = 0.30,
-        weight_semantic: float = 0.30,
-        weight_recency: float = 0.25,
-        weight_frequency: float = 0.15,
     ) -> List[Dict]:
         """
         Evaluate QA task with parallel question processing.
@@ -286,20 +338,35 @@ class BenchmarkRunner:
                     correct_answer = qa['answer']
                     category = qa.get('category', 0)
 
-                    # Get predicted answer, reasoning, and retrieved memories
-                    predicted_answer, reasoning, retrieved_memories = await self.answer_question(
-                        agent_id, question, thinking_budget, top_k,
-                        weight_activation, weight_semantic, weight_recency, weight_frequency
-                    )
+                    try:
+                        # Get predicted answer, reasoning, and retrieved memories
+                        predicted_answer, reasoning, retrieved_memories = await self.answer_question(
+                            agent_id, question, thinking_budget, max_tokens
+                        )
 
-                    return {
-                        'question': question,
-                        'correct_answer': correct_answer,
-                        'predicted_answer': predicted_answer,
-                        'reasoning': reasoning,
-                        'category': category,
-                        'retrieved_memories': retrieved_memories
-                    }
+                        return {
+                            'question': question,
+                            'correct_answer': correct_answer,
+                            'predicted_answer': predicted_answer,
+                            'reasoning': reasoning,
+                            'category': category,
+                            'retrieved_memories': retrieved_memories,
+                            'is_invalid': False,
+                            'error': None
+                        }
+                    except Exception as e:
+                        # Mark as invalid if answer generation failed
+                        console.print(f"      [red]✗[/red] Failed to answer question: {str(e)[:100]}")
+                        return {
+                            'question': question,
+                            'correct_answer': correct_answer,
+                            'predicted_answer': 'ERROR: Failed to generate answer',
+                            'reasoning': f'Error: {str(e)}',
+                            'category': category,
+                            'retrieved_memories': [],
+                            'is_invalid': True,
+                            'error': str(e)
+                        }
 
             question_tasks = [process_question(qa) for qa in questions_to_eval]
 
@@ -342,15 +409,30 @@ class BenchmarkRunner:
 
             # Create all judgment tasks
             async def judge_single(result):
-                is_correct, eval_reasoning = await self.answer_evaluator.judge_answer(
-                    result['question'],
-                    result['correct_answer'],
-                    result['predicted_answer'],
-                    semaphore
-                )
-                result['is_correct'] = is_correct
-                result['correctness_reasoning'] = eval_reasoning
-                return result
+                # Skip judging if already marked as invalid
+                if result.get('is_invalid', False):
+                    result['is_correct'] = None
+                    result['correctness_reasoning'] = f"Question invalid due to error: {result.get('error', 'Unknown error')}"
+                    return result
+
+                try:
+                    is_correct, eval_reasoning = await self.answer_evaluator.judge_answer(
+                        result['question'],
+                        result['correct_answer'],
+                        result['predicted_answer'],
+                        semaphore
+                    )
+                    result['is_correct'] = is_correct
+                    result['correctness_reasoning'] = eval_reasoning
+                    return result
+                except Exception as e:
+                    # Mark as invalid if judging failed
+                    console.print(f"      [red]✗[/red] Failed to judge answer: {str(e)[:100]}")
+                    result['is_invalid'] = True
+                    result['is_correct'] = None
+                    result['correctness_reasoning'] = f"Judge error: {str(e)}"
+                    result['error'] = str(e)
+                    return result
 
             judgment_tasks = [judge_single(result) for result in results]
 
@@ -363,22 +445,29 @@ class BenchmarkRunner:
 
         # Calculate stats
         correct = sum(1 for r in judged_results if r.get('is_correct', False))
+        invalid = sum(1 for r in judged_results if r.get('is_invalid', False))
+        valid_total = total - invalid
         category_stats = {}
 
         for result in judged_results:
             category = result.get('category', 'unknown')
             if category not in category_stats:
-                category_stats[category] = {'correct': 0, 'total': 0}
+                category_stats[category] = {'correct': 0, 'total': 0, 'invalid': 0}
             category_stats[category]['total'] += 1
-            if result.get('is_correct', False):
+            if result.get('is_invalid', False):
+                category_stats[category]['invalid'] += 1
+            elif result.get('is_correct', False):
                 category_stats[category]['correct'] += 1
 
-        accuracy = (correct / total * 100) if total > 0 else 0
+        # Calculate accuracy excluding invalid questions
+        accuracy = (correct / valid_total * 100) if valid_total > 0 else 0
 
         return {
             'accuracy': accuracy,
             'correct': correct,
             'total': total,
+            'invalid': invalid,
+            'valid_total': valid_total,
             'category_stats': category_stats,
             'detailed_results': judged_results
         }
@@ -390,15 +479,11 @@ class BenchmarkRunner:
         i: int,
         total_items: int,
         thinking_budget: int,
-        top_k: int,
+        max_tokens: int,
         max_questions_per_item: Optional[int],
         skip_ingestion: bool,
         question_semaphore: asyncio.Semaphore,
         eval_semaphore_size: int = 8,
-        weight_activation: float = 0.30,
-        weight_semantic: float = 0.30,
-        weight_recency: float = 0.25,
-        weight_frequency: float = 0.15,
     ) -> Dict:
         """
         Process a single item (ingest + evaluate).
@@ -432,13 +517,9 @@ class BenchmarkRunner:
             qa_pairs,
             item_id,
             thinking_budget,
-            top_k,
+            max_tokens,
             max_questions_per_item,
             question_semaphore,
-            weight_activation,
-            weight_semantic,
-            weight_recency,
-            weight_frequency
         )
 
         # Calculate metrics
@@ -460,15 +541,12 @@ class BenchmarkRunner:
         max_items: Optional[int] = None,
         max_questions_per_item: Optional[int] = None,
         thinking_budget: int = 500,
-        top_k: int = 20,
+        max_tokens: int = 4096,
         skip_ingestion: bool = False,
-        max_concurrent_questions: int = 16,
+        max_concurrent_questions: int = 10,  # Match search semaphore limit
         eval_semaphore_size: int = 8,
         clear_agent_per_item: bool = False,
-        weight_activation: float = 0.30,
-        weight_semantic: float = 0.30,
-        weight_recency: float = 0.25,
-        weight_frequency: float = 0.15,
+        specific_item: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the full benchmark evaluation.
@@ -479,15 +557,12 @@ class BenchmarkRunner:
             max_items: Maximum number of items to evaluate
             max_questions_per_item: Maximum questions per item
             thinking_budget: Thinking budget for search
-            top_k: Number of memories to retrieve
+            max_tokens: Maximum tokens to retrieve from memories
             skip_ingestion: Skip ingestion and use existing data
             max_concurrent_questions: Max concurrent question processing
             eval_semaphore_size: Max concurrent LLM judge requests
             clear_agent_per_item: Clear agent data before each item (for isolation)
-            weight_activation: Weight for activation score in final ranking (default: 0.30)
-            weight_semantic: Weight for semantic similarity in final ranking (default: 0.30)
-            weight_recency: Weight for recency score in final ranking (default: 0.25)
-            weight_frequency: Weight for frequency score in final ranking (default: 0.15)
+            specific_item: If provided, only run this specific item ID (e.g., conversation)
 
         Returns:
             Dict with complete benchmark results
@@ -498,6 +573,15 @@ class BenchmarkRunner:
         # Load dataset
         console.print(f"\n[1] Loading dataset from {dataset_path}...")
         items = self.dataset.load(dataset_path, max_items)
+
+        # Filter for specific item if requested
+        if specific_item is not None:
+            items = [item for item in items if self.dataset.get_item_id(item) == specific_item]
+            if not items:
+                console.print(f"    [red]✗[/red] No item found with ID: {specific_item}")
+                raise ValueError(f"Item with ID '{specific_item}' not found in dataset")
+            console.print(f"    [green]✓[/green] Filtering to specific item: {specific_item}")
+
         console.print(f"    [green]✓[/green] Loaded {len(items)} items")
 
         # Initialize memory system
@@ -517,21 +601,25 @@ class BenchmarkRunner:
 
             result = await self.process_single_item(
                 item, agent_id, i, len(items),
-                thinking_budget, top_k, max_questions_per_item,
+                thinking_budget, max_tokens, max_questions_per_item,
                 skip_ingestion, question_semaphore, eval_semaphore_size,
-                weight_activation, weight_semantic, weight_recency, weight_frequency
             )
             all_results.append(result)
 
         # Calculate overall metrics
         total_correct = sum(r['metrics']['correct'] for r in all_results)
         total_questions = sum(r['metrics']['total'] for r in all_results)
-        overall_accuracy = (total_correct / total_questions * 100) if total_questions > 0 else 0
+        total_invalid = sum(r['metrics'].get('invalid', 0) for r in all_results)
+        total_valid = total_questions - total_invalid
+        # Calculate accuracy excluding invalid questions
+        overall_accuracy = (total_correct / total_valid * 100) if total_valid > 0 else 0
 
         return {
             'overall_accuracy': overall_accuracy,
             'total_correct': total_correct,
             'total_questions': total_questions,
+            'total_invalid': total_invalid,
+            'total_valid': total_valid,
             'num_items': len(items),
             'item_results': all_results
         }
@@ -546,30 +634,109 @@ class BenchmarkRunner:
         table.add_column("Sessions", justify="right", style="yellow")
         table.add_column("Questions", justify="right", style="blue")
         table.add_column("Correct", justify="right", style="green")
+        table.add_column("Invalid", justify="right", style="red")
         table.add_column("Accuracy", justify="right", style="magenta")
 
         for result in results['item_results']:
             metrics = result['metrics']
+            invalid_count = metrics.get('invalid', 0)
+            invalid_str = str(invalid_count) if invalid_count > 0 else "-"
             table.add_row(
                 result['item_id'],
                 str(result['num_sessions']),
                 str(metrics['total']),
                 str(metrics['correct']),
+                invalid_str,
                 f"{metrics['accuracy']:.1f}%"
             )
 
+        overall_invalid = results.get('total_invalid', 0)
+        invalid_str = str(overall_invalid) if overall_invalid > 0 else "-"
         table.add_row(
             "[bold]OVERALL[/bold]",
             "-",
             f"[bold]{results['total_questions']}[/bold]",
             f"[bold]{results['total_correct']}[/bold]",
+            f"[bold]{invalid_str}[/bold]",
             f"[bold]{results['overall_accuracy']:.1f}%[/bold]"
         )
 
         console.print(table)
 
-    def save_results(self, results: Dict[str, Any], output_path: Path):
-        """Save results to JSON file."""
+        # Display note about invalid questions if any
+        if overall_invalid > 0:
+            console.print(f"\n[yellow]Note: {overall_invalid} question(s) marked as invalid due to errors (excluded from accuracy calculation)[/yellow]")
+
+    def merge_results(self, new_results: Dict[str, Any], existing_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Merge new results into existing results.
+
+        Updates or adds item results, then recalculates overall metrics.
+
+        Args:
+            new_results: New results to merge (typically from a specific item run)
+            existing_results: Existing results to merge into
+
+        Returns:
+            Merged results with updated overall metrics
+        """
+        # Start with existing item results
+        merged_item_results = existing_results.get('item_results', [])
+
+        # Update or add new item results
+        for new_item in new_results['item_results']:
+            item_id = new_item['item_id']
+
+            # Find if item already exists
+            found = False
+            for i, existing_item in enumerate(merged_item_results):
+                if existing_item['item_id'] == item_id:
+                    # Replace existing item result
+                    merged_item_results[i] = new_item
+                    found = True
+                    console.print(f"    [yellow]→[/yellow] Updated results for item: {item_id}")
+                    break
+
+            if not found:
+                # Add new item result
+                merged_item_results.append(new_item)
+                console.print(f"    [green]+[/green] Added results for item: {item_id}")
+
+        # Recalculate overall metrics from all item results
+        total_correct = sum(r['metrics']['correct'] for r in merged_item_results)
+        total_questions = sum(r['metrics']['total'] for r in merged_item_results)
+        total_invalid = sum(r['metrics'].get('invalid', 0) for r in merged_item_results)
+        total_valid = total_questions - total_invalid
+        # Calculate accuracy excluding invalid questions
+        overall_accuracy = (total_correct / total_valid * 100) if total_valid > 0 else 0
+
+        return {
+            'overall_accuracy': overall_accuracy,
+            'total_correct': total_correct,
+            'total_questions': total_questions,
+            'total_invalid': total_invalid,
+            'total_valid': total_valid,
+            'num_items': len(merged_item_results),
+            'item_results': merged_item_results
+        }
+
+    def save_results(self, results: Dict[str, Any], output_path: Path, merge_with_existing: bool = False):
+        """
+        Save results to JSON file.
+
+        Args:
+            results: Results to save
+            output_path: Path to save results to
+            merge_with_existing: If True, merge with existing results file if it exists
+        """
+        if merge_with_existing and output_path.exists():
+            # Load existing results
+            with open(output_path, 'r') as f:
+                existing_results = json.load(f)
+
+            console.print(f"\n[cyan]Merging with existing results from {output_path}...[/cyan]")
+            results = self.merge_results(results, existing_results)
+
         with open(output_path, 'w') as f:
             json.dump(results, f, indent=2, default=str)
         console.print(f"\n[green]✓[/green] Results saved to {output_path}")
