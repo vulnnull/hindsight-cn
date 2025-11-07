@@ -281,6 +281,11 @@ class BenchmarkRunner:
                 contents=batch_contents
             )
 
+            # If using remote API, wait for this batch to complete before continuing
+            from memora.remote_client import RemoteMemoryClient
+            if isinstance(self.memory, RemoteMemoryClient):
+                await self.memory.wait_for_backlog_completion(agent_id, verbose=False)
+
         return len(batch_contents)
 
     async def answer_question(
@@ -702,6 +707,10 @@ class BenchmarkRunner:
 
         More realistic scenario where agent accumulates memories over time.
         """
+        # Check if using remote API client
+        from memora.remote_client import RemoteMemoryClient
+        is_remote = isinstance(self.memory, RemoteMemoryClient)
+
         # Phase 1: Ingestion
         if not skip_ingestion:
             # Calculate and display data statistics
@@ -718,23 +727,48 @@ class BenchmarkRunner:
             await self.memory.delete_agent(agent_id)
             console.print(f"    [green]✓[/green] Cleared agent data")
 
-            # Collect all sessions from all items into one large batch
-            console.print(f"    [yellow]Collecting sessions from all items...[/yellow]")
-            all_sessions = []
-            for item in items:
-                item_sessions = self.dataset.prepare_sessions_for_ingestion(item)
-                all_sessions.extend(item_sessions)
+            if is_remote:
+                # For remote API: send one request per instance, then poll
+                console.print(f"    [yellow]Sending {len(items)} instances (one request per instance)...[/yellow]")
+                total_sessions = 0
 
-            console.print(f"    [cyan]Collected {len(all_sessions)} sessions from {len(items)} items[/cyan]")
-            console.print(f"    [yellow]Ingesting in one batch (auto-chunks if needed)...[/yellow]")
+                for i, item in enumerate(items, 1):
+                    item_sessions = self.dataset.prepare_sessions_for_ingestion(item)
+                    total_sessions += len(item_sessions)
 
-            # Ingest all sessions in one batch call (will auto-chunk if too large)
-            await self.memory.put_batch_async(
-                agent_id=agent_id,
-                contents=all_sessions
-            )
+                    if item_sessions:
+                        await self.memory.put_batch_async(
+                            agent_id=agent_id,
+                            contents=item_sessions
+                        )
 
-            console.print(f"    [green]✓[/green] Ingested {len(all_sessions)} sessions from {len(items)} items")
+                    if i % 10 == 0 or i == len(items):
+                        console.print(f"        Sent {i}/{len(items)} instances ({total_sessions} sessions so far)")
+
+                console.print(f"    [green]✓[/green] Sent all {len(items)} instances ({total_sessions} sessions total)")
+
+                # Wait for all background processing to complete
+                console.print(f"    [yellow]Waiting for background processing to complete...[/yellow]")
+                await self.memory.wait_for_backlog_completion(agent_id, verbose=False)
+                console.print(f"    [green]✓[/green] Background processing complete")
+            else:
+                # For local memory: collect all and send in one batch (faster with auto-chunking)
+                console.print(f"    [yellow]Collecting sessions from all items...[/yellow]")
+                all_sessions = []
+                for item in items:
+                    item_sessions = self.dataset.prepare_sessions_for_ingestion(item)
+                    all_sessions.extend(item_sessions)
+
+                console.print(f"    [cyan]Collected {len(all_sessions)} sessions from {len(items)} items[/cyan]")
+                console.print(f"    [yellow]Ingesting in one batch (auto-chunks if needed)...[/yellow]")
+
+                # Ingest all sessions in one batch call (will auto-chunk if too large)
+                await self.memory.put_batch_async(
+                    agent_id=agent_id,
+                    contents=all_sessions
+                )
+
+                console.print(f"    [green]✓[/green] Ingested {len(all_sessions)} sessions from {len(items)} items")
         else:
             console.print(f"\n[3] Skipping ingestion (using existing data)")
 

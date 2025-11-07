@@ -314,7 +314,8 @@ async def run_benchmark(
     max_questions_per_conv: int = None,
     skip_ingestion: bool = False,
     use_think: bool = False,
-    conversation: str = None
+    conversation: str = None,
+    api_url: str = None
 ):
     """
     Run the LoComo benchmark.
@@ -325,16 +326,23 @@ async def run_benchmark(
         skip_ingestion: Whether to skip ingestion and use existing data
         use_think: Whether to use the think API instead of search + LLM
         conversation: Specific conversation ID to run (e.g., "conv-26")
+        api_url: Optional API URL to connect to (default: use local memory)
     """
     # Initialize components
     dataset = LoComoDataset()
-    memory = TemporalSemanticMemory(
-        db_url=os.getenv("DATABASE_URL"),
-        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
-        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
-        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
-        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
-    )
+
+    # Use remote API client if api_url is provided, otherwise use local memory
+    if api_url:
+        from memora.remote_client import RemoteMemoryClient
+        memory = RemoteMemoryClient(base_url=api_url)
+    else:
+        memory = TemporalSemanticMemory(
+            db_url=os.getenv("DATABASE_URL"),
+            memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
+            memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
+            memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
+            memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
+        )
     await memory.initialize()
 
     if use_think:
@@ -466,6 +474,7 @@ if __name__ == "__main__":
     parser.add_argument('--skip-ingestion', action='store_true', help='Skip ingestion and use existing data')
     parser.add_argument('--use-think', action='store_true', help='Use think API instead of search + LLM')
     parser.add_argument('--conversation', type=str, default=None, help='Run only specific conversation (e.g., "conv-26")')
+    parser.add_argument('--api-url', type=str, default=None, help='Memora API URL (default: use local memory, example: http://localhost:8000)')
 
     args = parser.parse_args()
 
@@ -474,5 +483,6 @@ if __name__ == "__main__":
         max_questions_per_conv=args.max_questions,
         skip_ingestion=args.skip_ingestion,
         use_think=args.use_think,
-        conversation=args.conversation
+        conversation=args.conversation,
+        api_url=args.api_url
     ))

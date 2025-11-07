@@ -186,7 +186,8 @@ async def run_benchmark(
     max_questions_per_instance: int = None,
     thinking_budget: int = 100,
     max_tokens: int = 4096,
-    skip_ingestion: bool = False
+    skip_ingestion: bool = False,
+    api_url: str = None
 ):
     """
     Run the LongMemEval benchmark.
@@ -197,6 +198,7 @@ async def run_benchmark(
         thinking_budget: Thinking budget for spreading activation search
         max_tokens: Maximum tokens to retrieve from memories
         skip_ingestion: Whether to skip ingestion and use existing data
+        api_url: Optional API URL to connect to (default: use local memory)
     """
     from rich.console import Console
     console = Console()
@@ -213,13 +215,19 @@ async def run_benchmark(
     dataset = LongMemEvalDataset()
     answer_generator = LongMemEvalAnswerGenerator()
     answer_evaluator = LLMAnswerEvaluator()
-    memory = TemporalSemanticMemory(
-        db_url=os.getenv("DATABASE_URL"),
-        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
-        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
-        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
-        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
-    )
+
+    # Use remote API client if api_url is provided, otherwise use local memory
+    if api_url:
+        from memora.remote_client import RemoteMemoryClient
+        memory = RemoteMemoryClient(base_url=api_url)
+    else:
+        memory = TemporalSemanticMemory(
+            db_url=os.getenv("DATABASE_URL"),
+            memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
+            memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
+            memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
+            memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
+        )
 
     # Create benchmark runner
     runner = BenchmarkRunner(
@@ -374,6 +382,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Skip ingestion and use existing data"
     )
+    parser.add_argument(
+        "--api-url",
+        type=str,
+        default=None,
+        help="Memora API URL (default: use local memory, example: http://localhost:8000)"
+    )
 
     args = parser.parse_args()
 
@@ -382,5 +396,6 @@ if __name__ == "__main__":
         max_questions_per_instance=args.max_questions,
         thinking_budget=args.thinking_budget,
         max_tokens=args.max_tokens,
-        skip_ingestion=args.skip_ingestion
+        skip_ingestion=args.skip_ingestion,
+        api_url=args.api_url
     ))

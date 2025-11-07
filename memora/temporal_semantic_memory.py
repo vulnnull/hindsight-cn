@@ -224,17 +224,32 @@ class TemporalSemanticMemory(
                       Example: {'type': 'access_count_update', 'node_ids': [...]}
         """
         task_type = task_dict.get('type')
+        operation_id = task_dict.get('operation_id')
 
-        if task_type == 'access_count_update':
-            await self._handle_access_count_update(task_dict)
-        elif task_type == 'reinforce_opinion':
-            await self._handle_reinforce_opinion(task_dict)
-        elif task_type == 'form_opinion':
-            await self._handle_form_opinion(task_dict)
-        elif task_type == 'batch_put':
-            await self._handle_batch_put(task_dict)
-        else:
-            logger.error(f"Unknown task type: {task_type}")
+        try:
+            if task_type == 'access_count_update':
+                await self._handle_access_count_update(task_dict)
+            elif task_type == 'reinforce_opinion':
+                await self._handle_reinforce_opinion(task_dict)
+            elif task_type == 'form_opinion':
+                await self._handle_form_opinion(task_dict)
+            elif task_type == 'batch_put':
+                await self._handle_batch_put(task_dict)
+            else:
+                logger.error(f"Unknown task type: {task_type}")
+        finally:
+            # Delete operation record if operation_id is present
+            if operation_id:
+                try:
+                    pool = await self._get_pool()
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            "DELETE FROM async_operations WHERE id = $1",
+                            uuid.UUID(operation_id)
+                        )
+                    logger.debug(f"Deleted async operation record: {operation_id}")
+                except Exception as e:
+                    logger.error(f"Failed to delete async operation record {operation_id}: {e}")
 
     async def initialize(self):
         """Initialize the connection pool and background workers."""

@@ -178,9 +178,6 @@ class EntityResolver:
         # Batch create new entities using multi-row VALUES
         if entities_to_create:
             import logging
-            logger = logging.getLogger(__name__)
-            create_start = time.time()
-
             # Build multi-row VALUES statement
             # VALUES ($1, $2, ...), ($N+1, $N+2, ...), ...
             values_clauses = []
@@ -212,7 +209,6 @@ class EntityResolver:
             for i, (idx, entity_data) in enumerate(entities_to_create):
                 entity_ids[idx] = created_rows[i]['id']
 
-            logger.info(f"        [6.2.2.X] Batch created {len(entities_to_create)} new entities in {time.time() - create_start:.3f}s")
 
         return entity_ids
 

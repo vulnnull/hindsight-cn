@@ -5,6 +5,7 @@ This module provides the create_app function to create and configure
 the FastAPI application with all API endpoints.
 """
 import logging
+import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -20,23 +21,23 @@ from memora import TemporalSemanticMemory
 class SearchRequest(BaseModel):
     """Request model for search endpoint."""
     query: str
+    fact_type: str
     agent_id: str = "default"
     thinking_budget: int = 100
     max_tokens: int = 4096
     reranker: str = "heuristic"
     trace: bool = False
-    fact_type: Optional[str] = None
 
     class Config:
         json_schema_extra = {
             "example": {
                 "query": "What did Alice say about machine learning?",
+                "fact_type": "world",
                 "agent_id": "user123",
                 "thinking_budget": 100,
                 "max_tokens": 4096,
                 "reranker": "heuristic",
-                "trace": True,
-                "fact_type": "world"
+                "trace": True
             }
         }
 
@@ -336,11 +337,26 @@ def _register_routes(app: FastAPI):
         response_model=SearchResponse,
         tags=["Search"],
         summary="Search memory",
-        description="Search memory using semantic similarity and spreading activation. Optionally filter by fact_type (world, agent, opinion)"
+        description="""
+    Search memory using semantic similarity and spreading activation.
+
+    The fact_type parameter is required and must be one of:
+    - 'world': General knowledge about people, places, events, and things that happen
+    - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
+    - 'opinion': The agent's formed beliefs, perspectives, and viewpoints
+        """
     )
     async def api_search(request: SearchRequest):
         """Run a search and return results with trace."""
         try:
+            # Validate fact_type
+            valid_fact_types = ["world", "agent", "opinion"]
+            if request.fact_type not in valid_fact_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid fact_type '{request.fact_type}'. Must be one of: {', '.join(valid_fact_types)}"
+                )
+
             # Run search with tracing
             results, trace = await app.state.memory.search_async(
                 agent_id=request.agent_id,
@@ -359,115 +375,12 @@ def _register_routes(app: FastAPI):
                 results=results,
                 trace=trace_dict
             )
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             print(f"Error in /api/search: {error_detail}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-
-    @app.post(
-        "/api/world_search",
-        response_model=SearchResponse,
-        tags=["Search"],
-        summary="Search world facts",
-        description="Search only world facts - general knowledge about people, places, events, and things that happen"
-    )
-    async def api_world_search(request: SearchRequest):
-        """Search only world facts (general knowledge about the world)."""
-        try:
-            # Run search with fact_type filter for 'world'
-            results, trace = await app.state.memory.search_async(
-                agent_id=request.agent_id,
-                query=request.query,
-                thinking_budget=request.thinking_budget,
-                max_tokens=request.max_tokens,
-                enable_trace=request.trace,
-                reranker=request.reranker,
-                fact_type='world'
-            )
-
-            # Convert trace to dict
-            trace_dict = trace.to_dict() if trace else None
-
-            return SearchResponse(
-                results=results,
-                trace=trace_dict
-            )
-        except Exception as e:
-            import traceback
-            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/world_search: {error_detail}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-
-    @app.post(
-        "/api/agent_search",
-        response_model=SearchResponse,
-        tags=["Search"],
-        summary="Search agent action facts",
-        description="Search only agent facts - memories about what the AI agent did, actions taken, and tasks performed"
-    )
-    async def api_agent_search(request: SearchRequest):
-        """Search only agent facts (facts about what the agent did)."""
-        try:
-            # Run search with fact_type filter for 'agent'
-            results, trace = await app.state.memory.search_async(
-                agent_id=request.agent_id,
-                query=request.query,
-                thinking_budget=request.thinking_budget,
-                max_tokens=request.max_tokens,
-                enable_trace=request.trace,
-                reranker=request.reranker,
-                fact_type='agent'
-            )
-
-            # Convert trace to dict
-            trace_dict = trace.to_dict() if trace else None
-
-            return SearchResponse(
-                results=results,
-                trace=trace_dict
-            )
-        except Exception as e:
-            import traceback
-            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/agent_search: {error_detail}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-
-    @app.post(
-        "/api/opinion_search",
-        response_model=SearchResponse,
-        tags=["Search"],
-        summary="Search agent opinions",
-        description="Search only opinion facts - the agent's formed beliefs, perspectives, and viewpoints"
-    )
-    async def api_opinion_search(request: SearchRequest):
-        """Search only opinion facts (agent's formed opinions and perspectives)."""
-        try:
-            # Run search with fact_type filter for 'opinion'
-            results, trace = await app.state.memory.search_async(
-                agent_id=request.agent_id,
-                query=request.query,
-                thinking_budget=request.thinking_budget,
-                max_tokens=request.max_tokens,
-                enable_trace=request.trace,
-                reranker=request.reranker,
-                fact_type='opinion'
-            )
-
-            # Convert trace to dict
-            trace_dict = trace.to_dict() if trace else None
-
-            return SearchResponse(
-                results=results,
-                trace=trace_dict
-            )
-        except Exception as e:
-            import traceback
-            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/opinion_search: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -562,6 +475,17 @@ def _register_routes(app: FastAPI):
                     agent_id
                 )
 
+                # Get pending operations count
+                pending_ops_result = await conn.fetchrow(
+                    """
+                    SELECT COUNT(*) as count
+                    FROM async_operations
+                    WHERE agent_id = $1
+                    """,
+                    agent_id
+                )
+                pending_operations = pending_ops_result['count'] if pending_ops_result else 0
+
                 # Format results
                 nodes_by_type = {row['fact_type']: row['count'] for row in node_stats}
                 links_by_type = {row['link_type']: row['count'] for row in link_stats}
@@ -574,7 +498,8 @@ def _register_routes(app: FastAPI):
                     "total_nodes": total_nodes,
                     "total_links": total_links,
                     "nodes_by_type": nodes_by_type,
-                    "links_by_type": links_by_type
+                    "links_by_type": links_by_type,
+                    "pending_operations": pending_operations
                 }
 
         except Exception as e:
@@ -696,9 +621,28 @@ def _register_routes(app: FastAPI):
                     content_dict["context"] = item.context
                 contents.append(content_dict)
 
-            # Submit task to background queue
+            # Generate UUID for this operation
+            operation_id = uuid.uuid4()
+
+            # Insert operation record into database BEFORE scheduling task
+            pool = await app.state.memory._get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO async_operations (id, agent_id, task_type, items_count, document_id)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    operation_id,
+                    request.agent_id,
+                    'batch_put',
+                    len(contents),
+                    request.document_id
+                )
+
+            # Submit task to background queue with operation_id
             await app.state.memory._task_backend.submit_task({
                 'type': 'batch_put',
+                'operation_id': str(operation_id),
                 'agent_id': request.agent_id,
                 'contents': contents,
                 'document_id': request.document_id,
@@ -706,7 +650,7 @@ def _register_routes(app: FastAPI):
                 'upsert': request.upsert
             })
 
-            logging.info(f"Batch put task queued for agent_id={request.agent_id}, {len(contents)} items")
+            logging.info(f"Batch put task queued for agent_id={request.agent_id}, {len(contents)} items, operation_id={operation_id}")
 
             return BatchPutAsyncResponse(
                 success=True,
