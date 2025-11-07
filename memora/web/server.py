@@ -206,6 +206,28 @@ class BatchPutResponse(BaseModel):
         }
 
 
+class BatchPutAsyncResponse(BaseModel):
+    """Response model for async batch put endpoint."""
+    success: bool
+    message: str
+    agent_id: str
+    document_id: Optional[str] = None
+    items_count: int
+    queued: bool
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "message": "Batch put task queued for background processing",
+                "agent_id": "user123",
+                "document_id": "conversation_123",
+                "items_count": 2,
+                "queued": True
+            }
+        }
+
+
 class ThinkRequest(BaseModel):
     """Request model for think endpoint."""
     query: str
@@ -634,6 +656,79 @@ def _register_routes(app: FastAPI):
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             print(f"Error in /api/memories/batch: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    @app.post(
+        "/api/memories/batch_async",
+        response_model=BatchPutAsyncResponse,
+        tags=["Memory Storage"],
+        summary="Store multiple memories asynchronously",
+        description="""
+    Store multiple memory items in batch asynchronously using the task backend.
+
+    This endpoint returns immediately after queuing the task, without waiting for completion.
+    The actual processing happens in the background.
+
+    Features:
+    - Immediate response (non-blocking)
+    - Background processing via task queue
+    - Efficient batch processing
+    - Automatic fact extraction from natural language
+    - Entity recognition and linking
+    - Document tracking with optional upsert
+    - Temporal and semantic linking
+
+    The system automatically:
+    1. Queues the batch put task
+    2. Returns immediately with success=True, queued=True
+    3. Processes in background: extracts facts, generates embeddings, creates links
+        """
+    )
+    async def api_batch_put_async(request: BatchPutRequest):
+        try:
+            # Validate agent_id - prevent writing to reserved agents
+            RESERVED_AGENT_IDS = {"locomo"}
+            if request.agent_id in RESERVED_AGENT_IDS:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Cannot write to reserved agent_id '{request.agent_id}'. Reserved agents: {', '.join(RESERVED_AGENT_IDS)}"
+                )
+
+            # Prepare contents for put_batch_async
+            contents = []
+            for item in request.items:
+                content_dict = {"content": item.content}
+                if item.event_date:
+                    content_dict["event_date"] = item.event_date
+                if item.context:
+                    content_dict["context"] = item.context
+                contents.append(content_dict)
+
+            # Submit task to background queue
+            await app.state.memory._task_backend.submit_task({
+                'type': 'batch_put',
+                'agent_id': request.agent_id,
+                'contents': contents,
+                'document_id': request.document_id,
+                'document_metadata': request.document_metadata,
+                'upsert': request.upsert
+            })
+
+            logging.info(f"Batch put task queued for agent_id={request.agent_id}, {len(contents)} items")
+
+            return BatchPutAsyncResponse(
+                success=True,
+                message=f"Batch put task queued for background processing ({len(contents)} items)",
+                agent_id=request.agent_id,
+                document_id=request.document_id,
+                items_count=len(contents),
+                queued=True
+            )
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/memories/batch_async: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
