@@ -551,8 +551,7 @@ class TemporalSemanticMemory(
         # Calculate total character count
         total_chars = sum(len(item.get("content", "")) for item in contents)
 
-        # Threshold: 50,000 characters per sub-batch (roughly 12k tokens with average 4 chars/token)
-        CHARS_PER_BATCH = 50_000
+        CHARS_PER_BATCH = 500_000
 
         if total_chars > CHARS_PER_BATCH:
             # Split into smaller batches based on character count

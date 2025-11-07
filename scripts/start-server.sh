@@ -82,5 +82,4 @@ if [[ ${#SERVER_ARGS[@]} -eq 0 ]]; then
   SERVER_ARGS=(--reload --host 0.0.0.0 --port 8080)
 fi
 
-open "http://localhost:${PORT}"
 uv run python -m memora.web.server "${SERVER_ARGS[@]}"

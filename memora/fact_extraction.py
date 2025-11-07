@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import List, Dict, Optional, Literal
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
+from .llm_wrapper import OutputTooLongError
 
 
 class Entity(BaseModel):
@@ -439,6 +440,112 @@ Remember:
     raise last_error
 
 
+async def _extract_facts_with_auto_split(
+    chunk: str,
+    chunk_index: int,
+    total_chunks: int,
+    event_date: datetime,
+    context: str,
+    llm_config: 'LLMConfig'
+) -> List[Dict[str, str]]:
+    """
+    Extract facts from a chunk with automatic splitting if output exceeds token limits.
+
+    If the LLM output is too long (OutputTooLongError), this function automatically
+    splits the chunk in half and processes each half recursively.
+
+    Args:
+        chunk: Text chunk to process
+        chunk_index: Index of this chunk in the original list
+        total_chunks: Total number of original chunks
+        event_date: Reference date for temporal information
+        context: Context about the conversation/document
+        llm_config: LLM configuration to use
+
+    Returns:
+        List of fact dictionaries extracted from the chunk (possibly from sub-chunks)
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Try to extract facts from the full chunk
+        return await _extract_facts_from_chunk(
+            chunk=chunk,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            event_date=event_date,
+            context=context,
+            llm_config=llm_config
+        )
+    except OutputTooLongError as e:
+        # Output exceeded token limits - split the chunk in half and retry
+        logger.warning(
+            f"Output too long for chunk {chunk_index + 1}/{total_chunks} "
+            f"({len(chunk)} chars). Splitting in half and retrying..."
+        )
+
+        # Split at the midpoint, preferring sentence boundaries
+        mid_point = len(chunk) // 2
+
+        # Try to find a sentence boundary near the midpoint
+        # Look for ". ", "! ", "? " within 20% of midpoint
+        search_range = int(len(chunk) * 0.2)
+        search_start = max(0, mid_point - search_range)
+        search_end = min(len(chunk), mid_point + search_range)
+
+        sentence_endings = ['. ', '! ', '? ', '\n\n']
+        best_split = mid_point
+
+        for ending in sentence_endings:
+            pos = chunk.rfind(ending, search_start, search_end)
+            if pos != -1:
+                best_split = pos + len(ending)
+                break
+
+        # Split the chunk
+        first_half = chunk[:best_split].strip()
+        second_half = chunk[best_split:].strip()
+
+        logger.info(
+            f"Split chunk {chunk_index + 1} into two sub-chunks: "
+            f"{len(first_half)} chars and {len(second_half)} chars"
+        )
+
+        # Process both halves recursively (in parallel)
+        sub_tasks = [
+            _extract_facts_with_auto_split(
+                chunk=first_half,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                event_date=event_date,
+                context=context,
+                llm_config=llm_config
+            ),
+            _extract_facts_with_auto_split(
+                chunk=second_half,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                event_date=event_date,
+                context=context,
+                llm_config=llm_config
+            )
+        ]
+
+        sub_results = await asyncio.gather(*sub_tasks)
+
+        # Combine results from both halves
+        all_facts = []
+        for sub_result in sub_results:
+            all_facts.extend(sub_result)
+
+        logger.info(
+            f"Successfully extracted {len(all_facts)} facts from split chunk {chunk_index + 1}"
+        )
+
+        return all_facts
+
+
 async def extract_facts_from_text(
     text: str,
     event_date: datetime,
@@ -451,6 +558,9 @@ async def extract_facts_from_text(
 
     For large texts (>chunk_size chars), automatically chunks at sentence boundaries
     to avoid hitting output token limits. Processes ALL chunks in PARALLEL for speed.
+
+    If a chunk produces output that exceeds token limits (OutputTooLongError), it is
+    automatically split in half and retried recursively until successful.
 
     Args:
         text: Input text (conversation, article, etc.)
@@ -473,7 +583,7 @@ async def extract_facts_from_text(
 
     chunks = chunk_text(text, max_chars=chunk_size)
     tasks = [
-        _extract_facts_from_chunk(
+        _extract_facts_with_auto_split(
             chunk=chunk,
             chunk_index=i,
             total_chunks=len(chunks),

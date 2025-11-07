@@ -5,13 +5,24 @@ import os
 import time
 import asyncio
 from typing import Optional, Any, Dict, List
-from openai import AsyncOpenAI, RateLimitError, APIError, APIStatusError
+from openai import AsyncOpenAI, RateLimitError, APIError, APIStatusError, LengthFinishReasonError
 import logging
 
 logger = logging.getLogger(__name__)
 
 # Disable httpx logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+class OutputTooLongError(Exception):
+    """
+    Bridge exception raised when LLM output exceeds token limits.
+
+    This wraps provider-specific errors (e.g., OpenAI's LengthFinishReasonError)
+    to allow callers to handle output length issues without depending on
+    provider-specific implementations.
+    """
+    pass
 
 
 class LLMConfig:
@@ -133,6 +144,13 @@ class LLMConfig:
                 )
 
                 return result
+
+            except LengthFinishReasonError as e:
+                # Output exceeded token limits - raise bridge exception for caller to handle
+                logger.warning(f"LLM output exceeded token limits: {str(e)}")
+                raise OutputTooLongError(
+                    f"LLM output exceeded token limits. Input may need to be split into smaller chunks."
+                ) from e
 
             except APIStatusError as e:
                 last_exception = e
