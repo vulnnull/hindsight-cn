@@ -6,15 +6,27 @@ This script imports the FastAPI app and exports its OpenAPI schema to a JSON fil
 """
 import json
 import sys
+import os
 from pathlib import Path
 
 # Add parent directory to path to import memory module
 sys.path.insert(0, str(Path(__file__).parent))
 
-from memora.web.server import app
+from memora.web.server import create_app
+from memora import TemporalSemanticMemory
 
 def generate_openapi_spec(output_path: str = "openapi.json"):
     """Generate OpenAPI spec and save to file."""
+    # Create a temporary memory instance for OpenAPI generation
+    _memory = TemporalSemanticMemory(
+        db_url=os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/memora"),
+        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
+        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY", "dummy"),
+        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
+        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,
+    )
+    app = create_app(_memory)
+
     # Get the OpenAPI schema from the app
     openapi_schema = app.openapi()
 

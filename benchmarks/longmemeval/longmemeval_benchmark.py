@@ -6,6 +6,9 @@ Provides dataset, answer generator, and evaluator for the LongMemEval benchmark.
 import sys
 from pathlib import Path
 
+from benchmarks.common.benchmark_runner import BenchmarkRunner
+from memora import TemporalSemanticMemory
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -227,7 +230,8 @@ async def run_benchmark(
     )
 
     # Run benchmark
-    # Note: LongMemEval requires clearing agent per item for isolation
+    # Two-phase approach: ingest all 500 conversations into single agent, then evaluate all questions
+    # This is more realistic and tests retrieval from a large memory base
     results = await runner.run(
         dataset_path=dataset_path,
         agent_id="longmemeval",
@@ -236,9 +240,9 @@ async def run_benchmark(
         thinking_budget=thinking_budget,
         max_tokens=max_tokens,
         skip_ingestion=skip_ingestion,
-        max_concurrent_questions=8,  # Lower for LongMemEval (each has full conversation)
+        max_concurrent_questions=8,
         eval_semaphore_size=8,
-        clear_agent_per_item=True  # Clear agent data per item for isolation
+        separate_ingestion_phase=True  # Ingest all data first, then evaluate all questions
     )
 
     # Display and save results
@@ -267,6 +271,9 @@ def download_dataset(dataset_path: Path) -> bool:
     console.print(f"[yellow]Dataset not found. Downloading from HuggingFace...[/yellow]")
     console.print(f"[dim]URL: {url}[/dim]")
     console.print(f"[dim]Destination: {dataset_path}[/dim]")
+
+    # Create parent directory if it doesn't exist
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         # Use curl to download with progress

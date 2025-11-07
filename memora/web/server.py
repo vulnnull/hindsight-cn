@@ -662,30 +662,83 @@ def _register_routes(app: FastAPI):
 
 
 
-# Create default app instance
-# Initialize memory system with environment variables
-_memory = TemporalSemanticMemory(
-    db_url=os.getenv("DATABASE_URL"),
-    memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
-    memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
-    memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
-    memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
-)
-app = create_app(_memory)
+def _create_default_app():
+    """Create app instance with default environment configuration."""
+    _memory = TemporalSemanticMemory(
+        db_url=os.getenv("DATABASE_URL"),
+        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
+        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
+        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
+        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,
+    )
+    return create_app(_memory)
+
+
+# Module-level app instance (lazy initialization)
+_app_instance = None
+
+
+def _get_app():
+    """Get or create the app instance."""
+    global _app_instance
+    if _app_instance is None:
+        _app_instance = _create_default_app()
+    return _app_instance
 
 
 if __name__ == "__main__":
     import uvicorn
+    import argparse
+
+    # Parse CLI arguments
+    parser = argparse.ArgumentParser(description="Memory Graph API Server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8080, help="Port to bind to (default: 8080)")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
+    parser.add_argument("--workers", type=int, default=1, help="Number of worker processes (default: 1)")
+    parser.add_argument("--log-level", default="info", choices=["critical", "error", "warning", "info", "debug", "trace"],
+                        help="Log level (default: info)")
+    parser.add_argument("--access-log", action="store_true", help="Enable access log")
+    parser.add_argument("--no-access-log", dest="access_log", action="store_false", help="Disable access log")
+    parser.add_argument("--proxy-headers", action="store_true", help="Enable X-Forwarded-Proto, X-Forwarded-For headers")
+    parser.add_argument("--forwarded-allow-ips", default=None, help="Comma separated list of IPs to trust with proxy headers")
+    parser.add_argument("--ssl-keyfile", default=None, help="SSL key file")
+    parser.add_argument("--ssl-certfile", default=None, help="SSL certificate file")
+    parser.set_defaults(access_log=False)
+
+    args = parser.parse_args()
+
+    # Create app after parsing args (so --help works without DB connection)
+    app = _create_default_app()
+
     print("\n" + "=" * 80)
     print("Memory Graph API Server")
     print("=" * 80)
-    print("\nStarting server at http://localhost:8080")
-    print("\nEndpoints:")
-    print("  GET  /                    - Visualization UI")
-    print("  GET  /api/graph           - Get graph data")
-    print("  POST /api/search          - Run search with trace")
-    print("  POST /api/memories/batch  - Store multiple memories in batch")
-    print("  GET  /api/agents          - List available agents")
-    print("\n" + "=" * 80 + "\n")
+    print(f"Host: {args.host}")
+    print(f"Port: {args.port}")
+    print(f"Reload: {args.reload}")
+    print(f"Workers: {args.workers}")
+    print(f"Log Level: {args.log_level}")
+    print("=" * 80 + "\n")
 
-    uvicorn.run("memora.web.server:app", host="0.0.0.0", port=8080, reload=True)
+    # Prepare uvicorn config
+    uvicorn_config = {
+        "app": app,
+        "host": args.host,
+        "port": args.port,
+        "reload": args.reload,
+        "workers": args.workers,
+        "log_level": args.log_level,
+        "access_log": args.access_log,
+        "proxy_headers": args.proxy_headers,
+    }
+
+    # Add optional parameters if provided
+    if args.forwarded_allow_ips:
+        uvicorn_config["forwarded_allow_ips"] = args.forwarded_allow_ips
+    if args.ssl_keyfile:
+        uvicorn_config["ssl_keyfile"] = args.ssl_keyfile
+    if args.ssl_certfile:
+        uvicorn_config["ssl_certfile"] = args.ssl_certfile
+
+    uvicorn.run(**uvicorn_config)

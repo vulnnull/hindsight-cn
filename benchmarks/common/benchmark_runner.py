@@ -229,6 +229,37 @@ class BenchmarkRunner:
             memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
         )
 
+    def calculate_data_stats(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Calculate statistics about the data to be ingested.
+
+        Returns:
+            Dict with statistics: total_sessions, total_chars, avg_session_length, etc.
+        """
+        total_sessions = 0
+        total_chars = 0
+        session_lengths = []
+
+        for item in items:
+            batch_contents = self.dataset.prepare_sessions_for_ingestion(item)
+            total_sessions += len(batch_contents)
+
+            for session in batch_contents:
+                content_len = len(session['content'])
+                total_chars += content_len
+                session_lengths.append(content_len)
+
+        avg_length = total_chars / total_sessions if total_sessions > 0 else 0
+
+        return {
+            'total_sessions': total_sessions,
+            'total_chars': total_chars,
+            'total_items': len(items),
+            'avg_session_length': avg_length,
+            'min_session_length': min(session_lengths) if session_lengths else 0,
+            'max_session_length': max(session_lengths) if session_lengths else 0
+        }
+
     async def ingest_conversation(
         self,
         item: Dict[str, Any],
@@ -547,6 +578,7 @@ class BenchmarkRunner:
         eval_semaphore_size: int = 8,
         clear_agent_per_item: bool = False,
         specific_item: Optional[str] = None,
+        separate_ingestion_phase: bool = False,
     ) -> Dict[str, Any]:
         """
         Run the full benchmark evaluation.
@@ -561,8 +593,9 @@ class BenchmarkRunner:
             skip_ingestion: Skip ingestion and use existing data
             max_concurrent_questions: Max concurrent question processing
             eval_semaphore_size: Max concurrent LLM judge requests
-            clear_agent_per_item: Clear agent data before each item (for isolation)
+            clear_agent_per_item: Use unique agent ID per item for isolation (deprecated when separate_ingestion_phase=True)
             specific_item: If provided, only run this specific item ID (e.g., conversation)
+            separate_ingestion_phase: If True, ingest all data first, then evaluate all questions (single agent)
 
         Returns:
             Dict with complete benchmark results
@@ -588,6 +621,35 @@ class BenchmarkRunner:
         console.print(f"\n[2] Initializing memory system...")
         console.print(f"    [green]✓[/green] Memory system initialized")
 
+        if separate_ingestion_phase:
+            # New two-phase approach: ingest all, then evaluate all
+            return await self._run_two_phase(
+                items, agent_id, thinking_budget, max_tokens,
+                skip_ingestion, max_questions_per_item,
+                max_concurrent_questions, eval_semaphore_size
+            )
+        else:
+            # Original approach: process each item independently
+            return await self._run_single_phase(
+                items, agent_id, thinking_budget, max_tokens,
+                skip_ingestion, max_questions_per_item,
+                max_concurrent_questions, eval_semaphore_size,
+                clear_agent_per_item
+            )
+
+    async def _run_single_phase(
+        self,
+        items: List[Dict[str, Any]],
+        agent_id: str,
+        thinking_budget: int,
+        max_tokens: int,
+        skip_ingestion: bool,
+        max_questions_per_item: Optional[int],
+        max_concurrent_questions: int,
+        eval_semaphore_size: int,
+        clear_agent_per_item: bool,
+    ) -> Dict[str, Any]:
+        """Original single-phase approach: process each item independently."""
         # Create semaphore for question processing
         question_semaphore = asyncio.Semaphore(max_concurrent_questions)
 
@@ -595,12 +657,12 @@ class BenchmarkRunner:
         all_results = []
 
         for i, item in enumerate(items, 1):
-            # Clear agent per item if requested (for isolation in benchmarks like LongMemEval)
-            if clear_agent_per_item and i > 1 and not skip_ingestion:
-                await self.memory.delete_agent(agent_id)
+            # Use unique agent ID per item if requested (for isolation in benchmarks like LongMemEval)
+            # This avoids deadlocks from deleting agent data
+            item_agent_id = f"{agent_id}_item_{i-1}" if clear_agent_per_item else agent_id
 
             result = await self.process_single_item(
-                item, agent_id, i, len(items),
+                item, item_agent_id, i, len(items),
                 thinking_budget, max_tokens, max_questions_per_item,
                 skip_ingestion, question_semaphore, eval_semaphore_size,
             )
@@ -612,6 +674,112 @@ class BenchmarkRunner:
         total_invalid = sum(r['metrics'].get('invalid', 0) for r in all_results)
         total_valid = total_questions - total_invalid
         # Calculate accuracy excluding invalid questions
+        overall_accuracy = (total_correct / total_valid * 100) if total_valid > 0 else 0
+
+        return {
+            'overall_accuracy': overall_accuracy,
+            'total_correct': total_correct,
+            'total_questions': total_questions,
+            'total_invalid': total_invalid,
+            'total_valid': total_valid,
+            'num_items': len(items),
+            'item_results': all_results
+        }
+
+    async def _run_two_phase(
+        self,
+        items: List[Dict[str, Any]],
+        agent_id: str,
+        thinking_budget: int,
+        max_tokens: int,
+        skip_ingestion: bool,
+        max_questions_per_item: Optional[int],
+        max_concurrent_questions: int,
+        eval_semaphore_size: int,
+    ) -> Dict[str, Any]:
+        """
+        Two-phase approach: ingest all data into single agent, then evaluate all questions.
+
+        More realistic scenario where agent accumulates memories over time.
+        """
+        # Phase 1: Ingestion
+        if not skip_ingestion:
+            # Calculate and display data statistics
+            console.print(f"\n[3] Analyzing data to be ingested...")
+            stats = self.calculate_data_stats(items)
+            console.print(f"    [cyan]Total items:[/cyan] {stats['total_items']}")
+            console.print(f"    [cyan]Total sessions:[/cyan] {stats['total_sessions']}")
+            console.print(f"    [cyan]Total characters:[/cyan] {stats['total_chars']:,}")
+            console.print(f"    [cyan]Avg session length:[/cyan] {stats['avg_session_length']:.0f} chars")
+            console.print(f"    [cyan]Session length range:[/cyan] {stats['min_session_length']}-{stats['max_session_length']} chars")
+
+            console.print(f"\n[4] Phase 1: Ingesting all data into agent '{agent_id}'...")
+            console.print(f"    [yellow]Clearing previous agent data...[/yellow]")
+            await self.memory.delete_agent(agent_id)
+            console.print(f"    [green]✓[/green] Cleared agent data")
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                console=console
+            ) as progress:
+                task = progress.add_task(
+                    f"[cyan]Ingesting {len(items)} items...",
+                    total=len(items)
+                )
+
+                total_sessions = 0
+                for item in items:
+                    num_sessions = await self.ingest_conversation(item, agent_id)
+                    total_sessions += num_sessions
+                    progress.update(task, advance=1)
+
+            console.print(f"    [green]✓[/green] Ingested {total_sessions} sessions from {len(items)} items")
+        else:
+            console.print(f"\n[3] Skipping ingestion (using existing data)")
+
+        # Phase 2: Evaluation
+        console.print(f"\n[5] Phase 2: Evaluating all questions...")
+
+        # Create semaphore for question processing
+        question_semaphore = asyncio.Semaphore(max_concurrent_questions)
+
+        all_results = []
+        for i, item in enumerate(items, 1):
+            item_id = self.dataset.get_item_id(item)
+            console.print(f"\n[bold blue]Item {i}/{len(items)}[/bold blue] (ID: {item_id})")
+
+            # Get QA pairs
+            qa_pairs = self.dataset.get_qa_pairs(item)
+            console.print(f"  Evaluating {len(qa_pairs)} QA pairs (parallel)...")
+
+            qa_results = await self.evaluate_qa_task(
+                agent_id,
+                qa_pairs,
+                item_id,
+                thinking_budget,
+                max_tokens,
+                max_questions_per_item,
+                question_semaphore,
+            )
+
+            # Calculate metrics
+            metrics = await self.calculate_metrics(qa_results, eval_semaphore_size)
+            console.print(f"  [green]✓[/green] Accuracy: {metrics['accuracy']:.2f}% ({metrics['correct']}/{metrics['total']})")
+
+            all_results.append({
+                'item_id': item_id,
+                'metrics': metrics,
+                'num_sessions': -1  # Not tracked in two-phase mode
+            })
+
+        # Calculate overall metrics
+        total_correct = sum(r['metrics']['correct'] for r in all_results)
+        total_questions = sum(r['metrics']['total'] for r in all_results)
+        total_invalid = sum(r['metrics'].get('invalid', 0) for r in all_results)
+        total_valid = total_questions - total_invalid
         overall_accuracy = (total_correct / total_valid * 100) if total_valid > 0 else 0
 
         return {

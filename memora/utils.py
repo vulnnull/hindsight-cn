@@ -1,6 +1,7 @@
 """
 Utility functions for memory system.
 """
+import logging
 from datetime import datetime
 from typing import List, Dict, TYPE_CHECKING
 
@@ -38,7 +39,8 @@ async def extract_facts(text: str, event_date: datetime, context: str = "", llm_
     fact_dicts = await extract_facts_from_text(text, event_date, context, llm_config=llm_config)
 
     if not fact_dicts:
-        raise Exception(f"LLM extracted 0 facts from text of length {len(text)}. This may indicate the text contains no meaningful information, or the LLM failed to extract facts.")
+        logging.warning(f"LLM extracted 0 facts from text of length {len(text)}. This may indicate the text contains no meaningful information, or the LLM failed to extract facts. Full text: {text}")
+        return []
 
     return fact_dicts
 
