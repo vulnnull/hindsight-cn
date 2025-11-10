@@ -62,7 +62,7 @@ export function DocumentsView() {
         type="text"
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
-        placeholder="Search documents (ID, metadata)..."
+        placeholder="Search documents (ID)..."
         className="w-full max-w-2xl px-2.5 py-2 mb-4 mx-5 border-2 border-border bg-background text-foreground rounded text-sm focus:outline-none focus:ring-2 focus:ring-ring"
       />
 
@@ -75,7 +75,6 @@ export function DocumentsView() {
               <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Updated</th>
               <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Text Length</th>
               <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Memory Units</th>
-              <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Metadata</th>
               <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Actions</th>
             </tr>
           </thead>
@@ -94,11 +93,6 @@ export function DocumentsView() {
                   </td>
                   <td className="p-2 border border-border">{doc.text_length?.toLocaleString()} chars</td>
                   <td className="p-2 border border-border">{doc.memory_unit_count}</td>
-                  <td className="p-2 border border-border" title={JSON.stringify(doc.metadata)}>
-                    {Object.keys(doc.metadata || {}).length > 0
-                      ? JSON.stringify(doc.metadata).substring(0, 50) + '...'
-                      : 'None'}
-                  </td>
                   <td className="p-2 border border-border">
                     <button
                       onClick={() => viewDocumentText(doc.id)}
@@ -112,7 +106,7 @@ export function DocumentsView() {
               ))
             ) : (
               <tr>
-                <td colSpan={7} className="p-10 text-center text-muted-foreground bg-muted">
+                <td colSpan={6} className="p-10 text-center text-muted-foreground bg-muted">
                   Click "Load Documents" to view data
                 </td>
               </tr>

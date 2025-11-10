@@ -1281,6 +1281,7 @@ class TemporalSemanticMemory(
                     "text": data["text"],
                     "context": data.get("context", ""),
                     "event_date": data["event_date"],  # Keep as datetime for now
+                    "fact_type": data.get("fact_type"),  # Include fact type for filtering
                     "access_count": data.get("access_count", 0),
                     "semantic_similarity": semantic_sim,
                     "bm25_score": bm25_score,
@@ -1447,12 +1448,12 @@ class TemporalSemanticMemory(
         async with pool.acquire() as conn:
             doc = await conn.fetchrow(
                 """
-                SELECT d.id, d.agent_id, d.original_text, d.content_hash, d.metadata,
+                SELECT d.id, d.agent_id, d.original_text, d.content_hash,
                        d.created_at, d.updated_at, COUNT(mu.id) as unit_count
                 FROM documents d
                 LEFT JOIN memory_units mu ON mu.document_id = d.id
                 WHERE d.id = $1 AND d.agent_id = $2
-                GROUP BY d.id, d.agent_id, d.original_text, d.content_hash, d.metadata, d.created_at, d.updated_at
+                GROUP BY d.id, d.agent_id, d.original_text, d.content_hash, d.created_at, d.updated_at
                 """,
                 document_id, agent_id
             )
@@ -1460,13 +1461,11 @@ class TemporalSemanticMemory(
             if not doc:
                 return None
 
-            import json
             return {
                 "id": doc["id"],
                 "agent_id": doc["agent_id"],
                 "original_text": doc["original_text"],
                 "content_hash": doc["content_hash"],
-                "metadata": json.loads(doc["metadata"]) if doc["metadata"] else {},
                 "unit_count": doc["unit_count"],
                 "created_at": doc["created_at"],
                 "updated_at": doc["updated_at"]
@@ -1871,7 +1870,7 @@ class TemporalSemanticMemory(
 
     async def list_documents(
         self,
-        agent_id: Optional[str] = None,
+        agent_id: str,
         search_query: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
@@ -1880,8 +1879,8 @@ class TemporalSemanticMemory(
         List documents with optional search and pagination.
 
         Args:
-            agent_id: Filter by agent ID
-            search_query: Search in metadata (JSON text search)
+            agent_id: Agent ID (required)
+            search_query: Search in document ID
             limit: Maximum number of results
             offset: Offset for pagination
 
@@ -1895,15 +1894,14 @@ class TemporalSemanticMemory(
             query_params = []
             param_count = 0
 
-            if agent_id:
-                param_count += 1
-                query_conditions.append(f"agent_id = ${param_count}")
-                query_params.append(agent_id)
+            param_count += 1
+            query_conditions.append(f"agent_id = ${param_count}")
+            query_params.append(agent_id)
 
             if search_query:
-                # Search in document ID and metadata (as text)
+                # Search in document ID
                 param_count += 1
-                query_conditions.append(f"(id ILIKE ${param_count} OR metadata::text ILIKE ${param_count})")
+                query_conditions.append(f"id ILIKE ${param_count}")
                 query_params.append(f"%{search_query}%")
 
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
@@ -1931,7 +1929,6 @@ class TemporalSemanticMemory(
                     id,
                     agent_id,
                     content_hash,
-                    metadata,
                     created_at,
                     updated_at,
                     LENGTH(original_text) as text_length
@@ -1979,7 +1976,6 @@ class TemporalSemanticMemory(
                     "id": doc_id,
                     "agent_id": agent_id_val,
                     "content_hash": row['content_hash'],
-                    "metadata": row['metadata'] if row['metadata'] else {},
                     "created_at": row['created_at'].isoformat() if row['created_at'] else "",
                     "updated_at": row['updated_at'].isoformat() if row['updated_at'] else "",
                     "text_length": row['text_length'] or 0,
@@ -2016,7 +2012,6 @@ class TemporalSemanticMemory(
                     agent_id,
                     original_text,
                     content_hash,
-                    metadata,
                     created_at,
                     updated_at
                 FROM documents
@@ -2038,7 +2033,6 @@ class TemporalSemanticMemory(
                 "agent_id": doc['agent_id'],
                 "original_text": doc['original_text'],
                 "content_hash": doc['content_hash'],
-                "metadata": doc['metadata'] if doc['metadata'] else {},
                 "created_at": doc['created_at'].isoformat() if doc['created_at'] else "",
                 "updated_at": doc['updated_at'].isoformat() if doc['updated_at'] else "",
                 "memory_unit_count": unit_count_row['unit_count'] if unit_count_row else 0

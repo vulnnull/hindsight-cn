@@ -21,7 +21,7 @@ from memora import TemporalSemanticMemory
 class SearchRequest(BaseModel):
     """Request model for search endpoint."""
     query: str
-    fact_type: List[str]  # List of fact types to search
+    fact_type: Optional[List[str]] = None  # List of fact types to search (defaults to all if not specified)
     agent_id: str = "default"
     thinking_budget: int = 100
     max_tokens: int = 4096
@@ -274,7 +274,6 @@ class ListDocumentsResponse(BaseModel):
                         "id": "session_1",
                         "agent_id": "user123",
                         "content_hash": "abc123",
-                        "metadata": {"source": "conversation"},
                         "created_at": "2024-01-15T10:30:00Z",
                         "updated_at": "2024-01-15T10:30:00Z",
                         "text_length": 5420,
@@ -294,7 +293,6 @@ class DocumentResponse(BaseModel):
     agent_id: str
     original_text: str
     content_hash: Optional[str]
-    metadata: Dict[str, Any]
     created_at: str
     updated_at: str
     memory_unit_count: int
@@ -306,7 +304,6 @@ class DocumentResponse(BaseModel):
                 "agent_id": "user123",
                 "original_text": "Full document text here...",
                 "content_hash": "abc123",
-                "metadata": {"source": "conversation"},
                 "created_at": "2024-01-15T10:30:00Z",
                 "updated_at": "2024-01-15T10:30:00Z",
                 "memory_unit_count": 15
@@ -379,15 +376,6 @@ The system uses:
 
 def _register_routes(app: FastAPI):
     """Register all API routes on the given app instance."""
-
-    @app.get("/", include_in_schema=False)
-    async def index():
-        """Root endpoint - directs to control plane."""
-        return {
-            "message": "Memory Control Plane API",
-            "docs": "/docs",
-            "control_plane": "The web UI has moved to the Next.js control plane. Please use the control-plane directory."
-        }
 
 
     @app.get(
@@ -472,18 +460,16 @@ def _register_routes(app: FastAPI):
             # Validate fact_type(s)
             valid_fact_types = ["world", "agent", "opinion"]
 
+            # Default to all fact types if not specified
             if not request.fact_type:
-                raise HTTPException(
-                    status_code=400,
-                    detail="fact_type must be a non-empty list"
-                )
-
-            for ft in request.fact_type:
-                if ft not in valid_fact_types:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid fact_type '{ft}'. Must be one of: {', '.join(valid_fact_types)}"
-                    )
+                request.fact_type = valid_fact_types
+            else:
+                for ft in request.fact_type:
+                    if ft not in valid_fact_types:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Invalid fact_type '{ft}'. Must be one of: {', '.join(valid_fact_types)}"
+                        )
 
             # Parse question_date if provided
             question_date = None
@@ -508,11 +494,22 @@ def _register_routes(app: FastAPI):
                 question_date=question_date
             )
 
+            # Filter results to only include specific fields
+            filtered_results = [
+                {
+                    "id": result.get("id"),
+                    "text": result.get("text"),
+                    "context": result.get("context"),
+                    "event_date": result.get("event_date")
+                }
+                for result in results
+            ]
+
             # Convert trace to dict
             trace_dict = trace.to_dict() if trace else None
 
             return SearchResponse(
-                results=results,
+                results=filtered_results,
                 trace=trace_dict
             )
         except HTTPException:
@@ -672,7 +669,7 @@ def _register_routes(app: FastAPI):
         description="List documents with pagination and optional search. Documents are the source content from which memory units are extracted."
     )
     async def api_list_documents(
-        agent_id: Optional[str] = None,
+        agent_id: str,
         q: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
@@ -681,7 +678,7 @@ def _register_routes(app: FastAPI):
         List documents for an agent with optional search.
 
         Args:
-            agent_id: Filter by agent ID
+            agent_id: Agent ID (required)
             q: Search query (searches document ID and metadata)
             limit: Maximum number of results (default: 100)
             offset: Offset for pagination (default: 0)
@@ -760,14 +757,6 @@ def _register_routes(app: FastAPI):
     )
     async def api_batch_put(request: BatchPutRequest):
         try:
-            # Validate agent_id - prevent writing to reserved agents
-            RESERVED_AGENT_IDS = {"locomo"}
-            if request.agent_id in RESERVED_AGENT_IDS:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Cannot write to reserved agent_id '{request.agent_id}'. Reserved agents: {', '.join(RESERVED_AGENT_IDS)}"
-                )
-
             # Prepare contents for put_batch_async
             contents = []
             for item in request.items:
@@ -784,7 +773,7 @@ def _register_routes(app: FastAPI):
                 contents=contents,
                 document_id=request.document_id
             )
-            logging.info(f"Batch put result: {result}")
+
 
             return BatchPutResponse(
                 success=True,
@@ -830,14 +819,6 @@ def _register_routes(app: FastAPI):
     )
     async def api_batch_put_async(request: BatchPutRequest):
         try:
-            # Validate agent_id - prevent writing to reserved agents
-            RESERVED_AGENT_IDS = {"locomo"}
-            if request.agent_id in RESERVED_AGENT_IDS:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Cannot write to reserved agent_id '{request.agent_id}'. Reserved agents: {', '.join(RESERVED_AGENT_IDS)}"
-                )
-
             # Prepare contents for put_batch_async
             contents = []
             for item in request.items:

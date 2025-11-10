@@ -57,10 +57,14 @@ class ThinkOperationsMixin:
             fact_type=['agent', 'world', 'opinion']
         )
 
+        logger.info(f"[THINK] Search returned {len(all_results)} results")
+
         # Split results by fact type for structured response
         agent_results = [r for r in all_results if r.get('fact_type') == 'agent']
         world_results = [r for r in all_results if r.get('fact_type') == 'world']
         opinion_results = [r for r in all_results if r.get('fact_type') == 'opinion']
+
+        logger.info(f"[THINK] Split results - agent: {len(agent_results)}, world: {len(world_results)}, opinion: {len(opinion_results)}")
 
         # Step 4: Format facts for LLM with full details as JSON
         import json
@@ -99,6 +103,8 @@ class ThinkOperationsMixin:
         world_facts_text = format_facts(world_results)
         opinion_facts_text = format_facts(opinion_results)
 
+        logger.info(f"[THINK] Formatted facts - agent: {len(agent_facts_text)} chars, world: {len(world_facts_text)} chars, opinion: {len(opinion_facts_text)} chars")
+
         # Step 5: Call Groq to formulate answer
         prompt = f"""You are an AI assistant answering a question based on retrieved facts provided in JSON format.
 
@@ -122,6 +128,9 @@ The facts above are provided as JSON arrays. Each fact may include:
 Provide a helpful, accurate answer based on the facts above. Be consistent with your existing opinions. If the facts don't contain enough information to answer the question, say so clearly. Do not use markdown formatting - respond in plain text only.
 
 If you form any new opinions while thinking about this question, state them clearly in your answer."""
+
+        logger.info(f"[THINK] Full prompt length: {len(prompt)} chars")
+        logger.debug(f"[THINK] Prompt preview (first 500 chars): {prompt[:500]}")
 
         answer_text = await self._llm_config.call(
             messages=[
