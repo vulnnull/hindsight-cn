@@ -9,9 +9,6 @@ from pathlib import Path
 from benchmarks.common.benchmark_runner import BenchmarkRunner
 from memora import TemporalSemanticMemory
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 import json
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Tuple, Optional
@@ -20,9 +17,7 @@ import pydantic
 from openai import AsyncOpenAI
 import os
 
-# Import common framework
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from common.benchmark_runner import BenchmarkDataset, LLMAnswerGenerator, LLMAnswerEvaluator
+from benchmarks.common.benchmark_runner import BenchmarkDataset, LLMAnswerGenerator, LLMAnswerEvaluator
 from memora.llm_wrapper import LLMConfig
 
 

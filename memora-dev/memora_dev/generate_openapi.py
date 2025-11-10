@@ -9,9 +9,6 @@ import sys
 import os
 from pathlib import Path
 
-# Add parent directory to path to import memory module
-sys.path.insert(0, str(Path(__file__).parent))
-
 from memora.api import create_app
 from memora import TemporalSemanticMemory
 

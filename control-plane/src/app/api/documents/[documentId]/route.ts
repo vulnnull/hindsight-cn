@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const DATAPLANE_URL = process.env.NEXT_PUBLIC_DATAPLANE_API_URL || 'http://localhost:8080';
+const DATAPLANE_URL = process.env.DATAPLANE_API_URL || 'http://localhost:8080';
 
 export async function GET(
   request: NextRequest,

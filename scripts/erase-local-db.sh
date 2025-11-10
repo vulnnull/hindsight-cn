@@ -7,7 +7,7 @@ echo "🛑 Stopping and erasing local PostgreSQL..."
 echo ""
 
 # Stop and remove containers, networks, volumes
-cd docker
+cd local-db
 docker-compose down -v
 
 echo ""

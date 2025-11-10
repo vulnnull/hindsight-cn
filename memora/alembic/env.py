@@ -23,14 +23,17 @@ def load_env():
     if os.getenv("DATABASE_URL"):
         return
 
+    # Look for .env files in the parent directory (root of the workspace)
+    root_dir = Path(__file__).parent.parent.parent
+
     # Default to local environment
-    env_file = ".env.local"
-    if Path(env_file).exists():
+    env_file = root_dir / ".env.local"
+    if env_file.exists():
         load_dotenv(env_file)
     else:
         # Fallback to dev
-        env_file = ".env.dev"
-        if Path(env_file).exists():
+        env_file = root_dir / ".env.dev"
+        if env_file.exists():
             load_dotenv(env_file)
 
 load_env()

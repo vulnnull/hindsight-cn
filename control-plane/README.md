@@ -84,7 +84,7 @@ cp .env.local.example .env.local
 Edit `.env.local`:
 
 ```env
-NEXT_PUBLIC_DATAPLANE_API_URL=http://localhost:8080
+DATAPLANE_API_URL=http://localhost:8080
 ```
 
 ### Development

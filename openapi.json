@@ -472,7 +472,7 @@
           "Memory Storage"
         ],
         "summary": "Store multiple memories",
-        "description": "Store multiple memory items in batch with automatic fact extraction.\n\n    Features:\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with optional upsert\n    - Temporal and semantic linking\n\n    The system automatically:\n    1. Extracts semantic facts from the content\n    2. Generates embeddings\n    3. Deduplicates similar facts\n    4. Creates temporal, semantic, and entity links\n    5. Tracks document metadata",
+        "description": "Store multiple memory items in batch with automatic fact extraction.\n\n    Features:\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with automatic upsert (when document_id is provided)\n    - Temporal and semantic linking\n\n    The system automatically:\n    1. Extracts semantic facts from the content\n    2. Generates embeddings\n    3. Deduplicates similar facts\n    4. Creates temporal, semantic, and entity links\n    5. Tracks document metadata\n\n    Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).",
         "operationId": "api_batch_put_api_memories_batch_post",
         "requestBody": {
           "content": {
@@ -514,7 +514,7 @@
           "Memory Storage"
         ],
         "summary": "Store multiple memories asynchronously",
-        "description": "Store multiple memory items in batch asynchronously using the task backend.\n\n    This endpoint returns immediately after queuing the task, without waiting for completion.\n    The actual processing happens in the background.\n\n    Features:\n    - Immediate response (non-blocking)\n    - Background processing via task queue\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with optional upsert\n    - Temporal and semantic linking\n\n    The system automatically:\n    1. Queues the batch put task\n    2. Returns immediately with success=True, queued=True\n    3. Processes in background: extracts facts, generates embeddings, creates links",
+        "description": "Store multiple memory items in batch asynchronously using the task backend.\n\n    This endpoint returns immediately after queuing the task, without waiting for completion.\n    The actual processing happens in the background.\n\n    Features:\n    - Immediate response (non-blocking)\n    - Background processing via task queue\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with automatic upsert (when document_id is provided)\n    - Temporal and semantic linking\n\n    The system automatically:\n    1. Queues the batch put task\n    2. Returns immediately with success=True, queued=True\n    3. Processes in background: extracts facts, generates embeddings, creates links\n\n    Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).",
         "operationId": "api_batch_put_async_api_memories_batch_async_post",
         "requestBody": {
           "content": {
@@ -776,23 +776,6 @@
               }
             ],
             "title": "Document Id"
-          },
-          "document_metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Document Metadata"
-          },
-          "upsert": {
-            "type": "boolean",
-            "title": "Upsert",
-            "default": false
           }
         },
         "type": "object",
@@ -814,8 +797,7 @@
               "content": "Bob went hiking yesterday",
               "event_date": "2024-01-15T10:00:00Z"
             }
-          ],
-          "upsert": false
+          ]
         }
       },
       "BatchPutResponse": {
@@ -1188,7 +1170,10 @@
             "title": "Query"
           },
           "fact_type": {
-            "type": "string",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
             "title": "Fact Type"
           },
           "agent_id": {
@@ -1215,6 +1200,17 @@
             "type": "boolean",
             "title": "Trace",
             "default": false
+          },
+          "question_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question Date"
           }
         },
         "type": "object",
@@ -1226,9 +1222,13 @@
         "description": "Request model for search endpoint.",
         "example": {
           "agent_id": "user123",
-          "fact_type": "world",
+          "fact_type": [
+            "world",
+            "agent"
+          ],
           "max_tokens": 4096,
           "query": "What did Alice say about machine learning?",
+          "question_date": "2023-05-30T23:40:00",
           "reranker": "heuristic",
           "thinking_budget": 100,
           "trace": true

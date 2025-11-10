@@ -6,6 +6,13 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 
+[manifest]
+members = [
+    "benchmarks",
+    "memora",
+    "memora-dev",
+]
+
 [[package]]
 name = "alembic"
 version = "1.17.1"
@@ -206,6 +213,29 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/77/e9/df2358efd7659577435e2177bfa69cba6c33216681af51a707193dec162a/beautifulsoup4-4.14.2.tar.gz", hash = "sha256:2a98ab9f944a11acee9cc848508ec28d9228abfd522ef0fad6a02a72e0ded69e", size = 625822 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/94/fe/3aed5d0be4d404d12d36ab97e2f1791424d9ca39c2f754a6285d59a3b01d/beautifulsoup4-4.14.2-py3-none-any.whl", hash = "sha256:5ef6fa3a8cbece8488d66985560f97ed091e22bbc4e9c2338508a9d5de6d4515", size = 106392 },
+]
+
+[[package]]
+name = "benchmarks"
+version = "0.1.0"
+source = { editable = "benchmarks" }
+dependencies = [
+    { name = "memora" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "python-fasthtml" },
+    { name = "rich" },
+    { name = "streamlit" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "memora", editable = "memora" },
+    { name = "openai", specifier = ">=1.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "python-fasthtml", specifier = ">=0.12.33" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "streamlit", specifier = ">=1.51.0" },
 ]
 
 [[package]]
@@ -1015,7 +1045,7 @@ wheels = [
 [[package]]
 name = "memora"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "memora" }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
@@ -1032,11 +1062,9 @@ dependencies = [
     { name = "pytest-asyncio" },
     { name = "pytest-timeout" },
     { name = "python-dotenv" },
-    { name = "python-fasthtml" },
     { name = "rich" },
     { name = "sentence-transformers" },
     { name = "sqlalchemy" },
-    { name = "streamlit" },
     { name = "tiktoken" },
     { name = "uvicorn" },
 ]
@@ -1058,14 +1086,23 @@ requires-dist = [
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "python-fasthtml", specifier = ">=0.12.33" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "sentence-transformers", specifier = ">=2.2.0" },
     { name = "sqlalchemy", specifier = ">=2.0.44" },
-    { name = "streamlit", specifier = ">=1.51.0" },
     { name = "tiktoken", specifier = ">=0.12.0" },
     { name = "uvicorn", specifier = ">=0.38.0" },
 ]
+
+[[package]]
+name = "memora-dev"
+version = "0.1.0"
+source = { editable = "memora-dev" }
+dependencies = [
+    { name = "memora" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "memora", editable = "memora" }]
 
 [[package]]
 name = "mpmath"

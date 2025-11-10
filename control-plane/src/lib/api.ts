@@ -213,7 +213,7 @@ export class ServerDataplaneClient {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_DATAPLANE_API_URL || 'http://localhost:8080';
+    this.baseUrl = process.env.DATAPLANE_API_URL || 'http://localhost:8080';
   }
 
   async fetchDataplane<T>(

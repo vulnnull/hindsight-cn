@@ -7,7 +7,7 @@ echo "🚀 Starting local PostgreSQL..."
 echo ""
 
 # Start docker compose
-cd docker
+cd local-db
 docker-compose up -d
 
 echo ""
@@ -25,7 +25,9 @@ cd ..
 export DATABASE_URL="postgresql://memora:memora_dev@localhost:5432/memora"
 
 echo "📊 Running database migrations..."
+cd memora
 uv run alembic upgrade head
+cd ..
 
 echo ""
 echo "✅ Database initialized successfully!"

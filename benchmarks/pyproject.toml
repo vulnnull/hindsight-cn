@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "benchmarks"
+version = "0.1.0"
+description = "Benchmarks for Memora memory system"
+requires-python = ">=3.11"
+dependencies = [
+    "memora",
+    "python-fasthtml>=0.12.33",
+    "streamlit>=1.51.0",
+    "openai>=1.0.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["benchmarks"]
+
+[tool.uv.sources]
+memora = { workspace = true }

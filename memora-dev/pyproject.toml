@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memora-dev"
+version = "0.1.0"
+description = "Development utilities for Memora"
+requires-python = ">=3.11"
+dependencies = [
+    "memora",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["memora_dev"]
+
+[tool.uv.sources]
+memora = { workspace = true }
