@@ -7,7 +7,7 @@ the FastAPI application with all API endpoints.
 import logging
 import uuid
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
@@ -21,23 +21,25 @@ from memora import TemporalSemanticMemory
 class SearchRequest(BaseModel):
     """Request model for search endpoint."""
     query: str
-    fact_type: str
+    fact_type: List[str]  # List of fact types to search
     agent_id: str = "default"
     thinking_budget: int = 100
     max_tokens: int = 4096
     reranker: str = "heuristic"
     trace: bool = False
+    question_date: Optional[str] = None  # ISO format date string (e.g., "2023-05-30T23:40:00")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "query": "What did Alice say about machine learning?",
-                "fact_type": "world",
+                "fact_type": ["world", "agent"],
                 "agent_id": "user123",
                 "thinking_budget": 100,
                 "max_tokens": 4096,
                 "reranker": "heuristic",
-                "trace": True
+                "trace": True,
+                "question_date": "2023-05-30T23:40:00"
             }
         }
 
@@ -87,8 +89,6 @@ class BatchPutRequest(BaseModel):
     agent_id: str
     items: List[MemoryItem]
     document_id: Optional[str] = None
-    document_metadata: Optional[Dict[str, Any]] = None
-    upsert: bool = False
 
     class Config:
         json_schema_extra = {
@@ -104,8 +104,7 @@ class BatchPutRequest(BaseModel):
                         "event_date": "2024-01-15T10:00:00Z"
                     }
                 ],
-                "document_id": "conversation_123",
-                "upsert": False
+                "document_id": "conversation_123"
             }
         }
 
@@ -357,10 +356,6 @@ The system uses:
         }
     )
 
-    # Mount static files (web directory is sibling to this file)
-    web_dir = Path(__file__).parent / "web"
-    app.mount("/static", StaticFiles(directory=str(web_dir / "static")), name="static")
-
     @app.on_event("startup")
     async def startup_event():
         """Initialize memory system on startup."""
@@ -387,9 +382,12 @@ def _register_routes(app: FastAPI):
 
     @app.get("/", include_in_schema=False)
     async def index():
-        """Serve the visualization page."""
-        web_dir = Path(__file__).parent / "web"
-        return FileResponse(str(web_dir / "templates" / "index.html"))
+        """Root endpoint - directs to control plane."""
+        return {
+            "message": "Memory Control Plane API",
+            "docs": "/docs",
+            "control_plane": "The web UI has moved to the Next.js control plane. Please use the control-plane directory."
+        }
 
 
     @app.get(
@@ -471,13 +469,32 @@ def _register_routes(app: FastAPI):
     async def api_search(request: SearchRequest):
         """Run a search and return results with trace."""
         try:
-            # Validate fact_type
+            # Validate fact_type(s)
             valid_fact_types = ["world", "agent", "opinion"]
-            if request.fact_type not in valid_fact_types:
+
+            if not request.fact_type:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid fact_type '{request.fact_type}'. Must be one of: {', '.join(valid_fact_types)}"
+                    detail="fact_type must be a non-empty list"
                 )
+
+            for ft in request.fact_type:
+                if ft not in valid_fact_types:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid fact_type '{ft}'. Must be one of: {', '.join(valid_fact_types)}"
+                    )
+
+            # Parse question_date if provided
+            question_date = None
+            if request.question_date:
+                try:
+                    question_date = datetime.fromisoformat(request.question_date.replace('Z', '+00:00'))
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid question_date format. Expected ISO format (e.g., '2023-05-30T23:40:00'): {str(e)}"
+                    )
 
             # Run search with tracing
             results, trace = await app.state.memory.search_async(
@@ -487,7 +504,8 @@ def _register_routes(app: FastAPI):
                 max_tokens=request.max_tokens,
                 enable_trace=request.trace,
                 reranker=request.reranker,
-                fact_type=request.fact_type
+                fact_type=request.fact_type,
+                question_date=question_date
             )
 
             # Convert trace to dict
@@ -727,7 +745,7 @@ def _register_routes(app: FastAPI):
     - Efficient batch processing
     - Automatic fact extraction from natural language
     - Entity recognition and linking
-    - Document tracking with optional upsert
+    - Document tracking with automatic upsert (when document_id is provided)
     - Temporal and semantic linking
 
     The system automatically:
@@ -736,6 +754,8 @@ def _register_routes(app: FastAPI):
     3. Deduplicates similar facts
     4. Creates temporal, semantic, and entity links
     5. Tracks document metadata
+
+    Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
         """
     )
     async def api_batch_put(request: BatchPutRequest):
@@ -762,9 +782,7 @@ def _register_routes(app: FastAPI):
             result = await app.state.memory.put_batch_async(
                 agent_id=request.agent_id,
                 contents=contents,
-                document_id=request.document_id,
-                document_metadata=request.document_metadata,
-                upsert=request.upsert
+                document_id=request.document_id
             )
             logging.info(f"Batch put result: {result}")
 
@@ -799,13 +817,15 @@ def _register_routes(app: FastAPI):
     - Efficient batch processing
     - Automatic fact extraction from natural language
     - Entity recognition and linking
-    - Document tracking with optional upsert
+    - Document tracking with automatic upsert (when document_id is provided)
     - Temporal and semantic linking
 
     The system automatically:
     1. Queues the batch put task
     2. Returns immediately with success=True, queued=True
     3. Processes in background: extracts facts, generates embeddings, creates links
+
+    Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
         """
     )
     async def api_batch_put_async(request: BatchPutRequest):
@@ -852,9 +872,7 @@ def _register_routes(app: FastAPI):
                 'operation_id': str(operation_id),
                 'agent_id': request.agent_id,
                 'contents': contents,
-                'document_id': request.document_id,
-                'document_metadata': request.document_metadata,
-                'upsert': request.upsert
+                'document_id': request.document_id
             })
 
             logging.info(f"Batch put task queued for agent_id={request.agent_id}, {len(contents)} items, operation_id={operation_id}")

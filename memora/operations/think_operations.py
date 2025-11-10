@@ -46,36 +46,21 @@ class ThinkOperationsMixin:
         if self._llm_config is None:
             raise ValueError("Memory LLM API key not set. Set MEMORY_LLM_API_KEY environment variable.")
 
-        # Steps 1-3: Run all three searches in parallel
-        (agent_results, _), (world_results, _), (opinion_results, _) = await asyncio.gather(
-            # Get agent facts (identity)
-            self.search_async(
-                agent_id=agent_id,
-                query=query,
-                thinking_budget=thinking_budget,
-                max_tokens=4096,
-                enable_trace=False,
-                fact_type='agent'
-            ),
-            # Get world facts
-            self.search_async(
-                agent_id=agent_id,
-                query=query,
-                thinking_budget=thinking_budget,
-                max_tokens=4096,
-                enable_trace=False,
-                fact_type='world'
-            ),
-            # Get existing opinions
-            self.search_async(
-                agent_id=agent_id,
-                query=query,
-                thinking_budget=thinking_budget,
-                max_tokens=4096,
-                enable_trace=False,
-                fact_type='opinion'
-            )
+        # Steps 1-3: Run multi-fact-type search (12-way retrieval: 4 methods × 3 fact types)
+        # This is more efficient than 3 separate searches as it merges and reranks all results together
+        all_results, _ = await self.search_async(
+            agent_id=agent_id,
+            query=query,
+            thinking_budget=thinking_budget,
+            max_tokens=4096,
+            enable_trace=False,
+            fact_type=['agent', 'world', 'opinion']
         )
+
+        # Split results by fact type for structured response
+        agent_results = [r for r in all_results if r.get('fact_type') == 'agent']
+        world_results = [r for r in all_results if r.get('fact_type') == 'world']
+        opinion_results = [r for r in all_results if r.get('fact_type') == 'opinion']
 
         # Step 4: Format facts for LLM with full details as JSON
         import json

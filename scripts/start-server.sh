@@ -79,7 +79,7 @@ echo ""
 
 # Set default arguments if not provided
 if [[ ${#SERVER_ARGS[@]} -eq 0 ]]; then
-  SERVER_ARGS=(--reload --host 0.0.0.0 --port 8080)
+  SERVER_ARGS=(--host 0.0.0.0 --port 8080)
 fi
 
 uv run python -m memora.web.server "${SERVER_ARGS[@]}"

@@ -35,7 +35,7 @@ async def test_search_with_trace(memory):
         results, trace = await memory.search_async(
             agent_id=agent_id,
             query="Who works at Google?",
-            fact_type="world",
+            fact_type=["world"],
             thinking_budget=20,
             max_tokens=512,
             enable_trace=True,
@@ -147,7 +147,7 @@ async def test_search_without_trace(memory):
         results, trace = await memory.search_async(
             agent_id=agent_id,
             query="test",
-            fact_type="world",
+            fact_type=["world"],
             thinking_budget=10,
             max_tokens=512,
             enable_trace=False,

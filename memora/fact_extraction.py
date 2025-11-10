@@ -20,9 +20,6 @@ class Entity(BaseModel):
     text: str = Field(
         description="The entity name as it appears in the fact"
     )
-    type: Literal["PERSON", "ORG", "PLACE", "PRODUCT", "CONCEPT", "OTHER"] = Field(
-        description="Entity type: PERSON, ORG, PLACE, PRODUCT, CONCEPT, or OTHER for entities that don't fit other categories"
-    )
 
 
 class ExtractedFact(BaseModel):
@@ -184,13 +181,7 @@ Classify each fact as either 'world' or 'agent':
 - **'agent'**: Only for AI agent's own actions
 
 ## ENTITY EXTRACTION
-Extract ALL important entities with types:
-- **PERSON**: Names of individuals
-- **ORG**: Companies, institutions, teams
-- **PLACE**: Cities, countries, locations
-- **PRODUCT**: Products, tools, technologies
-- **CONCEPT**: Topics, projects, subjects
-- **OTHER**: Entities that don't fit above
+Extract ALL important entities (names of people, places, organizations, products, concepts, etc).
 
 Extract proper nouns and key identifying terms. Skip pronouns and generic terms.
 
@@ -217,7 +208,7 @@ Bob: Perfect, let's go with that!"
 **✅ GOOD (one comprehensive fact):**
 "Alice and Bob discussed naming their summer party playlist. Bob suggested 'Summer Vibes' because it's catchy and seasonal, but Alice wanted something more unique. Bob then proposed 'Sunset Sessions' and 'Beach Beats', with Alice favoring 'Beach Beats' for its playful and fun tone. They ultimately decided on 'Beach Beats' as the final name."
 - fact_type: "world"
-- entities: [{{"text": "Alice", "type": "PERSON"}}, {{"text": "Bob", "type": "PERSON"}}]
+- entities: [{{"text": "Alice"}}, {{"text": "Bob"}}]
 
 ### Example 2: Photo Sharing with Context
 **Input:**
@@ -231,7 +222,7 @@ Nate: I picked bright orange because it's bold and makes me feel confident. Plus
 **✅ GOOD (comprehensive with all context):**
 "Nate shared a photo of his new bright orange hair. When asked why he chose that color, Nate explained he picked it because it's bold and makes him feel confident, and it matches his personality."
 - fact_type: "world"
-- entities: [{{"text": "Nate", "type": "PERSON"}}]
+- entities: [{{"text": "Nate"}}]
 - NOTE: Preserves that it's a PHOTO, it's NEW hair, the COLOR, and the FULL reasoning
 
 ### Example 3: Travel Planning
@@ -252,7 +243,7 @@ Sarah: Sounds amazing! I'll add it to my itinerary."
 "Sarah is planning to visit Japan next spring, and Mike recommended Kyoto as the perfect destination for cherry blossom season. Mike explained that Kyoto has the most beautiful temples and spectacular cherry blossoms, based on his visit there in 2019. Sarah decided to add Kyoto to her itinerary."
 - fact_type: "world"
 - date: Next spring from reference date
-- entities: [{{"text": "Sarah", "type": "PERSON"}}, {{"text": "Mike", "type": "PERSON"}}, {{"text": "Japan", "type": "PLACE"}}, {{"text": "Kyoto", "type": "PLACE"}}]
+- entities: [{{"text": "Sarah"}}, {{"text": "Mike"}}, {{"text": "Japan"}}, {{"text": "Kyoto"}}]
 
 ### Example 4: Job News
 **Input:**
@@ -262,7 +253,7 @@ Sarah: Sounds amazing! I'll add it to my itinerary."
 "Alice works at Google in Mountain View on the AI team, which she joined in 2023, and she loves the company culture there."
 - fact_type: "world"
 - date: 2023 (if reference is 2024)
-- entities: [{{"text": "Alice", "type": "PERSON"}}, {{"text": "Google", "type": "ORG"}}, {{"text": "Mountain View", "type": "PLACE"}}, {{"text": "AI team", "type": "ORG"}}]
+- entities: [{{"text": "Alice"}}, {{"text": "Google"}}, {{"text": "Mountain View"}}, {{"text": "AI team"}}]
 
 ### Example 5: When to Split into Multiple Facts
 **Input:**
@@ -270,10 +261,10 @@ Sarah: Sounds amazing! I'll add it to my itinerary."
 
 **✅ GOOD (split into 2 facts - different topics):**
 1. "Caroline received a necklace from her grandmother in Sweden"
-   - entities: [{{"text": "Caroline", "type": "PERSON"}}, {{"text": "Sweden", "type": "PLACE"}}]
+   - entities: [{{"text": "Caroline"}}, {{"text": "Sweden"}}]
 2. "Caroline is planning to visit Stockholm next month to attend a tech conference"
    - date: Next month from reference
-   - entities: [{{"text": "Caroline", "type": "PERSON"}}, {{"text": "Stockholm", "type": "PLACE"}}]
+   - entities: [{{"text": "Caroline"}}, {{"text": "Stockholm"}}]
 - NOTE: Split because one is about the past (necklace) and one is future plans (conference) - completely different topics
 
 ## TEXT TO EXTRACT FROM:
@@ -303,7 +294,6 @@ Sarah: Sounds amazing! I'll add it to my itinerary."
 
     for attempt in range(max_retries):
         try:
-            llm_call_start = time.time()
             extraction_response = await llm_config.call(
                 messages=[
                     {
@@ -321,11 +311,7 @@ Sarah: Sounds amazing! I'll add it to my itinerary."
                 max_tokens=65000,
                 extra_body={"service_tier": "auto"}
             )
-            llm_call_time = time.time() - llm_call_start
-
-            # Convert to dict format
             chunk_facts = [fact.model_dump() for fact in extraction_response.facts]
-
             return chunk_facts
 
         except BadRequestError as e:

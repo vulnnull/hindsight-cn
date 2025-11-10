@@ -19,8 +19,7 @@ async def test_document_creation_and_retrieval(memory):
             agent_id=agent_id,
             content="Alice works at Google. Bob works at Microsoft.",
             context="Team meeting",
-            document_id=document_id,
-            document_metadata={"source": "meeting", "participants": ["Alice", "Bob"]}
+            document_id=document_id
         )
 
         # Retrieve document
@@ -30,8 +29,7 @@ async def test_document_creation_and_retrieval(memory):
         assert doc["id"] == document_id
         assert doc["agent_id"] == agent_id
         assert "Alice works at Google" in doc["original_text"]
-        assert doc["metadata"]["source"] == "meeting"
-        assert doc["unit_count"] > 0
+        assert doc["memory_unit_count"] > 0
 
     finally:
         await memory.delete_agent(agent_id)
@@ -39,7 +37,7 @@ async def test_document_creation_and_retrieval(memory):
 
 @pytest.mark.asyncio
 async def test_document_upsert(memory):
-    """Test that upsert deletes old units and creates new ones."""
+    """Test that providing the same document_id automatically upserts (deletes old units and creates new ones)."""
     agent_id = f"test_upsert_{datetime.now(timezone.utc).timestamp()}"
 
     try:
@@ -55,20 +53,19 @@ async def test_document_upsert(memory):
 
         # Get document stats
         doc_v1 = await memory.get_document(document_id, agent_id)
-        count_v1 = doc_v1["unit_count"]
+        count_v1 = doc_v1["memory_unit_count"]
 
-        # Upsert with different content
+        # Update with different content (automatic upsert when same document_id is provided)
         units_v2 = await memory.put_async(
             agent_id=agent_id,
             content="Alice works at Microsoft. Bob works at Apple.",
             context="Updated",
-            document_id=document_id,
-            upsert=True
+            document_id=document_id
         )
 
         # Get updated document stats
         doc_v2 = await memory.get_document(document_id, agent_id)
-        count_v2 = doc_v2["unit_count"]
+        count_v2 = doc_v2["memory_unit_count"]
 
         # Verify old units were replaced
         assert "Microsoft" in doc_v2["original_text"]
@@ -100,7 +97,7 @@ async def test_document_deletion(memory):
         # Verify it exists
         doc = await memory.get_document(document_id, agent_id)
         assert doc is not None
-        assert doc["unit_count"] > 0
+        assert doc["memory_unit_count"] > 0
 
         # Delete document
         result = await memory.delete_document(document_id, agent_id)

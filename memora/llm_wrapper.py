@@ -167,17 +167,17 @@ class LLMConfig:
                     )
                     await asyncio.sleep(sleep_time)
                 else:
-                    logger.error(f"Non-retryable API error after {max_retries + 1} attempts: {str(e)}")
+                    logger.error(f"Non-retryable API error after {max_retries + 1} attempts: {str(e)}, input {messages}")
                     raise
 
             except Exception as e:
-                logger.error(f"Unexpected error during LLM call: {type(e).__name__}: {str(e)}")
+                logger.error(f"Unexpected error during LLM call: {type(e).__name__}: {str(e)}, input {messages}")
                 raise
 
         # This should never be reached, but just in case
         if last_exception:
             raise last_exception
-        raise RuntimeError("LLM call failed after all retries with no exception captured")
+        raise RuntimeError(f"LLM call failed after all retries with no exception captured, input {messages}")
 
     @classmethod
     def for_memory(cls) -> "LLMConfig":

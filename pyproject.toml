@@ -29,6 +29,8 @@ dependencies = [
     "dateparser>=1.2.0",
     "tiktoken>=0.12.0",
     "httpx>=0.27.0",
+    "streamlit>=1.51.0",
+    "python-fasthtml>=0.12.33",
 ]
 
 [tool.hatch.build.targets.wheel]

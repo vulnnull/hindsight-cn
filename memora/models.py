@@ -146,7 +146,6 @@ class Entity(Base):
         UUID(as_uuid=True), primary_key=True, server_default=sql_text("uuid_generate_v4()")
     )
     canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
-    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
     agent_id: Mapped[str] = mapped_column(Text, nullable=False)
     entity_metadata: Mapped[dict] = mapped_column("metadata", JSONB, server_default=sql_text("'{}'::jsonb"))
     first_seen: Mapped[datetime] = mapped_column(
@@ -176,8 +175,7 @@ class Entity(Base):
     __table_args__ = (
         Index("idx_entities_agent_id", "agent_id"),
         Index("idx_entities_canonical_name", "canonical_name"),
-        Index("idx_entities_type", "entity_type"),
-        Index("idx_entities_agent_name_type", "agent_id", "canonical_name", "entity_type"),
+        Index("idx_entities_agent_name", "agent_id", "canonical_name"),
     )
 
 

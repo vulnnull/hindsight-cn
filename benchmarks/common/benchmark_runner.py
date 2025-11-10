@@ -19,6 +19,7 @@ The framework supports two answer generation patterns:
 
 import json
 import asyncio
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
@@ -91,10 +92,16 @@ class LLMAnswerGenerator(ABC):
     async def generate_answer(
         self,
         question: str,
-        memories: List[Dict[str, Any]]
+        memories: List[Dict[str, Any]],
+        question_date: Optional[datetime] = None
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer from retrieved memories.
+
+        Args:
+            question: The question text
+            memories: Retrieved memories to use for answering
+            question_date: Optional date when the question was asked (for temporal context)
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories_override)
@@ -166,6 +173,7 @@ Your task is to label an answer to a question as 'CORRECT' or 'WRONG'. You will 
     The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT.
 
     For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
+    There's an edge case where the actual answer can't be found in the data and in that case the gold answer will say so (e.g. 'You did not mention this information.'); if the generated answer says that it cannot be answered or it doesn't know, it should be counted as CORRECT. 
 
     Now it's time for the real question:
     Question: {question}
@@ -294,9 +302,17 @@ class BenchmarkRunner:
         question: str,
         thinking_budget: int = 500,
         max_tokens: int = 4096,
+        question_date: Optional[datetime] = None,
     ) -> Tuple[str, str, List[Dict]]:
         """
         Answer a question using memory retrieval.
+
+        Args:
+            agent_id: Agent ID
+            question: Question text
+            thinking_budget: Thinking budget for search
+            max_tokens: Maximum tokens to retrieve
+            question_date: Date when the question was asked (for temporal filtering)
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories)
@@ -304,19 +320,21 @@ class BenchmarkRunner:
         # Check if generator needs external search
         if self.answer_generator.needs_external_search():
             # Traditional flow: search then generate
+            # Search both 'world' and 'agent' fact types in parallel
             results, _ = await self.memory.search_async(
                 agent_id=agent_id,
                 query=question,
                 thinking_budget=thinking_budget,
                 max_tokens=max_tokens,
-                fact_type="world"
+                fact_type=["world", "agent"],
+                question_date=question_date
             )
 
             if not results:
                 return "I don't have enough information to answer that question.", "No relevant memories found.", []
 
             # Generate answer using LLM
-            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, results)
+            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, results, question_date)
 
             # Use override if provided, otherwise use search results
             final_memories = memories_override if memories_override is not None else results
@@ -325,7 +343,7 @@ class BenchmarkRunner:
         else:
             # Integrated flow: generator does its own search (e.g., think API)
             # Pass empty memories list since generator doesn't need them
-            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, [])
+            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, [], question_date)
 
             # Use memories from generator (should not be None for integrated mode)
             final_memories = memories_override if memories_override is not None else []
@@ -373,12 +391,19 @@ class BenchmarkRunner:
                     question = qa['question']
                     correct_answer = qa['answer']
                     category = qa.get('category', 0)
+                    question_date = qa.get('question_date')
 
                     try:
                         # Get predicted answer, reasoning, and retrieved memories
                         predicted_answer, reasoning, retrieved_memories = await self.answer_question(
-                            agent_id, question, thinking_budget, max_tokens
+                            agent_id, question, thinking_budget, max_tokens, question_date
                         )
+
+                        # Remove embeddings from retrieved memories to reduce file size
+                        memories_without_embeddings = [
+                            {k: v for k, v in mem.items() if k != 'embedding'}
+                            for mem in retrieved_memories
+                        ]
 
                         return {
                             'question': question,
@@ -386,11 +411,12 @@ class BenchmarkRunner:
                             'predicted_answer': predicted_answer,
                             'reasoning': reasoning,
                             'category': category,
-                            'retrieved_memories': retrieved_memories,
+                            'retrieved_memories': memories_without_embeddings,
                             'is_invalid': False,
                             'error': None
                         }
                     except Exception as e:
+                        logging.exception(e)
                         # Mark as invalid if answer generation failed
                         console.print(f"      [red]✗[/red] Failed to answer question: {str(e)[:100]}")
                         return {
@@ -508,6 +534,38 @@ class BenchmarkRunner:
             'detailed_results': judged_results
         }
 
+    async def _agent_has_data(self, agent_id: str) -> bool:
+        """
+        Check if an agent has any indexed memory units.
+
+        Args:
+            agent_id: Agent ID to check
+
+        Returns:
+            True if agent has at least one memory unit, False otherwise
+        """
+        try:
+            # Check if we're using a remote client or local memory
+            from memora.remote_client import RemoteMemoryClient
+
+            if isinstance(self.memory, RemoteMemoryClient):
+                # Use stats API for remote client
+                stats = await self.memory.get_agent_stats(agent_id)
+                total_nodes = stats.get("total_nodes", 0)
+                return total_nodes > 0
+            else:
+                # Use direct database access for local memory
+                pool = await self.memory._get_pool()
+                async with pool.acquire() as conn:
+                    result = await conn.fetchrow(
+                        "SELECT COUNT(*) as count FROM memory_units WHERE agent_id = $1 LIMIT 1",
+                        agent_id
+                    )
+                    return result['count'] > 0
+        except Exception as e:
+            console.print(f"  [red]Warning: Error checking agent data: {e}[/red]")
+            return False
+
     async def process_single_item(
         self,
         item: Dict,
@@ -520,9 +578,14 @@ class BenchmarkRunner:
         skip_ingestion: bool,
         question_semaphore: asyncio.Semaphore,
         eval_semaphore_size: int = 8,
+        clear_this_agent: bool = True,
     ) -> Dict:
         """
         Process a single item (ingest + evaluate).
+
+        Args:
+            clear_this_agent: Whether to clear this agent's data before ingesting.
+                             Set to False to skip clearing (e.g., when agent_id is shared and already cleared)
 
         Returns:
             Result dict with metrics
@@ -532,8 +595,8 @@ class BenchmarkRunner:
         console.print(f"\n[bold blue]Item {i}/{total_items}[/bold blue] (ID: {item_id})")
 
         if not skip_ingestion:
-            # Clear previous agent data only on first item
-            if i == 1:
+            # Clear agent data before ingesting
+            if clear_this_agent:
                 console.print("  [1] Clearing previous agent data...")
                 await self.memory.delete_agent(agent_id)
                 console.print(f"      [green]✓[/green] Cleared '{agent_id}' agent data")
@@ -579,11 +642,12 @@ class BenchmarkRunner:
         thinking_budget: int = 500,
         max_tokens: int = 4096,
         skip_ingestion: bool = False,
-        max_concurrent_questions: int = 10,  # Match search semaphore limit
+        max_concurrent_questions: int = 1,  # Default to 1 for sequential processing
         eval_semaphore_size: int = 8,
         clear_agent_per_item: bool = False,
         specific_item: Optional[str] = None,
         separate_ingestion_phase: bool = False,
+        filln: bool = False,
     ) -> Dict[str, Any]:
         """
         Run the full benchmark evaluation.
@@ -601,6 +665,7 @@ class BenchmarkRunner:
             clear_agent_per_item: Use unique agent ID per item for isolation (deprecated when separate_ingestion_phase=True)
             specific_item: If provided, only run this specific item ID (e.g., conversation)
             separate_ingestion_phase: If True, ingest all data first, then evaluate all questions (single agent)
+            filln: If True, only process items where the agent has no indexed data yet
 
         Returns:
             Dict with complete benchmark results
@@ -639,7 +704,7 @@ class BenchmarkRunner:
                 items, agent_id, thinking_budget, max_tokens,
                 skip_ingestion, max_questions_per_item,
                 max_concurrent_questions, eval_semaphore_size,
-                clear_agent_per_item
+                clear_agent_per_item, filln
             )
 
     async def _run_single_phase(
@@ -653,6 +718,7 @@ class BenchmarkRunner:
         max_concurrent_questions: int,
         eval_semaphore_size: int,
         clear_agent_per_item: bool,
+        filln: bool = False,
     ) -> Dict[str, Any]:
         """Original single-phase approach: process each item independently."""
         # Create semaphore for question processing
@@ -664,12 +730,29 @@ class BenchmarkRunner:
         for i, item in enumerate(items, 1):
             # Use unique agent ID per item if requested (for isolation in benchmarks like LongMemEval)
             # This avoids deadlocks from deleting agent data
-            item_agent_id = f"{agent_id}_item_{i-1}" if clear_agent_per_item else agent_id
+            if clear_agent_per_item:
+                item_id = self.dataset.get_item_id(item)
+                item_agent_id = f"{agent_id}_{item_id}"
+                # Always clear for unique agents (each agent_id is used only once)
+                clear_this_agent = True
+            else:
+                item_agent_id = agent_id
+                # Only clear on first item for shared agent_id
+                clear_this_agent = (i == 1)
+
+            # Check if we should skip this item (filln mode)
+            if filln:
+                has_data = await self._agent_has_data(item_agent_id)
+                if has_data:
+                    console.print(f"\n[bold blue]Item {i}/{len(items)}[/bold blue] (ID: {self.dataset.get_item_id(item)})")
+                    console.print(f"  [yellow]⊘[/yellow] Skipping - agent '{item_agent_id}' already has indexed data")
+                    continue
 
             result = await self.process_single_item(
                 item, item_agent_id, i, len(items),
                 thinking_budget, max_tokens, max_questions_per_item,
                 skip_ingestion, question_semaphore, eval_semaphore_size,
+                clear_this_agent,
             )
             all_results.append(result)
 

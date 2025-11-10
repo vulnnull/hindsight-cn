@@ -35,7 +35,7 @@ async def retrieve_semantic(
     """
     results = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding,
+        SELECT id, text, context, event_date, access_count, embedding, fact_type,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE agent_id = $2
@@ -70,13 +70,26 @@ async def retrieve_bm25(
     Returns:
         List of (doc_id, data) tuples
     """
+    import re
+
+    # Sanitize query text: remove special characters that have meaning in tsquery
+    # Keep only alphanumeric characters and spaces
+    sanitized_text = re.sub(r'[^\w\s]', ' ', query_text.lower())
+
+    # Split and filter empty strings
+    tokens = [token for token in sanitized_text.split() if token]
+
+    if not tokens:
+        # If no valid tokens, return empty results
+        return []
+
     # Convert query to tsquery using OR for more flexible matching
     # This prevents empty results when some terms are missing
-    query_tsquery = " | ".join(query_text.lower().split())
+    query_tsquery = " | ".join(tokens)
 
     results = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding,
+        SELECT id, text, context, event_date, access_count, embedding, fact_type,
                ts_rank_cd(search_vector, to_tsquery('english', $1)) AS bm25_score
         FROM memory_units
         WHERE agent_id = $2
@@ -113,7 +126,7 @@ async def retrieve_graph(
     # Find entry points
     entry_points = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding,
+        SELECT id, text, context, event_date, access_count, embedding, fact_type,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE agent_id = $2
@@ -150,7 +163,7 @@ async def retrieve_graph(
         if budget_remaining > 0:
             neighbors = await conn.fetch(
                 """
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding,
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding, mu.fact_type,
                        ml.weight
                 FROM memory_links ml
                 JOIN memory_units mu ON ml.to_unit_id = mu.id
@@ -204,10 +217,18 @@ async def retrieve_temporal(
     Returns:
         List of (doc_id, data) tuples with temporal_score
     """
+    from datetime import timezone
+
+    # Ensure start_date and end_date are timezone-aware (UTC) to match database datetimes
+    if start_date.tzinfo is None:
+        start_date = start_date.replace(tzinfo=timezone.utc)
+    if end_date.tzinfo is None:
+        end_date = end_date.replace(tzinfo=timezone.utc)
+
     # Find entry points: facts in date range with semantic relevance
     entry_points = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding,
+        SELECT id, text, context, event_date, access_count, embedding, fact_type,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE agent_id = $2
@@ -226,6 +247,7 @@ async def retrieve_temporal(
 
     # Calculate temporal scores for entry points
     total_days = (end_date - start_date).total_seconds() / 86400
+    mid_date = start_date + (end_date - start_date) / 2  # Calculate once for all comparisons
     results = []
     visited = set()
 
@@ -235,7 +257,6 @@ async def retrieve_temporal(
 
         # Temporal proximity score (closer to range center = higher score)
         event_date = ep["event_date"]
-        mid_date = start_date + (end_date - start_date) / 2
         days_from_mid = abs((event_date - mid_date).total_seconds() / 86400)
         temporal_proximity = 1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
 
@@ -256,7 +277,7 @@ async def retrieve_temporal(
         if budget_remaining > 0:
             neighbors = await conn.fetch(
                 """
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding,
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding, mu.fact_type,
                        ml.weight, ml.link_type,
                        1 - (mu.embedding <=> $1::vector) AS similarity
                 FROM memory_links ml
@@ -313,7 +334,8 @@ async def retrieve_parallel(
     query_embedding_str: str,
     agent_id: str,
     fact_type: str,
-    thinking_budget: int
+    thinking_budget: int,
+    question_date: Optional[datetime] = None
 ) -> Tuple[List, List, List, Optional[List]]:
     """
     Run 3-way or 4-way parallel retrieval (adds temporal if detected).
@@ -325,6 +347,7 @@ async def retrieve_parallel(
         agent_id: Agent ID
         fact_type: Fact type to filter
         thinking_budget: Budget for graph traversal and retrieval limits
+        question_date: Optional date when question was asked (for temporal filtering)
 
     Returns:
         Tuple of (semantic_results, bm25_results, graph_results, temporal_results)
@@ -332,7 +355,7 @@ async def retrieve_parallel(
     """
     # Detect temporal constraint
     from .temporal_extraction import extract_temporal_constraint
-    temporal_constraint = extract_temporal_constraint(query_text)
+    temporal_constraint = extract_temporal_constraint(query_text, reference_date=question_date)
 
     # Each retrieval needs its own connection
     async def run_semantic():

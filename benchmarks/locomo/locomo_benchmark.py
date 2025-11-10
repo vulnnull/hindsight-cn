@@ -6,6 +6,9 @@ Provides dataset, answer generator, and evaluator for the LoComo benchmark.
 import sys
 from pathlib import Path
 
+from benchmarks.common.benchmark_runner import BenchmarkRunner
+from memora import TemporalSemanticMemory
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -124,10 +127,16 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
     async def generate_answer(
         self,
         question: str,
-        memories: List[Dict[str, Any]]
+        memories: List[Dict[str, Any]],
+        question_date: Optional[datetime] = None
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer from retrieved memories using Groq.
+
+        Args:
+            question: The question text
+            memories: Retrieved memories
+            question_date: Date when the question was asked (for temporal context)
 
         Returns:
             Tuple of (answer, reasoning, None)
@@ -139,6 +148,11 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
             context_parts.append({"text": result.get("text"), "context": result.get("context"), "event_date": result.get("event_date")})
 
         context = json.dumps(context_parts)
+
+        # Format question date if provided
+        question_date_str = ""
+        if question_date:
+            question_date_str = f"\n# CURRENT DATE:\nThe question is being asked on: {question_date.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
 
         # Use LLM to generate answer
         try:
@@ -153,7 +167,7 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
                         "content": f"""
 # CONTEXT:
 You have access to facts and entities from a conversation.
-
+{question_date_str}
 # INSTRUCTIONS:
 1. Carefully analyze all provided memories
 2. Pay special attention to the timestamps to determine the answer
@@ -230,7 +244,8 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
     async def generate_answer(
         self,
         question: str,
-        memories: List[Dict[str, Any]]
+        memories: List[Dict[str, Any]],
+        question_date: Optional[datetime] = None
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer using the integrated think API.
@@ -241,6 +256,7 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
         Args:
             question: Question to answer
             memories: Not used (empty list), as think does its own retrieval
+            question_date: Date when the question was asked (currently not used by think API)
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories)

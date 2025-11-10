@@ -10,7 +10,7 @@ This implements a sophisticated memory architecture that combines:
 """
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import asyncpg
 import asyncio
 from .embeddings import Embeddings, SentenceTransformersEmbeddings
@@ -187,23 +187,19 @@ class TemporalSemanticMemory(
         Handler for batch put tasks.
 
         Args:
-            task_dict: Dict with 'agent_id', 'contents', 'document_id', 'document_metadata', 'upsert'
+            task_dict: Dict with 'agent_id', 'contents', 'document_id'
         """
         try:
             agent_id = task_dict.get('agent_id')
             contents = task_dict.get('contents', [])
             document_id = task_dict.get('document_id')
-            document_metadata = task_dict.get('document_metadata')
-            upsert = task_dict.get('upsert', False)
 
             logger.info(f"[BATCH_PUT_TASK] Starting background batch put for agent_id={agent_id}, {len(contents)} items")
 
             await self.put_batch_async(
                 agent_id=agent_id,
                 contents=contents,
-                document_id=document_id,
-                document_metadata=document_metadata,
-                upsert=upsert
+                document_id=document_id
             )
 
             logger.info(f"[BATCH_PUT_TASK] Completed background batch put for agent_id={agent_id}")
@@ -536,8 +532,6 @@ class TemporalSemanticMemory(
         context: str = "",
         event_date: Optional[datetime] = None,
         document_id: Optional[str] = None,
-        document_metadata: Optional[Dict[str, Any]] = None,
-        upsert: bool = False,
         fact_type_override: Optional[str] = None,
         confidence_score: Optional[float] = None,
     ) -> List[str]:
@@ -551,9 +545,7 @@ class TemporalSemanticMemory(
             content: Text content to store
             context: Context about when/why this memory was formed
             event_date: When the event occurred (defaults to now)
-            document_id: Optional document ID for tracking and upsert
-            document_metadata: Optional metadata about the document
-            upsert: If True and document_id exists, delete old units and create new ones
+            document_id: Optional document ID for tracking (always upserts if document already exists)
             fact_type_override: Override fact type ('world', 'agent', 'opinion')
             confidence_score: Confidence score for opinions (0.0 to 1.0)
 
@@ -569,8 +561,6 @@ class TemporalSemanticMemory(
                 "event_date": event_date
             }],
             document_id=document_id,
-            document_metadata=document_metadata,
-            upsert=upsert,
             fact_type_override=fact_type_override,
             confidence_score=confidence_score
         )
@@ -583,8 +573,6 @@ class TemporalSemanticMemory(
         agent_id: str,
         contents: List[Dict[str, Any]],
         document_id: Optional[str] = None,
-        document_metadata: Optional[Dict[str, Any]] = None,
-        upsert: bool = False,
         fact_type_override: Optional[str] = None,
         confidence_score: Optional[float] = None,
     ) -> List[List[str]]:
@@ -603,9 +591,7 @@ class TemporalSemanticMemory(
                 - "content" (required): Text content to store
                 - "context" (optional): Context about the memory
                 - "event_date" (optional): When the event occurred
-            document_id: Optional document ID for tracking and upsert
-            document_metadata: Optional metadata about the document
-            upsert: If True and document_id exists, delete old units and create new ones
+            document_id: Optional document ID for tracking (always upserts if document already exists)
             fact_type_override: Override fact type for all facts ('world', 'agent', 'opinion')
             confidence_score: Confidence score for opinions (0.0 to 1.0)
 
@@ -619,8 +605,7 @@ class TemporalSemanticMemory(
                     {"content": "Alice works at Google", "context": "conversation"},
                     {"content": "Bob loves Python", "context": "conversation"},
                 ],
-                document_id="meeting-2024-01-15",
-                upsert=True
+                document_id="meeting-2024-01-15"
             )
             # Returns: [["unit-id-1"], ["unit-id-2"]]
         """
@@ -672,8 +657,7 @@ class TemporalSemanticMemory(
                     agent_id=agent_id,
                     contents=sub_batch,
                     document_id=document_id,
-                    document_metadata=document_metadata,
-                    upsert=upsert and i == 1,  # Only upsert on first batch
+                    is_first_batch=i == 1,  # Only upsert on first batch
                     fact_type_override=fact_type_override,
                     confidence_score=confidence_score
                 )
@@ -688,8 +672,7 @@ class TemporalSemanticMemory(
             agent_id=agent_id,
             contents=contents,
             document_id=document_id,
-            document_metadata=document_metadata,
-            upsert=upsert,
+            is_first_batch=True,
             fact_type_override=fact_type_override,
             confidence_score=confidence_score
         )
@@ -699,8 +682,7 @@ class TemporalSemanticMemory(
         agent_id: str,
         contents: List[Dict[str, Any]],
         document_id: Optional[str] = None,
-        document_metadata: Optional[Dict[str, Any]] = None,
-        upsert: bool = False,
+        is_first_batch: bool = True,
         fact_type_override: Optional[str] = None,
         confidence_score: Optional[float] = None,
     ) -> List[List[str]]:
@@ -711,6 +693,14 @@ class TemporalSemanticMemory(
         Called by put_batch_async after chunking large batches.
 
         Uses semaphore for backpressure to limit concurrent puts.
+
+        Args:
+            agent_id: Unique identifier for the agent
+            contents: List of dicts with content, context, event_date
+            document_id: Optional document ID (always upserts if exists)
+            is_first_batch: Whether this is the first batch (for chunked operations, only delete on first batch)
+            fact_type_override: Override fact type for all facts
+            confidence_score: Confidence score for opinions
         """
         # Backpressure: limit concurrent puts to prevent database contention
         async with self._put_semaphore:
@@ -803,7 +793,7 @@ class TemporalSemanticMemory(
                 async with conn.transaction():
                     logger.debug("Inside transaction")
                     try:
-                        # Handle document tracking and upsert
+                        # Handle document tracking with automatic upsert
                         if document_id:
                             logger.debug(f"Handling document tracking for {document_id}")
                             import hashlib
@@ -813,8 +803,9 @@ class TemporalSemanticMemory(
                             combined_content = "\n".join([c.get("content", "") for c in contents])
                             content_hash = hashlib.sha256(combined_content.encode()).hexdigest()
 
-                            # If upsert, delete old document first (cascades to units and links)
-                            if upsert:
+                            # Always delete old document first if it exists (cascades to units and links)
+                            # Only delete on the first batch to avoid deleting data we just inserted
+                            if is_first_batch:
                                 deleted = await conn.fetchval(
                                     "DELETE FROM documents WHERE id = $1 AND agent_id = $2 RETURNING id",
                                     document_id, agent_id
@@ -822,8 +813,8 @@ class TemporalSemanticMemory(
                                 if deleted:
                                     logger.debug(f"[3.1] Upsert: Deleted existing document '{document_id}' and all its units")
 
-                            # Insert or update document
-                            # Always use ON CONFLICT for idempotent behavior
+                            # Insert document (or update if exists from concurrent operations)
+                            # Use ON CONFLICT for idempotent behavior in edge cases
                             await conn.execute(
                                 """
                                 INSERT INTO documents (id, agent_id, original_text, content_hash, metadata)
@@ -838,7 +829,7 @@ class TemporalSemanticMemory(
                                 agent_id,
                                 combined_content,
                                 content_hash,
-                                json.dumps(document_metadata or {})
+                                json.dumps({})  # Empty metadata dict
                             )
                             logger.debug(f"[3.2] Document '{document_id}' stored/updated")
 
@@ -1031,17 +1022,18 @@ class TemporalSemanticMemory(
         self,
         agent_id: str,
         query: str,
-        fact_type: str,
+        fact_type: List[str],
         thinking_budget: int = 50,
         max_tokens: int = 4096,
         enable_trace: bool = False,
         reranker: str = "cross-encoder",
+        question_date: Optional[datetime] = None,
     ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
         """
-        Search memories using 4-way parallel retrieval (semantic + keyword + graph + temporal).
+        Search memories using N*4-way parallel retrieval (N fact types × 4 retrieval methods).
 
         This implements the core SEARCH operation:
-        1. Retrieval: Run 4 parallel retrievals (semantic vector, BM25 keyword, graph activation, temporal graph)
+        1. Retrieval: For each fact type, run 4 parallel retrievals (semantic vector, BM25 keyword, graph activation, temporal graph)
         2. Merge: Combine using Reciprocal Rank Fusion (RRF)
         3. Rerank: Score using selected reranker (heuristic or cross-encoder)
         4. Diversify: Apply MMR for diversity
@@ -1050,7 +1042,7 @@ class TemporalSemanticMemory(
         Args:
             agent_id: Agent ID to search for
             query: Search query
-            fact_type: Type of facts to search ('world', 'agent', 'opinion')
+            fact_type: List of fact types to search (e.g., ['world', 'agent'])
             thinking_budget: How many units to explore in graph traversal (controls compute cost)
             max_tokens: Maximum tokens to return (counts only 'text' field, default 4096)
                        Results are returned until token budget is reached, stopping before
@@ -1059,6 +1051,7 @@ class TemporalSemanticMemory(
             reranker: Reranking strategy - "heuristic" (default) or "cross-encoder"
                      - heuristic: 60% semantic + 40% BM25 + normalized boosts (fast)
                      - cross-encoder: Neural reranking with ms-marco-MiniLM-L-6-v2 (slower but more accurate)
+            question_date: Optional date when question was asked (for temporal filtering)
 
         Returns:
             Tuple of (results, trace) where results is a list of memory units
@@ -1071,7 +1064,7 @@ class TemporalSemanticMemory(
             for attempt in range(max_retries + 1):
                 try:
                     return await self._search_with_retries(
-                        agent_id, query, fact_type, thinking_budget, max_tokens, enable_trace, reranker
+                        agent_id, query, fact_type, thinking_budget, max_tokens, enable_trace, reranker, question_date
                     )
                 except Exception as e:
                     # Check if it's a connection error
@@ -1097,11 +1090,12 @@ class TemporalSemanticMemory(
         self,
         agent_id: str,
         query: str,
-        fact_type: str,
+        fact_type: List[str],
         thinking_budget: int,
         max_tokens: int,
         enable_trace: bool,
         reranker: str,
+        question_date: Optional[datetime] = None,
     ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
         """
         Search implementation with modular retrieval and reranking.
@@ -1150,7 +1144,7 @@ class TemporalSemanticMemory(
                 tracer.record_query_embedding(query_embedding)
                 tracer.add_phase_metric("generate_query_embedding", step_duration)
 
-            # Step 2: 3-Way or 4-Way Parallel Retrieval
+            # Step 2: N*4-Way Parallel Retrieval (N fact types × 4 retrieval methods)
             step_start = time.time()
             query_embedding_str = str(query_embedding)
 
@@ -1158,16 +1152,39 @@ class TemporalSemanticMemory(
 
             # Track each retrieval start time
             retrieval_start = time.time()
-            semantic_results, bm25_results, graph_results, temporal_results = await retrieve_parallel(
-                pool, query, query_embedding_str, agent_id, fact_type, thinking_budget
-            )
+
+            # Run retrieval for each fact type in parallel
+            retrieval_tasks = [
+                retrieve_parallel(pool, query, query_embedding_str, agent_id, ft, thinking_budget, question_date)
+                for ft in fact_type
+            ]
+            all_retrievals = await asyncio.gather(*retrieval_tasks)
+
+            # Combine all results from all fact types
+            semantic_results = []
+            bm25_results = []
+            graph_results = []
+            temporal_results = []
+
+            for ft_semantic, ft_bm25, ft_graph, ft_temporal in all_retrievals:
+                semantic_results.extend(ft_semantic)
+                bm25_results.extend(ft_bm25)
+                graph_results.extend(ft_graph)
+                if ft_temporal:
+                    temporal_results.extend(ft_temporal)
+
+            # If no temporal results from any fact type, set to None
+            if not temporal_results:
+                temporal_results = None
+
             retrieval_duration = time.time() - retrieval_start
 
             step_duration = time.time() - step_start
+            total_retrievals = len(fact_type) * (4 if temporal_results else 3)
             if temporal_results:
-                log_buffer.append(f"  [2] 4-way retrieval: semantic={len(semantic_results)}, bm25={len(bm25_results)}, graph={len(graph_results)}, temporal={len(temporal_results)} in {step_duration:.3f}s")
+                log_buffer.append(f"  [2] {total_retrievals}-way retrieval ({len(fact_type)} fact_types): semantic={len(semantic_results)}, bm25={len(bm25_results)}, graph={len(graph_results)}, temporal={len(temporal_results)} in {step_duration:.3f}s")
             else:
-                log_buffer.append(f"  [2] 3-way retrieval: semantic={len(semantic_results)}, bm25={len(bm25_results)}, graph={len(graph_results)} in {step_duration:.3f}s")
+                log_buffer.append(f"  [2] {total_retrievals}-way retrieval ({len(fact_type)} fact_types): semantic={len(semantic_results)}, bm25={len(bm25_results)}, graph={len(graph_results)} in {step_duration:.3f}s")
 
             # Record retrieval results for tracer
             if tracer:
@@ -1303,25 +1320,12 @@ class TemporalSemanticMemory(
                     "candidates_reranked": len(results)
                 })
 
-            # Step 6: Apply MMR (always enabled with λ=0.5)
-            step_start = time.time()
-            from .search.mmr import apply_mmr
+            # Step 5: Truncate to thinking_budget * 2 for token filtering
+            rerank_limit = thinking_budget * 2
+            top_results = results[:rerank_limit]
+            log_buffer.append(f"  [5] Truncated to top {len(top_results)} results")
 
-            mmr_lambda = 0.5
-            # MMR also uses thinking_budget * 2 to have diverse options for token filtering
-            mmr_limit = thinking_budget * 2
-            top_results = apply_mmr(results, mmr_limit, mmr_lambda, log_buffer)
-
-            step_duration = time.time() - step_start
-            log_buffer.append(f"  [5] MMR diversification (λ={mmr_lambda}): {step_duration:.3f}s")
-
-            if tracer:
-                tracer.add_phase_metric("mmr_diversification", step_duration, {
-                    "lambda": mmr_lambda,
-                    "results_selected": len(top_results)
-                })
-
-            # Step 7: Token budget filtering
+            # Step 6: Token budget filtering
             step_start = time.time()
 
             # Filter results to fit within max_tokens budget
@@ -1427,132 +1431,6 @@ class TemporalSemanticMemory(
                 break
 
         return filtered_results, total_tokens
-
-    def _apply_mmr(
-        self,
-        results: List[Dict[str, Any]],
-        top_k: int,
-        mmr_lambda: float,
-        log_buffer: List[str]
-    ) -> List[Dict[str, Any]]:
-        """
-        Apply Maximal Marginal Relevance (MMR) to diversify search results.
-
-        MMR balances relevance with diversity by selecting results that are:
-        1. Relevant to the query (high score)
-        2. Different from already selected results (low similarity)
-
-        Formula: MMR = λ * relevance - (1-λ) * max_similarity_to_selected
-
-        Args:
-            results: Sorted list of all results with embeddings
-            top_k: Number of results to select
-            mmr_lambda: Balance parameter (0=max diversity, 1=max relevance)
-            log_buffer: Logging buffer
-
-        Returns:
-            Diversified list of top_k results
-        """
-        if not results or top_k <= 0:
-            return []
-
-        # Normalize weights to [0, 1] for fair comparison with similarity
-        max_weight = max(r["weight"] for r in results)
-        min_weight = min(r["weight"] for r in results)
-        weight_range = max_weight - min_weight if max_weight > min_weight else 1.0
-
-        # Pre-compute normalized relevance scores for all results
-        for idx, result in enumerate(results):
-            result["original_rank"] = idx + 1
-            result["normalized_relevance"] = (result["weight"] - min_weight) / weight_range
-
-        # Extract embeddings as a numpy array for vectorized operations
-        # Shape: (num_results, embedding_dim)
-        embeddings_list = []
-        valid_indices = []
-        for idx, result in enumerate(results):
-            if result.get("embedding") is not None:
-                embeddings_list.append(result["embedding"])
-                valid_indices.append(idx)
-
-        if not embeddings_list:
-            # No embeddings available, just return top-k by relevance
-            return results[:top_k]
-
-        # Stack embeddings into a matrix (num_results, embedding_dim)
-        embeddings_matrix = np.array(embeddings_list, dtype=np.float32)
-
-        # Normalize embeddings for faster cosine similarity (just dot product after normalization)
-        norms = np.linalg.norm(embeddings_matrix, axis=1, keepdims=True)
-        norms[norms == 0] = 1.0  # Avoid division by zero
-        embeddings_matrix = embeddings_matrix / norms
-
-        selected_indices = []
-        remaining_indices = list(range(len(results)))
-        diversified_count = 0
-
-        for selection_round in range(min(top_k, len(results))):
-            if not remaining_indices:
-                break
-
-            best_mmr_score = float('-inf')
-            best_remaining_idx = 0
-
-            # Vectorized computation for all remaining candidates
-            for remaining_idx, candidate_idx in enumerate(remaining_indices):
-                candidate = results[candidate_idx]
-                normalized_relevance = candidate["normalized_relevance"]
-
-                # Calculate max similarity to selected results
-                max_similarity = 0.0
-                if selected_indices and candidate_idx in valid_indices:
-                    # Find position in embeddings_matrix
-                    embedding_idx = valid_indices.index(candidate_idx)
-                    candidate_embedding = embeddings_matrix[embedding_idx]
-
-                    # Vectorized similarity calculation with all selected embeddings
-                    if selected_indices:
-                        selected_embedding_indices = [valid_indices.index(idx) for idx in selected_indices if idx in valid_indices]
-                        if selected_embedding_indices:
-                            selected_embeddings = embeddings_matrix[selected_embedding_indices]
-                            # Compute cosine similarities in one operation (already normalized, so just dot product)
-                            similarities = np.dot(selected_embeddings, candidate_embedding)
-                            max_similarity = float(np.max(similarities))
-
-                # MMR score: balance relevance and diversity
-                mmr_score = mmr_lambda * normalized_relevance - (1 - mmr_lambda) * max_similarity
-
-                if mmr_score > best_mmr_score:
-                    best_mmr_score = mmr_score
-                    best_remaining_idx = remaining_idx
-                    best_max_similarity = max_similarity
-
-            # Select the best candidate
-            best_candidate_idx = remaining_indices.pop(best_remaining_idx)
-            best_candidate = results[best_candidate_idx]
-
-            # Store MMR metadata
-            best_candidate["mmr_score"] = best_mmr_score
-            best_candidate["mmr_relevance"] = best_candidate["normalized_relevance"]
-            best_candidate["mmr_max_similarity"] = best_max_similarity
-            best_candidate["mmr_diversified"] = best_remaining_idx > 0
-
-            selected_indices.append(best_candidate_idx)
-
-            if best_remaining_idx > 0:
-                diversified_count += 1
-
-        log_buffer.append(f"      MMR: Selected {len(selected_indices)} results, {diversified_count} diversified picks")
-
-        # Return selected results in order
-        selected_results = [results[idx] for idx in selected_indices]
-
-        # Remove embeddings from final results (not needed in response)
-        for result in selected_results:
-            result.pop("embedding", None)
-            result.pop("normalized_relevance", None)  # Clean up temp field
-
-        return selected_results
 
     async def get_document(self, document_id: str, agent_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -1772,7 +1650,7 @@ class TemporalSemanticMemory(
 
             # Get entity information
             unit_entities = await conn.fetch("""
-                SELECT ue.unit_id, e.canonical_name, e.entity_type
+                SELECT ue.unit_id, e.canonical_name
                 FROM unit_entities ue
                 JOIN entities e ON ue.entity_id = e.id
                 ORDER BY ue.unit_id
@@ -1783,10 +1661,9 @@ class TemporalSemanticMemory(
         for row in unit_entities:
             unit_id = row['unit_id']
             entity_name = row['canonical_name']
-            entity_type = row['entity_type']
             if unit_id not in entity_map:
                 entity_map[unit_id] = []
-            entity_map[unit_id].append(f"{entity_name} ({entity_type})")
+            entity_map[unit_id].append(entity_name)
 
         # Build nodes
         nodes = []
@@ -1952,7 +1829,7 @@ class TemporalSemanticMemory(
             if units:
                 unit_ids = [row['id'] for row in units]
                 unit_entities = await conn.fetch("""
-                    SELECT ue.unit_id, e.canonical_name, e.entity_type
+                    SELECT ue.unit_id, e.canonical_name
                     FROM unit_entities ue
                     JOIN entities e ON ue.entity_id = e.id
                     WHERE ue.unit_id = ANY($1::uuid[])
@@ -1966,10 +1843,9 @@ class TemporalSemanticMemory(
             for row in unit_entities:
                 unit_id = row['unit_id']
                 entity_name = row['canonical_name']
-                entity_type = row['entity_type']
                 if unit_id not in entity_map:
                     entity_map[unit_id] = []
-                entity_map[unit_id].append(f"{entity_name} ({entity_type})")
+                entity_map[unit_id].append(entity_name)
 
             # Build result items
             items = []

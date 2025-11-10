@@ -42,9 +42,7 @@ class RemoteMemoryClient:
         self,
         agent_id: str,
         contents: List[Dict[str, Any]],
-        document_id: Optional[str] = None,
-        document_metadata: Optional[Dict[str, Any]] = None,
-        upsert: bool = False
+        document_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Store multiple memory items via API.
@@ -52,9 +50,7 @@ class RemoteMemoryClient:
         Args:
             agent_id: Agent identifier
             contents: List of content dicts with 'content', 'event_date', 'context' keys
-            document_id: Optional document identifier
-            document_metadata: Optional document metadata
-            upsert: Whether to upsert (update if exists)
+            document_id: Optional document identifier (always upserts if document exists)
 
         Returns:
             Result dict with success status
@@ -79,14 +75,11 @@ class RemoteMemoryClient:
         # Make API request
         request_data = {
             "agent_id": agent_id,
-            "items": items,
-            "upsert": upsert
+            "items": items
         }
 
         if document_id:
             request_data["document_id"] = document_id
-        if document_metadata:
-            request_data["document_metadata"] = document_metadata
 
         response = await self.client.post(
             f"{self.base_url}/api/memories/batch_async",
@@ -103,7 +96,7 @@ class RemoteMemoryClient:
         max_tokens: int = 4096,
         enable_trace: bool = False,
         reranker: str = "heuristic",
-        fact_type: Optional[str] = None
+        fact_type: Optional[List[str]] = None
     ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """
         Search memories via API.
@@ -115,7 +108,7 @@ class RemoteMemoryClient:
             max_tokens: Maximum tokens to retrieve
             enable_trace: Whether to return trace information
             reranker: Reranker type ("heuristic" or other)
-            fact_type: Optional fact type filter (world/agent/opinion)
+            fact_type: Optional list of fact types to search (e.g., ['world', 'agent'])
 
         Returns:
             Tuple of (results, trace)

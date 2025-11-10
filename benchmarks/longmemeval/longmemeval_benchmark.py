@@ -101,12 +101,18 @@ class LongMemEvalDataset(BenchmarkDataset):
         For LongMemEval, each item has one question.
 
         Returns:
-            List with single QA dict with 'question', 'answer', 'category'
+            List with single QA dict with 'question', 'answer', 'category', 'question_date'
         """
+        # Parse question_date if available
+        question_date = None
+        if 'question_date' in item:
+            question_date = self._parse_date(item['question_date'])
+
         return [{
             'question': item.get("question", ""),
             'answer': item.get("answer", ""),
-            'category': item.get("question_type", "unknown")
+            'category': item.get("question_type", "unknown"),
+            'question_date': question_date
         }]
 
     def _parse_date(self, date_str: str) -> datetime:
@@ -146,10 +152,16 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
     async def generate_answer(
                 self,
                 question: str,
-                memories: List[Dict[str, Any]]
+                memories: List[Dict[str, Any]],
+                question_date: Optional[datetime] = None
         ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
             """
             Generate answer from retrieved memories using Groq.
+
+            Args:
+                question: The question text
+                memories: Retrieved memories
+                question_date: Date when the question was asked (for temporal context)
 
             Returns:
                 Tuple of (answer, reasoning, None)
@@ -162,6 +174,11 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
                                       "event_date": result.get("event_date")})
 
             context = json.dumps(context_parts)
+
+            # Format question date if provided
+            question_date_str = ""
+            if question_date:
+                question_date_str = f"\n# CURRENT DATE:\nThe question is being asked on: {question_date.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
 
             # Use LLM to generate answer
             try:
@@ -176,7 +193,7 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
                             "content": f"""
     # CONTEXT:
     You have access to facts and entities from a conversation.
-
+{question_date_str}
     # INSTRUCTIONS:
     1. Carefully analyze all provided memories
     2. Pay special attention to the timestamps to determine the answer
@@ -206,8 +223,10 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
     5. Formulate a precise, concise answer based solely on the evidence in the memories
     6. Double-check that your answer directly addresses the question asked
     7. Ensure your final answer is specific and avoids vague time references
-    8. If you're not exactly sure, still try to attempt an answer. Sometimes the terms are sligtly different from the question, so it's better to try with the current evidence than just say you don't know. 
+    8. If you're not exactly sure, still try to attempt an answer. Sometimes the terms are sligtly different from the question, so it's better to try with the current evidence than just say you don't know.
     9. Say that you cannot answer if no evidence is related to the question.
+    10. Instead of saying "I don't know", you can use the most relevant information you found in the memories to construct a best-effort answer (but you need to use the provided context).
+    11. Provide a complete answer with your reasoning.
 
     Context:
 
@@ -230,10 +249,14 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
 async def run_benchmark(
     max_instances: int = None,
     max_questions_per_instance: int = None,
-    thinking_budget: int = 100,
-    max_tokens: int = 4096,
+    thinking_budget: int = 500,
+    max_tokens: int = 8192,
     skip_ingestion: bool = False,
-    api_url: str = None
+    api_url: str = None,
+    filln: bool = False,
+    question_id: str = None,
+    only_failed: bool = False,
+    only_invalid: bool = False
 ):
     """
     Run the LongMemEval benchmark.
@@ -245,6 +268,10 @@ async def run_benchmark(
         max_tokens: Maximum tokens to retrieve from memories
         skip_ingestion: Whether to skip ingestion and use existing data
         api_url: Optional API URL to connect to (default: use local memory)
+        filln: If True, only process questions where the agent has no indexed data yet
+        question_id: Optional question ID to filter (e.g., 'e47becba'). Useful with --skip-ingestion.
+        only_failed: If True, only run questions that were previously marked as incorrect (is_correct=False)
+        only_invalid: If True, only run questions that were previously marked as invalid (is_invalid=True)
     """
     from rich.console import Console
     console = Console()
@@ -257,8 +284,49 @@ async def run_benchmark(
             console.print("[yellow]curl -L 'https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json' -o benchmarks/longmemeval/datasets/longmemeval_s_cleaned.json[/yellow]")
             return
 
+    # Load previous results if filtering for failed/invalid questions
+    failed_question_ids = set()
+    invalid_question_ids = set()
+    if only_failed or only_invalid:
+        results_path = Path(__file__).parent / 'results' / 'benchmark_results.json'
+        if not results_path.exists():
+            console.print(f"[red]Error: Cannot use --only-failed or --only-invalid without existing results file[/red]")
+            console.print(f"[yellow]Results file not found: {results_path}[/yellow]")
+            return
+
+        with open(results_path, 'r') as f:
+            previous_results = json.load(f)
+
+        # Extract question IDs that failed or are invalid
+        for item_result in previous_results.get('item_results', []):
+            item_id = item_result['item_id']
+            for detail in item_result['metrics'].get('detailed_results', []):
+                if only_failed and detail.get('is_correct') == False and not detail.get('is_invalid', False):
+                    failed_question_ids.add(item_id)
+                if only_invalid and detail.get('is_invalid', False):
+                    invalid_question_ids.add(item_id)
+
+        if only_failed:
+            console.print(f"[cyan]Filtering to {len(failed_question_ids)} questions that failed (is_correct=False)[/cyan]")
+        if only_invalid:
+            console.print(f"[cyan]Filtering to {len(invalid_question_ids)} questions that were invalid (is_invalid=True)[/cyan]")
+
     # Initialize components
     dataset = LongMemEvalDataset()
+
+    # Filter dataset based on failed/invalid flags
+    if only_failed or only_invalid:
+        target_ids = failed_question_ids if only_failed else invalid_question_ids
+        if not target_ids:
+            filter_type = "failed" if only_failed else "invalid"
+            console.print(f"[yellow]No {filter_type} questions found in previous results. Nothing to run.[/yellow]")
+            return
+        # Override question_id to be None if we're filtering by failed/invalid
+        # The filtering will happen when we load the dataset
+        original_dataset_items = dataset.load(dataset_path, max_instances)
+        filtered_items = [item for item in original_dataset_items if dataset.get_item_id(item) in target_ids]
+        console.print(f"[green]Found {len(filtered_items)} items to re-evaluate[/green]")
+
     answer_generator = LongMemEvalAnswerGenerator()
     answer_evaluator = LLMAnswerEvaluator()
 
@@ -283,12 +351,20 @@ async def run_benchmark(
         memory=memory
     )
 
+    # If filtering by failed/invalid, we need to use a custom dataset that only returns those items
+    # We'll temporarily replace the dataset's load method
+    if only_failed or only_invalid:
+        original_load = dataset.load
+        def filtered_load(path: Path, max_items: Optional[int] = None):
+            return filtered_items[:max_items] if max_items else filtered_items
+        dataset.load = filtered_load
+
     # Run benchmark
-    # Two-phase approach: ingest all 500 conversations into single agent, then evaluate all questions
-    # This is more realistic and tests retrieval from a large memory base
+    # Single-phase approach: each question gets its own isolated agent_id
+    # This ensures each question only has access to its own context
     results = await runner.run(
         dataset_path=dataset_path,
-        agent_id="longmemeval",
+        agent_id="longmemeval",  # Will be suffixed with question_id per item
         max_items=max_instances,
         max_questions_per_item=max_questions_per_instance,
         thinking_budget=thinking_budget,
@@ -296,12 +372,19 @@ async def run_benchmark(
         skip_ingestion=skip_ingestion,
         max_concurrent_questions=8,
         eval_semaphore_size=8,
-        separate_ingestion_phase=True  # Ingest all data first, then evaluate all questions
+        separate_ingestion_phase=False,  # Process each question independently
+        clear_agent_per_item=True,  # Use unique agent_id per question
+        filln=filln,  # Only process questions without indexed data
+        specific_item=question_id  # Optional filter for specific question ID
     )
 
     # Display and save results
     runner.display_results(results)
-    runner.save_results(results, Path(__file__).parent / 'results' / 'benchmark_results.json')
+    runner.save_results(
+        results,
+        Path(__file__).parent / 'results' / 'benchmark_results.json',
+        merge_with_existing=(filln or question_id is not None or only_failed or only_invalid)  # Merge when using --fill, --only-failed, --only-invalid flags or specific question
+    )
 
     # Generate detailed report by question type
     generate_type_report(results)
@@ -414,13 +497,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--thinking-budget",
         type=int,
-        default=100,
+        default=500,
         help="Thinking budget for spreading activation search"
     )
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=4096,
+        default=8192,
         help="Maximum tokens to retrieve from memories"
     )
     parser.add_argument(
@@ -434,8 +517,33 @@ if __name__ == "__main__":
         default=None,
         help="Memora API URL (default: use local memory, example: http://localhost:8000)"
     )
+    parser.add_argument(
+        "--fill",
+        action="store_true",
+        help="Only process questions where the agent has no indexed data yet (for resuming interrupted runs)"
+    )
+    parser.add_argument(
+        "--question-id",
+        type=str,
+        default=None,
+        help="Filter to specific question ID (e.g., 'e47becba'). Useful with --skip-ingestion to test a single question."
+    )
+    parser.add_argument(
+        "--only-failed",
+        action="store_true",
+        help="Only run questions that were previously marked as incorrect (is_correct=False). Requires existing results file."
+    )
+    parser.add_argument(
+        "--only-invalid",
+        action="store_true",
+        help="Only run questions that were previously marked as invalid (is_invalid=True). Requires existing results file."
+    )
 
     args = parser.parse_args()
+
+    # Validate that only one of --only-failed or --only-invalid is set
+    if args.only_failed and args.only_invalid:
+        parser.error("Cannot use both --only-failed and --only-invalid at the same time")
 
     results = asyncio.run(run_benchmark(
         max_instances=args.max_instances,
@@ -443,5 +551,9 @@ if __name__ == "__main__":
         thinking_budget=args.thinking_budget,
         max_tokens=args.max_tokens,
         skip_ingestion=args.skip_ingestion,
-        api_url=args.api_url
+        api_url=args.api_url,
+        filln=args.fill,
+        question_id=args.question_id,
+        only_failed=args.only_failed,
+        only_invalid=args.only_invalid
     ))

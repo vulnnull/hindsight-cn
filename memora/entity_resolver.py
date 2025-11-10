@@ -65,47 +65,36 @@ class EntityResolver:
         import time
         start = time.time()
 
-        # Group entities by type for efficient querying
-        entities_by_type = {}
-        for idx, entity_data in enumerate(entities_data):
-            entity_type = entity_data['type']
-            if entity_type not in entities_by_type:
-                entities_by_type[entity_type] = []
-            entities_by_type[entity_type].append((idx, entity_data))
+        # Query ALL candidates for this agent
+        all_entities = await conn.fetch(
+            """
+            SELECT canonical_name, id, metadata, last_seen, mention_count
+            FROM entities
+            WHERE agent_id = $1
+            """,
+            agent_id
+        )
 
-        # Query ALL candidates for each type in batch
-        all_candidates = {}  # Maps (entity_type, entity_text) -> list of candidates
-        for entity_type, entities_list in entities_by_type.items():
-            # Extract unique entity texts for this type
-            entity_texts = list(set(e[1]['text'] for e in entities_list))
+        # Build candidate map for each entity text
+        all_candidates = {}  # Maps entity_text -> list of candidates
+        entity_texts = list(set(e['text'] for e in entities_data))
 
-            # Query candidates for all texts at once
-            type_candidates = await conn.fetch(
-                """
-                SELECT canonical_name, id, metadata, last_seen, mention_count
-                FROM entities
-                WHERE agent_id = $1 AND entity_type = $2
-                """,
-                agent_id, entity_type
-            )
-
-            # Filter candidates in memory (faster than complex SQL for small datasets)
-            for entity_text in entity_texts:
-                matching = []
-                entity_text_lower = entity_text.lower()
-                for row in type_candidates:
-                    canonical_name = row['canonical_name']
-                    ent_id = row['id']
-                    metadata = row['metadata']
-                    last_seen = row['last_seen']
-                    mention_count = row['mention_count']
-                    canonical_lower = canonical_name.lower()
-                    # Same matching logic as before
-                    if (entity_text_lower == canonical_lower or
-                        entity_text_lower in canonical_lower or
-                        canonical_lower in entity_text_lower):
-                        matching.append((ent_id, canonical_name, metadata, last_seen, mention_count))
-                all_candidates[(entity_type, entity_text)] = matching
+        for entity_text in entity_texts:
+            matching = []
+            entity_text_lower = entity_text.lower()
+            for row in all_entities:
+                canonical_name = row['canonical_name']
+                ent_id = row['id']
+                metadata = row['metadata']
+                last_seen = row['last_seen']
+                mention_count = row['mention_count']
+                canonical_lower = canonical_name.lower()
+                # Match if exact or substring match
+                if (entity_text_lower == canonical_lower or
+                    entity_text_lower in canonical_lower or
+                    canonical_lower in entity_text_lower):
+                    matching.append((ent_id, canonical_name, metadata, last_seen, mention_count))
+            all_candidates[entity_text] = matching
 
         # Resolve each entity using pre-fetched candidates
         entity_ids = [None] * len(entities_data)
@@ -114,10 +103,9 @@ class EntityResolver:
 
         for idx, entity_data in enumerate(entities_data):
             entity_text = entity_data['text']
-            entity_type = entity_data['type']
             nearby_entities = entity_data.get('nearby_entities', [])
 
-            candidates = all_candidates.get((entity_type, entity_text), [])
+            candidates = all_candidates.get(entity_text, [])
 
             if not candidates:
                 # Will create new entity
@@ -154,8 +142,8 @@ class EntityResolver:
                     best_candidate = candidate_id
                     best_name_similarity = name_similarity
 
-            # Apply threshold
-            threshold = 0.4 if entity_type == 'PERSON' and best_name_similarity >= 0.95 else 0.6
+            # Apply unified threshold
+            threshold = 0.6
 
             if best_score > threshold:
                 entity_ids[idx] = best_candidate
@@ -185,20 +173,19 @@ class EntityResolver:
             param_idx = 1
 
             for idx, entity_data in entities_to_create:
-                values_clauses.append(f"(${param_idx}, ${param_idx+1}, ${param_idx+2}, ${param_idx+3}, ${param_idx+4}, ${param_idx+5})")
+                values_clauses.append(f"(${param_idx}, ${param_idx+1}, ${param_idx+2}, ${param_idx+3}, ${param_idx+4})")
                 params.extend([
                     agent_id,
                     entity_data['text'],
-                    entity_data['type'],
                     unit_event_date,
                     unit_event_date,
                     1
                 ])
-                param_idx += 6
+                param_idx += 5
 
             # Single INSERT with multiple VALUES rows
             query = f"""
-                INSERT INTO entities (agent_id, canonical_name, entity_type, first_seen, last_seen, mention_count)
+                INSERT INTO entities (agent_id, canonical_name, first_seen, last_seen, mention_count)
                 VALUES {', '.join(values_clauses)}
                 RETURNING id
             """
@@ -216,7 +203,6 @@ class EntityResolver:
         self,
         agent_id: str,
         entity_text: str,
-        entity_type: str,
         context: str,
         nearby_entities: List[Dict],
         unit_event_date,
@@ -227,7 +213,6 @@ class EntityResolver:
         Args:
             agent_id: Agent ID (entities are scoped to agents)
             entity_text: Entity text ("Alice", "Google", etc.)
-            entity_type: Entity type (PERSON, ORG, etc.)
             context: Context where entity appears
             nearby_entities: Other entities in the same unit
             unit_event_date: When this unit was created
@@ -236,27 +221,26 @@ class EntityResolver:
             Entity ID (creates new entity if needed)
         """
         async with self.pool.acquire() as conn:
-            # Find candidate entities with same type and similar name
+            # Find candidate entities with similar name
             candidates = await conn.fetch(
                 """
                 SELECT id, canonical_name, metadata, last_seen
                 FROM entities
                 WHERE agent_id = $1
-                  AND entity_type = $2
                   AND (
-                    canonical_name ILIKE $3
-                    OR canonical_name ILIKE $4
-                    OR $3 ILIKE canonical_name || '%%'
+                    canonical_name ILIKE $2
+                    OR canonical_name ILIKE $3
+                    OR $2 ILIKE canonical_name || '%%'
                   )
                 ORDER BY mention_count DESC
                 """,
-                agent_id, entity_type, entity_text, f"%{entity_text}%"
+                agent_id, entity_text, f"%{entity_text}%"
             )
 
             if not candidates:
                 # New entity - create it
                 return await self._create_entity(
-                    conn, agent_id, entity_text, entity_type, unit_event_date
+                    conn, agent_id, entity_text, unit_event_date
                 )
 
             # Score candidates based on:
@@ -324,8 +308,7 @@ class EntityResolver:
                     best_name_similarity = name_similarity
 
             # Threshold for considering it the same entity
-            # For PERSON entities with exact name match, use lower threshold
-            threshold = 0.4 if entity_type == 'PERSON' and best_name_similarity >= 0.95 else 0.6
+            threshold = 0.6
 
             if best_score > threshold:
                 # Update entity
@@ -342,7 +325,7 @@ class EntityResolver:
             else:
                 # Not confident - create new entity
                 return await self._create_entity(
-                    conn, agent_id, entity_text, entity_type, unit_event_date
+                    conn, agent_id, entity_text, unit_event_date
                 )
 
     async def _create_entity(
@@ -350,7 +333,6 @@ class EntityResolver:
         conn,
         agent_id: str,
         entity_text: str,
-        entity_type: str,
         event_date,
     ) -> str:
         """
@@ -360,7 +342,6 @@ class EntityResolver:
             conn: Database connection
             agent_id: Agent ID
             entity_text: Entity text
-            entity_type: Entity type
             event_date: When first seen
 
         Returns:
@@ -368,11 +349,11 @@ class EntityResolver:
         """
         entity_id = await conn.fetchval(
             """
-            INSERT INTO entities (agent_id, canonical_name, entity_type, first_seen, last_seen, mention_count)
-            VALUES ($1, $2, $3, $4, $5, 1)
+            INSERT INTO entities (agent_id, canonical_name, first_seen, last_seen, mention_count)
+            VALUES ($1, $2, $3, $4, 1)
             RETURNING id
             """,
-            agent_id, entity_text, entity_type, event_date, event_date
+            agent_id, entity_text, event_date, event_date
         )
         return entity_id
 
@@ -535,7 +516,6 @@ class EntityResolver:
         self,
         agent_id: str,
         entity_text: str,
-        entity_type: Optional[str] = None
     ) -> Optional[str]:
         """
         Find an entity by text (for query resolution).
@@ -543,34 +523,20 @@ class EntityResolver:
         Args:
             agent_id: Agent ID
             entity_text: Entity text to search for
-            entity_type: Optional entity type filter
 
         Returns:
             Entity ID if found, None otherwise
         """
         async with self.pool.acquire() as conn:
-            if entity_type:
-                row = await conn.fetchrow(
-                    """
-                    SELECT id FROM entities
-                    WHERE agent_id = $1
-                      AND entity_type = $2
-                      AND canonical_name ILIKE $3
-                    ORDER BY mention_count DESC
-                    LIMIT 1
-                    """,
-                    agent_id, entity_type, entity_text
-                )
-            else:
-                row = await conn.fetchrow(
-                    """
-                    SELECT id FROM entities
-                    WHERE agent_id = $1
-                      AND canonical_name ILIKE $2
-                    ORDER BY mention_count DESC
-                    LIMIT 1
-                    """,
-                    agent_id, entity_text
-                )
+            row = await conn.fetchrow(
+                """
+                SELECT id FROM entities
+                WHERE agent_id = $1
+                  AND canonical_name ILIKE $2
+                ORDER BY mention_count DESC
+                LIMIT 1
+                """,
+                agent_id, entity_text
+            )
 
             return row['id'] if row else None
