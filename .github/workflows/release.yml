@@ -95,38 +95,11 @@ jobs:
         path: artifacts/${{ matrix.asset_name }}
         retention-days: 30
 
-  build-control-plane:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
-        cache-dependency-path: memora-control-plane/package-lock.json
-
-    - name: Install dependencies
-      working-directory: ./memora-control-plane
-      run: npm ci
-
-    - name: Build Next.js app
-      working-directory: ./memora-control-plane
-      run: npm run build
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: control-plane-build
-        path: |
-          memora-control-plane/.next/standalone
-          memora-control-plane/.next/static
-        retention-days: 30
-
   build-docker-images:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       matrix:
         component: [api, control-plane]
@@ -137,40 +110,51 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Extract version from tag
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-    - name: Build Docker image (api)
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository_owner }}/memora-${{ matrix.component }}
+        tags: |
+          type=semver,pattern={{version}},value=${{ steps.get_version.outputs.VERSION }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ steps.get_version.outputs.VERSION }}
+          type=semver,pattern={{major}},value=${{ steps.get_version.outputs.VERSION }}
+          type=raw,value=latest
+
+    - name: Build and push Docker image (api)
       if: matrix.component == 'api'
       uses: docker/build-push-action@v6
       with:
         context: .
         file: docker/api.Dockerfile
-        push: false
-        tags: memora-api:${{ steps.get_version.outputs.VERSION }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        outputs: type=docker,dest=/tmp/memora-api.tar
 
-    - name: Build Docker image (control-plane)
+    - name: Build and push Docker image (control-plane)
       if: matrix.component == 'control-plane'
       uses: docker/build-push-action@v6
       with:
         context: .
         file: docker/control-plane.Dockerfile
-        push: false
-        tags: memora-control-plane:${{ steps.get_version.outputs.VERSION }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        outputs: type=docker,dest=/tmp/memora-control-plane.tar
-
-    - name: Upload Docker image artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: docker-image-${{ matrix.component }}
-        path: /tmp/memora-${{ matrix.component }}.tar
-        retention-days: 30
 
   package-helm-chart:
     runs-on: ubuntu-latest
@@ -200,7 +184,7 @@ jobs:
 
   create-github-release:
     runs-on: ubuntu-latest
-    needs: [build-python-package, build-rust-cli, build-control-plane, build-docker-images, package-helm-chart]
+    needs: [build-python-package, build-rust-cli, build-docker-images, package-helm-chart]
     permissions:
       contents: write
 
@@ -227,13 +211,6 @@ jobs:
         cp artifacts/rust-cli-memora-darwin-arm64/memora-darwin-arm64 release-assets/
         # Helm chart
         cp artifacts/helm-chart/*.tgz release-assets/
-        # Docker images
-        cp artifacts/docker-image-api/memora-api.tar release-assets/
-        cp artifacts/docker-image-control-plane/memora-control-plane.tar release-assets/
-        # Control plane build
-        cd artifacts/control-plane-build
-        tar czf ../../release-assets/memora-control-plane-build.tar.gz .
-        cd ../..
 
     - name: Generate release notes
       id: release_notes
@@ -256,11 +233,9 @@ jobs:
         - \`memora-${{ steps.get_version.outputs.VERSION }}.tgz\`
 
         ### Docker Images
-        - \`memora-api.tar\` - API server Docker image
-        - \`memora-control-plane.tar\` - Control Plane Docker image
-
-        ### Control Plane
-        - \`memora-control-plane-build.tar.gz\` - Next.js standalone build
+        Docker images are published to GitHub Container Registry:
+        - \`ghcr.io/${{ github.repository_owner }}/memora-api:${{ steps.get_version.outputs.VERSION }}\`
+        - \`ghcr.io/${{ github.repository_owner }}/memora-control-plane:${{ steps.get_version.outputs.VERSION }}\`
 
         ## 🚀 Installation
 
@@ -294,11 +269,15 @@ jobs:
 
         ### Docker
         \`\`\`bash
-        # Load API image
-        docker load < memora-api.tar
+        # Pull API image
+        docker pull ghcr.io/${{ github.repository_owner }}/memora-api:${{ steps.get_version.outputs.VERSION }}
 
-        # Load Control Plane image
-        docker load < memora-control-plane.tar
+        # Pull Control Plane image
+        docker pull ghcr.io/${{ github.repository_owner }}/memora-control-plane:${{ steps.get_version.outputs.VERSION }}
+
+        # Or use latest
+        docker pull ghcr.io/${{ github.repository_owner }}/memora-api:latest
+        docker pull ghcr.io/${{ github.repository_owner }}/memora-control-plane:latest
         \`\`\`
         EOF
         cat release-notes.md
@@ -321,7 +300,6 @@ jobs:
         echo "## 📦 Components" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Python package (memora)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Rust CLI (Linux amd64, macOS amd64, macOS arm64)" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Control Plane Next.js application" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Docker images (API, Control Plane)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Helm chart" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
