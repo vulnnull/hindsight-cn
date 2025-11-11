@@ -195,10 +195,35 @@ jobs:
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-    - name: Download all artifacts
+    - name: Download Python package
       uses: actions/download-artifact@v4
       with:
-        path: ./artifacts
+        name: python-memora-dist
+        path: ./artifacts/python-memora-dist
+
+    - name: Download Rust CLI (Linux)
+      uses: actions/download-artifact@v4
+      with:
+        name: rust-cli-memora-linux-amd64
+        path: ./artifacts/rust-cli-memora-linux-amd64
+
+    - name: Download Rust CLI (macOS Intel)
+      uses: actions/download-artifact@v4
+      with:
+        name: rust-cli-memora-darwin-amd64
+        path: ./artifacts/rust-cli-memora-darwin-amd64
+
+    - name: Download Rust CLI (macOS ARM)
+      uses: actions/download-artifact@v4
+      with:
+        name: rust-cli-memora-darwin-arm64
+        path: ./artifacts/rust-cli-memora-darwin-arm64
+
+    - name: Download Helm chart
+      uses: actions/download-artifact@v4
+      with:
+        name: helm-chart
+        path: ./artifacts/helm-chart
 
     - name: Prepare release assets
       run: |
