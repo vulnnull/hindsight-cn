@@ -65,7 +65,7 @@ fi
 print_info "Updating version in all components..."
 
 # Update Python packages
-PYTHON_PACKAGES=("memora" "benchmarks" "memora-dev")
+PYTHON_PACKAGES=("memora" "memora-dev" "memora-dev/benchmarks")
 for package in "${PYTHON_PACKAGES[@]}"; do
     PYPROJECT_FILE="$package/pyproject.toml"
     if [ -f "$PYPROJECT_FILE" ]; then
@@ -128,7 +128,7 @@ git add -A
 git commit -m "Release v$VERSION
 
 - Update version to $VERSION in all components
-- Python packages: memora, benchmarks, memora-dev
+- Python packages: memora, memora-dev, memora-dev/benchmarks
 - Rust CLI: memora-cli
 - Control Plane: memora-control-plane
 - Helm chart"

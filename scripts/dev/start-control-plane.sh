@@ -1,40 +1,12 @@
 #!/bin/bash
 set -e
 
-cd "$(dirname "$0")/../../memora-control-plane"
-
-# Parse arguments
-PORT=3000
-
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --port|-p)
-      PORT="$2"
-      shift 2
-      ;;
-    --help|-h)
-      echo "Usage: $0 [options]"
-      echo ""
-      echo "Options:"
-      echo "  --port, -p PORT    Port to run on (default: 3000)"
-      echo "  --help, -h         Show this help message"
-      echo ""
-      echo "Example:"
-      echo "  $0 --port 3001"
-      exit 0
-      ;;
-    *)
-      echo "Unknown option: $1"
-      echo "Use --help for usage information"
-      exit 1
-      ;;
-  esac
-done
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR/memora-control-plane" || exit 1
 
 # Check if .env exists in workspace root
-ROOT_DIR="$(dirname "$0")/../.."
 if [ ! -f "$ROOT_DIR/.env" ]; then
-  echo "⚠️  Warning: .env not found in workspace root"
+  echo "⚠️  Warning: .env not found in workspace root at $ROOT_DIR/.env"
   echo "📝 Please create a .env file if you need to set MEMORA_CP_DATAPLANE_API_URL"
   echo "   Default will use http://localhost:8080"
   echo ""
@@ -48,6 +20,7 @@ if [ -f "$ROOT_DIR/.env" ]; then
   source "$ROOT_DIR/.env"
   set +a
 fi
+PORT=3000
 echo ""
 echo "Control plane will be available at: http://localhost:${PORT}"
 echo ""

@@ -6,11 +6,8 @@ on:
       - 'v*'
 
 jobs:
-  build-python-packages:
+  build-python-package:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        package: [memora, benchmarks, memora-dev]
 
     steps:
     - uses: actions/checkout@v4
@@ -25,16 +22,16 @@ jobs:
       with:
         python-version-file: ".python-version"
 
-    - name: Build package
+    - name: Build memora package
       run: |
-        cd ${{ matrix.package }}
+        cd memora
         uv build
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: python-${{ matrix.package }}-dist
-        path: ${{ matrix.package }}/dist/*
+        name: python-memora-dist
+        path: memora/dist/*
         retention-days: 30
 
   build-rust-cli:
@@ -132,7 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        component: [standalone, control-plane]
+        component: [api, control-plane]
 
     steps:
     - uses: actions/checkout@v4
@@ -144,24 +141,24 @@ jobs:
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-    - name: Build Docker image (standalone)
-      if: matrix.component == 'standalone'
+    - name: Build Docker image (api)
+      if: matrix.component == 'api'
       uses: docker/build-push-action@v6
       with:
         context: .
-        file: standalone/Dockerfile
+        file: docker/api.Dockerfile
         push: false
-        tags: memora-standalone:${{ steps.get_version.outputs.VERSION }}
+        tags: memora-api:${{ steps.get_version.outputs.VERSION }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        outputs: type=docker,dest=/tmp/memora-standalone.tar
+        outputs: type=docker,dest=/tmp/memora-api.tar
 
     - name: Build Docker image (control-plane)
       if: matrix.component == 'control-plane'
       uses: docker/build-push-action@v6
       with:
-        context: ./memora-control-plane
-        file: memora-control-plane/Dockerfile
+        context: .
+        file: docker/control-plane.Dockerfile
         push: false
         tags: memora-control-plane:${{ steps.get_version.outputs.VERSION }}
         cache-from: type=gha
@@ -201,25 +198,131 @@ jobs:
         path: helm-packages/*.tgz
         retention-days: 30
 
-  create-release-summary:
+  create-github-release:
     runs-on: ubuntu-latest
-    needs: [build-python-packages, build-rust-cli, build-control-plane, build-docker-images, package-helm-chart]
+    needs: [build-python-package, build-rust-cli, build-control-plane, build-docker-images, package-helm-chart]
+    permissions:
+      contents: write
 
     steps:
+    - uses: actions/checkout@v4
+
+    - name: Extract version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
         path: ./artifacts
 
+    - name: Prepare release assets
+      run: |
+        mkdir -p release-assets
+        # Python package
+        cp artifacts/python-memora-dist/* release-assets/
+        # Rust CLI binaries
+        cp artifacts/rust-cli-memora-linux-amd64/memora-linux-amd64 release-assets/
+        cp artifacts/rust-cli-memora-darwin-amd64/memora-darwin-amd64 release-assets/
+        cp artifacts/rust-cli-memora-darwin-arm64/memora-darwin-arm64 release-assets/
+        # Helm chart
+        cp artifacts/helm-chart/*.tgz release-assets/
+        # Docker images
+        cp artifacts/docker-image-api/memora-api.tar release-assets/
+        cp artifacts/docker-image-control-plane/memora-control-plane.tar release-assets/
+        # Control plane build
+        cd artifacts/control-plane-build
+        tar czf ../../release-assets/memora-control-plane-build.tar.gz .
+        cd ../..
+
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        cat << EOF > release-notes.md
+        # Memora v${{ steps.get_version.outputs.VERSION }}
+
+        ## 📦 Release Artifacts
+
+        ### Python Package
+        - \`memora-${{ steps.get_version.outputs.VERSION }}-py3-none-any.whl\`
+        - \`memora-${{ steps.get_version.outputs.VERSION }}.tar.gz\`
+
+        ### CLI Binaries
+        - \`memora-linux-amd64\` - Linux x86_64
+        - \`memora-darwin-amd64\` - macOS Intel
+        - \`memora-darwin-arm64\` - macOS Apple Silicon
+
+        ### Helm Chart
+        - \`memora-${{ steps.get_version.outputs.VERSION }}.tgz\`
+
+        ### Docker Images
+        - \`memora-api.tar\` - API server Docker image
+        - \`memora-control-plane.tar\` - Control Plane Docker image
+
+        ### Control Plane
+        - \`memora-control-plane-build.tar.gz\` - Next.js standalone build
+
+        ## 🚀 Installation
+
+        ### Python Package
+        \`\`\`bash
+        pip install memora==${{ steps.get_version.outputs.VERSION }}
+        \`\`\`
+
+        ### CLI
+        \`\`\`bash
+        # macOS (Apple Silicon)
+        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/memora-darwin-arm64 -o memora
+        chmod +x memora
+        sudo mv memora /usr/local/bin/
+
+        # macOS (Intel)
+        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/memora-darwin-amd64 -o memora
+        chmod +x memora
+        sudo mv memora /usr/local/bin/
+
+        # Linux
+        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/memora-linux-amd64 -o memora
+        chmod +x memora
+        sudo mv memora /usr/local/bin/
+        \`\`\`
+
+        ### Helm Chart
+        \`\`\`bash
+        helm install memora memora-${{ steps.get_version.outputs.VERSION }}.tgz
+        \`\`\`
+
+        ### Docker
+        \`\`\`bash
+        # Load API image
+        docker load < memora-api.tar
+
+        # Load Control Plane image
+        docker load < memora-control-plane.tar
+        \`\`\`
+        EOF
+        cat release-notes.md
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: release-assets/*
+        body_path: release-notes.md
+        draft: false
+        prerelease: false
+        generate_release_notes: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Create release summary
       run: |
-        echo "# Release Artifacts Built Successfully" >> $GITHUB_STEP_SUMMARY
+        echo "# Release v${{ steps.get_version.outputs.VERSION }} Published Successfully" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## Components" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Python packages (memora, benchmarks, memora-dev)" >> $GITHUB_STEP_SUMMARY
+        echo "## 📦 Components" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Python package (memora)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Rust CLI (Linux amd64, macOS amd64, macOS arm64)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Control Plane Next.js application" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Docker images (standalone, control-plane)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Docker images (API, Control Plane)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Helm chart" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "All artifacts are available for download in the workflow artifacts." >> $GITHUB_STEP_SUMMARY
+        echo "🎉 Release is now available at: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
