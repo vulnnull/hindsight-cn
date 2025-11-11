@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: memora-postgres
+    environment:
+      POSTGRES_USER: memora
+      POSTGRES_PASSWORD: memora_dev
+      POSTGRES_DB: memora
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memora"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - memora-network
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    container_name: memora-api
+    environment:
+      MEMORA_API_DATABASE_URL: postgresql://memora:memora_dev@postgres:5432/memora
+      MEMORA_API_LLM_PROVIDER: ${MEMORA_API_LLM_PROVIDER:-groq}
+      MEMORA_API_LLM_API_KEY: ${MEMORA_API_LLM_API_KEY}
+      MEMORA_API_LLM_MODEL: ${MEMORA_API_LLM_MODEL:-openai/gpt-oss-120b}
+      MEMORA_API_LLM_BASE_URL: ${MEMORA_API_LLM_BASE_URL}
+      MEMORA_API_HOST: ${MEMORA_API_HOST:-0.0.0.0}
+      MEMORA_API_PORT: ${MEMORA_API_PORT:-8080}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - memora-network
+    restart: unless-stopped
+
+  control-plane:
+    build:
+      context: ../memora-control-plane
+      dockerfile: ../docker/control-plane.Dockerfile
+    container_name: memora-control-plane
+    environment:
+      NODE_ENV: production
+      MEMORA_CP_HOSTNAME: ${MEMORA_CP_HOSTNAME:-0.0.0.0}
+      MEMORA_CP_PORT: ${MEMORA_CP_PORT:-3000}
+      MEMORA_CP_DATAPLANE_API_URL: ${MEMORA_CP_DATAPLANE_API_URL:-http://api:8080}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - memora-network
+    restart: unless-stopped
+
+networks:
+  memora-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

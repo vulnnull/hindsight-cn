@@ -9,11 +9,11 @@ import os
 async def test_large_batch_auto_chunks():
     """Test that large batches are automatically split into smaller chunks."""
     memory = TemporalSemanticMemory(
-        db_url=os.getenv("DATABASE_URL"),
-        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
-        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
-        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
-        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None
+        db_url=os.getenv("MEMORA_API_DATABASE_URL"),
+        memory_llm_provider=os.getenv("MEMORA_API_LLM_PROVIDER", "groq"),
+        memory_llm_api_key=os.getenv("MEMORA_API_LLM_API_KEY"),
+        memory_llm_model=os.getenv("MEMORA_API_LLM_MODEL", "openai/gpt-oss-120b"),
+        memory_llm_base_url=os.getenv("MEMORA_API_LLM_BASE_URL") or None
     )
 
     agent_id = "test_chunking_agent"
@@ -52,11 +52,11 @@ async def test_large_batch_auto_chunks():
 async def test_small_batch_no_chunking():
     """Test that small batches are not chunked."""
     memory = TemporalSemanticMemory(
-        db_url=os.getenv("DATABASE_URL"),
-        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
-        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
-        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
-        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None
+        db_url=os.getenv("MEMORA_API_DATABASE_URL"),
+        memory_llm_provider=os.getenv("MEMORA_API_LLM_PROVIDER", "groq"),
+        memory_llm_api_key=os.getenv("MEMORA_API_LLM_API_KEY"),
+        memory_llm_model=os.getenv("MEMORA_API_LLM_MODEL", "openai/gpt-oss-120b"),
+        memory_llm_base_url=os.getenv("MEMORA_API_LLM_BASE_URL") or None
     )
 
     agent_id = "test_no_chunking_agent"

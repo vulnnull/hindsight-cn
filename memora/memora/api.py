@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from memora import TemporalSemanticMemory
 
@@ -44,9 +44,32 @@ class SearchRequest(BaseModel):
         }
 
 
+class SearchResult(BaseModel):
+    """Single search result item."""
+    model_config = {
+        "populate_by_name": True,
+        "json_schema_extra": {
+            "example": {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "text": "Alice works at Google on the AI team",
+                "type": "world",
+                "context": "work info",
+                "event_date": "2024-01-15T10:30:00Z"
+            }
+        }
+    }
+
+    id: str
+    text: str
+    type: Optional[str] = None  # fact type: world, agent, opinion
+    activation: Optional[float] = None
+    context: Optional[str] = None
+    event_date: Optional[str] = None  # ISO format date string
+
+
 class SearchResponse(BaseModel):
     """Response model for search endpoints."""
-    results: List[Dict[str, Any]]
+    results: List[SearchResult]
     trace: Optional[Dict[str, Any]] = None
 
     class Config:
@@ -54,9 +77,12 @@ class SearchResponse(BaseModel):
             "example": {
                 "results": [
                     {
+                        "id": "123e4567-e89b-12d3-a456-426614174000",
                         "text": "Alice works at Google on the AI team",
-                        "score": 0.95,
-                        "id": "123e4567-e89b-12d3-a456-426614174000"
+                        "type": "world",
+                        "activation": 0.95,
+                        "context": "work info",
+                        "event_date": "2024-01-15T10:30:00Z"
                     }
                 ],
                 "trace": {
@@ -173,23 +199,53 @@ class OpinionItem(BaseModel):
     confidence: float
 
 
+class ThinkFact(BaseModel):
+    """A fact used in think response."""
+    id: Optional[str] = None
+    text: str
+    type: Optional[str] = None  # fact type: world, agent, opinion
+    activation: Optional[float] = None
+    context: Optional[str] = None
+    event_date: Optional[str] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "text": "AI is used in healthcare",
+                "type": "world",
+                "context": "healthcare discussion",
+                "event_date": "2024-01-15T10:30:00Z"
+            }
+        }
+
+
 class ThinkResponse(BaseModel):
     """Response model for think endpoint."""
     text: str
-    based_on: Dict[str, List[Dict[str, Any]]]  # {"world": [...], "agent": [...], "opinion": [...]}
-    new_opinions: List[OpinionItem] = []  # List of newly formed opinions with confidence
+    based_on: List[ThinkFact] = []  # Facts used to generate the response
+    new_opinions: List[str] = []  # Simplified to list of opinion strings
 
     class Config:
         json_schema_extra = {
             "example": {
                 "text": "Based on my understanding, AI is a transformative technology...",
-                "based_on": {
-                    "world": [{"text": "AI is used in healthcare", "score": 0.9}],
-                    "agent": [{"text": "I discussed AI applications last week", "score": 0.85}],
-                    "opinion": [{"text": "I believe AI should be used ethically", "score": 0.8}]
-                },
+                "based_on": [
+                    {
+                        "id": "123",
+                        "text": "AI is used in healthcare",
+                        "type": "world",
+                        "activation": 0.9
+                    },
+                    {
+                        "id": "456",
+                        "text": "I discussed AI applications last week",
+                        "type": "agent",
+                        "activation": 0.85
+                    }
+                ],
                 "new_opinions": [
-                    {"text": "AI has great potential when used responsibly", "confidence": 0.95}
+                    "AI has great potential when used responsibly"
                 ]
             }
         }
@@ -355,7 +411,13 @@ The system uses:
 
     @app.on_event("startup")
     async def startup_event():
-        """Initialize memory system on startup."""
+        """Initialize database and memory system on startup."""
+        from memora.migrations import run_migrations
+
+        # Run database migrations first
+        run_migrations(memory.db_url)
+
+        # Then initialize memory system
         await memory.initialize()
         logging.info("Memory system initialized")
 
@@ -483,7 +545,7 @@ def _register_routes(app: FastAPI):
                     )
 
             # Run search with tracing
-            results, trace = await app.state.memory.search_async(
+            core_result = await app.state.memory.search_async(
                 agent_id=request.agent_id,
                 query=request.query,
                 thinking_budget=request.thinking_budget,
@@ -494,23 +556,21 @@ def _register_routes(app: FastAPI):
                 question_date=question_date
             )
 
-            # Filter results to only include specific fields
-            filtered_results = [
-                {
-                    "id": result.get("id"),
-                    "text": result.get("text"),
-                    "context": result.get("context"),
-                    "event_date": result.get("event_date")
-                }
-                for result in results
+            # Convert core MemoryFact objects to API SearchResult objects (excluding internal metrics)
+            search_results = [
+                SearchResult(
+                    id=fact.id,
+                    text=fact.text,
+                    type=fact.fact_type,
+                    context=fact.context,
+                    event_date=fact.event_date
+                )
+                for fact in core_result.results
             ]
 
-            # Convert trace to dict
-            trace_dict = trace.to_dict() if trace else None
-
             return SearchResponse(
-                results=filtered_results,
-                trace=trace_dict
+                results=search_results,
+                trace=core_result.trace
             )
         except HTTPException:
             raise
@@ -541,16 +601,28 @@ def _register_routes(app: FastAPI):
     async def api_think(request: ThinkRequest):
         try:
             # Use the memory system's think_async method
-            result = await app.state.memory.think_async(
+            core_result = await app.state.memory.think_async(
                 agent_id=request.agent_id,
                 query=request.query,
                 thinking_budget=request.thinking_budget
             )
 
+            # Convert core MemoryFact objects to API ThinkFact objects (excluding internal metrics)
+            based_on_facts = []
+            for fact_type, facts in core_result.based_on.items():
+                for fact in facts:
+                    based_on_facts.append(ThinkFact(
+                        id=fact.id,
+                        text=fact.text,
+                        type=fact.fact_type,
+                        context=fact.context,
+                        event_date=fact.event_date
+                    ))
+
             return ThinkResponse(
-                text=result["text"],
-                based_on=result["based_on"],
-                new_opinions=result.get("new_opinions", [])
+                text=core_result.text,
+                based_on=based_on_facts,
+                new_opinions=core_result.new_opinions
             )
 
         except Exception as e:

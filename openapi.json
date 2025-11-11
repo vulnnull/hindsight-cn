@@ -340,16 +340,9 @@
           {
             "name": "agent_id",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
               "title": "Agent Id"
             }
           },
@@ -872,11 +865,6 @@
             ],
             "title": "Content Hash"
           },
-          "metadata": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Metadata"
-          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -896,7 +884,6 @@
           "agent_id",
           "original_text",
           "content_hash",
-          "metadata",
           "created_at",
           "updated_at",
           "memory_unit_count"
@@ -909,9 +896,6 @@
           "created_at": "2024-01-15T10:30:00Z",
           "id": "session_1",
           "memory_unit_count": 15,
-          "metadata": {
-            "source": "conversation"
-          },
           "original_text": "Full document text here...",
           "updated_at": "2024-01-15T10:30:00Z"
         }
@@ -1042,9 +1026,6 @@
               "created_at": "2024-01-15T10:30:00Z",
               "id": "session_1",
               "memory_unit_count": 15,
-              "metadata": {
-                "source": "conversation"
-              },
               "text_length": 5420,
               "updated_at": "2024-01-15T10:30:00Z"
             }
@@ -1144,25 +1125,6 @@
           "event_date": "2024-01-15T10:30:00Z"
         }
       },
-      "OpinionItem": {
-        "properties": {
-          "text": {
-            "type": "string",
-            "title": "Text"
-          },
-          "confidence": {
-            "type": "number",
-            "title": "Confidence"
-          }
-        },
-        "type": "object",
-        "required": [
-          "text",
-          "confidence"
-        ],
-        "title": "OpinionItem",
-        "description": "Model for an opinion with confidence score."
-      },
       "SearchRequest": {
         "properties": {
           "query": {
@@ -1170,10 +1132,17 @@
             "title": "Query"
           },
           "fact_type": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Fact Type"
           },
           "agent_id": {
@@ -1215,8 +1184,7 @@
         },
         "type": "object",
         "required": [
-          "query",
-          "fact_type"
+          "query"
         ],
         "title": "SearchRequest",
         "description": "Request model for search endpoint.",
@@ -1238,8 +1206,7 @@
         "properties": {
           "results": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/SearchResult"
             },
             "type": "array",
             "title": "Results"
@@ -1266,9 +1233,12 @@
         "example": {
           "results": [
             {
+              "activation": 0.95,
+              "context": "work info",
+              "event_date": "2024-01-15T10:30:00Z",
               "id": "123e4567-e89b-12d3-a456-426614174000",
-              "score": 0.95,
-              "text": "Alice works at Google on the AI team"
+              "text": "Alice works at Google on the AI team",
+              "type": "world"
             }
           ],
           "trace": {
@@ -1276,6 +1246,152 @@
             "query": "What did Alice say about machine learning?",
             "time_seconds": 0.123
           }
+        }
+      },
+      "SearchResult": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "activation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activation"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context"
+          },
+          "event_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "SearchResult",
+        "description": "Single search result item.",
+        "example": {
+          "context": "work info",
+          "event_date": "2024-01-15T10:30:00Z",
+          "id": "123e4567-e89b-12d3-a456-426614174000",
+          "text": "Alice works at Google on the AI team",
+          "type": "world"
+        }
+      },
+      "ThinkFact": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "activation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activation"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context"
+          },
+          "event_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "ThinkFact",
+        "description": "A fact used in think response.",
+        "example": {
+          "context": "healthcare discussion",
+          "event_date": "2024-01-15T10:30:00Z",
+          "id": "123e4567-e89b-12d3-a456-426614174000",
+          "text": "AI is used in healthcare",
+          "type": "world"
         }
       },
       "ThinkRequest": {
@@ -1314,19 +1430,16 @@
             "title": "Text"
           },
           "based_on": {
-            "additionalProperties": {
-              "items": {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              "type": "array"
+            "items": {
+              "$ref": "#/components/schemas/ThinkFact"
             },
-            "type": "object",
-            "title": "Based On"
+            "type": "array",
+            "title": "Based On",
+            "default": []
           },
           "new_opinions": {
             "items": {
-              "$ref": "#/components/schemas/OpinionItem"
+              "type": "string"
             },
             "type": "array",
             "title": "New Opinions",
@@ -1335,37 +1448,27 @@
         },
         "type": "object",
         "required": [
-          "text",
-          "based_on"
+          "text"
         ],
         "title": "ThinkResponse",
         "description": "Response model for think endpoint.",
         "example": {
-          "based_on": {
-            "agent": [
-              {
-                "score": 0.85,
-                "text": "I discussed AI applications last week"
-              }
-            ],
-            "opinion": [
-              {
-                "score": 0.8,
-                "text": "I believe AI should be used ethically"
-              }
-            ],
-            "world": [
-              {
-                "score": 0.9,
-                "text": "AI is used in healthcare"
-              }
-            ]
-          },
-          "new_opinions": [
+          "based_on": [
             {
-              "confidence": 0.95,
-              "text": "AI has great potential when used responsibly"
+              "activation": 0.9,
+              "id": "123",
+              "text": "AI is used in healthcare",
+              "type": "world"
+            },
+            {
+              "activation": 0.85,
+              "id": "456",
+              "text": "I discussed AI applications last week",
+              "type": "agent"
             }
+          ],
+          "new_opinions": [
+            "AI has great potential when used responsibly"
           ],
           "text": "Based on my understanding, AI is a transformative technology..."
         }

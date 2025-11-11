@@ -1,0 +1,135 @@
+MEMORA HELM CHART INSTALLATION GUIDE
+=====================================
+
+PREREQUISITES
+-------------
+- Kubernetes cluster (1.19+)
+- kubectl configured
+- Helm 3.x installed
+- PostgreSQL database with pgvector extension (if not using bundled PostgreSQL)
+
+BASIC INSTALLATION
+------------------
+
+1. Install with default values (requires external PostgreSQL):
+
+   helm install memora ./memora \
+     --set postgresql.external.host=your-postgres-host \
+     --set postgresql.external.password=your-password \
+     --set api.secrets.MEMORY_LLM_API_KEY=your-api-key
+
+2. Install with custom values file:
+
+   helm install memora ./memora -f memora/values-production.yaml
+
+3. Install in a specific namespace:
+
+   kubectl create namespace memora
+   helm install memora ./memora -n memora
+
+CONFIGURATION OPTIONS
+---------------------
+
+Development setup (using values-development.yaml):
+   helm install memora ./memora -f memora/values-development.yaml
+
+Production setup (using values-production.yaml):
+   helm install memora ./memora -f memora/values-production.yaml
+
+Custom LLM provider:
+   helm install memora ./memora \
+     --set api.env.MEMORY_LLM_PROVIDER=openai \
+     --set api.env.MEMORY_LLM_MODEL=gpt-4 \
+     --set api.secrets.MEMORY_LLM_API_KEY=sk-your-key
+
+Enable ingress:
+   helm install memora ./memora \
+     --set ingress.enabled=true \
+     --set ingress.hosts[0].host=memora.example.com
+
+Enable autoscaling:
+   helm install memora ./memora \
+     --set autoscaling.enabled=true \
+     --set autoscaling.minReplicas=2 \
+     --set autoscaling.maxReplicas=10
+
+UPGRADE
+-------
+
+Upgrade existing installation:
+   helm upgrade memora ./memora
+
+Upgrade with new values:
+   helm upgrade memora ./memora -f memora/values-production.yaml
+
+UNINSTALL
+---------
+
+Remove the Helm release:
+   helm uninstall memora
+
+Remove with namespace:
+   helm uninstall memora -n memora
+
+TESTING
+-------
+
+Test the installation with dry-run:
+   helm install memora ./memora --dry-run --debug
+
+Validate templates:
+   helm template memora ./memora
+
+Lint the chart:
+   helm lint ./memora
+
+ACCESSING THE SERVICES
+----------------------
+
+Port-forward control plane:
+   kubectl port-forward svc/memora-control-plane 3000:3000
+
+Port-forward API:
+   kubectl port-forward svc/memora-api 8080:8080
+
+Get service URLs:
+   helm status memora
+
+DATABASE INITIALIZATION
+-----------------------
+
+NOTE: Database migrations now run automatically when the API service starts.
+      You typically don't need to run migrations manually.
+
+If you want to pre-initialize the database before deploying (optional):
+   kubectl run memora-init --rm -it --restart=Never \
+     --image=memora/api:latest \
+     --env="DATABASE_URL=postgresql://user:pass@host:5432/memora" \
+     -- python -c "from memora.migrations import run_migrations; run_migrations()"
+
+TROUBLESHOOTING
+---------------
+
+Check pod status:
+   kubectl get pods -l app.kubernetes.io/name=memora
+
+View logs for API:
+   kubectl logs -l app.kubernetes.io/component=api
+
+View logs for control plane:
+   kubectl logs -l app.kubernetes.io/component=control-plane
+
+Describe a pod:
+   kubectl describe pod <pod-name>
+
+Check configuration:
+   kubectl get configmap memora-config -o yaml
+   kubectl get secret memora-secret -o yaml
+
+NOTES
+-----
+- Make sure PostgreSQL has pgvector extension enabled
+- Run database migrations before first use
+- Configure proper resource limits for production
+- Use external secrets management for production
+- Enable TLS/SSL for production deployments

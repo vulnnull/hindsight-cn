@@ -28,6 +28,7 @@ from .utils import (
 from .entity_resolver import EntityResolver
 from .operations import EmbeddingOperationsMixin, LinkOperationsMixin, ThinkOperationsMixin
 from .llm_wrapper import LLMConfig
+from .response_models import SearchResult as SearchResultModel, ThinkResult, MemoryFact
 from .task_backend import TaskBackend, AsyncIOQueueBackend
 from .search.reranking import HeuristicReranker, CrossEncoderReranker
 
@@ -158,6 +159,9 @@ class TemporalSemanticMemory(
         # Each put_batch holds a connection for the entire transaction, so we limit to 5
         # concurrent puts to avoid connection pool exhaustion and reduce write contention
         self._put_semaphore = asyncio.Semaphore(5)
+
+        # initialize encoding eagerly to avoid delaying the first time
+        _get_tiktoken_encoding()
 
     async def _handle_access_count_update(self, task_dict: Dict[str, Any]):
         """
@@ -1028,7 +1032,7 @@ class TemporalSemanticMemory(
         enable_trace: bool = False,
         reranker: str = "cross-encoder",
         question_date: Optional[datetime] = None,
-    ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
+    ) -> SearchResultModel:
         """
         Search memories using N*4-way parallel retrieval (N fact types × 4 retrieval methods).
 
@@ -1054,8 +1058,9 @@ class TemporalSemanticMemory(
             question_date: Optional date when question was asked (for temporal filtering)
 
         Returns:
-            Tuple of (results, trace) where results is a list of memory units
-            and trace is None (tracing removed)
+            SearchResultModel containing:
+            - results: List of MemoryFact objects
+            - trace: Optional trace information for debugging
         """
         # Backpressure: limit concurrent searches to prevent overwhelming the database
         async with self._search_semaphore:
@@ -1385,11 +1390,25 @@ class TemporalSemanticMemory(
                     event_date = result["event_date"]
                     result["event_date"] = event_date.isoformat() if hasattr(event_date, 'isoformat') else event_date
 
+            # Convert results to MemoryFact objects
+            memory_facts = []
+            for result in top_results:
+                memory_facts.append(MemoryFact(
+                    id=str(result.get("id")),
+                    text=result.get("text"),
+                    fact_type=result.get("fact_type", "world"),
+                    context=result.get("context"),
+                    event_date=result.get("event_date"),
+                    activation=result.get("activation")
+                ))
+
             # Finalize trace if enabled
+            trace_dict = None
             if tracer:
                 trace = tracer.finalize(top_results)
-                return top_results, trace
-            return top_results, None
+                trace_dict = trace.to_dict() if trace else None
+
+            return SearchResultModel(results=memory_facts, trace=trace_dict)
 
         except Exception as e:
             log_buffer.append(f"[SEARCH {search_id}] ERROR after {time.time() - search_start:.3f}s: {str(e)}")

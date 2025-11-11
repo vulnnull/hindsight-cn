@@ -66,8 +66,9 @@ docker run -p 3000:3000 -p 8080:8080 \
 With custom environment variables:
 ```bash
 docker run -p 3000:3000 -p 8080:8080 \
-  -e OPENAI_API_KEY=your-key \
-  -e EMBEDDING_MODEL_NAME=custom-model \
+  -e MEMORA_API_LLM_PROVIDER=groq \
+  -e MEMORA_API_LLM_API_KEY=your-key \
+  -e MEMORA_API_LLM_MODEL=openai/gpt-oss-120b \
   memora-standalone:latest
 ```
 
@@ -96,11 +97,12 @@ The `init.sh` script handles:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/memora` | PostgreSQL connection string |
-| `DATAPLANE_API_URL` | `http://localhost:8080` | Dataplane API URL for control plane |
-| `EMBEDDING_MODEL_NAME` | `sentence-transformers/all-MiniLM-L6-v2` | Sentence transformer model |
-| `EMBEDDING_DIM` | `384` | Embedding dimension |
-| `OPENAI_API_KEY` | - | Optional OpenAI API key |
+| `MEMORA_API_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/memora` | PostgreSQL connection string |
+| `MEMORA_CP_DATAPLANE_API_URL` | `http://localhost:8080` | Dataplane API URL for control plane |
+| `MEMORA_API_LLM_PROVIDER` | `none` | LLM provider (openai, groq, ollama, none) |
+| `MEMORA_API_LLM_API_KEY` | - | API key for LLM provider |
+| `MEMORA_API_LLM_MODEL` | `openai/gpt-oss-120b` | LLM model name |
+| `MEMORA_API_LLM_BASE_URL` | - | Optional custom LLM endpoint |
 
 ## Logs
 

@@ -27,8 +27,11 @@ done
 echo "📊 Setting up database..."
 su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname = 'memora'\" | grep -q 1 || psql -c 'CREATE DATABASE memora;'"
 
-# Run migrations
-echo "🔄 Running database migrations..."
+# Run initial migrations
+# Note: The API also runs migrations automatically on startup.
+# We run them here during initialization to ensure the database
+# schema is ready before handing off to supervisord.
+echo "🔄 Running initial database migrations..."
 cd /app/memora
 
 # Export environment variables

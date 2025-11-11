@@ -41,17 +41,15 @@ async def test_think_opinion_consistency(memory):
         )
 
         print(f"\n=== First Think Call ===")
-        print(f"Answer: {result1['text']}")
-        print(f"New opinions formed: {len(result1.get('new_opinions', []))}")
-        for opinion in result1.get('new_opinions', []):
-            print(f"  - {opinion['text']} (confidence: {opinion['confidence']:.2f})")
+        print(f"Answer: {result1.text}")
+        print(f"New opinions formed: {len(result1.new_opinions)}")
 
         # Verify we got an answer
-        assert result1['text'], "First think call should return an answer"
-        assert 'based_on' in result1, "Should return based_on facts"
+        assert result1.text, "First think call should return an answer"
+        assert result1.based_on, "Should return based_on facts"
 
         # Verify opinions were formed
-        new_opinions_count = len(result1.get('new_opinions', []))
+        new_opinions_count = len(result1.new_opinions)
         print(f"\nNew opinions formed: {new_opinions_count}")
 
         # Wait for background opinion PUT tasks to complete
@@ -91,23 +89,23 @@ async def test_think_opinion_consistency(memory):
         )
 
         print(f"\n=== Second Think Call ===")
-        print(f"Answer: {result2['text']}")
-        print(f"Existing opinions used: {len(result2['based_on'].get('opinion', []))}")
-        for opinion in result2['based_on'].get('opinion', []):
-            print(f"  - {opinion['text']}")
-        print(f"New opinions formed: {len(result2.get('new_opinions', []))}")
+        print(f"Answer: {result2.text}")
+        print(f"Existing opinions used: {len(result2.based_on.get('opinion', []))}")
+        for opinion in result2.based_on.get('opinion', []):
+            print(f"  - {opinion.text}")
+        print(f"New opinions formed: {len(result2.new_opinions)}")
 
         # Verify second call also got an answer
-        assert result2['text'], "Second think call should return an answer"
+        assert result2.text, "Second think call should return an answer"
 
         # Verify second call used the stored opinions (if any were stored)
         if len(stored_opinions) > 0:
-            assert len(result2['based_on'].get('opinion', [])) > 0, "Second call should retrieve stored opinions"
+            assert len(result2.based_on.get('opinion', [])) > 0, "Second call should retrieve stored opinions"
 
         # The responses should be consistent (both should mention the same person as more reliable)
         # We'll do a basic check that they're not contradictory
-        text1_lower = result1['text'].lower()
-        text2_lower = result2['text'].lower()
+        text1_lower = result1.text.lower()
+        text2_lower = result2.text.lower()
 
         print(f"\n=== Consistency Check ===")
 
@@ -149,11 +147,11 @@ async def test_think_without_prior_context(memory):
     )
 
     print(f"\n=== Think Without Context ===")
-    print(f"Answer: {result['text']}")
+    print(f"Answer: {result.text}")
 
     # Should still return an answer (even if it says it doesn't have enough info)
-    assert result['text'], "Should return some answer"
-    assert 'based_on' in result, "Should return based_on structure"
+    assert result.text, "Should return some answer"
+    assert result.based_on, "Should return based_on structure"
 
 
 if __name__ == "__main__":

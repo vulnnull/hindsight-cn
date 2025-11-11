@@ -1,11 +1,11 @@
 FROM node:20-alpine AS control-plane-builder
 
 # Build control plane
-WORKDIR /app/control-plane
-COPY control-plane/package*.json ./
+WORKDIR /app/memora-control-plane
+COPY memora-control-plane/package*.json ./
 RUN npm ci
 
-COPY control-plane/ ./
+COPY memora-control-plane/ ./
 # Set env to skip font optimization during build
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build || (echo "Build failed, retrying..." && npm run build)
@@ -16,9 +16,7 @@ FROM python:3.12-slim AS dataplane-source
 WORKDIR /build
 COPY pyproject.toml uv.lock ./
 COPY memora/ ./memora/
-COPY benchmarks/ ./benchmarks/
 COPY memora-dev/ ./memora-dev/
-COPY memora-cli/ ./memora-cli/
 
 # Final runtime image
 FROM python:3.12-slim
@@ -55,8 +53,10 @@ COPY --from=dataplane-source /build /app
 RUN cd /app && uv sync --frozen
 
 # Copy control plane from builder
-COPY --from=control-plane-builder /app/control-plane/.next/standalone /app/control-plane
-COPY --from=control-plane-builder /app/control-plane/.next/static /app/control-plane/.next/static
+COPY --from=control-plane-builder /app/memora-control-plane/.next/standalone /app/memora-control-plane
+COPY --from=control-plane-builder /app/memora-control-plane/.next/static /app/memora-control-plane/.next/static
+COPY memora-control-plane/start-server.sh /app/memora-control-plane/start-server.sh
+RUN chmod +x /app/memora-control-plane/start-server.sh
 
 # Copy standalone configuration
 COPY standalone/supervisord.conf /etc/supervisor/conf.d/supervisord.conf

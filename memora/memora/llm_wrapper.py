@@ -182,10 +182,10 @@ class LLMConfig:
     @classmethod
     def for_memory(cls) -> "LLMConfig":
         """Create configuration for memory operations from environment variables."""
-        provider = os.getenv("MEMORY_LLM_PROVIDER", "groq")
-        api_key = os.getenv("MEMORY_LLM_API_KEY")
-        base_url = os.getenv("MEMORY_LLM_BASE_URL")
-        model = os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b")
+        provider = os.getenv("MEMORA_API_LLM_PROVIDER", "groq")
+        api_key = os.getenv("MEMORA_API_LLM_API_KEY")
+        base_url = os.getenv("MEMORA_API_LLM_BASE_URL")
+        model = os.getenv("MEMORA_API_LLM_MODEL", "openai/gpt-oss-120b")
 
         # Set default base URL if not provided
         if not base_url:
@@ -211,10 +211,10 @@ class LLMConfig:
         Falls back to memory LLM config if judge-specific config not set.
         """
         # Check if judge-specific config exists, otherwise fall back to memory config
-        provider = os.getenv("JUDGE_LLM_PROVIDER", os.getenv("MEMORY_LLM_PROVIDER", "groq"))
-        api_key = os.getenv("JUDGE_LLM_API_KEY", os.getenv("MEMORY_LLM_API_KEY"))
-        base_url = os.getenv("JUDGE_LLM_BASE_URL", os.getenv("MEMORY_LLM_BASE_URL"))
-        model = os.getenv("JUDGE_LLM_MODEL", os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"))
+        provider = os.getenv("MEMORA_API_JUDGE_LLM_PROVIDER", os.getenv("MEMORA_API_LLM_PROVIDER", "groq"))
+        api_key = os.getenv("MEMORA_API_JUDGE_LLM_API_KEY", os.getenv("MEMORA_API_LLM_API_KEY"))
+        base_url = os.getenv("MEMORA_API_JUDGE_LLM_BASE_URL", os.getenv("MEMORA_API_LLM_BASE_URL"))
+        model = os.getenv("MEMORA_API_JUDGE_LLM_MODEL", os.getenv("MEMORA_API_LLM_MODEL", "openai/gpt-oss-120b"))
 
         # Set default base URL if not provided
         if not base_url:

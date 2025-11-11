@@ -11,14 +11,16 @@ import argparse
 from memora import TemporalSemanticMemory
 from memora.api import create_app
 
+# Disable tokenizers parallelism to avoid warnings
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Create app at module level (required for uvicorn import string)
 _memory = TemporalSemanticMemory(
-    db_url=os.getenv("DATABASE_URL"),
-    memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
-    memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
-    memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
-    memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,
+    db_url=os.getenv("MEMORA_API_DATABASE_URL"),
+    memory_llm_provider=os.getenv("MEMORA_API_LLM_PROVIDER", "groq"),
+    memory_llm_api_key=os.getenv("MEMORA_API_LLM_API_KEY"),
+    memory_llm_model=os.getenv("MEMORA_API_LLM_MODEL", "openai/gpt-oss-120b"),
+    memory_llm_base_url=os.getenv("MEMORA_API_LLM_BASE_URL") or None,
 )
 app = create_app(_memory)
 
@@ -46,17 +48,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    print("\n" + "=" * 80)
-    print("Memory Graph API Server")
-    print("=" * 80)
-    print(f"Host: {args.host}")
-    print(f"Port: {args.port}")
-    print(f"Reload: {args.reload}")
-    print(f"Workers: {args.workers}")
-    print(f"Log Level: {args.log_level}")
-    print("=" * 80 + "\n")
-
-    # Always use import string for uvicorn (required for reload and workers)
     app_ref = "memora.web.server:app"
 
     # Prepare uvicorn config

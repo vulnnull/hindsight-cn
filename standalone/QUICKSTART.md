@@ -67,9 +67,11 @@ docker-compose down -v
 
 Set in `docker-compose.yml` or pass with `-e`:
 
-- `EMBEDDING_MODEL_NAME` - Sentence transformer model (default: sentence-transformers/all-MiniLM-L6-v2)
-- `EMBEDDING_DIM` - Embedding dimension (default: 384)
-- `OPENAI_API_KEY` - Optional OpenAI API key
+- `MEMORA_API_LLM_PROVIDER` - LLM provider (openai, groq, ollama, none) (default: none)
+- `MEMORA_API_LLM_API_KEY` - API key for LLM provider
+- `MEMORA_API_LLM_MODEL` - LLM model name (default: openai/gpt-oss-120b)
+- `MEMORA_API_LLM_BASE_URL` - Optional custom LLM endpoint
+- `MEMORA_CP_DATAPLANE_API_URL` - Dataplane API URL (default: http://localhost:8080)
 
 ## Troubleshooting
 

@@ -1,0 +1,225 @@
+name: Build Release Artifacts
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-python-packages:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [memora, benchmarks, memora-dev]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version-file: ".python-version"
+
+    - name: Build package
+      run: |
+        cd ${{ matrix.package }}
+        uv build
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-${{ matrix.package }}-dist
+        path: ${{ matrix.package }}/dist/*
+        retention-days: 30
+
+  build-rust-cli:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: memora
+            asset_name: memora-linux-amd64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: memora
+            asset_name: memora-darwin-amd64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: memora
+            asset_name: memora-darwin-arm64
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: memora-cli/target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build
+      working-directory: memora-cli
+      run: cargo build --release --target ${{ matrix.target }}
+
+    - name: Prepare artifact
+      run: |
+        mkdir -p artifacts
+        cp memora-cli/target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
+        chmod +x artifacts/${{ matrix.asset_name }}
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: rust-cli-${{ matrix.asset_name }}
+        path: artifacts/${{ matrix.asset_name }}
+        retention-days: 30
+
+  build-control-plane:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: memora-control-plane/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ./memora-control-plane
+      run: npm ci
+
+    - name: Build Next.js app
+      working-directory: ./memora-control-plane
+      run: npm run build
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: control-plane-build
+        path: |
+          memora-control-plane/.next/standalone
+          memora-control-plane/.next/static
+        retention-days: 30
+
+  build-docker-images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [standalone, control-plane]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Extract version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Build Docker image (standalone)
+      if: matrix.component == 'standalone'
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: standalone/Dockerfile
+        push: false
+        tags: memora-standalone:${{ steps.get_version.outputs.VERSION }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        outputs: type=docker,dest=/tmp/memora-standalone.tar
+
+    - name: Build Docker image (control-plane)
+      if: matrix.component == 'control-plane'
+      uses: docker/build-push-action@v6
+      with:
+        context: ./memora-control-plane
+        file: memora-control-plane/Dockerfile
+        push: false
+        tags: memora-control-plane:${{ steps.get_version.outputs.VERSION }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        outputs: type=docker,dest=/tmp/memora-control-plane.tar
+
+    - name: Upload Docker image artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-image-${{ matrix.component }}
+        path: /tmp/memora-${{ matrix.component }}.tar
+        retention-days: 30
+
+  package-helm-chart:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: 'latest'
+
+    - name: Lint Helm chart
+      run: |
+        helm lint helm/memora
+
+    - name: Package Helm chart
+      run: |
+        helm package helm/memora --destination ./helm-packages
+
+    - name: Upload Helm chart artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: helm-chart
+        path: helm-packages/*.tgz
+        retention-days: 30
+
+  create-release-summary:
+    runs-on: ubuntu-latest
+    needs: [build-python-packages, build-rust-cli, build-control-plane, build-docker-images, package-helm-chart]
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Create release summary
+      run: |
+        echo "# Release Artifacts Built Successfully" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Components" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Python packages (memora, benchmarks, memora-dev)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Rust CLI (Linux amd64, macOS amd64, macOS arm64)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Control Plane Next.js application" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Docker images (standalone, control-plane)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Helm chart" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "All artifacts are available for download in the workflow artifacts." >> $GITHUB_STEP_SUMMARY

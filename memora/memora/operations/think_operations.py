@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any
 from pydantic import BaseModel, Field
 
+from ..response_models import ThinkResult, MemoryFact
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,7 +21,7 @@ class ThinkOperationsMixin:
         agent_id: str,
         query: str,
         thinking_budget: int = 50,
-    ) -> Dict[str, Any]:
+    ) -> ThinkResult:
         """
         Think and formulate an answer using agent identity, world facts, and opinions.
 
@@ -37,18 +39,18 @@ class ThinkOperationsMixin:
             thinking_budget: Number of memory units to explore
 
         Returns:
-            Dict with:
+            ThinkResult containing:
                 - text: Plain text answer (no markdown)
-                - based_on: Dict with 'world', 'agent', and 'opinion' fact lists
+                - based_on: Dict with 'world', 'agent', and 'opinion' fact lists (MemoryFact objects)
                 - new_opinions: List of newly formed opinions
         """
         # Use cached LLM config
         if self._llm_config is None:
-            raise ValueError("Memory LLM API key not set. Set MEMORY_LLM_API_KEY environment variable.")
+            raise ValueError("Memory LLM API key not set. Set MEMORA_API_LLM_API_KEY environment variable.")
 
         # Steps 1-3: Run multi-fact-type search (12-way retrieval: 4 methods × 3 fact types)
         # This is more efficient than 3 separate searches as it merges and reranks all results together
-        all_results, _ = await self.search_async(
+        search_result = await self.search_async(
             agent_id=agent_id,
             query=query,
             thinking_budget=thinking_budget,
@@ -57,12 +59,13 @@ class ThinkOperationsMixin:
             fact_type=['agent', 'world', 'opinion']
         )
 
+        all_results = search_result.results
         logger.info(f"[THINK] Search returned {len(all_results)} results")
 
         # Split results by fact type for structured response
-        agent_results = [r for r in all_results if r.get('fact_type') == 'agent']
-        world_results = [r for r in all_results if r.get('fact_type') == 'world']
-        opinion_results = [r for r in all_results if r.get('fact_type') == 'opinion']
+        agent_results = [r for r in all_results if r.fact_type == 'agent']
+        world_results = [r for r in all_results if r.fact_type == 'world']
+        opinion_results = [r for r in all_results if r.fact_type == 'opinion']
 
         logger.info(f"[THINK] Split results - agent: {len(agent_results)}, world: {len(world_results)}, opinion: {len(opinion_results)}")
 
@@ -75,25 +78,25 @@ class ThinkOperationsMixin:
             formatted = []
             for fact in facts:
                 fact_obj = {
-                    "text": fact['text']
+                    "text": fact.text
                 }
 
                 # Add context if available
-                if fact.get('context'):
-                    fact_obj["context"] = fact['context']
+                if fact.context:
+                    fact_obj["context"] = fact.context
 
                 # Add event_date if available
-                if fact.get('event_date'):
+                if fact.event_date:
                     from datetime import datetime
-                    event_date = fact['event_date']
+                    event_date = fact.event_date
                     if isinstance(event_date, str):
                         fact_obj["event_date"] = event_date
                     elif isinstance(event_date, datetime):
                         fact_obj["event_date"] = event_date.strftime('%Y-%m-%d %H:%M:%S')
 
-                # Add score if available
-                if fact.get('score') is not None:
-                    fact_obj["score"] = fact['score']
+                # Add activation if available
+                if fact.activation is not None:
+                    fact_obj["score"] = fact.activation
 
                 formatted.append(fact_obj)
 
@@ -155,15 +158,15 @@ If you form any new opinions while thinking about this question, state them clea
         logger.debug(f"[THINK] form_opinion task submitted")
 
         # Step 7: Return response with facts split by type (don't wait for opinions)
-        return {
-            "text": answer_text,
-            "based_on": {
+        return ThinkResult(
+            text=answer_text,
+            based_on={
                 "world": world_results,
                 "agent": agent_results,
                 "opinion": opinion_results
             },
-            "new_opinions": []  # Opinions are being extracted asynchronously
-        }
+            new_opinions=[]  # Opinions are being extracted asynchronously
+        )
 
     async def _extract_and_store_opinions_async(
         self,

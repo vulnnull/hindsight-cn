@@ -2,10 +2,10 @@
 Alembic environment configuration for SQLAlchemy with pgvector.
 Uses synchronous psycopg2 driver for migrations to avoid pgbouncer issues.
 """
+import logging
 import os
 import sys
 from pathlib import Path
-from logging.config import fileConfig
 
 from sqlalchemy import pool, engine_from_config
 from sqlalchemy.engine import Connection
@@ -16,25 +16,19 @@ from dotenv import load_dotenv
 # Import your models here
 from memora.models import Base
 
-# Load environment variables based on DATABASE_URL env var or default to local
+# Load environment variables based on MEMORA_API_DATABASE_URL env var or default to local
 def load_env():
-    """Load environment variables from .env.local or .env.dev"""
-    # Check if DATABASE_URL is already set (e.g., by CI/CD)
-    if os.getenv("DATABASE_URL"):
+    """Load environment variables from .env"""
+    # Check if MEMORA_API_DATABASE_URL is already set (e.g., by CI/CD)
+    if os.getenv("MEMORA_API_DATABASE_URL"):
         return
 
-    # Look for .env files in the parent directory (root of the workspace)
+    # Look for .env file in the parent directory (root of the workspace)
     root_dir = Path(__file__).parent.parent.parent
+    env_file = root_dir / ".env"
 
-    # Default to local environment
-    env_file = root_dir / ".env.local"
     if env_file.exists():
         load_dotenv(env_file)
-    else:
-        # Fallback to dev
-        env_file = root_dir / ".env.dev"
-        if env_file.exists():
-            load_dotenv(env_file)
 
 load_env()
 
@@ -42,25 +36,8 @@ load_env()
 # access to the values within the .ini file in use.
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-
-# Get database URL from environment
-database_url = os.getenv("DATABASE_URL")
-if not database_url:
-    raise ValueError("DATABASE_URL environment variable is not set")
-
-# For migrations, use psycopg2 (sync driver) to avoid pgbouncer prepared statement issues
-# The application uses asyncpg, but migrations work better with psycopg2
-if database_url.startswith("postgresql+asyncpg://"):
-    database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
-elif database_url.startswith("postgres+asyncpg://"):
-    database_url = database_url.replace("postgres+asyncpg://", "postgresql://", 1)
-
-# Override the sqlalchemy.url in alembic.ini
-config.set_main_option("sqlalchemy.url", database_url)
+# Note: We don't call fileConfig() here to avoid overriding the application's logging configuration.
+# Alembic will use the existing logging configuration from the application.
 
 # add your model's MetaData object here
 # for 'autogenerate' support
@@ -70,6 +47,34 @@ target_metadata = Base.metadata
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
+
+
+def get_database_url() -> str:
+    """
+    Get and process the database URL from config or environment.
+
+    Returns the URL with the correct driver (psycopg2) for migrations.
+    """
+    # Get database URL from config (set programmatically) or environment
+    database_url = config.get_main_option("sqlalchemy.url")
+    if not database_url:
+        database_url = os.getenv("MEMORA_API_DATABASE_URL")
+        if not database_url:
+            raise ValueError(
+                "Database URL not found. "
+                "Set MEMORA_API_DATABASE_URL environment variable or pass database_url to run_migrations()."
+            )
+
+    # For migrations, use psycopg2 (sync driver) to avoid pgbouncer prepared statement issues
+    if database_url.startswith("postgresql+asyncpg://"):
+        database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    elif database_url.startswith("postgres+asyncpg://"):
+        database_url = database_url.replace("postgres+asyncpg://", "postgresql://", 1)
+
+    # Update config with processed URL for engine_from_config to use
+    config.set_main_option("sqlalchemy.url", database_url)
+
+    return database_url
 
 
 def run_migrations_offline() -> None:
@@ -84,9 +89,11 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    logging.info("running offline")
+    database_url = get_database_url()
+
     context.configure(
-        url=url,
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -98,6 +105,8 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode with synchronous engine."""
+    get_database_url()  # Process and set the database URL in config
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

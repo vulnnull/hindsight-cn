@@ -16,3 +16,6 @@ packages = ["memora_dev"]
 
 [tool.uv.sources]
 memora = { workspace = true }
+
+[project.scripts]
+generate-openapi = "memora_dev.generate_openapi:generate_openapi_spec"

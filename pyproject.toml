@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["memora", "benchmarks", "memora-dev", "memora-cli"]
+members = ["memora", "memora-dev", "memora-dev/benchmarks"]
 
 [tool.uv]
 dev-dependencies = []

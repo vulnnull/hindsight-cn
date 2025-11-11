@@ -40,4 +40,4 @@ set -a
 source "$ENV_FILE"
 set +a
 
-uv run python benchmarks/locomo/locomo_benchmark.py "${ARGS[@]}"
+uv run python memora-dev/benchmarks/locomo/locomo_benchmark.py "${ARGS[@]}"

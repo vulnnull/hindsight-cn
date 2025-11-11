@@ -16,18 +16,18 @@ import asyncpg
 LOCAL_DB_URL = "postgresql://memora:memora_dev@localhost:5432/memora"
 
 
-# Load environment variables from .env.local at the start of test session
+# Load environment variables from .env at the start of test session
 def pytest_configure(config):
     """Load environment variables before running tests."""
-    # Look for .env.local in the workspace root (two levels up from tests dir)
-    env_file = Path(__file__).parent.parent.parent / ".env.local"
+    # Look for .env in the workspace root (two levels up from tests dir)
+    env_file = Path(__file__).parent.parent.parent / ".env"
     if env_file.exists():
         load_dotenv(env_file)
     else:
         print(f"Warning: {env_file} not found, tests may fail without proper configuration")
 
-    # Override DATABASE_URL to use local database
-    os.environ["DATABASE_URL"] = LOCAL_DB_URL
+    # Override MEMORA_API_DATABASE_URL to use local database
+    os.environ["MEMORA_API_DATABASE_URL"] = LOCAL_DB_URL
 
 
 @pytest.fixture(scope="session")
@@ -53,10 +53,10 @@ async def memory():
     """
     mem = TemporalSemanticMemory(
         db_url=LOCAL_DB_URL,
-        memory_llm_provider=os.getenv("MEMORY_LLM_PROVIDER", "groq"),
-        memory_llm_api_key=os.getenv("MEMORY_LLM_API_KEY"),
-        memory_llm_model=os.getenv("MEMORY_LLM_MODEL", "openai/gpt-oss-120b"),
-        memory_llm_base_url=os.getenv("MEMORY_LLM_BASE_URL") or None,  # Use None to get provider defaults
+        memory_llm_provider=os.getenv("MEMORA_API_LLM_PROVIDER", "groq"),
+        memory_llm_api_key=os.getenv("MEMORA_API_LLM_API_KEY"),
+        memory_llm_model=os.getenv("MEMORA_API_LLM_MODEL", "openai/gpt-oss-120b"),
+        memory_llm_base_url=os.getenv("MEMORA_API_LLM_BASE_URL") or None,  # Use None to get provider defaults
     )
     await mem.initialize()
     yield mem
