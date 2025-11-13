@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -518,6 +519,32 @@ def create_app(memory: TemporalSemanticMemory) -> FastAPI:
     Returns:
         Configured FastAPI application
     """
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """
+        Lifespan context manager for startup and shutdown events.
+        This works both for standalone apps and when mounted as a sub-application.
+        """
+        # Startup: Initialize database and memory system
+        from memora.migrations import run_migrations
+
+        # Run database migrations first
+        run_migrations(memory.db_url)
+        logging.info("Database migrations applied")
+
+        # Then initialize memory system
+        await memory.initialize()
+        logging.info("Memory system initialized")
+
+        # Store memory instance on app for route handlers to access
+        app.state.memory = memory
+
+        yield
+
+        # Shutdown: Cleanup memory system
+        await memory.close()
+        logging.info("Memory system closed")
+
     app = FastAPI(
         title="Agent Memory API",
         version="1.0.0",
@@ -547,29 +574,9 @@ The system uses:
         license_info={
             "name": "Apache 2.0",
             "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
-        }
+        },
+        lifespan=lifespan
     )
-
-    @app.on_event("startup")
-    async def startup_event():
-        """Initialize database and memory system on startup."""
-        from memora.migrations import run_migrations
-
-        # Run database migrations first
-        run_migrations(memory.db_url)
-
-        # Then initialize memory system
-        await memory.initialize()
-        logging.info("Memory system initialized")
-
-    @app.on_event("shutdown")
-    async def shutdown_event():
-        """Cleanup memory system on shutdown."""
-        await memory.close()
-        logging.info("Memory system closed")
-
-    # Store memory instance on app for route handlers to access
-    app.state.memory = memory
 
     # Register all routes
     _register_routes(app)
