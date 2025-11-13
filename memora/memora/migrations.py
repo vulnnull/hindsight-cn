@@ -8,10 +8,14 @@ conflicts when multiple instances start simultaneously.
 
 Important: All migrations must be backward-compatible to allow
 safe rolling deployments.
+
+No alembic.ini required - all configuration is done programmatically.
 """
 import logging
 import os
+import shutil
 from pathlib import Path
+from typing import Optional
 
 from alembic import command
 from alembic.config import Config
@@ -19,9 +23,10 @@ from alembic.config import Config
 logger = logging.getLogger(__name__)
 
 
-def run_migrations(database_url: str) -> None:
+
+def run_migrations(database_url: str, script_location: Optional[str] = None) -> None:
     """
-    Run database migrations to the latest version.
+    Run database migrations to the latest version using programmatic Alembic configuration.
 
     This function is safe to call on every application startup:
     - Alembic checks the current schema version in the database
@@ -29,29 +34,57 @@ def run_migrations(database_url: str) -> None:
     - PostgreSQL transactions prevent concurrent migration conflicts
     - If schema is already up-to-date, this is a fast no-op
 
+    Args:
+        database_url: SQLAlchemy database URL (e.g., "postgresql://user:pass@host/db")
+        script_location: Path to alembic migrations directory (e.g., "/path/to/alembic").
+                        If None, defaults to memora/alembic directory.
+
     Raises:
         RuntimeError: If migrations fail to complete
-        FileNotFoundError: If alembic.ini is not found
+        FileNotFoundError: If script_location doesn't exist
+
+    Example:
+        # Using default location (memora package)
+        run_migrations("postgresql://user:pass@host/db")
+
+        # Using custom location (when importing from another project)
+        run_migrations(
+            "postgresql://user:pass@host/db",
+            script_location="/path/to/copied/_alembic"
+        )
     """
     try:
-        # Find alembic.ini - it should be at the project root
-        # This file is in: memora/memora/migrations.py
-        # Project root is: memora/
-        project_root = Path(__file__).parent.parent
-        alembic_ini = project_root / "alembic.ini"
+        # Determine script location
+        if script_location is None:
+            # Default: use the alembic directory in the memora package
+            # This file is in: memora/memora/migrations.py
+            # Default location is: memora/alembic
+            package_root = Path(__file__).parent.parent
+            script_location = str(package_root / "alembic")
 
-        if not alembic_ini.exists():
+        script_path = Path(script_location)
+        if not script_path.exists():
             raise FileNotFoundError(
-                f"alembic.ini not found at {alembic_ini}. "
+                f"Alembic script location not found at {script_location}. "
                 "Database migrations cannot be run."
             )
 
         logger.info(f"Running database migrations to head...")
         logger.info(f"Database URL: {database_url}")
+        logger.info(f"Script location: {script_location}")
 
-        # Create Alembic configuration from ini file
-        alembic_cfg = Config(str(alembic_ini))
+        # Create Alembic configuration programmatically (no alembic.ini needed)
+        alembic_cfg = Config()
+
+        # Set the script location (where alembic versions are stored)
+        alembic_cfg.set_main_option("script_location", script_location)
+
+        # Set the database URL
         alembic_cfg.set_main_option("sqlalchemy.url", database_url)
+
+        # Configure logging (optional, but helps with debugging)
+        # Uses Python's logging system instead of alembic.ini
+        alembic_cfg.set_main_option("prepend_sys_path", ".")
 
         # Run migrations to head (latest version)
         # Note: Alembic may call sys.exit() on errors instead of raising exceptions
@@ -61,7 +94,7 @@ def run_migrations(database_url: str) -> None:
         logger.info("Database migrations completed successfully")
 
     except FileNotFoundError:
-        logger.error("alembic.ini not found, database migrations cannot be run")
+        logger.error(f"Alembic script location not found at {script_location}")
         raise
     except SystemExit as e:
         # Catch sys.exit() calls from Alembic
@@ -72,9 +105,13 @@ def run_migrations(database_url: str) -> None:
         raise RuntimeError("Database migration failed") from e
 
 
-def check_migration_status() -> tuple[str | None, str | None]:
+def check_migration_status(database_url: Optional[str] = None, script_location: Optional[str] = None) -> tuple[str | None, str | None]:
     """
     Check current database schema version and latest available version.
+
+    Args:
+        database_url: SQLAlchemy database URL. If None, uses MEMORA_API_DATABASE_URL env var.
+        script_location: Path to alembic migrations directory. If None, uses default location.
 
     Returns:
         Tuple of (current_revision, head_revision)
@@ -85,9 +122,11 @@ def check_migration_status() -> tuple[str | None, str | None]:
         from alembic.script import ScriptDirectory
         from sqlalchemy import create_engine
 
-        database_url = os.getenv("MEMORA_API_DATABASE_URL")
+        # Get database URL
+        if database_url is None:
+            database_url = os.getenv("MEMORA_API_DATABASE_URL")
         if not database_url:
-            logger.warning("MEMORA_API_DATABASE_URL not set, cannot check migration status")
+            logger.warning("Database URL not provided and MEMORA_API_DATABASE_URL not set, cannot check migration status")
             return None, None
 
         # Get current revision from database
@@ -97,13 +136,19 @@ def check_migration_status() -> tuple[str | None, str | None]:
             current_rev = context.get_current_revision()
 
         # Get head revision from migration scripts
-        project_root = Path(__file__).parent.parent
-        alembic_ini = project_root / "alembic.ini"
+        if script_location is None:
+            package_root = Path(__file__).parent.parent
+            script_location = str(package_root / "alembic")
 
-        if not alembic_ini.exists():
+        script_path = Path(script_location)
+        if not script_path.exists():
+            logger.warning(f"Script location not found at {script_location}")
             return current_rev, None
 
-        alembic_cfg = Config(str(alembic_ini))
+        # Create config programmatically
+        alembic_cfg = Config()
+        alembic_cfg.set_main_option("script_location", script_location)
+
         script = ScriptDirectory.from_config(alembic_cfg)
         head_rev = script.get_current_head()
 
