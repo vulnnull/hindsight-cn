@@ -12,6 +12,7 @@ from ...types import Response
 
 
 def _get_kwargs(
+    agent_id: str,
     *,
     body: BatchPutRequest,
 ) -> dict[str, Any]:
@@ -19,7 +20,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/memories/batch_async",
+        "url": f"/api/v1/agents/{agent_id}/memories/async",
     }
 
     _kwargs["json"] = body.to_dict()
@@ -61,6 +62,7 @@ def _build_response(
 
 
 def sync_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: BatchPutRequest,
@@ -90,10 +92,10 @@ def sync_detailed(
     be deleted before creating new ones (upsert behavior).
 
     Args:
-        body (BatchPutRequest): Request model for batch put endpoint. Example: {'agent_id':
-            'user123', 'document_id': 'conversation_123', 'items': [{'content': 'Alice works at
-            Google', 'context': 'work'}, {'content': 'Bob went hiking yesterday', 'event_date':
-            '2024-01-15T10:00:00Z'}]}.
+        agent_id (str):
+        body (BatchPutRequest): Request model for batch put endpoint. Example: {'document_id':
+            'conversation_123', 'items': [{'content': 'Alice works at Google', 'context': 'work'},
+            {'content': 'Bob went hiking yesterday', 'event_date': '2024-01-15T10:00:00Z'}]}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -104,6 +106,7 @@ def sync_detailed(
     """
 
     kwargs = _get_kwargs(
+        agent_id=agent_id,
         body=body,
     )
 
@@ -115,6 +118,7 @@ def sync_detailed(
 
 
 def sync(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: BatchPutRequest,
@@ -144,10 +148,10 @@ def sync(
     be deleted before creating new ones (upsert behavior).
 
     Args:
-        body (BatchPutRequest): Request model for batch put endpoint. Example: {'agent_id':
-            'user123', 'document_id': 'conversation_123', 'items': [{'content': 'Alice works at
-            Google', 'context': 'work'}, {'content': 'Bob went hiking yesterday', 'event_date':
-            '2024-01-15T10:00:00Z'}]}.
+        agent_id (str):
+        body (BatchPutRequest): Request model for batch put endpoint. Example: {'document_id':
+            'conversation_123', 'items': [{'content': 'Alice works at Google', 'context': 'work'},
+            {'content': 'Bob went hiking yesterday', 'event_date': '2024-01-15T10:00:00Z'}]}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -158,12 +162,14 @@ def sync(
     """
 
     return sync_detailed(
+        agent_id=agent_id,
         client=client,
         body=body,
     ).parsed
 
 
 async def asyncio_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: BatchPutRequest,
@@ -193,10 +199,10 @@ async def asyncio_detailed(
     be deleted before creating new ones (upsert behavior).
 
     Args:
-        body (BatchPutRequest): Request model for batch put endpoint. Example: {'agent_id':
-            'user123', 'document_id': 'conversation_123', 'items': [{'content': 'Alice works at
-            Google', 'context': 'work'}, {'content': 'Bob went hiking yesterday', 'event_date':
-            '2024-01-15T10:00:00Z'}]}.
+        agent_id (str):
+        body (BatchPutRequest): Request model for batch put endpoint. Example: {'document_id':
+            'conversation_123', 'items': [{'content': 'Alice works at Google', 'context': 'work'},
+            {'content': 'Bob went hiking yesterday', 'event_date': '2024-01-15T10:00:00Z'}]}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -207,6 +213,7 @@ async def asyncio_detailed(
     """
 
     kwargs = _get_kwargs(
+        agent_id=agent_id,
         body=body,
     )
 
@@ -216,6 +223,7 @@ async def asyncio_detailed(
 
 
 async def asyncio(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: BatchPutRequest,
@@ -245,10 +253,10 @@ async def asyncio(
     be deleted before creating new ones (upsert behavior).
 
     Args:
-        body (BatchPutRequest): Request model for batch put endpoint. Example: {'agent_id':
-            'user123', 'document_id': 'conversation_123', 'items': [{'content': 'Alice works at
-            Google', 'context': 'work'}, {'content': 'Bob went hiking yesterday', 'event_date':
-            '2024-01-15T10:00:00Z'}]}.
+        agent_id (str):
+        body (BatchPutRequest): Request model for batch put endpoint. Example: {'document_id':
+            'conversation_123', 'items': [{'content': 'Alice works at Google', 'context': 'work'},
+            {'content': 'Bob went hiking yesterday', 'event_date': '2024-01-15T10:00:00Z'}]}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -260,6 +268,7 @@ async def asyncio(
 
     return (
         await asyncio_detailed(
+            agent_id=agent_id,
             client=client,
             body=body,
         )

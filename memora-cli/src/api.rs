@@ -15,7 +15,6 @@ pub struct ApiError {
 pub struct SearchRequest {
     pub query: String,
     pub fact_type: Vec<String>,
-    pub agent_id: String,
     pub thinking_budget: i32,
     pub max_tokens: i32,
     pub trace: bool,
@@ -50,7 +49,6 @@ pub struct TraceInfo {
 #[derive(Debug, Serialize)]
 pub struct ThinkRequest {
     pub query: String,
-    pub agent_id: String,
     pub thinking_budget: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
@@ -71,7 +69,6 @@ pub struct MemoryItem {
 
 #[derive(Debug, Serialize)]
 pub struct BatchMemoryRequest {
-    pub agent_id: String,
     pub items: Vec<MemoryItem>,
     pub document_id: Option<String>,
 }
@@ -134,6 +131,62 @@ pub struct BackgroundResponse {
     pub personality: Option<PersonalityTraits>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentStats {
+    pub agent_id: String,
+    pub total_nodes: i32,
+    pub total_links: i32,
+    pub total_documents: i32,
+    pub pending_operations: i32,
+    pub failed_operations: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Document {
+    pub document_id: String,
+    pub agent_id: String,
+    pub created_at: String,
+    pub num_units: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DocumentDetails {
+    pub document_id: String,
+    pub agent_id: String,
+    pub text: String,
+    pub created_at: String,
+    pub num_units: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DocumentsResponse {
+    pub documents: Vec<Document>,
+    pub total: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Operation {
+    pub id: String,
+    pub task_type: String,
+    pub items_count: i32,
+    pub document_id: Option<String>,
+    pub created_at: String,
+    pub status: String,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OperationsResponse {
+    pub agent_id: String,
+    pub operations: Vec<Operation>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeleteResponse {
+    pub success: bool,
+    pub message: String,
+}
+
 pub struct ApiClient {
     client: Client,
     base_url: String,
@@ -149,8 +202,8 @@ impl ApiClient {
         Ok(ApiClient { client, base_url })
     }
 
-    pub fn search(&self, request: SearchRequest, verbose: bool) -> Result<SearchResponse> {
-        let url = format!("{}/api/search", self.base_url);
+    pub fn search(&self, agent_id: &str, request: SearchRequest, verbose: bool) -> Result<SearchResponse> {
+        let url = format!("{}/api/v1/agents/{}/memories/search", self.base_url, agent_id);
         let request_body = serde_json::to_string_pretty(&request).unwrap_or_default();
 
         if verbose {
@@ -188,8 +241,8 @@ impl ApiClient {
         Ok(result)
     }
 
-    pub fn think(&self, request: ThinkRequest, verbose: bool) -> Result<ThinkResponse> {
-        let url = format!("{}/api/think", self.base_url);
+    pub fn think(&self, agent_id: &str, request: ThinkRequest, verbose: bool) -> Result<ThinkResponse> {
+        let url = format!("{}/api/v1/agents/{}/think", self.base_url, agent_id);
 
         if verbose {
             eprintln!("Request URL: {}", url);
@@ -226,13 +279,17 @@ impl ApiClient {
         Ok(result)
     }
 
-    pub fn put_memories(&self, request: BatchMemoryRequest, async_mode: bool, verbose: bool) -> Result<BatchMemoryResponse> {
+    pub fn put_memories(&self, agent_id: &str, request: BatchMemoryRequest, async_mode: bool, verbose: bool) -> Result<BatchMemoryResponse> {
         let endpoint = if async_mode {
-            "batch_async"
+            "async"
         } else {
-            "batch"
+            ""
         };
-        let url = format!("{}/api/memories/{}", self.base_url, endpoint);
+        let url = if async_mode {
+            format!("{}/api/v1/agents/{}/memories/{}", self.base_url, agent_id, endpoint)
+        } else {
+            format!("{}/api/v1/agents/{}/memories", self.base_url, agent_id)
+        };
 
         if verbose {
             eprintln!("Request URL: {}", url);
@@ -270,7 +327,7 @@ impl ApiClient {
     }
 
     pub fn list_agents(&self, verbose: bool) -> Result<Vec<Agent>> {
-        let url = format!("{}/api/agents", self.base_url);
+        let url = format!("{}/api/v1/agents", self.base_url);
 
         if verbose {
             eprintln!("Request URL: {}", url);
@@ -314,7 +371,7 @@ impl ApiClient {
     }
 
     pub fn get_profile(&self, agent_id: &str, verbose: bool) -> Result<AgentProfile> {
-        let url = format!("{}/api/agents/{}/profile", self.base_url, agent_id);
+        let url = format!("{}/api/v1/agents/{}/profile", self.base_url, agent_id);
 
         if verbose {
             eprintln!("Request URL: {}", url);
@@ -360,7 +417,7 @@ impl ApiClient {
         bias_strength: f32,
         verbose: bool,
     ) -> Result<AgentProfile> {
-        let url = format!("{}/api/agents/{}/profile", self.base_url, agent_id);
+        let url = format!("{}/api/v1/agents/{}/profile", self.base_url, agent_id);
         let request = UpdatePersonalityRequest {
             personality: PersonalityTraits {
                 openness,
@@ -408,7 +465,7 @@ impl ApiClient {
     }
 
     pub fn add_background(&self, agent_id: &str, content: &str, update_personality: bool, verbose: bool) -> Result<BackgroundResponse> {
-        let url = format!("{}/api/agents/{}/background", self.base_url, agent_id);
+        let url = format!("{}/api/v1/agents/{}/background", self.base_url, agent_id);
         let request = AddBackgroundRequest {
             content: content.to_string(),
             update_personality,
@@ -445,6 +502,238 @@ impl ApiClient {
         }
 
         let result: BackgroundResponse = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn get_stats(&self, agent_id: &str, verbose: bool) -> Result<AgentStats> {
+        let url = format!("{}/api/v1/agents/{}/stats", self.base_url, agent_id);
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: AgentStats = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn list_documents(&self, agent_id: &str, q: Option<&str>, limit: Option<i32>, offset: Option<i32>, verbose: bool) -> Result<DocumentsResponse> {
+        let mut url = format!("{}/api/v1/agents/{}/documents", self.base_url, agent_id);
+        let mut params = vec![];
+
+        if let Some(query) = q {
+            params.push(format!("q={}", query));
+        }
+        if let Some(l) = limit {
+            params.push(format!("limit={}", l));
+        }
+        if let Some(o) = offset {
+            params.push(format!("offset={}", o));
+        }
+
+        if !params.is_empty() {
+            url.push('?');
+            url.push_str(&params.join("&"));
+        }
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: DocumentsResponse = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn get_document(&self, agent_id: &str, document_id: &str, verbose: bool) -> Result<DocumentDetails> {
+        let url = format!("{}/api/v1/agents/{}/documents/{}", self.base_url, agent_id, document_id);
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: DocumentDetails = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn list_operations(&self, agent_id: &str, verbose: bool) -> Result<OperationsResponse> {
+        let url = format!("{}/api/v1/agents/{}/operations", self.base_url, agent_id);
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: OperationsResponse = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn cancel_operation(&self, agent_id: &str, operation_id: &str, verbose: bool) -> Result<DeleteResponse> {
+        let url = format!("{}/api/v1/agents/{}/operations/{}", self.base_url, agent_id, operation_id);
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+        }
+
+        let response = self
+            .client
+            .delete(&url)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: DeleteResponse = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn delete_memory(&self, agent_id: &str, unit_id: &str, verbose: bool) -> Result<DeleteResponse> {
+        let url = format!("{}/api/v1/agents/{}/memories/{}", self.base_url, agent_id, unit_id);
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+        }
+
+        let response = self
+            .client
+            .delete(&url)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: DeleteResponse = serde_json::from_str(&response_text)
             .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
         Ok(result)
     }

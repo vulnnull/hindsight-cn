@@ -20,23 +20,19 @@ class BatchPutRequest:
     """Request model for batch put endpoint.
 
     Example:
-        {'agent_id': 'user123', 'document_id': 'conversation_123', 'items': [{'content': 'Alice works at Google',
-            'context': 'work'}, {'content': 'Bob went hiking yesterday', 'event_date': '2024-01-15T10:00:00Z'}]}
+        {'document_id': 'conversation_123', 'items': [{'content': 'Alice works at Google', 'context': 'work'},
+            {'content': 'Bob went hiking yesterday', 'event_date': '2024-01-15T10:00:00Z'}]}
 
     Attributes:
-        agent_id (str):
         items (list[MemoryItem]):
         document_id (None | str | Unset):
     """
 
-    agent_id: str
     items: list[MemoryItem]
     document_id: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        agent_id = self.agent_id
-
         items = []
         for items_item_data in self.items:
             items_item = items_item_data.to_dict()
@@ -52,7 +48,6 @@ class BatchPutRequest:
         field_dict.update(self.additional_properties)
         field_dict.update(
             {
-                "agent_id": agent_id,
                 "items": items,
             }
         )
@@ -66,8 +61,6 @@ class BatchPutRequest:
         from ..models.memory_item import MemoryItem
 
         d = dict(src_dict)
-        agent_id = d.pop("agent_id")
-
         items = []
         _items = d.pop("items")
         for items_item_data in _items:
@@ -85,7 +78,6 @@ class BatchPutRequest:
         document_id = _parse_document_id(d.pop("document_id", UNSET))
 
         batch_put_request = cls(
-            agent_id=agent_id,
             items=items,
             document_id=document_id,
         )

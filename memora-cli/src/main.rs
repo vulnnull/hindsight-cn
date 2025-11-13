@@ -180,6 +180,63 @@ enum Commands {
         #[arg(long)]
         no_update_personality: bool,
     },
+
+    /// Get memory statistics for an agent
+    Stats {
+        /// Agent ID to get stats for
+        agent_id: String,
+    },
+
+    /// List documents for an agent
+    Documents {
+        /// Agent ID to list documents for
+        agent_id: String,
+
+        /// Search query to filter documents
+        #[arg(short = 'q', long)]
+        query: Option<String>,
+
+        /// Maximum number of results
+        #[arg(short = 'l', long, default_value = "100")]
+        limit: i32,
+
+        /// Offset for pagination
+        #[arg(short = 's', long, default_value = "0")]
+        offset: i32,
+    },
+
+    /// Get a specific document by ID
+    Document {
+        /// Agent ID
+        agent_id: String,
+
+        /// Document ID to retrieve
+        document_id: String,
+    },
+
+    /// List async operations for an agent
+    Operations {
+        /// Agent ID to list operations for
+        agent_id: String,
+    },
+
+    /// Cancel a pending async operation
+    CancelOperation {
+        /// Agent ID
+        agent_id: String,
+
+        /// Operation ID to cancel
+        operation_id: String,
+    },
+
+    /// Delete a memory unit
+    DeleteMemory {
+        /// Agent ID
+        agent_id: String,
+
+        /// Memory unit ID to delete
+        unit_id: String,
+    },
 }
 
 fn main() {
@@ -227,13 +284,12 @@ fn run() -> Result<()> {
             let request = SearchRequest {
                 query,
                 fact_type,
-                agent_id,
                 thinking_budget: budget,
                 max_tokens,
                 trace,
             };
 
-            let response = client.search(request, verbose);
+            let response = client.search(&agent_id, request, verbose);
 
             if let Some(sp) = spinner {
                 sp.finish_and_clear();
@@ -266,12 +322,11 @@ fn run() -> Result<()> {
 
             let request = ThinkRequest {
                 query,
-                agent_id,
                 thinking_budget: budget,
                 context,
             };
 
-            let response = client.think(request, verbose);
+            let response = client.think(&agent_id, request, verbose);
 
             if let Some(sp) = spinner {
                 sp.finish_and_clear();
@@ -311,12 +366,11 @@ fn run() -> Result<()> {
             };
 
             let request = BatchMemoryRequest {
-                agent_id,
                 items: vec![item],
                 document_id: Some(doc_id.clone()),
             };
 
-            let response = client.put_memories(request, r#async, verbose);
+            let response = client.put_memories(&agent_id, request, r#async, verbose);
 
             if let Some(sp) = spinner {
                 sp.finish_and_clear();
@@ -425,11 +479,10 @@ fn run() -> Result<()> {
             };
 
             let request = BatchMemoryRequest {
-                agent_id,
                 items,
                 document_id,
             };
-            let response = client.put_memories(request, r#async, verbose);
+            let response = client.put_memories(&agent_id, request, r#async, verbose);
 
             if let Some(sp) = spinner {
                 sp.finish_and_clear();
@@ -616,6 +669,201 @@ fn run() -> Result<()> {
                         }
                     } else {
                         output::print_output(&background_resp, output_format)?;
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e)
+            }
+        }
+
+        Commands::Stats { agent_id } => {
+            let spinner = if output_format == OutputFormat::Pretty {
+                Some(ui::create_spinner("Fetching statistics..."))
+            } else {
+                None
+            };
+
+            let response = client.get_stats(&agent_id, verbose);
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
+            }
+
+            match response {
+                Ok(stats) => {
+                    if output_format == OutputFormat::Pretty {
+                        ui::print_info(&format!("Statistics for agent '{}':", agent_id));
+                        println!("  Total Nodes: {}", stats.total_nodes);
+                        println!("  Total Links: {}", stats.total_links);
+                        println!("  Total Documents: {}", stats.total_documents);
+                        println!("  Pending Operations: {}", stats.pending_operations);
+                        println!("  Failed Operations: {}", stats.failed_operations);
+                    } else {
+                        output::print_output(&stats, output_format)?;
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e)
+            }
+        }
+
+        Commands::Documents { agent_id, query, limit, offset } => {
+            let spinner = if output_format == OutputFormat::Pretty {
+                Some(ui::create_spinner("Fetching documents..."))
+            } else {
+                None
+            };
+
+            let response = client.list_documents(&agent_id, query.as_deref(), Some(limit), Some(offset), verbose);
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
+            }
+
+            match response {
+                Ok(docs_response) => {
+                    if output_format == OutputFormat::Pretty {
+                        ui::print_info(&format!("Documents for agent '{}' (total: {})", agent_id, docs_response.total));
+                        for doc in &docs_response.documents {
+                            println!("\n  Document ID: {}", doc.document_id);
+                            println!("    Created: {}", doc.created_at);
+                            println!("    Units: {}", doc.num_units);
+                        }
+                    } else {
+                        output::print_output(&docs_response, output_format)?;
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e)
+            }
+        }
+
+        Commands::Document { agent_id, document_id } => {
+            let spinner = if output_format == OutputFormat::Pretty {
+                Some(ui::create_spinner("Fetching document..."))
+            } else {
+                None
+            };
+
+            let response = client.get_document(&agent_id, &document_id, verbose);
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
+            }
+
+            match response {
+                Ok(doc) => {
+                    if output_format == OutputFormat::Pretty {
+                        ui::print_info(&format!("Document: {}", doc.document_id));
+                        println!("  Agent ID: {}", doc.agent_id);
+                        println!("  Created: {}", doc.created_at);
+                        println!("  Units: {}", doc.num_units);
+                        println!("\n  Text:\n{}", doc.text);
+                    } else {
+                        output::print_output(&doc, output_format)?;
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e)
+            }
+        }
+
+        Commands::Operations { agent_id } => {
+            let spinner = if output_format == OutputFormat::Pretty {
+                Some(ui::create_spinner("Fetching operations..."))
+            } else {
+                None
+            };
+
+            let response = client.list_operations(&agent_id, verbose);
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
+            }
+
+            match response {
+                Ok(ops_response) => {
+                    if output_format == OutputFormat::Pretty {
+                        ui::print_info(&format!("Operations for agent '{}':", agent_id));
+                        if ops_response.operations.is_empty() {
+                            println!("  No operations found.");
+                        } else {
+                            for op in &ops_response.operations {
+                                println!("\n  Operation ID: {}", op.id);
+                                println!("    Type: {}", op.task_type);
+                                println!("    Status: {}", op.status);
+                                println!("    Items: {}", op.items_count);
+                                if let Some(doc_id) = &op.document_id {
+                                    println!("    Document ID: {}", doc_id);
+                                }
+                                println!("    Created: {}", op.created_at);
+                                if let Some(error) = &op.error_message {
+                                    println!("    Error: {}", error);
+                                }
+                            }
+                        }
+                    } else {
+                        output::print_output(&ops_response, output_format)?;
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e)
+            }
+        }
+
+        Commands::CancelOperation { agent_id, operation_id } => {
+            let spinner = if output_format == OutputFormat::Pretty {
+                Some(ui::create_spinner("Cancelling operation..."))
+            } else {
+                None
+            };
+
+            let response = client.cancel_operation(&agent_id, &operation_id, verbose);
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
+            }
+
+            match response {
+                Ok(result) => {
+                    if output_format == OutputFormat::Pretty {
+                        if result.success {
+                            ui::print_success(&result.message);
+                        } else {
+                            ui::print_error(&result.message);
+                        }
+                    } else {
+                        output::print_output(&result, output_format)?;
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e)
+            }
+        }
+
+        Commands::DeleteMemory { agent_id, unit_id } => {
+            let spinner = if output_format == OutputFormat::Pretty {
+                Some(ui::create_spinner("Deleting memory unit..."))
+            } else {
+                None
+            };
+
+            let response = client.delete_memory(&agent_id, &unit_id, verbose);
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
+            }
+
+            match response {
+                Ok(result) => {
+                    if output_format == OutputFormat::Pretty {
+                        if result.success {
+                            ui::print_success(&result.message);
+                        } else {
+                            ui::print_error(&result.message);
+                        }
+                    } else {
+                        output::print_output(&result, output_format)?;
                     }
                     Ok(())
                 }

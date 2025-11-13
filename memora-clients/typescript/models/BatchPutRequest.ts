@@ -7,7 +7,6 @@ import type { MemoryItem } from './MemoryItem';
  * Request model for batch put endpoint.
  */
 export type BatchPutRequest = {
-    agent_id: string;
     items: Array<MemoryItem>;
     document_id?: (string | null);
 };

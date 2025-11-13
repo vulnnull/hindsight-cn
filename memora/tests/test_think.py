@@ -153,6 +153,3 @@ async def test_think_without_prior_context(memory):
     assert result.text, "Should return some answer"
     assert result.based_on, "Should return based_on structure"
 
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])

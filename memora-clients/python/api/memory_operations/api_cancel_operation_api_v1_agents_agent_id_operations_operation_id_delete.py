@@ -5,38 +5,27 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.agent_profile_response import AgentProfileResponse
 from ...models.http_validation_error import HTTPValidationError
-from ...models.update_personality_request import UpdatePersonalityRequest
 from ...types import Response
 
 
 def _get_kwargs(
     agent_id: str,
-    *,
-    body: UpdatePersonalityRequest,
+    operation_id: str,
 ) -> dict[str, Any]:
-    headers: dict[str, Any] = {}
-
     _kwargs: dict[str, Any] = {
-        "method": "put",
-        "url": f"/api/agents/{agent_id}/profile",
+        "method": "delete",
+        "url": f"/api/v1/agents/{agent_id}/operations/{operation_id}",
     }
 
-    _kwargs["json"] = body.to_dict()
-
-    headers["Content-Type"] = "application/json"
-
-    _kwargs["headers"] = headers
     return _kwargs
 
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> AgentProfileResponse | HTTPValidationError | None:
+) -> Any | HTTPValidationError | None:
     if response.status_code == 200:
-        response_200 = AgentProfileResponse.from_dict(response.json())
-
+        response_200 = response.json()
         return response_200
 
     if response.status_code == 422:
@@ -52,7 +41,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[AgentProfileResponse | HTTPValidationError]:
+) -> Response[Any | HTTPValidationError]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -63,29 +52,29 @@ def _build_response(
 
 def sync_detailed(
     agent_id: str,
+    operation_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: UpdatePersonalityRequest,
-) -> Response[AgentProfileResponse | HTTPValidationError]:
-    """Update agent personality
+) -> Response[Any | HTTPValidationError]:
+    """Cancel a pending async operation
 
-     Update agent's Big Five personality traits and bias strength
+     Cancel a pending async operation by removing it from the queue
 
     Args:
         agent_id (str):
-        body (UpdatePersonalityRequest): Request model for updating personality traits.
+        operation_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[AgentProfileResponse | HTTPValidationError]
+        Response[Any | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
         agent_id=agent_id,
-        body=body,
+        operation_id=operation_id,
     )
 
     response = client.get_httpx_client().request(
@@ -97,58 +86,58 @@ def sync_detailed(
 
 def sync(
     agent_id: str,
+    operation_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: UpdatePersonalityRequest,
-) -> AgentProfileResponse | HTTPValidationError | None:
-    """Update agent personality
+) -> Any | HTTPValidationError | None:
+    """Cancel a pending async operation
 
-     Update agent's Big Five personality traits and bias strength
+     Cancel a pending async operation by removing it from the queue
 
     Args:
         agent_id (str):
-        body (UpdatePersonalityRequest): Request model for updating personality traits.
+        operation_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        AgentProfileResponse | HTTPValidationError
+        Any | HTTPValidationError
     """
 
     return sync_detailed(
         agent_id=agent_id,
+        operation_id=operation_id,
         client=client,
-        body=body,
     ).parsed
 
 
 async def asyncio_detailed(
     agent_id: str,
+    operation_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: UpdatePersonalityRequest,
-) -> Response[AgentProfileResponse | HTTPValidationError]:
-    """Update agent personality
+) -> Response[Any | HTTPValidationError]:
+    """Cancel a pending async operation
 
-     Update agent's Big Five personality traits and bias strength
+     Cancel a pending async operation by removing it from the queue
 
     Args:
         agent_id (str):
-        body (UpdatePersonalityRequest): Request model for updating personality traits.
+        operation_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[AgentProfileResponse | HTTPValidationError]
+        Response[Any | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
         agent_id=agent_id,
-        body=body,
+        operation_id=operation_id,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -158,30 +147,30 @@ async def asyncio_detailed(
 
 async def asyncio(
     agent_id: str,
+    operation_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: UpdatePersonalityRequest,
-) -> AgentProfileResponse | HTTPValidationError | None:
-    """Update agent personality
+) -> Any | HTTPValidationError | None:
+    """Cancel a pending async operation
 
-     Update agent's Big Five personality traits and bias strength
+     Cancel a pending async operation by removing it from the queue
 
     Args:
         agent_id (str):
-        body (UpdatePersonalityRequest): Request model for updating personality traits.
+        operation_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        AgentProfileResponse | HTTPValidationError
+        Any | HTTPValidationError
     """
 
     return (
         await asyncio_detailed(
             agent_id=agent_id,
+            operation_id=operation_id,
             client=client,
-            body=body,
         )
     ).parsed

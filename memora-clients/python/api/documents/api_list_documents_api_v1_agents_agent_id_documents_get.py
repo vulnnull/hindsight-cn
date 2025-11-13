@@ -6,33 +6,18 @@ import httpx
 from ... import errors
 from ...client import AuthenticatedClient, Client
 from ...models.http_validation_error import HTTPValidationError
-from ...models.list_memory_units_response import ListMemoryUnitsResponse
+from ...models.list_documents_response import ListDocumentsResponse
 from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
+    agent_id: str,
     *,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
     q: None | str | Unset = UNSET,
     limit: int | Unset = 100,
     offset: int | Unset = 0,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {}
-
-    json_agent_id: None | str | Unset
-    if isinstance(agent_id, Unset):
-        json_agent_id = UNSET
-    else:
-        json_agent_id = agent_id
-    params["agent_id"] = json_agent_id
-
-    json_fact_type: None | str | Unset
-    if isinstance(fact_type, Unset):
-        json_fact_type = UNSET
-    else:
-        json_fact_type = fact_type
-    params["fact_type"] = json_fact_type
 
     json_q: None | str | Unset
     if isinstance(q, Unset):
@@ -49,7 +34,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/list",
+        "url": f"/api/v1/agents/{agent_id}/documents",
         "params": params,
     }
 
@@ -58,9 +43,9 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> HTTPValidationError | ListMemoryUnitsResponse | None:
+) -> HTTPValidationError | ListDocumentsResponse | None:
     if response.status_code == 200:
-        response_200 = ListMemoryUnitsResponse.from_dict(response.json())
+        response_200 = ListDocumentsResponse.from_dict(response.json())
 
         return response_200
 
@@ -77,7 +62,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[HTTPValidationError | ListMemoryUnitsResponse]:
+) -> Response[HTTPValidationError | ListDocumentsResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -87,22 +72,20 @@ def _build_response(
 
 
 def sync_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
     q: None | str | Unset = UNSET,
     limit: int | Unset = 100,
     offset: int | Unset = 0,
-) -> Response[HTTPValidationError | ListMemoryUnitsResponse]:
-    """List memory units
+) -> Response[HTTPValidationError | ListDocumentsResponse]:
+    """List documents
 
-     List memory units with pagination and optional full-text search. Supports filtering by agent_id and
-    fact_type.
+     List documents with pagination and optional search. Documents are the source content from which
+    memory units are extracted.
 
     Args:
-        agent_id (None | str | Unset):
-        fact_type (None | str | Unset):
+        agent_id (str):
         q (None | str | Unset):
         limit (int | Unset):  Default: 100.
         offset (int | Unset):  Default: 0.
@@ -112,12 +95,11 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[HTTPValidationError | ListMemoryUnitsResponse]
+        Response[HTTPValidationError | ListDocumentsResponse]
     """
 
     kwargs = _get_kwargs(
         agent_id=agent_id,
-        fact_type=fact_type,
         q=q,
         limit=limit,
         offset=offset,
@@ -131,22 +113,20 @@ def sync_detailed(
 
 
 def sync(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
     q: None | str | Unset = UNSET,
     limit: int | Unset = 100,
     offset: int | Unset = 0,
-) -> HTTPValidationError | ListMemoryUnitsResponse | None:
-    """List memory units
+) -> HTTPValidationError | ListDocumentsResponse | None:
+    """List documents
 
-     List memory units with pagination and optional full-text search. Supports filtering by agent_id and
-    fact_type.
+     List documents with pagination and optional search. Documents are the source content from which
+    memory units are extracted.
 
     Args:
-        agent_id (None | str | Unset):
-        fact_type (None | str | Unset):
+        agent_id (str):
         q (None | str | Unset):
         limit (int | Unset):  Default: 100.
         offset (int | Unset):  Default: 0.
@@ -156,13 +136,12 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        HTTPValidationError | ListMemoryUnitsResponse
+        HTTPValidationError | ListDocumentsResponse
     """
 
     return sync_detailed(
-        client=client,
         agent_id=agent_id,
-        fact_type=fact_type,
+        client=client,
         q=q,
         limit=limit,
         offset=offset,
@@ -170,22 +149,20 @@ def sync(
 
 
 async def asyncio_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
     q: None | str | Unset = UNSET,
     limit: int | Unset = 100,
     offset: int | Unset = 0,
-) -> Response[HTTPValidationError | ListMemoryUnitsResponse]:
-    """List memory units
+) -> Response[HTTPValidationError | ListDocumentsResponse]:
+    """List documents
 
-     List memory units with pagination and optional full-text search. Supports filtering by agent_id and
-    fact_type.
+     List documents with pagination and optional search. Documents are the source content from which
+    memory units are extracted.
 
     Args:
-        agent_id (None | str | Unset):
-        fact_type (None | str | Unset):
+        agent_id (str):
         q (None | str | Unset):
         limit (int | Unset):  Default: 100.
         offset (int | Unset):  Default: 0.
@@ -195,12 +172,11 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[HTTPValidationError | ListMemoryUnitsResponse]
+        Response[HTTPValidationError | ListDocumentsResponse]
     """
 
     kwargs = _get_kwargs(
         agent_id=agent_id,
-        fact_type=fact_type,
         q=q,
         limit=limit,
         offset=offset,
@@ -212,22 +188,20 @@ async def asyncio_detailed(
 
 
 async def asyncio(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
     q: None | str | Unset = UNSET,
     limit: int | Unset = 100,
     offset: int | Unset = 0,
-) -> HTTPValidationError | ListMemoryUnitsResponse | None:
-    """List memory units
+) -> HTTPValidationError | ListDocumentsResponse | None:
+    """List documents
 
-     List memory units with pagination and optional full-text search. Supports filtering by agent_id and
-    fact_type.
+     List documents with pagination and optional search. Documents are the source content from which
+    memory units are extracted.
 
     Args:
-        agent_id (None | str | Unset):
-        fact_type (None | str | Unset):
+        agent_id (str):
         q (None | str | Unset):
         limit (int | Unset):  Default: 100.
         offset (int | Unset):  Default: 0.
@@ -237,14 +211,13 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        HTTPValidationError | ListMemoryUnitsResponse
+        HTTPValidationError | ListDocumentsResponse
     """
 
     return (
         await asyncio_detailed(
-            client=client,
             agent_id=agent_id,
-            fact_type=fact_type,
+            client=client,
             q=q,
             limit=limit,
             offset=offset,

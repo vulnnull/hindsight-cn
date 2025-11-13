@@ -4,7 +4,7 @@ const DATAPLANE_URL = process.env.MEMORA_CP_DATAPLANE_API_URL || 'http://localho
 
 export async function GET() {
   try {
-    const response = await fetch(`${DATAPLANE_URL}/api/agents`);
+    const response = await fetch(`${DATAPLANE_URL}/api/v1/agents`);
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
   } catch (error) {

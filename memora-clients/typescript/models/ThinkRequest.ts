@@ -7,7 +7,6 @@
  */
 export type ThinkRequest = {
     query: string;
-    agent_id?: string;
     thinking_budget?: number;
     context?: (string | null);
 };

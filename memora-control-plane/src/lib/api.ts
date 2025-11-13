@@ -30,18 +30,16 @@ export class DataplaneClient {
   async search(params: {
     query: string;
     fact_type: ('world' | 'agent' | 'opinion')[];
-    agent_id?: string;
+    agent_id: string;
     thinking_budget?: number;
     max_tokens?: number;
     reranker?: string;
     trace?: boolean;
   }) {
-    return this.fetchApi('/api/search', {
+    const { agent_id, ...body } = params;
+    return this.fetchApi(`/api/v1/agents/${agent_id}/memories/search`, {
       method: 'POST',
-      body: JSON.stringify({
-        agent_id: params.agent_id || 'default',
-        ...params,
-      }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -50,15 +48,13 @@ export class DataplaneClient {
    */
   async think(params: {
     query: string;
-    agent_id?: string;
+    agent_id: string;
     thinking_budget?: number;
   }) {
-    return this.fetchApi('/api/think', {
+    const { agent_id, ...body } = params;
+    return this.fetchApi(`/api/v1/agents/${agent_id}/think`, {
       method: 'POST',
-      body: JSON.stringify({
-        agent_id: params.agent_id || 'default',
-        ...params,
-      }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -74,9 +70,10 @@ export class DataplaneClient {
     }>;
     document_id?: string;
   }) {
-    return this.fetchApi('/api/memories/batch', {
+    const { agent_id, ...body } = params;
+    return this.fetchApi(`/api/v1/agents/${agent_id}/memories`, {
       method: 'POST',
-      body: JSON.stringify(params),
+      body: JSON.stringify(body),
     });
   }
 
@@ -93,9 +90,10 @@ export class DataplaneClient {
     }>;
     document_id?: string;
   }) {
-    return this.fetchApi('/api/memories/batch_async', {
+    const { agent_id, ...body } = params;
+    return this.fetchApi(`/api/v1/agents/${agent_id}/memories/async`, {
       method: 'POST',
-      body: JSON.stringify(params),
+      body: JSON.stringify(body),
     });
   }
 
@@ -103,68 +101,65 @@ export class DataplaneClient {
    * List all agents
    */
   async listAgents() {
-    return this.fetchApi<{ agents: string[] }>('/api/agents', { cache: 'no-store' });
+    return this.fetchApi<{ agents: any[] }>('/api/v1/agents', { cache: 'no-store' });
   }
 
   /**
    * Get agent statistics
    */
   async getAgentStats(agentId: string) {
-    return this.fetchApi(`/api/stats/${agentId}`);
+    return this.fetchApi(`/api/v1/agents/${agentId}/stats`);
   }
 
   /**
    * Get graph data for visualization
    */
-  async getGraphData(params?: {
-    agent_id?: string;
+  async getGraphData(params: {
+    agent_id: string;
     fact_type?: string;
   }) {
     const queryParams = new URLSearchParams();
-    if (params?.agent_id) queryParams.append('agent_id', params.agent_id);
-    if (params?.fact_type) queryParams.append('fact_type', params.fact_type);
+    if (params.fact_type) queryParams.append('fact_type', params.fact_type);
 
-    const path = `/api/graph${queryParams.toString() ? `?${queryParams}` : ''}`;
+    const path = `/api/v1/agents/${params.agent_id}/graph${queryParams.toString() ? `?${queryParams}` : ''}`;
     return this.fetchApi(path);
   }
 
   /**
    * List memory units
    */
-  async listMemoryUnits(params?: {
-    agent_id?: string;
+  async listMemoryUnits(params: {
+    agent_id: string;
     fact_type?: string;
     q?: string;
     limit?: number;
     offset?: number;
   }) {
     const queryParams = new URLSearchParams();
-    if (params?.agent_id) queryParams.append('agent_id', params.agent_id);
-    if (params?.fact_type) queryParams.append('fact_type', params.fact_type);
-    if (params?.q) queryParams.append('q', params.q);
-    if (params?.limit) queryParams.append('limit', params.limit.toString());
-    if (params?.offset) queryParams.append('offset', params.offset.toString());
+    if (params.fact_type) queryParams.append('fact_type', params.fact_type);
+    if (params.q) queryParams.append('q', params.q);
+    if (params.limit) queryParams.append('limit', params.limit.toString());
+    if (params.offset) queryParams.append('offset', params.offset.toString());
 
-    const path = `/api/list${queryParams.toString() ? `?${queryParams}` : ''}`;
+    const path = `/api/v1/agents/${params.agent_id}/memories/list${queryParams.toString() ? `?${queryParams}` : ''}`;
     return this.fetchApi(path);
   }
 
   /**
    * List documents
    */
-  async listDocuments(params?: {
-    agent_id?: string;
+  async listDocuments(params: {
+    agent_id: string;
     q?: string;
     limit?: number;
     offset?: number;
   }) {
     const queryParams = new URLSearchParams();
-    if (params?.agent_id) queryParams.append('agent_id', params.agent_id);
-    if (params?.q) queryParams.append('q', params.q);
-    if (params?.limit) queryParams.append('limit', params.limit.toString());
-    if (params?.offset) queryParams.append('offset', params.offset.toString());
+    if (params.q) queryParams.append('q', params.q);
+    if (params.limit) queryParams.append('limit', params.limit.toString());
+    if (params.offset) queryParams.append('offset', params.offset.toString());
 
-    const path = `/api/documents${queryParams.toString() ? `?${queryParams}` : ''}`;
+    const path = `/api/v1/agents/${params.agent_id}/documents${queryParams.toString() ? `?${queryParams}` : ''}`;
     return this.fetchApi(path);
   }
 
@@ -172,22 +167,21 @@ export class DataplaneClient {
    * Get document by ID
    */
   async getDocument(documentId: string, agentId: string) {
-    const queryParams = new URLSearchParams({ agent_id: agentId });
-    return this.fetchApi(`/api/documents/${documentId}?${queryParams}`);
+    return this.fetchApi(`/api/v1/agents/${agentId}/documents/${documentId}`);
   }
 
   /**
    * List async operations for an agent
    */
   async listOperations(agentId: string) {
-    return this.fetchApi(`/api/operations/${agentId}`);
+    return this.fetchApi(`/api/v1/agents/${agentId}/operations`);
   }
 
   /**
    * Cancel a pending async operation
    */
-  async cancelOperation(operationId: string) {
-    return this.fetchApi(`/api/operations/${operationId}`, {
+  async cancelOperation(agentId: string, operationId: string) {
+    return this.fetchApi(`/api/v1/agents/${agentId}/operations/${operationId}`, {
       method: 'DELETE',
     });
   }
@@ -195,8 +189,8 @@ export class DataplaneClient {
   /**
    * Delete a memory unit
    */
-  async deleteMemoryUnit(unitId: string) {
-    return this.fetchApi(`/api/memory/${unitId}`, {
+  async deleteMemoryUnit(agentId: string, unitId: string) {
+    return this.fetchApi(`/api/v1/agents/${agentId}/memories/${unitId}`, {
       method: 'DELETE',
     });
   }

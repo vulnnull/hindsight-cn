@@ -5,8 +5,8 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.add_background_request import AddBackgroundRequest
-from ...models.background_response import BackgroundResponse
+from ...models.agent_profile_response import AgentProfileResponse
+from ...models.create_agent_request import CreateAgentRequest
 from ...models.http_validation_error import HTTPValidationError
 from ...types import Response
 
@@ -14,13 +14,13 @@ from ...types import Response
 def _get_kwargs(
     agent_id: str,
     *,
-    body: AddBackgroundRequest,
+    body: CreateAgentRequest,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
 
     _kwargs: dict[str, Any] = {
-        "method": "post",
-        "url": f"/api/agents/{agent_id}/background",
+        "method": "put",
+        "url": f"/api/v1/agents/{agent_id}",
     }
 
     _kwargs["json"] = body.to_dict()
@@ -33,9 +33,9 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> BackgroundResponse | HTTPValidationError | None:
+) -> AgentProfileResponse | HTTPValidationError | None:
     if response.status_code == 200:
-        response_200 = BackgroundResponse.from_dict(response.json())
+        response_200 = AgentProfileResponse.from_dict(response.json())
 
         return response_200
 
@@ -52,7 +52,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[BackgroundResponse | HTTPValidationError]:
+) -> Response[AgentProfileResponse | HTTPValidationError]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -65,24 +65,26 @@ def sync_detailed(
     agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: AddBackgroundRequest,
-) -> Response[BackgroundResponse | HTTPValidationError]:
-    """Add/merge agent background
+    body: CreateAgentRequest,
+) -> Response[AgentProfileResponse | HTTPValidationError]:
+    """Create or update agent
 
-     Add new background information or merge with existing. LLM intelligently resolves conflicts,
-    normalizes to first person, and optionally infers personality traits.
+     Create a new agent or update existing agent with personality and background. Auto-fills missing
+    fields with defaults.
 
     Args:
         agent_id (str):
-        body (AddBackgroundRequest): Request model for adding/merging background information.
-            Example: {'content': 'I was born in Texas', 'update_personality': True}.
+        body (CreateAgentRequest): Request model for creating/updating an agent. Example:
+            {'background': 'I am a creative software engineer with 10 years of experience',
+            'personality': {'agreeableness': 0.7, 'bias_strength': 0.7, 'conscientiousness': 0.6,
+            'extraversion': 0.5, 'neuroticism': 0.3, 'openness': 0.8}}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BackgroundResponse | HTTPValidationError]
+        Response[AgentProfileResponse | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
@@ -101,24 +103,26 @@ def sync(
     agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: AddBackgroundRequest,
-) -> BackgroundResponse | HTTPValidationError | None:
-    """Add/merge agent background
+    body: CreateAgentRequest,
+) -> AgentProfileResponse | HTTPValidationError | None:
+    """Create or update agent
 
-     Add new background information or merge with existing. LLM intelligently resolves conflicts,
-    normalizes to first person, and optionally infers personality traits.
+     Create a new agent or update existing agent with personality and background. Auto-fills missing
+    fields with defaults.
 
     Args:
         agent_id (str):
-        body (AddBackgroundRequest): Request model for adding/merging background information.
-            Example: {'content': 'I was born in Texas', 'update_personality': True}.
+        body (CreateAgentRequest): Request model for creating/updating an agent. Example:
+            {'background': 'I am a creative software engineer with 10 years of experience',
+            'personality': {'agreeableness': 0.7, 'bias_strength': 0.7, 'conscientiousness': 0.6,
+            'extraversion': 0.5, 'neuroticism': 0.3, 'openness': 0.8}}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BackgroundResponse | HTTPValidationError
+        AgentProfileResponse | HTTPValidationError
     """
 
     return sync_detailed(
@@ -132,24 +136,26 @@ async def asyncio_detailed(
     agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: AddBackgroundRequest,
-) -> Response[BackgroundResponse | HTTPValidationError]:
-    """Add/merge agent background
+    body: CreateAgentRequest,
+) -> Response[AgentProfileResponse | HTTPValidationError]:
+    """Create or update agent
 
-     Add new background information or merge with existing. LLM intelligently resolves conflicts,
-    normalizes to first person, and optionally infers personality traits.
+     Create a new agent or update existing agent with personality and background. Auto-fills missing
+    fields with defaults.
 
     Args:
         agent_id (str):
-        body (AddBackgroundRequest): Request model for adding/merging background information.
-            Example: {'content': 'I was born in Texas', 'update_personality': True}.
+        body (CreateAgentRequest): Request model for creating/updating an agent. Example:
+            {'background': 'I am a creative software engineer with 10 years of experience',
+            'personality': {'agreeableness': 0.7, 'bias_strength': 0.7, 'conscientiousness': 0.6,
+            'extraversion': 0.5, 'neuroticism': 0.3, 'openness': 0.8}}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BackgroundResponse | HTTPValidationError]
+        Response[AgentProfileResponse | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
@@ -166,24 +172,26 @@ async def asyncio(
     agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: AddBackgroundRequest,
-) -> BackgroundResponse | HTTPValidationError | None:
-    """Add/merge agent background
+    body: CreateAgentRequest,
+) -> AgentProfileResponse | HTTPValidationError | None:
+    """Create or update agent
 
-     Add new background information or merge with existing. LLM intelligently resolves conflicts,
-    normalizes to first person, and optionally infers personality traits.
+     Create a new agent or update existing agent with personality and background. Auto-fills missing
+    fields with defaults.
 
     Args:
         agent_id (str):
-        body (AddBackgroundRequest): Request model for adding/merging background information.
-            Example: {'content': 'I was born in Texas', 'update_personality': True}.
+        body (CreateAgentRequest): Request model for creating/updating an agent. Example:
+            {'background': 'I am a creative software engineer with 10 years of experience',
+            'personality': {'agreeableness': 0.7, 'bias_strength': 0.7, 'conscientiousness': 0.6,
+            'extraversion': 0.5, 'neuroticism': 0.3, 'openness': 0.8}}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BackgroundResponse | HTTPValidationError
+        AgentProfileResponse | HTTPValidationError
     """
 
     return (

@@ -12,6 +12,7 @@ from ...types import Response
 
 
 def _get_kwargs(
+    agent_id: str,
     *,
     body: SearchRequest,
 ) -> dict[str, Any]:
@@ -19,7 +20,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/search",
+        "url": f"/api/v1/agents/{agent_id}/memories/search",
     }
 
     _kwargs["json"] = body.to_dict()
@@ -61,6 +62,7 @@ def _build_response(
 
 
 def sync_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: SearchRequest,
@@ -69,16 +71,17 @@ def sync_detailed(
 
      Search memory using semantic similarity and spreading activation.
 
-        The fact_type parameter is required and must be one of:
+        The fact_type parameter is optional and must be one of:
         - 'world': General knowledge about people, places, events, and things that happen
         - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
         - 'opinion': The agent's formed beliefs, perspectives, and viewpoints
 
     Args:
-        body (SearchRequest): Request model for search endpoint. Example: {'agent_id': 'user123',
-            'fact_type': ['world', 'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about
-            machine learning?', 'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic',
-            'thinking_budget': 100, 'trace': True}.
+        agent_id (str):
+        body (SearchRequest): Request model for search endpoint. Example: {'fact_type': ['world',
+            'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about machine learning?',
+            'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic', 'thinking_budget': 100,
+            'trace': True}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -89,6 +92,7 @@ def sync_detailed(
     """
 
     kwargs = _get_kwargs(
+        agent_id=agent_id,
         body=body,
     )
 
@@ -100,6 +104,7 @@ def sync_detailed(
 
 
 def sync(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: SearchRequest,
@@ -108,16 +113,17 @@ def sync(
 
      Search memory using semantic similarity and spreading activation.
 
-        The fact_type parameter is required and must be one of:
+        The fact_type parameter is optional and must be one of:
         - 'world': General knowledge about people, places, events, and things that happen
         - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
         - 'opinion': The agent's formed beliefs, perspectives, and viewpoints
 
     Args:
-        body (SearchRequest): Request model for search endpoint. Example: {'agent_id': 'user123',
-            'fact_type': ['world', 'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about
-            machine learning?', 'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic',
-            'thinking_budget': 100, 'trace': True}.
+        agent_id (str):
+        body (SearchRequest): Request model for search endpoint. Example: {'fact_type': ['world',
+            'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about machine learning?',
+            'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic', 'thinking_budget': 100,
+            'trace': True}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -128,12 +134,14 @@ def sync(
     """
 
     return sync_detailed(
+        agent_id=agent_id,
         client=client,
         body=body,
     ).parsed
 
 
 async def asyncio_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: SearchRequest,
@@ -142,16 +150,17 @@ async def asyncio_detailed(
 
      Search memory using semantic similarity and spreading activation.
 
-        The fact_type parameter is required and must be one of:
+        The fact_type parameter is optional and must be one of:
         - 'world': General knowledge about people, places, events, and things that happen
         - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
         - 'opinion': The agent's formed beliefs, perspectives, and viewpoints
 
     Args:
-        body (SearchRequest): Request model for search endpoint. Example: {'agent_id': 'user123',
-            'fact_type': ['world', 'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about
-            machine learning?', 'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic',
-            'thinking_budget': 100, 'trace': True}.
+        agent_id (str):
+        body (SearchRequest): Request model for search endpoint. Example: {'fact_type': ['world',
+            'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about machine learning?',
+            'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic', 'thinking_budget': 100,
+            'trace': True}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -162,6 +171,7 @@ async def asyncio_detailed(
     """
 
     kwargs = _get_kwargs(
+        agent_id=agent_id,
         body=body,
     )
 
@@ -171,6 +181,7 @@ async def asyncio_detailed(
 
 
 async def asyncio(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: SearchRequest,
@@ -179,16 +190,17 @@ async def asyncio(
 
      Search memory using semantic similarity and spreading activation.
 
-        The fact_type parameter is required and must be one of:
+        The fact_type parameter is optional and must be one of:
         - 'world': General knowledge about people, places, events, and things that happen
         - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
         - 'opinion': The agent's formed beliefs, perspectives, and viewpoints
 
     Args:
-        body (SearchRequest): Request model for search endpoint. Example: {'agent_id': 'user123',
-            'fact_type': ['world', 'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about
-            machine learning?', 'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic',
-            'thinking_budget': 100, 'trace': True}.
+        agent_id (str):
+        body (SearchRequest): Request model for search endpoint. Example: {'fact_type': ['world',
+            'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about machine learning?',
+            'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic', 'thinking_budget': 100,
+            'trace': True}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -200,6 +212,7 @@ async def asyncio(
 
     return (
         await asyncio_detailed(
+            agent_id=agent_id,
             client=client,
             body=body,
         )

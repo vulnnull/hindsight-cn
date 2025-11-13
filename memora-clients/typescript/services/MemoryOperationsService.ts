@@ -5,10 +5,80 @@
 import type { BatchPutAsyncResponse } from '../models/BatchPutAsyncResponse';
 import type { BatchPutRequest } from '../models/BatchPutRequest';
 import type { BatchPutResponse } from '../models/BatchPutResponse';
+import type { ListMemoryUnitsResponse } from '../models/ListMemoryUnitsResponse';
+import type { SearchRequest } from '../models/SearchRequest';
+import type { SearchResponse } from '../models/SearchResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
-export class MemoryStorageService {
+export class MemoryOperationsService {
+    /**
+     * List memory units
+     * List memory units with pagination and optional full-text search. Supports filtering by fact_type.
+     * @returns ListMemoryUnitsResponse Successful Response
+     * @throws ApiError
+     */
+    public static apiListApiV1AgentsAgentIdMemoriesListGet({
+        agentId,
+        factType,
+        q,
+        limit = 100,
+        offset,
+    }: {
+        agentId: string,
+        factType?: (string | null),
+        q?: (string | null),
+        limit?: number,
+        offset?: number,
+    }): CancelablePromise<ListMemoryUnitsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agents/{agent_id}/memories/list',
+            path: {
+                'agent_id': agentId,
+            },
+            query: {
+                'fact_type': factType,
+                'q': q,
+                'limit': limit,
+                'offset': offset,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Search memory
+     * Search memory using semantic similarity and spreading activation.
+     *
+     * The fact_type parameter is optional and must be one of:
+     * - 'world': General knowledge about people, places, events, and things that happen
+     * - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
+     * - 'opinion': The agent's formed beliefs, perspectives, and viewpoints
+     * @returns SearchResponse Successful Response
+     * @throws ApiError
+     */
+    public static apiSearchApiV1AgentsAgentIdMemoriesSearchPost({
+        agentId,
+        requestBody,
+    }: {
+        agentId: string,
+        requestBody: SearchRequest,
+    }): CancelablePromise<SearchResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/agents/{agent_id}/memories/search',
+            path: {
+                'agent_id': agentId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
     /**
      * Store multiple memories
      * Store multiple memory items in batch with automatic fact extraction.
@@ -31,14 +101,19 @@ export class MemoryStorageService {
      * @returns BatchPutResponse Successful Response
      * @throws ApiError
      */
-    public static apiBatchPutApiMemoriesBatchPost({
+    public static apiBatchPutApiV1AgentsAgentIdMemoriesPost({
+        agentId,
         requestBody,
     }: {
+        agentId: string,
         requestBody: BatchPutRequest,
     }): CancelablePromise<BatchPutResponse> {
         return __request(OpenAPI, {
             method: 'POST',
-            url: '/api/memories/batch',
+            url: '/api/v1/agents/{agent_id}/memories',
+            path: {
+                'agent_id': agentId,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -71,14 +146,19 @@ export class MemoryStorageService {
      * @returns BatchPutAsyncResponse Successful Response
      * @throws ApiError
      */
-    public static apiBatchPutAsyncApiMemoriesBatchAsyncPost({
+    public static apiBatchPutAsyncApiV1AgentsAgentIdMemoriesAsyncPost({
+        agentId,
         requestBody,
     }: {
+        agentId: string,
         requestBody: BatchPutRequest,
     }): CancelablePromise<BatchPutAsyncResponse> {
         return __request(OpenAPI, {
             method: 'POST',
-            url: '/api/memories/batch_async',
+            url: '/api/v1/agents/{agent_id}/memories/async',
+            path: {
+                'agent_id': agentId,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -92,14 +172,14 @@ export class MemoryStorageService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static apiListOperationsApiOperationsAgentIdGet({
+    public static apiListOperationsApiV1AgentsAgentIdOperationsGet({
         agentId,
     }: {
         agentId: string,
     }): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/operations/{agent_id}',
+            url: '/api/v1/agents/{agent_id}/operations',
             path: {
                 'agent_id': agentId,
             },
@@ -114,15 +194,18 @@ export class MemoryStorageService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static apiCancelOperationApiOperationsOperationIdDelete({
+    public static apiCancelOperationApiV1AgentsAgentIdOperationsOperationIdDelete({
+        agentId,
         operationId,
     }: {
+        agentId: string,
         operationId: string,
     }): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'DELETE',
-            url: '/api/operations/{operation_id}',
+            url: '/api/v1/agents/{agent_id}/operations/{operation_id}',
             path: {
+                'agent_id': agentId,
                 'operation_id': operationId,
             },
             errors: {
@@ -136,15 +219,18 @@ export class MemoryStorageService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static apiDeleteMemoryUnitApiMemoryUnitIdDelete({
+    public static apiDeleteMemoryUnitApiV1AgentsAgentIdMemoriesUnitIdDelete({
+        agentId,
         unitId,
     }: {
+        agentId: string,
         unitId: string,
     }): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'DELETE',
-            url: '/api/memory/{unit_id}',
+            url: '/api/v1/agents/{agent_id}/memories/{unit_id}',
             path: {
+                'agent_id': agentId,
                 'unit_id': unitId,
             },
             errors: {

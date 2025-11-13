@@ -5,32 +5,24 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.http_validation_error import HTTPValidationError
+from ...models.agent_list_response import AgentListResponse
 from ...types import Response
 
 
-def _get_kwargs(
-    agent_id: str,
-) -> dict[str, Any]:
+def _get_kwargs() -> dict[str, Any]:
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": f"/api/operations/{agent_id}",
+        "url": "/api/v1/agents",
     }
 
     return _kwargs
 
 
-def _parse_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Any | HTTPValidationError | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> AgentListResponse | None:
     if response.status_code == 200:
-        response_200 = response.json()
+        response_200 = AgentListResponse.from_dict(response.json())
+
         return response_200
-
-    if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
-
-        return response_422
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -38,9 +30,7 @@ def _parse_response(
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[Any | HTTPValidationError]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[AgentListResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -50,29 +40,22 @@ def _build_response(
 
 
 def sync_detailed(
-    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Response[Any | HTTPValidationError]:
-    """List async operations
+) -> Response[AgentListResponse]:
+    """List all agents
 
-     Get a list of all async operations (pending and failed) for a specific agent, including error
-    messages for failed operations
-
-    Args:
-        agent_id (str):
+     Get a list of all agents with their profiles
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | HTTPValidationError]
+        Response[AgentListResponse]
     """
 
-    kwargs = _get_kwargs(
-        agent_id=agent_id,
-    )
+    kwargs = _get_kwargs()
 
     response = client.get_httpx_client().request(
         **kwargs,
@@ -82,56 +65,43 @@ def sync_detailed(
 
 
 def sync(
-    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Any | HTTPValidationError | None:
-    """List async operations
+) -> AgentListResponse | None:
+    """List all agents
 
-     Get a list of all async operations (pending and failed) for a specific agent, including error
-    messages for failed operations
-
-    Args:
-        agent_id (str):
+     Get a list of all agents with their profiles
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | HTTPValidationError
+        AgentListResponse
     """
 
     return sync_detailed(
-        agent_id=agent_id,
         client=client,
     ).parsed
 
 
 async def asyncio_detailed(
-    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Response[Any | HTTPValidationError]:
-    """List async operations
+) -> Response[AgentListResponse]:
+    """List all agents
 
-     Get a list of all async operations (pending and failed) for a specific agent, including error
-    messages for failed operations
-
-    Args:
-        agent_id (str):
+     Get a list of all agents with their profiles
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | HTTPValidationError]
+        Response[AgentListResponse]
     """
 
-    kwargs = _get_kwargs(
-        agent_id=agent_id,
-    )
+    kwargs = _get_kwargs()
 
     response = await client.get_async_httpx_client().request(**kwargs)
 
@@ -139,29 +109,23 @@ async def asyncio_detailed(
 
 
 async def asyncio(
-    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Any | HTTPValidationError | None:
-    """List async operations
+) -> AgentListResponse | None:
+    """List all agents
 
-     Get a list of all async operations (pending and failed) for a specific agent, including error
-    messages for failed operations
-
-    Args:
-        agent_id (str):
+     Get a list of all agents with their profiles
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | HTTPValidationError
+        AgentListResponse
     """
 
     return (
         await asyncio_detailed(
-            agent_id=agent_id,
             client=client,
         )
     ).parsed

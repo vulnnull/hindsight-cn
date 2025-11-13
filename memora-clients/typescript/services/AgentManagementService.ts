@@ -11,17 +11,39 @@ import type { UpdatePersonalityRequest } from '../models/UpdatePersonalityReques
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
-export class AgentProfileService {
+export class AgentManagementService {
     /**
      * List all agents
      * Get a list of all agents with their profiles
      * @returns AgentListResponse Successful Response
      * @throws ApiError
      */
-    public static apiListAgentsApiAgentsGet(): CancelablePromise<AgentListResponse> {
+    public static apiAgentsApiV1AgentsGet(): CancelablePromise<AgentListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/agents',
+            url: '/api/v1/agents',
+        });
+    }
+    /**
+     * Get memory statistics for an agent
+     * Get statistics about nodes and links for a specific agent
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static apiStatsApiV1AgentsAgentIdStatsGet({
+        agentId,
+    }: {
+        agentId: string,
+    }): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/agents/{agent_id}/stats',
+            path: {
+                'agent_id': agentId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
         });
     }
     /**
@@ -30,14 +52,14 @@ export class AgentProfileService {
      * @returns AgentProfileResponse Successful Response
      * @throws ApiError
      */
-    public static apiGetAgentProfileApiAgentsAgentIdProfileGet({
+    public static apiGetAgentProfileApiV1AgentsAgentIdProfileGet({
         agentId,
     }: {
         agentId: string,
     }): CancelablePromise<AgentProfileResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/agents/{agent_id}/profile',
+            url: '/api/v1/agents/{agent_id}/profile',
             path: {
                 'agent_id': agentId,
             },
@@ -52,7 +74,7 @@ export class AgentProfileService {
      * @returns AgentProfileResponse Successful Response
      * @throws ApiError
      */
-    public static apiUpdateAgentPersonalityApiAgentsAgentIdProfilePut({
+    public static apiUpdateAgentPersonalityApiV1AgentsAgentIdProfilePut({
         agentId,
         requestBody,
     }: {
@@ -61,7 +83,7 @@ export class AgentProfileService {
     }): CancelablePromise<AgentProfileResponse> {
         return __request(OpenAPI, {
             method: 'PUT',
-            url: '/api/agents/{agent_id}/profile',
+            url: '/api/v1/agents/{agent_id}/profile',
             path: {
                 'agent_id': agentId,
             },
@@ -78,7 +100,7 @@ export class AgentProfileService {
      * @returns BackgroundResponse Successful Response
      * @throws ApiError
      */
-    public static apiAddAgentBackgroundApiAgentsAgentIdBackgroundPost({
+    public static apiAddAgentBackgroundApiV1AgentsAgentIdBackgroundPost({
         agentId,
         requestBody,
     }: {
@@ -87,7 +109,7 @@ export class AgentProfileService {
     }): CancelablePromise<BackgroundResponse> {
         return __request(OpenAPI, {
             method: 'POST',
-            url: '/api/agents/{agent_id}/background',
+            url: '/api/v1/agents/{agent_id}/background',
             path: {
                 'agent_id': agentId,
             },
@@ -104,7 +126,7 @@ export class AgentProfileService {
      * @returns AgentProfileResponse Successful Response
      * @throws ApiError
      */
-    public static apiCreateOrUpdateAgentApiAgentsAgentIdPut({
+    public static apiCreateOrUpdateAgentApiV1AgentsAgentIdPut({
         agentId,
         requestBody,
     }: {
@@ -113,7 +135,7 @@ export class AgentProfileService {
     }): CancelablePromise<AgentProfileResponse> {
         return __request(OpenAPI, {
             method: 'PUT',
-            url: '/api/agents/{agent_id}',
+            url: '/api/v1/agents/{agent_id}',
             path: {
                 'agent_id': agentId,
             },

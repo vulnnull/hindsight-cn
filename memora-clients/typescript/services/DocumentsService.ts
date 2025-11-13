@@ -14,7 +14,7 @@ export class DocumentsService {
      * @returns ListDocumentsResponse Successful Response
      * @throws ApiError
      */
-    public static apiListDocumentsApiDocumentsGet({
+    public static apiListDocumentsApiV1AgentsAgentIdDocumentsGet({
         agentId,
         q,
         limit = 100,
@@ -27,9 +27,11 @@ export class DocumentsService {
     }): CancelablePromise<ListDocumentsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/documents',
-            query: {
+            url: '/api/v1/agents/{agent_id}/documents',
+            path: {
                 'agent_id': agentId,
+            },
+            query: {
                 'q': q,
                 'limit': limit,
                 'offset': offset,
@@ -45,21 +47,19 @@ export class DocumentsService {
      * @returns DocumentResponse Successful Response
      * @throws ApiError
      */
-    public static apiGetDocumentApiDocumentsDocumentIdGet({
-        documentId,
+    public static apiGetDocumentApiV1AgentsAgentIdDocumentsDocumentIdGet({
         agentId,
+        documentId,
     }: {
-        documentId: string,
         agentId: string,
+        documentId: string,
     }): CancelablePromise<DocumentResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/documents/{document_id}',
+            url: '/api/v1/agents/{agent_id}/documents/{document_id}',
             path: {
-                'document_id': documentId,
-            },
-            query: {
                 'agent_id': agentId,
+                'document_id': documentId,
             },
             errors: {
                 422: `Validation Error`,

@@ -8,7 +8,7 @@ export async function GET(
 ) {
   try {
     const { agentId } = await params;
-    const response = await fetch(`${DATAPLANE_URL}/api/stats/${agentId}`);
+    const response = await fetch(`${DATAPLANE_URL}/api/v1/agents/${agentId}/stats`);
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
   } catch (error) {

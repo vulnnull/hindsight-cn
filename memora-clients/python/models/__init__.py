@@ -4,7 +4,6 @@ from .add_background_request import AddBackgroundRequest
 from .agent_list_item import AgentListItem
 from .agent_list_response import AgentListResponse
 from .agent_profile_response import AgentProfileResponse
-from .agents_response import AgentsResponse
 from .background_response import BackgroundResponse
 from .batch_put_async_response import BatchPutAsyncResponse
 from .batch_put_request import BatchPutRequest
@@ -37,7 +36,6 @@ __all__ = (
     "AgentListItem",
     "AgentListResponse",
     "AgentProfileResponse",
-    "AgentsResponse",
     "BackgroundResponse",
     "BatchPutAsyncResponse",
     "BatchPutRequest",

@@ -74,7 +74,6 @@ class RemoteMemoryClient:
 
         # Make API request
         request_data = {
-            "agent_id": agent_id,
             "items": items
         }
 
@@ -82,7 +81,7 @@ class RemoteMemoryClient:
             request_data["document_id"] = document_id
 
         response = await self.client.post(
-            f"{self.base_url}/api/memories/batch_async",
+            f"{self.base_url}/api/v1/agents/{agent_id}/memories/async",
             json=request_data
         )
         response.raise_for_status()
@@ -114,7 +113,6 @@ class RemoteMemoryClient:
             Tuple of (results, trace)
         """
         request_data = {
-            "agent_id": agent_id,
             "query": query,
             "thinking_budget": thinking_budget,
             "max_tokens": max_tokens,
@@ -126,7 +124,7 @@ class RemoteMemoryClient:
             request_data["fact_type"] = fact_type
 
         response = await self.client.post(
-            f"{self.base_url}/api/search",
+            f"{self.base_url}/api/v1/agents/{agent_id}/memories/search",
             json=request_data
         )
         response.raise_for_status()
@@ -154,7 +152,6 @@ class RemoteMemoryClient:
             Dict with 'text', 'based_on', and 'new_opinions' keys
         """
         request_data = {
-            "agent_id": agent_id,
             "query": query,
             "thinking_budget": thinking_budget
         }
@@ -163,7 +160,7 @@ class RemoteMemoryClient:
             request_data["context"] = context
 
         response = await self.client.post(
-            f"{self.base_url}/api/think",
+            f"{self.base_url}/api/v1/agents/{agent_id}/think",
             json=request_data
         )
         response.raise_for_status()
@@ -193,7 +190,7 @@ class RemoteMemoryClient:
         Returns:
             List of agent IDs
         """
-        response = await self.client.get(f"{self.base_url}/api/agents")
+        response = await self.client.get(f"{self.base_url}/api/v1/agents")
         response.raise_for_status()
         result = response.json()
         return result.get("agents", [])
@@ -208,7 +205,7 @@ class RemoteMemoryClient:
         Returns:
             Dict with statistics including total_nodes, total_links, and pending_operations
         """
-        response = await self.client.get(f"{self.base_url}/api/stats/{agent_id}")
+        response = await self.client.get(f"{self.base_url}/api/v1/agents/{agent_id}/stats")
         response.raise_for_status()
         return response.json()
 

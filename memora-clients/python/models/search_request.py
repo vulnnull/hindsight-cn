@@ -16,14 +16,12 @@ class SearchRequest:
     """Request model for search endpoint.
 
     Example:
-        {'agent_id': 'user123', 'fact_type': ['world', 'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about
-            machine learning?', 'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic', 'thinking_budget': 100,
-            'trace': True}
+        {'fact_type': ['world', 'agent'], 'max_tokens': 4096, 'query': 'What did Alice say about machine learning?',
+            'question_date': '2023-05-30T23:40:00', 'reranker': 'heuristic', 'thinking_budget': 100, 'trace': True}
 
     Attributes:
         query (str):
         fact_type (list[str] | None | Unset):
-        agent_id (str | Unset):  Default: 'default'.
         thinking_budget (int | Unset):  Default: 100.
         max_tokens (int | Unset):  Default: 4096.
         reranker (str | Unset):  Default: 'heuristic'.
@@ -33,7 +31,6 @@ class SearchRequest:
 
     query: str
     fact_type: list[str] | None | Unset = UNSET
-    agent_id: str | Unset = "default"
     thinking_budget: int | Unset = 100
     max_tokens: int | Unset = 4096
     reranker: str | Unset = "heuristic"
@@ -52,8 +49,6 @@ class SearchRequest:
 
         else:
             fact_type = self.fact_type
-
-        agent_id = self.agent_id
 
         thinking_budget = self.thinking_budget
 
@@ -78,8 +73,6 @@ class SearchRequest:
         )
         if fact_type is not UNSET:
             field_dict["fact_type"] = fact_type
-        if agent_id is not UNSET:
-            field_dict["agent_id"] = agent_id
         if thinking_budget is not UNSET:
             field_dict["thinking_budget"] = thinking_budget
         if max_tokens is not UNSET:
@@ -115,8 +108,6 @@ class SearchRequest:
 
         fact_type = _parse_fact_type(d.pop("fact_type", UNSET))
 
-        agent_id = d.pop("agent_id", UNSET)
-
         thinking_budget = d.pop("thinking_budget", UNSET)
 
         max_tokens = d.pop("max_tokens", UNSET)
@@ -137,7 +128,6 @@ class SearchRequest:
         search_request = cls(
             query=query,
             fact_type=fact_type,
-            agent_id=agent_id,
             thinking_budget=thinking_budget,
             max_tokens=max_tokens,
             reranker=reranker,

@@ -5,38 +5,30 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
+from ...models.graph_data_response import GraphDataResponse
 from ...models.http_validation_error import HTTPValidationError
-from ...models.list_documents_response import ListDocumentsResponse
 from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
-    *,
     agent_id: str,
-    q: None | str | Unset = UNSET,
-    limit: int | Unset = 100,
-    offset: int | Unset = 0,
+    *,
+    fact_type: None | str | Unset = UNSET,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {}
 
-    params["agent_id"] = agent_id
-
-    json_q: None | str | Unset
-    if isinstance(q, Unset):
-        json_q = UNSET
+    json_fact_type: None | str | Unset
+    if isinstance(fact_type, Unset):
+        json_fact_type = UNSET
     else:
-        json_q = q
-    params["q"] = json_q
-
-    params["limit"] = limit
-
-    params["offset"] = offset
+        json_fact_type = fact_type
+    params["fact_type"] = json_fact_type
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/documents",
+        "url": f"/api/v1/agents/{agent_id}/graph",
         "params": params,
     }
 
@@ -45,9 +37,9 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> HTTPValidationError | ListDocumentsResponse | None:
+) -> GraphDataResponse | HTTPValidationError | None:
     if response.status_code == 200:
-        response_200 = ListDocumentsResponse.from_dict(response.json())
+        response_200 = GraphDataResponse.from_dict(response.json())
 
         return response_200
 
@@ -64,7 +56,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[HTTPValidationError | ListDocumentsResponse]:
+) -> Response[GraphDataResponse | HTTPValidationError]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -74,37 +66,31 @@ def _build_response(
 
 
 def sync_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: str,
-    q: None | str | Unset = UNSET,
-    limit: int | Unset = 100,
-    offset: int | Unset = 0,
-) -> Response[HTTPValidationError | ListDocumentsResponse]:
-    """List documents
+    fact_type: None | str | Unset = UNSET,
+) -> Response[GraphDataResponse | HTTPValidationError]:
+    """Get memory graph data
 
-     List documents with pagination and optional search. Documents are the source content from which
-    memory units are extracted.
+     Retrieve graph data for visualization, optionally filtered by fact_type (world/agent/opinion).
+    Limited to 1000 most recent items.
 
     Args:
         agent_id (str):
-        q (None | str | Unset):
-        limit (int | Unset):  Default: 100.
-        offset (int | Unset):  Default: 0.
+        fact_type (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[HTTPValidationError | ListDocumentsResponse]
+        Response[GraphDataResponse | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
         agent_id=agent_id,
-        q=q,
-        limit=limit,
-        offset=offset,
+        fact_type=fact_type,
     )
 
     response = client.get_httpx_client().request(
@@ -115,73 +101,61 @@ def sync_detailed(
 
 
 def sync(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: str,
-    q: None | str | Unset = UNSET,
-    limit: int | Unset = 100,
-    offset: int | Unset = 0,
-) -> HTTPValidationError | ListDocumentsResponse | None:
-    """List documents
+    fact_type: None | str | Unset = UNSET,
+) -> GraphDataResponse | HTTPValidationError | None:
+    """Get memory graph data
 
-     List documents with pagination and optional search. Documents are the source content from which
-    memory units are extracted.
+     Retrieve graph data for visualization, optionally filtered by fact_type (world/agent/opinion).
+    Limited to 1000 most recent items.
 
     Args:
         agent_id (str):
-        q (None | str | Unset):
-        limit (int | Unset):  Default: 100.
-        offset (int | Unset):  Default: 0.
+        fact_type (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        HTTPValidationError | ListDocumentsResponse
+        GraphDataResponse | HTTPValidationError
     """
 
     return sync_detailed(
-        client=client,
         agent_id=agent_id,
-        q=q,
-        limit=limit,
-        offset=offset,
+        client=client,
+        fact_type=fact_type,
     ).parsed
 
 
 async def asyncio_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: str,
-    q: None | str | Unset = UNSET,
-    limit: int | Unset = 100,
-    offset: int | Unset = 0,
-) -> Response[HTTPValidationError | ListDocumentsResponse]:
-    """List documents
+    fact_type: None | str | Unset = UNSET,
+) -> Response[GraphDataResponse | HTTPValidationError]:
+    """Get memory graph data
 
-     List documents with pagination and optional search. Documents are the source content from which
-    memory units are extracted.
+     Retrieve graph data for visualization, optionally filtered by fact_type (world/agent/opinion).
+    Limited to 1000 most recent items.
 
     Args:
         agent_id (str):
-        q (None | str | Unset):
-        limit (int | Unset):  Default: 100.
-        offset (int | Unset):  Default: 0.
+        fact_type (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[HTTPValidationError | ListDocumentsResponse]
+        Response[GraphDataResponse | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
         agent_id=agent_id,
-        q=q,
-        limit=limit,
-        offset=offset,
+        fact_type=fact_type,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -190,38 +164,32 @@ async def asyncio_detailed(
 
 
 async def asyncio(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: str,
-    q: None | str | Unset = UNSET,
-    limit: int | Unset = 100,
-    offset: int | Unset = 0,
-) -> HTTPValidationError | ListDocumentsResponse | None:
-    """List documents
+    fact_type: None | str | Unset = UNSET,
+) -> GraphDataResponse | HTTPValidationError | None:
+    """Get memory graph data
 
-     List documents with pagination and optional search. Documents are the source content from which
-    memory units are extracted.
+     Retrieve graph data for visualization, optionally filtered by fact_type (world/agent/opinion).
+    Limited to 1000 most recent items.
 
     Args:
         agent_id (str):
-        q (None | str | Unset):
-        limit (int | Unset):  Default: 100.
-        offset (int | Unset):  Default: 0.
+        fact_type (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        HTTPValidationError | ListDocumentsResponse
+        GraphDataResponse | HTTPValidationError
     """
 
     return (
         await asyncio_detailed(
-            client=client,
             agent_id=agent_id,
-            q=q,
-            limit=limit,
-            offset=offset,
+            client=client,
+            fact_type=fact_type,
         )
     ).parsed

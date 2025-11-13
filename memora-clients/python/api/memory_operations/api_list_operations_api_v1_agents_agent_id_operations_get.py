@@ -5,26 +5,16 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.document_response import DocumentResponse
 from ...models.http_validation_error import HTTPValidationError
-from ...types import UNSET, Response
+from ...types import Response
 
 
 def _get_kwargs(
-    document_id: str,
-    *,
     agent_id: str,
 ) -> dict[str, Any]:
-    params: dict[str, Any] = {}
-
-    params["agent_id"] = agent_id
-
-    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
-
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": f"/api/documents/{document_id}",
-        "params": params,
+        "url": f"/api/v1/agents/{agent_id}/operations",
     }
 
     return _kwargs
@@ -32,10 +22,9 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> DocumentResponse | HTTPValidationError | None:
+) -> Any | HTTPValidationError | None:
     if response.status_code == 200:
-        response_200 = DocumentResponse.from_dict(response.json())
-
+        response_200 = response.json()
         return response_200
 
     if response.status_code == 422:
@@ -51,7 +40,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[DocumentResponse | HTTPValidationError]:
+) -> Response[Any | HTTPValidationError]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -61,17 +50,16 @@ def _build_response(
 
 
 def sync_detailed(
-    document_id: str,
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: str,
-) -> Response[DocumentResponse | HTTPValidationError]:
-    """Get document details
+) -> Response[Any | HTTPValidationError]:
+    """List async operations
 
-     Get a specific document including its original text
+     Get a list of all async operations (pending and failed) for a specific agent, including error
+    messages for failed operations
 
     Args:
-        document_id (str):
         agent_id (str):
 
     Raises:
@@ -79,11 +67,10 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[DocumentResponse | HTTPValidationError]
+        Response[Any | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
-        document_id=document_id,
         agent_id=agent_id,
     )
 
@@ -95,17 +82,16 @@ def sync_detailed(
 
 
 def sync(
-    document_id: str,
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: str,
-) -> DocumentResponse | HTTPValidationError | None:
-    """Get document details
+) -> Any | HTTPValidationError | None:
+    """List async operations
 
-     Get a specific document including its original text
+     Get a list of all async operations (pending and failed) for a specific agent, including error
+    messages for failed operations
 
     Args:
-        document_id (str):
         agent_id (str):
 
     Raises:
@@ -113,28 +99,26 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        DocumentResponse | HTTPValidationError
+        Any | HTTPValidationError
     """
 
     return sync_detailed(
-        document_id=document_id,
-        client=client,
         agent_id=agent_id,
+        client=client,
     ).parsed
 
 
 async def asyncio_detailed(
-    document_id: str,
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: str,
-) -> Response[DocumentResponse | HTTPValidationError]:
-    """Get document details
+) -> Response[Any | HTTPValidationError]:
+    """List async operations
 
-     Get a specific document including its original text
+     Get a list of all async operations (pending and failed) for a specific agent, including error
+    messages for failed operations
 
     Args:
-        document_id (str):
         agent_id (str):
 
     Raises:
@@ -142,11 +126,10 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[DocumentResponse | HTTPValidationError]
+        Response[Any | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
-        document_id=document_id,
         agent_id=agent_id,
     )
 
@@ -156,17 +139,16 @@ async def asyncio_detailed(
 
 
 async def asyncio(
-    document_id: str,
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: str,
-) -> DocumentResponse | HTTPValidationError | None:
-    """Get document details
+) -> Any | HTTPValidationError | None:
+    """List async operations
 
-     Get a specific document including its original text
+     Get a list of all async operations (pending and failed) for a specific agent, including error
+    messages for failed operations
 
     Args:
-        document_id (str):
         agent_id (str):
 
     Raises:
@@ -174,13 +156,12 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        DocumentResponse | HTTPValidationError
+        Any | HTTPValidationError
     """
 
     return (
         await asyncio_detailed(
-            document_id=document_id,
-            client=client,
             agent_id=agent_id,
+            client=client,
         )
     ).parsed

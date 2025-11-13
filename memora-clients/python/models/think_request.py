@@ -16,26 +16,22 @@ class ThinkRequest:
     """Request model for think endpoint.
 
     Example:
-        {'agent_id': 'user123', 'context': 'This is for a research paper on AI ethics', 'query': 'What do you think
-            about artificial intelligence?', 'thinking_budget': 50}
+        {'context': 'This is for a research paper on AI ethics', 'query': 'What do you think about artificial
+            intelligence?', 'thinking_budget': 50}
 
     Attributes:
         query (str):
-        agent_id (str | Unset):  Default: 'default'.
         thinking_budget (int | Unset):  Default: 50.
         context (None | str | Unset):
     """
 
     query: str
-    agent_id: str | Unset = "default"
     thinking_budget: int | Unset = 50
     context: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         query = self.query
-
-        agent_id = self.agent_id
 
         thinking_budget = self.thinking_budget
 
@@ -52,8 +48,6 @@ class ThinkRequest:
                 "query": query,
             }
         )
-        if agent_id is not UNSET:
-            field_dict["agent_id"] = agent_id
         if thinking_budget is not UNSET:
             field_dict["thinking_budget"] = thinking_budget
         if context is not UNSET:
@@ -65,8 +59,6 @@ class ThinkRequest:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         query = d.pop("query")
-
-        agent_id = d.pop("agent_id", UNSET)
 
         thinking_budget = d.pop("thinking_budget", UNSET)
 
@@ -81,7 +73,6 @@ class ThinkRequest:
 
         think_request = cls(
             query=query,
-            agent_id=agent_id,
             thinking_budget=thinking_budget,
             context=context,
         )

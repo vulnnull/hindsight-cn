@@ -5,38 +5,18 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.graph_data_response import GraphDataResponse
+from ...models.document_response import DocumentResponse
 from ...models.http_validation_error import HTTPValidationError
-from ...types import UNSET, Response, Unset
+from ...types import Response
 
 
 def _get_kwargs(
-    *,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
+    agent_id: str,
+    document_id: str,
 ) -> dict[str, Any]:
-    params: dict[str, Any] = {}
-
-    json_agent_id: None | str | Unset
-    if isinstance(agent_id, Unset):
-        json_agent_id = UNSET
-    else:
-        json_agent_id = agent_id
-    params["agent_id"] = json_agent_id
-
-    json_fact_type: None | str | Unset
-    if isinstance(fact_type, Unset):
-        json_fact_type = UNSET
-    else:
-        json_fact_type = fact_type
-    params["fact_type"] = json_fact_type
-
-    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
-
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/graph",
-        "params": params,
+        "url": f"/api/v1/agents/{agent_id}/documents/{document_id}",
     }
 
     return _kwargs
@@ -44,9 +24,9 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> GraphDataResponse | HTTPValidationError | None:
+) -> DocumentResponse | HTTPValidationError | None:
     if response.status_code == 200:
-        response_200 = GraphDataResponse.from_dict(response.json())
+        response_200 = DocumentResponse.from_dict(response.json())
 
         return response_200
 
@@ -63,7 +43,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[GraphDataResponse | HTTPValidationError]:
+) -> Response[DocumentResponse | HTTPValidationError]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -73,31 +53,30 @@ def _build_response(
 
 
 def sync_detailed(
+    agent_id: str,
+    document_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
-) -> Response[GraphDataResponse | HTTPValidationError]:
-    """Get memory graph data
+) -> Response[DocumentResponse | HTTPValidationError]:
+    """Get document details
 
-     Retrieve graph data for visualization, optionally filtered by agent_id and fact_type
-    (world/agent/opinion). Limited to 1000 most recent items.
+     Get a specific document including its original text
 
     Args:
-        agent_id (None | str | Unset):
-        fact_type (None | str | Unset):
+        agent_id (str):
+        document_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[GraphDataResponse | HTTPValidationError]
+        Response[DocumentResponse | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
         agent_id=agent_id,
-        fact_type=fact_type,
+        document_id=document_id,
     )
 
     response = client.get_httpx_client().request(
@@ -108,61 +87,59 @@ def sync_detailed(
 
 
 def sync(
+    agent_id: str,
+    document_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
-) -> GraphDataResponse | HTTPValidationError | None:
-    """Get memory graph data
+) -> DocumentResponse | HTTPValidationError | None:
+    """Get document details
 
-     Retrieve graph data for visualization, optionally filtered by agent_id and fact_type
-    (world/agent/opinion). Limited to 1000 most recent items.
+     Get a specific document including its original text
 
     Args:
-        agent_id (None | str | Unset):
-        fact_type (None | str | Unset):
+        agent_id (str):
+        document_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        GraphDataResponse | HTTPValidationError
+        DocumentResponse | HTTPValidationError
     """
 
     return sync_detailed(
-        client=client,
         agent_id=agent_id,
-        fact_type=fact_type,
+        document_id=document_id,
+        client=client,
     ).parsed
 
 
 async def asyncio_detailed(
+    agent_id: str,
+    document_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
-) -> Response[GraphDataResponse | HTTPValidationError]:
-    """Get memory graph data
+) -> Response[DocumentResponse | HTTPValidationError]:
+    """Get document details
 
-     Retrieve graph data for visualization, optionally filtered by agent_id and fact_type
-    (world/agent/opinion). Limited to 1000 most recent items.
+     Get a specific document including its original text
 
     Args:
-        agent_id (None | str | Unset):
-        fact_type (None | str | Unset):
+        agent_id (str):
+        document_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[GraphDataResponse | HTTPValidationError]
+        Response[DocumentResponse | HTTPValidationError]
     """
 
     kwargs = _get_kwargs(
         agent_id=agent_id,
-        fact_type=fact_type,
+        document_id=document_id,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -171,32 +148,31 @@ async def asyncio_detailed(
 
 
 async def asyncio(
+    agent_id: str,
+    document_id: str,
     *,
     client: AuthenticatedClient | Client,
-    agent_id: None | str | Unset = UNSET,
-    fact_type: None | str | Unset = UNSET,
-) -> GraphDataResponse | HTTPValidationError | None:
-    """Get memory graph data
+) -> DocumentResponse | HTTPValidationError | None:
+    """Get document details
 
-     Retrieve graph data for visualization, optionally filtered by agent_id and fact_type
-    (world/agent/opinion). Limited to 1000 most recent items.
+     Get a specific document including its original text
 
     Args:
-        agent_id (None | str | Unset):
-        fact_type (None | str | Unset):
+        agent_id (str):
+        document_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        GraphDataResponse | HTTPValidationError
+        DocumentResponse | HTTPValidationError
     """
 
     return (
         await asyncio_detailed(
-            client=client,
             agent_id=agent_id,
-            fact_type=fact_type,
+            document_id=document_id,
+            client=client,
         )
     ).parsed

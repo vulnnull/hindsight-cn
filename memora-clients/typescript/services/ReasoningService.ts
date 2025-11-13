@@ -22,14 +22,19 @@ export class ReasoningService {
      * @returns ThinkResponse Successful Response
      * @throws ApiError
      */
-    public static apiThinkApiThinkPost({
+    public static apiThinkApiV1AgentsAgentIdThinkPost({
+        agentId,
         requestBody,
     }: {
+        agentId: string,
         requestBody: ThinkRequest,
     }): CancelablePromise<ThinkResponse> {
         return __request(OpenAPI, {
             method: 'POST',
-            url: '/api/think',
+            url: '/api/v1/agents/{agent_id}/think',
+            path: {
+                'agent_id': agentId,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {

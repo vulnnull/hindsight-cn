@@ -8,7 +8,6 @@
 export type SearchRequest = {
     query: string;
     fact_type?: (Array<string> | null);
-    agent_id?: string;
     thinking_budget?: number;
     max_tokens?: number;
     reranker?: string;

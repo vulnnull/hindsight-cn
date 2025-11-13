@@ -22,7 +22,6 @@ class SearchRequest(BaseModel):
     """Request model for search endpoint."""
     query: str
     fact_type: Optional[List[str]] = None  # List of fact types to search (defaults to all if not specified)
-    agent_id: str = "default"
     thinking_budget: int = 100
     max_tokens: int = 4096
     reranker: str = "heuristic"
@@ -34,7 +33,6 @@ class SearchRequest(BaseModel):
             "example": {
                 "query": "What did Alice say about machine learning?",
                 "fact_type": ["world", "agent"],
-                "agent_id": "user123",
                 "thinking_budget": 100,
                 "max_tokens": 4096,
                 "reranker": "heuristic",
@@ -112,14 +110,12 @@ class MemoryItem(BaseModel):
 
 class BatchPutRequest(BaseModel):
     """Request model for batch put endpoint."""
-    agent_id: str
     items: List[MemoryItem]
     document_id: Optional[str] = None
 
     class Config:
         json_schema_extra = {
             "example": {
-                "agent_id": "user123",
                 "items": [
                     {
                         "content": "Alice works at Google",
@@ -180,7 +176,6 @@ class BatchPutAsyncResponse(BaseModel):
 class ThinkRequest(BaseModel):
     """Request model for think endpoint."""
     query: str
-    agent_id: str = "default"
     thinking_budget: int = 50
     context: Optional[str] = None
 
@@ -188,7 +183,6 @@ class ThinkRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "query": "What do you think about artificial intelligence?",
-                "agent_id": "user123",
                 "thinking_budget": 50,
                 "context": "This is for a research paper on AI ethics"
             }
@@ -588,36 +582,36 @@ def _register_routes(app: FastAPI):
 
 
     @app.get(
-        "/api/graph",
+        "/api/v1/agents/{agent_id}/graph",
         response_model=GraphDataResponse,
         tags=["Visualization"],
         summary="Get memory graph data",
-        description="Retrieve graph data for visualization, optionally filtered by agent_id and fact_type (world/agent/opinion). Limited to 1000 most recent items."
+        description="Retrieve graph data for visualization, optionally filtered by fact_type (world/agent/opinion). Limited to 1000 most recent items."
     )
     async def api_graph(
-        agent_id: Optional[str] = None,
+        agent_id: str,
         fact_type: Optional[str] = None
     ):
-        """Get graph data from database, optionally filtered by agent_id and fact_type."""
+        """Get graph data from database, filtered by agent_id and optionally by fact_type."""
         try:
             data = await app.state.memory.get_graph_data(agent_id, fact_type)
             return data
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/graph: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/graph: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.get(
-        "/api/list",
+        "/api/v1/agents/{agent_id}/memories/list",
         response_model=ListMemoryUnitsResponse,
-        tags=["Visualization"],
+        tags=["Memory Operations"],
         summary="List memory units",
-        description="List memory units with pagination and optional full-text search. Supports filtering by agent_id and fact_type."
+        description="List memory units with pagination and optional full-text search. Supports filtering by fact_type."
     )
     async def api_list(
-        agent_id: Optional[str] = None,
+        agent_id: str,
         fact_type: Optional[str] = None,
         q: Optional[str] = None,
         limit: int = 100,
@@ -627,7 +621,7 @@ def _register_routes(app: FastAPI):
         List memory units for table view with optional full-text search.
 
         Args:
-            agent_id: Filter by agent ID
+            agent_id: Agent ID (from path)
             fact_type: Filter by fact type (world, agent, opinion)
             q: Search query for full-text search (searches text and context)
             limit: Maximum number of results (default: 100)
@@ -645,25 +639,25 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/list: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/memories/list: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.post(
-        "/api/search",
+        "/api/v1/agents/{agent_id}/memories/search",
         response_model=SearchResponse,
-        tags=["Search"],
+        tags=["Memory Operations"],
         summary="Search memory",
         description="""
     Search memory using semantic similarity and spreading activation.
 
-    The fact_type parameter is required and must be one of:
+    The fact_type parameter is optional and must be one of:
     - 'world': General knowledge about people, places, events, and things that happen
     - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
     - 'opinion': The agent's formed beliefs, perspectives, and viewpoints
         """
     )
-    async def api_search(request: SearchRequest):
+    async def api_search(agent_id: str, request: SearchRequest):
         """Run a search and return results with trace."""
         try:
             # Validate fact_type(s)
@@ -693,7 +687,7 @@ def _register_routes(app: FastAPI):
 
             # Run search with tracing
             core_result = await app.state.memory.search_async(
-                agent_id=request.agent_id,
+                agent_id=agent_id,
                 query=request.query,
                 thinking_budget=request.thinking_budget,
                 max_tokens=request.max_tokens,
@@ -724,12 +718,12 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/search: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/memories/search: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.post(
-        "/api/think",
+        "/api/v1/agents/{agent_id}/think",
         response_model=ThinkResponse,
         tags=["Reasoning"],
         summary="Think and generate answer",
@@ -745,11 +739,11 @@ def _register_routes(app: FastAPI):
     6. Returns plain text answer, the facts used, and new opinions
         """
     )
-    async def api_think(request: ThinkRequest):
+    async def api_think(agent_id: str, request: ThinkRequest):
         try:
             # Use the memory system's think_async method
             core_result = await app.state.memory.think_async(
-                agent_id=request.agent_id,
+                agent_id=agent_id,
                 query=request.query,
                 thinking_budget=request.thinking_budget,
                 context=request.context
@@ -776,31 +770,31 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/think: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/think: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.get(
-        "/api/agents",
-        response_model=AgentsResponse,
-        tags=["Management"],
+        "/api/v1/agents",
+        response_model=AgentListResponse,
+        tags=["Agent Management"],
         summary="List all agents",
-        description="Get a list of all agent IDs that have stored memories in the system"
+        description="Get a list of all agents with their profiles"
     )
     async def api_agents():
-        """Get list of available agents from database."""
+        """Get list of all agents with their profiles."""
         try:
-            agent_list = await app.state.memory.list_agents()
-            return AgentsResponse(agents=agent_list)
+            agents = await app.state.memory.list_agents()
+            return AgentListResponse(agents=agents)
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/agents: {error_detail}")
+            print(f"Error in /api/v1/agents: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get(
-        "/api/stats/{agent_id}",
-        tags=["Memory Statistics"],
+        "/api/v1/agents/{agent_id}/stats",
+        tags=["Agent Management"],
         summary="Get memory statistics for an agent",
         description="Get statistics about nodes and links for a specific agent"
     )
@@ -878,11 +872,11 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/stats/{agent_id}: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/stats: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get(
-        "/api/documents",
+        "/api/v1/agents/{agent_id}/documents",
         response_model=ListDocumentsResponse,
         tags=["Documents"],
         summary="List documents",
@@ -898,7 +892,7 @@ def _register_routes(app: FastAPI):
         List documents for an agent with optional search.
 
         Args:
-            agent_id: Agent ID (required)
+            agent_id: Agent ID (from path)
             q: Search query (searches document ID and metadata)
             limit: Maximum number of results (default: 100)
             offset: Offset for pagination (default: 0)
@@ -914,27 +908,27 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/documents: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/documents: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.get(
-        "/api/documents/{document_id}",
+        "/api/v1/agents/{agent_id}/documents/{document_id}",
         response_model=DocumentResponse,
         tags=["Documents"],
         summary="Get document details",
         description="Get a specific document including its original text"
     )
     async def api_get_document(
-        document_id: str,
-        agent_id: str
+        agent_id: str,
+        document_id: str
     ):
         """
         Get a specific document with its original text.
 
         Args:
-            document_id: Document ID
-            agent_id: Agent ID (required as query parameter)
+            agent_id: Agent ID (from path)
+            document_id: Document ID (from path)
         """
         try:
             document = await app.state.memory.get_document(document_id, agent_id)
@@ -946,14 +940,14 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/documents/{document_id}: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/documents/{document_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.post(
-        "/api/memories/batch",
+        "/api/v1/agents/{agent_id}/memories",
         response_model=BatchPutResponse,
-        tags=["Memory Storage"],
+        tags=["Memory Operations"],
         summary="Store multiple memories",
         description="""
     Store multiple memory items in batch with automatic fact extraction.
@@ -975,7 +969,7 @@ def _register_routes(app: FastAPI):
     Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
         """
     )
-    async def api_batch_put(request: BatchPutRequest):
+    async def api_batch_put(agent_id: str, request: BatchPutRequest):
         try:
             # Prepare contents for put_batch_async
             contents = []
@@ -989,7 +983,7 @@ def _register_routes(app: FastAPI):
 
             # Call put_batch_async
             result = await app.state.memory.put_batch_async(
-                agent_id=request.agent_id,
+                agent_id=agent_id,
                 contents=contents,
                 document_id=request.document_id
             )
@@ -998,21 +992,21 @@ def _register_routes(app: FastAPI):
             return BatchPutResponse(
                 success=True,
                 message=f"Successfully stored {len(contents)} memory items",
-                agent_id=request.agent_id,
+                agent_id=agent_id,
                 document_id=request.document_id,
                 items_count=len(contents)
             )
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/memories/batch: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/memories: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.post(
-        "/api/memories/batch_async",
+        "/api/v1/agents/{agent_id}/memories/async",
         response_model=BatchPutAsyncResponse,
-        tags=["Memory Storage"],
+        tags=["Memory Operations"],
         summary="Store multiple memories asynchronously",
         description="""
     Store multiple memory items in batch asynchronously using the task backend.
@@ -1037,7 +1031,7 @@ def _register_routes(app: FastAPI):
     Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
         """
     )
-    async def api_batch_put_async(request: BatchPutRequest):
+    async def api_batch_put_async(agent_id: str, request: BatchPutRequest):
         try:
             # Prepare contents for put_batch_async
             contents = []
@@ -1061,7 +1055,7 @@ def _register_routes(app: FastAPI):
                     VALUES ($1, $2, $3, $4, $5)
                     """,
                     operation_id,
-                    request.agent_id,
+                    agent_id,
                     'batch_put',
                     len(contents),
                     request.document_id
@@ -1071,17 +1065,17 @@ def _register_routes(app: FastAPI):
             await app.state.memory._task_backend.submit_task({
                 'type': 'batch_put',
                 'operation_id': str(operation_id),
-                'agent_id': request.agent_id,
+                'agent_id': agent_id,
                 'contents': contents,
                 'document_id': request.document_id
             })
 
-            logging.info(f"Batch put task queued for agent_id={request.agent_id}, {len(contents)} items, operation_id={operation_id}")
+            logging.info(f"Batch put task queued for agent_id={agent_id}, {len(contents)} items, operation_id={operation_id}")
 
             return BatchPutAsyncResponse(
                 success=True,
                 message=f"Batch put task queued for background processing ({len(contents)} items)",
-                agent_id=request.agent_id,
+                agent_id=agent_id,
                 document_id=request.document_id,
                 items_count=len(contents),
                 queued=True
@@ -1089,13 +1083,13 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/memories/batch_async: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/memories/async: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.get(
-        "/api/operations/{agent_id}",
-        tags=["Memory Storage"],
+        "/api/v1/agents/{agent_id}/operations",
+        tags=["Memory Operations"],
         summary="List async operations",
         description="Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations"
     )
@@ -1133,17 +1127,17 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/operations/{agent_id}: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/operations: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.delete(
-        "/api/operations/{operation_id}",
-        tags=["Memory Storage"],
+        "/api/v1/agents/{agent_id}/operations/{operation_id}",
+        tags=["Memory Operations"],
         summary="Cancel a pending async operation",
         description="Cancel a pending async operation by removing it from the queue"
     )
-    async def api_cancel_operation(operation_id: str):
+    async def api_cancel_operation(agent_id: str, operation_id: str):
         """Cancel a pending async operation."""
         try:
             # Validate UUID format
@@ -1154,14 +1148,15 @@ def _register_routes(app: FastAPI):
 
             pool = await app.state.memory._get_pool()
             async with pool.acquire() as conn:
-                # Check if operation exists
+                # Check if operation exists and belongs to this agent
                 result = await conn.fetchrow(
-                    "SELECT agent_id FROM async_operations WHERE id = $1",
-                    op_uuid
+                    "SELECT agent_id FROM async_operations WHERE id = $1 AND agent_id = $2",
+                    op_uuid,
+                    agent_id
                 )
 
                 if not result:
-                    raise HTTPException(status_code=404, detail=f"Operation {operation_id} not found")
+                    raise HTTPException(status_code=404, detail=f"Operation {operation_id} not found for agent {agent_id}")
 
                 # Delete the operation
                 await conn.execute(
@@ -1173,7 +1168,7 @@ def _register_routes(app: FastAPI):
                     "success": True,
                     "message": f"Operation {operation_id} cancelled",
                     "operation_id": operation_id,
-                    "agent_id": result['agent_id']
+                    "agent_id": agent_id
                 }
 
         except HTTPException:
@@ -1181,17 +1176,17 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/operations/{operation_id}: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/operations/{operation_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.delete(
-        "/api/memory/{unit_id}",
-        tags=["Memory Storage"],
+        "/api/v1/agents/{agent_id}/memories/{unit_id}",
+        tags=["Memory Operations"],
         summary="Delete a memory unit",
         description="Delete a single memory unit and all its associated links (temporal, semantic, and entity links)"
     )
-    async def api_delete_memory_unit(unit_id: str):
+    async def api_delete_memory_unit(agent_id: str, unit_id: str):
         """Delete a memory unit and all its links."""
         try:
             result = await app.state.memory.delete_memory_unit(unit_id)
@@ -1205,35 +1200,16 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/memory/{unit_id}: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/memories/{unit_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     # Agent Profile Endpoints
 
     @app.get(
-        "/api/agents",
-        response_model=AgentListResponse,
-        tags=["Agent Profile"],
-        summary="List all agents",
-        description="Get a list of all agents with their profiles"
-    )
-    async def api_list_agents():
-        """List all agents with their profiles."""
-        try:
-            agents = await app.state.memory.list_agents()
-            return AgentListResponse(agents=agents)
-        except Exception as e:
-            import traceback
-            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/agents: {error_detail}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-
-    @app.get(
-        "/api/agents/{agent_id}/profile",
+        "/api/v1/agents/{agent_id}/profile",
         response_model=AgentProfileResponse,
-        tags=["Agent Profile"],
+        tags=["Agent Management"],
         summary="Get agent profile",
         description="Get personality traits and background for an agent. Auto-creates agent with defaults if not exists."
     )
@@ -1249,14 +1225,14 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/agents/{agent_id}/profile: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/profile: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.put(
-        "/api/agents/{agent_id}/profile",
+        "/api/v1/agents/{agent_id}/profile",
         response_model=AgentProfileResponse,
-        tags=["Agent Profile"],
+        tags=["Agent Management"],
         summary="Update agent personality",
         description="Update agent's Big Five personality traits and bias strength"
     )
@@ -1282,14 +1258,14 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/agents/{agent_id}/profile: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/profile: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.post(
-        "/api/agents/{agent_id}/background",
+        "/api/v1/agents/{agent_id}/background",
         response_model=BackgroundResponse,
-        tags=["Agent Profile"],
+        tags=["Agent Management"],
         summary="Add/merge agent background",
         description="Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits."
     )
@@ -1313,14 +1289,14 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/agents/{agent_id}/background: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}/background: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
     @app.put(
-        "/api/agents/{agent_id}",
+        "/api/v1/agents/{agent_id}",
         response_model=AgentProfileResponse,
-        tags=["Agent Profile"],
+        tags=["Agent Management"],
         summary="Create or update agent",
         description="Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults."
     )
@@ -1367,5 +1343,5 @@ def _register_routes(app: FastAPI):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"Error in /api/agents/{agent_id}: {error_detail}")
+            print(f"Error in /api/v1/agents/{agent_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))

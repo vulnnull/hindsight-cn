@@ -10,11 +10,11 @@ from ...types import Response
 
 
 def _get_kwargs(
-    unit_id: str,
+    agent_id: str,
 ) -> dict[str, Any]:
     _kwargs: dict[str, Any] = {
-        "method": "delete",
-        "url": f"/api/memory/{unit_id}",
+        "method": "get",
+        "url": f"/api/v1/agents/{agent_id}/stats",
     }
 
     return _kwargs
@@ -50,16 +50,16 @@ def _build_response(
 
 
 def sync_detailed(
-    unit_id: str,
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
 ) -> Response[Any | HTTPValidationError]:
-    """Delete a memory unit
+    """Get memory statistics for an agent
 
-     Delete a single memory unit and all its associated links (temporal, semantic, and entity links)
+     Get statistics about nodes and links for a specific agent
 
     Args:
-        unit_id (str):
+        agent_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -70,7 +70,7 @@ def sync_detailed(
     """
 
     kwargs = _get_kwargs(
-        unit_id=unit_id,
+        agent_id=agent_id,
     )
 
     response = client.get_httpx_client().request(
@@ -81,16 +81,16 @@ def sync_detailed(
 
 
 def sync(
-    unit_id: str,
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
 ) -> Any | HTTPValidationError | None:
-    """Delete a memory unit
+    """Get memory statistics for an agent
 
-     Delete a single memory unit and all its associated links (temporal, semantic, and entity links)
+     Get statistics about nodes and links for a specific agent
 
     Args:
-        unit_id (str):
+        agent_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -101,22 +101,22 @@ def sync(
     """
 
     return sync_detailed(
-        unit_id=unit_id,
+        agent_id=agent_id,
         client=client,
     ).parsed
 
 
 async def asyncio_detailed(
-    unit_id: str,
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
 ) -> Response[Any | HTTPValidationError]:
-    """Delete a memory unit
+    """Get memory statistics for an agent
 
-     Delete a single memory unit and all its associated links (temporal, semantic, and entity links)
+     Get statistics about nodes and links for a specific agent
 
     Args:
-        unit_id (str):
+        agent_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -127,7 +127,7 @@ async def asyncio_detailed(
     """
 
     kwargs = _get_kwargs(
-        unit_id=unit_id,
+        agent_id=agent_id,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -136,16 +136,16 @@ async def asyncio_detailed(
 
 
 async def asyncio(
-    unit_id: str,
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
 ) -> Any | HTTPValidationError | None:
-    """Delete a memory unit
+    """Get memory statistics for an agent
 
-     Delete a single memory unit and all its associated links (temporal, semantic, and entity links)
+     Get statistics about nodes and links for a specific agent
 
     Args:
-        unit_id (str):
+        agent_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -157,7 +157,7 @@ async def asyncio(
 
     return (
         await asyncio_detailed(
-            unit_id=unit_id,
+            agent_id=agent_id,
             client=client,
         )
     ).parsed

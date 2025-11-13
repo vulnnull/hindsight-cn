@@ -12,6 +12,7 @@ from ...types import Response
 
 
 def _get_kwargs(
+    agent_id: str,
     *,
     body: ThinkRequest,
 ) -> dict[str, Any]:
@@ -19,7 +20,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/think",
+        "url": f"/api/v1/agents/{agent_id}/think",
     }
 
     _kwargs["json"] = body.to_dict()
@@ -61,6 +62,7 @@ def _build_response(
 
 
 def sync_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: ThinkRequest,
@@ -78,9 +80,10 @@ def sync_detailed(
         6. Returns plain text answer, the facts used, and new opinions
 
     Args:
-        body (ThinkRequest): Request model for think endpoint. Example: {'agent_id': 'user123',
-            'context': 'This is for a research paper on AI ethics', 'query': 'What do you think about
-            artificial intelligence?', 'thinking_budget': 50}.
+        agent_id (str):
+        body (ThinkRequest): Request model for think endpoint. Example: {'context': 'This is for a
+            research paper on AI ethics', 'query': 'What do you think about artificial intelligence?',
+            'thinking_budget': 50}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -91,6 +94,7 @@ def sync_detailed(
     """
 
     kwargs = _get_kwargs(
+        agent_id=agent_id,
         body=body,
     )
 
@@ -102,6 +106,7 @@ def sync_detailed(
 
 
 def sync(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: ThinkRequest,
@@ -119,9 +124,10 @@ def sync(
         6. Returns plain text answer, the facts used, and new opinions
 
     Args:
-        body (ThinkRequest): Request model for think endpoint. Example: {'agent_id': 'user123',
-            'context': 'This is for a research paper on AI ethics', 'query': 'What do you think about
-            artificial intelligence?', 'thinking_budget': 50}.
+        agent_id (str):
+        body (ThinkRequest): Request model for think endpoint. Example: {'context': 'This is for a
+            research paper on AI ethics', 'query': 'What do you think about artificial intelligence?',
+            'thinking_budget': 50}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -132,12 +138,14 @@ def sync(
     """
 
     return sync_detailed(
+        agent_id=agent_id,
         client=client,
         body=body,
     ).parsed
 
 
 async def asyncio_detailed(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: ThinkRequest,
@@ -155,9 +163,10 @@ async def asyncio_detailed(
         6. Returns plain text answer, the facts used, and new opinions
 
     Args:
-        body (ThinkRequest): Request model for think endpoint. Example: {'agent_id': 'user123',
-            'context': 'This is for a research paper on AI ethics', 'query': 'What do you think about
-            artificial intelligence?', 'thinking_budget': 50}.
+        agent_id (str):
+        body (ThinkRequest): Request model for think endpoint. Example: {'context': 'This is for a
+            research paper on AI ethics', 'query': 'What do you think about artificial intelligence?',
+            'thinking_budget': 50}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -168,6 +177,7 @@ async def asyncio_detailed(
     """
 
     kwargs = _get_kwargs(
+        agent_id=agent_id,
         body=body,
     )
 
@@ -177,6 +187,7 @@ async def asyncio_detailed(
 
 
 async def asyncio(
+    agent_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: ThinkRequest,
@@ -194,9 +205,10 @@ async def asyncio(
         6. Returns plain text answer, the facts used, and new opinions
 
     Args:
-        body (ThinkRequest): Request model for think endpoint. Example: {'agent_id': 'user123',
-            'context': 'This is for a research paper on AI ethics', 'query': 'What do you think about
-            artificial intelligence?', 'thinking_budget': 50}.
+        agent_id (str):
+        body (ThinkRequest): Request model for think endpoint. Example: {'context': 'This is for a
+            research paper on AI ethics', 'query': 'What do you think about artificial intelligence?',
+            'thinking_budget': 50}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -208,6 +220,7 @@ async def asyncio(
 
     return (
         await asyncio_detailed(
+            agent_id=agent_id,
             client=client,
             body=body,
         )

@@ -108,6 +108,26 @@ else
     print_warn "File $CONTROL_PLANE_PKG not found, skipping"
 fi
 
+# Update Python API client
+PYTHON_CLIENT_PKG="memora-clients/python/pyproject.toml"
+if [ -f "$PYTHON_CLIENT_PKG" ]; then
+    print_info "Updating $PYTHON_CLIENT_PKG"
+    sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" "$PYTHON_CLIENT_PKG"
+    rm "${PYTHON_CLIENT_PKG}.bak"
+else
+    print_warn "File $PYTHON_CLIENT_PKG not found, skipping"
+fi
+
+# Update TypeScript API client
+TYPESCRIPT_CLIENT_PKG="memora-clients/typescript/package.json"
+if [ -f "$TYPESCRIPT_CLIENT_PKG" ]; then
+    print_info "Updating $TYPESCRIPT_CLIENT_PKG"
+    sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$TYPESCRIPT_CLIENT_PKG"
+    rm "${TYPESCRIPT_CLIENT_PKG}.bak"
+else
+    print_warn "File $TYPESCRIPT_CLIENT_PKG not found, skipping"
+fi
+
 # Show changes
 print_info "Changes to be committed:"
 git diff
@@ -129,6 +149,8 @@ git commit -m "Release v$VERSION
 
 - Update version to $VERSION in all components
 - Python packages: memora, memora-dev, memora-dev/benchmarks
+- Python client: memora-clients/python
+- TypeScript client: memora-clients/typescript
 - Rust CLI: memora-cli
 - Control Plane: memora-control-plane
 - Helm chart"

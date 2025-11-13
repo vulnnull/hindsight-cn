@@ -9,10 +9,17 @@ export async function GET(
   try {
     const { documentId } = await params;
     const searchParams = request.nextUrl.searchParams;
-    const queryString = searchParams.toString();
+    const agentId = searchParams.get('agent_id');
+
+    if (!agentId) {
+      return NextResponse.json(
+        { error: 'agent_id is required' },
+        { status: 400 }
+      );
+    }
 
     const response = await fetch(
-      `${DATAPLANE_URL}/api/documents/${documentId}?${queryString}`
+      `${DATAPLANE_URL}/api/v1/agents/${agentId}/documents/${documentId}`
     );
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
