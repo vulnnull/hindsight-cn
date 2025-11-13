@@ -23,9 +23,8 @@ jobs:
         python-version-file: ".python-version"
 
     - name: Build memora package
-      run: |
-        cd memora
-        uv build
+      working-directory: ./memora
+      run: uv build
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4

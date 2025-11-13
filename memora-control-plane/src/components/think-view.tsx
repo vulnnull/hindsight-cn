@@ -7,6 +7,7 @@ import { useAgent } from '@/lib/agent-context';
 export function ThinkView() {
   const { currentAgent } = useAgent();
   const [query, setQuery] = useState('');
+  const [context, setContext] = useState('');
   const [budget, setBudget] = useState(50);
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -20,6 +21,7 @@ export function ThinkView() {
         query,
         agent_id: currentAgent,
         thinking_budget: budget,
+        context: context || undefined,
       });
       setResult(data);
     } catch (error) {
@@ -67,6 +69,16 @@ export function ThinkView() {
           >
             💭 Think
           </button>
+        </div>
+        <div className="flex-1 min-w-[300px]">
+          <label className="font-bold block mb-1">Context (optional):</label>
+          <textarea
+            value={context}
+            onChange={(e) => setContext(e.target.value)}
+            placeholder="Additional context for the LLM (not used in search)..."
+            className="w-full px-2.5 py-2 border-2 border-gray-300 rounded text-sm"
+            rows={3}
+          />
         </div>
       </div>
 

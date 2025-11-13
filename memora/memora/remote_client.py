@@ -138,7 +138,8 @@ class RemoteMemoryClient:
         self,
         agent_id: str,
         query: str,
-        thinking_budget: int = 50
+        thinking_budget: int = 50,
+        context: str = None
     ) -> Dict[str, Any]:
         """
         Generate answer using think API.
@@ -147,6 +148,7 @@ class RemoteMemoryClient:
             agent_id: Agent identifier
             query: Question to answer
             thinking_budget: Budget for memory exploration
+            context: Additional context string to include in LLM prompt (not used in search)
 
         Returns:
             Dict with 'text', 'based_on', and 'new_opinions' keys
@@ -156,6 +158,9 @@ class RemoteMemoryClient:
             "query": query,
             "thinking_budget": thinking_budget
         }
+
+        if context is not None:
+            request_data["context"] = context
 
         response = await self.client.post(
             f"{self.base_url}/api/think",

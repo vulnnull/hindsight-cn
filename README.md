@@ -4,193 +4,35 @@ A temporal-semantic-entity memory system that enables AI agents to store, retrie
 
 ## Architecture
 
-### Three Memory Networks
+**See [architecture.md](architecture.md) for comprehensive technical documentation.**
 
-The system maintains three separate but interconnected memory networks:
+The system provides:
+- **Three Memory Networks**: Separate world knowledge, agent experiences, and formed opinions
+- **Multi-Strategy Retrieval**: 4-way parallel search (semantic, keyword, graph, temporal-graph)
+- **Entity Resolution**: Automatic entity disambiguation and linking
+- **Personality Framework**: Big Five traits influencing opinion formation
+- **Neural Reranking**: Optional cross-encoder for precision refinement
 
-**1. World Network** (`fact_type='world'`)
-- General knowledge and facts about the world
-- Information not specific to the agent's actions
-- Example: "Alice works at Google", "Yosemite is in California"
+### Quick Architecture Overview
 
-**2. Agent Network** (`fact_type='agent'`)
-- Facts about what the AI agent specifically did
-- Agent's own actions and experiences
-- Example: "The agent helped debug a Python script", "The agent recommended Yosemite"
+**Three Memory Networks**:
+1. **World Network**: General knowledge ("Alice works at Google")
+2. **Agent Network**: Agent's own actions ("I recommended Yosemite to Alice")
+3. **Opinion Network**: Formed opinions with confidence scores ("Python is better for data science [0.85]")
 
-**3. Opinion Network** (`fact_type='opinion'`)
-- Agent's formed opinions and perspectives
-- Automatically extracted during think operations
-- Includes reasons and confidence scores (0.0-1.0)
-- Immutable once formed (event_date = when opinion was formed)
-- Example: "Python is better for data science than JavaScript (Reasons: has better libraries like pandas and numpy) [confidence: 0.85]"
-
-All three networks share the same infrastructure (temporal/semantic/entity links) but can be searched independently or together.
-
-### Core Components
-
-**Memory Units**: Individual sentence-level memories that are:
-- Self-contained (pronouns resolved to actual referents by LLM)
-- Validated to have subject + verb (complete thoughts)
-- Embedded as 384-dim vectors using `BAAI/bge-small-en-v1.5`
-- Timestamped for temporal relationships
-- Linked to extracted entities via spaCy NER
-- Classified as 'world', 'agent', or 'opinion'
-
-**Entity Resolution**: Named entities (PERSON, ORG, PLACE, PRODUCT, CONCEPT, OTHER) are:
-- Extracted using spaCy NER
-- Disambiguated using scoring algorithm (name similarity 50%, co-occurrence 30%, temporal proximity 20%)
-- Tracked with canonical IDs across all memories
-- Used to create strong connections between related memories
-
-### Three Types of Memory Links
-
-**1. Temporal Links** (Time-Based)
-- Connect memories within time window (default: 24 hours)
-- Weight: `max(0.3, 1.0 - (time_diff / window_size))`
-- Closer in time = stronger link
-- Use case: "What happened recently?" or understanding sequences
-
-**2. Semantic Links** (Meaning-Based)
-- Connect memories with similar embeddings
-- Uses pgvector with HNSW index for fast nearest neighbor search
-- Create links only if cosine similarity > threshold (default: 0.7)
-- Weight = cosine similarity score
-- Use case: "Tell me about hiking" retrieves all semantically related activities
-
-**3. Entity Links** (Identity-Based)
-- Connect ALL memories mentioning the same entity
-- No decay over time (weight 1.0)
-- Critical advantage: Solves the problem where "Alice loves hiking" wouldn't normally connect to "Alice works at Google" through semantic similarity alone
-- Use case: "What does Alice do?" returns ALL memories about Alice
-
-### 4-Way Parallel Retrieval with Reranking
-
-The search algorithm uses a sophisticated multi-stage pipeline that combines four different retrieval strategies, followed by fusion and reranking:
-
-#### Stage 1: Parallel Retrieval (4 paths)
-
-The system runs **four retrieval methods in parallel** to capture different types of relevance:
-
-**1. Semantic Retrieval** (Vector Similarity)
-- Uses embedding cosine similarity via pgvector
-- Finds memories that are conceptually similar to the query
-- Threshold: similarity ≥ 0.3
-- **Why**: Captures meaning and intent, even when exact words don't match
-- Example: "hiking activities" finds "mountain climbing", "trail running"
-
-**2. Keyword Retrieval** (BM25 Full-Text Search)
-- Uses PostgreSQL's full-text search with BM25 ranking
-- Finds memories with matching terms and phrases
-- **Why**: Catches exact terminology and proper nouns that embeddings might miss
-- Example: "Google" query finds all mentions of the company name
-- Complements semantic search: high precision for named entities
-
-**3. Graph Retrieval** (Spreading Activation)
-- Starts from top semantic matches (similarity ≥ 0.5)
-- Spreads activation through temporal, semantic, and entity links
-- Activation decays by 0.8 at each hop
-- Budget-limited exploration (default: thinking_budget nodes)
-- **Why**: Discovers indirectly related memories through relationships
-- Example: Query "Alice" → spreads to "Google" → finds "Mountain View office"
-- Leverages entity links (constant weight 1.0) to traverse the knowledge graph
-
-**4. Temporal Graph Retrieval** (Time-Aware + Spreading)
-- **Activated only when temporal constraint detected** (e.g., "last year", "in June", "last spring")
-- Uses `dateparser` library (<5ms) to extract date ranges
-- Finds memories in date range with semantic threshold (≥ 0.4)
-- Spreads through temporal links to related facts
-- Scores by temporal proximity (closer to range center = higher)
-- **Why**: Enables time-scoped queries while maintaining relevance
-- Example: "What did Alice do last spring?" → finds March-May activities about Alice only
-- Prevents temporal leakage: Mike's June activities won't appear in Alice's June query
-
-**Why All Four?**
-- Semantic captures meaning but misses exact matches
-- Keyword catches proper nouns but misses synonyms
-- Graph discovers indirect relationships via entity/temporal/semantic links
-- Temporal graph enables time-scoped retrieval while filtering by relevance
-- Together they achieve **high recall** (find everything relevant) before reranking refines to **high precision**
-
-#### Stage 2: Reciprocal Rank Fusion (RRF)
-
-Merges the 3-4 ranked lists using RRF algorithm:
+**Retrieval Pipeline**:
 ```
-RRF_score(d) = Σ (1 / (k + rank_i(d)))  where k=60
+Query → [Semantic + Keyword + Graph + Temporal] → RRF Merge → Reranker → MMR → Results
 ```
-- Handles ties and missing items gracefully
-- Gives more weight to items appearing in multiple lists
-- Position-based scoring (rank matters more than raw scores)
+- 4-way parallel retrieval for high recall
+- Neural reranking (optional) for precision
+- MMR diversification to avoid redundancy
 
-#### Stage 3: Reranking (2 strategies)
-
-**Heuristic Reranker** (default: fast, ~0ms overhead)
-- Base score: 60% semantic + 40% BM25 (normalized)
-- Boosts: +20% recency (log decay, 1-year half-life), +10% frequency (access_count)
-- **When to use**: Production workloads needing speed
-- **Advantage**: No additional latency, interpretable scoring
-
-**Cross-Encoder Reranker** (optional: accurate, ~80ms for 100 pairs)
-- Neural reranking using `cross-encoder/ms-marco-MiniLM-L-6-v2`
-- Takes query + document pairs, returns relevance scores
-- Includes formatted dates: `[Date: November 06, 2025 (2025-11-06)] {text}`
-- Scores normalized via sigmoid to [0, 1] range
-- **When to use**: Accuracy-critical queries (user-facing search)
-- **Advantage**: 5-10% better precision than heuristic
-- Model loaded once at init (cached for performance)
-- Pluggable: abstract `CrossEncoderReranker` interface for future API-based rerankers
-
-#### Stage 4: MMR Diversification
-
-Applies Maximal Marginal Relevance (λ=0.5) to final results:
-```
-MMR = λ × relevance - (1-λ) × max_similarity_to_selected
-```
-- Balances relevance with diversity
-- Prevents redundant results about the same fact
-- Iteratively selects results that are relevant BUT different
-
-**Final Pipeline Summary**:
-```
-Query → [Semantic, Keyword, Graph, Temporal Graph] → RRF Merge → Reranker → MMR → Top-K Results
-        (4-way parallel, 30-50ms)                   (0-80ms)          (0ms)
-```
-
-This architecture ensures:
-- **High Recall**: 4 retrieval methods cast a wide net (union of all relevant memories)
-- **High Precision**: Reranking and MMR refine to most relevant, diverse results
-- **Flexibility**: Choose heuristic (fast) or cross-encoder (accurate) based on use case
-- **Temporal Awareness**: Automatically activates time-scoped search when needed
-
-### LLM-Based Fact Extraction
-
-Raw content is processed through an LLM (Groq by default) to extract meaningful facts:
-
-- Filters out noise (greetings, filler words)
-- Extracts only substantive facts (biographical, events, opinions, recommendations)
-- Creates self-contained statements with subject+action+context
-- Resolves pronouns to actual referents
-- Automatic chunking for large documents (>120k chars)
-- Structured output using Pydantic models
-- Retry logic for JSON validation failures
-
-### Technology Stack
-
-**Database**:
-- PostgreSQL 15+ with `pgvector` and `uuid-ossp` extensions
-
-**Python Libraries**:
-- `asyncpg` - Async PostgreSQL client with connection pooling
-- `sentence-transformers` - Embedding model (BAAI/bge-small-en-v1.5) + cross-encoder (ms-marco-MiniLM-L-6-v2)
-- `openai` - LLM API client (supports Groq, OpenAI)
-- `dateparser` - Natural language date parsing for temporal queries
-- `fastapi` - Web API framework
-
-**Architecture Patterns**:
-- Mixin pattern for code organization
-- Connection pooling with backpressure (32 concurrent searches max)
-- Background task management for opinion storage
-- Cached LLM client for performance
+**Key Features**:
+- Entity resolution links memories through shared people/places/things
+- Graph spreading activation discovers indirect connections
+- Temporal queries: "What did Alice do last spring?"
+- Personality traits (Big Five model) influence opinion formation
 
 ## Quick Start
 
@@ -306,10 +148,56 @@ The server will start at http://localhost:8080
 - `POST /api/think` - Think and generate contextual answers
 - `GET  /api/graph` - Get graph data for visualization
 - `GET  /api/agents` - List all agents
+- `PUT  /api/agents/{agent_id}` - Create/update agent with personality
+- `GET  /api/agents/{agent_id}/profile` - Get agent profile
+- `PUT  /api/agents/{agent_id}/profile` - Update personality traits
+- `POST /api/agents/{agent_id}/background` - Merge agent background
 
 ## API Examples (curl)
 
-### Store Memories (PUT)
+### Create/Update Agent
+
+```bash
+# Create or update an agent with personality and background
+curl -X PUT http://localhost:8080/api/agents/alice_agent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "personality": {
+      "openness": 0.8,
+      "conscientiousness": 0.6,
+      "extraversion": 0.5,
+      "agreeableness": 0.7,
+      "neuroticism": 0.3,
+      "bias_strength": 0.7
+    },
+    "background": "I am a creative software engineer with 10 years of startup experience"
+  }'
+
+# Create agent with just background (personality defaults to 0.5 for all traits)
+curl -X PUT http://localhost:8080/api/agents/bob_agent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "background": "I am a data scientist interested in machine learning"
+  }'
+```
+
+Response:
+```json
+{
+  "agent_id": "alice_agent",
+  "personality": {
+    "openness": 0.8,
+    "conscientiousness": 0.6,
+    "extraversion": 0.5,
+    "agreeableness": 0.7,
+    "neuroticism": 0.3,
+    "bias_strength": 0.7
+  },
+  "background": "I am a creative software engineer with 10 years of startup experience"
+}
+```
+
+### Store Memories
 
 ```bash
 # Store memories for an agent
@@ -452,6 +340,58 @@ Response:
   },
   "new_opinions": []
 }
+```
+
+## CLI Usage
+
+The Memora CLI provides command-line access to memory operations and agent management:
+
+**Memory Operations**:
+```bash
+# Store a memory
+memora put <agent_id> "Alice works at Google"
+
+# Search memories
+memora search <agent_id> "What does Alice do?" --budget 100
+
+# Think (reasoning with opinions)
+memora think <agent_id> "What do you think about remote work?" -v
+```
+
+**Agent Management**:
+```bash
+# View agent profile
+memora profile <agent_id>
+
+# Update personality traits (all required)
+memora set-personality <agent_id> \
+  --openness 0.8 \
+  --conscientiousness 0.6 \
+  --extraversion 0.5 \
+  --agreeableness 0.7 \
+  --neuroticism 0.3 \
+  --bias-strength 0.7
+
+# Add/merge background
+memora background <agent_id> "I was born in Texas"
+
+# List all agents
+memora agents
+```
+
+**Output Formats**:
+```bash
+# Pretty output (default)
+memora search <agent_id> "query"
+
+# JSON output
+memora search <agent_id> "query" -o json
+
+# YAML output
+memora search <agent_id> "query" -o yaml
+
+# Verbose mode (show requests/responses)
+memora search <agent_id> "query" -v
 ```
 
 ## Running Benchmarks

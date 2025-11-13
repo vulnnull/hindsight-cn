@@ -21,6 +21,7 @@ class ThinkOperationsMixin:
         agent_id: str,
         query: str,
         thinking_budget: int = 50,
+        context: str = None,
     ) -> ThinkResult:
         """
         Think and formulate an answer using agent identity, world facts, and opinions.
@@ -37,6 +38,7 @@ class ThinkOperationsMixin:
             agent_id: Agent identifier
             query: Question to answer
             thinking_budget: Number of memory units to explore
+            context: Additional context string to include in LLM prompt (not used in search)
 
         Returns:
             ThinkResult containing:
@@ -108,40 +110,90 @@ class ThinkOperationsMixin:
 
         logger.info(f"[THINK] Formatted facts - agent: {len(agent_facts_text)} chars, world: {len(world_facts_text)} chars, opinion: {len(opinion_facts_text)} chars")
 
-        # Step 5: Call Groq to formulate answer
-        prompt = f"""You are an AI assistant answering a question based on retrieved facts provided in JSON format.
+        # Step 4.5: Get agent profile (personality + background)
+        profile = await self.get_agent_profile(agent_id)
+        personality = profile["personality"]
+        background = profile["background"]
 
-AGENT IDENTITY (what the agent has done):
+        # Build personality description for prompt
+        def describe_trait(name: str, value: float) -> str:
+            """Convert trait value to descriptive text."""
+            if value >= 0.8:
+                return f"very high {name}"
+            elif value >= 0.6:
+                return f"high {name}"
+            elif value >= 0.4:
+                return f"moderate {name}"
+            elif value >= 0.2:
+                return f"low {name}"
+            else:
+                return f"very low {name}"
+
+        personality_desc = f"""Your personality traits:
+- {describe_trait('openness to new ideas', personality['openness'])}
+- {describe_trait('conscientiousness and organization', personality['conscientiousness'])}
+- {describe_trait('extraversion and sociability', personality['extraversion'])}
+- {describe_trait('agreeableness and cooperation', personality['agreeableness'])}
+- {describe_trait('emotional sensitivity', personality['neuroticism'])}
+
+Personality influence strength: {int(personality['bias_strength'] * 100)}% (how much your personality shapes your opinions)"""
+
+        background_section = ""
+        if background:
+            background_section = f"""
+
+Your background:
+{background}
+"""
+
+        # Step 5: Call LLM to formulate answer
+        # Build the prompt with context if provided
+        context_section = ""
+        if context:
+            context_section = f"""
+ADDITIONAL CONTEXT:
+{context}
+
+"""
+
+        prompt = f"""Here's what I know and have experienced:
+
+MY IDENTITY & EXPERIENCES:
 {agent_facts_text}
 
-WORLD FACTS (general knowledge):
+WHAT I KNOW ABOUT THE WORLD:
 {world_facts_text}
 
-YOUR EXISTING OPINIONS (perspectives you've formed):
+MY EXISTING OPINIONS & BELIEFS:
 {opinion_facts_text}
+
+{context_section}{personality_desc}{background_section}
 
 QUESTION: {query}
 
-The facts above are provided as JSON arrays. Each fact may include:
-- text: The fact content
-- context: Additional context information
-- event_date: When the fact occurred
-- score: Relevance score
-
-Provide a helpful, accurate answer based on the facts above. Be consistent with your existing opinions. If the facts don't contain enough information to answer the question, say so clearly. Do not use markdown formatting - respond in plain text only.
-
-If you form any new opinions while thinking about this question, state them clearly in your answer."""
+Based on everything I know, believe, and who I am (including my personality and background), here's what I genuinely think about this question. I'll draw on my experiences, knowledge, opinions, and personal traits to give you my honest perspective."""
 
         logger.info(f"[THINK] Full prompt length: {len(prompt)} chars")
         logger.debug(f"[THINK] Prompt preview (first 500 chars): {prompt[:500]}")
 
+        # Adjust system message based on bias_strength
+        bias_strength = personality['bias_strength']
+        if bias_strength >= 0.7:
+            personality_instruction = "Your personality strongly influences your thinking. Let your traits guide how you interpret facts and form opinions. Don't be afraid to be biased based on your personality."
+        elif bias_strength >= 0.4:
+            personality_instruction = "Your personality moderately influences your thinking. Balance your personal traits with objective analysis."
+        else:
+            personality_instruction = "Your personality has minimal influence on your thinking. Focus primarily on facts while keeping your traits in mind."
+
+        system_message = f"You are a person with your own thoughts, experiences, opinions, and personality. When asked a question, respond naturally like a human would - share what you genuinely think based on what you know and have experienced. {personality_instruction} Be direct, express your views confidently, and use 'I think', 'I believe', 'in my view', etc. Respond in plain text without markdown formatting."
+
         answer_text = await self._llm_config.call(
             messages=[
-                {"role": "system", "content": "You are a helpful AI assistant. Always respond in plain text without markdown formatting. You can form and express opinions based on facts."},
+                {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt}
             ],
             scope="memory_think",
-            temperature=0.7,
+            temperature=0.9,
             max_tokens=1000
         )
 
@@ -224,8 +276,7 @@ If you form any new opinions while thinking about this question, state them clea
         """
         class Opinion(BaseModel):
             """An opinion formed by the agent."""
-            opinion: str = Field(description="The opinion or perspective formed")
-            reasons: str = Field(description="The reasons supporting this opinion")
+            opinion: str = Field(description="The opinion or perspective with reasoning included")
             confidence: float = Field(description="Confidence score for this opinion (0.0 to 1.0, where 1.0 is very confident)")
 
         class OpinionExtractionResponse(BaseModel):
@@ -235,7 +286,7 @@ If you form any new opinions while thinking about this question, state them clea
                 description="List of opinions formed with their supporting reasons and confidence scores"
             )
 
-        extraction_prompt = f"""Extract any NEW opinions or perspectives that were formed while answering the following question.
+        extraction_prompt = f"""Extract any NEW opinions or perspectives from the answer below and rewrite them in FIRST-PERSON as if YOU are stating the opinion directly.
 
 ORIGINAL QUESTION:
 {query}
@@ -243,40 +294,78 @@ ORIGINAL QUESTION:
 ANSWER PROVIDED:
 {text}
 
-An opinion is a judgment, viewpoint, or conclusion that goes beyond just stating facts. It represents a formed perspective or belief.
+Your task: Find opinions in the answer and rewrite them AS IF YOU ARE THE ONE SAYING THEM.
+
+An opinion is a judgment, viewpoint, or conclusion that goes beyond just stating facts.
 
 IMPORTANT: Do NOT extract statements like:
 - "I don't have enough information"
 - "The facts don't contain information about X"
 - "I cannot answer because..."
-- Simple acknowledgments or meta-statements about the query itself
 
-ONLY extract actual opinions, judgments, or perspectives about substantive topics.
+ONLY extract actual opinions about substantive topics.
 
-For each opinion found, provide:
-1. The opinion itself (what the agent believes or concludes)
-2. The reasons or facts that support it
-3. A confidence score (0.0 to 1.0) indicating how confident the agent is in this opinion
+CRITICAL FORMAT REQUIREMENTS:
+1. **ALWAYS start with first-person phrases**: "I think...", "I believe...", "In my view...", "I've come to believe...", "Previously I thought... but now..."
+2. **NEVER use third-person**: Do NOT say "The speaker thinks..." or "They believe..." - always use "I"
+3. Include the reasoning naturally within the statement
+4. Provide a confidence score (0.0 to 1.0)
+
+CORRECT Examples (✓ FIRST-PERSON):
+- "I think Alice is more reliable because she consistently delivers on time and writes clean code"
+- "Previously I thought all engineers were equal, but now I feel that experience and track record really matter"
+- "I believe reliability is best measured by consistent output over time"
+- "I've come to believe that track records are more important than potential"
+
+WRONG Examples (✗ THIRD-PERSON - DO NOT USE):
+- "The speaker thinks Alice is more reliable"
+- "They believe reliability matters"
+- "It is believed that Alice is better"
 
 If no genuine opinions are expressed (e.g., the response just says "I don't know"), return an empty list."""
 
         try:
             result = await self._llm_config.call(
                 messages=[
-                    {"role": "system", "content": "You extract opinions and perspectives from text."},
+                    {"role": "system", "content": "You are converting opinions from text into first-person statements. Always use 'I think', 'I believe', 'I feel', etc. NEVER use third-person like 'The speaker' or 'They'."},
                     {"role": "user", "content": extraction_prompt}
                 ],
                 response_format=OpinionExtractionResponse,
                 scope="memory_extract_opinion"
             )
 
-            # Format opinions with reasons included in the text and confidence score
+            # Format opinions with confidence score and convert to first-person
             formatted_opinions = []
             for op in result.opinions:
-                # Combine opinion and reasons into a single statement
-                opinion_with_reasons = f"{op.opinion} (Reasons: {op.reasons})"
+                # Convert third-person to first-person if needed
+                opinion_text = op.opinion
+
+                # Replace common third-person patterns with first-person
+                import re
+
+                # Remove "s" from verbs: believes -> believe, thinks -> think, etc.
+                def singularize_verb(verb):
+                    if verb.endswith('es'):
+                        return verb[:-1]  # believes -> believe
+                    elif verb.endswith('s'):
+                        return verb[:-1]  # thinks -> think
+                    return verb
+
+                # Pattern: "The speaker/user [verb]..." -> "I [verb]..."
+                match = re.match(r'^(The speaker|The user|They|It is believed) (believes?|thinks?|feels?|says|asserts?|considers?)(\s+that)?(.*)$', opinion_text, re.IGNORECASE)
+                if match:
+                    verb = singularize_verb(match.group(2))
+                    that_part = match.group(3) or ""  # Keep " that" if present
+                    rest = match.group(4)
+                    opinion_text = f"I {verb}{that_part}{rest}"
+
+                # If still doesn't start with first-person, prepend "I believe that "
+                first_person_starters = ["I think", "I believe", "I feel", "In my view", "I've come to believe", "Previously I"]
+                if not any(opinion_text.startswith(starter) for starter in first_person_starters):
+                    opinion_text = "I believe that " + opinion_text[0].lower() + opinion_text[1:]
+
                 formatted_opinions.append({
-                    "text": opinion_with_reasons,
+                    "text": opinion_text,
                     "confidence": op.confidence
                 })
 

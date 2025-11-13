@@ -268,18 +268,18 @@
     "/api/agents": {
       "get": {
         "tags": [
-          "Management"
+          "Agent Profile"
         ],
         "summary": "List all agents",
-        "description": "Get a list of all agent IDs that have stored memories in the system",
-        "operationId": "api_agents_api_agents_get",
+        "description": "Get a list of all agents with their profiles",
+        "operationId": "api_list_agents_api_agents_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AgentsResponse"
+                  "$ref": "#/components/schemas/AgentListResponse"
                 }
               }
             }
@@ -665,10 +665,350 @@
           }
         }
       }
+    },
+    "/api/agents/{agent_id}/profile": {
+      "get": {
+        "tags": [
+          "Agent Profile"
+        ],
+        "summary": "Get agent profile",
+        "description": "Get personality traits and background for an agent. Auto-creates agent with defaults if not exists.",
+        "operationId": "api_get_agent_profile_api_agents__agent_id__profile_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Agent Profile"
+        ],
+        "summary": "Update agent personality",
+        "description": "Update agent's Big Five personality traits and bias strength",
+        "operationId": "api_update_agent_personality_api_agents__agent_id__profile_put",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePersonalityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/background": {
+      "post": {
+        "tags": [
+          "Agent Profile"
+        ],
+        "summary": "Add/merge agent background",
+        "description": "Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.",
+        "operationId": "api_add_agent_background_api_agents__agent_id__background_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddBackgroundRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}": {
+      "put": {
+        "tags": [
+          "Agent Profile"
+        ],
+        "summary": "Create or update agent",
+        "description": "Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.",
+        "operationId": "api_create_or_update_agent_api_agents__agent_id__put",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAgentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AddBackgroundRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "New background information to add or merge"
+          },
+          "update_personality": {
+            "type": "boolean",
+            "title": "Update Personality",
+            "description": "If true, infer Big Five personality traits from the merged background (default: true)",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "AddBackgroundRequest",
+        "description": "Request model for adding/merging background information.",
+        "example": {
+          "content": "I was born in Texas",
+          "update_personality": true
+        }
+      },
+      "AgentListItem": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "personality": {
+            "$ref": "#/components/schemas/PersonalityTraits"
+          },
+          "background": {
+            "type": "string",
+            "title": "Background"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "personality",
+          "background"
+        ],
+        "title": "AgentListItem",
+        "description": "Agent list item with profile summary."
+      },
+      "AgentListResponse": {
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentListItem"
+            },
+            "type": "array",
+            "title": "Agents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agents"
+        ],
+        "title": "AgentListResponse",
+        "description": "Response model for listing all agents.",
+        "example": {
+          "agents": [
+            {
+              "agent_id": "user123",
+              "background": "I am a software engineer",
+              "created_at": "2024-01-15T10:30:00Z",
+              "personality": {
+                "agreeableness": 0.5,
+                "bias_strength": 0.5,
+                "conscientiousness": 0.5,
+                "extraversion": 0.5,
+                "neuroticism": 0.5,
+                "openness": 0.5
+              },
+              "updated_at": "2024-01-16T14:20:00Z"
+            }
+          ]
+        }
+      },
+      "AgentProfileResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "personality": {
+            "$ref": "#/components/schemas/PersonalityTraits"
+          },
+          "background": {
+            "type": "string",
+            "title": "Background"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "personality",
+          "background"
+        ],
+        "title": "AgentProfileResponse",
+        "description": "Response model for agent profile.",
+        "example": {
+          "agent_id": "user123",
+          "background": "I am a software engineer with 10 years of experience in startups",
+          "personality": {
+            "agreeableness": 0.7,
+            "bias_strength": 0.7,
+            "conscientiousness": 0.6,
+            "extraversion": 0.5,
+            "neuroticism": 0.3,
+            "openness": 0.8
+          }
+        }
+      },
       "AgentsResponse": {
         "properties": {
           "agents": {
@@ -691,6 +1031,41 @@
             "agent_alice",
             "agent_bob"
           ]
+        }
+      },
+      "BackgroundResponse": {
+        "properties": {
+          "background": {
+            "type": "string",
+            "title": "Background"
+          },
+          "personality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonalityTraits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "background"
+        ],
+        "title": "BackgroundResponse",
+        "description": "Response model for background update.",
+        "example": {
+          "background": "I was born in Texas. I am a software engineer with 10 years of experience.",
+          "personality": {
+            "agreeableness": 0.8,
+            "bias_strength": 0.6,
+            "conscientiousness": 0.6,
+            "extraversion": 0.5,
+            "neuroticism": 0.4,
+            "openness": 0.7
+          }
         }
       },
       "BatchPutAsyncResponse": {
@@ -838,6 +1213,45 @@
           "items_count": 2,
           "message": "Successfully stored 2 memory items",
           "success": true
+        }
+      },
+      "CreateAgentRequest": {
+        "properties": {
+          "personality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonalityTraits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "background": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background"
+          }
+        },
+        "type": "object",
+        "title": "CreateAgentRequest",
+        "description": "Request model for creating/updating an agent.",
+        "example": {
+          "background": "I am a creative software engineer with 10 years of experience",
+          "personality": {
+            "agreeableness": 0.7,
+            "bias_strength": 0.7,
+            "conscientiousness": 0.6,
+            "extraversion": 0.5,
+            "neuroticism": 0.3,
+            "openness": 0.8
+          }
         }
       },
       "DocumentResponse": {
@@ -1125,6 +1539,71 @@
           "event_date": "2024-01-15T10:30:00Z"
         }
       },
+      "PersonalityTraits": {
+        "properties": {
+          "openness": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Openness",
+            "description": "Openness to experience (0-1)"
+          },
+          "conscientiousness": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Conscientiousness",
+            "description": "Conscientiousness (0-1)"
+          },
+          "extraversion": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Extraversion",
+            "description": "Extraversion (0-1)"
+          },
+          "agreeableness": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Agreeableness",
+            "description": "Agreeableness (0-1)"
+          },
+          "neuroticism": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Neuroticism",
+            "description": "Neuroticism (0-1)"
+          },
+          "bias_strength": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Bias Strength",
+            "description": "How strongly personality influences opinions (0-1)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "openness",
+          "conscientiousness",
+          "extraversion",
+          "agreeableness",
+          "neuroticism",
+          "bias_strength"
+        ],
+        "title": "PersonalityTraits",
+        "description": "Personality traits based on Big Five model.",
+        "example": {
+          "agreeableness": 0.7,
+          "bias_strength": 0.7,
+          "conscientiousness": 0.6,
+          "extraversion": 0.5,
+          "neuroticism": 0.3,
+          "openness": 0.8
+        }
+      },
       "SearchRequest": {
         "properties": {
           "query": {
@@ -1409,6 +1888,17 @@
             "type": "integer",
             "title": "Thinking Budget",
             "default": 50
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context"
           }
         },
         "type": "object",
@@ -1419,6 +1909,7 @@
         "description": "Request model for think endpoint.",
         "example": {
           "agent_id": "user123",
+          "context": "This is for a research paper on AI ethics",
           "query": "What do you think about artificial intelligence?",
           "thinking_budget": 50
         }
@@ -1472,6 +1963,19 @@
           ],
           "text": "Based on my understanding, AI is a transformative technology..."
         }
+      },
+      "UpdatePersonalityRequest": {
+        "properties": {
+          "personality": {
+            "$ref": "#/components/schemas/PersonalityTraits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "personality"
+        ],
+        "title": "UpdatePersonalityRequest",
+        "description": "Request model for updating personality traits."
       },
       "ValidationError": {
         "properties": {

@@ -85,6 +85,10 @@ enum Commands {
         /// Thinking budget
         #[arg(short = 'b', long, default_value = "50")]
         budget: i32,
+
+        /// Additional context for the query (not used in search)
+        #[arg(short = 'c', long)]
+        context: Option<String>,
     },
 
     /// Store a single memory
@@ -127,6 +131,55 @@ enum Commands {
 
     /// List all agents
     Agents,
+
+    /// Get agent profile (personality + background)
+    Profile {
+        /// Agent ID to get profile for
+        agent_id: String,
+    },
+
+    /// Update agent personality traits
+    SetPersonality {
+        /// Agent ID to update
+        agent_id: String,
+
+        /// Openness to experience (0.0-1.0)
+        #[arg(long)]
+        openness: f32,
+
+        /// Conscientiousness (0.0-1.0)
+        #[arg(long)]
+        conscientiousness: f32,
+
+        /// Extraversion (0.0-1.0)
+        #[arg(long)]
+        extraversion: f32,
+
+        /// Agreeableness (0.0-1.0)
+        #[arg(long)]
+        agreeableness: f32,
+
+        /// Neuroticism (0.0-1.0)
+        #[arg(long)]
+        neuroticism: f32,
+
+        /// Bias strength - how much personality influences opinions (0.0-1.0)
+        #[arg(long)]
+        bias_strength: f32,
+    },
+
+    /// Add or merge background information for an agent
+    Background {
+        /// Agent ID to add background for
+        agent_id: String,
+
+        /// Background information to add (will be merged with existing)
+        content: String,
+
+        /// Skip automatic personality inference from background (default: false, traits are inferred)
+        #[arg(long)]
+        no_update_personality: bool,
+    },
 }
 
 fn main() {
@@ -203,6 +256,7 @@ fn run() -> Result<()> {
             agent_id,
             query,
             budget,
+            context,
         } => {
             let spinner = if output_format == OutputFormat::Pretty {
                 Some(ui::create_spinner("Thinking..."))
@@ -214,6 +268,7 @@ fn run() -> Result<()> {
                 query,
                 agent_id,
                 thinking_budget: budget,
+                context,
             };
 
             let response = client.think(request, verbose);
@@ -422,6 +477,145 @@ fn run() -> Result<()> {
                         ui::print_agents_table(&agents);
                     } else {
                         output::print_output(&agents, output_format)?;
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e)
+            }
+        }
+
+        Commands::Profile { agent_id } => {
+            let spinner = if output_format == OutputFormat::Pretty {
+                Some(ui::create_spinner("Fetching profile..."))
+            } else {
+                None
+            };
+
+            let response = client.get_profile(&agent_id, verbose);
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
+            }
+
+            match response {
+                Ok(profile) => {
+                    if output_format == OutputFormat::Pretty {
+                        ui::print_profile(&profile);
+                    } else {
+                        output::print_output(&profile, output_format)?;
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e)
+            }
+        }
+
+        Commands::SetPersonality {
+            agent_id,
+            openness,
+            conscientiousness,
+            extraversion,
+            agreeableness,
+            neuroticism,
+            bias_strength,
+        } => {
+            // Validate all values are between 0 and 1
+            let values = vec![
+                ("openness", openness),
+                ("conscientiousness", conscientiousness),
+                ("extraversion", extraversion),
+                ("agreeableness", agreeableness),
+                ("neuroticism", neuroticism),
+                ("bias_strength", bias_strength),
+            ];
+
+            for (name, value) in &values {
+                if *value < 0.0 || *value > 1.0 {
+                    anyhow::bail!("{} must be between 0.0 and 1.0, got {}", name, value);
+                }
+            }
+
+            let spinner = if output_format == OutputFormat::Pretty {
+                Some(ui::create_spinner("Updating personality..."))
+            } else {
+                None
+            };
+
+            let response = client.update_personality(
+                &agent_id,
+                openness,
+                conscientiousness,
+                extraversion,
+                agreeableness,
+                neuroticism,
+                bias_strength,
+                verbose,
+            );
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
+            }
+
+            match response {
+                Ok(profile) => {
+                    if output_format == OutputFormat::Pretty {
+                        ui::print_success("Personality updated successfully");
+                        ui::print_profile(&profile);
+                    } else {
+                        output::print_output(&profile, output_format)?;
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e)
+            }
+        }
+
+        Commands::Background { agent_id, content, no_update_personality } => {
+            let update_personality = !no_update_personality;
+
+            // Fetch current profile to show delta
+            let old_profile = if update_personality && output_format == OutputFormat::Pretty {
+                client.get_profile(&agent_id, verbose).ok()
+            } else {
+                None
+            };
+
+            let spinner = if output_format == OutputFormat::Pretty {
+                Some(ui::create_spinner("Merging background..."))
+            } else {
+                None
+            };
+
+            let response = client.add_background(&agent_id, &content, update_personality, verbose);
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
+            }
+
+            match response {
+                Ok(background_resp) => {
+                    if output_format == OutputFormat::Pretty {
+                        ui::print_success("Background updated successfully");
+                        ui::print_info(&format!("New background:\n{}", background_resp.background));
+
+                        // Show inferred personality changes with delta
+                        if let Some(new_personality) = background_resp.personality {
+                            if let Some(old_prof) = old_profile {
+                                // Show delta visualization
+                                ui::print_personality_delta(&old_prof.personality, &new_personality);
+                            } else {
+                                // Fallback to simple display if we don't have old profile
+                                ui::print_info("\nInferred personality traits:");
+                                println!("  Openness: {:.2}", new_personality.openness);
+                                println!("  Conscientiousness: {:.2}", new_personality.conscientiousness);
+                                println!("  Extraversion: {:.2}", new_personality.extraversion);
+                                println!("  Agreeableness: {:.2}", new_personality.agreeableness);
+                                println!("  Neuroticism: {:.2}", new_personality.neuroticism);
+                                println!("  Bias Strength: {:.2}", new_personality.bias_strength);
+                            }
+                        }
+                    } else {
+                        output::print_output(&background_resp, output_format)?;
                     }
                     Ok(())
                 }

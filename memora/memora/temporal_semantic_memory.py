@@ -26,7 +26,7 @@ from .utils import (
     calculate_frequency_weight,
 )
 from .entity_resolver import EntityResolver
-from .operations import EmbeddingOperationsMixin, LinkOperationsMixin, ThinkOperationsMixin
+from .operations import EmbeddingOperationsMixin, LinkOperationsMixin, ThinkOperationsMixin, AgentOperationsMixin
 from .llm_wrapper import LLMConfig
 from .response_models import SearchResult as SearchResultModel, ThinkResult, MemoryFact
 from .task_backend import TaskBackend, AsyncIOQueueBackend
@@ -59,6 +59,7 @@ class TemporalSemanticMemory(
     EmbeddingOperationsMixin,
     LinkOperationsMixin,
     ThinkOperationsMixin,
+    AgentOperationsMixin,
 ):
     """
     Advanced memory system using temporal and semantic linking with PostgreSQL.
@@ -67,6 +68,7 @@ class TemporalSemanticMemory(
     - EmbeddingOperationsMixin: Embedding generation
     - LinkOperationsMixin: Entity, temporal, and semantic link creation
     - ThinkOperationsMixin: Think operations for formulating answers with opinions
+    - AgentOperationsMixin: Agent profile and personality management
     """
 
     def __init__(
@@ -135,8 +137,8 @@ class TemporalSemanticMemory(
             model=memory_llm_model,
         )
 
-        # Store client and model for convenience
-        self._llm_client = self._llm_config.client
+        # Store client and model for convenience (deprecated: use _llm_config.call() instead)
+        self._llm_client = self._llm_config._client
         self._llm_model = self._llm_config.model
 
         # Initialize rerankers (cached for performance)

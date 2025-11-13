@@ -264,3 +264,29 @@ class MemoryLink(Base):
             postgresql_ops={"weight": "DESC"}
         ),
     )
+
+
+class Agent(Base):
+    """Agent profiles with personality traits and background."""
+    __tablename__ = "agents"
+
+    agent_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    personality: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sql_text(
+            '\'{"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, '
+            '"agreeableness": 0.5, "neuroticism": 0.5, "bias_strength": 0.5}\'::jsonb'
+        )
+    )
+    background: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_agents_agent_id", "agent_id"),
+    )

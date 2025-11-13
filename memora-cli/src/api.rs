@@ -52,6 +52,8 @@ pub struct ThinkRequest {
     pub query: String,
     pub agent_id: String,
     pub thinking_budget: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -96,6 +98,40 @@ pub enum AgentsResponse {
 #[derive(Debug, Serialize)]
 pub struct Agent {
     pub agent_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PersonalityTraits {
+    pub openness: f32,
+    pub conscientiousness: f32,
+    pub extraversion: f32,
+    pub agreeableness: f32,
+    pub neuroticism: f32,
+    pub bias_strength: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentProfile {
+    pub agent_id: String,
+    pub personality: PersonalityTraits,
+    pub background: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpdatePersonalityRequest {
+    pub personality: PersonalityTraits,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddBackgroundRequest {
+    pub content: String,
+    pub update_personality: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackgroundResponse {
+    pub background: String,
+    pub personality: Option<PersonalityTraits>,
 }
 
 pub struct ApiClient {
@@ -275,5 +311,141 @@ impl ApiClient {
                 anyhow::bail!("Failed to list agents: {}", error)
             }
         }
+    }
+
+    pub fn get_profile(&self, agent_id: &str, verbose: bool) -> Result<AgentProfile> {
+        let url = format!("{}/api/agents/{}/profile", self.base_url, agent_id);
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: AgentProfile = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn update_personality(
+        &self,
+        agent_id: &str,
+        openness: f32,
+        conscientiousness: f32,
+        extraversion: f32,
+        agreeableness: f32,
+        neuroticism: f32,
+        bias_strength: f32,
+        verbose: bool,
+    ) -> Result<AgentProfile> {
+        let url = format!("{}/api/agents/{}/profile", self.base_url, agent_id);
+        let request = UpdatePersonalityRequest {
+            personality: PersonalityTraits {
+                openness,
+                conscientiousness,
+                extraversion,
+                agreeableness,
+                neuroticism,
+                bias_strength,
+            },
+        };
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+            eprintln!("Request body:\n{}", serde_json::to_string_pretty(&request).unwrap_or_default());
+        }
+
+        let response = self
+            .client
+            .put(&url)
+            .json(&request)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: AgentProfile = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn add_background(&self, agent_id: &str, content: &str, update_personality: bool, verbose: bool) -> Result<BackgroundResponse> {
+        let url = format!("{}/api/agents/{}/background", self.base_url, agent_id);
+        let request = AddBackgroundRequest {
+            content: content.to_string(),
+            update_personality,
+        };
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+            eprintln!("Request body:\n{}", serde_json::to_string_pretty(&request).unwrap_or_default());
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&request)
+            .timeout(Duration::from_secs(60))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: BackgroundResponse = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
     }
 }

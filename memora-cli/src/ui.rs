@@ -1,4 +1,4 @@
-use crate::api::{Agent, Fact, SearchResponse, ThinkResponse, TraceInfo};
+use crate::api::{Agent, AgentProfile, Fact, PersonalityTraits, SearchResponse, ThinkResponse, TraceInfo};
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::io::{self, Write};
@@ -214,4 +214,160 @@ pub fn prompt_confirmation(message: &str) -> io::Result<bool> {
     io::stdin().read_line(&mut input)?;
 
     Ok(input.trim().eq_ignore_ascii_case("y") || input.trim().eq_ignore_ascii_case("yes"))
+}
+
+pub fn print_profile(profile: &AgentProfile) {
+    print_section_header(&format!("Agent Profile: {}", profile.agent_id));
+
+    // Print personality traits
+    println!("  {}", "Personality Traits (Big Five):".bright_cyan().bold());
+    println!();
+
+    let traits = [
+        ("Openness", profile.personality.openness, "🔓"),
+        ("Conscientiousness", profile.personality.conscientiousness, "📋"),
+        ("Extraversion", profile.personality.extraversion, "🗣️"),
+        ("Agreeableness", profile.personality.agreeableness, "🤝"),
+        ("Neuroticism", profile.personality.neuroticism, "😰"),
+    ];
+
+    for (name, value, emoji) in &traits {
+        let bar_length = 20;
+        let filled = (*value * bar_length as f32) as usize;
+        let empty = bar_length - filled;
+        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+
+        let value_color = if *value >= 0.7 {
+            bar.bright_green()
+        } else if *value >= 0.4 {
+            bar.bright_yellow()
+        } else {
+            bar.bright_red()
+        };
+
+        println!("    {} {:<20} [{}] {:.0}%",
+            emoji,
+            name,
+            value_color,
+            value * 100.0
+        );
+    }
+
+    println!();
+    println!("  {}", "Bias Strength:".bright_cyan().bold());
+    let bias = profile.personality.bias_strength;
+    let bar_length = 20;
+    let filled = (bias * bar_length as f32) as usize;
+    let empty = bar_length - filled;
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+
+    let bias_color = if bias >= 0.7 {
+        bar.bright_green()
+    } else if bias >= 0.4 {
+        bar.bright_yellow()
+    } else {
+        bar.bright_red()
+    };
+
+    println!("    💪 {:<20} [{}] {:.0}%",
+        "Personality Influence",
+        bias_color,
+        bias * 100.0
+    );
+    println!("    {}", format!("(How much personality shapes opinions)").bright_black());
+    println!();
+
+    // Print background
+    if !profile.background.is_empty() {
+        println!("  {}", "Background:".bright_cyan().bold());
+        println!();
+        for line in profile.background.lines() {
+            println!("    {}", line);
+        }
+        println!();
+    } else {
+        println!("  {}", "Background: (none)".bright_black());
+        println!();
+    }
+}
+
+pub fn print_personality_delta(old: &PersonalityTraits, new: &PersonalityTraits) {
+    print_section_header("Personality Changes");
+
+    let traits = [
+        ("Openness", old.openness, new.openness, "🔓"),
+        ("Conscientiousness", old.conscientiousness, new.conscientiousness, "📋"),
+        ("Extraversion", old.extraversion, new.extraversion, "🗣️"),
+        ("Agreeableness", old.agreeableness, new.agreeableness, "🤝"),
+        ("Neuroticism", old.neuroticism, new.neuroticism, "😰"),
+    ];
+
+    for (name, old_value, new_value, emoji) in &traits {
+        let bar_length = 20;
+        let filled = (*new_value * bar_length as f32) as usize;
+        let empty = bar_length - filled;
+        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+
+        let value_color = if *new_value >= 0.7 {
+            bar.bright_green()
+        } else if *new_value >= 0.4 {
+            bar.bright_yellow()
+        } else {
+            bar.bright_red()
+        };
+
+        let delta = new_value - old_value;
+        let delta_pct = (delta * 100.0).abs();
+        let delta_str = if delta.abs() < 0.01 {
+            "".to_string()
+        } else if delta > 0.0 {
+            format!(" {} {:.0}%", "↗".bright_green(), delta_pct)
+        } else {
+            format!(" {} {:.0}%", "↘".bright_red(), delta_pct)
+        };
+
+        println!("    {} {:<20} [{}] {:.0}%{}",
+            emoji,
+            name,
+            value_color,
+            new_value * 100.0,
+            delta_str
+        );
+    }
+
+    println!();
+    println!("  {}", "Bias Strength:".bright_cyan().bold());
+    let old_bias = old.bias_strength;
+    let new_bias = new.bias_strength;
+    let bar_length = 20;
+    let filled = (new_bias * bar_length as f32) as usize;
+    let empty = bar_length - filled;
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+
+    let bias_color = if new_bias >= 0.7 {
+        bar.bright_green()
+    } else if new_bias >= 0.4 {
+        bar.bright_yellow()
+    } else {
+        bar.bright_red()
+    };
+
+    let delta = new_bias - old_bias;
+    let delta_pct = (delta * 100.0).abs();
+    let delta_str = if delta.abs() < 0.01 {
+        "".to_string()
+    } else if delta > 0.0 {
+        format!(" {} {:.0}%", "↗".bright_green(), delta_pct)
+    } else {
+        format!(" {} {:.0}%", "↘".bright_red(), delta_pct)
+    };
+
+    println!("    💪 {:<20} [{}] {:.0}%{}",
+        "Personality Influence",
+        bias_color,
+        new_bias * 100.0,
+        delta_str
+    );
+    println!("    {}", format!("(How much personality shapes opinions)").bright_black());
+    println!();
 }

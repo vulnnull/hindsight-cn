@@ -182,13 +182,15 @@ class ThinkRequest(BaseModel):
     query: str
     agent_id: str = "default"
     thinking_budget: int = 50
+    context: Optional[str] = None
 
     class Config:
         json_schema_extra = {
             "example": {
                 "query": "What do you think about artificial intelligence?",
                 "agent_id": "user123",
-                "thinking_budget": 50
+                "thinking_budget": 50,
+                "context": "This is for a research paper on AI ethics"
             }
         }
 
@@ -259,6 +261,151 @@ class AgentsResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "agents": ["user123", "agent_alice", "agent_bob"]
+            }
+        }
+
+
+class PersonalityTraits(BaseModel):
+    """Personality traits based on Big Five model."""
+    openness: float = Field(ge=0.0, le=1.0, description="Openness to experience (0-1)")
+    conscientiousness: float = Field(ge=0.0, le=1.0, description="Conscientiousness (0-1)")
+    extraversion: float = Field(ge=0.0, le=1.0, description="Extraversion (0-1)")
+    agreeableness: float = Field(ge=0.0, le=1.0, description="Agreeableness (0-1)")
+    neuroticism: float = Field(ge=0.0, le=1.0, description="Neuroticism (0-1)")
+    bias_strength: float = Field(ge=0.0, le=1.0, description="How strongly personality influences opinions (0-1)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "openness": 0.8,
+                "conscientiousness": 0.6,
+                "extraversion": 0.5,
+                "agreeableness": 0.7,
+                "neuroticism": 0.3,
+                "bias_strength": 0.7
+            }
+        }
+
+
+class AgentProfileResponse(BaseModel):
+    """Response model for agent profile."""
+    agent_id: str
+    personality: PersonalityTraits
+    background: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "agent_id": "user123",
+                "personality": {
+                    "openness": 0.8,
+                    "conscientiousness": 0.6,
+                    "extraversion": 0.5,
+                    "agreeableness": 0.7,
+                    "neuroticism": 0.3,
+                    "bias_strength": 0.7
+                },
+                "background": "I am a software engineer with 10 years of experience in startups"
+            }
+        }
+
+
+class UpdatePersonalityRequest(BaseModel):
+    """Request model for updating personality traits."""
+    personality: PersonalityTraits
+
+
+class AddBackgroundRequest(BaseModel):
+    """Request model for adding/merging background information."""
+    content: str = Field(description="New background information to add or merge")
+    update_personality: bool = Field(
+        default=True,
+        description="If true, infer Big Five personality traits from the merged background (default: true)"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "content": "I was born in Texas",
+                "update_personality": True
+            }
+        }
+
+
+class BackgroundResponse(BaseModel):
+    """Response model for background update."""
+    background: str
+    personality: Optional[PersonalityTraits] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "background": "I was born in Texas. I am a software engineer with 10 years of experience.",
+                "personality": {
+                    "openness": 0.7,
+                    "conscientiousness": 0.6,
+                    "extraversion": 0.5,
+                    "agreeableness": 0.8,
+                    "neuroticism": 0.4,
+                    "bias_strength": 0.6
+                }
+            }
+        }
+
+
+class AgentListItem(BaseModel):
+    """Agent list item with profile summary."""
+    agent_id: str
+    personality: PersonalityTraits
+    background: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class AgentListResponse(BaseModel):
+    """Response model for listing all agents."""
+    agents: List[AgentListItem]
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "agents": [
+                    {
+                        "agent_id": "user123",
+                        "personality": {
+                            "openness": 0.5,
+                            "conscientiousness": 0.5,
+                            "extraversion": 0.5,
+                            "agreeableness": 0.5,
+                            "neuroticism": 0.5,
+                            "bias_strength": 0.5
+                        },
+                        "background": "I am a software engineer",
+                        "created_at": "2024-01-15T10:30:00Z",
+                        "updated_at": "2024-01-16T14:20:00Z"
+                    }
+                ]
+            }
+        }
+
+
+class CreateAgentRequest(BaseModel):
+    """Request model for creating/updating an agent."""
+    personality: Optional[PersonalityTraits] = None
+    background: Optional[str] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "personality": {
+                    "openness": 0.8,
+                    "conscientiousness": 0.6,
+                    "extraversion": 0.5,
+                    "agreeableness": 0.7,
+                    "neuroticism": 0.3,
+                    "bias_strength": 0.7
+                },
+                "background": "I am a creative software engineer with 10 years of experience"
             }
         }
 
@@ -604,7 +751,8 @@ def _register_routes(app: FastAPI):
             core_result = await app.state.memory.think_async(
                 agent_id=request.agent_id,
                 query=request.query,
-                thinking_budget=request.thinking_budget
+                thinking_budget=request.thinking_budget,
+                context=request.context
             )
 
             # Convert core MemoryFact objects to API ThinkFact objects (excluding internal metrics)
@@ -1058,4 +1206,166 @@ def _register_routes(app: FastAPI):
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             print(f"Error in /api/memory/{unit_id}: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    # Agent Profile Endpoints
+
+    @app.get(
+        "/api/agents",
+        response_model=AgentListResponse,
+        tags=["Agent Profile"],
+        summary="List all agents",
+        description="Get a list of all agents with their profiles"
+    )
+    async def api_list_agents():
+        """List all agents with their profiles."""
+        try:
+            agents = await app.state.memory.list_agents()
+            return AgentListResponse(agents=agents)
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/agents: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    @app.get(
+        "/api/agents/{agent_id}/profile",
+        response_model=AgentProfileResponse,
+        tags=["Agent Profile"],
+        summary="Get agent profile",
+        description="Get personality traits and background for an agent. Auto-creates agent with defaults if not exists."
+    )
+    async def api_get_agent_profile(agent_id: str):
+        """Get agent profile (personality + background)."""
+        try:
+            profile = await app.state.memory.get_agent_profile(agent_id)
+            return AgentProfileResponse(
+                agent_id=agent_id,
+                personality=PersonalityTraits(**profile["personality"]),
+                background=profile["background"]
+            )
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/agents/{agent_id}/profile: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    @app.put(
+        "/api/agents/{agent_id}/profile",
+        response_model=AgentProfileResponse,
+        tags=["Agent Profile"],
+        summary="Update agent personality",
+        description="Update agent's Big Five personality traits and bias strength"
+    )
+    async def api_update_agent_personality(
+        agent_id: str,
+        request: UpdatePersonalityRequest
+    ):
+        """Update agent personality traits."""
+        try:
+            # Update personality
+            await app.state.memory.update_agent_personality(
+                agent_id,
+                request.personality.model_dump()
+            )
+
+            # Get updated profile
+            profile = await app.state.memory.get_agent_profile(agent_id)
+            return AgentProfileResponse(
+                agent_id=agent_id,
+                personality=PersonalityTraits(**profile["personality"]),
+                background=profile["background"]
+            )
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/agents/{agent_id}/profile: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    @app.post(
+        "/api/agents/{agent_id}/background",
+        response_model=BackgroundResponse,
+        tags=["Agent Profile"],
+        summary="Add/merge agent background",
+        description="Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits."
+    )
+    async def api_add_agent_background(
+        agent_id: str,
+        request: AddBackgroundRequest
+    ):
+        """Add or merge agent background information. Optionally infer personality traits."""
+        try:
+            result = await app.state.memory.merge_agent_background(
+                agent_id,
+                request.content,
+                update_personality=request.update_personality
+            )
+
+            response = BackgroundResponse(background=result["background"])
+            if "personality" in result:
+                response.personality = PersonalityTraits(**result["personality"])
+
+            return response
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/agents/{agent_id}/background: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    @app.put(
+        "/api/agents/{agent_id}",
+        response_model=AgentProfileResponse,
+        tags=["Agent Profile"],
+        summary="Create or update agent",
+        description="Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults."
+    )
+    async def api_create_or_update_agent(
+        agent_id: str,
+        request: CreateAgentRequest
+    ):
+        """Create or update an agent with personality and background."""
+        try:
+            # Get existing profile or create with defaults
+            profile = await app.state.memory.get_agent_profile(agent_id)
+
+            # Update personality if provided
+            if request.personality is not None:
+                await app.state.memory.update_agent_personality(
+                    agent_id,
+                    request.personality.model_dump()
+                )
+                profile["personality"] = request.personality.model_dump()
+
+            # Update background if provided (replace, not merge)
+            if request.background is not None:
+                pool = await app.state.memory._get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE agents
+                        SET background = $2,
+                            updated_at = NOW()
+                        WHERE agent_id = $1
+                        """,
+                        agent_id,
+                        request.background
+                    )
+                profile["background"] = request.background
+
+            # Get final profile
+            final_profile = await app.state.memory.get_agent_profile(agent_id)
+            return AgentProfileResponse(
+                agent_id=agent_id,
+                personality=PersonalityTraits(**final_profile["personality"]),
+                background=final_profile["background"]
+            )
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/agents/{agent_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))

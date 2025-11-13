@@ -68,13 +68,13 @@ class LLMConfig:
                 f"API key not found for {self.provider}"
             )
 
-        # Create client
+        # Create client (private - use .call() method instead)
         if self.provider == "ollama":
-            self.client = AsyncOpenAI(api_key="ollama", base_url=self.base_url)
+            self._client = AsyncOpenAI(api_key="ollama", base_url=self.base_url)
         elif self.base_url:
-            self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+            self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
         else:
-            self.client = AsyncOpenAI(api_key=self.api_key)
+            self._client = AsyncOpenAI(api_key=self.api_key)
 
         logger.info(
             f"Initialized LLM: provider={self.provider}, model={self.model}, base_url={self.base_url}"
@@ -124,14 +124,14 @@ class LLMConfig:
             try:
                 if response_format is not None:
                     # Use structured output parsing and return .parsed
-                    response = await self.client.beta.chat.completions.parse(
+                    response = await self._client.beta.chat.completions.parse(
                         response_format=response_format,
                         **call_params
                     )
                     result = response.choices[0].message.parsed
                 else:
                     # Standard completion and return text content
-                    response = await self.client.chat.completions.create(**call_params)
+                    response = await self._client.chat.completions.create(**call_params)
                     result = response.choices[0].message.content
 
                 # Log call details on success
