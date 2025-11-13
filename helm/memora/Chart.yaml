@@ -2,8 +2,8 @@ apiVersion: v2
 name: memora
 description: A Helm chart for Memora - temporal-semantic-entity memory system for AI agents
 type: application
-version: 0.0.5
-appVersion: "0.0.5"
+version: 0.0.7
+appVersion: "0.0.7"
 keywords:
   - ai
   - memory

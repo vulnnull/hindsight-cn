@@ -1,6 +1,6 @@
 [project]
 name = "memora-client"
-version = "0.0.1"
+version = "0.0.7"
 description = "Python client for Memora - Semantic memory system with personality-driven thinking"
 authors = [
     {name = "Memora Team"}

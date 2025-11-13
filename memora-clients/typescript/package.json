@@ -1,6 +1,6 @@
 {
   "name": "@memora/client",
-  "version": "0.0.1",
+  "version": "0.0.7",
   "description": "TypeScript client for Memora - Semantic memory system with personality-driven thinking",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
