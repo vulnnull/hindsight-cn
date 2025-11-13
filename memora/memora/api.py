@@ -509,35 +509,38 @@ class DocumentResponse(BaseModel):
         }
 
 
-def create_app(memory: TemporalSemanticMemory) -> FastAPI:
+def create_app(memory: TemporalSemanticMemory, run_migrations: bool = True, initialize_memory: bool = True) -> FastAPI:
     """
     Create and configure the FastAPI application.
 
     Args:
         memory: TemporalSemanticMemory instance (already initialized with required parameters)
+        run_migrations: Whether to run database migrations on startup (default: True)
+        initialize_memory: Whether to initialize memory system on startup (default: True)
 
     Returns:
         Configured FastAPI application
+
+    Note:
+        When mounting this app as a sub-application, the lifespan events may not fire.
+        In that case, you should call memory.initialize() manually before starting the server
+        and memory.close() when shutting down.
     """
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """
         Lifespan context manager for startup and shutdown events.
-        This works both for standalone apps and when mounted as a sub-application.
+        Note: This only fires when running the app standalone, not when mounted.
         """
         # Startup: Initialize database and memory system
-        from memora.migrations import run_migrations
+        if run_migrations:
+            from memora.migrations import run_migrations as do_migrations
+            do_migrations(memory.db_url)
+            logging.info("Database migrations applied")
 
-        # Run database migrations first
-        run_migrations(memory.db_url)
-        logging.info("Database migrations applied")
-
-        # Then initialize memory system
-        await memory.initialize()
-        logging.info("Memory system initialized")
-
-        # Store memory instance on app for route handlers to access
-        app.state.memory = memory
+        if initialize_memory:
+            await memory.initialize()
+            logging.info("Memory system initialized")
 
         yield
 
@@ -577,6 +580,10 @@ The system uses:
         },
         lifespan=lifespan
     )
+
+    # IMPORTANT: Set memory on app.state immediately, don't wait for lifespan
+    # This is required for mounted sub-applications where lifespan may not fire
+    app.state.memory = memory
 
     # Register all routes
     _register_routes(app)
