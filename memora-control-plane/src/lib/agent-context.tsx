@@ -19,7 +19,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const loadAgents = async () => {
     try {
       const data = await dataplaneClient.listAgents();
-      setAgents(data.agents);
+      // Extract agent_id from each agent object
+      const agentIds = data.agents.map((agent: any) => agent.agent_id);
+      setAgents(agentIds);
     } catch (error) {
       console.error('Error loading agents:', error);
     }

@@ -799,6 +799,21 @@ class TemporalSemanticMemory(
                 async with conn.transaction():
                     logger.debug("Inside transaction")
                     try:
+                        # Ensure agent exists in agents table (create with defaults if not exists)
+                        # Update updated_at to reflect recent activity
+                        logger.debug(f"Ensuring agent '{agent_id}' exists in agents table")
+                        await conn.execute(
+                            """
+                            INSERT INTO agents (agent_id, personality, background)
+                            VALUES ($1, $2::jsonb, $3)
+                            ON CONFLICT (agent_id) DO UPDATE
+                            SET updated_at = NOW()
+                            """,
+                            agent_id,
+                            '{"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5, "bias_strength": 0.5}',
+                            ""
+                        )
+
                         # Handle document tracking with automatic upsert
                         if document_id:
                             logger.debug(f"Handling document tracking for {document_id}")
@@ -1592,25 +1607,6 @@ class TemporalSemanticMemory(
 
                 except Exception as e:
                     raise Exception(f"Failed to delete agent data: {str(e)}")
-
-    async def list_agents(self) -> List[str]:
-        """
-        Get list of all agent IDs in the database.
-
-        Returns:
-            List of agent IDs
-        """
-        pool = await self._get_pool()
-        async with pool.acquire() as conn:
-            # Get distinct agent IDs from memory_units
-            agents = await conn.fetch("""
-                SELECT DISTINCT agent_id
-                FROM memory_units
-                WHERE agent_id IS NOT NULL
-                ORDER BY agent_id
-            """)
-
-            return [row['agent_id'] for row in agents]
 
     async def get_graph_data(self, agent_id: Optional[str] = None, fact_type: Optional[str] = None):
         """

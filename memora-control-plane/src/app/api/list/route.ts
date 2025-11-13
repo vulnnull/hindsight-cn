@@ -31,3 +31,38 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const searchParams = request.nextUrl.searchParams;
+    const agentId = searchParams.get('agent_id');
+    const unitId = searchParams.get('unit_id');
+
+    if (!agentId) {
+      return NextResponse.json(
+        { error: 'agent_id is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!unitId) {
+      return NextResponse.json(
+        { error: 'unit_id is required' },
+        { status: 400 }
+      );
+    }
+
+    const response = await fetch(
+      `${DATAPLANE_URL}/api/v1/agents/${agentId}/memories/${unitId}`,
+      { method: 'DELETE' }
+    );
+    const data = await response.json();
+    return NextResponse.json(data, { status: response.status });
+  } catch (error) {
+    console.error('Error deleting memory unit:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete memory unit' },
+      { status: 500 }
+    );
+  }
+}

@@ -248,7 +248,7 @@ wheels = [
 
 [[package]]
 name = "benchmarks"
-version = "0.0.5"
+version = "0.0.7"
 source = { editable = "memora-dev/benchmarks" }
 dependencies = [
     { name = "memora" },
@@ -1408,7 +1408,7 @@ wheels = [
 
 [[package]]
 name = "memora"
-version = "0.0.5"
+version = "0.0.7"
 source = { editable = "memora" }
 dependencies = [
     { name = "alembic" },
@@ -1464,7 +1464,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "memora-dev"
-version = "0.0.5"
+version = "0.0.7"
 source = { editable = "memora-dev" }
 dependencies = [
     { name = "memora" },

@@ -61,7 +61,6 @@ class SearchResult(BaseModel):
     id: str
     text: str
     type: Optional[str] = None  # fact type: world, agent, opinion
-    activation: Optional[float] = None
     context: Optional[str] = None
     event_date: Optional[str] = None  # ISO format date string
 
@@ -79,7 +78,6 @@ class SearchResponse(BaseModel):
                         "id": "123e4567-e89b-12d3-a456-426614174000",
                         "text": "Alice works at Google on the AI team",
                         "type": "world",
-                        "activation": 0.95,
                         "context": "work info",
                         "event_date": "2024-01-15T10:30:00Z"
                     }
@@ -201,7 +199,6 @@ class ThinkFact(BaseModel):
     id: Optional[str] = None
     text: str
     type: Optional[str] = None  # fact type: world, agent, opinion
-    activation: Optional[float] = None
     context: Optional[str] = None
     event_date: Optional[str] = None
 
@@ -231,14 +228,12 @@ class ThinkResponse(BaseModel):
                     {
                         "id": "123",
                         "text": "AI is used in healthcare",
-                        "type": "world",
-                        "activation": 0.9
+                        "type": "world"
                     },
                     {
                         "id": "456",
                         "text": "I discussed AI applications last week",
-                        "type": "agent",
-                        "activation": 0.85
+                        "type": "agent"
                     }
                 ],
                 "new_opinions": [
