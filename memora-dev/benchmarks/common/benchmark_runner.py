@@ -127,7 +127,7 @@ class LLMAnswerEvaluator:
         """Initialize with LLM configuration for judge/evaluator."""
         from memora.llm_wrapper import LLMConfig
         self.llm_config = LLMConfig.for_judge()
-        self.client = self.llm_config.client
+        self.client = self.llm_config._client
         self.model = self.llm_config.model
 
     async def judge_answer(
@@ -321,7 +321,7 @@ class BenchmarkRunner:
         if self.answer_generator.needs_external_search():
             # Traditional flow: search then generate
             # Search both 'world' and 'agent' fact types in parallel
-            results, _ = await self.memory.search_async(
+            search_result = await self.memory.search_async(
                 agent_id=agent_id,
                 query=question,
                 thinking_budget=thinking_budget,
@@ -329,6 +329,9 @@ class BenchmarkRunner:
                 fact_type=["world", "agent"],
                 question_date=question_date
             )
+
+            # Convert MemoryFact objects to dictionaries for compatibility
+            results = [fact.model_dump() for fact in search_result.results]
 
             if not results:
                 return "I don't have enough information to answer that question.", "No relevant memories found.", []
@@ -416,9 +419,9 @@ class BenchmarkRunner:
                             'error': None
                         }
                     except Exception as e:
-                        logging.exception(e)
+                        logging.exception(f"Failed to answer question: {question[:100]}")
                         # Mark as invalid if answer generation failed
-                        console.print(f"      [red]✗[/red] Failed to answer question: {str(e)[:100]}")
+                        console.print(f"      [red]✗[/red] Failed to answer question: {question[:50]}... Error: {str(e)[:100]}")
                         return {
                             'question': question,
                             'correct_answer': correct_answer,
@@ -489,7 +492,8 @@ class BenchmarkRunner:
                     return result
                 except Exception as e:
                     # Mark as invalid if judging failed
-                    console.print(f"      [red]✗[/red] Failed to judge answer: {str(e)[:100]}")
+                    logging.exception(f"Failed to judge answer for question: {result.get('question', 'unknown')[:100]}")
+                    console.print(f"      [red]✗[/red] Failed to judge answer: {result.get('question', '')[:50]}... Error: {str(e)[:100]}")
                     result['is_invalid'] = True
                     result['is_correct'] = None
                     result['correctness_reasoning'] = f"Judge error: {str(e)}"
@@ -648,6 +652,7 @@ class BenchmarkRunner:
         specific_item: Optional[str] = None,
         separate_ingestion_phase: bool = False,
         filln: bool = False,
+        max_concurrent_items: int = 1,  # Max concurrent items (conversations) to process in parallel
     ) -> Dict[str, Any]:
         """
         Run the full benchmark evaluation.
@@ -666,6 +671,7 @@ class BenchmarkRunner:
             specific_item: If provided, only run this specific item ID (e.g., conversation)
             separate_ingestion_phase: If True, ingest all data first, then evaluate all questions (single agent)
             filln: If True, only process items where the agent has no indexed data yet
+            max_concurrent_items: Max concurrent items to process in parallel (requires clear_agent_per_item=True)
 
         Returns:
             Dict with complete benchmark results
@@ -704,7 +710,7 @@ class BenchmarkRunner:
                 items, agent_id, thinking_budget, max_tokens,
                 skip_ingestion, max_questions_per_item,
                 max_concurrent_questions, eval_semaphore_size,
-                clear_agent_per_item, filln
+                clear_agent_per_item, filln, max_concurrent_items
             )
 
     async def _run_single_phase(
@@ -719,12 +725,60 @@ class BenchmarkRunner:
         eval_semaphore_size: int,
         clear_agent_per_item: bool,
         filln: bool = False,
+        max_concurrent_items: int = 1,
     ) -> Dict[str, Any]:
         """Original single-phase approach: process each item independently."""
         # Create semaphore for question processing
         question_semaphore = asyncio.Semaphore(max_concurrent_questions)
 
-        # Process items
+        # Process items - either in parallel or sequentially
+        if max_concurrent_items > 1 and clear_agent_per_item:
+            # Parallel item processing (requires unique agent IDs)
+            all_results = await self._process_items_parallel(
+                items, agent_id, thinking_budget, max_tokens,
+                skip_ingestion, max_questions_per_item, question_semaphore,
+                eval_semaphore_size, filln, max_concurrent_items
+            )
+        else:
+            # Sequential item processing (original behavior)
+            all_results = await self._process_items_sequential(
+                items, agent_id, thinking_budget, max_tokens,
+                skip_ingestion, max_questions_per_item, question_semaphore,
+                eval_semaphore_size, clear_agent_per_item, filln
+            )
+
+        # Calculate overall metrics
+        total_correct = sum(r['metrics']['correct'] for r in all_results)
+        total_questions = sum(r['metrics']['total'] for r in all_results)
+        total_invalid = sum(r['metrics'].get('invalid', 0) for r in all_results)
+        total_valid = total_questions - total_invalid
+        # Calculate accuracy excluding invalid questions
+        overall_accuracy = (total_correct / total_valid * 100) if total_valid > 0 else 0
+
+        return {
+            'overall_accuracy': overall_accuracy,
+            'total_correct': total_correct,
+            'total_questions': total_questions,
+            'total_invalid': total_invalid,
+            'total_valid': total_valid,
+            'num_items': len(items),
+            'item_results': all_results
+        }
+
+    async def _process_items_sequential(
+        self,
+        items: List[Dict[str, Any]],
+        agent_id: str,
+        thinking_budget: int,
+        max_tokens: int,
+        skip_ingestion: bool,
+        max_questions_per_item: Optional[int],
+        question_semaphore: asyncio.Semaphore,
+        eval_semaphore_size: int,
+        clear_agent_per_item: bool,
+        filln: bool,
+    ) -> List[Dict]:
+        """Process items sequentially (original behavior)."""
         all_results = []
 
         for i, item in enumerate(items, 1):
@@ -756,23 +810,58 @@ class BenchmarkRunner:
             )
             all_results.append(result)
 
-        # Calculate overall metrics
-        total_correct = sum(r['metrics']['correct'] for r in all_results)
-        total_questions = sum(r['metrics']['total'] for r in all_results)
-        total_invalid = sum(r['metrics'].get('invalid', 0) for r in all_results)
-        total_valid = total_questions - total_invalid
-        # Calculate accuracy excluding invalid questions
-        overall_accuracy = (total_correct / total_valid * 100) if total_valid > 0 else 0
+        return all_results
 
-        return {
-            'overall_accuracy': overall_accuracy,
-            'total_correct': total_correct,
-            'total_questions': total_questions,
-            'total_invalid': total_invalid,
-            'total_valid': total_valid,
-            'num_items': len(items),
-            'item_results': all_results
-        }
+    async def _process_items_parallel(
+        self,
+        items: List[Dict[str, Any]],
+        agent_id: str,
+        thinking_budget: int,
+        max_tokens: int,
+        skip_ingestion: bool,
+        max_questions_per_item: Optional[int],
+        question_semaphore: asyncio.Semaphore,
+        eval_semaphore_size: int,
+        filln: bool,
+        max_concurrent_items: int,
+    ) -> List[Dict]:
+        """Process items in parallel (requires unique agent IDs per item)."""
+        # Create semaphore for item-level parallelism
+        item_semaphore = asyncio.Semaphore(max_concurrent_items)
+
+        async def process_item_wrapper(i: int, item: Dict) -> Optional[Dict]:
+            """Wrapper to process a single item with semaphore control."""
+            async with item_semaphore:
+                item_id = self.dataset.get_item_id(item)
+                item_agent_id = f"{agent_id}_{item_id}"
+
+                # Check if we should skip this item (filln mode)
+                if filln:
+                    has_data = await self._agent_has_data(item_agent_id)
+                    if has_data:
+                        console.print(f"\n[bold blue]Item {i}/{len(items)}[/bold blue] (ID: {item_id})")
+                        console.print(f"  [yellow]⊘[/yellow] Skipping - agent '{item_agent_id}' already has indexed data")
+                        return None
+
+                # Process the item
+                result = await self.process_single_item(
+                    item, item_agent_id, i, len(items),
+                    thinking_budget, max_tokens, max_questions_per_item,
+                    skip_ingestion, question_semaphore, eval_semaphore_size,
+                    clear_this_agent=True,  # Always clear for parallel processing
+                )
+                return result
+
+        # Create all tasks
+        tasks = [process_item_wrapper(i, item) for i, item in enumerate(items, 1)]
+
+        # Run in parallel and collect results
+        results = await asyncio.gather(*tasks)
+
+        # Filter out None results (skipped items)
+        all_results = [r for r in results if r is not None]
+
+        return all_results
 
     async def _run_two_phase(
         self,

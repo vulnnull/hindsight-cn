@@ -141,7 +141,7 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
     def __init__(self):
         """Initialize with LLM configuration for memory operations."""
         self.llm_config = LLMConfig.for_memory()
-        self.client = self.llm_config.client
+        self.client = self.llm_config._client
         self.model = self.llm_config.model
 
     async def generate_answer(

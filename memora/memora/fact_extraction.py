@@ -4,6 +4,7 @@ Fact extraction from text using LLM.
 Extracts semantic facts, entities, and temporal information from text.
 Uses the LLMConfig wrapper for all LLM calls.
 """
+import logging
 import os
 import json
 import re
@@ -12,7 +13,7 @@ from datetime import datetime
 from typing import List, Dict, Optional, Literal
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
-from .llm_wrapper import OutputTooLongError
+from .llm_wrapper import OutputTooLongError, LLMConfig
 
 
 class Entity(BaseModel):
@@ -31,7 +32,7 @@ class ExtractedFact(BaseModel):
         description="Absolute date/time when this fact occurred in ISO format (YYYY-MM-DDTHH:MM:SSZ). If text mentions relative time (yesterday, last week, this morning), calculate absolute date from the provided context date."
     )
     fact_type: Literal["world", "agent", "opinion"] = Field(
-        description="Type of fact: 'world' for general facts about the world (events, people, things that happen), 'agent' for facts about what the AI agent specifically did or actions the agent took (conversations with the user, tasks performed by the agent), 'opinion' for the agent's formed opinions and perspectives"
+        description="Type of fact: 'world' for general facts about the world (events, people, things others said/did), 'agent' for facts about what the memory owner (the person this memory belongs to, often identified as 'you' in context) specifically did, said, experienced, or actions they took - MUST be written in FIRST PERSON ('I did...', 'I said...'), 'opinion' for the memory owner's formed opinions and perspectives - also in first person"
     )
     entities: List[Entity] = Field(
         default_factory=list,
@@ -46,7 +47,7 @@ class FactExtractionResponse(BaseModel):
     )
 
 
-def chunk_text(text: str, max_chars: int = 120000) -> List[str]:
+def chunk_text(text: str, max_chars: int) -> List[str]:
     """
     Split text into chunks at sentence boundaries using LangChain's text splitter.
 
@@ -96,7 +97,8 @@ async def _extract_facts_from_chunk(
     total_chunks: int,
     event_date: datetime,
     context: str,
-    llm_config: 'LLMConfig'
+    llm_config: 'LLMConfig',
+    agent_name: str = None
 ) -> List[Dict[str, str]]:
     """
     Extract facts from a single chunk (internal helper for parallel processing).
@@ -104,11 +106,13 @@ async def _extract_facts_from_chunk(
     # Format event_date for the prompt
     event_date_str = event_date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    agent_context = f"\n- Agent name (memory owner): {agent_name}" if agent_name else ""
+
     prompt = f"""You are extracting comprehensive, narrative facts from conversations for an AI memory system.
 
 ## CONTEXT INFORMATION
 - Current reference date/time: {event_date_str}
-- Context: {context if context else 'no context provided'}
+- Context: {context if context else 'no context provided'}{agent_context}
 
 ## CORE PRINCIPLE: Extract FEWER, MORE COMPREHENSIVE Facts
 
@@ -174,11 +178,34 @@ Only split into separate facts when topics are COMPLETELY UNRELATED:
 - Filler words ("um", "uh", "like")
 - Pure reactions without content ("wow", "cool")
 - Incomplete fragments with no meaning
+- **Structural/procedural statements**: Openings, closings, transitions, housekeeping ("let's get started", "that's all", "moving on")
+- **Meta-commentary about the medium itself**: References to the format/structure rather than content ("welcome to the show", "thanks for listening", "before we begin")
+- **Calls to action unrelated to content**: Requests to subscribe, follow, rate, share, etc.
+- **Generic sign-offs**: "See you next time", "Until later", "That wraps it up"
+- **FOCUS PRINCIPLE**: Extract SUBSTANTIVE CONTENT (ideas, facts, discussions, decisions), NOT FORMAT/STRUCTURE
 
 ## FACT TYPE CLASSIFICATION
-Classify each fact as either 'world' or 'agent':
-- **'world'**: General facts about people, events, conversations (most facts)
-- **'agent'**: Only for AI agent's own actions
+
+Classify each fact as 'world', 'agent', or 'opinion':
+
+- **'world'**: Facts about other people, events, things that happened in the world, what others said/did
+  - Written in third person (use names, "they", etc.)
+- **'agent'**: Facts about what the MEMORY OWNER (the person this memory belongs to) specifically did, said, experienced, or actions they took
+  - The memory owner is typically identified in the context (e.g., "you (Marcus)" means Marcus is the memory owner)
+  - **CRITICAL**: MUST be written in FIRST PERSON using "I", "me", "my" (NOT the person's name)
+  - Examples: "I said I prefer coffee", "I attended the conference", "I completed the project"
+  - ❌ WRONG: "Marcus said he prefers coffee"
+  - ✅ CORRECT: "I said I prefer coffee"
+- **'opinion'**: The memory owner's formed opinions, beliefs, and perspectives about topics
+  - Also written in first person: "I believe...", "I think..."
+
+**CRITICAL**: If the context identifies someone as "you" or specifies whose memory this is, then facts about that person's actions/statements are 'agent' facts written in FIRST PERSON.
+
+**Example**: If context says "podcast between you (Marcus) and Jamie":
+- "I explained my approach to AI safety" → 'agent' (first person, my action)
+- "Jamie asked about neural networks" → 'world' (someone else's action, third person)
+- "Jamie and I discussed transformer architectures" → 'world' (general conversation - could use first person here since it includes both)
+- "I believe interpretability is crucial" → 'opinion' (first person belief)
 
 ## ENTITY EXTRACTION
 Extract ALL important entities (names of people, places, organizations, products, concepts, etc).
@@ -255,7 +282,46 @@ Sarah: Sounds amazing! I'll add it to my itinerary."
 - date: 2023 (if reference is 2024)
 - entities: [{{"text": "Alice"}}, {{"text": "Google"}}, {{"text": "Mountain View"}}, {{"text": "AI team"}}]
 
-### Example 5: When to Split into Multiple Facts
+### Example 5: Agent vs World Facts (CRITICAL FOR CLASSIFICATION)
+**Context:** "Podcast episode between you (Marcus) and Jamie about AI"
+**Input:**
+"Marcus: I've been working on interpretability research for the past year.
+Jamie: That's fascinating! What made you focus on that?
+Marcus: I believe it's crucial for AI safety. Without understanding how models work, we can't trust them.
+Jamie: I agree. Have you published any papers?
+Marcus: Yes, I published a paper on attention visualization in March."
+
+**✅ GOOD CLASSIFICATION:**
+1. "I have been working on interpretability research for the past year because I believe it's crucial for AI safety and think that without understanding how models work, we can't trust them. Jamie found this fascinating and asked about publications. I published a paper on attention visualization in March 2024."
+   - fact_type: "agent" (written in FIRST PERSON - my work and statements)
+   - entities: [{{"text": "Jamie"}}, {{"text": "interpretability research"}}, {{"text": "attention visualization"}}]
+   - NOTE: Uses "I" not "Marcus" - first person for agent facts
+
+2. "Jamie agrees that understanding how AI models work is crucial for trust"
+   - fact_type: "world" (Jamie's statement - third person, not the memory owner)
+   - entities: [{{"text": "Jamie"}}]
+
+**❌ BAD CLASSIFICATION:**
+- Using "Marcus has been working..." instead of "I have been working..." for agent facts
+- Marking my actions as 'world' facts
+- Marking Jamie's statements as 'agent' facts
+
+### Example 6: Skipping Structural/Procedural Statements
+**Input (could be podcast, meeting, lecture, etc.):**
+"Marcus: So in my research on AI safety, I've found that interpretability is key.
+Jamie: That's fascinating! Tell us more.
+Marcus: Well, it's all about understanding how models make decisions...
+Marcus: I think that's gonna do it for us today! Don't forget to subscribe and leave a rating. See you next week!"
+
+**✅ GOOD (extract only substantive content):**
+1. "I have found that interpretability is key in my AI safety research because it's all about understanding how models make decisions, and Jamie found this fascinating."
+   - fact_type: "agent"
+   - entities: [{{"text": "Jamie"}}, {{"text": "AI safety"}}, {{"text": "interpretability"}}]
+
+**❌ BAD (extracting procedural/structural statements):**
+- "I think that's gonna do it for us today and I encourage listeners to subscribe and leave a rating" ← This is structural boilerplate about the format, NOT substantive content!
+
+### Example 7: When to Split into Multiple Facts
 **Input:**
 "Caroline said 'This necklace is from my grandma in Sweden. I'm planning to visit Stockholm next month for a tech conference.'"
 
@@ -279,8 +345,12 @@ Sarah: Sounds amazing! I'll add it to my itinerary."
 6. **ONLY SPLIT** when topics are completely unrelated or different time periods
 7. **TRANSFORM RELATIVE DATES** - "last year" → "in 2023" in the fact text
 8. **EXTRACT ALL ENTITIES** - PERSON, ORG, PLACE, PRODUCT, CONCEPT, OTHER
-9. **CLASSIFY FACTS** - 'world' for general facts, 'agent' for AI agent actions
-10. When combining, prefer MORE comprehensive facts over fragmenting"""
+9. **CLASSIFY FACTS CORRECTLY**:
+   - 'agent' = memory owner's actions/statements (identified as "you" in context) - **MUST USE FIRST PERSON** ("I did...", "I said...")
+   - 'world' = other people's actions/statements, general events - use third person
+   - 'opinion' = memory owner's beliefs/perspectives - use first person ("I believe...", "I think...")
+10. **EXTRACT CONTENT, NOT FORMAT** - Skip structural/procedural statements (openings, closings, housekeeping), meta-commentary about the medium, calls to action - extract only SUBSTANTIVE CONTENT (ideas, facts, discussions, decisions)
+11. When combining, prefer MORE comprehensive facts over fragmenting"""
 
     import time
     import logging
@@ -298,7 +368,7 @@ Sarah: Sounds amazing! I'll add it to my itinerary."
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a comprehensive fact extractor that creates narrative, self-contained facts. CRITICAL: Extract 2-5 COMPREHENSIVE facts per conversation, NOT dozens of fragments. COMBINE related exchanges into single narrative facts that tell the complete story. For example, a discussion about playlist names should be ONE fact capturing the entire back-and-forth with all reasoning, not multiple small facts. PRESERVE all context (photos, 'new' things, visual elements, full reasoning), INCLUDE all participants and what they said/did, MAINTAIN narrative flow. ONLY SPLIT into separate facts when topics are completely unrelated or different time periods. Transform relative dates in fact text ('last year' → 'in 2023'). Extract entities (PERSON, ORG, PLACE, PRODUCT, CONCEPT, OTHER). When in doubt, prefer MORE COMPREHENSIVE over fragmenting."
+                        "content": "You are a comprehensive fact extractor that creates narrative, self-contained facts. CRITICAL: Extract 2-5 COMPREHENSIVE facts per conversation, NOT dozens of fragments. COMBINE related exchanges into single narrative facts that tell the complete story. For example, a discussion about playlist names should be ONE fact capturing the entire back-and-forth with all reasoning, not multiple small facts. PRESERVE all context (photos, 'new' things, visual elements, full reasoning), INCLUDE all participants and what they said/did, MAINTAIN narrative flow. ONLY SPLIT into separate facts when topics are completely unrelated or different time periods. Transform relative dates in fact text ('last year' → 'in 2023'). Extract entities (PERSON, ORG, PLACE, PRODUCT, CONCEPT, OTHER). FACT TYPES: Classify as 'world' (facts about others/events - third person), 'agent' (facts about the memory owner's actions/statements - identified as 'you' in context - MUST USE FIRST PERSON 'I did...', 'I said...'), or 'opinion' (memory owner's beliefs - first person 'I believe...'). CRITICAL: If context says 'you (Name)', write Name's actions in FIRST PERSON as 'agent' facts ('I attended...' NOT 'Name attended...'). Extract SUBSTANTIVE CONTENT only - skip structural/procedural statements (openings, closings, housekeeping), meta-commentary about format/medium, and calls to action. Focus on IDEAS, FACTS, DISCUSSIONS, DECISIONS - not structure. When in doubt, prefer MORE COMPREHENSIVE over fragmenting."
                     },
                     {
                         "role": "user",
@@ -334,7 +404,8 @@ async def _extract_facts_with_auto_split(
     total_chunks: int,
     event_date: datetime,
     context: str,
-    llm_config: 'LLMConfig'
+    llm_config: LLMConfig,
+    agent_name: str = None
 ) -> List[Dict[str, str]]:
     """
     Extract facts from a chunk with automatic splitting if output exceeds token limits.
@@ -349,6 +420,7 @@ async def _extract_facts_with_auto_split(
         event_date: Reference date for temporal information
         context: Context about the conversation/document
         llm_config: LLM configuration to use
+        agent_name: Optional agent name (memory owner)
 
     Returns:
         List of fact dictionaries extracted from the chunk (possibly from sub-chunks)
@@ -364,7 +436,8 @@ async def _extract_facts_with_auto_split(
             total_chunks=total_chunks,
             event_date=event_date,
             context=context,
-            llm_config=llm_config
+            llm_config=llm_config,
+            agent_name=agent_name
         )
     except OutputTooLongError as e:
         # Output exceeded token limits - split the chunk in half and retry
@@ -408,7 +481,8 @@ async def _extract_facts_with_auto_split(
                 total_chunks=total_chunks,
                 event_date=event_date,
                 context=context,
-                llm_config=llm_config
+                llm_config=llm_config,
+                agent_name=agent_name
             ),
             _extract_facts_with_auto_split(
                 chunk=second_half,
@@ -416,7 +490,8 @@ async def _extract_facts_with_auto_split(
                 total_chunks=total_chunks,
                 event_date=event_date,
                 context=context,
-                llm_config=llm_config
+                llm_config=llm_config,
+                agent_name=agent_name
             )
         ]
 
@@ -437,9 +512,9 @@ async def _extract_facts_with_auto_split(
 async def extract_facts_from_text(
     text: str,
     event_date: datetime,
+    llm_config: LLMConfig,
+    agent_name: str,
     context: str = "",
-    llm_config: Optional['LLMConfig'] = None,
-    chunk_size: int = 5000
 ) -> List[Dict[str, str]]:
     """
     Extract semantic facts from conversational or narrative text using LLM.
@@ -456,20 +531,13 @@ async def extract_facts_from_text(
         context: Context about the conversation/document
         llm_config: LLM configuration to use (if None, uses default from environment)
         chunk_size: Maximum characters per chunk
+        agent_name: Optional agent name (memory owner)
 
     Returns:
         List of fact dictionaries with 'fact' and 'date' keys
     """
-    from typing import TYPE_CHECKING
-
-    if TYPE_CHECKING:
-        from .llm_wrapper import LLMConfig
-
-    if llm_config is None:
-        from .llm_wrapper import LLMConfig
-        llm_config = LLMConfig.for_memory()
-
-    chunks = chunk_text(text, max_chars=chunk_size)
+    chunks = chunk_text(text, max_chars=50_000)
+    logging.info(f"created {len(chunks)} chunks from text {len(text)}")
     tasks = [
         _extract_facts_with_auto_split(
             chunk=chunk,
@@ -477,7 +545,8 @@ async def extract_facts_from_text(
             total_chunks=len(chunks),
             event_date=event_date,
             context=context,
-            llm_config=llm_config
+            llm_config=llm_config,
+            agent_name=agent_name
         )
         for i, chunk in enumerate(chunks)
     ]

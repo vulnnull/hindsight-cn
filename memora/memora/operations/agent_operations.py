@@ -40,21 +40,21 @@ class AgentOperationsMixin:
 
     async def get_agent_profile(self, agent_id: str) -> Dict:
         """
-        Get agent profile (personality + background).
+        Get agent profile (name, personality + background).
         Auto-creates agent with default values if not exists.
 
         Args:
             agent_id: Agent identifier
 
         Returns:
-            Dict with 'personality' (dict) and 'background' (str) keys
+            Dict with 'name' (str), 'personality' (dict) and 'background' (str) keys
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             # Try to get existing agent
             row = await conn.fetchrow(
                 """
-                SELECT personality, background
+                SELECT name, personality, background
                 FROM agents
                 WHERE agent_id = $1
                 """,
@@ -68,6 +68,7 @@ class AgentOperationsMixin:
                     personality_data = json.loads(personality_data)
 
                 return {
+                    "name": row["name"],
                     "personality": personality_data,
                     "background": row["background"]
                 }
@@ -75,16 +76,18 @@ class AgentOperationsMixin:
             # Agent doesn't exist, create with defaults
             await conn.execute(
                 """
-                INSERT INTO agents (agent_id, personality, background)
-                VALUES ($1, $2::jsonb, $3)
+                INSERT INTO agents (agent_id, name, personality, background)
+                VALUES ($1, $2, $3::jsonb, $4)
                 ON CONFLICT (agent_id) DO NOTHING
                 """,
                 agent_id,
+                agent_id,  # Default name is the agent_id
                 json.dumps(DEFAULT_PERSONALITY),
                 ""
             )
 
             return {
+                "name": agent_id,
                 "personality": DEFAULT_PERSONALITY.copy(),
                 "background": ""
             }
@@ -385,13 +388,13 @@ Merged background:"""
         List all agents in the system.
 
         Returns:
-            List of dicts with agent_id, personality, background, created_at, updated_at
+            List of dicts with agent_id, name, personality, background, created_at, updated_at
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT agent_id, personality, background, created_at, updated_at
+                SELECT agent_id, name, personality, background, created_at, updated_at
                 FROM agents
                 ORDER BY updated_at DESC
                 """
@@ -406,6 +409,7 @@ Merged background:"""
 
                 result.append({
                     "agent_id": row["agent_id"],
+                    "name": row["name"],
                     "personality": personality_data,
                     "background": row["background"],
                     "created_at": row["created_at"].isoformat() if row["created_at"] else None,

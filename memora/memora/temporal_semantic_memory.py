@@ -720,6 +720,10 @@ class TemporalSemanticMemory(
             log_buffer.append(f"Batch size: {len(contents)} content items, {total_chars:,} chars")
             log_buffer.append(f"{'='*60}")
 
+            # Get agent name for fact extraction
+            profile = await self.get_agent_profile(agent_id)
+            agent_name = profile["name"]
+
             # Step 1: Extract facts from ALL contents in parallel
             step_start = time.time()
 
@@ -730,7 +734,7 @@ class TemporalSemanticMemory(
                 context = item.get("context", "")
                 event_date = item.get("event_date") or utcnow()
 
-                task = extract_facts(content, event_date, context, llm_config=self._llm_config)
+                task = extract_facts(content, event_date, context, llm_config=self._llm_config, agent_name=agent_name)
                 fact_extraction_tasks.append((task, event_date, context))
 
             # Wait for all fact extractions to complete

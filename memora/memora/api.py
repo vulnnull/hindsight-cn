@@ -280,6 +280,7 @@ class PersonalityTraits(BaseModel):
 class AgentProfileResponse(BaseModel):
     """Response model for agent profile."""
     agent_id: str
+    name: str
     personality: PersonalityTraits
     background: str
 
@@ -287,6 +288,7 @@ class AgentProfileResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "agent_id": "user123",
+                "name": "Alice",
                 "personality": {
                     "openness": 0.8,
                     "conscientiousness": 0.6,
@@ -346,6 +348,7 @@ class BackgroundResponse(BaseModel):
 class AgentListItem(BaseModel):
     """Agent list item with profile summary."""
     agent_id: str
+    name: str
     personality: PersonalityTraits
     background: str
     created_at: Optional[str] = None
@@ -362,6 +365,7 @@ class AgentListResponse(BaseModel):
                 "agents": [
                     {
                         "agent_id": "user123",
+                        "name": "Alice",
                         "personality": {
                             "openness": 0.5,
                             "conscientiousness": 0.5,
@@ -381,12 +385,14 @@ class AgentListResponse(BaseModel):
 
 class CreateAgentRequest(BaseModel):
     """Request model for creating/updating an agent."""
+    name: Optional[str] = None
     personality: Optional[PersonalityTraits] = None
     background: Optional[str] = None
 
     class Config:
         json_schema_extra = {
             "example": {
+                "name": "Alice",
                 "personality": {
                     "openness": 0.8,
                     "conscientiousness": 0.6,
@@ -835,6 +841,30 @@ def _register_routes(app: FastAPI):
                     agent_id
                 )
 
+                # Get link counts by fact_type (from nodes)
+                link_fact_type_stats = await conn.fetch(
+                    """
+                    SELECT mu.fact_type, COUNT(*) as count
+                    FROM memory_links ml
+                    JOIN memory_units mu ON ml.from_unit_id = mu.id
+                    WHERE mu.agent_id = $1
+                    GROUP BY mu.fact_type
+                    """,
+                    agent_id
+                )
+
+                # Get link counts by fact_type AND link_type
+                link_breakdown_stats = await conn.fetch(
+                    """
+                    SELECT mu.fact_type, ml.link_type, COUNT(*) as count
+                    FROM memory_links ml
+                    JOIN memory_units mu ON ml.from_unit_id = mu.id
+                    WHERE mu.agent_id = $1
+                    GROUP BY mu.fact_type, ml.link_type
+                    """,
+                    agent_id
+                )
+
                 # Get pending and failed operations counts
                 ops_stats = await conn.fetch(
                     """
@@ -863,6 +893,17 @@ def _register_routes(app: FastAPI):
                 # Format results
                 nodes_by_type = {row['fact_type']: row['count'] for row in node_stats}
                 links_by_type = {row['link_type']: row['count'] for row in link_stats}
+                links_by_fact_type = {row['fact_type']: row['count'] for row in link_fact_type_stats}
+
+                # Build detailed breakdown: {fact_type: {link_type: count}}
+                links_breakdown = {}
+                for row in link_breakdown_stats:
+                    fact_type = row['fact_type']
+                    link_type = row['link_type']
+                    count = row['count']
+                    if fact_type not in links_breakdown:
+                        links_breakdown[fact_type] = {}
+                    links_breakdown[fact_type][link_type] = count
 
                 total_nodes = sum(nodes_by_type.values())
                 total_links = sum(links_by_type.values())
@@ -872,8 +913,10 @@ def _register_routes(app: FastAPI):
                     "total_nodes": total_nodes,
                     "total_links": total_links,
                     "total_documents": total_documents,
-                    "nodes_by_type": nodes_by_type,
-                    "links_by_type": links_by_type,
+                    "nodes_by_fact_type": nodes_by_type,
+                    "links_by_link_type": links_by_type,
+                    "links_by_fact_type": links_by_fact_type,
+                    "links_breakdown": links_breakdown,
                     "pending_operations": pending_operations,
                     "failed_operations": failed_operations
                 }
@@ -944,6 +987,53 @@ def _register_routes(app: FastAPI):
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
             return document
+        except HTTPException:
+            raise
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/v1/agents/{agent_id}/documents/{document_id}: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    @app.delete(
+        "/api/v1/agents/{agent_id}/documents/{document_id}",
+        tags=["Documents"],
+        summary="Delete a document",
+        description="""
+Delete a document and all its associated memory units and links.
+
+This will cascade delete:
+- The document itself
+- All memory units extracted from this document
+- All links (temporal, semantic, entity) associated with those memory units
+
+This operation cannot be undone.
+        """
+    )
+    async def api_delete_document(
+        agent_id: str,
+        document_id: str
+    ):
+        """
+        Delete a document and all its associated memory units and links.
+
+        Args:
+            agent_id: Agent ID (from path)
+            document_id: Document ID to delete (from path)
+        """
+        try:
+            result = await app.state.memory.delete_document(document_id, agent_id)
+
+            if result["document_deleted"] == 0:
+                raise HTTPException(status_code=404, detail="Document not found")
+
+            return {
+                "success": True,
+                "message": f"Document '{document_id}' and {result['memory_units_deleted']} associated memory units deleted successfully",
+                "document_id": document_id,
+                "memory_units_deleted": result["memory_units_deleted"]
+            }
         except HTTPException:
             raise
         except Exception as e:
@@ -1228,6 +1318,7 @@ def _register_routes(app: FastAPI):
             profile = await app.state.memory.get_agent_profile(agent_id)
             return AgentProfileResponse(
                 agent_id=agent_id,
+                name=profile["name"],
                 personality=PersonalityTraits(**profile["personality"]),
                 background=profile["background"]
             )
@@ -1261,6 +1352,7 @@ def _register_routes(app: FastAPI):
             profile = await app.state.memory.get_agent_profile(agent_id)
             return AgentProfileResponse(
                 agent_id=agent_id,
+                name=profile["name"],
                 personality=PersonalityTraits(**profile["personality"]),
                 background=profile["background"]
             )
@@ -1318,6 +1410,22 @@ def _register_routes(app: FastAPI):
             # Get existing profile or create with defaults
             profile = await app.state.memory.get_agent_profile(agent_id)
 
+            # Update name if provided
+            if request.name is not None:
+                pool = await app.state.memory._get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE agents
+                        SET name = $2,
+                            updated_at = NOW()
+                        WHERE agent_id = $1
+                        """,
+                        agent_id,
+                        request.name
+                    )
+                profile["name"] = request.name
+
             # Update personality if provided
             if request.personality is not None:
                 await app.state.memory.update_agent_personality(
@@ -1346,6 +1454,7 @@ def _register_routes(app: FastAPI):
             final_profile = await app.state.memory.get_agent_profile(agent_id)
             return AgentProfileResponse(
                 agent_id=agent_id,
+                name=final_profile["name"],
                 personality=PersonalityTraits(**final_profile["personality"]),
                 background=final_profile["background"]
             )

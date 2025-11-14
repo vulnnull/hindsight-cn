@@ -39,10 +39,12 @@ class LoComoDataset(BenchmarkDataset):
 
     def prepare_sessions_for_ingestion(self, item: Dict) -> List[Dict[str, Any]]:
         """
-        Prepare LoComo conversation sessions for batch ingestion.
+        Prepare LoComo conversation for batch ingestion.
+
+        Combines all sessions into a single conversation item instead of separate sessions.
 
         Returns:
-            List of session dicts with 'content', 'context', 'event_date'
+            List with single conversation dict containing 'content', 'context', 'event_date'
         """
         conv = item['conversation']
         speaker_a = conv['speaker_a']
@@ -51,13 +53,22 @@ class LoComoDataset(BenchmarkDataset):
         # Get all session keys sorted
         session_keys = sorted([k for k in conv.keys() if k.startswith('session_') and not k.endswith('_date_time')])
 
-        batch_contents = []
+        all_conversation_parts = []
+        first_session_date = None
 
         for session_key in session_keys:
             if session_key not in conv or not isinstance(conv[session_key], list):
                 continue
 
             session_data = conv[session_key]
+
+            # Get session date
+            date_key = f"{session_key}_date_time"
+            session_date = self._parse_date(conv.get(date_key, "n/a"))
+
+            # Store first session date
+            if first_session_date is None:
+                first_session_date = session_date
 
             # Build session content from all turns
             session_parts = []
@@ -66,24 +77,22 @@ class LoComoDataset(BenchmarkDataset):
                 text = turn['text']
                 session_parts.append(f"{speaker}: {text}")
 
-            if not session_parts:
-                continue
+            if session_parts:
+                all_conversation_parts.append("\n".join(session_parts))
 
-            # Get session date
-            date_key = f"{session_key}_date_time"
-            session_date = self._parse_date(conv.get(date_key, "1:00 pm on 1 January, 2023"))
+        if not all_conversation_parts:
+            return []
 
-            # Add to batch
-            session_content = "\n".join(session_parts)
-            document_id = f"{item['sample_id']}_{session_key}"
-            batch_contents.append({
-                "content": session_content,
-                "context": f"Conversation session between {speaker_a} and {speaker_b} (conversation {item['sample_id']} session {session_key})",
-                "event_date": session_date,
-                "document_id": document_id
-            })
+        # Combine all sessions into a single conversation
+        conversation_content = "\n\n".join(all_conversation_parts)
+        document_id = item['sample_id']
 
-        return batch_contents
+        return [{
+            "content": conversation_content,
+            "context": f"Conversation between {speaker_a} and {speaker_b} (conversation {item['sample_id']})",
+            "event_date": first_session_date or datetime.now(timezone.utc),
+            "document_id": document_id
+        }]
 
     def get_qa_pairs(self, item: Dict) -> List[Dict[str, Any]]:
         """
@@ -116,7 +125,7 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
     def __init__(self):
         """Initialize with LLM configuration for memory operations."""
         self.llm_config = LLMConfig.for_memory()
-        self.client = self.llm_config.client
+        self.client = self.llm_config._client
         self.model = self.llm_config.model
 
     async def generate_answer(
@@ -266,10 +275,10 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
             )
 
             # Extract answer and reasoning
-            answer = result.get('text', '')
+            answer = result.text
 
             # Extract memories from based_on
-            based_on = result.get('based_on', {})
+            based_on = result.based_on
             world_facts = based_on.get('world', [])
             agent_facts = based_on.get('agent', [])
             opinion_facts = based_on.get('opinion', [])
@@ -279,37 +288,12 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
 
             # Add world facts
             for fact in world_facts:
-                retrieved_memories.append({
-                    'id': fact.get('id'),
-                    'text': fact.get('text'),
-                    'context': fact.get('context'),
-                    'event_date': fact.get('event_date'),
-                    'score': fact.get('score', 0.0),
-                    'fact_type': 'world'
-                })
+                retrieved_memories.append(fact.model_dump())
 
-            # Add agent facts
             for fact in agent_facts:
-                retrieved_memories.append({
-                    'id': fact.get('id'),
-                    'text': fact.get('text'),
-                    'context': fact.get('context'),
-                    'event_date': fact.get('event_date'),
-                    'score': fact.get('score', 0.0),
-                    'fact_type': 'agent'
-                })
-
-            # Add opinion facts
+                retrieved_memories.append(fact.model_dump())
             for fact in opinion_facts:
-                retrieved_memories.append({
-                    'id': fact.get('id'),
-                    'text': fact.get('text'),
-                    'context': fact.get('context'),
-                    'event_date': fact.get('event_date'),
-                    'score': fact.get('score', 0.0),
-                    'fact_type': 'opinion'
-                })
-
+                retrieved_memories.append(fact.model_dump())
             # Build reasoning summary
             num_world = len(world_facts)
             num_agent = len(agent_facts)
@@ -328,7 +312,9 @@ async def run_benchmark(
     skip_ingestion: bool = False,
     use_think: bool = False,
     conversation: str = None,
-    api_url: str = None
+    api_url: str = None,
+    only_failed: bool = False,
+    only_invalid: bool = False
 ):
     """
     Run the LoComo benchmark.
@@ -340,7 +326,48 @@ async def run_benchmark(
         use_think: Whether to use the think API instead of search + LLM
         conversation: Specific conversation ID to run (e.g., "conv-26")
         api_url: Optional API URL to connect to (default: use local memory)
+        only_failed: If True, only run conversations that have failed questions (is_correct=False)
+        only_invalid: If True, only run conversations that have invalid questions (is_invalid=True)
     """
+    from rich.console import Console
+    console = Console()
+
+    # Load previous results if filtering for failed/invalid conversations
+    failed_conversation_ids = set()
+    invalid_conversation_ids = set()
+    if only_failed or only_invalid:
+        suffix = "_think" if use_think else ""
+        results_filename = f'benchmark_results{suffix}.json'
+        results_path = Path(__file__).parent / 'results' / results_filename
+
+        if not results_path.exists():
+            console.print(f"[red]Error: Cannot use --only-failed or --only-invalid without existing results file[/red]")
+            console.print(f"[yellow]Results file not found: {results_path}[/yellow]")
+            return
+
+        with open(results_path, 'r') as f:
+            previous_results = json.load(f)
+
+        # Extract conversation IDs that have failed or invalid questions
+        for item_result in previous_results.get('item_results', []):
+            item_id = item_result['item_id']
+            for detail in item_result['metrics'].get('detailed_results', []):
+                if only_failed and detail.get('is_correct') == False and not detail.get('is_invalid', False):
+                    failed_conversation_ids.add(item_id)
+                if only_invalid and detail.get('is_invalid', False):
+                    invalid_conversation_ids.add(item_id)
+
+        if only_failed:
+            console.print(f"[cyan]Filtering to {len(failed_conversation_ids)} conversations with failed questions (is_correct=False)[/cyan]")
+        if only_invalid:
+            console.print(f"[cyan]Filtering to {len(invalid_conversation_ids)} conversations with invalid questions (is_invalid=True)[/cyan]")
+
+        target_ids = failed_conversation_ids if only_failed else invalid_conversation_ids
+        if not target_ids:
+            filter_type = "failed" if only_failed else "invalid"
+            console.print(f"[yellow]No conversations with {filter_type} questions found in previous results. Nothing to run.[/yellow]")
+            return
+
     # Initialize components
     dataset = LoComoDataset()
 
@@ -383,8 +410,25 @@ async def run_benchmark(
         memory=memory
     )
 
-    # Run benchmark
+    # Filter dataset if using --only-failed or --only-invalid
     dataset_path = Path(__file__).parent / 'datasets' / 'locomo10.json'
+
+    if only_failed or only_invalid:
+        # Load and filter dataset
+        target_ids = failed_conversation_ids if only_failed else invalid_conversation_ids
+        original_items = dataset.load(dataset_path, max_conversations)
+        filtered_items = [item for item in original_items if dataset.get_item_id(item) in target_ids]
+        console.print(f"[green]Found {len(filtered_items)} conversations to re-evaluate[/green]")
+
+        # Temporarily replace dataset's load method
+        original_load = dataset.load
+        def filtered_load(path: Path, max_items: Optional[int] = None):
+            return filtered_items[:max_items] if max_items else filtered_items
+        dataset.load = filtered_load
+
+    # Run benchmark with parallel conversation processing
+    # Each conversation gets its own agent ID (locomo_conv-26, locomo_conv-30, etc.)
+    # This allows conversations to run in parallel (up to max_concurrent_items at a time)
     results = await runner.run(
         dataset_path=dataset_path,
         agent_id="locomo",
@@ -395,7 +439,9 @@ async def run_benchmark(
         skip_ingestion=skip_ingestion,
         max_concurrent_questions=max_concurrent_questions,
         eval_semaphore_size=eval_semaphore_size,
-        specific_item=conversation
+        specific_item=conversation,
+        clear_agent_per_item=True,  # Use unique agent ID per conversation
+        max_concurrent_items=3,  # Process up to 3 conversations in parallel
     )
 
     # Display and save results
@@ -405,8 +451,8 @@ async def run_benchmark(
     suffix = "_think" if use_think else ""
     results_filename = f'benchmark_results{suffix}.json'
 
-    # Merge with existing results if running a specific conversation
-    merge_with_existing = conversation is not None
+    # Merge with existing results if running a specific conversation or using filters
+    merge_with_existing = conversation is not None or only_failed or only_invalid
     runner.save_results(results, Path(__file__).parent / 'results' / results_filename, merge_with_existing=merge_with_existing)
 
     # Generate markdown table
@@ -488,8 +534,14 @@ if __name__ == "__main__":
     parser.add_argument('--use-think', action='store_true', help='Use think API instead of search + LLM')
     parser.add_argument('--conversation', type=str, default=None, help='Run only specific conversation (e.g., "conv-26")')
     parser.add_argument('--api-url', type=str, default=None, help='Memora API URL (default: use local memory, example: http://localhost:8000)')
+    parser.add_argument('--only-failed', action='store_true', help='Only run conversations that have failed questions (is_correct=False). Requires existing results file.')
+    parser.add_argument('--only-invalid', action='store_true', help='Only run conversations that have invalid questions (is_invalid=True). Requires existing results file.')
 
     args = parser.parse_args()
+
+    # Validate that only one of --only-failed or --only-invalid is set
+    if args.only_failed and args.only_invalid:
+        parser.error("Cannot use both --only-failed and --only-invalid at the same time")
 
     results = asyncio.run(run_benchmark(
         max_conversations=args.max_conversations,
@@ -497,5 +549,7 @@ if __name__ == "__main__":
         skip_ingestion=args.skip_ingestion,
         use_think=args.use_think,
         conversation=args.conversation,
-        api_url=args.api_url
+        api_url=args.api_url,
+        only_failed=args.only_failed,
+        only_invalid=args.only_invalid
     ))

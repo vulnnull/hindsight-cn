@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
 
 pub struct ApiError {
@@ -97,7 +98,7 @@ pub struct Agent {
     pub agent_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PersonalityTraits {
     pub openness: f32,
     pub conscientiousness: f32,
@@ -110,6 +111,7 @@ pub struct PersonalityTraits {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentProfile {
     pub agent_id: String,
+    pub name: String,
     pub personality: PersonalityTraits,
     pub background: String,
 }
@@ -137,31 +139,42 @@ pub struct AgentStats {
     pub total_nodes: i32,
     pub total_links: i32,
     pub total_documents: i32,
+    pub nodes_by_fact_type: HashMap<String, i32>,
+    pub links_by_link_type: HashMap<String, i32>,
+    pub links_by_fact_type: HashMap<String, i32>,
+    pub links_breakdown: HashMap<String, HashMap<String, i32>>,
     pub pending_operations: i32,
     pub failed_operations: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Document {
-    pub document_id: String,
+    pub id: String,
     pub agent_id: String,
+    pub content_hash: Option<String>,
     pub created_at: String,
-    pub num_units: i32,
+    pub updated_at: String,
+    pub text_length: i32,
+    pub memory_unit_count: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DocumentDetails {
-    pub document_id: String,
+    pub id: String,
     pub agent_id: String,
-    pub text: String,
+    pub original_text: String,
+    pub content_hash: Option<String>,
     pub created_at: String,
-    pub num_units: i32,
+    pub updated_at: String,
+    pub memory_unit_count: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DocumentsResponse {
-    pub documents: Vec<Document>,
+    pub items: Vec<Document>,
     pub total: i32,
+    pub limit: i32,
+    pub offset: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -704,6 +717,42 @@ impl ApiClient {
 
     pub fn delete_memory(&self, agent_id: &str, unit_id: &str, verbose: bool) -> Result<DeleteResponse> {
         let url = format!("{}/api/v1/agents/{}/memories/{}", self.base_url, agent_id, unit_id);
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+        }
+
+        let response = self
+            .client
+            .delete(&url)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: DeleteResponse = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn delete_document(&self, agent_id: &str, document_id: &str, verbose: bool) -> Result<DeleteResponse> {
+        let url = format!("{}/api/v1/agents/{}/documents/{}", self.base_url, agent_id, document_id);
 
         if verbose {
             eprintln!("Request URL: {}", url);

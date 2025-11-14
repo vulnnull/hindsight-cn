@@ -110,8 +110,9 @@ class ThinkOperationsMixin:
 
         logger.info(f"[THINK] Formatted facts - agent: {len(agent_facts_text)} chars, world: {len(world_facts_text)} chars, opinion: {len(opinion_facts_text)} chars")
 
-        # Step 4.5: Get agent profile (personality + background)
+        # Step 4.5: Get agent profile (name, personality + background)
         profile = await self.get_agent_profile(agent_id)
+        name = profile["name"]
         personality = profile["personality"]
         background = profile["background"]
 
@@ -137,6 +138,11 @@ class ThinkOperationsMixin:
 - {describe_trait('emotional sensitivity', personality['neuroticism'])}
 
 Personality influence strength: {int(personality['bias_strength'] * 100)}% (how much your personality shapes your opinions)"""
+
+        name_section = f"""
+
+Your name: {name}
+"""
 
         background_section = ""
         if background:
@@ -167,11 +173,11 @@ WHAT I KNOW ABOUT THE WORLD:
 MY EXISTING OPINIONS & BELIEFS:
 {opinion_facts_text}
 
-{context_section}{personality_desc}{background_section}
+{context_section}{name_section}{personality_desc}{background_section}
 
 QUESTION: {query}
 
-Based on everything I know, believe, and who I am (including my personality and background), here's what I genuinely think about this question. I'll draw on my experiences, knowledge, opinions, and personal traits to give you my honest perspective."""
+Based on everything I know, believe, and who I am (including my name, personality and background), here's what I genuinely think about this question. I'll draw on my experiences, knowledge, opinions, and personal traits to give you my honest perspective."""
 
         logger.info(f"[THINK] Full prompt length: {len(prompt)} chars")
         logger.debug(f"[THINK] Prompt preview (first 500 chars): {prompt[:500]}")

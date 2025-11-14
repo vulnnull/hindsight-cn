@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from .fact_extraction import extract_facts_from_text
 
 
-async def extract_facts(text: str, event_date: datetime, context: str = "", llm_config: 'LLMConfig' = None) -> List[Dict[str, str]]:
+async def extract_facts(text: str, event_date: datetime, context: str = "", llm_config: 'LLMConfig' = None, agent_name: str = None) -> List[Dict[str, str]]:
     """
     Extract semantic facts from text using LLM.
 
@@ -26,6 +26,7 @@ async def extract_facts(text: str, event_date: datetime, context: str = "", llm_
         event_date: Reference date for resolving relative times
         context: Context about the conversation/document
         llm_config: LLM configuration to use
+        agent_name: Optional agent name to help identify agent-related facts
 
     Returns:
         List of fact dictionaries with keys: 'fact' (text) and 'date' (ISO string)
@@ -36,7 +37,7 @@ async def extract_facts(text: str, event_date: datetime, context: str = "", llm_
     if not text or not text.strip():
         return []
 
-    fact_dicts = await extract_facts_from_text(text, event_date, context, llm_config=llm_config)
+    fact_dicts = await extract_facts_from_text(text, event_date, context=context, llm_config=llm_config, agent_name=agent_name)
 
     if not fact_dicts:
         logging.warning(f"LLM extracted 0 facts from text of length {len(text)}. This may indicate the text contains no meaningful information, or the LLM failed to extract facts. Full text: {text}")
