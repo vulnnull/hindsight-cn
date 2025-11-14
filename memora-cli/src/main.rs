@@ -83,38 +83,17 @@ enum AgentCommands {
         agent_id: String,
     },
 
-    /// Update agent personality traits
-    SetPersonality {
+    /// Set agent name
+    Name {
         /// Agent ID
         agent_id: String,
 
-        /// Openness to experience (0.0-1.0)
-        #[arg(long)]
-        openness: f32,
-
-        /// Conscientiousness (0.0-1.0)
-        #[arg(long)]
-        conscientiousness: f32,
-
-        /// Extraversion (0.0-1.0)
-        #[arg(long)]
-        extraversion: f32,
-
-        /// Agreeableness (0.0-1.0)
-        #[arg(long)]
-        agreeableness: f32,
-
-        /// Neuroticism (0.0-1.0)
-        #[arg(long)]
-        neuroticism: f32,
-
-        /// Bias strength (0.0-1.0)
-        #[arg(long)]
-        bias_strength: f32,
+        /// Agent name
+        name: String,
     },
 
     /// Set or merge agent background
-    SetBackground {
+    Background {
         /// Agent ID
         agent_id: String,
 
@@ -220,6 +199,20 @@ enum MemoryCommands {
 
         /// Memory unit ID
         unit_id: String,
+    },
+
+    /// Clear all memories for an agent
+    Clear {
+        /// Agent ID
+        agent_id: String,
+
+        /// Fact type to clear (world, agent, opinion). If not specified, clears all types.
+        #[arg(short = 't', long, value_parser = ["world", "agent", "opinion"])]
+        fact_type: Option<String>,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 }
 
@@ -358,21 +351,7 @@ fn run() -> Result<()> {
                 match response {
                     Ok(profile) => {
                         if output_format == OutputFormat::Pretty {
-                            ui::print_info(&format!("Profile for agent '{}'", agent_id));
-                            
-                            let personality = &profile.personality; {
-                                println!("\n  Personality Traits:");
-                                println!("    Openness:          {:.2}", personality.openness);
-                                println!("    Conscientiousness: {:.2}", personality.conscientiousness);
-                                println!("    Extraversion:      {:.2}", personality.extraversion);
-                                println!("    Agreeableness:     {:.2}", personality.agreeableness);
-                                println!("    Neuroticism:       {:.2}", personality.neuroticism);
-                                println!("    Bias Strength:     {:.2}", personality.bias_strength);
-                            }
-                            
-                            if !profile.background.is_empty() {
-                                println!("\n  Background:\n{}", profile.background);
-                            }
+                            ui::print_profile(&profile);
                         } else {
                             output::print_output(&profile, output_format)?;
                         }
@@ -488,30 +467,19 @@ fn run() -> Result<()> {
                 }
             }
 
-            AgentCommands::SetPersonality {
+            AgentCommands::Name {
                 agent_id,
-                openness,
-                conscientiousness,
-                extraversion,
-                agreeableness,
-                neuroticism,
-                bias_strength,
+                name,
             } => {
                 let spinner = if output_format == OutputFormat::Pretty {
-                    Some(ui::create_spinner("Updating personality..."))
+                    Some(ui::create_spinner("Updating agent name..."))
                 } else {
                     None
                 };
 
-
-                let response = client.update_personality(
+                let response = client.update_agent_name(
                     &agent_id,
-                    openness,
-                    conscientiousness,
-                    extraversion,
-                    agreeableness,
-                    neuroticism,
-                    bias_strength,
+                    &name,
                     verbose,
                 );
 
@@ -522,15 +490,7 @@ fn run() -> Result<()> {
                 match response {
                     Ok(profile) => {
                         if output_format == OutputFormat::Pretty {
-                            ui::print_success("Personality updated successfully");
-                            let p = &profile.personality; {
-                                println!("  Openness:          {:.2}", p.openness);
-                                println!("  Conscientiousness: {:.2}", p.conscientiousness);
-                                println!("  Extraversion:      {:.2}", p.extraversion);
-                                println!("  Agreeableness:     {:.2}", p.agreeableness);
-                                println!("  Neuroticism:       {:.2}", p.neuroticism);
-                                println!("  Bias Strength:     {:.2}", p.bias_strength);
-                            }
+                            ui::print_success(&format!("Agent name updated to '{}'", profile.name));
                         } else {
                             output::print_output(&profile, output_format)?;
                         }
@@ -540,7 +500,7 @@ fn run() -> Result<()> {
                 }
             }
 
-            AgentCommands::SetBackground {
+            AgentCommands::Background {
                 agent_id,
                 content,
                 no_update_personality,
@@ -627,7 +587,11 @@ fn run() -> Result<()> {
 
                 match response {
                     Ok(result) => {
-                        output::print_output(&result, output_format)?;
+                        if output_format == OutputFormat::Pretty {
+                            ui::print_search_results(&result, trace);
+                        } else {
+                            output::print_output(&result, output_format)?;
+                        }
                         Ok(())
                     }
                     Err(e) => Err(e)
@@ -660,7 +624,11 @@ fn run() -> Result<()> {
 
                 match response {
                     Ok(result) => {
-                        output::print_output(&result, output_format)?;
+                        if output_format == OutputFormat::Pretty {
+                            ui::print_think_response(&result);
+                        } else {
+                            output::print_output(&result, output_format)?;
+                        }
                         Ok(())
                     }
                     Err(e) => Err(e)
@@ -709,7 +677,8 @@ fn run() -> Result<()> {
                                 println!("  Operation ID: {}", op_id);
                                 println!("  Status: queued for background processing");
                             } else {
-                                println!("  Stored count: {}", result.stored_count.unwrap_or(0));
+                                let count = result.stored_count.or(result.items_count).unwrap_or(0);
+                                println!("  Stored count: {}", count);
                             }
                         } else {
                             output::print_output(&result, output_format)?;
@@ -825,7 +794,8 @@ fn run() -> Result<()> {
                                 println!("  Operation ID: {}", op_id);
                                 println!("  Status: queued for background processing");
                             } else {
-                                println!("  Total units created: {}", result.stored_count.unwrap_or(0));
+                                let count = result.stored_count.or(result.items_count).unwrap_or(0);
+                                println!("  Total units created: {}", count);
                             }
                         } else {
                             output::print_output(&result, output_format)?;
@@ -844,6 +814,64 @@ fn run() -> Result<()> {
                 };
 
                 let response = client.delete_memory(&agent_id, &unit_id, verbose);
+
+                if let Some(sp) = spinner {
+                    sp.finish_and_clear();
+                }
+
+                match response {
+                    Ok(result) => {
+                        if output_format == OutputFormat::Pretty {
+                            if result.success {
+                                ui::print_success(&result.message);
+                            } else {
+                                ui::print_error(&result.message);
+                            }
+                        } else {
+                            output::print_output(&result, output_format)?;
+                        }
+                        Ok(())
+                    }
+                    Err(e) => Err(e)
+                }
+            }
+
+            MemoryCommands::Clear { agent_id, fact_type, yes } => {
+                // Confirmation prompt unless -y flag is used
+                if !yes && output_format == OutputFormat::Pretty {
+                    let message = if let Some(ft) = &fact_type {
+                        format!(
+                            "Are you sure you want to clear all '{}' memories for agent '{}'? This cannot be undone.",
+                            ft, agent_id
+                        )
+                    } else {
+                        format!(
+                            "Are you sure you want to clear ALL memories for agent '{}'? This cannot be undone.",
+                            agent_id
+                        )
+                    };
+
+                    let confirmed = ui::prompt_confirmation(&message)?;
+
+                    if !confirmed {
+                        ui::print_info("Operation cancelled");
+                        return Ok(());
+                    }
+                }
+
+                let spinner_msg = if let Some(ft) = &fact_type {
+                    format!("Clearing {} memories...", ft)
+                } else {
+                    "Clearing all memories...".to_string()
+                };
+
+                let spinner = if output_format == OutputFormat::Pretty {
+                    Some(ui::create_spinner(&spinner_msg))
+                } else {
+                    None
+                };
+
+                let response = client.clear_memories(&agent_id, fact_type.as_deref(), verbose);
 
                 if let Some(sp) = spinner {
                     sp.finish_and_clear();

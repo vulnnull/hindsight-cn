@@ -35,7 +35,7 @@ async def retrieve_semantic(
     """
     results = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding, fact_type,
+        SELECT id, text, context, event_date, access_count, embedding, fact_type, document_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE agent_id = $2
@@ -89,7 +89,7 @@ async def retrieve_bm25(
 
     results = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding, fact_type,
+        SELECT id, text, context, event_date, access_count, embedding, fact_type, document_id,
                ts_rank_cd(search_vector, to_tsquery('english', $1)) AS bm25_score
         FROM memory_units
         WHERE agent_id = $2
@@ -126,7 +126,7 @@ async def retrieve_graph(
     # Find entry points
     entry_points = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding, fact_type,
+        SELECT id, text, context, event_date, access_count, embedding, fact_type, document_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE agent_id = $2
@@ -163,7 +163,7 @@ async def retrieve_graph(
         if budget_remaining > 0:
             neighbors = await conn.fetch(
                 """
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding, mu.fact_type,
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding, mu.fact_type, mu.document_id,
                        ml.weight
                 FROM memory_links ml
                 JOIN memory_units mu ON ml.to_unit_id = mu.id
@@ -228,7 +228,7 @@ async def retrieve_temporal(
     # Find entry points: facts in date range with semantic relevance
     entry_points = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding, fact_type,
+        SELECT id, text, context, event_date, access_count, embedding, fact_type, document_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE agent_id = $2
@@ -277,7 +277,7 @@ async def retrieve_temporal(
         if budget_remaining > 0:
             neighbors = await conn.fetch(
                 """
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding, mu.fact_type,
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding, mu.fact_type, mu.document_id,
                        ml.weight, ml.link_type,
                        1 - (mu.embedding <=> $1::vector) AS similarity
                 FROM memory_links ml

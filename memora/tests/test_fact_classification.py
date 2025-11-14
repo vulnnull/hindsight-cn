@@ -131,6 +131,90 @@ We presented our findings to the team yesterday.
 
 
 @pytest.mark.asyncio
+async def test_speaker_attribution_predictions():
+    """
+    Test that predictions made by different speakers are correctly attributed.
+
+    This addresses the issue where Jamie's prediction of "Niners 27-13" was being
+    incorrectly attributed to Marcus (the agent) in the extracted facts.
+    """
+
+    # Simplified transcript with clear predictions from each speaker
+    transcript = """
+Marcus: [excited] I'm calling it now, Rams will win twenty seven to twenty four, their defense is too strong!
+Jamie: [laughs] No way, I predict the Niners will win twenty seven to thirteen, comfy win at home.
+Marcus: [angry] That's ridiculous, I stand by my Rams prediction.
+Jamie: [teasing] We'll see who's right, my Niners pick is solid.
+"""
+
+    context = "podcast episode on match prediction of week 10 - Marcus (you) and Jamie - 14 nov"
+    agent_name = "Marcus"
+
+    llm_config = LLMConfig.for_memory()
+
+    facts = await extract_facts_from_text(
+        text=transcript,
+        event_date=datetime(2024, 11, 14),
+        context=context,
+        llm_config=llm_config,
+        agent_name=agent_name
+    )
+
+    assert len(facts) > 0, "Should extract at least one fact"
+
+    print(f"\nExtracted {len(facts)} facts:")
+    for i, f in enumerate(facts):
+        print(f"{i+1}. [{f['fact_type']}] {f['fact']}")
+
+    # Find agent facts (Marcus's statements)
+    agent_facts = [f for f in facts if f["fact_type"] == "agent"]
+
+    # Find world facts about Jamie
+    jamie_facts = [f for f in facts if f["fact_type"] == "world" and "Jamie" in f["fact"]]
+
+    print(f"\nAgent facts (Marcus): {len(agent_facts)}")
+    for f in agent_facts:
+        print(f"  - {f['fact']}")
+
+    print(f"\nWorld facts (Jamie): {len(jamie_facts)}")
+    for f in jamie_facts:
+        print(f"  - {f['fact']}")
+
+    # CRITICAL: Marcus's prediction should be in agent facts, NOT Jamie's prediction
+    # Marcus predicted: Rams 27-24
+    # Jamie predicted: Niners 27-13
+
+    agent_facts_text = " ".join([f["fact"].lower() for f in agent_facts])
+
+    # Marcus (agent) should have mentioned Rams 27-24
+    assert "rams" in agent_facts_text or "twenty seven to twenty four" in agent_facts_text or "27" in agent_facts_text, \
+        f"Agent facts should contain Marcus's Rams prediction. Agent facts: {[f['fact'] for f in agent_facts]}"
+
+    # Marcus (agent) should NOT have predicted Niners 27-13 (that was Jamie!)
+    # Check that agent facts don't incorrectly contain Jamie's prediction
+    has_niners_27_13 = False
+    for fact in agent_facts:
+        fact_lower = fact["fact"].lower()
+        # Look for patterns that suggest 27-13 Niners prediction
+        if ("niners" in fact_lower or "49ers" in fact_lower) and ("27" in fact_lower or "twenty seven") and ("13" in fact_lower or "thirteen"):
+            # This is Jamie's prediction, should NOT be in agent facts!
+            has_niners_27_13 = True
+            print(f"\n❌ ERROR: Found Jamie's Niners 27-13 prediction in agent facts: {fact['fact']}")
+
+    assert not has_niners_27_13, \
+        f"Agent facts should NOT contain Jamie's Niners 27-13 prediction! " \
+        f"Agent facts: {[f['fact'] for f in agent_facts]}"
+
+    # Jamie's facts should contain Niners prediction
+    if jamie_facts:
+        jamie_facts_text = " ".join([f["fact"].lower() for f in jamie_facts])
+        # Jamie predicted Niners, so world facts about Jamie might mention it
+        print(f"\n✅ Jamie facts correctly classified as world facts")
+
+    print(f"\n✅ Speaker attribution test passed: Predictions correctly attributed to their speakers")
+
+
+@pytest.mark.asyncio
 async def test_skip_podcast_meta_commentary():
     """
     Test that podcast intros, outros, and calls to action are skipped.

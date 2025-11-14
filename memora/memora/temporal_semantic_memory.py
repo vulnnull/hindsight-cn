@@ -30,7 +30,7 @@ from .operations import EmbeddingOperationsMixin, LinkOperationsMixin, ThinkOper
 from .llm_wrapper import LLMConfig
 from .response_models import SearchResult as SearchResultModel, ThinkResult, MemoryFact
 from .task_backend import TaskBackend, AsyncIOQueueBackend
-from .search.reranking import HeuristicReranker, CrossEncoderReranker
+from .search.reranking import CrossEncoderReranker
 
 
 def utcnow():
@@ -141,8 +141,7 @@ class TemporalSemanticMemory(
         self._llm_client = self._llm_config._client
         self._llm_model = self._llm_config.model
 
-        # Initialize rerankers (cached for performance)
-        self._heuristic_reranker = HeuristicReranker()
+        # Initialize cross-encoder reranker (cached for performance)
         self._cross_encoder_reranker = CrossEncoderReranker(cross_encoder=cross_encoder)
 
         # Initialize task backend
@@ -727,6 +726,9 @@ class TemporalSemanticMemory(
             # Step 1: Extract facts from ALL contents in parallel
             step_start = time.time()
 
+            # If fact_type_override is 'opinion', extract only opinions; otherwise extract world and agent facts
+            extract_opinions = (fact_type_override == 'opinion')
+
             # Create tasks for parallel fact extraction using configured LLM
             fact_extraction_tasks = []
             for item in contents:
@@ -734,7 +736,7 @@ class TemporalSemanticMemory(
                 context = item.get("context", "")
                 event_date = item.get("event_date") or utcnow()
 
-                task = extract_facts(content, event_date, context, llm_config=self._llm_config, agent_name=agent_name)
+                task = extract_facts(content, event_date, context, llm_config=self._llm_config, agent_name=agent_name, extract_opinions=extract_opinions)
                 fact_extraction_tasks.append((task, event_date, context))
 
             # Wait for all fact extractions to complete
@@ -778,6 +780,19 @@ class TemporalSemanticMemory(
 
             if total_facts == 0:
                 return [[] for _ in contents]
+
+            # Step 1.5: Add time offsets to preserve fact ordering within each document
+            # This allows retrieval to distinguish between facts that happened earlier vs later
+            # in the same conversation, even when the base event_date is the same
+            SECONDS_PER_FACT = 10  # Each fact gets 10 seconds offset
+            for start_idx, end_idx in content_boundaries:
+                # For each content item, offset its facts sequentially
+                for i in range(start_idx, end_idx):
+                    fact_position = i - start_idx  # 0, 1, 2, ...
+                    # Add incremental offset to preserve order (facts appear in extraction order)
+                    all_fact_dates[i] = all_fact_dates[i] + timedelta(seconds=fact_position * SECONDS_PER_FACT)
+
+            log_buffer.append(f"[1.5] Added time offsets: {SECONDS_PER_FACT}s per fact to preserve ordering")
 
             # Step 2: Augment fact texts with readable dates for better temporal matching
             # This allows queries like "camping in June" to match facts that happened in June
@@ -1018,7 +1033,6 @@ class TemporalSemanticMemory(
         thinking_budget: int = 50,
         max_tokens: int = 4096,
         enable_trace: bool = False,
-        reranker: str = "heuristic",
     ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
         """
         Search memories using 4-way parallel retrieval (synchronous wrapper).
@@ -1033,14 +1047,13 @@ class TemporalSemanticMemory(
             thinking_budget: How many units to explore (computational budget)
             max_tokens: Maximum tokens to return (counts only 'text' field, default 4096)
             enable_trace: If True, returns detailed SearchTrace object
-            reranker: Reranking strategy - "heuristic" (default) or "cross-encoder"
 
         Returns:
             Tuple of (results, trace)
         """
         # Run async version synchronously
         return asyncio.run(self.search_async(
-            agent_id, query, fact_type, thinking_budget, max_tokens, enable_trace, reranker
+            agent_id, query, fact_type, thinking_budget, max_tokens, enable_trace
         ))
 
     async def search_async(
@@ -1051,7 +1064,6 @@ class TemporalSemanticMemory(
         thinking_budget: int = 50,
         max_tokens: int = 4096,
         enable_trace: bool = False,
-        reranker: str = "cross-encoder",
         question_date: Optional[datetime] = None,
     ) -> SearchResultModel:
         """
@@ -1073,9 +1085,6 @@ class TemporalSemanticMemory(
                        Results are returned until token budget is reached, stopping before
                        including a fact that would exceed the limit
             enable_trace: Whether to return search trace for debugging (deprecated)
-            reranker: Reranking strategy - "heuristic" (default) or "cross-encoder"
-                     - heuristic: 60% semantic + 40% BM25 + normalized boosts (fast)
-                     - cross-encoder: Neural reranking with ms-marco-MiniLM-L-6-v2 (slower but more accurate)
             question_date: Optional date when question was asked (for temporal filtering)
 
         Returns:
@@ -1090,7 +1099,7 @@ class TemporalSemanticMemory(
             for attempt in range(max_retries + 1):
                 try:
                     return await self._search_with_retries(
-                        agent_id, query, fact_type, thinking_budget, max_tokens, enable_trace, reranker, question_date
+                        agent_id, query, fact_type, thinking_budget, max_tokens, enable_trace, question_date
                     )
                 except Exception as e:
                     # Check if it's a connection error
@@ -1120,7 +1129,6 @@ class TemporalSemanticMemory(
         thinking_budget: int,
         max_tokens: int,
         enable_trace: bool,
-        reranker: str,
         question_date: Optional[datetime] = None,
     ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
         """
@@ -1140,7 +1148,6 @@ class TemporalSemanticMemory(
             thinking_budget: Nodes to explore in graph traversal
             max_tokens: Maximum tokens to return (counts only 'text' field)
             enable_trace: Whether to return search trace (deprecated)
-            reranker: Reranking strategy ("heuristic" or "cross-encoder")
 
         Returns:
             (results, trace) tuple where trace is None (tracing removed)
@@ -1324,18 +1331,12 @@ class TemporalSemanticMemory(
 
                 results.append(result_obj)
 
-            # Step 5: Rerank using selected strategy (use cached rerankers)
-            if reranker == "cross-encoder":
-                reranker_instance = self._cross_encoder_reranker
-                log_buffer.append(f"  [4] Using cross-encoder reranker")
-            else:
-                reranker_instance = self._heuristic_reranker
-                log_buffer.append(f"  [4] Using heuristic reranker")
+            # Step 5: Rerank using cross-encoder
+            reranker_instance = self._cross_encoder_reranker
+            log_buffer.append(f"  [4] Using cross-encoder reranker")
 
-            # Rerank more candidates than we need (thinking_budget * 2)
-            # so token filtering has diverse options to choose from
-            rerank_limit = thinking_budget * 2
-            results = reranker_instance.rerank(query, results, rerank_limit)
+            # Rerank using cross-encoder
+            results = reranker_instance.rerank(query, results)
 
             step_duration = time.time() - step_start
             log_buffer.append(f"  [4] Reranking: {len(results)} candidates scored in {step_duration:.3f}s")
@@ -1572,7 +1573,7 @@ class TemporalSemanticMemory(
                     "message": "Memory unit and all its links deleted successfully" if deleted else "Memory unit not found"
                 }
 
-    async def delete_agent(self, agent_id: str) -> Dict[str, int]:
+    async def delete_agent(self, agent_id: str, fact_type: Optional[str] = None) -> Dict[str, int]:
         """
         Delete all data for a specific agent (multi-tenant cleanup).
 
@@ -1580,12 +1581,13 @@ class TemporalSemanticMemory(
         multiple agents to coexist in the same database.
 
         Deletes (with CASCADE):
-        - All memory units for this agent
-        - All entities for this agent
+        - All memory units for this agent (optionally filtered by fact_type)
+        - All entities for this agent (if deleting all memory units)
         - All associated links, unit-entity associations, and co-occurrences
 
         Args:
             agent_id: Agent ID to delete
+            fact_type: Optional fact type filter (world, agent, opinion). If provided, only deletes memories of that type.
 
         Returns:
             Dictionary with counts of deleted items
@@ -1594,20 +1596,38 @@ class TemporalSemanticMemory(
         async with pool.acquire() as conn:
             async with conn.transaction():
                 try:
-                    # Count before deletion for reporting
-                    units_count = await conn.fetchval("SELECT COUNT(*) FROM memory_units WHERE agent_id = $1", agent_id)
-                    entities_count = await conn.fetchval("SELECT COUNT(*) FROM entities WHERE agent_id = $1", agent_id)
+                    if fact_type:
+                        # Delete only memories of a specific fact type
+                        units_count = await conn.fetchval(
+                            "SELECT COUNT(*) FROM memory_units WHERE agent_id = $1 AND fact_type = $2",
+                            agent_id, fact_type
+                        )
+                        await conn.execute(
+                            "DELETE FROM memory_units WHERE agent_id = $1 AND fact_type = $2",
+                            agent_id, fact_type
+                        )
 
-                    # Delete memory units (cascades to unit_entities, memory_links)
-                    await conn.execute("DELETE FROM memory_units WHERE agent_id = $1", agent_id)
+                        # Note: We don't delete entities when fact_type is specified,
+                        # as they may be referenced by other memory units
+                        return {
+                            "memory_units_deleted": units_count,
+                            "entities_deleted": 0
+                        }
+                    else:
+                        # Delete all data for the agent
+                        units_count = await conn.fetchval("SELECT COUNT(*) FROM memory_units WHERE agent_id = $1", agent_id)
+                        entities_count = await conn.fetchval("SELECT COUNT(*) FROM entities WHERE agent_id = $1", agent_id)
 
-                    # Delete entities (cascades to unit_entities, entity_cooccurrences, memory_links with entity_id)
-                    await conn.execute("DELETE FROM entities WHERE agent_id = $1", agent_id)
+                        # Delete memory units (cascades to unit_entities, memory_links)
+                        await conn.execute("DELETE FROM memory_units WHERE agent_id = $1", agent_id)
 
-                    return {
-                        "memory_units_deleted": units_count,
-                        "entities_deleted": entities_count
-                    }
+                        # Delete entities (cascades to unit_entities, entity_cooccurrences, memory_links with entity_id)
+                        await conn.execute("DELETE FROM entities WHERE agent_id = $1", agent_id)
+
+                        return {
+                            "memory_units_deleted": units_count,
+                            "entities_deleted": entities_count
+                        }
 
                 except Exception as e:
                     raise Exception(f"Failed to delete agent data: {str(e)}")

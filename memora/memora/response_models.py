@@ -22,6 +22,7 @@ class MemoryFact(BaseModel):
     fact_type: str = Field(description="Type of fact: 'world', 'agent', or 'opinion'")
     context: Optional[str] = Field(None, description="Additional context for the memory")
     event_date: Optional[str] = Field(None, description="ISO format date when the event occurred")
+    document_id: Optional[str] = Field(None, description="ID of the document this memory belongs to")
 
     # Internal metrics (used by system but may not be exposed in API)
     activation: Optional[float] = Field(None, description="Internal activation score")
@@ -34,6 +35,7 @@ class MemoryFact(BaseModel):
                 "fact_type": "world",
                 "context": "work info",
                 "event_date": "2024-01-15T10:30:00Z",
+                "document_id": "session_abc123",
                 "activation": 0.95
             }
         }

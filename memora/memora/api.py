@@ -11,7 +11,7 @@ from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -25,7 +25,6 @@ class SearchRequest(BaseModel):
     fact_type: Optional[List[str]] = None  # List of fact types to search (defaults to all if not specified)
     thinking_budget: int = 100
     max_tokens: int = 4096
-    reranker: str = "heuristic"
     trace: bool = False
     question_date: Optional[str] = None  # ISO format date string (e.g., "2023-05-30T23:40:00")
 
@@ -36,7 +35,6 @@ class SearchRequest(BaseModel):
                 "fact_type": ["world", "agent"],
                 "thinking_budget": 100,
                 "max_tokens": 4096,
-                "reranker": "heuristic",
                 "trace": True,
                 "question_date": "2023-05-30T23:40:00"
             }
@@ -53,7 +51,8 @@ class SearchResult(BaseModel):
                 "text": "Alice works at Google on the AI team",
                 "type": "world",
                 "context": "work info",
-                "event_date": "2024-01-15T10:30:00Z"
+                "event_date": "2024-01-15T10:30:00Z",
+                "document_id": "session_abc123"
             }
         }
     }
@@ -63,6 +62,7 @@ class SearchResult(BaseModel):
     type: Optional[str] = None  # fact type: world, agent, opinion
     context: Optional[str] = None
     event_date: Optional[str] = None  # ISO format date string
+    document_id: Optional[str] = None  # Document this memory belongs to
 
 
 class SearchResponse(BaseModel):
@@ -510,6 +510,20 @@ class DocumentResponse(BaseModel):
         }
 
 
+class DeleteResponse(BaseModel):
+    """Response model for delete operations."""
+    success: bool
+    message: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "message": "Resource deleted successfully"
+            }
+        }
+
+
 def create_app(memory: TemporalSemanticMemory, run_migrations: bool = True, initialize_memory: bool = True) -> FastAPI:
     """
     Create and configure the FastAPI application.
@@ -707,7 +721,6 @@ def _register_routes(app: FastAPI):
                 thinking_budget=request.thinking_budget,
                 max_tokens=request.max_tokens,
                 enable_trace=request.trace,
-                reranker=request.reranker,
                 fact_type=request.fact_type,
                 question_date=question_date
             )
@@ -1462,4 +1475,38 @@ This operation cannot be undone.
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             print(f"Error in /api/v1/agents/{agent_id}: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    @app.delete(
+        "/api/v1/agents/{agent_id}/memories",
+        response_model=DeleteResponse,
+        tags=["Agent Management"],
+        summary="Clear agent memories",
+        description="Delete memory units for an agent. Optionally filter by fact_type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The agent profile (personality and background) will be preserved."
+    )
+    async def api_clear_agent_memories(
+        agent_id: str,
+        fact_type: Optional[str] = Query(None, description="Optional fact type filter (world, agent, opinion)")
+    ):
+        """Clear memories for an agent, optionally filtered by fact_type."""
+        try:
+            result = await app.state.memory.delete_agent(agent_id, fact_type=fact_type)
+
+            units_deleted = result.get('memory_units_deleted', 0)
+            entities_deleted = result.get('entities_deleted', 0)
+
+            if fact_type:
+                message = f"Cleared {units_deleted} {fact_type} memories for agent '{agent_id}'"
+            else:
+                message = f"Cleared all memories for agent '{agent_id}': {units_deleted} memory units, {entities_deleted} entities deleted"
+
+            return DeleteResponse(
+                success=True,
+                message=message
+            )
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            print(f"Error in /api/v1/agents/{agent_id}/memories: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))

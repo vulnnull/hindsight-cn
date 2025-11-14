@@ -55,6 +55,11 @@ pub fn print_fact(fact: &Fact, show_activation: bool) {
         println!("  {}: {}", "Date".bright_black(), event_date.bright_black());
     }
 
+    // Show document ID if available
+    if let Some(document_id) = &fact.document_id {
+        println!("  {}: {}", "Document".bright_black(), document_id.bright_black());
+    }
+
     println!();
 }
 
@@ -79,23 +84,12 @@ pub fn print_search_results(response: &SearchResponse, show_trace: bool) {
 }
 
 pub fn print_think_response(response: &ThinkResponse) {
-    print_section_header("Answer");
+    println!();
     println!("{}", response.text.bright_white());
     println!();
 
-    // Note: based_on facts are hidden in default output
-    // Use -o json to see the complete response including based_on facts
     if !response.based_on.is_empty() {
-        println!("  {}", format!("(Based on {} facts - use -o json to see details)", response.based_on.len()).bright_black());
-        println!();
-    }
-
-    if !response.new_opinions.is_empty() {
-        print_section_header(&format!("New opinions formed ({})", response.new_opinions.len()));
-        for opinion in &response.new_opinions {
-            println!("  💭 {}", opinion.bright_yellow());
-        }
-        println!();
+        println!("{}", format!("Based on {} memory units", response.based_on.len()).bright_black());
     }
 }
 
@@ -219,155 +213,159 @@ pub fn prompt_confirmation(message: &str) -> io::Result<bool> {
 pub fn print_profile(profile: &AgentProfile) {
     print_section_header(&format!("Agent Profile: {}", profile.agent_id));
 
+    // Print name
+    println!("{} {}", "Name:".bright_cyan().bold(), profile.name.bright_white());
+    println!();
+
+    // Print background if available
+    if !profile.background.is_empty() {
+        println!("{}", "Background:".bright_yellow());
+        for line in profile.background.lines() {
+            println!("{}", line);
+        }
+        println!();
+    }
+
     // Print personality traits
-    println!("  {}", "Personality Traits (Big Five):".bright_cyan().bold());
+    println!("{}", "─── Personality Traits ───".bright_yellow());
     println!();
 
     let traits = [
-        ("Openness", profile.personality.openness, "🔓"),
-        ("Conscientiousness", profile.personality.conscientiousness, "📋"),
-        ("Extraversion", profile.personality.extraversion, "🗣️"),
-        ("Agreeableness", profile.personality.agreeableness, "🤝"),
-        ("Neuroticism", profile.personality.neuroticism, "😰"),
+        ("Openness", profile.personality.openness, "🔓", "green"),
+        ("Conscientiousness", profile.personality.conscientiousness, "📋", "yellow"),
+        ("Extraversion", profile.personality.extraversion, "🗣️", "cyan"),
+        ("Agreeableness", profile.personality.agreeableness, "🤝", "magenta"),
+        ("Neuroticism", profile.personality.neuroticism, "😰", "yellow"),
     ];
 
-    for (name, value, emoji) in &traits {
-        let bar_length = 20;
+    for (name, value, emoji, color) in &traits {
+        let bar_length = 40;
         let filled = (*value * bar_length as f32) as usize;
         let empty = bar_length - filled;
-        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
 
-        let value_color = if *value >= 0.7 {
-            bar.bright_green()
-        } else if *value >= 0.4 {
-            bar.bright_yellow()
-        } else {
-            bar.bright_red()
+        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+        let colored_bar = match *color {
+            "green" => bar.bright_green(),
+            "yellow" => bar.bright_yellow(),
+            "cyan" => bar.bright_cyan(),
+            "magenta" => bar.bright_magenta(),
+            _ => bar.bright_white(),
         };
 
-        println!("    {} {:<20} [{}] {:.0}%",
+        println!("  {} {:<20} [{}] {:.0}%",
             emoji,
             name,
-            value_color,
+            colored_bar,
             value * 100.0
         );
     }
 
     println!();
-    println!("  {}", "Bias Strength:".bright_cyan().bold());
+    println!("{}", "Bias Strength:".bright_yellow());
     let bias = profile.personality.bias_strength;
-    let bar_length = 20;
+    let bar_length = 40;
     let filled = (bias * bar_length as f32) as usize;
     let empty = bar_length - filled;
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
 
-    let bias_color = if bias >= 0.7 {
-        bar.bright_green()
-    } else if bias >= 0.4 {
-        bar.bright_yellow()
-    } else {
-        bar.bright_red()
-    };
-
-    println!("    💪 {:<20} [{}] {:.0}%",
+    println!("  💪 {:<20} [{}] {:.0}%",
         "Personality Influence",
-        bias_color,
+        bar.bright_green(),
         bias * 100.0
     );
-    println!("    {}", format!("(How much personality shapes opinions)").bright_black());
+    println!("  {}", "(how much personality shapes opinions)".bright_black());
     println!();
-
-    // Print background
-    if !profile.background.is_empty() {
-        println!("  {}", "Background:".bright_cyan().bold());
-        println!();
-        for line in profile.background.lines() {
-            println!("    {}", line);
-        }
-        println!();
-    } else {
-        println!("  {}", "Background: (none)".bright_black());
-        println!();
-    }
 }
 
 pub fn print_personality_delta(old: &PersonalityTraits, new: &PersonalityTraits) {
-    print_section_header("Personality Changes");
+    println!();
+    println!("{}", "─── Personality Changes ───".bright_yellow());
+    println!();
 
     let traits = [
-        ("Openness", old.openness, new.openness, "🔓"),
-        ("Conscientiousness", old.conscientiousness, new.conscientiousness, "📋"),
-        ("Extraversion", old.extraversion, new.extraversion, "🗣️"),
-        ("Agreeableness", old.agreeableness, new.agreeableness, "🤝"),
-        ("Neuroticism", old.neuroticism, new.neuroticism, "😰"),
+        ("Openness", old.openness, new.openness, "🔓", "green"),
+        ("Conscientiousness", old.conscientiousness, new.conscientiousness, "📋", "yellow"),
+        ("Extraversion", old.extraversion, new.extraversion, "🗣️", "cyan"),
+        ("Agreeableness", old.agreeableness, new.agreeableness, "🤝", "magenta"),
+        ("Neuroticism", old.neuroticism, new.neuroticism, "😰", "yellow"),
     ];
 
-    for (name, old_value, new_value, emoji) in &traits {
-        let bar_length = 20;
+    for (name, old_value, new_value, emoji, color) in &traits {
+        let bar_length = 40;
         let filled = (*new_value * bar_length as f32) as usize;
         let empty = bar_length - filled;
-        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
 
-        let value_color = if *new_value >= 0.7 {
-            bar.bright_green()
-        } else if *new_value >= 0.4 {
-            bar.bright_yellow()
-        } else {
-            bar.bright_red()
-        };
-
+        // Create bar with pattern if there's a change
         let delta = new_value - old_value;
-        let delta_pct = (delta * 100.0).abs();
-        let delta_str = if delta.abs() < 0.01 {
-            "".to_string()
-        } else if delta > 0.0 {
-            format!(" {} {:.0}%", "↗".bright_green(), delta_pct)
+        let has_change = delta.abs() >= 0.01;
+
+        let bar = if has_change {
+            // Add pattern for changes (using different characters to show change)
+            let pattern_filled = filled.min(3);
+            format!("{}{}{}",
+                "█".repeat(filled.saturating_sub(pattern_filled)),
+                "▓".repeat(pattern_filled),
+                "░".repeat(empty)
+            )
         } else {
-            format!(" {} {:.0}%", "↘".bright_red(), delta_pct)
+            format!("{}{}", "█".repeat(filled), "░".repeat(empty))
         };
 
-        println!("    {} {:<20} [{}] {:.0}%{}",
+        let colored_bar = match *color {
+            "green" => bar.bright_green(),
+            "yellow" => bar.bright_yellow(),
+            "cyan" => bar.bright_cyan(),
+            "magenta" => bar.bright_magenta(),
+            _ => bar.bright_white(),
+        };
+
+        let delta_str = if has_change {
+            format!(" → {:.0}%", new_value * 100.0)
+        } else {
+            format!(" {:.0}%", new_value * 100.0)
+        };
+
+        println!("  {} {:<20} [{}]{}",
             emoji,
             name,
-            value_color,
-            new_value * 100.0,
+            colored_bar,
             delta_str
         );
     }
 
     println!();
-    println!("  {}", "Bias Strength:".bright_cyan().bold());
+    println!("{}", "Bias Strength:".bright_yellow());
     let old_bias = old.bias_strength;
     let new_bias = new.bias_strength;
-    let bar_length = 20;
+    let bar_length = 40;
     let filled = (new_bias * bar_length as f32) as usize;
     let empty = bar_length - filled;
-    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
-
-    let bias_color = if new_bias >= 0.7 {
-        bar.bright_green()
-    } else if new_bias >= 0.4 {
-        bar.bright_yellow()
-    } else {
-        bar.bright_red()
-    };
 
     let delta = new_bias - old_bias;
-    let delta_pct = (delta * 100.0).abs();
-    let delta_str = if delta.abs() < 0.01 {
-        "".to_string()
-    } else if delta > 0.0 {
-        format!(" {} {:.0}%", "↗".bright_green(), delta_pct)
+    let has_change = delta.abs() >= 0.01;
+
+    let bar = if has_change {
+        let pattern_filled = filled.min(3);
+        format!("{}{}{}",
+            "█".repeat(filled.saturating_sub(pattern_filled)),
+            "▓".repeat(pattern_filled),
+            "░".repeat(empty)
+        )
     } else {
-        format!(" {} {:.0}%", "↘".bright_red(), delta_pct)
+        format!("{}{}", "█".repeat(filled), "░".repeat(empty))
     };
 
-    println!("    💪 {:<20} [{}] {:.0}%{}",
+    let delta_str = if has_change {
+        format!(" → {:.0}%", new_bias * 100.0)
+    } else {
+        format!(" {:.0}%", new_bias * 100.0)
+    };
+
+    println!("  💪 {:<20} [{}]{}",
         "Personality Influence",
-        bias_color,
-        new_bias * 100.0,
+        bar.bright_green(),
         delta_str
     );
-    println!("    {}", format!("(How much personality shapes opinions)").bright_black());
+    println!("  {}", "(how much personality shapes opinions)".bright_black());
     println!();
 }

@@ -39,6 +39,8 @@ pub struct Fact {
     pub context: Option<String>,
     #[serde(default)]
     pub event_date: Option<String>,
+    #[serde(default)]
+    pub document_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,6 +80,7 @@ pub struct BatchMemoryRequest {
 pub struct BatchMemoryResponse {
     pub success: bool,
     pub stored_count: Option<i32>,
+    pub items_count: Option<i32>,
     pub error: Option<String>,
     pub job_id: Option<String>,
 }
@@ -393,6 +396,57 @@ impl ApiClient {
         let response = self
             .client
             .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: AgentProfile = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn update_agent_name(
+        &self,
+        agent_id: &str,
+        name: &str,
+        verbose: bool,
+    ) -> Result<AgentProfile> {
+        #[derive(Serialize)]
+        struct UpdateNameRequest {
+            name: String,
+        }
+
+        let url = format!("{}/api/v1/agents/{}", self.base_url, agent_id);
+        let request = UpdateNameRequest {
+            name: name.to_string(),
+        };
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+            eprintln!("Request body:\n{}", serde_json::to_string_pretty(&request).unwrap_or_default());
+        }
+
+        let response = self
+            .client
+            .put(&url)
+            .json(&request)
             .timeout(Duration::from_secs(30))
             .send()?;
 
@@ -762,6 +816,46 @@ impl ApiClient {
             .client
             .delete(&url)
             .timeout(Duration::from_secs(30))
+            .send()?;
+
+        let status = response.status();
+        if verbose {
+            eprintln!("Response status: {}", status);
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().unwrap_or_default();
+            if verbose {
+                eprintln!("Error response body:\n{}", error_body);
+            }
+            anyhow::bail!("API returned error status {}: {}", status, error_body);
+        }
+
+        let response_text = response.text()?;
+        if verbose {
+            eprintln!("Response body:\n{}", response_text);
+        }
+
+        let result: DeleteResponse = serde_json::from_str(&response_text)
+            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
+        Ok(result)
+    }
+
+    pub fn clear_memories(&self, agent_id: &str, fact_type: Option<&str>, verbose: bool) -> Result<DeleteResponse> {
+        let mut url = format!("{}/api/v1/agents/{}/memories", self.base_url, agent_id);
+
+        if let Some(ft) = fact_type {
+            url.push_str(&format!("?fact_type={}", ft));
+        }
+
+        if verbose {
+            eprintln!("Request URL: {}", url);
+        }
+
+        let response = self
+            .client
+            .delete(&url)
+            .timeout(Duration::from_secs(60))
             .send()?;
 
         let status = response.status();

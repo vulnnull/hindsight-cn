@@ -7,11 +7,9 @@ Provides modular search architecture:
 """
 
 from .retrieval import retrieve_parallel
-from .reranking import Reranker, HeuristicReranker, CrossEncoderReranker
+from .reranking import CrossEncoderReranker
 
 __all__ = [
     "retrieve_parallel",
-    "Reranker",
-    "HeuristicReranker",
     "CrossEncoderReranker",
 ]

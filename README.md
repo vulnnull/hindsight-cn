@@ -22,10 +22,10 @@ The system provides:
 
 **Retrieval Pipeline**:
 ```
-Query → [Semantic + Keyword + Graph + Temporal] → RRF Merge → Reranker → MMR → Results
+Query → [Semantic + Keyword + Graph + Temporal] → RRF Merge → Cross-Encoder Reranking → MMR → Results
 ```
 - 4-way parallel retrieval for high recall
-- Neural reranking (optional) for precision
+- Neural cross-encoder reranking for precision
 - MMR diversification to avoid redundancy
 
 **Key Features**:
@@ -242,19 +242,6 @@ curl -X POST http://localhost:8080/api/search \
     "query": "What does Alice do?",
     "thinking_budget": 100,
     "top_k": 10,
-    "reranker": "heuristic",
-    "trace": false
-  }'
-
-# Optional: Use cross-encoder reranker for better accuracy
-curl -X POST http://localhost:8080/api/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent_id": "alice_agent",
-    "query": "What does Alice do?",
-    "thinking_budget": 100,
-    "top_k": 10,
-    "reranker": "cross-encoder",
     "trace": false
   }'
 ```

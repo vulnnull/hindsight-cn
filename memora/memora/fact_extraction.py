@@ -32,7 +32,7 @@ class ExtractedFact(BaseModel):
         description="Absolute date/time when this fact occurred in ISO format (YYYY-MM-DDTHH:MM:SSZ). If text mentions relative time (yesterday, last week, this morning), calculate absolute date from the provided context date."
     )
     fact_type: Literal["world", "agent", "opinion"] = Field(
-        description="Type of fact: 'world' for general facts about the world (events, people, things others said/did), 'agent' for facts about what the memory owner (the person this memory belongs to, often identified as 'you' in context) specifically did, said, experienced, or actions they took - MUST be written in FIRST PERSON ('I did...', 'I said...'), 'opinion' for the memory owner's formed opinions and perspectives - also in first person"
+        description="Type of fact: 'world' for facts about others that don't involve you (the agent) directly, 'agent' for facts that involve YOU (the agent whose memory this is) - what you did, said, experienced, or participated in - MUST be written in FIRST PERSON ('I did...', 'I said...', 'I met...'), 'opinion' for YOUR formed opinions and perspectives - also in first person"
     )
     entities: List[Entity] = Field(
         default_factory=list,
@@ -98,7 +98,8 @@ async def _extract_facts_from_chunk(
     event_date: datetime,
     context: str,
     llm_config: 'LLMConfig',
-    agent_name: str = None
+    agent_name: str = None,
+    extract_opinions: bool = False
 ) -> List[Dict[str, str]]:
     """
     Extract facts from a single chunk (internal helper for parallel processing).
@@ -106,13 +107,22 @@ async def _extract_facts_from_chunk(
     # Format event_date for the prompt
     event_date_str = event_date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    agent_context = f"\n- Agent name (memory owner): {agent_name}" if agent_name else ""
+    agent_context = f"\n- Your name: {agent_name}" if agent_name else ""
 
-    prompt = f"""You are extracting comprehensive, narrative facts from conversations for an AI memory system.
+    # Determine which fact types to extract based on the flag
+    if extract_opinions:
+        fact_types_instruction = "Extract ONLY 'opinion' type facts (the agent's formed opinions, beliefs, and perspectives). DO NOT extract 'world' or 'agent' facts."
+    else:
+        fact_types_instruction = "Extract ONLY 'world' and 'agent' type facts. DO NOT extract 'opinion' type facts - opinions should never be created during normal memory storage."
+
+    prompt = f"""You are extracting comprehensive, narrative facts from conversations/document for an AI memory system.
+
+{fact_types_instruction}
 
 ## CONTEXT INFORMATION
-- Current reference date/time: {event_date_str}
-- Context: {context if context else 'no context provided'}{agent_context}
+- Today time: {datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}
+- Current document date/time: {event_date_str}
+- Context: {context if context else 'no additional context provided'}{agent_context}
 
 ## CORE PRINCIPLE: Extract FEWER, MORE COMPREHENSIVE Facts
 
@@ -190,22 +200,32 @@ Classify each fact as 'world', 'agent', or 'opinion':
 
 - **'world'**: Facts about other people, events, things that happened in the world, what others said/did
   - Written in third person (use names, "they", etc.)
-- **'agent'**: Facts about what the MEMORY OWNER (the person this memory belongs to) specifically did, said, experienced, or actions they took
-  - The memory owner is typically identified in the context (e.g., "you (Marcus)" means Marcus is the memory owner)
-  - **CRITICAL**: MUST be written in FIRST PERSON using "I", "me", "my" (NOT the person's name)
-  - Examples: "I said I prefer coffee", "I attended the conference", "I completed the project"
-  - ❌ WRONG: "Marcus said he prefers coffee"
-  - ✅ CORRECT: "I said I prefer coffee"
-- **'opinion'**: The memory owner's formed opinions, beliefs, and perspectives about topics
+  - Does NOT involve you (the agent) directly
+- **'agent'**: Facts that involve YOU (the agent whose memory this is) - what you specifically did, said, experienced, or actions you took
+  - YOU are identified by the agent name in context (e.g., "Your name: Marcus" means you are Marcus)
+  - **CRITICAL**: Agent facts MUST be written in FIRST PERSON using "I", "me", "my" (NOT using your name)
+  - Agent facts capture things YOU did, said, or experienced - not just things that happened around you
+  - **SPEAKER ATTRIBUTION WARNING**: In conversations with speakers labeled (e.g., "Marcus: text" and "Jamie: text"), ONLY extract agent facts from lines where YOUR name appears as the speaker
+  - Examples: "I said I prefer coffee", "I attended the conference", "I completed the project", "I met with Jamie"
+  - ❌ WRONG: "Marcus said he prefers coffee" (using name instead of first person)
+  - ✅ CORRECT: "I said I prefer coffee" (first person)
+- **'opinion'**: YOUR (the agent's) formed opinions, beliefs, and perspectives about topics
   - Also written in first person: "I believe...", "I think..."
 
-**CRITICAL**: If the context identifies someone as "you" or specifies whose memory this is, then facts about that person's actions/statements are 'agent' facts written in FIRST PERSON.
+**CRITICAL SPEAKER ATTRIBUTION RULES**:
+1. If text has format "Name: statement", ONLY extract 'agent' facts from lines where Name matches YOUR name from context
+2. If context says "Your name: Marcus", then ONLY statements by "Marcus:" are YOUR statements
+3. Statements by other speakers (e.g., "Jamie:") are 'world' facts about what THEY said/did
+4. DO NOT confuse who said what - carefully check the speaker name before each statement
 
-**Example**: If context says "podcast between you (Marcus) and Jamie":
-- "I explained my approach to AI safety" → 'agent' (first person, my action)
-- "Jamie asked about neural networks" → 'world' (someone else's action, third person)
-- "Jamie and I discussed transformer architectures" → 'world' (general conversation - could use first person here since it includes both)
-- "I believe interpretability is crucial" → 'opinion' (first person belief)
+**Example**: If context says "Your name: Marcus" and text is:
+```
+Marcus: I predict the Rams will win 27-24.
+Jamie: I predict the Niners will win 27-13.
+```
+- "I predicted the Rams will win 27-24" → 'agent' (I/Marcus said this)
+- "Jamie predicted the Niners will win 27-13" → 'world' (Jamie said this, not me)
+- ❌ WRONG: "I predicted the Niners will win 27-13" (this was Jamie's prediction, not mine!)
 
 ## ENTITY EXTRACTION
 Extract ALL important entities (names of people, places, organizations, products, concepts, etc).
@@ -379,7 +399,6 @@ Marcus: I think that's gonna do it for us today! Don't forget to subscribe and l
                 scope="memory_extract_facts",
                 temperature=0.1,
                 max_tokens=65000,
-                extra_body={"service_tier": "auto"}
             )
             chunk_facts = [fact.model_dump() for fact in extraction_response.facts]
             return chunk_facts
@@ -405,7 +424,8 @@ async def _extract_facts_with_auto_split(
     event_date: datetime,
     context: str,
     llm_config: LLMConfig,
-    agent_name: str = None
+    agent_name: str = None,
+    extract_opinions: bool = False
 ) -> List[Dict[str, str]]:
     """
     Extract facts from a chunk with automatic splitting if output exceeds token limits.
@@ -421,6 +441,7 @@ async def _extract_facts_with_auto_split(
         context: Context about the conversation/document
         llm_config: LLM configuration to use
         agent_name: Optional agent name (memory owner)
+        extract_opinions: If True, extract ONLY opinions. If False, extract world and agent facts (no opinions)
 
     Returns:
         List of fact dictionaries extracted from the chunk (possibly from sub-chunks)
@@ -437,7 +458,8 @@ async def _extract_facts_with_auto_split(
             event_date=event_date,
             context=context,
             llm_config=llm_config,
-            agent_name=agent_name
+            agent_name=agent_name,
+            extract_opinions=extract_opinions
         )
     except OutputTooLongError as e:
         # Output exceeded token limits - split the chunk in half and retry
@@ -482,7 +504,8 @@ async def _extract_facts_with_auto_split(
                 event_date=event_date,
                 context=context,
                 llm_config=llm_config,
-                agent_name=agent_name
+                agent_name=agent_name,
+                extract_opinions=extract_opinions
             ),
             _extract_facts_with_auto_split(
                 chunk=second_half,
@@ -491,7 +514,8 @@ async def _extract_facts_with_auto_split(
                 event_date=event_date,
                 context=context,
                 llm_config=llm_config,
-                agent_name=agent_name
+                agent_name=agent_name,
+                extract_opinions=extract_opinions
             )
         ]
 
@@ -515,6 +539,7 @@ async def extract_facts_from_text(
     llm_config: LLMConfig,
     agent_name: str,
     context: str = "",
+    extract_opinions: bool = False,
 ) -> List[Dict[str, str]]:
     """
     Extract semantic facts from conversational or narrative text using LLM.
@@ -532,12 +557,12 @@ async def extract_facts_from_text(
         llm_config: LLM configuration to use (if None, uses default from environment)
         chunk_size: Maximum characters per chunk
         agent_name: Optional agent name (memory owner)
+        extract_opinions: If True, extract ONLY opinions. If False, extract world and agent facts (no opinions)
 
     Returns:
         List of fact dictionaries with 'fact' and 'date' keys
     """
     chunks = chunk_text(text, max_chars=50_000)
-    logging.info(f"created {len(chunks)} chunks from text {len(text)}")
     tasks = [
         _extract_facts_with_auto_split(
             chunk=chunk,
@@ -546,7 +571,8 @@ async def extract_facts_from_text(
             event_date=event_date,
             context=context,
             llm_config=llm_config,
-            agent_name=agent_name
+            agent_name=agent_name,
+            extract_opinions=extract_opinions
         )
         for i, chunk in enumerate(chunks)
     ]

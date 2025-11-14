@@ -480,7 +480,7 @@ for each candidate memory unit:
 - Temporal awareness through formatted date context
 - Significantly improves precision on multi-hop and temporal queries
 
-**Pluggable Design**: Abstract `Reranker` interface allows future API-based rerankers (e.g., Cohere Rerank, Jina Reranker)
+**Implementation**: Uses cross-encoder neural reranking with ms-marco-MiniLM-L-6-v2 model for all queries
 
 ### 3.4 Token Budget Filtering
 
