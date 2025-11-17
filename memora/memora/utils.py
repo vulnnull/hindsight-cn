@@ -125,3 +125,76 @@ def calculate_frequency_weight(access_count: int, max_boost: float = 2.0) -> flo
     # This gives: 0 accesses = 1.0, 9 accesses ~= 1.5, 99 accesses ~= 2.0
     normalized = math.log(access_count + 1) / math.log(10)
     return 1.0 + min(normalized, max_boost - 1.0)
+
+
+def calculate_temporal_anchor(occurred_start: datetime, occurred_end: datetime) -> datetime:
+    """
+    Calculate a single temporal anchor point from a temporal range.
+
+    Used for spreading activation - we need a single representative date
+    to calculate temporal proximity between facts. This simplifies the
+    range-to-range distance problem.
+
+    Strategy: Use midpoint of the range for balanced representation.
+
+    Args:
+        occurred_start: Start of temporal range
+        occurred_end: End of temporal range
+
+    Returns:
+        Single datetime representing the temporal anchor (midpoint)
+
+    Examples:
+        - Point event (July 14): start=July 14, end=July 14 → anchor=July 14
+        - Month range (February): start=Feb 1, end=Feb 28 → anchor=Feb 14
+        - Year range (2023): start=Jan 1, end=Dec 31 → anchor=July 1
+    """
+    # Calculate midpoint
+    time_delta = occurred_end - occurred_start
+    midpoint = occurred_start + (time_delta / 2)
+    return midpoint
+
+
+def calculate_temporal_proximity(
+    anchor_a: datetime,
+    anchor_b: datetime,
+    half_life_days: float = 30.0
+) -> float:
+    """
+    Calculate temporal proximity between two temporal anchors.
+
+    Used for spreading activation to determine how "close" two facts are
+    in time. Uses logarithmic decay so that temporal similarity doesn't
+    drop off too quickly.
+
+    Args:
+        anchor_a: Temporal anchor of first fact
+        anchor_b: Temporal anchor of second fact
+        half_life_days: Number of days for proximity to reach 0.5
+                       (default: 30 days = 1 month)
+
+    Returns:
+        Proximity score in [0, 1] where:
+        - 1.0 = same day
+        - 0.5 = ~half_life days apart
+        - 0.0 = very distant in time
+
+    Examples:
+        - Same day: 1.0
+        - 1 week apart (half_life=30): ~0.7
+        - 1 month apart (half_life=30): ~0.5
+        - 1 year apart (half_life=30): ~0.2
+    """
+    import math
+
+    days_apart = abs((anchor_a - anchor_b).days)
+
+    if days_apart == 0:
+        return 1.0
+
+    # Logarithmic decay: 1 / (1 + log(1 + days_apart/half_life))
+    # Similar to calculate_recency_weight but for proximity between events
+    normalized_distance = days_apart / half_life_days
+    proximity = 1.0 / (1.0 + math.log1p(normalized_distance))
+
+    return proximity

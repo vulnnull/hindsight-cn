@@ -422,3 +422,88 @@ class LinkOperationsMixin:
             )
         except Exception as e:
             logger.warning(f"Failed to insert entity links: {str(e)}")
+
+    async def _create_causal_links_batch(
+        self,
+        conn,
+        unit_ids: List[str],
+        causal_relations_per_fact: List[List[dict]],
+    ) -> int:
+        """
+        Create causal links between facts based on LLM-extracted causal relationships.
+
+        Args:
+            conn: Database connection
+            unit_ids: List of unit IDs (in same order as causal_relations_per_fact)
+            causal_relations_per_fact: List of causal relations for each fact.
+                Each element is a list of dicts with:
+                - target_fact_index: Index into unit_ids for the target fact
+                - relation_type: "causes", "caused_by", "enables", or "prevents"
+                - strength: Float in [0.0, 1.0] representing relationship strength
+
+        Returns:
+            Number of causal links created
+
+        Causal link types:
+        - "causes": This fact directly causes the target fact (forward causation)
+        - "caused_by": This fact was caused by the target fact (backward causation)
+        - "enables": This fact enables/allows the target fact (enablement)
+        - "prevents": This fact prevents/blocks the target fact (prevention)
+        """
+        if not unit_ids or not causal_relations_per_fact:
+            return 0
+
+        try:
+            import time as time_mod
+            create_start = time_mod.time()
+
+            # Build links list
+            links = []
+            for fact_idx, causal_relations in enumerate(causal_relations_per_fact):
+                if not causal_relations:
+                    continue
+
+                from_unit_id = unit_ids[fact_idx]
+
+                for relation in causal_relations:
+                    target_idx = relation['target_fact_index']
+                    relation_type = relation['relation_type']
+                    strength = relation.get('strength', 1.0)
+
+                    # Validate target index
+                    if target_idx < 0 or target_idx >= len(unit_ids):
+                        logger.warning(f"Invalid target_fact_index {target_idx} in causal relation from fact {fact_idx}")
+                        continue
+
+                    to_unit_id = unit_ids[target_idx]
+
+                    # Don't create self-links
+                    if from_unit_id == to_unit_id:
+                        continue
+
+                    # Add the causal link
+                    # link_type is the relation_type (e.g., "causes", "caused_by")
+                    # weight is the strength of the relationship
+                    links.append((from_unit_id, to_unit_id, relation_type, strength, None))
+
+            logger.debug(f"Generated {len(links)} causal links in {time_mod.time() - create_start:.3f}s")
+
+            if links:
+                insert_start = time_mod.time()
+                await conn.executemany(
+                    """
+                    INSERT INTO memory_links (from_unit_id, to_unit_id, link_type, weight, entity_id)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
+                    """,
+                    links
+                )
+                logger.debug(f"Inserted {len(links)} causal links in {time_mod.time() - insert_start:.3f}s")
+
+            return len(links)
+
+        except Exception as e:
+            logger.error(f"Failed to create causal links: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise

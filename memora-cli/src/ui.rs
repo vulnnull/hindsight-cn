@@ -50,9 +50,28 @@ pub fn print_fact(fact: &Fact, show_activation: bool) {
         println!("  {}: {}", "Context".bright_black(), context.bright_black());
     }
 
-    // Show event date if available
-    if let Some(event_date) = &fact.event_date {
+    // Show temporal information
+    // If occurred_start/end exist, show them; otherwise fall back to event_date
+    if let Some(occurred_start) = &fact.occurred_start {
+        if let Some(occurred_end) = &fact.occurred_end {
+            if occurred_start == occurred_end {
+                // Point event
+                println!("  {}: {}", "Occurred".bright_black(), occurred_start.bright_black());
+            } else {
+                // Range event
+                println!("  {}: {} to {}", "Occurred".bright_black(), occurred_start.bright_black(), occurred_end.bright_black());
+            }
+        } else {
+            println!("  {}: {}", "Occurred".bright_black(), occurred_start.bright_black());
+        }
+    } else if let Some(event_date) = &fact.event_date {
+        // Fallback for backward compatibility
         println!("  {}: {}", "Date".bright_black(), event_date.bright_black());
+    }
+
+    // Show when fact was mentioned (learned)
+    if let Some(mentioned_at) = &fact.mentioned_at {
+        println!("  {}: {}", "Mentioned".bright_black(), mentioned_at.bright_black());
     }
 
     // Show document ID if available

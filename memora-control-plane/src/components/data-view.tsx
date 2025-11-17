@@ -268,7 +268,8 @@ export function DataView({ factType }: DataViewProps) {
                       <th className="p-2.5 text-left border border-border bg-card text-card-foreground">ID</th>
                       <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Text</th>
                       <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Context</th>
-                      <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Date</th>
+                      <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Occurred</th>
+                      <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Mentioned</th>
                       <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Entities</th>
                     </tr>
                   </thead>
@@ -283,15 +284,33 @@ export function DataView({ factType }: DataViewProps) {
                             row.context?.toLowerCase().includes(query)
                           );
                         })
-                        .map((row: any, idx: number) => (
-                          <tr key={idx} className="bg-background hover:bg-muted">
-                            <td className="p-2 border border-border" title={row.id}>{row.id}</td>
-                            <td className="p-2 border border-border">{row.text}</td>
-                            <td className="p-2 border border-border">{row.context || 'N/A'}</td>
-                            <td className="p-2 border border-border">{row.date || 'N/A'}</td>
-                            <td className="p-2 border border-border">{row.entities || 'None'}</td>
-                          </tr>
-                        ))
+                        .map((row: any, idx: number) => {
+                          // Format temporal range
+                          let occurredDisplay = 'N/A';
+                          if (row.occurred_start && row.occurred_end) {
+                            const start = new Date(row.occurred_start).toLocaleDateString();
+                            const end = new Date(row.occurred_end).toLocaleDateString();
+                            occurredDisplay = start === end ? start : `${start} - ${end}`;
+                          } else if (row.date) {
+                            // Fallback to old date field
+                            occurredDisplay = row.date;
+                          }
+
+                          const mentionedDisplay = row.mentioned_at
+                            ? new Date(row.mentioned_at).toLocaleDateString()
+                            : 'N/A';
+
+                          return (
+                            <tr key={idx} className="bg-background hover:bg-muted">
+                              <td className="p-2 border border-border" title={row.id}>{row.id}</td>
+                              <td className="p-2 border border-border">{row.text}</td>
+                              <td className="p-2 border border-border">{row.context || 'N/A'}</td>
+                              <td className="p-2 border border-border">{occurredDisplay}</td>
+                              <td className="p-2 border border-border">{mentionedDisplay}</td>
+                              <td className="p-2 border border-border">{row.entities || 'None'}</td>
+                            </tr>
+                          );
+                        })
                     ) : (
                       <tr>
                         <td colSpan={5} className="p-10 text-center text-muted-foreground bg-muted">

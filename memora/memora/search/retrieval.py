@@ -164,7 +164,7 @@ async def retrieve_graph(
             neighbors = await conn.fetch(
                 """
                 SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding, mu.fact_type, mu.document_id,
-                       ml.weight
+                       ml.weight, ml.link_type
                 FROM memory_links ml
                 JOIN memory_units mu ON ml.to_unit_id = mu.id
                 WHERE ml.from_unit_id = $1
@@ -179,7 +179,23 @@ async def retrieve_graph(
             for n in neighbors:
                 neighbor_id = str(n["id"])
                 if neighbor_id not in visited:
-                    new_activation = activation * n["weight"] * 0.8
+                    # Boost activation for causal links (they're high-value relationships)
+                    link_type = n["link_type"]
+                    base_weight = n["weight"]
+
+                    # Causal links get 1.5-2.0x boost depending on type
+                    if link_type in ("causes", "caused_by"):
+                        # Direct causation - very strong relationship
+                        causal_boost = 2.0
+                    elif link_type in ("enables", "prevents"):
+                        # Conditional causation - strong but not as direct
+                        causal_boost = 1.5
+                    else:
+                        # Temporal, semantic, entity links - standard weight
+                        causal_boost = 1.0
+
+                    effective_weight = base_weight * causal_boost
+                    new_activation = activation * effective_weight * 0.8
                     if new_activation > 0.1:
                         queue.append((dict(n), new_activation))
 
@@ -273,7 +289,7 @@ async def retrieve_temporal(
         current, semantic_sim, temporal_score = queue.pop(0)
         current_id = str(current["id"])
 
-        # Get neighbors via temporal links
+        # Get neighbors via temporal and causal links
         if budget_remaining > 0:
             neighbors = await conn.fetch(
                 """
@@ -283,7 +299,7 @@ async def retrieve_temporal(
                 FROM memory_links ml
                 JOIN memory_units mu ON ml.to_unit_id = mu.id
                 WHERE ml.from_unit_id = $2
-                  AND ml.link_type = 'temporal'
+                  AND ml.link_type IN ('temporal', 'causes', 'caused_by', 'enables', 'prevents')
                   AND ml.weight >= 0.1
                   AND mu.fact_type = $3
                   AND mu.embedding IS NOT NULL
@@ -307,8 +323,17 @@ async def retrieve_temporal(
                 days_from_mid = abs((neighbor_date - mid_date).total_seconds() / 86400)
                 neighbor_temporal_proximity = 1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
 
-                # Propagate temporal score through links (decay)
-                propagated_temporal = temporal_score * n["weight"] * 0.7
+                # Boost causal links (same as graph retrieval)
+                link_type = n["link_type"]
+                if link_type in ("causes", "caused_by"):
+                    causal_boost = 2.0
+                elif link_type in ("enables", "prevents"):
+                    causal_boost = 1.5
+                else:
+                    causal_boost = 1.0
+
+                # Propagate temporal score through links (decay, with causal boost)
+                propagated_temporal = temporal_score * n["weight"] * causal_boost * 0.7
 
                 # Combined temporal score
                 combined_temporal = max(neighbor_temporal_proximity, propagated_temporal)

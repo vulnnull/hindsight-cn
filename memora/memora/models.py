@@ -66,7 +66,10 @@ class MemoryUnit(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding = mapped_column(Vector(384))  # pgvector type
     context: Mapped[Optional[str]] = mapped_column(Text)
-    event_date: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    event_date: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)  # Kept for backward compatibility
+    occurred_start: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))  # When fact occurred (range start)
+    occurred_end: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))    # When fact occurred (range end)
+    mentioned_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))    # When fact was mentioned
     fact_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="world")
     confidence_score: Mapped[Optional[float]] = mapped_column(Float)
     access_count: Mapped[int] = mapped_column(Integer, server_default="0")

@@ -746,9 +746,13 @@ class TemporalSemanticMemory(
             # Flatten and track which facts belong to which content
             all_fact_texts = []
             all_fact_dates = []
+            all_occurred_starts = []  # NEW: When fact occurred (range start)
+            all_occurred_ends = []    # NEW: When fact occurred (range end)
+            all_mentioned_ats = []    # NEW: When fact was mentioned
             all_contexts = []
             all_fact_entities = []  # NEW: Store LLM-extracted entities per fact
             all_fact_types = []  # Store fact type (world or agent)
+            all_causal_relations = []  # NEW: Store causal relationships per fact
             content_boundaries = []  # [(start_idx, end_idx), ...]
 
             current_idx = 0
@@ -757,12 +761,31 @@ class TemporalSemanticMemory(
 
                 for fact_dict in fact_dicts:
                     all_fact_texts.append(fact_dict['fact'])
+
+                    # Extract temporal fields (new schema with ranges)
+                    from dateutil import parser as date_parser
                     try:
-                        from dateutil import parser as date_parser
-                        fact_date = date_parser.isoparse(fact_dict['date'])
+                        # Try new schema first (occurred_start/end)
+                        occurred_start = date_parser.isoparse(fact_dict['occurred_start'])
+                        occurred_end = date_parser.isoparse(fact_dict['occurred_end'])
+                        all_occurred_starts.append(occurred_start)
+                        all_occurred_ends.append(occurred_end)
+                        # Use occurred_start as event_date for backward compatibility
+                        all_fact_dates.append(occurred_start)
+                    except (KeyError, Exception):
+                        # Fallback to old schema (single 'date' field)
+                        try:
+                            fact_date = date_parser.isoparse(fact_dict['date'])
+                        except Exception:
+                            fact_date = event_date
                         all_fact_dates.append(fact_date)
-                    except Exception:
-                        all_fact_dates.append(event_date)
+                        # For old schema, use same date for start and end (point event)
+                        all_occurred_starts.append(fact_date)
+                        all_occurred_ends.append(fact_date)
+
+                    # mentioned_at is when the fact was mentioned (conversation date)
+                    all_mentioned_ats.append(event_date)
+
                     all_contexts.append(context)
                     # Extract entities from fact (default to empty list if not present)
                     all_fact_entities.append(fact_dict.get('entities', []))
@@ -771,6 +794,16 @@ class TemporalSemanticMemory(
                         all_fact_types.append(fact_type_override)
                     else:
                         all_fact_types.append(fact_dict.get('fact_type', 'world'))
+                    # Extract causal relations (with global index adjustment)
+                    # Causal relations use fact indices within each content, need to adjust to global indices
+                    causal_relations = fact_dict.get('causal_relations', []) or []
+                    # Adjust target_fact_index to global index by adding start_idx
+                    adjusted_relations = []
+                    for rel in causal_relations:
+                        adjusted_rel = dict(rel)
+                        adjusted_rel['target_fact_index'] = start_idx + rel['target_fact_index']
+                        adjusted_relations.append(adjusted_rel)
+                    all_causal_relations.append(adjusted_relations)
 
                 end_idx = current_idx + len(fact_dicts)
                 content_boundaries.append((start_idx, end_idx))
@@ -789,8 +822,11 @@ class TemporalSemanticMemory(
                 # For each content item, offset its facts sequentially
                 for i in range(start_idx, end_idx):
                     fact_position = i - start_idx  # 0, 1, 2, ...
+                    offset = timedelta(seconds=fact_position * SECONDS_PER_FACT)
                     # Add incremental offset to preserve order (facts appear in extraction order)
-                    all_fact_dates[i] = all_fact_dates[i] + timedelta(seconds=fact_position * SECONDS_PER_FACT)
+                    all_fact_dates[i] = all_fact_dates[i] + offset
+                    all_occurred_starts[i] = all_occurred_starts[i] + offset
+                    all_occurred_ends[i] = all_occurred_ends[i] + offset
 
             log_buffer.append(f"[1.5] Added time offsets: {SECONDS_PER_FACT}s per fact to preserve ordering")
 
@@ -908,9 +944,35 @@ class TemporalSemanticMemory(
                         filtered_sentences = [s for s, is_dup in zip(all_fact_texts, all_is_duplicate) if not is_dup]
                         filtered_embeddings = [e for e, is_dup in zip(all_embeddings, all_is_duplicate) if not is_dup]
                         filtered_dates = [d for d, is_dup in zip(all_fact_dates, all_is_duplicate) if not is_dup]
+                        filtered_occurred_starts = [d for d, is_dup in zip(all_occurred_starts, all_is_duplicate) if not is_dup]
+                        filtered_occurred_ends = [d for d, is_dup in zip(all_occurred_ends, all_is_duplicate) if not is_dup]
+                        filtered_mentioned_ats = [d for d, is_dup in zip(all_mentioned_ats, all_is_duplicate) if not is_dup]
                         filtered_contexts = [c for c, is_dup in zip(all_contexts, all_is_duplicate) if not is_dup]
                         filtered_entities = [ents for ents, is_dup in zip(all_fact_entities, all_is_duplicate) if not is_dup]
                         filtered_fact_types = [ft for ft, is_dup in zip(all_fact_types, all_is_duplicate) if not is_dup]
+
+                        # Build index mapping from old indices to new indices (accounting for removed duplicates)
+                        old_to_new_index = {}
+                        new_idx = 0
+                        for old_idx, is_dup in enumerate(all_is_duplicate):
+                            if not is_dup:
+                                old_to_new_index[old_idx] = new_idx
+                                new_idx += 1
+
+                        # Filter and remap causal relations
+                        filtered_causal_relations = []
+                        for old_idx, (relations, is_dup) in enumerate(zip(all_causal_relations, all_is_duplicate)):
+                            if not is_dup:
+                                # Keep relations where both source and target survived deduplication
+                                valid_relations = []
+                                for rel in relations:
+                                    target_idx = rel['target_fact_index']
+                                    # Only keep if target fact wasn't filtered out
+                                    if target_idx in old_to_new_index:
+                                        remapped_rel = dict(rel)
+                                        remapped_rel['target_fact_index'] = old_to_new_index[target_idx]
+                                        valid_relations.append(remapped_rel)
+                                filtered_causal_relations.append(valid_relations)
 
                         if not filtered_sentences:
                             logger.debug(f"[PUT_BATCH_ASYNC] All facts were duplicates, returning empty")
@@ -930,8 +992,8 @@ class TemporalSemanticMemory(
                         ]
                         results = await conn.fetch(
                             """
-                            INSERT INTO memory_units (agent_id, document_id, text, context, embedding, event_date, fact_type, confidence_score, access_count)
-                            SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::vector[], $6::timestamptz[], $7::text[], $8::float[], $9::integer[])
+                            INSERT INTO memory_units (agent_id, document_id, text, context, embedding, event_date, occurred_start, occurred_end, mentioned_at, fact_type, confidence_score, access_count)
+                            SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::vector[], $6::timestamptz[], $7::timestamptz[], $8::timestamptz[], $9::timestamptz[], $10::text[], $11::float[], $12::integer[])
                             RETURNING id
                             """,
                             [agent_id] * len(filtered_sentences),
@@ -940,6 +1002,9 @@ class TemporalSemanticMemory(
                             filtered_contexts,
                             filtered_embeddings_str,
                             filtered_dates,
+                            filtered_occurred_starts,
+                            filtered_occurred_ends,
+                            filtered_mentioned_ats,
                             filtered_fact_types,
                             confidence_scores,
                             [0] * len(filtered_sentences)
@@ -979,6 +1044,15 @@ class TemporalSemanticMemory(
                             await self._insert_entity_links_batch(conn, all_entity_links)
                         logger.debug("Entity links inserted")
                         log_buffer.append(f"[9] Batch insert entity links: {time.time() - step_start:.3f}s")
+
+                        # Create causal links
+                        logger.debug("Creating causal links")
+                        step_start = time.time()
+                        causal_link_count = await self._create_causal_links_batch(
+                            conn, created_unit_ids, filtered_causal_relations
+                        )
+                        logger.debug(f"Causal links complete: {causal_link_count} links created")
+                        log_buffer.append(f"[10] Batch create causal links: {causal_link_count} links in {time.time() - step_start:.3f}s")
 
                         # Transaction auto-commits on success
                         commit_start = time.time()

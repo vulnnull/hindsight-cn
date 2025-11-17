@@ -381,7 +381,7 @@ def get_locomo(mode: str, filter_type: str = "all", category_filter: str = "all"
 
 
 @rt("/locomo/{mode}/item/{item_idx}")
-def get_locomo_item(mode: str, item_idx: int, filter_type: str = "all"):
+def get_locomo_item(mode: str, item_idx: int, filter_type: str = "all", category_filter: str = "all"):
     """Render a single LoComo item with questions."""
     data = load_locomo_results(mode)
     if not data:
@@ -395,37 +395,160 @@ def get_locomo_item(mode: str, item_idx: int, filter_type: str = "all"):
     item_id = item.get("item_id", item.get("sample_id", f"item-{item_idx}"))
     metrics = item.get("metrics", {})
     accuracy = metrics.get("accuracy", 0)
+    correct = metrics.get("correct", 0)
+    total = metrics.get("total", 0)
+    invalid = metrics.get("invalid", 0)
     detailed_results = metrics.get("detailed_results", [])
+    category_stats_raw = metrics.get("category_stats", {})
 
     # Filter questions
     filtered_questions = []
     for q_idx, result in enumerate(detailed_results):
         is_invalid = result.get("is_invalid", False)
         is_correct = result.get("is_correct", False)
+        question_category = result.get("category")
 
+        # Apply correctness filter
+        passes_correctness = False
         if filter_type == "all":
-            filtered_questions.append((q_idx, result))
+            passes_correctness = True
         elif filter_type == "correct" and is_correct and not is_invalid:
-            filtered_questions.append((q_idx, result))
+            passes_correctness = True
         elif filter_type == "incorrect" and not is_correct and not is_invalid:
-            filtered_questions.append((q_idx, result))
+            passes_correctness = True
         elif filter_type == "invalid" and is_invalid:
+            passes_correctness = True
+
+        # Apply category filter
+        passes_category = False
+        if category_filter == "all":
+            passes_category = True
+        elif category_filter.isdigit() and question_category == int(category_filter):
+            passes_category = True
+
+        if passes_correctness and passes_category:
             filtered_questions.append((q_idx, result))
+
+    # Build category stats for this item
+    category_stats = {
+        1: {"name": "Multi-hop", "correct": 0, "total": 0, "invalid": 0},
+        2: {"name": "Single-hop", "correct": 0, "total": 0, "invalid": 0},
+        3: {"name": "Temporal", "correct": 0, "total": 0, "invalid": 0},
+        4: {"name": "Open-domain", "correct": 0, "total": 0, "invalid": 0}
+    }
+
+    for cat_id_str, stats in category_stats_raw.items():
+        cat_id = int(cat_id_str)
+        if cat_id in category_stats:
+            category_stats[cat_id]["correct"] = stats.get("correct", 0)
+            category_stats[cat_id]["total"] = stats.get("total", 0)
+            category_stats[cat_id]["invalid"] = stats.get("invalid", 0)
+
+    # Overall stats for this item
+    mode_label = " (Think Mode)" if mode == "think" else " (Search Mode)"
+    stats_html = Div(
+        H3(f"{item_id}{mode_label} - Performance", cls="text-2xl font-bold text-foreground mb-6"),
+        Div(
+            Div(
+                P("Overall Accuracy", cls="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2"),
+                P(f"{accuracy:.2f}%", cls="text-3xl font-bold text-foreground"),
+                cls="bg-white border border-border rounded-lg p-6 text-center shadow-sm"
+            ),
+            Div(
+                P("Correct Answers", cls="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2"),
+                P(f"{correct} / {total}", cls="text-3xl font-bold text-foreground"),
+                cls="bg-white border border-border rounded-lg p-6 text-center shadow-sm"
+            ),
+            Div(
+                P("Invalid Questions", cls="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2"),
+                P(str(invalid), cls="text-3xl font-bold text-foreground"),
+                cls="bg-white border border-border rounded-lg p-6 text-center shadow-sm"
+            ) if invalid > 0 else None,
+            Div(
+                P("Total Questions", cls="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2"),
+                P(str(total), cls="text-3xl font-bold text-foreground"),
+                cls="bg-white border border-border rounded-lg p-6 text-center shadow-sm"
+            ),
+            cls="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+        ),
+        H4("Accuracy by Category", cls="text-xl font-semibold text-foreground mb-4"),
+        Div(
+            *[
+                Div(
+                    P(cat["name"], cls="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2"),
+                    P(f"{(cat['correct'] / (cat['total'] - cat['invalid']) * 100) if (cat['total'] - cat['invalid']) > 0 else 0:.1f}%", cls="text-2xl font-bold text-foreground"),
+                    P(f"{cat['correct']} / {cat['total']}", cls="text-sm text-muted-foreground mt-1"),
+                    cls="bg-white border border-border rounded-lg p-6 text-center shadow-sm"
+                )
+                for cat in category_stats.values() if cat['total'] > 0
+            ],
+            cls="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
+        ) if any(cat['total'] > 0 for cat in category_stats.values()) else None,
+        cls="mb-6"
+    )
+
+    # Generate markdown table for copying
+    markdown_rows = [f"| {item_id} | {accuracy:.1f}% |"]
+    for cat in category_stats.values():
+        if cat['total'] > 0:
+            cat_accuracy = (cat['correct'] / (cat['total'] - cat['invalid']) * 100) if (cat['total'] - cat['invalid']) > 0 else 0
+            markdown_rows.append(f" {cat_accuracy:.1f}% |")
+
+    markdown_table = f"""| Conversation | Overall |{' | '.join([cat['name'] for cat in category_stats.values() if cat['total'] > 0])} |
+|---|---|{' | '.join(['---' for cat in category_stats.values() if cat['total'] > 0])} |
+{''.join(markdown_rows)}"""
+
+    # Copy button
+    copy_button = Div(
+        Button(
+            "📋 Copy Stats Table",
+            onclick=f"""
+                navigator.clipboard.writeText(`{markdown_table}`).then(() => {{
+                    this.textContent = '✓ Copied!';
+                    setTimeout(() => {{ this.textContent = '📋 Copy Stats Table'; }}, 2000);
+                }});
+            """,
+            cls="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm font-medium cursor-pointer"
+        ),
+        cls="mb-6"
+    )
 
     # Filters for questions
     has_invalid = any(r.get("is_invalid", False) for r in detailed_results)
     q_filters = Div(
-        P("Filter:", cls="text-sm font-medium text-foreground mb-2"),
+        # Correctness filter
         Div(
-            A("All", href=f"/locomo/{mode}/item/{item_idx}?filter_type=all",
-              cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if filter_type == 'all' else "bg-white text-foreground border border-border hover:bg-accent")),
-            A("✅ Correct", href=f"/locomo/{mode}/item/{item_idx}?filter_type=correct",
-              cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if filter_type == 'correct' else "bg-white text-foreground border border-border hover:bg-accent")),
-            A("❌ Incorrect", href=f"/locomo/{mode}/item/{item_idx}?filter_type=incorrect",
-              cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if filter_type == 'incorrect' else "bg-white text-foreground border border-border hover:bg-accent")),
-            A("⚠️ Invalid", href=f"/locomo/{mode}/item/{item_idx}?filter_type=invalid",
-              cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if filter_type == 'invalid' else "bg-white text-foreground border border-border hover:bg-accent")) if has_invalid else None,
-            cls="flex flex-wrap gap-2"
+            P("Filter by correctness:", cls="text-sm font-medium text-foreground mb-2"),
+            Div(
+                A("All", href=f"/locomo/{mode}/item/{item_idx}?filter_type=all&category_filter={category_filter}",
+                  cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if filter_type == 'all' else "bg-white text-foreground border border-border hover:bg-accent")),
+                A("✅ Correct", href=f"/locomo/{mode}/item/{item_idx}?filter_type=correct&category_filter={category_filter}",
+                  cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if filter_type == 'correct' else "bg-white text-foreground border border-border hover:bg-accent")),
+                A("❌ Incorrect", href=f"/locomo/{mode}/item/{item_idx}?filter_type=incorrect&category_filter={category_filter}",
+                  cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if filter_type == 'incorrect' else "bg-white text-foreground border border-border hover:bg-accent")),
+                A("⚠️ Invalid", href=f"/locomo/{mode}/item/{item_idx}?filter_type=invalid&category_filter={category_filter}",
+                  cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if filter_type == 'invalid' else "bg-white text-foreground border border-border hover:bg-accent")) if has_invalid else None,
+                cls="flex flex-wrap gap-2"
+            ),
+            cls="mb-4"
+        ),
+        # Category filter
+        Div(
+            P("Filter by category:", cls="text-sm font-medium text-foreground mb-2"),
+            Div(
+                A("All Categories", href=f"/locomo/{mode}/item/{item_idx}?filter_type={filter_type}&category_filter=all",
+                  cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if category_filter == 'all' else "bg-white text-foreground border border-border hover:bg-accent")),
+                A("Multi-hop", href=f"/locomo/{mode}/item/{item_idx}?filter_type={filter_type}&category_filter=1",
+                  cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if category_filter == '1' else "bg-white text-foreground border border-border hover:bg-accent")) if any(cat_id == 1 for cat_id in category_stats.keys() if category_stats[cat_id]['total'] > 0) else None,
+                A("Single-hop", href=f"/locomo/{mode}/item/{item_idx}?filter_type={filter_type}&category_filter=2",
+                  cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if category_filter == '2' else "bg-white text-foreground border border-border hover:bg-accent")) if any(cat_id == 2 for cat_id in category_stats.keys() if category_stats[cat_id]['total'] > 0) else None,
+                A("Temporal", href=f"/locomo/{mode}/item/{item_idx}?filter_type={filter_type}&category_filter=3",
+                  cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if category_filter == '3' else "bg-white text-foreground border border-border hover:bg-accent")) if any(cat_id == 3 for cat_id in category_stats.keys() if category_stats[cat_id]['total'] > 0) else None,
+                A("Open-domain", href=f"/locomo/{mode}/item/{item_idx}?filter_type={filter_type}&category_filter=4",
+                  cls="px-3 py-1.5 rounded-md text-sm font-medium " + ("bg-primary text-primary-foreground" if category_filter == '4' else "bg-white text-foreground border border-border hover:bg-accent")) if any(cat_id == 4 for cat_id in category_stats.keys() if category_stats[cat_id]['total'] > 0) else None,
+                cls="flex flex-wrap gap-2"
+            ),
+            cls="mb-4"
         ),
         cls="mb-6"
     )
@@ -495,7 +618,7 @@ def get_locomo_item(mode: str, item_idx: int, filter_type: str = "all"):
                             P(f"Retrieved Memories ({len(result.get('retrieved_memories', []))}):", cls="text-sm font-medium text-foreground mb-2"),
                             *[
                                 Div(
-                                    P(f"#{i+1} • Score: {mem.get('score', 0):.4f} • Type: {mem.get('fact_type', 'N/A').upper()}", cls="text-xs text-muted-foreground mb-1"),
+                                    P(f"#{i+1} • Date: {mem.get('event_date', 'N/A')[:10] if mem.get('event_date') else 'N/A'} • Type: {mem.get('fact_type', 'N/A').upper()}", cls="text-xs text-muted-foreground mb-1"),
                                     P(mem.get('text', ''), cls="text-sm text-foreground"),
                                     cls="bg-muted/50 border border-border rounded-md p-3 mb-2"
                                 )
@@ -517,7 +640,8 @@ def get_locomo_item(mode: str, item_idx: int, filter_type: str = "all"):
         Main(
             Div(
                 A(f"← Back to LoComo ({mode})", href=f"/locomo/{mode}", cls="inline-flex items-center px-4 py-2 bg-white border border-border rounded-md text-sm font-medium text-foreground hover:bg-accent mb-6"),
-                H3(f"📊 {item_id} - {accuracy:.2f}%", cls="text-2xl font-bold text-foreground mb-4"),
+                stats_html,
+                copy_button,
                 Hr(cls="my-6 border-border"),
                 q_filters,
                 P(f"Showing {len(filtered_questions)} questions", cls="text-sm text-muted-foreground mb-6"),
@@ -870,7 +994,7 @@ def get_longmemeval_item(item_idx: int, filter_type: str = "all"):
                             P(f"Retrieved Memories ({len(result.get('retrieved_memories', []))}):", cls="text-sm font-medium text-foreground mb-2"),
                             *[
                                 Div(
-                                    P(f"#{i+1} • Score: {mem.get('score', 0):.4f} • Type: {mem.get('fact_type', 'N/A').upper()}", cls="text-xs text-muted-foreground mb-1"),
+                                    P(f"#{i+1} • Date: {mem.get('event_date', 'N/A')[:10] if mem.get('event_date') else 'N/A'} • Type: {mem.get('fact_type', 'N/A').upper()}", cls="text-xs text-muted-foreground mb-1"),
                                     P(mem.get('text', ''), cls="text-sm text-foreground"),
                                     cls="bg-muted/50 border border-border rounded-md p-3 mb-2"
                                 )

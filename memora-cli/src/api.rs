@@ -40,6 +40,12 @@ pub struct Fact {
     #[serde(default)]
     pub event_date: Option<String>,
     #[serde(default)]
+    pub occurred_start: Option<String>,
+    #[serde(default)]
+    pub occurred_end: Option<String>,
+    #[serde(default)]
+    pub mentioned_at: Option<String>,
+    #[serde(default)]
     pub document_id: Option<String>,
 }
 

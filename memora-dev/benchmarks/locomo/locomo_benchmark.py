@@ -41,10 +41,10 @@ class LoComoDataset(BenchmarkDataset):
         """
         Prepare LoComo conversation for batch ingestion.
 
-        Combines all sessions into a single conversation item instead of separate sessions.
+        Each session is ingested as a separate item with its own date.
 
         Returns:
-            List with single conversation dict containing 'content', 'context', 'event_date'
+            List of session dicts, each containing 'content', 'context', 'event_date', 'document_id'
         """
         conv = item['conversation']
         speaker_a = conv['speaker_a']
@@ -53,8 +53,7 @@ class LoComoDataset(BenchmarkDataset):
         # Get all session keys sorted
         session_keys = sorted([k for k in conv.keys() if k.startswith('session_') and not k.endswith('_date_time')])
 
-        all_conversation_parts = []
-        first_session_date = None
+        session_items = []
 
         for session_key in session_keys:
             if session_key not in conv or not isinstance(conv[session_key], list):
@@ -66,10 +65,6 @@ class LoComoDataset(BenchmarkDataset):
             date_key = f"{session_key}_date_time"
             session_date = self._parse_date(conv.get(date_key, "n/a"))
 
-            # Store first session date
-            if first_session_date is None:
-                first_session_date = session_date
-
             # Build session content from all turns
             session_parts = []
             for turn in session_data:
@@ -78,21 +73,17 @@ class LoComoDataset(BenchmarkDataset):
                 session_parts.append(f"{speaker}: {text}")
 
             if session_parts:
-                all_conversation_parts.append("\n".join(session_parts))
+                session_content = "\n".join(session_parts)
+                document_id = f"{item['sample_id']}_{session_key}"
 
-        if not all_conversation_parts:
-            return []
+                session_items.append({
+                    "content": session_content,
+                    "context": f"Conversation between {speaker_a} and {speaker_b} ({session_key} of {item['sample_id']})",
+                    "event_date": session_date,
+                    "document_id": document_id
+                })
 
-        # Combine all sessions into a single conversation
-        conversation_content = "\n\n".join(all_conversation_parts)
-        document_id = item['sample_id']
-
-        return [{
-            "content": conversation_content,
-            "context": f"Conversation between {speaker_a} and {speaker_b} (conversation {item['sample_id']})",
-            "event_date": first_session_date or datetime.now(timezone.utc),
-            "document_id": document_id
-        }]
+        return session_items
 
     def get_qa_pairs(self, item: Dict) -> List[Dict[str, Any]]:
         """
@@ -313,6 +304,7 @@ async def run_benchmark(
     use_think: bool = False,
     conversation: str = None,
     api_url: str = None,
+    max_concurrent_questions_override: int = None,
     only_failed: bool = False,
     only_invalid: bool = False
 ):
@@ -391,13 +383,13 @@ async def run_benchmark(
             agent_id="locomo",
             thinking_budget=500
         )
-        max_concurrent_questions = 4
+        max_concurrent_questions = max_concurrent_questions_override or 4
         eval_semaphore_size = 4
     else:
         answer_generator = LoComoAnswerGenerator()
         # Reduced from 32 to 10 to match search semaphore limit
         # Prevents "too many connections" errors
-        max_concurrent_questions = 10
+        max_concurrent_questions = max_concurrent_questions_override or 10
         eval_semaphore_size = 8
 
     answer_evaluator = LLMAnswerEvaluator()
@@ -534,6 +526,7 @@ if __name__ == "__main__":
     parser.add_argument('--use-think', action='store_true', help='Use think API instead of search + LLM')
     parser.add_argument('--conversation', type=str, default=None, help='Run only specific conversation (e.g., "conv-26")')
     parser.add_argument('--api-url', type=str, default=None, help='Memora API URL (default: use local memory, example: http://localhost:8000)')
+    parser.add_argument('--max-concurrent-questions', type=int, default=None, help='Max concurrent questions per conversation (default: 4 for think, 10 for search)')
     parser.add_argument('--only-failed', action='store_true', help='Only run conversations that have failed questions (is_correct=False). Requires existing results file.')
     parser.add_argument('--only-invalid', action='store_true', help='Only run conversations that have invalid questions (is_invalid=True). Requires existing results file.')
 
@@ -550,6 +543,7 @@ if __name__ == "__main__":
         use_think=args.use_think,
         conversation=args.conversation,
         api_url=args.api_url,
+        max_concurrent_questions_override=args.max_concurrent_questions,
         only_failed=args.only_failed,
         only_invalid=args.only_invalid
     ))
