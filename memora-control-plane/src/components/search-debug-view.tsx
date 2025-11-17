@@ -353,7 +353,8 @@ export function SearchDebugView() {
               <th className="p-2 text-left border border-border text-card-foreground">Rank</th>
               <th className="p-2 text-left border border-border text-card-foreground">Text</th>
               <th className="p-2 text-left border border-border text-card-foreground">Context</th>
-              <th className="p-2 text-left border border-border text-card-foreground">Date</th>
+              <th className="p-2 text-left border border-border text-card-foreground">Occurred</th>
+              <th className="p-2 text-left border border-border text-card-foreground">Mentioned</th>
               <th className="p-2 text-left border border-border text-card-foreground" title="Final weighted score">
                 Final Score
               </th>

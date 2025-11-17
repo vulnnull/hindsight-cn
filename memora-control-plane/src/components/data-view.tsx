@@ -313,7 +313,7 @@ export function DataView({ factType }: DataViewProps) {
                         })
                     ) : (
                       <tr>
-                        <td colSpan={5} className="p-10 text-center text-muted-foreground bg-muted">
+                        <td colSpan={6} className="p-10 text-center text-muted-foreground bg-muted">
                           {data.table_rows ? 'No facts match your search' : 'No facts found for this agent and fact type'}
                         </td>
                       </tr>
