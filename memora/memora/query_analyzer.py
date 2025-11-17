@@ -105,12 +105,12 @@ class TransformerQueryAnalyzer(QueryAnalyzer):
                     "Install it with: pip install transformers"
                 )
 
-            logger.info(f"Loading T5 model: {self.model_name}...")
+            logger.debug(f"Loading T5 model: {self.model_name}...")
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self._model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
             self._model.to(self.device)
             self._model.eval()
-            logger.info(f"Model loaded on {self.device}")
+            logger.debug(f"Model loaded on {self.device}")
 
     def analyze(
         self, query: str, reference_date: Optional[datetime] = None
@@ -158,7 +158,7 @@ what is the weather = none
             )
 
         result = self._tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-        logger.info(f"T5 generated: '{result}'")
+        logger.debug(f"T5 generated: '{result}'")
 
         # Parse the generated output
         temporal = self._parse_generated_output(result, reference_date)
