@@ -13,7 +13,6 @@ interface SearchPane {
   query: string;
   factTypes: FactType[];
   thinkingBudget: number;
-  reranker: string;
   maxTokens: number;
   results: any[] | null;
   trace: any | null;
@@ -31,7 +30,6 @@ export function SearchDebugView() {
       query: '',
       factTypes: ['world'],
       thinkingBudget: 100,
-      reranker: 'heuristic',
       maxTokens: 4096,
       results: null,
       trace: null,
@@ -51,7 +49,6 @@ export function SearchDebugView() {
         query: '',
         factTypes: ['world'],
         thinkingBudget: 100,
-        reranker: 'heuristic',
         maxTokens: 4096,
         results: null,
         trace: null,
@@ -98,7 +95,6 @@ export function SearchDebugView() {
         agent_id: currentAgent,
         thinking_budget: pane.thinkingBudget,
         max_tokens: pane.maxTokens,
-        reranker: pane.reranker,
         trace: true,
       });
 
@@ -123,21 +119,15 @@ export function SearchDebugView() {
       return <div className="p-5 text-center text-muted-foreground">No retrieval data available</div>;
     }
 
-    // Filter by fact type and method
-    // Since we always send fact types as array, the dataplane should always include fact_type in results
+    // Filter by retrieval method
     const methodData = pane.trace.retrieval_results.find(
-      (m: any) =>
-        m.method_name === pane.currentRetrievalMethod &&
-        (pane.currentRetrievalFactType === null ||
-         !pane.currentRetrievalFactType ||
-         m.fact_type === pane.currentRetrievalFactType)
+      (m: any) => m.method_name === pane.currentRetrievalMethod
     );
 
     if (!methodData || !methodData.results || methodData.results.length === 0) {
       return (
         <div className="p-5 text-center text-muted-foreground">
           No results from this retrieval method
-          {pane.currentRetrievalFactType && ` for fact type: ${pane.currentRetrievalFactType}`}
         </div>
       );
     }
@@ -146,11 +136,6 @@ export function SearchDebugView() {
       <div className="p-4 overflow-auto">
         <h3 className="text-base font-bold mb-2 text-foreground">
           {methodData.method_name.toUpperCase()} Retrieval
-          {methodData.fact_type && (
-            <span className="ml-2 text-sm font-normal bg-secondary/30 px-2 py-0.5 rounded">
-              {methodData.fact_type}
-            </span>
-          )}
           {' '}({methodData.results.length} results, {methodData.duration_seconds?.toFixed(3)}s)
         </h3>
         <table className="w-full border-collapse text-xs">
@@ -242,7 +227,7 @@ export function SearchDebugView() {
           )}
         </h3>
         <p className="text-xs text-muted-foreground mb-3">
-          Reranker adjusts scores based on semantic similarity, BM25, recency, and frequency.{' '}
+          Cross-encoder reranker adjusts scores based on semantic relevance.{' '}
           <span className="bg-secondary/30 px-2 py-0.5 rounded">Highlight</span> = rank improved
           vs RRF
         </p>
@@ -314,29 +299,11 @@ export function SearchDebugView() {
       return ranks;
     };
 
-    const activations = pane.results.map((result: any) => {
-      const visit = pane.trace?.visits?.find((v: any) => v.node_id === result.id);
-      return visit ? visit.weights.activation : 0;
-    });
-
-    const similarities = pane.results.map((result: any) => {
-      const visit = pane.trace?.visits?.find((v: any) => v.node_id === result.id);
-      return visit ? visit.weights.semantic_similarity : 0;
-    });
-
-    const recencies = pane.results.map((result: any) => {
-      const visit = pane.trace?.visits?.find((v: any) => v.node_id === result.id);
-      return visit ? visit.weights.recency || 0 : 0;
-    });
-
     const frequencies = pane.results.map((result: any) => {
       const visit = pane.trace?.visits?.find((v: any) => v.node_id === result.id);
       return visit ? visit.weights.frequency || 0 : 0;
     });
 
-    const activationRanks = calculateRanks(activations);
-    const similarityRanks = calculateRanks(similarities);
-    const recencyRanks = calculateRanks(recencies);
     const frequencyRanks = calculateRanks(frequencies);
 
     return (
@@ -358,15 +325,6 @@ export function SearchDebugView() {
               <th className="p-2 text-left border border-border text-card-foreground" title="Final weighted score">
                 Final Score
               </th>
-              <th className="p-2 text-left border border-border text-card-foreground" title="Spreading activation value">
-                Activation
-              </th>
-              <th className="p-2 text-left border border-border text-card-foreground" title="Semantic similarity to query">
-                Similarity
-              </th>
-              <th className="p-2 text-left border border-border text-card-foreground" title="Recency boost">
-                Recency
-              </th>
               <th className="p-2 text-left border border-border text-card-foreground" title="Frequency boost">
                 Frequency
               </th>
@@ -376,10 +334,21 @@ export function SearchDebugView() {
             {pane.results.map((result: any, idx: number) => {
               const visit = pane.trace?.visits?.find((v: any) => v.node_id === result.id);
               const finalScore = visit ? visit.weights.final_weight : result.score || 0;
-              const activation = visit ? visit.weights.activation : 0;
-              const similarity = visit ? visit.weights.semantic_similarity : 0;
-              const recency = visit ? visit.weights.recency || 0 : 0;
               const frequency = visit ? visit.weights.frequency || 0 : 0;
+
+              // Format temporal range
+              let occurredDisplay = 'N/A';
+              if (result.occurred_start && result.occurred_end) {
+                const start = new Date(result.occurred_start).toLocaleDateString();
+                const end = new Date(result.occurred_end).toLocaleDateString();
+                occurredDisplay = start === end ? start : `${start} - ${end}`;
+              } else if (result.event_date) {
+                occurredDisplay = new Date(result.event_date).toLocaleDateString();
+              }
+
+              const mentionedDisplay = result.mentioned_at
+                ? new Date(result.mentioned_at).toLocaleDateString()
+                : 'N/A';
 
               return (
                 <tr key={idx} className="border border-border bg-background">
@@ -389,24 +358,13 @@ export function SearchDebugView() {
                     {result.context || 'N/A'}
                   </td>
                   <td className="p-2 border border-border whitespace-nowrap">
-                    {result.event_date
-                      ? new Date(result.event_date).toLocaleDateString()
-                      : 'N/A'}
+                    {occurredDisplay}
+                  </td>
+                  <td className="p-2 border border-border whitespace-nowrap">
+                    {mentionedDisplay}
                   </td>
                   <td className="p-2 border border-border font-bold">
                     {finalScore.toFixed(4)}
-                  </td>
-                  <td className="p-2 border border-border">
-                    {activation.toFixed(4)}{' '}
-                    <span className="text-muted-foreground text-xs">(#{activationRanks.get(idx)})</span>
-                  </td>
-                  <td className="p-2 border border-border">
-                    {similarity.toFixed(4)}{' '}
-                    <span className="text-muted-foreground text-xs">(#{similarityRanks.get(idx)})</span>
-                  </td>
-                  <td className="p-2 border border-border">
-                    {recency.toFixed(4)}{' '}
-                    <span className="text-muted-foreground text-xs">(#{recencyRanks.get(idx)})</span>
                   </td>
                   <td className="p-2 border border-border">
                     {frequency.toFixed(4)}{' '}
@@ -491,17 +449,6 @@ export function SearchDebugView() {
                       </label>
                     ))}
                   </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold mb-1 text-accent-foreground">Reranker:</label>
-                  <select
-                    value={pane.reranker}
-                    onChange={(e) => updatePane(pane.id, { reranker: e.target.value })}
-                    className="px-2 py-1 border-2 border-border bg-background text-foreground rounded text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="heuristic">Heuristic</option>
-                    <option value="cross-encoder">Cross-Encoder</option>
-                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold mb-1 text-accent-foreground">Budget:</label>

@@ -95,7 +95,7 @@ pub struct BatchMemoryResponse {
 #[serde(untagged)]
 pub enum AgentsResponse {
     Success {
-        agents: Vec<String>,
+        agents: Vec<AgentProfile>,
     },
     Error {
         error: String,
@@ -384,7 +384,7 @@ impl ApiClient {
 
         match result {
             AgentsResponse::Success { agents } => {
-                Ok(agents.into_iter().map(|agent_id| Agent { agent_id }).collect())
+                Ok(agents.into_iter().map(|profile| Agent { agent_id: profile.agent_id }).collect())
             }
             AgentsResponse::Error { error } => {
                 anyhow::bail!("Failed to list agents: {}", error)

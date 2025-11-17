@@ -618,7 +618,16 @@ def get_locomo_item(mode: str, item_idx: int, filter_type: str = "all", category
                             P(f"Retrieved Memories ({len(result.get('retrieved_memories', []))}):", cls="text-sm font-medium text-foreground mb-2"),
                             *[
                                 Div(
-                                    P(f"#{i+1} • Date: {mem.get('event_date', 'N/A')[:10] if mem.get('event_date') else 'N/A'} • Type: {mem.get('fact_type', 'N/A').upper()}", cls="text-xs text-muted-foreground mb-1"),
+                                    P(
+                                        f"#{i+1} • " +
+                                        (f"Occurred: {mem.get('occurred_start', 'N/A')[:10] if mem.get('occurred_start') else 'N/A'}" +
+                                         (f" - {mem.get('occurred_end', '')[:10]}" if mem.get('occurred_end') and mem.get('occurred_start', '')[:10] != mem.get('occurred_end', '')[:10] else "") +
+                                         f" • Mentioned: {mem.get('mentioned_at', 'N/A')[:10] if mem.get('mentioned_at') else 'N/A'}"
+                                         if mem.get('occurred_start') else
+                                         f"Date: {mem.get('event_date', 'N/A')[:10] if mem.get('event_date') else 'N/A'}") +
+                                        f" • Type: {mem.get('fact_type', 'N/A').upper()}",
+                                        cls="text-xs text-muted-foreground mb-1"
+                                    ),
                                     P(mem.get('text', ''), cls="text-sm text-foreground"),
                                     cls="bg-muted/50 border border-border rounded-md p-3 mb-2"
                                 )
@@ -994,7 +1003,16 @@ def get_longmemeval_item(item_idx: int, filter_type: str = "all"):
                             P(f"Retrieved Memories ({len(result.get('retrieved_memories', []))}):", cls="text-sm font-medium text-foreground mb-2"),
                             *[
                                 Div(
-                                    P(f"#{i+1} • Date: {mem.get('event_date', 'N/A')[:10] if mem.get('event_date') else 'N/A'} • Type: {mem.get('fact_type', 'N/A').upper()}", cls="text-xs text-muted-foreground mb-1"),
+                                    P(
+                                        f"#{i+1} • " +
+                                        (f"Occurred: {mem.get('occurred_start', 'N/A')[:10] if mem.get('occurred_start') else 'N/A'}" +
+                                         (f" - {mem.get('occurred_end', '')[:10]}" if mem.get('occurred_end') and mem.get('occurred_start', '')[:10] != mem.get('occurred_end', '')[:10] else "") +
+                                         f" • Mentioned: {mem.get('mentioned_at', 'N/A')[:10] if mem.get('mentioned_at') else 'N/A'}"
+                                         if mem.get('occurred_start') else
+                                         f"Date: {mem.get('event_date', 'N/A')[:10] if mem.get('event_date') else 'N/A'}") +
+                                        f" • Type: {mem.get('fact_type', 'N/A').upper()}",
+                                        cls="text-xs text-muted-foreground mb-1"
+                                    ),
                                     P(mem.get('text', ''), cls="text-sm text-foreground"),
                                     cls="bg-muted/50 border border-border rounded-md p-3 mb-2"
                                 )

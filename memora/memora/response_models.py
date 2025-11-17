@@ -22,6 +22,9 @@ class MemoryFact(BaseModel):
     fact_type: str = Field(description="Type of fact: 'world', 'agent', or 'opinion'")
     context: Optional[str] = Field(None, description="Additional context for the memory")
     event_date: Optional[str] = Field(None, description="ISO format date when the event occurred")
+    occurred_start: Optional[str] = Field(None, description="ISO format date when the event started occurring")
+    occurred_end: Optional[str] = Field(None, description="ISO format date when the event ended occurring")
+    mentioned_at: Optional[str] = Field(None, description="ISO format date when the fact was mentioned/learned")
     document_id: Optional[str] = Field(None, description="ID of the document this memory belongs to")
 
     # Internal metrics (used by system but may not be exposed in API)

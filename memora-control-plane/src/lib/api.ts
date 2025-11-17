@@ -33,7 +33,6 @@ export class DataplaneClient {
     agent_id: string;
     thinking_budget?: number;
     max_tokens?: number;
-    reranker?: string;
     trace?: boolean;
   }) {
     return this.fetchApi(`/api/search`, {

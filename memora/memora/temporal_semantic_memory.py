@@ -80,6 +80,7 @@ class TemporalSemanticMemory(
         memory_llm_base_url: Optional[str] = None,
         embeddings: Optional[Embeddings] = None,
         cross_encoder: Optional[CrossEncoderModel] = None,
+        query_analyzer: Optional["QueryAnalyzer"] = None,
         pool_min_size: int = 5,
         pool_max_size: int = 100,
         task_backend: Optional[TaskBackend] = None,
@@ -97,6 +98,7 @@ class TemporalSemanticMemory(
                                 - ollama: http://localhost:11434/v1
             embeddings: Embeddings implementation to use. If not provided, uses SentenceTransformersEmbeddings
             cross_encoder: Cross-encoder model for reranking. If not provided, uses default when cross-encoder reranker is selected
+            query_analyzer: Query analyzer implementation to use. If not provided, uses TransformerQueryAnalyzer
             pool_min_size: Minimum number of connections in the pool (default: 5)
             pool_max_size: Maximum number of connections in the pool (default: 100)
                           Increase for parallel think/search operations (e.g., 200-300 for 100+ parallel thinks)
@@ -128,6 +130,13 @@ class TemporalSemanticMemory(
             self.embeddings = embeddings
         else:
             self.embeddings = SentenceTransformersEmbeddings("BAAI/bge-small-en-v1.5")
+
+        # Initialize query analyzer
+        if query_analyzer is not None:
+            self.query_analyzer = query_analyzer
+        else:
+            from memora.query_analyzer import TransformerQueryAnalyzer
+            self.query_analyzer = TransformerQueryAnalyzer()
 
         # Initialize LLM configuration
         self._llm_config = LLMConfig(
@@ -1262,7 +1271,10 @@ class TemporalSemanticMemory(
 
             # Run retrieval for each fact type in parallel
             retrieval_tasks = [
-                retrieve_parallel(pool, query, query_embedding_str, agent_id, ft, thinking_budget, question_date)
+                retrieve_parallel(
+                    pool, query, query_embedding_str, agent_id, ft, thinking_budget,
+                    question_date, self.query_analyzer
+                )
                 for ft in fact_type
             ]
             all_retrievals = await asyncio.gather(*retrieval_tasks)
@@ -1418,7 +1430,7 @@ class TemporalSemanticMemory(
             if tracer:
                 tracer.add_reranked(results, merged_candidates)
                 tracer.add_phase_metric("reranking", step_duration, {
-                    "reranker_type": reranker,
+                    "reranker_type": "cross-encoder",
                     "candidates_reranked": len(results)
                 })
 
@@ -1485,6 +1497,15 @@ class TemporalSemanticMemory(
                 if result.get("event_date"):
                     event_date = result["event_date"]
                     result["event_date"] = event_date.isoformat() if hasattr(event_date, 'isoformat') else event_date
+                if result.get("occurred_start"):
+                    occurred_start = result["occurred_start"]
+                    result["occurred_start"] = occurred_start.isoformat() if hasattr(occurred_start, 'isoformat') else occurred_start
+                if result.get("occurred_end"):
+                    occurred_end = result["occurred_end"]
+                    result["occurred_end"] = occurred_end.isoformat() if hasattr(occurred_end, 'isoformat') else occurred_end
+                if result.get("mentioned_at"):
+                    mentioned_at = result["mentioned_at"]
+                    result["mentioned_at"] = mentioned_at.isoformat() if hasattr(mentioned_at, 'isoformat') else mentioned_at
 
             # Convert results to MemoryFact objects
             memory_facts = []
@@ -1495,6 +1516,9 @@ class TemporalSemanticMemory(
                     fact_type=result.get("fact_type", "world"),
                     context=result.get("context"),
                     event_date=result.get("event_date"),
+                    occurred_start=result.get("occurred_start"),
+                    occurred_end=result.get("occurred_end"),
+                    mentioned_at=result.get("mentioned_at"),
                     activation=result.get("activation")
                 ))
 

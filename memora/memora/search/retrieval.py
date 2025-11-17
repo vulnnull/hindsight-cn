@@ -35,7 +35,7 @@ async def retrieve_semantic(
     """
     results = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding, fact_type, document_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE agent_id = $2
@@ -89,7 +89,7 @@ async def retrieve_bm25(
 
     results = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding, fact_type, document_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
                ts_rank_cd(search_vector, to_tsquery('english', $1)) AS bm25_score
         FROM memory_units
         WHERE agent_id = $2
@@ -126,7 +126,7 @@ async def retrieve_graph(
     # Find entry points
     entry_points = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding, fact_type, document_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE agent_id = $2
@@ -163,7 +163,7 @@ async def retrieve_graph(
         if budget_remaining > 0:
             neighbors = await conn.fetch(
                 """
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding, mu.fact_type, mu.document_id,
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding, mu.fact_type, mu.document_id,
                        ml.weight, ml.link_type
                 FROM memory_links ml
                 JOIN memory_units mu ON ml.to_unit_id = mu.id
@@ -242,23 +242,49 @@ async def retrieve_temporal(
         end_date = end_date.replace(tzinfo=timezone.utc)
 
     # Find entry points: facts in date range with semantic relevance
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Temporal retrieval: searching for facts between {start_date} and {end_date} (agent={agent_id}, fact_type={fact_type})")
+
     entry_points = await conn.fetch(
         """
-        SELECT id, text, context, event_date, access_count, embedding, fact_type, document_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE agent_id = $2
           AND fact_type = $3
           AND embedding IS NOT NULL
-          AND event_date BETWEEN $4 AND $5
+          AND (
+              -- Match if occurred range overlaps with query range
+              (occurred_start IS NOT NULL AND occurred_end IS NOT NULL
+               AND occurred_start <= $5 AND occurred_end >= $4)
+              OR
+              -- Match if mentioned_at falls within query range
+              (mentioned_at IS NOT NULL AND mentioned_at BETWEEN $4 AND $5)
+              OR
+              -- Match if any occurred date is set and overlaps (even if only start or end is set)
+              (occurred_start IS NOT NULL AND occurred_start BETWEEN $4 AND $5)
+              OR
+              (occurred_end IS NOT NULL AND occurred_end BETWEEN $4 AND $5)
+          )
           AND (1 - (embedding <=> $1::vector)) >= $6
-        ORDER BY event_date DESC, (embedding <=> $1::vector) ASC
+        ORDER BY COALESCE(occurred_start, mentioned_at, occurred_end) DESC, (embedding <=> $1::vector) ASC
         LIMIT 10
         """,
         query_emb_str, agent_id, fact_type, start_date, end_date, semantic_threshold
     )
 
+    logger.info(f"Temporal retrieval: found {len(entry_points)} entry points")
+
     if not entry_points:
+        # Check if there are ANY memories with temporal metadata for this agent
+        total_with_dates = await conn.fetchval(
+            """SELECT COUNT(*) FROM memory_units
+               WHERE agent_id = $1 AND fact_type = $2
+               AND (occurred_start IS NOT NULL OR occurred_end IS NOT NULL OR mentioned_at IS NOT NULL)""",
+            agent_id, fact_type
+        )
+        logger.info(f"Temporal retrieval: agent has {total_with_dates} total memories with temporal metadata (fact_type={fact_type})")
         return []
 
     # Calculate temporal scores for entry points
@@ -271,10 +297,25 @@ async def retrieve_temporal(
         unit_id = str(ep["id"])
         visited.add(unit_id)
 
+        # Calculate temporal proximity using the most relevant date
+        # Priority: occurred_start/end (event time) > mentioned_at (mention time)
+        best_date = None
+        if ep["occurred_start"] is not None and ep["occurred_end"] is not None:
+            # Use midpoint of occurred range
+            best_date = ep["occurred_start"] + (ep["occurred_end"] - ep["occurred_start"]) / 2
+        elif ep["occurred_start"] is not None:
+            best_date = ep["occurred_start"]
+        elif ep["occurred_end"] is not None:
+            best_date = ep["occurred_end"]
+        elif ep["mentioned_at"] is not None:
+            best_date = ep["mentioned_at"]
+
         # Temporal proximity score (closer to range center = higher score)
-        event_date = ep["event_date"]
-        days_from_mid = abs((event_date - mid_date).total_seconds() / 86400)
-        temporal_proximity = 1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
+        if best_date:
+            days_from_mid = abs((best_date - mid_date).total_seconds() / 86400)
+            temporal_proximity = 1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
+        else:
+            temporal_proximity = 0.5  # Fallback if no dates (shouldn't happen due to WHERE clause)
 
         data = dict(ep)
         data["temporal_score"] = temporal_proximity
@@ -293,7 +334,7 @@ async def retrieve_temporal(
         if budget_remaining > 0:
             neighbors = await conn.fetch(
                 """
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.access_count, mu.embedding, mu.fact_type, mu.document_id,
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding, mu.fact_type, mu.document_id,
                        ml.weight, ml.link_type,
                        1 - (mu.embedding <=> $1::vector) AS similarity
                 FROM memory_links ml
@@ -318,10 +359,22 @@ async def retrieve_temporal(
                 visited.add(neighbor_id)
                 budget_remaining -= 1
 
-                # Calculate temporal score for neighbor
-                neighbor_date = n["event_date"]
-                days_from_mid = abs((neighbor_date - mid_date).total_seconds() / 86400)
-                neighbor_temporal_proximity = 1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
+                # Calculate temporal score for neighbor using best available date
+                neighbor_best_date = None
+                if n["occurred_start"] is not None and n["occurred_end"] is not None:
+                    neighbor_best_date = n["occurred_start"] + (n["occurred_end"] - n["occurred_start"]) / 2
+                elif n["occurred_start"] is not None:
+                    neighbor_best_date = n["occurred_start"]
+                elif n["occurred_end"] is not None:
+                    neighbor_best_date = n["occurred_end"]
+                elif n["mentioned_at"] is not None:
+                    neighbor_best_date = n["mentioned_at"]
+
+                if neighbor_best_date:
+                    days_from_mid = abs((neighbor_best_date - mid_date).total_seconds() / 86400)
+                    neighbor_temporal_proximity = 1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
+                else:
+                    neighbor_temporal_proximity = 0.3  # Lower score if no temporal data
 
                 # Boost causal links (same as graph retrieval)
                 link_type = n["link_type"]
@@ -360,7 +413,8 @@ async def retrieve_parallel(
     agent_id: str,
     fact_type: str,
     thinking_budget: int,
-    question_date: Optional[datetime] = None
+    question_date: Optional[datetime] = None,
+    query_analyzer: Optional["QueryAnalyzer"] = None
 ) -> Tuple[List, List, List, Optional[List]]:
     """
     Run 3-way or 4-way parallel retrieval (adds temporal if detected).
@@ -373,6 +427,7 @@ async def retrieve_parallel(
         fact_type: Fact type to filter
         thinking_budget: Budget for graph traversal and retrieval limits
         question_date: Optional date when question was asked (for temporal filtering)
+        query_analyzer: Query analyzer to use (defaults to TransformerQueryAnalyzer)
 
     Returns:
         Tuple of (semantic_results, bm25_results, graph_results, temporal_results)
@@ -380,7 +435,17 @@ async def retrieve_parallel(
     """
     # Detect temporal constraint
     from .temporal_extraction import extract_temporal_constraint
-    temporal_constraint = extract_temporal_constraint(query_text, reference_date=question_date)
+    import logging
+    logger = logging.getLogger(__name__)
+
+    temporal_constraint = extract_temporal_constraint(
+        query_text, reference_date=question_date, analyzer=query_analyzer
+    )
+
+    if temporal_constraint:
+        logger.info(f"Temporal constraint detected in retrieve_parallel: {temporal_constraint[0]} to {temporal_constraint[1]}")
+    else:
+        logger.info("No temporal constraint in retrieve_parallel")
 
     # Each retrieval needs its own connection
     async def run_semantic():

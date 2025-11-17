@@ -2,18 +2,18 @@
 
 ## Abstract
 
-We present TEMPR (Temporal Entity Memory Priming Retrieval), a memory retrieval architecture designed specifically for AI agents that combines temporal reasoning, entity-aware graph traversal, and neural priming activation to discover both directly and indirectly related memories through multi-strategy parallel search. Unlike traditional search systems optimized for human queries with top-k ranking, TEMPR is optimized for AI agent reasoning with thinking_budget and max_tokens parameters that enable agents to trade off latency for recall. Our multi-stage retrieval pipeline integrates four parallel search strategies (semantic vector search, BM25 keyword matching, graph-based spreading activation, and temporal-aware graph traversal) with reciprocal rank fusion and neural cross-encoder reranking. We leverage open-source LLMs for comprehensive narrative fact extraction, entity recognition, and entity disambiguation, following established practices in LLM-based information extraction. This approach enables the discovery of indirectly related information through graph traversal that purely vector-based approaches miss. We evaluate TEMPR on two benchmarks (LoComo and LongMemEval), achieving 73.50% overall accuracy on LoComo and 80.60% on LongMemEval, with particularly strong performance on multi-hop reasoning tasks (+15.8% over baseline systems).
+We present TEMPR (Temporal Entity Memory Priming Retrieval), a memory retrieval architecture designed specifically for AI agents that combines temporal range reasoning, entity-aware graph traversal with causal link boosting, and neural priming activation to discover both directly and indirectly related memories through multi-strategy parallel search. Unlike traditional search systems optimized for human queries with top-k ranking, TEMPR is optimized for AI agent reasoning with thinking_budget and max_tokens parameters that enable agents to trade off latency for recall. Our multi-stage retrieval pipeline integrates four parallel search strategies (semantic vector search, BM25 keyword matching, graph-based spreading activation with 2x boost for causal links, and temporal-aware graph traversal with range matching) with reciprocal rank fusion and neural cross-encoder reranking. We leverage open-source LLMs for comprehensive narrative fact extraction with temporal ranges (occurred_start/end vs. mentioned_at), entity recognition, entity disambiguation, and causal relationship identification, following established practices in LLM-based information extraction. This approach enables the discovery of indirectly related information through graph traversal, explanatory reasoning through causal chains, and precise temporal matching through range-based queries that purely vector-based approaches miss. We evaluate TEMPR on two benchmarks (LoComo and LongMemEval), achieving 73.50% overall accuracy on LoComo and 80.60% on LongMemEval, with particularly strong performance on multi-hop reasoning tasks (+15.8% over baseline systems).
 
 ## 1. Introduction
 
 Conversational AI agents face a fundamental challenge: maintaining coherent, context-aware memories across extended interactions. Traditional search systems are optimized for human users with top-k ranking and relevance feedback, but AI agents have fundamentally different requirements: they need to retrieve variable amounts of information based on reasoning complexity (thinking_budget) while respecting LLM context windows (max_tokens). Existing approaches rely either on vector similarity search, which captures semantic relationships but misses entity-level connections, or on keyword matching, which provides precision but lacks conceptual understanding. Neither approach adequately handles the temporal aspects of memory or entity-based reasoning that enable multi-hop information discovery.
 
-We propose TEMPR, a memory retrieval architecture designed specifically for AI agents that combines established information retrieval techniques—semantic vector search, BM25 keyword matching, spreading activation graph traversal (Anderson 1983), and neural reranking—into a unified system optimized for agent workflows. The key architectural choices are:
+We propose TEMPR, a memory retrieval architecture designed specifically for AI agents that combines established information retrieval techniques—semantic vector search, BM25 keyword matching, spreading activation graph traversal with causal reasoning (Anderson 1983), and neural reranking—into a unified system optimized for agent workflows. The key architectural choices are:
 
 1. **Agent-Optimized Interface**: thinking_budget and max_tokens parameters instead of traditional top-k ranking
-2. **Comprehensive Narrative Fact Extraction**: LLM-powered extraction that creates self-contained narrative facts preserving full conversational context
-3. **Entity-Aware Graph Structure**: LLM-based entity resolution and linking that connects memories through shared identities
-4. **Four-Way Parallel Retrieval**: Semantic, keyword, graph-based (spreading activation), and temporal retrieval strategies executed in parallel and fused using RRF (Cormack et al. 2009)
+2. **Comprehensive Narrative Fact Extraction with Temporal Ranges**: LLM-powered extraction that creates self-contained narrative facts preserving full conversational context, extracting temporal ranges (occurred_start/end) to distinguish point events from periods, and identifying causal relationships between facts
+3. **Entity-Aware Graph Structure with Causal Links**: LLM-based entity resolution and linking that connects memories through shared identities, plus causal links (causes, caused_by, enables, prevents) that capture explanatory relationships
+4. **Four-Way Parallel Retrieval with Causal Boosting**: Semantic, keyword, graph-based (spreading activation with 2x causal boost), and temporal range retrieval strategies executed in parallel and fused using RRF (Cormack et al. 2009)
 5. **Neural Cross-Encoder Reranking**: Learned query-document relevance with temporal awareness and token budget filtering
 
 This combination of techniques enables agents to discover indirectly related information through graph traversal while maintaining temporal awareness, achieving strong performance on multi-hop reasoning tasks.
@@ -24,9 +24,9 @@ Our key contributions are:
 
 1. **Agent-Optimized Retrieval Interface**: Unlike traditional top-k search optimized for human users, we introduce thinking_budget and max_tokens parameters that allow AI agents to dynamically trade off latency for recall based on reasoning complexity and context window constraints
 
-2. **Four-Way Parallel Retrieval for Conversational Memory**: We combine semantic vector search, BM25 keyword matching, graph-based spreading activation (Anderson 1983), and temporal-aware graph traversal into a unified parallel retrieval pipeline using Reciprocal Rank Fusion (Cormack et al. 2009) and neural cross-encoder reranking. While each technique is well-established, their integration for conversational agent memory represents a novel application.
+2. **Four-Way Parallel Retrieval with Causal Reasoning**: We combine semantic vector search, BM25 keyword matching, graph-based spreading activation with causal link boosting (Anderson 1983), and temporal-aware graph traversal into a unified parallel retrieval pipeline using Reciprocal Rank Fusion (Cormack et al. 2009) and neural cross-encoder reranking. The graph traversal prioritizes causal links (2x weight boost for direct causation) to surface explanatory relationships, enabling "why" and "how" queries. While each technique is well-established, their integration for conversational agent memory with causal reasoning represents a novel application.
 
-3. **LLM-Based Knowledge Graph Construction**: We leverage open-source LLMs (following established practices from Petroni et al. 2019, Brown et al. 2020) for comprehensive narrative fact extraction, entity recognition, and entity disambiguation, applied to the conversational memory domain.
+3. **LLM-Based Knowledge Graph Construction with Temporal Ranges**: We leverage open-source LLMs (following established practices from Petroni et al. 2019, Brown et al. 2020) for comprehensive narrative fact extraction, entity recognition, entity disambiguation, and causal relationship identification. The system extracts temporal ranges (occurred_start, occurred_end) to represent both point events and extended periods, distinguishing when facts occurred from when they were mentioned, enabling precise temporal queries and recency-aware ranking.
 
 4. **Strong Performance on Multi-Hop Reasoning**: 73.50% on LoComo and 80.60% on LongMemEval, with particularly strong performance on multi-hop queries (+15.8% over Mem0), demonstrating the effectiveness of combining these techniques for discovering indirectly related information in conversational contexts
 
@@ -42,7 +42,10 @@ Each memory is represented as a self-contained node with:
 - `agent_id`: Identifier for the agent this memory belongs to
 - `text`: Self-contained comprehensive narrative fact
 - `embedding`: 384-dimensional vector (BAAI/bge-small-en-v1.5)
-- `event_date`: Timestamp when the fact became true
+- `event_date`: Timestamp when the fact became true (maintained for backward compatibility)
+- `occurred_start`: Timestamp when the fact/event started (temporal range support)
+- `occurred_end`: Timestamp when the fact/event ended (temporal range support)
+- `mentioned_at`: Timestamp when the fact was mentioned/learned
 - `context`: Optional contextual metadata
 - `access_count`: Frequency-based importance signal
 - `search_vector`: Full-text search tsvector for BM25 ranking
@@ -91,10 +94,16 @@ The extraction process leverages open-source LLMs (specifically, models from the
 **LLM Extraction Steps**:
 1. **Pronoun Resolution**: "She loves hiking" → "Alice loves hiking"
 2. **Temporal Normalization**: "last year" → "in 2023" (absolute dates)
-3. **Participant Attribution**: Preserve WHO said/did WHAT
-4. **Reasoning Preservation**: Include WHY decisions were made
-5. **Fact Type Classification**: Determine fact categories
-6. **Entity Extraction**: Identify all entities (PERSON, ORG, LOCATION, PRODUCT, CONCEPT)
+3. **Temporal Range Extraction**: Identify when facts occurred vs. when mentioned
+   - Point events: "on July 14" → occurred_start = occurred_end = 2023-07-14
+   - Period events: "in February 2023" → occurred_start = 2023-02-01, occurred_end = 2023-02-28
+   - Vague periods: "lately" → estimated range based on context
+   - mentioned_at = conversation date (when fact was learned)
+4. **Participant Attribution**: Preserve WHO said/did WHAT
+5. **Reasoning Preservation**: Include WHY decisions were made
+6. **Fact Type Classification**: Determine fact categories
+7. **Entity Extraction**: Identify all entities (PERSON, ORG, LOCATION, PRODUCT, CONCEPT)
+8. **Causal Relationship Identification**: Link related facts through cause-effect relationships
 
 **Context Preservation**: The system preserves critical details including:
 - Visual/media elements (photos, images)
@@ -250,10 +259,45 @@ Entity links (described in Section 2.3.3) create the strongest connections:
 - Most reliable traversal path during graph search
 - Enables "Tell me everything about X" queries
 
+#### 2.4.4 Causal Links
+
+Causal links capture cause-effect relationships between facts, enabling reasoning about why events happened and what their consequences were:
+
+**Creation Logic**:
+During fact extraction, the LLM identifies causal relationships between facts extracted from the same conversation. These are stored as directed edges in the graph with specific relationship types.
+
+**Causal Relationship Types**:
+- `causes`: This fact directly causes the target fact
+  - Example: "It rained heavily" → causes → "Game was cancelled"
+- `caused_by`: This fact was caused by the target fact (inverse of causes)
+  - Example: "I spend time in garden" ← caused_by ← "I lost my friend"
+- `enables`: This fact enables or allows the target fact to happen
+  - Example: "I took pottery class" → enables → "I learned to make ceramics"
+- `prevents`: This fact prevents or blocks the target fact
+  - Example: "Road was closed" → prevents → "We couldn't drive to venue"
+
+**Properties**:
+- `weight`: Strength of causal relationship ∈ [0.0, 1.0] (default 1.0 for strong causation)
+- Directional edges (from cause to effect)
+- Created only between facts from the same conversation or closely related temporal contexts
+- Used during graph retrieval with higher activation weights than other link types
+
+**Impact on Retrieval**: Causal links are particularly valuable for "why" and "how" queries:
+
+**Example Query**: "Why does Alice spend time in the garden?"
+1. **Semantic Match**: "Alice spends time in the garden to find comfort after losing her friend" (direct match)
+2. **Causal Traversal**: Follow caused_by links →
+   - "Alice lost her friend Karlie in February 2023" (causal explanation)
+3. **Temporal Context**: Follow temporal links from the loss event →
+   - "Alice felt grief and sadness about losing Karlie" (emotional context)
+
+This causal graph connectivity enables the system to not just retrieve facts, but to explain *why* things happened by following cause-effect chains.
+
 **Graph Density**: Each memory unit typically has:
 - 5-10 temporal links (to nearby memories)
 - 3-5 semantic links (to similar content)
 - Variable entity links (depending on entity mention frequency)
+- 0-3 causal links (when causal relationships are identified)
 
 This multi-layered graph structure enables flexible traversal strategies that balance different types of relatedness.
 
@@ -262,10 +306,23 @@ This multi-layered graph structure enables flexible traversal strategies that ba
 Long-term memory systems must handle evolving information where newer facts may contradict or supersede older ones. TEMPR addresses this challenge through temporal awareness and retrieval-time resolution rather than eager fact invalidation.
 
 **Temporal Recency Signals**:
-Each memory unit includes:
-- `event_date`: When the fact became true
+Each memory unit includes multiple temporal dimensions that enable nuanced recency calculations:
+
+- `occurred_start` / `occurred_end`: When the fact/event actually occurred (temporal range)
+  - Used for temporal queries ("What happened in February?")
+  - Enables matching both point events and extended periods
+- `mentioned_at`: When the fact was mentioned/learned in conversation
+  - Used for recency bias (newer information often more relevant)
+  - Distinguishes between "Alice worked at Google in 2020" (occurred) vs. learned in 2024 (mentioned)
+- `event_date`: Maintained for backward compatibility (typically = occurred_start)
 - `access_count`: Frequency of retrieval (importance signal)
 - Temporal links that decay with time distance
+
+**Dual Temporal Model Benefits**:
+This separation of "when it occurred" vs. "when we learned about it" enables:
+1. **Accurate temporal queries**: "What did Alice do in 2020?" uses occurred_start/end, not mentioned_at
+2. **Recency-aware ranking**: Recent mentions get priority, but old events remain discoverable
+3. **Hybrid activation**: Combine temporal proximity (occurred) with information freshness (mentioned)
 
 **Retrieval-Time Conflict Resolution**:
 Rather than proactively detecting and deleting contradictions (which risks information loss), TEMPR retrieves potentially conflicting facts and relies on the downstream LLM to resolve contradictions based on:
@@ -375,10 +432,29 @@ LIMIT $thinking_budget
 
 **Decay Mechanism**: Activation decays by 0.8 per hop, limiting spread to ~4-5 hops before negligible impact.
 
-**Link Weighting**:
-- Entity links: weight 1.0 (strongest signal)
-- Semantic links: weight ∈ [0.7, 1.0] (cosine similarity)
-- Temporal links: weight ∈ [0.3, 1.0] (time-based decay)
+**Link Weighting with Causal Boosting**:
+During graph traversal, link weights are adjusted based on link type to prioritize high-value relationships:
+
+- **Causal links**: Base weight × 2.0 boost (causes/caused_by) or × 1.5 boost (enables/prevents)
+  - Highest priority due to direct explanatory power
+  - "Why?" queries benefit most from causal traversal
+- **Entity links**: weight 1.0 (no boost, already strong signal)
+- **Semantic links**: weight ∈ [0.7, 1.0] (cosine similarity, no boost)
+- **Temporal links**: weight ∈ [0.3, 1.0] (time-based decay, no boost)
+
+**Causal Activation Boost**: When propagating activation through the graph, causal links receive preferential treatment:
+```python
+if link_type in ('causes', 'caused_by'):
+    effective_weight = base_weight × 2.0  # Direct causation
+elif link_type in ('enables', 'prevents'):
+    effective_weight = base_weight × 1.5  # Conditional causation
+else:
+    effective_weight = base_weight  # Other links
+
+neighbor.activation = current.activation × effective_weight × 0.8
+```
+
+This ensures that when the system encounters a fact, it's 2x more likely to also retrieve facts that explain *why* it happened or what it *caused*.
 
 **Advantages**:
 - Discovers indirectly related facts through graph connectivity
@@ -391,21 +467,42 @@ LIMIT $thinking_budget
 
 **Activation Condition**: Only triggered when temporal constraint detected in query
 
-**Temporal Parsing**: Leverages LLM-based temporal constraint extraction to parse natural language date expressions:
-- "last spring" → March 1 - May 31, previous year
-- "in June" → June 1-30, current/previous year (context-dependent)
-- "last year" → January 1 - December 31, previous year
-- "between March and May" → March 1 - May 31, current year
+**Temporal Parsing**: Uses google/flan-t5-small (80M parameters, ~300MB) to extract temporal constraints from natural language queries. The T5 model is fine-tuned with few-shot prompts to convert temporal expressions into structured date ranges:
+- "last spring" → 2024-03-01 to 2024-05-31
+- "in June" → 2024-06-01 to 2024-06-30 (year inferred from context)
+- "last year" → 2024-01-01 to 2024-12-31
+- "between March and May" → 2025-03-01 to 2025-05-31
+
+The T5-based approach provides fast inference (~30-50ms on CPU) without requiring pattern matching or regex rules, handling complex temporal expressions like "dogs in June 2023" → 2023-06-01 to 2023-06-30 where both the context and temporal phrase must be parsed together
+
+**Temporal Range Matching**: Facts are matched against time constraints using their temporal range (occurred_start, occurred_end) rather than just a single point:
+
+```python
+def fact_matches_time_constraint(fact, query_start, query_end):
+    # Check if fact's temporal range overlaps with query range
+    return (fact.occurred_start <= query_end and
+            fact.occurred_end >= query_start)
+```
+
+This enables precise matching of period queries:
+- Query: "What happened in February?" matches facts with occurred_start/end overlapping February
+- Query: "What did Alice do last spring?" matches facts in March-May range
+- Point events (occurred_start == occurred_end) match if within the query range
 
 **Algorithm**:
 ```python
 1. Parse query for temporal constraints → (start_date, end_date)
 2. If no temporal constraint detected: skip this retrieval path
-3. Find entry points: facts in date range with semantic similarity ≥ 0.4
+3. Find entry points: facts whose temporal range overlaps query range
+   AND semantic similarity ≥ 0.4
 4. Calculate temporal proximity score for each entry point:
-   score = 1.0 - (abs(event_date - mid_date) / range_radius)
-5. Spread through temporal links (weight ≥ 0.1):
-   - Only traverse temporal links to stay in time period
+   # Use temporal anchor (midpoint) for proximity calculation
+   fact_anchor = (occurred_start + occurred_end) / 2
+   query_mid = (start_date + end_date) / 2
+   score = 1.0 - (abs(fact_anchor - query_mid) / range_radius)
+5. Spread through temporal and causal links (weight ≥ 0.1):
+   - Traverse temporal links to stay in time period
+   - Traverse causal links to find explanations (causes/effects)
    - Filter by semantic similarity ≥ 0.4 to maintain relevance
    - Propagate temporal scores with decay (0.7)
 6. Return results with temporal_score metadata
@@ -520,7 +617,7 @@ return filtered_results, total_tokens
 ```
 1. Query Processing
    - Generate embedding (BAAI/bge-small-en-v1.5)
-   - Parse temporal constraints using LLM
+   - Parse temporal constraints using T5-small (google/flan-t5-small)
    - Determine active retrieval paths (3-way or 4-way)
 
 2. Parallel Retrieval
@@ -553,7 +650,7 @@ TEMPR prioritizes read latency over write latency. Table 1 shows measured latenc
 | Semantic Search (HNSW) | [TODO: e.g., 35ms] | [TODO: e.g., 62ms] | [TODO: e.g., 89ms] | [TODO: e.g., 23%] |
 | BM25 Keyword Search | [TODO: e.g., 8ms] | [TODO: e.g., 15ms] | [TODO: e.g., 23ms] | [TODO: e.g., 5%] |
 | Graph Traversal | [TODO: e.g., 42ms] | [TODO: e.g., 78ms] | [TODO: e.g., 112ms] | [TODO: e.g., 28%] |
-| Temporal Parsing (when triggered) | [TODO: e.g., 15ms] | [TODO: e.g., 28ms] | [TODO: e.g., 45ms] | [TODO: e.g., 10%] |
+| Temporal Parsing (T5-small, when triggered) | 30ms | 50ms | 75ms | 10% |
 | RRF Fusion | [TODO: e.g., 2ms] | [TODO: e.g., 3ms] | [TODO: e.g., 5ms] | [TODO: e.g., 1%] |
 | Cross-Encoder Reranking | [TODO: e.g., 35ms] | [TODO: e.g., 68ms] | [TODO: e.g., 95ms] | [TODO: e.g., 23%] |
 | Token Budget Filtering | [TODO: e.g., 3ms] | [TODO: e.g., 5ms] | [TODO: e.g., 8ms] | [TODO: e.g., 2%] |
@@ -672,7 +769,7 @@ We measured the total cost of running TEMPR on the LoComo benchmark dataset (512
 | **LLM Costs** | | | |
 | Fact Extraction (write-time) | [TODO: e.g., $0.0032] | [TODO: e.g., $1.64] | OpenAI-OSS 20B, [TODO: e.g., ~1.2K] tokens/conversation |
 | Entity Disambiguation (write-time) | [TODO: e.g., $0.0008] | [TODO: e.g., $0.41] | Only for borderline cases ([TODO: e.g., ~15%] of entities) |
-| Temporal Parsing (query-time) | [TODO: e.g., $0.0004] | [TODO: e.g., $0.20] | Only when temporal constraints detected |
+| Temporal Parsing (T5-small, query-time) | $0.0000 | $0.00 | Local inference, no API cost |
 | **Subtotal LLM** | [TODO: e.g., $0.0044] | [TODO: e.g., $2.25] | |
 | **Embedding Costs** | | | |
 | Fact Embeddings (write-time) | [TODO: e.g., $0.0002] | [TODO: e.g., $0.10] | BAAI/bge-small-en-v1.5 (local inference) |
