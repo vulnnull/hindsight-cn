@@ -381,6 +381,82 @@ memora search <agent_id> "query" -o yaml
 memora search <agent_id> "query" -v
 ```
 
+## OpenAI Client Wrapper (`memora-openai`)
+
+The `memora-openai` package provides a drop-in replacement for the OpenAI Python client that automatically integrates with Memora. It transparently stores conversations and injects relevant memories into prompts.
+
+### Installation
+
+```bash
+cd memora-openai
+uv pip install -e .
+```
+
+### Usage
+
+```python
+from memora_openai import configure, OpenAI
+
+# Configure Memora integration once
+configure(
+    memora_api_url="http://localhost:8000",
+    agent_id="my-agent",
+    store_conversations=True,  # Store conversations to Memora
+    inject_memories=True,      # Inject relevant memories into prompts
+)
+
+# Use OpenAI client as normal - Memora integration happens automatically
+client = OpenAI(api_key="sk-...")
+
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "What did we discuss about AI?"}]
+)
+```
+
+### Async Support
+
+```python
+from memora_openai import configure, AsyncOpenAI
+
+configure(
+    memora_api_url="http://localhost:8000",
+    agent_id="my-agent",
+)
+
+client = AsyncOpenAI(api_key="sk-...")
+
+response = await client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Tell me about my preferences"}]
+)
+```
+
+### Features
+
+- **Automatic Memory Injection**: Relevant memories are automatically retrieved and injected as system messages before each API call
+- **Conversation Storage**: All conversations are automatically stored to Memora for future retrieval
+- **Zero Code Changes**: Works as a drop-in replacement for `openai.OpenAI` and `openai.AsyncOpenAI`
+- **Configurable**: Control memory search budget, context window, and enable/disable features
+- **Transparent**: Original OpenAI API responses are returned unchanged
+
+### Configuration Options
+
+```python
+configure(
+    memora_api_url="http://localhost:8000",  # Memora API URL
+    agent_id="my-agent",                      # Agent identifier (required)
+    store_conversations=True,                 # Store conversations
+    inject_memories=True,                     # Inject memories
+    memory_search_budget=10,                  # Number of memories to retrieve
+    context_window=10,                        # Conversation history size
+    document_id="session-123",                # Optional: Group conversations by document ID
+    enabled=True,                             # Master switch
+)
+```
+
+See [memora-openai/README.md](memora-openai/README.md) for full documentation and examples.
+
 ## Running Benchmarks
 
 The system includes two benchmarks for evaluating memory retrieval quality:

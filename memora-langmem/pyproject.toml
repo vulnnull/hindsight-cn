@@ -1,0 +1,30 @@
+[project]
+name = "memora-langmem"
+version = "0.0.1"
+description = "LangGraph langmem drop-in replacement using Memora memory system"
+authors = [
+    {name = "Memora Team"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph>=0.2.0",
+    "memora-client",
+]
+
+[tool.uv.sources]
+memora-client = { path = "../memora-clients/python", editable = true }
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "I", "UP"]
