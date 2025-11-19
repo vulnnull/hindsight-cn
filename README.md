@@ -448,8 +448,6 @@ configure(
     agent_id="my-agent",                      # Agent identifier (required)
     store_conversations=True,                 # Store conversations
     inject_memories=True,                     # Inject memories
-    memory_search_budget=10,                  # Number of memories to retrieve
-    context_window=10,                        # Conversation history size
     document_id="session-123",                # Optional: Group conversations by document ID
     enabled=True,                             # Master switch
 )

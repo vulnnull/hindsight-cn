@@ -22,7 +22,7 @@ export class ReasoningService {
      * @returns ThinkResponse Successful Response
      * @throws ApiError
      */
-    public static apiThinkApiV1AgentsAgentIdThinkPost({
+    public static think({
         agentId,
         requestBody,
     }: {

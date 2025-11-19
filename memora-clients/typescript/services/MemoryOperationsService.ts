@@ -18,7 +18,7 @@ export class MemoryOperationsService {
      * @returns ListMemoryUnitsResponse Successful Response
      * @throws ApiError
      */
-    public static apiListApiV1AgentsAgentIdMemoriesListGet({
+    public static listMemories({
         agentId,
         factType,
         q,
@@ -59,7 +59,7 @@ export class MemoryOperationsService {
      * @returns SearchResponse Successful Response
      * @throws ApiError
      */
-    public static apiSearchApiV1AgentsAgentIdMemoriesSearchPost({
+    public static searchMemories({
         agentId,
         requestBody,
     }: {
@@ -101,7 +101,7 @@ export class MemoryOperationsService {
      * @returns BatchPutResponse Successful Response
      * @throws ApiError
      */
-    public static apiBatchPutApiV1AgentsAgentIdMemoriesPost({
+    public static batchPutMemories({
         agentId,
         requestBody,
     }: {
@@ -146,7 +146,7 @@ export class MemoryOperationsService {
      * @returns BatchPutAsyncResponse Successful Response
      * @throws ApiError
      */
-    public static apiBatchPutAsyncApiV1AgentsAgentIdMemoriesAsyncPost({
+    public static batchPutAsync({
         agentId,
         requestBody,
     }: {
@@ -172,7 +172,7 @@ export class MemoryOperationsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static apiListOperationsApiV1AgentsAgentIdOperationsGet({
+    public static listOperations({
         agentId,
     }: {
         agentId: string,
@@ -194,7 +194,7 @@ export class MemoryOperationsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static apiCancelOperationApiV1AgentsAgentIdOperationsOperationIdDelete({
+    public static cancelOperation({
         agentId,
         operationId,
     }: {
@@ -219,7 +219,7 @@ export class MemoryOperationsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static apiDeleteMemoryUnitApiV1AgentsAgentIdMemoriesUnitIdDelete({
+    public static deleteMemoryUnit({
         agentId,
         unitId,
     }: {

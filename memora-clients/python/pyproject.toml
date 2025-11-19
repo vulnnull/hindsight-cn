@@ -8,18 +8,26 @@ authors = [
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
-    "httpx>=0.23.0,<0.29.0",
-    "attrs>=22.2.0",
-    "python-dateutil>=2.8.0,<3",
+  "urllib3 (>=2.1.0,<3.0.0)",
+  "python-dateutil (>=2.8.2)",
+  "aiohttp (>=3.8.4)",
+  "aiohttp-retry (>=2.8.3)",
+  "pydantic (>=2)",
+  "typing-extensions (>=4.7.1)",
 ]
 
-[tool.uv.build-backend]
-module-name = "agent_memory_api_client"
-module-root = ""
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
 
 [build-system]
-requires = ["uv_build>=0.9.0,<0.10.0"]
-build-backend = "uv_build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["memora_client", "memora_client_api"]
 
 [tool.ruff]
 line-length = 120

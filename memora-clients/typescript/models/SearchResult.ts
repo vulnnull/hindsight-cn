@@ -9,8 +9,8 @@ export type SearchResult = {
     id: string;
     text: string;
     type?: (string | null);
-    activation?: (number | null);
     context?: (string | null);
     event_date?: (string | null);
+    document_id?: (string | null);
 };
 

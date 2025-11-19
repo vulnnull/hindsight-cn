@@ -7,6 +7,7 @@ import type { AgentListResponse } from '../models/AgentListResponse';
 import type { AgentProfileResponse } from '../models/AgentProfileResponse';
 import type { BackgroundResponse } from '../models/BackgroundResponse';
 import type { CreateAgentRequest } from '../models/CreateAgentRequest';
+import type { DeleteResponse } from '../models/DeleteResponse';
 import type { UpdatePersonalityRequest } from '../models/UpdatePersonalityRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -18,7 +19,7 @@ export class AgentManagementService {
      * @returns AgentListResponse Successful Response
      * @throws ApiError
      */
-    public static apiAgentsApiV1AgentsGet(): CancelablePromise<AgentListResponse> {
+    public static listAgents(): CancelablePromise<AgentListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/agents',
@@ -30,7 +31,7 @@ export class AgentManagementService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static apiStatsApiV1AgentsAgentIdStatsGet({
+    public static getAgentStats({
         agentId,
     }: {
         agentId: string,
@@ -47,12 +48,42 @@ export class AgentManagementService {
         });
     }
     /**
+     * Clear agent memories
+     * Delete memory units for an agent. Optionally filter by fact_type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The agent profile (personality and background) will be preserved.
+     * @returns DeleteResponse Successful Response
+     * @throws ApiError
+     */
+    public static clearAgentMemories({
+        agentId,
+        factType,
+    }: {
+        agentId: string,
+        /**
+         * Optional fact type filter (world, agent, opinion)
+         */
+        factType?: (string | null),
+    }): CancelablePromise<DeleteResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/agents/{agent_id}/memories',
+            path: {
+                'agent_id': agentId,
+            },
+            query: {
+                'fact_type': factType,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Get agent profile
      * Get personality traits and background for an agent. Auto-creates agent with defaults if not exists.
      * @returns AgentProfileResponse Successful Response
      * @throws ApiError
      */
-    public static apiGetAgentProfileApiV1AgentsAgentIdProfileGet({
+    public static getAgentProfile({
         agentId,
     }: {
         agentId: string,
@@ -74,7 +105,7 @@ export class AgentManagementService {
      * @returns AgentProfileResponse Successful Response
      * @throws ApiError
      */
-    public static apiUpdateAgentPersonalityApiV1AgentsAgentIdProfilePut({
+    public static updateAgentPersonality({
         agentId,
         requestBody,
     }: {
@@ -100,7 +131,7 @@ export class AgentManagementService {
      * @returns BackgroundResponse Successful Response
      * @throws ApiError
      */
-    public static apiAddAgentBackgroundApiV1AgentsAgentIdBackgroundPost({
+    public static addAgentBackground({
         agentId,
         requestBody,
     }: {
@@ -126,7 +157,7 @@ export class AgentManagementService {
      * @returns AgentProfileResponse Successful Response
      * @throws ApiError
      */
-    public static apiCreateOrUpdateAgentApiV1AgentsAgentIdPut({
+    public static createOrUpdateAgent({
         agentId,
         requestBody,
     }: {

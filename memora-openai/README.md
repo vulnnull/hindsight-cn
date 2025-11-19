@@ -12,7 +12,13 @@ Drop-in replacement for OpenAI Python client with automatic Memora integration.
 
 ## Installation
 
+This package is part of the Memora workspace. Install from the root:
+
 ```bash
+# From repository root
+uv sync
+
+# Or install just this package
 cd memora-openai
 uv pip install -e .
 ```
@@ -76,10 +82,6 @@ The `configure()` function accepts the following parameters:
 | `api_key` | str | `None` | Optional API key for Memora authentication |
 | `store_conversations` | bool | `True` | Store conversations to Memora |
 | `inject_memories` | bool | `True` | Inject relevant memories into prompts |
-| `memory_search_budget` | int | `10` | Number of memories to retrieve for context |
-| `auto_extract_facts` | bool | `False` | Automatically extract facts from responses |
-| `event_timestamp` | str | `None` | Custom timestamp for memory events (ISO format) |
-| `context_window` | int | `10` | Number of recent conversation turns to consider |
 | `document_id` | str | `None` | Optional document ID for stored conversations |
 | `enabled` | bool | `True` | Master switch to enable/disable Memora integration |
 
@@ -144,16 +146,6 @@ response2 = client.chat.completions.create(...)  # No Memora integration
 
 # Re-enable
 configure(memora_api_url="http://localhost:8000", agent_id="agent-1")
-```
-
-### Custom Memory Search Budget
-
-```python
-configure(
-    memora_api_url="http://localhost:8000",
-    agent_id="my-agent",
-    memory_search_budget=20,  # Retrieve more memories for richer context
-)
 ```
 
 ### Using Document ID

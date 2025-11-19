@@ -8,6 +8,7 @@ import type { PersonalityTraits } from './PersonalityTraits';
  */
 export type AgentProfileResponse = {
     agent_id: string;
+    name: string;
     personality: PersonalityTraits;
     background: string;
 };

@@ -10,7 +10,6 @@ export type SearchRequest = {
     fact_type?: (Array<string> | null);
     thinking_budget?: number;
     max_tokens?: number;
-    reranker?: string;
     trace?: boolean;
     question_date?: (string | null);
 };

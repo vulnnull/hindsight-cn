@@ -20,7 +20,7 @@
         ],
         "summary": "Get memory graph data",
         "description": "Retrieve graph data for visualization, optionally filtered by fact_type (world/agent/opinion). Limited to 1000 most recent items.",
-        "operationId": "api_graph_api_v1_agents__agent_id__graph_get",
+        "operationId": "get_graph",
         "parameters": [
           {
             "name": "agent_id",
@@ -79,7 +79,7 @@
         ],
         "summary": "List memory units",
         "description": "List memory units with pagination and optional full-text search. Supports filtering by fact_type.",
-        "operationId": "api_list_api_v1_agents__agent_id__memories_list_get",
+        "operationId": "list_memories",
         "parameters": [
           {
             "name": "agent_id",
@@ -174,7 +174,7 @@
         ],
         "summary": "Search memory",
         "description": "Search memory using semantic similarity and spreading activation.\n\n    The fact_type parameter is optional and must be one of:\n    - 'world': General knowledge about people, places, events, and things that happen\n    - 'agent': Memories about what the AI agent did, actions taken, and tasks performed\n    - 'opinion': The agent's formed beliefs, perspectives, and viewpoints",
-        "operationId": "api_search_api_v1_agents__agent_id__memories_search_post",
+        "operationId": "search_memories",
         "parameters": [
           {
             "name": "agent_id",
@@ -227,7 +227,7 @@
         ],
         "summary": "Think and generate answer",
         "description": "Think and formulate an answer using agent identity, world facts, and opinions.\n\n    This endpoint:\n    1. Retrieves agent facts (agent's identity)\n    2. Retrieves world facts relevant to the query\n    3. Retrieves existing opinions (agent's perspectives)\n    4. Uses LLM to formulate a contextual answer\n    5. Extracts and stores any new opinions formed\n    6. Returns plain text answer, the facts used, and new opinions",
-        "operationId": "api_think_api_v1_agents__agent_id__think_post",
+        "operationId": "think",
         "parameters": [
           {
             "name": "agent_id",
@@ -280,7 +280,7 @@
         ],
         "summary": "List all agents",
         "description": "Get a list of all agents with their profiles",
-        "operationId": "api_agents_api_v1_agents_get",
+        "operationId": "list_agents",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -302,7 +302,7 @@
         ],
         "summary": "Get memory statistics for an agent",
         "description": "Get statistics about nodes and links for a specific agent",
-        "operationId": "api_stats_api_v1_agents__agent_id__stats_get",
+        "operationId": "get_agent_stats",
         "parameters": [
           {
             "name": "agent_id",
@@ -343,7 +343,7 @@
         ],
         "summary": "List documents",
         "description": "List documents with pagination and optional search. Documents are the source content from which memory units are extracted.",
-        "operationId": "api_list_documents_api_v1_agents__agent_id__documents_get",
+        "operationId": "list_documents",
         "parameters": [
           {
             "name": "agent_id",
@@ -422,7 +422,7 @@
         ],
         "summary": "Get document details",
         "description": "Get a specific document including its original text",
-        "operationId": "api_get_document_api_v1_agents__agent_id__documents__document_id__get",
+        "operationId": "get_document",
         "parameters": [
           {
             "name": "agent_id",
@@ -465,6 +465,54 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Delete a document",
+        "description": "Delete a document and all its associated memory units and links.\n\nThis will cascade delete:\n- The document itself\n- All memory units extracted from this document\n- All links (temporal, semantic, entity) associated with those memory units\n\nThis operation cannot be undone.",
+        "operationId": "delete_document",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/agents/{agent_id}/memories": {
@@ -474,7 +522,7 @@
         ],
         "summary": "Store multiple memories",
         "description": "Store multiple memory items in batch with automatic fact extraction.\n\n    Features:\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with automatic upsert (when document_id is provided)\n    - Temporal and semantic linking\n\n    The system automatically:\n    1. Extracts semantic facts from the content\n    2. Generates embeddings\n    3. Deduplicates similar facts\n    4. Creates temporal, semantic, and entity links\n    5. Tracks document metadata\n\n    Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).",
-        "operationId": "api_batch_put_api_v1_agents__agent_id__memories_post",
+        "operationId": "batch_put_memories",
         "parameters": [
           {
             "name": "agent_id",
@@ -518,6 +566,65 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "Agent Management"
+        ],
+        "summary": "Clear agent memories",
+        "description": "Delete memory units for an agent. Optionally filter by fact_type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The agent profile (personality and background) will be preserved.",
+        "operationId": "clear_agent_memories",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "fact_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional fact type filter (world, agent, opinion)",
+              "title": "Fact Type"
+            },
+            "description": "Optional fact type filter (world, agent, opinion)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/agents/{agent_id}/memories/async": {
@@ -527,7 +634,7 @@
         ],
         "summary": "Store multiple memories asynchronously",
         "description": "Store multiple memory items in batch asynchronously using the task backend.\n\n    This endpoint returns immediately after queuing the task, without waiting for completion.\n    The actual processing happens in the background.\n\n    Features:\n    - Immediate response (non-blocking)\n    - Background processing via task queue\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with automatic upsert (when document_id is provided)\n    - Temporal and semantic linking\n\n    The system automatically:\n    1. Queues the batch put task\n    2. Returns immediately with success=True, queued=True\n    3. Processes in background: extracts facts, generates embeddings, creates links\n\n    Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).",
-        "operationId": "api_batch_put_async_api_v1_agents__agent_id__memories_async_post",
+        "operationId": "batch_put_async",
         "parameters": [
           {
             "name": "agent_id",
@@ -580,7 +687,7 @@
         ],
         "summary": "List async operations",
         "description": "Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations",
-        "operationId": "api_list_operations_api_v1_agents__agent_id__operations_get",
+        "operationId": "list_operations",
         "parameters": [
           {
             "name": "agent_id",
@@ -621,7 +728,7 @@
         ],
         "summary": "Cancel a pending async operation",
         "description": "Cancel a pending async operation by removing it from the queue",
-        "operationId": "api_cancel_operation_api_v1_agents__agent_id__operations__operation_id__delete",
+        "operationId": "cancel_operation",
         "parameters": [
           {
             "name": "agent_id",
@@ -671,7 +778,7 @@
         ],
         "summary": "Delete a memory unit",
         "description": "Delete a single memory unit and all its associated links (temporal, semantic, and entity links)",
-        "operationId": "api_delete_memory_unit_api_v1_agents__agent_id__memories__unit_id__delete",
+        "operationId": "delete_memory_unit",
         "parameters": [
           {
             "name": "agent_id",
@@ -721,7 +828,7 @@
         ],
         "summary": "Get agent profile",
         "description": "Get personality traits and background for an agent. Auto-creates agent with defaults if not exists.",
-        "operationId": "api_get_agent_profile_api_v1_agents__agent_id__profile_get",
+        "operationId": "get_agent_profile",
         "parameters": [
           {
             "name": "agent_id",
@@ -762,7 +869,7 @@
         ],
         "summary": "Update agent personality",
         "description": "Update agent's Big Five personality traits and bias strength",
-        "operationId": "api_update_agent_personality_api_v1_agents__agent_id__profile_put",
+        "operationId": "update_agent_personality",
         "parameters": [
           {
             "name": "agent_id",
@@ -815,7 +922,7 @@
         ],
         "summary": "Add/merge agent background",
         "description": "Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.",
-        "operationId": "api_add_agent_background_api_v1_agents__agent_id__background_post",
+        "operationId": "add_agent_background",
         "parameters": [
           {
             "name": "agent_id",
@@ -868,7 +975,7 @@
         ],
         "summary": "Create or update agent",
         "description": "Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.",
-        "operationId": "api_create_or_update_agent_api_v1_agents__agent_id__put",
+        "operationId": "create_or_update_agent",
         "parameters": [
           {
             "name": "agent_id",
@@ -948,6 +1055,10 @@
             "type": "string",
             "title": "Agent Id"
           },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
           "personality": {
             "$ref": "#/components/schemas/PersonalityTraits"
           },
@@ -981,6 +1092,7 @@
         "type": "object",
         "required": [
           "agent_id",
+          "name",
           "personality",
           "background"
         ],
@@ -1009,6 +1121,7 @@
               "agent_id": "user123",
               "background": "I am a software engineer",
               "created_at": "2024-01-15T10:30:00Z",
+              "name": "Alice",
               "personality": {
                 "agreeableness": 0.5,
                 "bias_strength": 0.5,
@@ -1028,6 +1141,10 @@
             "type": "string",
             "title": "Agent Id"
           },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
           "personality": {
             "$ref": "#/components/schemas/PersonalityTraits"
           },
@@ -1039,6 +1156,7 @@
         "type": "object",
         "required": [
           "agent_id",
+          "name",
           "personality",
           "background"
         ],
@@ -1047,6 +1165,7 @@
         "example": {
           "agent_id": "user123",
           "background": "I am a software engineer with 10 years of experience in startups",
+          "name": "Alice",
           "personality": {
             "agreeableness": 0.7,
             "bias_strength": 0.7,
@@ -1235,6 +1354,17 @@
       },
       "CreateAgentRequest": {
         "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "personality": {
             "anyOf": [
               {
@@ -1262,6 +1392,7 @@
         "description": "Request model for creating/updating an agent.",
         "example": {
           "background": "I am a creative software engineer with 10 years of experience",
+          "name": "Alice",
           "personality": {
             "agreeableness": 0.7,
             "bias_strength": 0.7,
@@ -1270,6 +1401,29 @@
             "neuroticism": 0.3,
             "openness": 0.8
           }
+        }
+      },
+      "DeleteResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "DeleteResponse",
+        "description": "Response model for delete operations.",
+        "example": {
+          "message": "Resource deleted successfully",
+          "success": true
         }
       },
       "DocumentResponse": {
@@ -1652,11 +1806,6 @@
             "title": "Max Tokens",
             "default": 4096
           },
-          "reranker": {
-            "type": "string",
-            "title": "Reranker",
-            "default": "heuristic"
-          },
           "trace": {
             "type": "boolean",
             "title": "Trace",
@@ -1688,7 +1837,6 @@
           "max_tokens": 4096,
           "query": "What did Alice say about machine learning?",
           "question_date": "2023-05-30T23:40:00",
-          "reranker": "heuristic",
           "thinking_budget": 100,
           "trace": true
         }
@@ -1724,7 +1872,6 @@
         "example": {
           "results": [
             {
-              "activation": 0.95,
               "context": "work info",
               "event_date": "2024-01-15T10:30:00Z",
               "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -1760,17 +1907,6 @@
             ],
             "title": "Type"
           },
-          "activation": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Activation"
-          },
           "context": {
             "anyOf": [
               {
@@ -1792,6 +1928,17 @@
               }
             ],
             "title": "Event Date"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
           }
         },
         "type": "object",
@@ -1803,6 +1950,7 @@
         "description": "Single search result item.",
         "example": {
           "context": "work info",
+          "document_id": "session_abc123",
           "event_date": "2024-01-15T10:30:00Z",
           "id": "123e4567-e89b-12d3-a456-426614174000",
           "text": "Alice works at Google on the AI team",
@@ -1836,17 +1984,6 @@
               }
             ],
             "title": "Type"
-          },
-          "activation": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Activation"
           },
           "context": {
             "anyOf": [
@@ -1952,13 +2089,11 @@
         "example": {
           "based_on": [
             {
-              "activation": 0.9,
               "id": "123",
               "text": "AI is used in healthcare",
               "type": "world"
             },
             {
-              "activation": 0.85,
               "id": "456",
               "text": "I discussed AI applications last week",
               "type": "agent"

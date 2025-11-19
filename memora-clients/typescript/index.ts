@@ -16,6 +16,7 @@ export type { BatchPutAsyncResponse } from './models/BatchPutAsyncResponse';
 export type { BatchPutRequest } from './models/BatchPutRequest';
 export type { BatchPutResponse } from './models/BatchPutResponse';
 export type { CreateAgentRequest } from './models/CreateAgentRequest';
+export type { DeleteResponse } from './models/DeleteResponse';
 export type { DocumentResponse } from './models/DocumentResponse';
 export type { GraphDataResponse } from './models/GraphDataResponse';
 export type { HTTPValidationError } from './models/HTTPValidationError';

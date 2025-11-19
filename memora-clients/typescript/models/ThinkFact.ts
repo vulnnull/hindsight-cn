@@ -9,7 +9,6 @@ export type ThinkFact = {
     id?: (string | null);
     text: string;
     type?: (string | null);
-    activation?: (number | null);
     context?: (string | null);
     event_date?: (string | null);
 };

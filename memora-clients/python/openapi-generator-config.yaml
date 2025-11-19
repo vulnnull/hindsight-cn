@@ -1,0 +1,5 @@
+packageName: memora_client_api
+projectName: memora-client
+packageVersion: 0.0.7
+library: asyncio
+generateSourceCodeOnly: true

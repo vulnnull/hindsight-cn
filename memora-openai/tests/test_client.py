@@ -56,15 +56,11 @@ class TestConfiguration:
             agent_id="test-agent",
             store_conversations=False,
             inject_memories=False,
-            memory_search_budget=20,
-            context_window=5,
             document_id="test-doc",
         )
 
         assert config.store_conversations is False
         assert config.inject_memories is False
-        assert config.memory_search_budget == 20
-        assert config.context_window == 5
         assert config.document_id == "test-doc"
 
     def test_reset_config(self):
@@ -227,6 +223,7 @@ class TestInterceptor:
     def test_extract_conversation_context(self):
         """Test extracting conversation context."""
         from memora_openai.interceptor import MemoraInterceptor
+        from unittest.mock import Mock
 
         interceptor = MemoraInterceptor()
         messages = [
@@ -235,10 +232,18 @@ class TestInterceptor:
             {"role": "user", "content": "Tell me about AI"},
         ]
 
-        context = interceptor._extract_conversation_context(messages)
-        assert "user: Hello" in context
-        assert "assistant: Hi! How can I help?" in context
-        assert "user: Tell me about AI" in context
+        # Mock response object
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message = Mock()
+        mock_response.choices[0].message.content = "AI stands for Artificial Intelligence"
+
+        context = interceptor._extract_conversation_context(messages, mock_response)
+
+        # Should include recent messages and response
+        assert len(context) > 0
+        assert any(msg["content"] == "Tell me about AI" for msg in context)
+        assert any(msg["content"] == "AI stands for Artificial Intelligence" for msg in context)
 
     def test_format_memories(self):
         """Test formatting memories."""
@@ -257,4 +262,4 @@ class TestInterceptor:
         formatted = interceptor._format_memories(memories)
         assert "1. User likes Python" in formatted
         assert "2. Working on AI project" in formatted
-        assert "Date: 2024-01-01" in formatted
+        assert "Relevant Memories" in formatted

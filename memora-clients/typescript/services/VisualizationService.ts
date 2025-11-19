@@ -13,7 +13,7 @@ export class VisualizationService {
      * @returns GraphDataResponse Successful Response
      * @throws ApiError
      */
-    public static apiGraphApiV1AgentsAgentIdGraphGet({
+    public static getGraph({
         agentId,
         factType,
     }: {

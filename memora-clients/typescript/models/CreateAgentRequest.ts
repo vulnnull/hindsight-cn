@@ -7,6 +7,7 @@ import type { PersonalityTraits } from './PersonalityTraits';
  * Request model for creating/updating an agent.
  */
 export type CreateAgentRequest = {
+    name?: (string | null);
     personality?: (PersonalityTraits | null);
     background?: (string | null);
 };

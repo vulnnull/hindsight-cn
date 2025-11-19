@@ -14,7 +14,7 @@ export class DocumentsService {
      * @returns ListDocumentsResponse Successful Response
      * @throws ApiError
      */
-    public static apiListDocumentsApiV1AgentsAgentIdDocumentsGet({
+    public static listDocuments({
         agentId,
         q,
         limit = 100,
@@ -47,7 +47,7 @@ export class DocumentsService {
      * @returns DocumentResponse Successful Response
      * @throws ApiError
      */
-    public static apiGetDocumentApiV1AgentsAgentIdDocumentsDocumentIdGet({
+    public static getDocument({
         agentId,
         documentId,
     }: {
@@ -56,6 +56,38 @@ export class DocumentsService {
     }): CancelablePromise<DocumentResponse> {
         return __request(OpenAPI, {
             method: 'GET',
+            url: '/api/v1/agents/{agent_id}/documents/{document_id}',
+            path: {
+                'agent_id': agentId,
+                'document_id': documentId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Delete a document
+     * Delete a document and all its associated memory units and links.
+     *
+     * This will cascade delete:
+     * - The document itself
+     * - All memory units extracted from this document
+     * - All links (temporal, semantic, entity) associated with those memory units
+     *
+     * This operation cannot be undone.
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static deleteDocument({
+        agentId,
+        documentId,
+    }: {
+        agentId: string,
+        documentId: string,
+    }): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
             url: '/api/v1/agents/{agent_id}/documents/{document_id}',
             path: {
                 'agent_id': agentId,

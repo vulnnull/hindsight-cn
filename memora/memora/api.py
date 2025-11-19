@@ -615,7 +615,8 @@ def _register_routes(app: FastAPI):
         response_model=GraphDataResponse,
         tags=["Visualization"],
         summary="Get memory graph data",
-        description="Retrieve graph data for visualization, optionally filtered by fact_type (world/agent/opinion). Limited to 1000 most recent items."
+        description="Retrieve graph data for visualization, optionally filtered by fact_type (world/agent/opinion). Limited to 1000 most recent items.",
+        operation_id="get_graph"
     )
     async def api_graph(
         agent_id: str,
@@ -637,7 +638,8 @@ def _register_routes(app: FastAPI):
         response_model=ListMemoryUnitsResponse,
         tags=["Memory Operations"],
         summary="List memory units",
-        description="List memory units with pagination and optional full-text search. Supports filtering by fact_type."
+        description="List memory units with pagination and optional full-text search. Supports filtering by fact_type.",
+        operation_id="list_memories"
     )
     async def api_list(
         agent_id: str,
@@ -684,7 +686,8 @@ def _register_routes(app: FastAPI):
     - 'world': General knowledge about people, places, events, and things that happen
     - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
     - 'opinion': The agent's formed beliefs, perspectives, and viewpoints
-        """
+        """,
+        operation_id="search_memories"
     )
     async def api_search(agent_id: str, request: SearchRequest):
         """Run a search and return results with trace."""
@@ -765,7 +768,8 @@ def _register_routes(app: FastAPI):
     4. Uses LLM to formulate a contextual answer
     5. Extracts and stores any new opinions formed
     6. Returns plain text answer, the facts used, and new opinions
-        """
+        """,
+        operation_id="think"
     )
     async def api_think(agent_id: str, request: ThinkRequest):
         try:
@@ -807,7 +811,8 @@ def _register_routes(app: FastAPI):
         response_model=AgentListResponse,
         tags=["Agent Management"],
         summary="List all agents",
-        description="Get a list of all agents with their profiles"
+        description="Get a list of all agents with their profiles",
+        operation_id="list_agents"
     )
     async def api_agents():
         """Get list of all agents with their profiles."""
@@ -824,7 +829,8 @@ def _register_routes(app: FastAPI):
         "/api/v1/agents/{agent_id}/stats",
         tags=["Agent Management"],
         summary="Get memory statistics for an agent",
-        description="Get statistics about nodes and links for a specific agent"
+        description="Get statistics about nodes and links for a specific agent",
+        operation_id="get_agent_stats"
     )
     async def api_stats(agent_id: str):
         """Get statistics about memory nodes and links for an agent."""
@@ -945,7 +951,8 @@ def _register_routes(app: FastAPI):
         response_model=ListDocumentsResponse,
         tags=["Documents"],
         summary="List documents",
-        description="List documents with pagination and optional search. Documents are the source content from which memory units are extracted."
+        description="List documents with pagination and optional search. Documents are the source content from which memory units are extracted.",
+        operation_id="list_documents"
     )
     async def api_list_documents(
         agent_id: str,
@@ -982,7 +989,8 @@ def _register_routes(app: FastAPI):
         response_model=DocumentResponse,
         tags=["Documents"],
         summary="Get document details",
-        description="Get a specific document including its original text"
+        description="Get a specific document including its original text",
+        operation_id="get_document"
     )
     async def api_get_document(
         agent_id: str,
@@ -1022,7 +1030,8 @@ This will cascade delete:
 - All links (temporal, semantic, entity) associated with those memory units
 
 This operation cannot be undone.
-        """
+        """,
+        operation_id="delete_document"
     )
     async def api_delete_document(
         agent_id: str,
@@ -1079,7 +1088,8 @@ This operation cannot be undone.
     5. Tracks document metadata
 
     Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
-        """
+        """,
+        operation_id="batch_put_memories"
     )
     async def api_batch_put(agent_id: str, request: BatchPutRequest):
         try:
@@ -1141,7 +1151,8 @@ This operation cannot be undone.
     3. Processes in background: extracts facts, generates embeddings, creates links
 
     Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
-        """
+        """,
+        operation_id="batch_put_async"
     )
     async def api_batch_put_async(agent_id: str, request: BatchPutRequest):
         try:
@@ -1203,7 +1214,8 @@ This operation cannot be undone.
         "/api/v1/agents/{agent_id}/operations",
         tags=["Memory Operations"],
         summary="List async operations",
-        description="Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations"
+        description="Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations",
+        operation_id="list_operations"
     )
     async def api_list_operations(agent_id: str):
         """List all async operations (pending and failed) for an agent."""
@@ -1247,7 +1259,8 @@ This operation cannot be undone.
         "/api/v1/agents/{agent_id}/operations/{operation_id}",
         tags=["Memory Operations"],
         summary="Cancel a pending async operation",
-        description="Cancel a pending async operation by removing it from the queue"
+        description="Cancel a pending async operation by removing it from the queue",
+        operation_id="cancel_operation"
     )
     async def api_cancel_operation(agent_id: str, operation_id: str):
         """Cancel a pending async operation."""
@@ -1296,7 +1309,8 @@ This operation cannot be undone.
         "/api/v1/agents/{agent_id}/memories/{unit_id}",
         tags=["Memory Operations"],
         summary="Delete a memory unit",
-        description="Delete a single memory unit and all its associated links (temporal, semantic, and entity links)"
+        description="Delete a single memory unit and all its associated links (temporal, semantic, and entity links)",
+        operation_id="delete_memory_unit"
     )
     async def api_delete_memory_unit(agent_id: str, unit_id: str):
         """Delete a memory unit and all its links."""
@@ -1323,7 +1337,8 @@ This operation cannot be undone.
         response_model=AgentProfileResponse,
         tags=["Agent Management"],
         summary="Get agent profile",
-        description="Get personality traits and background for an agent. Auto-creates agent with defaults if not exists."
+        description="Get personality traits and background for an agent. Auto-creates agent with defaults if not exists.",
+        operation_id="get_agent_profile"
     )
     async def api_get_agent_profile(agent_id: str):
         """Get agent profile (personality + background)."""
@@ -1347,7 +1362,8 @@ This operation cannot be undone.
         response_model=AgentProfileResponse,
         tags=["Agent Management"],
         summary="Update agent personality",
-        description="Update agent's Big Five personality traits and bias strength"
+        description="Update agent's Big Five personality traits and bias strength",
+        operation_id="update_agent_personality"
     )
     async def api_update_agent_personality(
         agent_id: str,
@@ -1381,7 +1397,8 @@ This operation cannot be undone.
         response_model=BackgroundResponse,
         tags=["Agent Management"],
         summary="Add/merge agent background",
-        description="Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits."
+        description="Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.",
+        operation_id="add_agent_background"
     )
     async def api_add_agent_background(
         agent_id: str,
@@ -1412,7 +1429,8 @@ This operation cannot be undone.
         response_model=AgentProfileResponse,
         tags=["Agent Management"],
         summary="Create or update agent",
-        description="Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults."
+        description="Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.",
+        operation_id="create_or_update_agent"
     )
     async def api_create_or_update_agent(
         agent_id: str,
@@ -1483,7 +1501,8 @@ This operation cannot be undone.
         response_model=DeleteResponse,
         tags=["Agent Management"],
         summary="Clear agent memories",
-        description="Delete memory units for an agent. Optionally filter by fact_type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The agent profile (personality and background) will be preserved."
+        description="Delete memory units for an agent. Optionally filter by fact_type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The agent profile (personality and background) will be preserved.",
+        operation_id="clear_agent_memories"
     )
     async def api_clear_agent_memories(
         agent_id: str,
