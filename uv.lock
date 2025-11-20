@@ -13,7 +13,6 @@ members = [
     "memora-client",
     "memora-dev",
     "memora-langmem",
-    "memora-mcp-server",
     "memora-openai",
 ]
 
@@ -1717,6 +1716,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+mcp = [
+    { name = "fastmcp" },
+]
 test = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1728,6 +1730,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.17.1" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.120.3" },
+    { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=2.0.0" },
     { name = "greenlet", specifier = ">=3.2.4" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "langchain-text-splitters", specifier = ">=0.3.0" },
@@ -1747,7 +1750,7 @@ requires-dist = [
     { name = "transformers", specifier = ">=4.30.0" },
     { name = "uvicorn", specifier = ">=0.38.0" },
 ]
-provides-extras = ["test"]
+provides-extras = ["test", "mcp"]
 
 [[package]]
 name = "memora-client"
@@ -1813,21 +1816,6 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
 ]
 provides-extras = ["test"]
-
-[[package]]
-name = "memora-mcp-server"
-version = "0.0.1"
-source = { editable = "memora-mcp-server" }
-dependencies = [
-    { name = "fastmcp" },
-    { name = "httpx" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastmcp", specifier = ">=0.7.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-]
 
 [[package]]
 name = "memora-openai"

@@ -22,7 +22,17 @@ _memory = TemporalSemanticMemory(
     memory_llm_model=os.getenv("MEMORA_API_LLM_MODEL", "openai/gpt-oss-120b"),
     memory_llm_base_url=os.getenv("MEMORA_API_LLM_BASE_URL") or None,
 )
-app = create_app(_memory)
+
+# Check if MCP should be enabled
+mcp_enabled = os.getenv("MEMORA_API_MCP_ENABLED", "true").lower() == "true"
+
+# Create unified app with both HTTP and optionally MCP
+app = create_app(
+    memory=_memory,
+    http_api_enabled=True,
+    mcp_api_enabled=mcp_enabled,
+    mcp_mount_path="/mcp"
+)
 
 
 if __name__ == "__main__":

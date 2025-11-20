@@ -278,6 +278,132 @@ class Memora:
         response = _run_async(self._agent_api.create_or_update_agent(agent_id, request_obj))
         return response.to_dict() if hasattr(response, 'to_dict') else response
 
+    # Async methods (native async, no _run_async wrapper)
+
+    async def aput_batch(
+        self,
+        agent_id: str,
+        items: List[Dict[str, Any]],
+        document_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Store multiple memories in batch (async).
+
+        Args:
+            agent_id: The agent ID
+            items: List of memory items with 'content' and optional 'event_date', 'context'
+            document_id: Optional document ID for grouping memories
+
+        Returns:
+            Response with success status and item count
+        """
+        memory_items = [
+            memory_item.MemoryItem(
+                content=item["content"],
+                event_date=item.get("event_date"),
+                context=item.get("context"),
+            )
+            for item in items
+        ]
+
+        request_obj = batch_put_request.BatchPutRequest(
+            items=memory_items,
+            document_id=document_id,
+        )
+
+        response = await self._memory_api.batch_put_memories(agent_id, request_obj)
+        return response.to_dict() if hasattr(response, 'to_dict') else response
+
+    async def aput(
+        self,
+        agent_id: str,
+        content: str,
+        event_date: Optional[datetime] = None,
+        context: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Store a single memory (async).
+
+        Args:
+            agent_id: The agent ID
+            content: Memory content
+            event_date: Optional event timestamp
+            context: Optional context description
+            document_id: Optional document ID for grouping
+
+        Returns:
+            Response with success status
+        """
+        return await self.aput_batch(
+            agent_id=agent_id,
+            items=[{"content": content, "event_date": event_date, "context": context}],
+            document_id=document_id,
+        )
+
+    async def asearch(
+        self,
+        agent_id: str,
+        query: str,
+        fact_type: Optional[List[str]] = None,
+        max_tokens: int = 4096,
+        thinking_budget: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search memories using semantic similarity (async).
+
+        Args:
+            agent_id: The agent ID
+            query: Search query
+            fact_type: Optional list of fact types to filter (world, agent, opinion)
+            max_tokens: Maximum tokens in results (default: 4096)
+            thinking_budget: Token budget for search (default: 100)
+
+        Returns:
+            List of search results
+        """
+        request_obj = search_request.SearchRequest(
+            query=query,
+            fact_type=fact_type,
+            thinking_budget=thinking_budget,
+            max_tokens=max_tokens,
+            trace=False,
+        )
+
+        response = await self._memory_api.search_memories(agent_id, request_obj)
+
+        if hasattr(response, 'results'):
+            return [r.to_dict() if hasattr(r, 'to_dict') else r for r in response.results]
+        return []
+
+    async def athink(
+        self,
+        agent_id: str,
+        query: str,
+        thinking_budget: int = 50,
+        context: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a contextual answer based on agent identity and memories (async).
+
+        Args:
+            agent_id: The agent ID
+            query: The question or prompt
+            thinking_budget: Token budget for thinking (default: 50)
+            context: Optional additional context
+
+        Returns:
+            Response with answer text, facts used, and new opinions
+        """
+        request_obj = think_request.ThinkRequest(
+            query=query,
+            thinking_budget=thinking_budget,
+            context=context,
+        )
+
+        response = await self._reasoning_api.think(agent_id, request_obj)
+        return response.to_dict() if hasattr(response, 'to_dict') else response
+
 
 # Alias for backward compatibility
 MemoraClient = Memora
