@@ -172,9 +172,15 @@ fn format_error_message(err: &anyhow::Error, api_url: &str) -> String {
 
 pub fn print_config_help() {
     println!("\n{}", "Configuration:".bright_cyan().bold());
-    println!("  Set the API URL using an environment variable:");
-    println!("  {}", "export MEMORA_API_URL=http://localhost:8080".bright_white());
-    println!("\n  Add to your shell profile to make it permanent:");
-    println!("  {}", "echo 'export MEMORA_API_URL=http://localhost:8080' >> ~/.zshrc".bright_black());
+    println!("  Run the configure command to set the API URL:");
+    println!("  {}", "memora configure".bright_white());
+    println!();
+    println!("  Or set it directly:");
+    println!("  {}", "memora configure --api-url http://your-api:8080".bright_white());
+    println!();
+    println!("  {}", "Configuration priority:".bright_yellow());
+    println!("    1. Environment variable (MEMORA_API_URL) - highest priority");
+    println!("    2. Config file (~/.memora/config)");
+    println!("    3. Default (http://localhost:8080)");
     println!();
 }

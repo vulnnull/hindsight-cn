@@ -28,6 +28,13 @@ def create_mcp_server(memory: TemporalSemanticMemory) -> FastMCP:
         """
         **CRITICAL: Store important user information to long-term memory.**
 
+        **⚠️ PER-USER TOOL - REQUIRES USER IDENTIFICATION:**
+        - This tool is STRICTLY per-user. Each user MUST have a unique `agent_id`.
+        - ONLY use this tool if you have a valid user identifier (user ID, email, session ID, etc.) to map to `agent_id`.
+        - DO NOT use this tool if you cannot identify the specific user.
+        - DO NOT share memories between different users - each user's memories are isolated by their `agent_id`.
+        - If you don't have a user identifier, DO NOT use this tool at all.
+
         Use this tool PROACTIVELY whenever the user shares:
         - Personal facts, preferences, or interests (e.g., "I love hiking", "I'm a vegetarian")
         - Important events or milestones (e.g., "I got promoted", "My birthday is June 15")
@@ -44,7 +51,9 @@ def create_mcp_server(memory: TemporalSemanticMemory) -> FastMCP:
         "career_goals", "project_details", etc. This helps organize and retrieve related memories later.
 
         Args:
-            agent_id: The unique identifier for the agent/user storing the memory
+            agent_id: **REQUIRED** - The unique, persistent identifier for this specific user (e.g., user_id, email, session_id).
+                     This MUST be consistent across all interactions with the same user.
+                     Example: "user_12345", "alice@example.com", "session_abc123"
             content: The fact/memory to store (be specific and include relevant details)
             context: Categorize the memory (e.g., 'personal_preferences', 'work_history', 'hobbies', 'family')
             explanation: Optional explanation for why this memory is being stored
@@ -69,6 +78,13 @@ def create_mcp_server(memory: TemporalSemanticMemory) -> FastMCP:
         """
         **CRITICAL: Search user's memory to provide personalized, context-aware responses.**
 
+        **⚠️ PER-USER TOOL - REQUIRES USER IDENTIFICATION:**
+        - This tool is STRICTLY per-user. Each user MUST have a unique `agent_id`.
+        - ONLY use this tool if you have a valid user identifier (user ID, email, session ID, etc.) to map to `agent_id`.
+        - DO NOT use this tool if you cannot identify the specific user.
+        - DO NOT search across multiple users - each user's memories are isolated by their `agent_id`.
+        - If you don't have a user identifier, DO NOT use this tool at all.
+
         Use this tool PROACTIVELY at the start of conversations or when making recommendations to:
         - Check user's preferences before making suggestions (e.g., "what foods does the user like?")
         - Recall user's history to provide continuity (e.g., "what projects has the user worked on?")
@@ -87,7 +103,9 @@ def create_mcp_server(memory: TemporalSemanticMemory) -> FastMCP:
         "user's work experience", "user's dietary restrictions", "what does the user know about X?"
 
         Args:
-            agent_id: The unique identifier for the agent/user whose memories to search
+            agent_id: **REQUIRED** - The unique, persistent identifier for this specific user (e.g., user_id, email, session_id).
+                     This MUST be consistent across all interactions with the same user.
+                     Example: "user_12345", "alice@example.com", "session_abc123"
             query: Natural language search query to find relevant memories
             max_tokens: Maximum tokens for search context (default: 4096)
             explanation: Optional explanation for why this search is being performed

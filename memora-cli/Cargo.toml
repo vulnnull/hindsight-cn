@@ -38,6 +38,7 @@ thiserror = "1.0"
 # Utilities
 chrono = "0.4"
 walkdir = "2.5"
+dirs = "5.0"
 
 [profile.release]
 opt-level = "z"

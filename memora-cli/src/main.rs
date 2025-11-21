@@ -34,6 +34,7 @@ impl From<Format> for OutputFormat {
 #[command(name = "memora")]
 #[command(about = "Memora CLI - Semantic memory system", long_about = None)]
 #[command(version)]
+#[command(after_help = get_after_help())]
 struct Cli {
     /// Output format (pretty, json, yaml)
     #[arg(short = 'o', long, global = true, default_value = "pretty")]
@@ -45,6 +46,18 @@ struct Cli {
 
     #[command(subcommand)]
     command: Commands,
+}
+
+fn get_after_help() -> String {
+    let config = config::Config::load().ok();
+    let (api_url, source) = match &config {
+        Some(c) => (c.api_url.as_str(), c.source.to_string()),
+        None => ("http://localhost:8080", "default".to_string()),
+    };
+    format!(
+        "Current API URL: {} (from {})\n\nRun 'memora configure' to change the API URL.",
+        api_url, source
+    )
 }
 
 #[derive(Subcommand)]
@@ -64,6 +77,14 @@ enum Commands {
     /// Manage async operations (list, cancel)
     #[command(subcommand)]
     Operation(OperationCommands),
+
+    /// Configure the CLI (API URL, etc.)
+    #[command(after_help = "Configuration priority:\n  1. Environment variable (MEMORA_API_URL) - highest priority\n  2. Config file (~/.memora/config)\n  3. Default (http://localhost:8080)")]
+    Configure {
+        /// API URL to connect to (interactive prompt if not provided)
+        #[arg(long)]
+        api_url: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -285,6 +306,11 @@ fn run() -> Result<()> {
     let output_format: OutputFormat = cli.output.into();
     let verbose = cli.verbose;
 
+    // Handle configure command before loading full config (it doesn't need API client)
+    if let Commands::Configure { api_url } = cli.command {
+        return handle_configure(api_url, output_format);
+    }
+
     // Load configuration
     let config = Config::from_env().unwrap_or_else(|e| {
         ui::print_error(&format!("Configuration error: {}", e));
@@ -301,6 +327,7 @@ fn run() -> Result<()> {
 
     // Execute command and handle errors
     let result: Result<()> = match cli.command {
+        Commands::Configure { .. } => unreachable!(), // Handled above
         Commands::Agent(agent_cmd) => match agent_cmd {
             AgentCommands::List => {
                 let spinner = if output_format == OutputFormat::Pretty {
@@ -1071,6 +1098,61 @@ fn run() -> Result<()> {
     // Handle API errors with nice messages
     if let Err(e) = result {
         errors::handle_api_error(e, &api_url);
+    }
+
+    Ok(())
+}
+
+fn handle_configure(api_url: Option<String>, output_format: OutputFormat) -> Result<()> {
+    // Load current config to show current state
+    let current_config = Config::load().ok();
+
+    if output_format == OutputFormat::Pretty {
+        ui::print_info("Memora CLI Configuration");
+        println!();
+
+        // Show current configuration
+        if let Some(ref config) = current_config {
+            println!("  Current API URL: {}", config.api_url);
+            println!("  Source: {}", config.source);
+            println!();
+        }
+    }
+
+    // Get the new API URL (from argument or prompt)
+    let new_api_url = match api_url {
+        Some(url) => url,
+        None => {
+            // Interactive prompt
+            let current = current_config.as_ref().map(|c| c.api_url.as_str());
+            config::prompt_api_url(current)?
+        }
+    };
+
+    // Validate the URL
+    if !new_api_url.starts_with("http://") && !new_api_url.starts_with("https://") {
+        ui::print_error(&format!(
+            "Invalid API URL: {}. Must start with http:// or https://",
+            new_api_url
+        ));
+        return Ok(());
+    }
+
+    // Save to config file
+    let config_path = Config::save_api_url(&new_api_url)?;
+
+    if output_format == OutputFormat::Pretty {
+        ui::print_success(&format!("Configuration saved to {}", config_path.display()));
+        println!();
+        println!("  API URL: {}", new_api_url);
+        println!();
+        println!("Note: Environment variable MEMORA_API_URL will override this setting.");
+    } else {
+        let result = serde_json::json!({
+            "api_url": new_api_url,
+            "config_path": config_path.display().to_string(),
+        });
+        output::print_output(&result, output_format)?;
     }
 
     Ok(())
