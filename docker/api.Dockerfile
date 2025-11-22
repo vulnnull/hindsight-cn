@@ -11,6 +11,7 @@ WORKDIR /app
 # Copy only dependency files first for better caching
 COPY memora/pyproject.toml memora/README.md /app/memora/
 COPY memora/memora /app/memora/memora
+COPY memora/alembic /app/memora/alembic
 
 # Install uv for faster dependency installation
 RUN pip install --no-cache-dir uv

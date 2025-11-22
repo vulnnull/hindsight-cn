@@ -48,6 +48,7 @@ export class DataplaneClient {
     query: string;
     agent_id: string;
     thinking_budget?: number;
+    context?: string;
   }) {
     return this.fetchApi(`/api/think`, {
       method: 'POST',

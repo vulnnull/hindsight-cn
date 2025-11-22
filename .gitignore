@@ -26,3 +26,5 @@ nltk_data/
 
 # Debug logs
 logs/
+
+.DS_Store
