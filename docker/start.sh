@@ -15,7 +15,7 @@ if [ ! -f ../.env ]; then
     cp ../.env.example ../.env
     echo ""
     echo "⚠️  Please edit .env and set your API keys:"
-    echo "   - MEMORY_LLM_API_KEY"
+    echo "   - MEMORA_API_LLM_API_KEY"
     echo ""
     echo "Then run this script again."
     exit 1
@@ -37,14 +37,14 @@ echo "  ✅ PostgreSQL is ready"
 
 # Wait for API
 echo "  Waiting for API..."
-until curl -f http://localhost:8080/ > /dev/null 2>&1; do
+until curl -f http://localhost:8080/api/v1/agents > /dev/null 2>&1; do
   sleep 2
 done
 echo "  ✅ API is ready"
 
 # Wait for Control Plane
 echo "  Waiting for Control Plane..."
-until curl -f http://localhost:3000/ > /dev/null 2>&1; do
+until curl -f http://localhost:3000 > /dev/null 2>&1; do
   sleep 2
 done
 echo "  ✅ Control Plane is ready"
