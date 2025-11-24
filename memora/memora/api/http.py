@@ -19,6 +19,22 @@ from pydantic import BaseModel, Field
 from memora import TemporalSemanticMemory
 
 
+class MetadataFilter(BaseModel):
+    """Filter for metadata fields. Matches records where (key=value) OR (key not set) when match_unset=True."""
+    key: str = Field(description="Metadata key to filter on")
+    value: Optional[str] = Field(default=None, description="Value to match. If None with match_unset=True, matches any record where key is not set.")
+    match_unset: bool = Field(default=True, description="If True, also match records where this metadata key is not set")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "key": "source",
+                "value": "slack",
+                "match_unset": True
+            }
+        }
+
+
 class SearchRequest(BaseModel):
     """Request model for search endpoint."""
     query: str
@@ -27,6 +43,7 @@ class SearchRequest(BaseModel):
     max_tokens: int = 4096
     trace: bool = False
     question_date: Optional[str] = None  # ISO format date string (e.g., "2023-05-30T23:40:00")
+    metadata_filter: Optional[List[MetadataFilter]] = Field(default=None, description="Filter by metadata. Multiple filters are ANDed together.")
 
     class Config:
         json_schema_extra = {
@@ -36,7 +53,8 @@ class SearchRequest(BaseModel):
                 "thinking_budget": 100,
                 "max_tokens": 4096,
                 "trace": True,
-                "question_date": "2023-05-30T23:40:00"
+                "question_date": "2023-05-30T23:40:00",
+                "metadata_filter": [{"key": "source", "value": "slack", "match_unset": True}]
             }
         }
 
@@ -52,7 +70,8 @@ class SearchResult(BaseModel):
                 "type": "world",
                 "context": "work info",
                 "event_date": "2024-01-15T10:30:00Z",
-                "document_id": "session_abc123"
+                "document_id": "session_abc123",
+                "metadata": {"source": "slack"}
             }
         }
     }
@@ -63,6 +82,7 @@ class SearchResult(BaseModel):
     context: Optional[str] = None
     event_date: Optional[str] = None  # ISO format date string
     document_id: Optional[str] = None  # Document this memory belongs to
+    metadata: Optional[Dict[str, str]] = None  # User-defined metadata
 
 
 class SearchResponse(BaseModel):
@@ -96,13 +116,15 @@ class MemoryItem(BaseModel):
     content: str
     event_date: Optional[datetime] = None
     context: Optional[str] = None
+    metadata: Optional[Dict[str, str]] = None
 
     class Config:
         json_schema_extra = {
             "example": {
                 "content": "Alice mentioned she's working on a new ML model",
                 "event_date": "2024-01-15T10:30:00Z",
-                "context": "team meeting"
+                "context": "team meeting",
+                "metadata": {"source": "slack", "channel": "engineering"}
             }
         }
 
@@ -177,13 +199,15 @@ class ThinkRequest(BaseModel):
     query: str
     thinking_budget: int = 50
     context: Optional[str] = None
+    metadata_filter: Optional[List[MetadataFilter]] = Field(default=None, description="Filter by metadata. Multiple filters are ANDed together.")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "query": "What do you think about artificial intelligence?",
                 "thinking_budget": 50,
-                "context": "This is for a research paper on AI ethics"
+                "context": "This is for a research paper on AI ethics",
+                "metadata_filter": [{"key": "source", "value": "slack", "match_unset": True}]
             }
         }
 

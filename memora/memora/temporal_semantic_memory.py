@@ -744,12 +744,13 @@ class TemporalSemanticMemory(
                 content = item["content"]
                 context = item.get("context", "")
                 event_date = item.get("event_date") or utcnow()
+                metadata = item.get("metadata") or {}
 
                 task = extract_facts(content, event_date, context, llm_config=self._llm_config, agent_name=agent_name, extract_opinions=extract_opinions)
-                fact_extraction_tasks.append((task, event_date, context))
+                fact_extraction_tasks.append((task, event_date, context, metadata))
 
             # Wait for all fact extractions to complete
-            all_fact_results = await asyncio.gather(*[task for task, _, _ in fact_extraction_tasks])
+            all_fact_results = await asyncio.gather(*[task for task, _, _, _ in fact_extraction_tasks])
             log_buffer.append(f"[1] Extract facts (parallel): {len(fact_extraction_tasks)} contents in {time.time() - step_start:.3f}s")
 
             # Flatten and track which facts belong to which content
@@ -762,10 +763,11 @@ class TemporalSemanticMemory(
             all_fact_entities = []  # NEW: Store LLM-extracted entities per fact
             all_fact_types = []  # Store fact type (world or agent)
             all_causal_relations = []  # NEW: Store causal relationships per fact
+            all_metadata = []  # User-defined metadata for each fact
             content_boundaries = []  # [(start_idx, end_idx), ...]
 
             current_idx = 0
-            for i, ((_, event_date, context), fact_dicts) in enumerate(zip(fact_extraction_tasks, all_fact_results)):
+            for i, ((_, event_date, context, metadata), fact_dicts) in enumerate(zip(fact_extraction_tasks, all_fact_results)):
                 start_idx = current_idx
 
                 for fact_dict in fact_dicts:
@@ -813,6 +815,8 @@ class TemporalSemanticMemory(
                         adjusted_rel['target_fact_index'] = start_idx + rel['target_fact_index']
                         adjusted_relations.append(adjusted_rel)
                     all_causal_relations.append(adjusted_relations)
+                    # Each fact inherits metadata from its source content item
+                    all_metadata.append(metadata)
 
                 end_idx = current_idx + len(fact_dicts)
                 content_boundaries.append((start_idx, end_idx))
@@ -959,6 +963,7 @@ class TemporalSemanticMemory(
                         filtered_contexts = [c for c, is_dup in zip(all_contexts, all_is_duplicate) if not is_dup]
                         filtered_entities = [ents for ents, is_dup in zip(all_fact_entities, all_is_duplicate) if not is_dup]
                         filtered_fact_types = [ft for ft, is_dup in zip(all_fact_types, all_is_duplicate) if not is_dup]
+                        filtered_metadata = [m for m, is_dup in zip(all_metadata, all_is_duplicate) if not is_dup]
 
                         # Build index mapping from old indices to new indices (accounting for removed duplicates)
                         old_to_new_index = {}
@@ -999,10 +1004,13 @@ class TemporalSemanticMemory(
                             else None
                             for ft in filtered_fact_types
                         ]
+                        # Convert metadata dicts to JSON strings for asyncpg
+                        import json
+                        filtered_metadata_json = [json.dumps(m) if m else '{}' for m in filtered_metadata]
                         results = await conn.fetch(
                             """
-                            INSERT INTO memory_units (agent_id, document_id, text, context, embedding, event_date, occurred_start, occurred_end, mentioned_at, fact_type, confidence_score, access_count)
-                            SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::vector[], $6::timestamptz[], $7::timestamptz[], $8::timestamptz[], $9::timestamptz[], $10::text[], $11::float[], $12::integer[])
+                            INSERT INTO memory_units (agent_id, document_id, text, context, embedding, event_date, occurred_start, occurred_end, mentioned_at, fact_type, confidence_score, access_count, metadata)
+                            SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::vector[], $6::timestamptz[], $7::timestamptz[], $8::timestamptz[], $9::timestamptz[], $10::text[], $11::float[], $12::integer[], $13::jsonb[])
                             RETURNING id
                             """,
                             [agent_id] * len(filtered_sentences),
@@ -1016,7 +1024,8 @@ class TemporalSemanticMemory(
                             filtered_mentioned_ats,
                             filtered_fact_types,
                             confidence_scores,
-                            [0] * len(filtered_sentences)
+                            [0] * len(filtered_sentences),
+                            filtered_metadata_json
                         )
 
                         created_unit_ids = [str(row['id']) for row in results]

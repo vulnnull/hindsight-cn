@@ -26,6 +26,7 @@ class MemoryFact(BaseModel):
     occurred_end: Optional[str] = Field(None, description="ISO format date when the event ended occurring")
     mentioned_at: Optional[str] = Field(None, description="ISO format date when the fact was mentioned/learned")
     document_id: Optional[str] = Field(None, description="ID of the document this memory belongs to")
+    metadata: Optional[Dict[str, str]] = Field(None, description="User-defined metadata")
 
     # Internal metrics (used by system but may not be exposed in API)
     activation: Optional[float] = Field(None, description="Internal activation score")
@@ -39,6 +40,7 @@ class MemoryFact(BaseModel):
                 "context": "work info",
                 "event_date": "2024-01-15T10:30:00Z",
                 "document_id": "session_abc123",
+                "metadata": {"source": "slack"},
                 "activation": 0.95
             }
         }

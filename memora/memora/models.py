@@ -73,6 +73,7 @@ class MemoryUnit(Base):
     fact_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="world")
     confidence_score: Mapped[Optional[float]] = mapped_column(Float)
     access_count: Mapped[int] = mapped_column(Integer, server_default="0")
+    unit_metadata: Mapped[dict] = mapped_column("metadata", JSONB, server_default=sql_text("'{}'::jsonb"))  # User-defined metadata (str->str)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now()
     )
