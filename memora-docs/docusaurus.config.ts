@@ -16,11 +16,12 @@ const config: Config = {
     mermaid: true,
   },
 
-  url: 'https://memora.dev',
-  baseUrl: '/',
+  url: 'https://vectorize-io.github.io',
+  baseUrl: '/hindsight/',
 
-  organizationName: 'memora',
-  projectName: 'memora',
+  organizationName: 'vectorize-io',
+  projectName: 'hindsight',
+  trailingSlash: false,
 
   onBrokenLinks: 'throw',
 
