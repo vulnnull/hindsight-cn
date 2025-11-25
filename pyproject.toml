@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["memora", "memora-dev", "memora-dev/benchmarks", "memora-mcp-server", "memora-openai", "memora-langmem", "memora-clients/python"]
+members = ["hindsight", "hindsight-api", "hindsight-dev", "hindsight-dev/benchmarks", "hindsight-mcp-server", "hindsight-openai", "hindsight-langmem", "hindsight-clients/python"]
 
 [tool.uv]
 dev-dependencies = []

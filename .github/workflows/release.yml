@@ -22,15 +22,15 @@ jobs:
       with:
         python-version-file: ".python-version"
 
-    - name: Build memora package
-      working-directory: ./memora
+    - name: Build hindsight package
+      working-directory: ./hindsight
       run: uv build
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: python-memora-dist
-        path: memora/dist/*
+        name: python-hindsight-dist
+        path: hindsight/dist/*
         retention-days: 30
 
   build-rust-cli:
@@ -40,16 +40,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: memora
-            asset_name: memora-linux-amd64
+            artifact_name: hindsight
+            asset_name: hindsight-linux-amd64
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact_name: memora
-            asset_name: memora-darwin-amd64
+            artifact_name: hindsight
+            asset_name: hindsight-darwin-amd64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: memora
-            asset_name: memora-darwin-arm64
+            artifact_name: hindsight
+            asset_name: hindsight-darwin-arm64
 
     steps:
     - uses: actions/checkout@v4
@@ -74,17 +74,17 @@ jobs:
     - name: Cache cargo build
       uses: actions/cache@v4
       with:
-        path: memora-cli/target
+        path: hindsight-cli/target
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Build
-      working-directory: memora-cli
+      working-directory: hindsight-cli
       run: cargo build --release --target ${{ matrix.target }}
 
     - name: Prepare artifact
       run: |
         mkdir -p artifacts
-        cp memora-cli/target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
+        cp hindsight-cli/target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
         chmod +x artifacts/${{ matrix.asset_name }}
 
     - name: Upload artifacts
@@ -135,7 +135,7 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ghcr.io/${{ github.repository_owner }}/memora-${{ matrix.component }}
+        images: ghcr.io/${{ github.repository_owner }}/hindsight-${{ matrix.component }}
         tags: |
           type=semver,pattern={{version}},value=${{ steps.get_version.outputs.VERSION }}
           type=semver,pattern={{major}}.{{minor}},value=${{ steps.get_version.outputs.VERSION }}
@@ -179,11 +179,11 @@ jobs:
 
     - name: Lint Helm chart
       run: |
-        helm lint helm/memora
+        helm lint helm/hindsight
 
     - name: Package Helm chart
       run: |
-        helm package helm/memora --destination ./helm-packages
+        helm package helm/hindsight --destination ./helm-packages
 
     - name: Upload Helm chart artifact
       uses: actions/upload-artifact@v4
@@ -208,26 +208,26 @@ jobs:
     - name: Download Python package
       uses: actions/download-artifact@v4
       with:
-        name: python-memora-dist
-        path: ./artifacts/python-memora-dist
+        name: python-hindsight-dist
+        path: ./artifacts/python-hindsight-dist
 
     - name: Download Rust CLI (Linux)
       uses: actions/download-artifact@v4
       with:
-        name: rust-cli-memora-linux-amd64
-        path: ./artifacts/rust-cli-memora-linux-amd64
+        name: rust-cli-hindsight-linux-amd64
+        path: ./artifacts/rust-cli-hindsight-linux-amd64
 
     - name: Download Rust CLI (macOS Intel)
       uses: actions/download-artifact@v4
       with:
-        name: rust-cli-memora-darwin-amd64
-        path: ./artifacts/rust-cli-memora-darwin-amd64
+        name: rust-cli-hindsight-darwin-amd64
+        path: ./artifacts/rust-cli-hindsight-darwin-amd64
 
     - name: Download Rust CLI (macOS ARM)
       uses: actions/download-artifact@v4
       with:
-        name: rust-cli-memora-darwin-arm64
-        path: ./artifacts/rust-cli-memora-darwin-arm64
+        name: rust-cli-hindsight-darwin-arm64
+        path: ./artifacts/rust-cli-hindsight-darwin-arm64
 
     - name: Download Helm chart
       uses: actions/download-artifact@v4
@@ -239,11 +239,11 @@ jobs:
       run: |
         mkdir -p release-assets
         # Python package
-        cp artifacts/python-memora-dist/* release-assets/
+        cp artifacts/python-hindsight-dist/* release-assets/
         # Rust CLI binaries
-        cp artifacts/rust-cli-memora-linux-amd64/memora-linux-amd64 release-assets/
-        cp artifacts/rust-cli-memora-darwin-amd64/memora-darwin-amd64 release-assets/
-        cp artifacts/rust-cli-memora-darwin-arm64/memora-darwin-arm64 release-assets/
+        cp artifacts/rust-cli-hindsight-linux-amd64/hindsight-linux-amd64 release-assets/
+        cp artifacts/rust-cli-hindsight-darwin-amd64/hindsight-darwin-amd64 release-assets/
+        cp artifacts/rust-cli-hindsight-darwin-arm64/hindsight-darwin-arm64 release-assets/
         # Helm chart
         cp artifacts/helm-chart/*.tgz release-assets/
 
@@ -251,68 +251,68 @@ jobs:
       id: release_notes
       run: |
         cat << EOF > release-notes.md
-        # Memora v${{ steps.get_version.outputs.VERSION }}
+        # Hindsight v${{ steps.get_version.outputs.VERSION }}
 
         ## 📦 Release Artifacts
 
         ### Python Package
-        - \`memora-${{ steps.get_version.outputs.VERSION }}-py3-none-any.whl\`
-        - \`memora-${{ steps.get_version.outputs.VERSION }}.tar.gz\`
+        - \`hindsight-${{ steps.get_version.outputs.VERSION }}-py3-none-any.whl\`
+        - \`hindsight-${{ steps.get_version.outputs.VERSION }}.tar.gz\`
 
         ### CLI Binaries
-        - \`memora-linux-amd64\` - Linux x86_64
-        - \`memora-darwin-amd64\` - macOS Intel
-        - \`memora-darwin-arm64\` - macOS Apple Silicon
+        - \`hindsight-linux-amd64\` - Linux x86_64
+        - \`hindsight-darwin-amd64\` - macOS Intel
+        - \`hindsight-darwin-arm64\` - macOS Apple Silicon
 
         ### Helm Chart
-        - \`memora-${{ steps.get_version.outputs.VERSION }}.tgz\`
+        - \`hindsight-${{ steps.get_version.outputs.VERSION }}.tgz\`
 
         ### Docker Images
         Docker images are published to GitHub Container Registry:
-        - \`ghcr.io/${{ github.repository_owner }}/memora-api:${{ steps.get_version.outputs.VERSION }}\`
-        - \`ghcr.io/${{ github.repository_owner }}/memora-control-plane:${{ steps.get_version.outputs.VERSION }}\`
+        - \`ghcr.io/${{ github.repository_owner }}/hindsight-api:${{ steps.get_version.outputs.VERSION }}\`
+        - \`ghcr.io/${{ github.repository_owner }}/hindsight-control-plane:${{ steps.get_version.outputs.VERSION }}\`
 
         ## 🚀 Installation
 
         ### Python Package
         \`\`\`bash
-        pip install memora==${{ steps.get_version.outputs.VERSION }}
+        pip install hindsight==${{ steps.get_version.outputs.VERSION }}
         \`\`\`
 
         ### CLI
         \`\`\`bash
         # macOS (Apple Silicon)
-        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/memora-darwin-arm64 -o memora
-        chmod +x memora
-        sudo mv memora /usr/local/bin/
+        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/hindsight-darwin-arm64 -o hindsight
+        chmod +x hindsight
+        sudo mv hindsight /usr/local/bin/
 
         # macOS (Intel)
-        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/memora-darwin-amd64 -o memora
-        chmod +x memora
-        sudo mv memora /usr/local/bin/
+        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/hindsight-darwin-amd64 -o hindsight
+        chmod +x hindsight
+        sudo mv hindsight /usr/local/bin/
 
         # Linux
-        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/memora-linux-amd64 -o memora
-        chmod +x memora
-        sudo mv memora /usr/local/bin/
+        curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/hindsight-linux-amd64 -o hindsight
+        chmod +x hindsight
+        sudo mv hindsight /usr/local/bin/
         \`\`\`
 
         ### Helm Chart
         \`\`\`bash
-        helm install memora memora-${{ steps.get_version.outputs.VERSION }}.tgz
+        helm install hindsight hindsight-${{ steps.get_version.outputs.VERSION }}.tgz
         \`\`\`
 
         ### Docker
         \`\`\`bash
         # Pull API image
-        docker pull ghcr.io/${{ github.repository_owner }}/memora-api:${{ steps.get_version.outputs.VERSION }}
+        docker pull ghcr.io/${{ github.repository_owner }}/hindsight-api:${{ steps.get_version.outputs.VERSION }}
 
         # Pull Control Plane image
-        docker pull ghcr.io/${{ github.repository_owner }}/memora-control-plane:${{ steps.get_version.outputs.VERSION }}
+        docker pull ghcr.io/${{ github.repository_owner }}/hindsight-control-plane:${{ steps.get_version.outputs.VERSION }}
 
         # Or use latest
-        docker pull ghcr.io/${{ github.repository_owner }}/memora-api:latest
-        docker pull ghcr.io/${{ github.repository_owner }}/memora-control-plane:latest
+        docker pull ghcr.io/${{ github.repository_owner }}/hindsight-api:latest
+        docker pull ghcr.io/${{ github.repository_owner }}/hindsight-control-plane:latest
         \`\`\`
         EOF
         cat release-notes.md
@@ -333,7 +333,7 @@ jobs:
         echo "# Release v${{ steps.get_version.outputs.VERSION }} Published Successfully" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "## 📦 Components" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Python package (memora)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Python package (hindsight)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Rust CLI (Linux amd64, macOS amd64, macOS arm64)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Docker images (API, Control Plane)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Helm chart" >> $GITHUB_STEP_SUMMARY

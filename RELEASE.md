@@ -6,7 +6,7 @@
 
 ```bash
 uv sync
-cd memora-dev
+cd hindsight-dev
 uv run generate-openapi
 cd ..
 ```
@@ -24,7 +24,7 @@ This regenerates Python and TypeScript clients from `openapi.json`.
 ### 3. Commit Everything
 
 ```bash
-git add openapi.json memora-clients/
+git add openapi.json hindsight-clients/
 git commit -m "Update OpenAPI spec and regenerate clients"
 ```
 
@@ -47,7 +47,7 @@ This will:
 ### Publish Python Client to PyPI
 
 ```bash
-cd memora-clients/python
+cd hindsight-clients/python
 uv build
 uv publish
 ```
@@ -55,7 +55,7 @@ uv publish
 ### Publish TypeScript Client to NPM
 
 ```bash
-cd memora-clients/typescript
+cd hindsight-clients/typescript
 npm install
 npm run build
 npm publish --access public
@@ -65,7 +65,7 @@ npm publish --access public
 
 ## Pre-Release Checklist
 
-- [ ] Tests passing: `cd memora && uv run pytest tests`
+- [ ] Tests passing: `cd hindsight-api && uv run pytest tests`
 - [ ] No uncommitted changes: `git status`
 - [ ] On `main` branch
 
@@ -98,7 +98,7 @@ git status
 ```
 
 **GitHub Actions failed:**
-- Check: https://github.com/nicoloboschi/memora/actions
+- Check: https://github.com/vectorize-io/hindsight/actions
 - Re-run failed jobs or fix and release new patch version
 
 **Rollback:**
@@ -116,13 +116,13 @@ git push
 ```bash
 # Full release workflow
 uv sync
-cd memora-dev && uv run generate-openapi && cd ..
+cd hindsight-dev && uv run generate-openapi && cd ..
 ./scripts/generate-clients.sh
-git add openapi.json memora-clients/
+git add openapi.json hindsight-clients/
 git commit -m "Update OpenAPI spec and regenerate clients"
 ./scripts/release.sh 0.0.6
 
 # After GH Actions complete:
-cd memora-clients/python && uv build && uv publish
+cd hindsight-clients/python && uv build && uv publish
 cd ../typescript && npm run build && npm publish --access public
 ```

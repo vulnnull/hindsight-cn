@@ -16,7 +16,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: memora_test
+          POSTGRES_DB: hindsight_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -26,10 +26,10 @@ jobs:
           - 5432:5432
 
     env:
-      MEMORA_API_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/memora_test
-      MEMORA_API_LLM_PROVIDER: groq
-      MEMORA_API_LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      MEMORA_API_LLM_MODEL: openai/gpt-oss-20b
+      HINDSIGHT_API_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hindsight_test
+      HINDSIGHT_API_LLM_PROVIDER: groq
+      HINDSIGHT_API_LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-20b
 
     steps:
     - uses: actions/checkout@v4
@@ -48,9 +48,9 @@ jobs:
       run: uv sync --extra test
 
     - name: Run migrations
-      working-directory: ./memora
+      working-directory: ./hindsight
       run: |
         uv run alembic upgrade head
 
     - name: Run tests
-      run: uv run pytest memora/tests -v
+      run: uv run pytest hindsight/tests -v

@@ -2,13 +2,13 @@
 set -e
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
-cd "$ROOT_DIR/memora-control-plane" || exit 1
+cd "$ROOT_DIR/hindsight-control-plane" || exit 1
 
 # Check if .env exists in workspace root
 if [ ! -f "$ROOT_DIR/.env" ]; then
   echo "⚠️  Warning: .env not found in workspace root at $ROOT_DIR/.env"
-  echo "📝 Please create a .env file if you need to set MEMORA_CP_DATAPLANE_API_URL"
-  echo "   Default will use http://localhost:8080"
+  echo "📝 Please create a .env file if you need to set HINDSIGHT_CP_DATAPLANE_API_URL"
+  echo "   Default will use http://localhost:8888"
   echo ""
 fi
 
@@ -20,14 +20,9 @@ if [ -f "$ROOT_DIR/.env" ]; then
   source "$ROOT_DIR/.env"
   set +a
 fi
-PORT=3000
-echo ""
-echo "Control plane will be available at: http://localhost:${PORT}"
-echo ""
 
 # Map prefixed env vars to Next.js standard vars
-export HOSTNAME="${MEMORA_CP_HOSTNAME:-0.0.0.0}"
-export PORT="${MEMORA_CP_PORT:-$PORT}"
+export HOSTNAME="${HINDSIGHT_CP_HOSTNAME:-0.0.0.0}"
 
 # Run dev server
 npm run dev

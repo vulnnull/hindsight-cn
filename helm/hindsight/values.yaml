@@ -1,0 +1,185 @@
+# Default values for hindsight
+
+# Global settings
+replicaCount: 1
+
+# Image settings for api
+api:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: hindsight/api
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  service:
+    type: ClusterIP
+    port: 8888
+    targetPort: 8888
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 8888
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 8888
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Environment variables
+  env:
+    HINDSIGHT_API_LLM_PROVIDER: "groq"
+    HINDSIGHT_API_LLM_MODEL: "openai/gpt-oss-120b"
+
+  # Secret environment variables
+  secrets:
+    # HINDSIGHT_API_LLM_API_KEY: "your-api-key"
+    # HINDSIGHT_API_LLM_BASE_URL: "https://api.groq.com/openai/v1"
+
+# Image settings for control plane
+controlPlane:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: hindsight/hindsight-control-plane
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: 3000
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 3000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 3000
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Environment variables
+  env:
+    NODE_ENV: "production"
+    HINDSIGHT_CP_HOSTNAME: "0.0.0.0"
+    HINDSIGHT_CP_PORT: "3000"
+
+# PostgreSQL configuration
+postgresql:
+  # Set to true to deploy PostgreSQL as part of this chart
+  enabled: false
+
+  # External PostgreSQL connection details
+  # If postgresql.enabled is false, provide external database details
+  external:
+    host: "postgresql"
+    port: 5432
+    database: "hindsight"
+    username: "hindsight"
+    # Password should be provided via secret
+    # password: ""
+
+# Database URL (auto-generated from postgresql config if not provided)
+# databaseUrl: "postgresql://user:pass@host:5432/database"
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+  hosts:
+    - host: hindsight.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: controlPlane
+        - path: /api
+          pathType: Prefix
+          service: api
+
+  tls: []
+  #  - secretName: hindsight-tls
+  #    hosts:
+  #      - hindsight.example.com
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  allowPrivilegeEscalation: false
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80

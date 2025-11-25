@@ -17,7 +17,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Uvicorn options (passed to server):"
       echo "  --host HOST              Host to bind to (default: 0.0.0.0)"
-      echo "  --port PORT              Port to bind to (default: 8080)"
+      echo "  --port PORT              Port to bind to (default: 8888)"
       echo "  --reload                 Enable auto-reload on code changes"
       echo "  --workers WORKERS        Number of worker processes (default: 1)"
       echo "  --log-level LEVEL        Log level: critical/error/warning/info/debug/trace"
@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --ssl-certfile FILE      SSL certificate file"
       echo ""
       echo "Example:"
-      echo "  $0 --env dev --reload --port 8000 --log-level debug"
+      echo "  $0 --env dev --reload --port 8888 --log-level debug"
       exit 0
       ;;
     *)
@@ -56,7 +56,7 @@ source "$ENV_FILE"
 set +a
 
 # Extract port from SERVER_ARGS if provided, otherwise use default
-PORT=8080
+PORT=8888
 for ((i=0; i<${#SERVER_ARGS[@]}; i++)); do
   if [[ "${SERVER_ARGS[$i]}" == "--port" ]]; then
     PORT="${SERVER_ARGS[$((i+1))]}"
@@ -69,7 +69,7 @@ echo ""
 
 # Set default arguments if not provided
 if [[ ${#SERVER_ARGS[@]} -eq 0 ]]; then
-  SERVER_ARGS=(--host 0.0.0.0 --port 8080)
+  SERVER_ARGS=(--host 0.0.0.0 --port 8888)
 fi
 
-uv run python -m memora.web.server "${SERVER_ARGS[@]}"
+uv run python -m hindsight_api.web.server "${SERVER_ARGS[@]}"

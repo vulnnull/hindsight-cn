@@ -1,0 +1,76 @@
+{{- if .Values.controlPlane.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hindsight.fullname" . }}-control-plane
+  labels:
+    {{- include "hindsight.controlPlane.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.controlPlane.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "hindsight.controlPlane.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "hindsight.controlPlane.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "hindsight.serviceAccountName" . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: control-plane
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 10 }}
+        image: "{{ .Values.controlPlane.image.repository }}:{{ .Values.controlPlane.image.tag }}"
+        imagePullPolicy: {{ .Values.controlPlane.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.controlPlane.service.targetPort }}
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "hindsight.fullname" . }}-config
+              key: node-env
+        - name: HINDSIGHT_CP_HOSTNAME
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "hindsight.fullname" . }}-config
+              key: hostname
+        - name: HINDSIGHT_CP_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "hindsight.fullname" . }}-config
+              key: control-plane-port
+        - name: HINDSIGHT_CP_DATAPLANE_API_URL
+          value: {{ include "hindsight.apiUrl" . | quote }}
+        livenessProbe:
+          {{- toYaml .Values.controlPlane.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml .Values.controlPlane.readinessProbe | nindent 10 }}
+        resources:
+          {{- toYaml .Values.controlPlane.resources | nindent 10 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

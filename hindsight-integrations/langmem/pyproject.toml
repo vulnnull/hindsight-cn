@@ -1,0 +1,33 @@
+[project]
+name = "hindsight-langmem"
+version = "0.0.1"
+description = "LangGraph langmem drop-in replacement using Hindsight memory system"
+authors = [
+    {name = "Hindsight Team"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph>=0.2.0",
+    "hindsight-client",
+]
+
+[tool.uv.sources]
+hindsight-client = { path = "../../hindsight-clients/python" }
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hindsight_langmem"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "I", "UP"]

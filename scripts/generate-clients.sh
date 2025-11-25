@@ -6,11 +6,11 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLIENTS_DIR="$PROJECT_ROOT/memora-clients"
+CLIENTS_DIR="$PROJECT_ROOT/hindsight-clients"
 OPENAPI_SPEC="$PROJECT_ROOT/openapi.json"
 
 echo "=================================================="
-echo "Memora API Client Generator (openapi-generator)"
+echo "Hindsight API Client Generator (openapi-generator)"
 echo "=================================================="
 echo "Project root: $PROJECT_ROOT"
 echo "Clients directory: $CLIENTS_DIR"
@@ -42,17 +42,17 @@ echo "=================================================="
 PYTHON_CLIENT_DIR="$CLIENTS_DIR/python"
 
 # Backup the maintained wrapper file
-WRAPPER_FILE="$PYTHON_CLIENT_DIR/memora_client.py"
-WRAPPER_BACKUP="/tmp/memora_client_backup.py"
+WRAPPER_FILE="$PYTHON_CLIENT_DIR/hindsight_client/hindsight_client.py"
+WRAPPER_BACKUP="/tmp/hindsight_client_backup.py"
 if [ -f "$WRAPPER_FILE" ]; then
-    echo "📦 Backing up maintained wrapper: memora_client.py"
+    echo "📦 Backing up maintained wrapper: hindsight_client.py"
     cp "$WRAPPER_FILE" "$WRAPPER_BACKUP"
 fi
 
 # Remove old generated code (but keep config and maintained files)
-if [ -d "$PYTHON_CLIENT_DIR/agent_memory_api_client" ]; then
+if [ -d "$PYTHON_CLIENT_DIR/hindsight_client_api" ]; then
     echo "Removing old generated code..."
-    rm -rf "$PYTHON_CLIENT_DIR/agent_memory_api_client"
+    rm -rf "$PYTHON_CLIENT_DIR/hindsight_client_api"
 fi
 
 # Remove other generated files but keep pyproject.toml and config
@@ -83,7 +83,7 @@ echo "Organizing generated files..."
 
 # Restore the maintained wrapper file
 if [ -f "$WRAPPER_BACKUP" ]; then
-    echo "📦 Restoring maintained wrapper: memora_client.py"
+    echo "📦 Restoring maintained wrapper: hindsight_client.py"
     cp "$WRAPPER_BACKUP" "$WRAPPER_FILE"
     rm "$WRAPPER_BACKUP"
 fi
@@ -103,23 +103,20 @@ echo "=================================================="
 
 TYPESCRIPT_CLIENT_DIR="$CLIENTS_DIR/typescript"
 
-# Remove old generated client
-if [ -d "$TYPESCRIPT_CLIENT_DIR/src" ]; then
-    echo "Removing old TypeScript client..."
-    rm -rf "$TYPESCRIPT_CLIENT_DIR/src"
-fi
+# Remove old generated client (keep package.json, tsconfig.json, tests, src/, and config)
+echo "Removing old TypeScript generated code..."
+rm -rf "$TYPESCRIPT_CLIENT_DIR/generated"
 
-# Generate new client
+# Also remove legacy structure from old generator if it exists
+rm -rf "$TYPESCRIPT_CLIENT_DIR/core"
+rm -rf "$TYPESCRIPT_CLIENT_DIR/models"
+rm -rf "$TYPESCRIPT_CLIENT_DIR/services"
+rm -f "$TYPESCRIPT_CLIENT_DIR/index.ts"
+
+# Generate new client using @hey-api/openapi-ts
 echo "Generating from $OPENAPI_SPEC..."
-npx --yes openapi-typescript-codegen \
-    --input "$OPENAPI_SPEC" \
-    --output "$TYPESCRIPT_CLIENT_DIR" \
-    --client axios \
-    --useOptions \
-    --useUnionTypes \
-    --exportCore true \
-    --exportServices true \
-    --exportModels true
+cd "$TYPESCRIPT_CLIENT_DIR"
+npx --yes @hey-api/openapi-ts
 
 echo "✓ TypeScript client generated at $TYPESCRIPT_CLIENT_DIR"
 echo ""
@@ -131,7 +128,7 @@ echo ""
 echo "Python client:     $PYTHON_CLIENT_DIR"
 echo "TypeScript client: $TYPESCRIPT_CLIENT_DIR"
 echo ""
-echo "⚠️  Important: The maintained wrapper memora_client.py was preserved"
+echo "⚠️  Important: The maintained wrapper hindsight_client.py was preserved"
 echo ""
 echo "Next steps:"
 echo "  1. Review the generated clients"

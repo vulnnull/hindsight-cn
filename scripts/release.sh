@@ -65,7 +65,7 @@ fi
 print_info "Updating version in all components..."
 
 # Update Python packages
-PYTHON_PACKAGES=("memora" "memora-dev" "memora-dev/benchmarks")
+PYTHON_PACKAGES=("hindsight-api" "hindsight-dev" "hindsight-dev/benchmarks")
 for package in "${PYTHON_PACKAGES[@]}"; do
     PYPROJECT_FILE="$package/pyproject.toml"
     if [ -f "$PYPROJECT_FILE" ]; then
@@ -78,7 +78,7 @@ for package in "${PYTHON_PACKAGES[@]}"; do
 done
 
 # Update Rust CLI
-CARGO_FILE="memora-cli/Cargo.toml"
+CARGO_FILE="hindsight-cli/Cargo.toml"
 if [ -f "$CARGO_FILE" ]; then
     print_info "Updating $CARGO_FILE"
     sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" "$CARGO_FILE"
@@ -88,7 +88,7 @@ else
 fi
 
 # Update Helm chart
-HELM_CHART_FILE="helm/memora/Chart.yaml"
+HELM_CHART_FILE="helm/hindsight/Chart.yaml"
 if [ -f "$HELM_CHART_FILE" ]; then
     print_info "Updating $HELM_CHART_FILE"
     sed -i.bak "s/^version: .*/version: $VERSION/" "$HELM_CHART_FILE"
@@ -99,7 +99,7 @@ else
 fi
 
 # Update Control Plane package.json
-CONTROL_PLANE_PKG="memora-control-plane/package.json"
+CONTROL_PLANE_PKG="hindsight-control-plane/package.json"
 if [ -f "$CONTROL_PLANE_PKG" ]; then
     print_info "Updating $CONTROL_PLANE_PKG"
     sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$CONTROL_PLANE_PKG"
@@ -109,7 +109,7 @@ else
 fi
 
 # Update Python API client
-PYTHON_CLIENT_PKG="memora-clients/python/pyproject.toml"
+PYTHON_CLIENT_PKG="hindsight-clients/python/pyproject.toml"
 if [ -f "$PYTHON_CLIENT_PKG" ]; then
     print_info "Updating $PYTHON_CLIENT_PKG"
     sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" "$PYTHON_CLIENT_PKG"
@@ -119,7 +119,7 @@ else
 fi
 
 # Update TypeScript API client
-TYPESCRIPT_CLIENT_PKG="memora-clients/typescript/package.json"
+TYPESCRIPT_CLIENT_PKG="hindsight-clients/typescript/package.json"
 if [ -f "$TYPESCRIPT_CLIENT_PKG" ]; then
     print_info "Updating $TYPESCRIPT_CLIENT_PKG"
     sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$TYPESCRIPT_CLIENT_PKG"
@@ -148,11 +148,11 @@ git add -A
 git commit -m "Release v$VERSION
 
 - Update version to $VERSION in all components
-- Python packages: memora, memora-dev, memora-dev/benchmarks
-- Python client: memora-clients/python
-- TypeScript client: memora-clients/typescript
-- Rust CLI: memora-cli
-- Control Plane: memora-control-plane
+- Python packages: hindsight-api, hindsight-dev, hindsight-dev/benchmarks
+- Python client: hindsight-clients/python
+- TypeScript client: hindsight-clients/typescript
+- Rust CLI: hindsight-cli
+- Control Plane: hindsight-control-plane
 - Helm chart"
 
 # Create tag
