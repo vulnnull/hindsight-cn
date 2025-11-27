@@ -94,20 +94,20 @@ hindsight think <agent_id> "What do you know about Alice?"
 hindsight think <agent_id> "Should I recommend Python or Java?" -v
 ```
 
-### Agent Management
+### Memory bank Management
 
-#### agents
+#### memory banks
 
-List all agents:
+List all memory banks:
 
 ```bash
-hindsight agents
+hindsight memory banks
 ```
 
 Output:
 
 ```
-Available agents:
+Available memory banks:
   - alice-agent
   - bob-agent
   - tech-advisor
@@ -115,7 +115,7 @@ Available agents:
 
 #### profile
 
-View agent profile:
+View memory bank profile:
 
 ```bash
 hindsight profile <agent_id>
@@ -124,7 +124,7 @@ hindsight profile <agent_id>
 Output:
 
 ```
-Agent: my-agent
+Memory bank: my-agent
 
 Personality:
   Openness:          0.80
@@ -226,8 +226,8 @@ Shows:
 ### Full Workflow
 
 ```bash
-# Create an agent
-curl -X PUT http://localhost:8888/api/agents/demo-agent \
+# Create a memory bank
+curl -X PUT http://localhost:8888/api/memory banks/demo-agent \
   -H "Content-Type: application/json" \
   -d '{"background": "Demo agent"}'
 

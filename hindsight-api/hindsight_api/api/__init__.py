@@ -80,26 +80,26 @@ def create_app(
 
 # Re-export commonly used items for backwards compatibility
 from .http import (
-    SearchRequest,
-    SearchResult,
-    SearchResponse,
+    RecallRequest,
+    RecallResult,
+    RecallResponse,
     MemoryItem,
-    BatchPutRequest,
-    ThinkRequest,
-    ThinkResponse,
-    CreateAgentRequest,
+    RetainRequest,
+    ReflectRequest,
+    ReflectResponse,
+    CreateBankRequest,
     PersonalityTraits,
 )
 
 __all__ = [
     "create_app",
-    "SearchRequest",
-    "SearchResult",
-    "SearchResponse",
+    "RecallRequest",
+    "RecallResult",
+    "RecallResponse",
     "MemoryItem",
-    "BatchPutRequest",
-    "ThinkRequest",
-    "ThinkResponse",
-    "CreateAgentRequest",
+    "RetainRequest",
+    "ReflectRequest",
+    "ReflectResponse",
+    "CreateBankRequest",
     "PersonalityTraits",
 ]

@@ -91,8 +91,8 @@ class ExtractedFact(BaseModel):
     )
 
     # Classification
-    fact_type: Literal["world", "agent", "opinion"] = Field(
-        description="'world' = facts about others (third person), 'agent' = facts about YOU the memory owner (FIRST PERSON: 'I did...'), 'opinion' = your beliefs (first person)"
+    fact_type: Literal["world", "bank", "opinion"] = Field(
+        description="'world' = facts about others (third person), 'bank' = facts about YOU the memory owner (FIRST PERSON: 'I did...'), 'opinion' = your beliefs (first person)"
     )
 
     # Entities and relations
@@ -199,9 +199,9 @@ async def _extract_facts_from_chunk(
 
     # Determine which fact types to extract based on the flag
     if extract_opinions:
-        fact_types_instruction = "Extract ONLY 'opinion' type facts (the agent's formed opinions, beliefs, and perspectives). DO NOT extract 'world' or 'agent' facts."
+        fact_types_instruction = "Extract ONLY 'opinion' type facts (the bank's formed opinions, beliefs, and perspectives). DO NOT extract 'world' or 'bank' facts."
     else:
-        fact_types_instruction = "Extract ONLY 'world' and 'agent' type facts. DO NOT extract 'opinion' type facts - opinions should never be created during normal memory storage."
+        fact_types_instruction = "Extract ONLY 'world' and 'bank' type facts. DO NOT extract 'opinion' type facts - opinions should never be created during normal memory storage."
 
     prompt = f"""You are extracting comprehensive, narrative facts from conversations/document for an AI memory system.
 

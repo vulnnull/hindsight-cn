@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { dataplaneClient } from '@/lib/api';
-import { useAgent } from '@/lib/agent-context';
+import { client } from '@/lib/api';
+import { useBank } from '@/lib/bank-context';
 
 interface Entity {
   id: string;
@@ -21,7 +21,7 @@ interface EntityDetail extends Entity {
 }
 
 export function EntitiesView() {
-  const { currentAgent } = useAgent();
+  const { currentBank } = useBank();
   const [entities, setEntities] = useState<Entity[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<EntityDetail | null>(null);
@@ -29,12 +29,12 @@ export function EntitiesView() {
   const [regenerating, setRegenerating] = useState(false);
 
   const loadEntities = async () => {
-    if (!currentAgent) return;
+    if (!currentBank) return;
 
     setLoading(true);
     try {
-      const result: any = await dataplaneClient.listEntities({
-        agent_id: currentAgent,
+      const result: any = await client.listEntities({
+        bank_id: currentBank,
         limit: 100,
       });
       setEntities(result.entities || []);
@@ -47,11 +47,11 @@ export function EntitiesView() {
   };
 
   const loadEntityDetail = async (entityId: string) => {
-    if (!currentAgent) return;
+    if (!currentBank) return;
 
     setLoadingDetail(true);
     try {
-      const result: any = await dataplaneClient.getEntity(entityId, currentAgent);
+      const result: any = await client.getEntity(entityId, currentBank);
       setSelectedEntity(result);
     } catch (error) {
       console.error('Error loading entity detail:', error);
@@ -62,11 +62,11 @@ export function EntitiesView() {
   };
 
   const regenerateObservations = async () => {
-    if (!currentAgent || !selectedEntity) return;
+    if (!currentBank || !selectedEntity) return;
 
     setRegenerating(true);
     try {
-      await dataplaneClient.regenerateEntityObservations(selectedEntity.id, currentAgent);
+      await client.regenerateEntityObservations(selectedEntity.id, currentBank);
       // Reload entity detail to show new observations
       await loadEntityDetail(selectedEntity.id);
     } catch (error) {
@@ -78,11 +78,11 @@ export function EntitiesView() {
   };
 
   useEffect(() => {
-    if (currentAgent) {
+    if (currentBank) {
       loadEntities();
       setSelectedEntity(null);
     }
-  }, [currentAgent]);
+  }, [currentBank]);
 
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return 'N/A';

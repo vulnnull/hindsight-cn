@@ -34,12 +34,15 @@ from hindsight import HindsightServer, HindsightClient
 with HindsightServer(llm_provider="openai", llm_model="gpt-5.1-mini", llm_api_key=os.environ["OPENAI_API_KEY"]) as server:
     client = HindsightClient(base_url=server.url)
 
-    client.put(agent_id="my-agent", content="Alice works at Google")
-    client.put(agent_id="my-agent", content="Bob prefers Python over JavaScript")
-    
-    client.search(agent_id="my-agent", query="What does Alice do?")
-    
-    client.think(agent_id="my-agent", query="Tell me about Alice")
+    # Retain memories
+    client.retain(bank_id="my-agent", content="Alice works at Google")
+    client.retain(bank_id="my-agent", content="Bob prefers Python over JavaScript")
+
+    # Recall memories
+    client.recall(bank_id="my-agent", query="What does Alice do?")
+
+    # Get memory perspective
+    client.reflect(bank_id="my-agent", query="Tell me about Alice")
 ```
 
 

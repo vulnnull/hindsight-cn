@@ -30,7 +30,7 @@ class SearchTracer:
     Tracer for collecting detailed search execution information.
 
     Usage:
-        tracer = SearchTracer(query="Who is Alice?", thinking_budget=50, top_k=10)
+        tracer = SearchTracer(query="Who is Alice?", budget=50, max_tokens=4096)
         tracer.start()
 
         # During search...
@@ -44,17 +44,17 @@ class SearchTracer:
         json_output = trace.to_json()
     """
 
-    def __init__(self, query: str, thinking_budget: int, max_tokens: int):
+    def __init__(self, query: str, budget: int, max_tokens: int):
         """
         Initialize tracer.
 
         Args:
             query: Search query text
-            thinking_budget: Maximum nodes to explore
+            budget: Maximum nodes to explore
             max_tokens: Maximum tokens to return in results
         """
         self.query_text = query
-        self.thinking_budget = thinking_budget
+        self.budget = budget
         self.max_tokens = max_tokens
 
         # Trace data
@@ -400,7 +400,7 @@ class SearchTracer:
             query_text=self.query_text,
             query_embedding=self.query_embedding or [],
             timestamp=datetime.now(timezone.utc),
-            thinking_budget=self.thinking_budget,
+            budget=self.budget,
             max_tokens=self.max_tokens,
         )
 
@@ -410,7 +410,7 @@ class SearchTracer:
             total_nodes_pruned=len(self.pruned),
             entry_points_found=len(self.entry_points),
             budget_used=len(self.visits),
-            budget_remaining=self.thinking_budget - len(self.visits),
+            budget_remaining=self.budget - len(self.visits),
             total_duration_seconds=total_duration,
             results_returned=len(final_results),
             temporal_links_followed=self.temporal_links_followed,

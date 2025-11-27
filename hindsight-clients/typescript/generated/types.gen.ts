@@ -25,15 +25,28 @@ export type AddBackgroundRequest = {
 };
 
 /**
- * AgentListItem
+ * BackgroundResponse
  *
- * Agent list item with profile summary.
+ * Response model for background update.
  */
-export type AgentListItem = {
+export type BackgroundResponse = {
     /**
-     * Agent Id
+     * Background
      */
-    agent_id: string;
+    background: string;
+    personality?: PersonalityTraits | null;
+};
+
+/**
+ * BankListItem
+ *
+ * Bank list item with profile summary.
+ */
+export type BankListItem = {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
     /**
      * Name
      */
@@ -54,27 +67,27 @@ export type AgentListItem = {
 };
 
 /**
- * AgentListResponse
+ * BankListResponse
  *
- * Response model for listing all agents.
+ * Response model for listing all banks.
  */
-export type AgentListResponse = {
+export type BankListResponse = {
     /**
-     * Agents
+     * Banks
      */
-    agents: Array<AgentListItem>;
+    banks: Array<BankListItem>;
 };
 
 /**
- * AgentProfileResponse
+ * BankProfileResponse
  *
- * Response model for agent profile.
+ * Response model for bank profile.
  */
-export type AgentProfileResponse = {
+export type BankProfileResponse = {
     /**
-     * Agent Id
+     * Bank Id
      */
-    agent_id: string;
+    bank_id: string;
     /**
      * Name
      */
@@ -87,100 +100,18 @@ export type AgentProfileResponse = {
 };
 
 /**
- * BackgroundResponse
+ * Budget
  *
- * Response model for background update.
+ * Budget levels for recall/reflect operations.
  */
-export type BackgroundResponse = {
-    /**
-     * Background
-     */
-    background: string;
-    personality?: PersonalityTraits | null;
-};
+export type Budget = 'low' | 'mid' | 'high';
 
 /**
- * BatchPutAsyncResponse
+ * CreateBankRequest
  *
- * Response model for async batch put endpoint.
+ * Request model for creating/updating a bank.
  */
-export type BatchPutAsyncResponse = {
-    /**
-     * Success
-     */
-    success: boolean;
-    /**
-     * Message
-     */
-    message: string;
-    /**
-     * Agent Id
-     */
-    agent_id: string;
-    /**
-     * Document Id
-     */
-    document_id?: string | null;
-    /**
-     * Items Count
-     */
-    items_count: number;
-    /**
-     * Queued
-     */
-    queued: boolean;
-};
-
-/**
- * BatchPutRequest
- *
- * Request model for batch put endpoint.
- */
-export type BatchPutRequest = {
-    /**
-     * Items
-     */
-    items: Array<MemoryItem>;
-    /**
-     * Document Id
-     */
-    document_id?: string | null;
-};
-
-/**
- * BatchPutResponse
- *
- * Response model for batch put endpoint.
- */
-export type BatchPutResponse = {
-    /**
-     * Success
-     */
-    success: boolean;
-    /**
-     * Message
-     */
-    message: string;
-    /**
-     * Agent Id
-     */
-    agent_id: string;
-    /**
-     * Document Id
-     */
-    document_id?: string | null;
-    /**
-     * Items Count
-     */
-    items_count: number;
-};
-
-/**
- * CreateAgentRequest
- *
- * Request model for creating/updating an agent.
- */
-export type CreateAgentRequest = {
+export type CreateBankRequest = {
     /**
      * Name
      */
@@ -202,10 +133,6 @@ export type DeleteResponse = {
      * Success
      */
     success: boolean;
-    /**
-     * Message
-     */
-    message: string;
 };
 
 /**
@@ -242,6 +169,149 @@ export type DocumentResponse = {
      * Memory Unit Count
      */
     memory_unit_count: number;
+};
+
+/**
+ * EntityDetailResponse
+ *
+ * Response model for entity detail endpoint.
+ */
+export type EntityDetailResponse = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Canonical Name
+     */
+    canonical_name: string;
+    /**
+     * Mention Count
+     */
+    mention_count: number;
+    /**
+     * First Seen
+     */
+    first_seen?: string | null;
+    /**
+     * Last Seen
+     */
+    last_seen?: string | null;
+    /**
+     * Metadata
+     */
+    metadata?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Observations
+     */
+    observations: Array<EntityObservationResponse>;
+};
+
+/**
+ * EntityIncludeOptions
+ *
+ * Options for including entity observations in recall results.
+ */
+export type EntityIncludeOptions = {
+    /**
+     * Max Tokens
+     *
+     * Maximum tokens for entity observations
+     */
+    max_tokens?: number;
+};
+
+/**
+ * EntityListItem
+ *
+ * Entity list item with summary.
+ */
+export type EntityListItem = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Canonical Name
+     */
+    canonical_name: string;
+    /**
+     * Mention Count
+     */
+    mention_count: number;
+    /**
+     * First Seen
+     */
+    first_seen?: string | null;
+    /**
+     * Last Seen
+     */
+    last_seen?: string | null;
+    /**
+     * Metadata
+     */
+    metadata?: {
+        [key: string]: unknown;
+    } | null;
+};
+
+/**
+ * EntityListResponse
+ *
+ * Response model for entity list endpoint.
+ */
+export type EntityListResponse = {
+    /**
+     * Entities
+     */
+    entities: Array<EntityListItem>;
+};
+
+/**
+ * EntityObservationResponse
+ *
+ * An observation about an entity.
+ */
+export type EntityObservationResponse = {
+    /**
+     * Text
+     */
+    text: string;
+    /**
+     * Mentioned At
+     */
+    mentioned_at?: string | null;
+};
+
+/**
+ * EntityStateResponse
+ *
+ * Current mental model of an entity.
+ */
+export type EntityStateResponse = {
+    /**
+     * Entity Id
+     */
+    entity_id: string;
+    /**
+     * Canonical Name
+     */
+    canonical_name: string;
+    /**
+     * Observations
+     */
+    observations: Array<EntityObservationResponse>;
+};
+
+/**
+ * FactsIncludeOptions
+ *
+ * Options for including facts (based_on) in reflect results.
+ */
+export type FactsIncludeOptions = {
+    [key: string]: unknown;
 };
 
 /**
@@ -282,6 +352,18 @@ export type HttpValidationError = {
      * Detail
      */
     detail?: Array<ValidationError>;
+};
+
+/**
+ * IncludeOptions
+ *
+ * Options for including additional data in recall results.
+ */
+export type IncludeOptions = {
+    /**
+     * Include entity observations. Set to null to disable entity inclusion.
+     */
+    entities?: EntityIncludeOptions | null;
 };
 
 /**
@@ -339,7 +421,7 @@ export type ListMemoryUnitsResponse = {
 /**
  * MemoryItem
  *
- * Single memory item for batch put.
+ * Single memory item for retain.
  */
 export type MemoryItem = {
     /**
@@ -347,13 +429,45 @@ export type MemoryItem = {
      */
     content: string;
     /**
-     * Event Date
+     * Timestamp
      */
-    event_date?: string | null;
+    timestamp?: string | null;
     /**
      * Context
      */
     context?: string | null;
+    /**
+     * Metadata
+     */
+    metadata?: {
+        [key: string]: string;
+    } | null;
+};
+
+/**
+ * MetadataFilter
+ *
+ * Filter for metadata fields. Matches records where (key=value) OR (key not set) when match_unset=True.
+ */
+export type MetadataFilter = {
+    /**
+     * Key
+     *
+     * Metadata key to filter on
+     */
+    key: string;
+    /**
+     * Value
+     *
+     * Value to match. If None with match_unset=True, matches any record where key is not set.
+     */
+    value?: string | null;
+    /**
+     * Match Unset
+     *
+     * If True, also match records where this metadata key is not set
+     */
+    match_unset?: boolean;
 };
 
 /**
@@ -401,23 +515,22 @@ export type PersonalityTraits = {
 };
 
 /**
- * SearchRequest
+ * RecallRequest
  *
- * Request model for search endpoint.
+ * Request model for recall endpoint.
  */
-export type SearchRequest = {
+export type RecallRequest = {
     /**
      * Query
      */
     query: string;
     /**
-     * Fact Type
+     * Types
+     *
+     * List of fact types to recall (defaults to all if not specified)
      */
-    fact_type?: Array<string> | null;
-    /**
-     * Thinking Budget
-     */
-    thinking_budget?: number;
+    types?: Array<string> | null;
+    budget?: Budget;
     /**
      * Max Tokens
      */
@@ -427,35 +540,55 @@ export type SearchRequest = {
      */
     trace?: boolean;
     /**
-     * Question Date
+     * Query Timestamp
+     *
+     * ISO format date string (e.g., '2023-05-30T23:40:00')
      */
-    question_date?: string | null;
+    query_timestamp?: string | null;
+    /**
+     * Filters
+     *
+     * Filter by metadata. Multiple filters are ANDed together.
+     */
+    filters?: Array<MetadataFilter> | null;
+    /**
+     * Options for including additional data (entities are included by default)
+     */
+    include?: IncludeOptions;
 };
 
 /**
- * SearchResponse
+ * RecallResponse
  *
- * Response model for search endpoints.
+ * Response model for recall endpoints.
  */
-export type SearchResponse = {
+export type RecallResponse = {
     /**
      * Results
      */
-    results: Array<SearchResult>;
+    results: Array<RecallResult>;
     /**
      * Trace
      */
     trace?: {
         [key: string]: unknown;
     } | null;
+    /**
+     * Entities
+     *
+     * Entity states for entities mentioned in results
+     */
+    entities?: {
+        [key: string]: EntityStateResponse;
+    } | null;
 };
 
 /**
- * SearchResult
+ * RecallResult
  *
- * Single search result item.
+ * Single recall result item.
  */
-export type SearchResult = {
+export type RecallResult = {
     /**
      * Id
      */
@@ -469,25 +602,43 @@ export type SearchResult = {
      */
     type?: string | null;
     /**
+     * Entities
+     */
+    entities?: Array<string> | null;
+    /**
      * Context
      */
     context?: string | null;
     /**
-     * Event Date
+     * Occurred Start
      */
-    event_date?: string | null;
+    occurred_start?: string | null;
+    /**
+     * Occurred End
+     */
+    occurred_end?: string | null;
+    /**
+     * Mentioned At
+     */
+    mentioned_at?: string | null;
     /**
      * Document Id
      */
     document_id?: string | null;
+    /**
+     * Metadata
+     */
+    metadata?: {
+        [key: string]: string;
+    } | null;
 };
 
 /**
- * ThinkFact
+ * ReflectFact
  *
  * A fact used in think response.
  */
-export type ThinkFact = {
+export type ReflectFact = {
     /**
      * Id
      */
@@ -505,37 +656,64 @@ export type ThinkFact = {
      */
     context?: string | null;
     /**
-     * Event Date
+     * Occurred Start
      */
-    event_date?: string | null;
+    occurred_start?: string | null;
+    /**
+     * Occurred End
+     */
+    occurred_end?: string | null;
 };
 
 /**
- * ThinkRequest
+ * ReflectIncludeOptions
  *
- * Request model for think endpoint.
+ * Options for including additional data in reflect results.
  */
-export type ThinkRequest = {
+export type ReflectIncludeOptions = {
+    /**
+     * Include facts that the answer is based on. Set to {} to enable, null to disable (default: disabled).
+     */
+    facts?: FactsIncludeOptions | null;
+    /**
+     * Include entity observations. Set to {max_tokens: N} to enable, null to disable (default: disabled).
+     */
+    entities?: EntityIncludeOptions | null;
+};
+
+/**
+ * ReflectRequest
+ *
+ * Request model for reflect endpoint.
+ */
+export type ReflectRequest = {
     /**
      * Query
      */
     query: string;
-    /**
-     * Thinking Budget
-     */
-    thinking_budget?: number;
+    budget?: Budget;
     /**
      * Context
      */
     context?: string | null;
+    /**
+     * Filters
+     *
+     * Filter by metadata. Multiple filters are ANDed together.
+     */
+    filters?: Array<MetadataFilter> | null;
+    /**
+     * Options for including additional data (both disabled by default)
+     */
+    include?: ReflectIncludeOptions;
 };
 
 /**
- * ThinkResponse
+ * ReflectResponse
  *
  * Response model for think endpoint.
  */
-export type ThinkResponse = {
+export type ReflectResponse = {
     /**
      * Text
      */
@@ -543,11 +721,59 @@ export type ThinkResponse = {
     /**
      * Based On
      */
-    based_on?: Array<ThinkFact>;
+    based_on?: Array<ReflectFact>;
+};
+
+/**
+ * RetainRequest
+ *
+ * Request model for retain endpoint.
+ */
+export type RetainRequest = {
     /**
-     * New Opinions
+     * Items
      */
-    new_opinions?: Array<string>;
+    items: Array<MemoryItem>;
+    /**
+     * Document Id
+     */
+    document_id?: string | null;
+    /**
+     * Async
+     *
+     * If true, process asynchronously in background. If false, wait for completion (default: false)
+     */
+    async?: boolean;
+};
+
+/**
+ * RetainResponse
+ *
+ * Response model for retain endpoint.
+ */
+export type RetainResponse = {
+    /**
+     * Success
+     */
+    success: boolean;
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Document Id
+     */
+    document_id?: string | null;
+    /**
+     * Items Count
+     */
+    items_count: number;
+    /**
+     * Async
+     *
+     * Whether the operation was processed asynchronously
+     */
+    async: boolean;
 };
 
 /**
@@ -581,17 +807,17 @@ export type GetGraphData = {
     body?: never;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: {
         /**
-         * Fact Type
+         * Type
          */
-        fact_type?: string | null;
+        type?: string | null;
     };
-    url: '/api/v1/agents/{agent_id}/graph';
+    url: '/v1/default/banks/{bank_id}/graph';
 };
 
 export type GetGraphErrors = {
@@ -616,15 +842,15 @@ export type ListMemoriesData = {
     body?: never;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: {
         /**
-         * Fact Type
+         * Type
          */
-        fact_type?: string | null;
+        type?: string | null;
         /**
          * Q
          */
@@ -638,7 +864,7 @@ export type ListMemoriesData = {
          */
         offset?: number;
     };
-    url: '/api/v1/agents/{agent_id}/memories/list';
+    url: '/v1/default/banks/{bank_id}/memories/list';
 };
 
 export type ListMemoriesErrors = {
@@ -659,92 +885,92 @@ export type ListMemoriesResponses = {
 
 export type ListMemoriesResponse = ListMemoriesResponses[keyof ListMemoriesResponses];
 
-export type SearchMemoriesData = {
-    body: SearchRequest;
+export type RecallMemoriesData = {
+    body: RecallRequest;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/memories/search';
+    url: '/v1/default/banks/{bank_id}/memories/recall';
 };
 
-export type SearchMemoriesErrors = {
+export type RecallMemoriesErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type SearchMemoriesError = SearchMemoriesErrors[keyof SearchMemoriesErrors];
+export type RecallMemoriesError = RecallMemoriesErrors[keyof RecallMemoriesErrors];
 
-export type SearchMemoriesResponses = {
+export type RecallMemoriesResponses = {
     /**
      * Successful Response
      */
-    200: SearchResponse;
+    200: RecallResponse;
 };
 
-export type SearchMemoriesResponse = SearchMemoriesResponses[keyof SearchMemoriesResponses];
+export type RecallMemoriesResponse = RecallMemoriesResponses[keyof RecallMemoriesResponses];
 
-export type ThinkData = {
-    body: ThinkRequest;
+export type ReflectData = {
+    body: ReflectRequest;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/think';
+    url: '/v1/default/banks/{bank_id}/reflect';
 };
 
-export type ThinkErrors = {
+export type ReflectErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type ThinkError = ThinkErrors[keyof ThinkErrors];
+export type ReflectError = ReflectErrors[keyof ReflectErrors];
 
-export type ThinkResponses = {
+export type ReflectResponses = {
     /**
      * Successful Response
      */
-    200: ThinkResponse;
+    200: ReflectResponse;
 };
 
-export type ThinkResponse2 = ThinkResponses[keyof ThinkResponses];
+export type ReflectResponse2 = ReflectResponses[keyof ReflectResponses];
 
-export type ListAgentsData = {
+export type ListBanksData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/v1/agents';
+    url: '/v1/default/banks';
 };
 
-export type ListAgentsResponses = {
+export type ListBanksResponses = {
     /**
      * Successful Response
      */
-    200: AgentListResponse;
+    200: BankListResponse;
 };
 
-export type ListAgentsResponse = ListAgentsResponses[keyof ListAgentsResponses];
+export type ListBanksResponse = ListBanksResponses[keyof ListBanksResponses];
 
 export type GetAgentStatsData = {
     body?: never;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/stats';
+    url: '/v1/default/banks/{bank_id}/stats';
 };
 
 export type GetAgentStatsErrors = {
@@ -763,13 +989,118 @@ export type GetAgentStatsResponses = {
     200: unknown;
 };
 
+export type ListEntitiesData = {
+    body?: never;
+    path: {
+        /**
+         * Bank Id
+         */
+        bank_id: string;
+    };
+    query?: {
+        /**
+         * Limit
+         *
+         * Maximum number of entities to return
+         */
+        limit?: number;
+    };
+    url: '/v1/default/banks/{bank_id}/entities';
+};
+
+export type ListEntitiesErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ListEntitiesError = ListEntitiesErrors[keyof ListEntitiesErrors];
+
+export type ListEntitiesResponses = {
+    /**
+     * Successful Response
+     */
+    200: EntityListResponse;
+};
+
+export type ListEntitiesResponse = ListEntitiesResponses[keyof ListEntitiesResponses];
+
+export type GetEntityData = {
+    body?: never;
+    path: {
+        /**
+         * Bank Id
+         */
+        bank_id: string;
+        /**
+         * Entity Id
+         */
+        entity_id: string;
+    };
+    query?: never;
+    url: '/v1/default/banks/{bank_id}/entities/{entity_id}';
+};
+
+export type GetEntityErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GetEntityError = GetEntityErrors[keyof GetEntityErrors];
+
+export type GetEntityResponses = {
+    /**
+     * Successful Response
+     */
+    200: EntityDetailResponse;
+};
+
+export type GetEntityResponse = GetEntityResponses[keyof GetEntityResponses];
+
+export type RegenerateEntityObservationsData = {
+    body?: never;
+    path: {
+        /**
+         * Bank Id
+         */
+        bank_id: string;
+        /**
+         * Entity Id
+         */
+        entity_id: string;
+    };
+    query?: never;
+    url: '/v1/default/banks/{bank_id}/entities/{entity_id}/regenerate';
+};
+
+export type RegenerateEntityObservationsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RegenerateEntityObservationsError = RegenerateEntityObservationsErrors[keyof RegenerateEntityObservationsErrors];
+
+export type RegenerateEntityObservationsResponses = {
+    /**
+     * Successful Response
+     */
+    200: EntityDetailResponse;
+};
+
+export type RegenerateEntityObservationsResponse = RegenerateEntityObservationsResponses[keyof RegenerateEntityObservationsResponses];
+
 export type ListDocumentsData = {
     body?: never;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: {
         /**
@@ -785,7 +1116,7 @@ export type ListDocumentsData = {
          */
         offset?: number;
     };
-    url: '/api/v1/agents/{agent_id}/documents';
+    url: '/v1/default/banks/{bank_id}/documents';
 };
 
 export type ListDocumentsErrors = {
@@ -810,16 +1141,16 @@ export type DeleteDocumentData = {
     body?: never;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
         /**
          * Document Id
          */
         document_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/documents/{document_id}';
+    url: '/v1/default/banks/{bank_id}/documents/{document_id}';
 };
 
 export type DeleteDocumentErrors = {
@@ -842,16 +1173,16 @@ export type GetDocumentData = {
     body?: never;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
         /**
          * Document Id
          */
         document_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/documents/{document_id}';
+    url: '/v1/default/banks/{bank_id}/documents/{document_id}';
 };
 
 export type GetDocumentErrors = {
@@ -872,113 +1203,16 @@ export type GetDocumentResponses = {
 
 export type GetDocumentResponse = GetDocumentResponses[keyof GetDocumentResponses];
 
-export type ClearAgentMemoriesData = {
-    body?: never;
-    path: {
-        /**
-         * Agent Id
-         */
-        agent_id: string;
-    };
-    query?: {
-        /**
-         * Fact Type
-         *
-         * Optional fact type filter (world, agent, opinion)
-         */
-        fact_type?: string | null;
-    };
-    url: '/api/v1/agents/{agent_id}/memories';
-};
-
-export type ClearAgentMemoriesErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type ClearAgentMemoriesError = ClearAgentMemoriesErrors[keyof ClearAgentMemoriesErrors];
-
-export type ClearAgentMemoriesResponses = {
-    /**
-     * Successful Response
-     */
-    200: DeleteResponse;
-};
-
-export type ClearAgentMemoriesResponse = ClearAgentMemoriesResponses[keyof ClearAgentMemoriesResponses];
-
-export type BatchPutMemoriesData = {
-    body: BatchPutRequest;
-    path: {
-        /**
-         * Agent Id
-         */
-        agent_id: string;
-    };
-    query?: never;
-    url: '/api/v1/agents/{agent_id}/memories';
-};
-
-export type BatchPutMemoriesErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type BatchPutMemoriesError = BatchPutMemoriesErrors[keyof BatchPutMemoriesErrors];
-
-export type BatchPutMemoriesResponses = {
-    /**
-     * Successful Response
-     */
-    200: BatchPutResponse;
-};
-
-export type BatchPutMemoriesResponse = BatchPutMemoriesResponses[keyof BatchPutMemoriesResponses];
-
-export type BatchPutAsyncData = {
-    body: BatchPutRequest;
-    path: {
-        /**
-         * Agent Id
-         */
-        agent_id: string;
-    };
-    query?: never;
-    url: '/api/v1/agents/{agent_id}/memories/async';
-};
-
-export type BatchPutAsyncErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type BatchPutAsyncError = BatchPutAsyncErrors[keyof BatchPutAsyncErrors];
-
-export type BatchPutAsyncResponses = {
-    /**
-     * Successful Response
-     */
-    200: BatchPutAsyncResponse;
-};
-
-export type BatchPutAsyncResponse2 = BatchPutAsyncResponses[keyof BatchPutAsyncResponses];
-
 export type ListOperationsData = {
     body?: never;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/operations';
+    url: '/v1/default/banks/{bank_id}/operations';
 };
 
 export type ListOperationsErrors = {
@@ -1001,16 +1235,16 @@ export type CancelOperationData = {
     body?: never;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
         /**
          * Operation Id
          */
         operation_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/operations/{operation_id}';
+    url: '/v1/default/banks/{bank_id}/operations/{operation_id}';
 };
 
 export type CancelOperationErrors = {
@@ -1029,154 +1263,189 @@ export type CancelOperationResponses = {
     200: unknown;
 };
 
-export type DeleteMemoryUnitData = {
+export type GetBankProfileData = {
     body?: never;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
-        /**
-         * Unit Id
-         */
-        unit_id: string;
+        bank_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/memories/{unit_id}';
+    url: '/v1/default/banks/{bank_id}/profile';
 };
 
-export type DeleteMemoryUnitErrors = {
+export type GetBankProfileErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type DeleteMemoryUnitError = DeleteMemoryUnitErrors[keyof DeleteMemoryUnitErrors];
+export type GetBankProfileError = GetBankProfileErrors[keyof GetBankProfileErrors];
 
-export type DeleteMemoryUnitResponses = {
+export type GetBankProfileResponses = {
     /**
      * Successful Response
      */
-    200: unknown;
+    200: BankProfileResponse;
 };
 
-export type GetAgentProfileData = {
-    body?: never;
-    path: {
-        /**
-         * Agent Id
-         */
-        agent_id: string;
-    };
-    query?: never;
-    url: '/api/v1/agents/{agent_id}/profile';
-};
+export type GetBankProfileResponse = GetBankProfileResponses[keyof GetBankProfileResponses];
 
-export type GetAgentProfileErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type GetAgentProfileError = GetAgentProfileErrors[keyof GetAgentProfileErrors];
-
-export type GetAgentProfileResponses = {
-    /**
-     * Successful Response
-     */
-    200: AgentProfileResponse;
-};
-
-export type GetAgentProfileResponse = GetAgentProfileResponses[keyof GetAgentProfileResponses];
-
-export type UpdateAgentPersonalityData = {
+export type UpdateBankPersonalityData = {
     body: UpdatePersonalityRequest;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/profile';
+    url: '/v1/default/banks/{bank_id}/profile';
 };
 
-export type UpdateAgentPersonalityErrors = {
+export type UpdateBankPersonalityErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type UpdateAgentPersonalityError = UpdateAgentPersonalityErrors[keyof UpdateAgentPersonalityErrors];
+export type UpdateBankPersonalityError = UpdateBankPersonalityErrors[keyof UpdateBankPersonalityErrors];
 
-export type UpdateAgentPersonalityResponses = {
+export type UpdateBankPersonalityResponses = {
     /**
      * Successful Response
      */
-    200: AgentProfileResponse;
+    200: BankProfileResponse;
 };
 
-export type UpdateAgentPersonalityResponse = UpdateAgentPersonalityResponses[keyof UpdateAgentPersonalityResponses];
+export type UpdateBankPersonalityResponse = UpdateBankPersonalityResponses[keyof UpdateBankPersonalityResponses];
 
-export type AddAgentBackgroundData = {
+export type AddBankBackgroundData = {
     body: AddBackgroundRequest;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}/background';
+    url: '/v1/default/banks/{bank_id}/background';
 };
 
-export type AddAgentBackgroundErrors = {
+export type AddBankBackgroundErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type AddAgentBackgroundError = AddAgentBackgroundErrors[keyof AddAgentBackgroundErrors];
+export type AddBankBackgroundError = AddBankBackgroundErrors[keyof AddBankBackgroundErrors];
 
-export type AddAgentBackgroundResponses = {
+export type AddBankBackgroundResponses = {
     /**
      * Successful Response
      */
     200: BackgroundResponse;
 };
 
-export type AddAgentBackgroundResponse = AddAgentBackgroundResponses[keyof AddAgentBackgroundResponses];
+export type AddBankBackgroundResponse = AddBankBackgroundResponses[keyof AddBankBackgroundResponses];
 
-export type CreateOrUpdateAgentData = {
-    body: CreateAgentRequest;
+export type CreateOrUpdateBankData = {
+    body: CreateBankRequest;
     path: {
         /**
-         * Agent Id
+         * Bank Id
          */
-        agent_id: string;
+        bank_id: string;
     };
     query?: never;
-    url: '/api/v1/agents/{agent_id}';
+    url: '/v1/default/banks/{bank_id}';
 };
 
-export type CreateOrUpdateAgentErrors = {
+export type CreateOrUpdateBankErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type CreateOrUpdateAgentError = CreateOrUpdateAgentErrors[keyof CreateOrUpdateAgentErrors];
+export type CreateOrUpdateBankError = CreateOrUpdateBankErrors[keyof CreateOrUpdateBankErrors];
 
-export type CreateOrUpdateAgentResponses = {
+export type CreateOrUpdateBankResponses = {
     /**
      * Successful Response
      */
-    200: AgentProfileResponse;
+    200: BankProfileResponse;
 };
 
-export type CreateOrUpdateAgentResponse = CreateOrUpdateAgentResponses[keyof CreateOrUpdateAgentResponses];
+export type CreateOrUpdateBankResponse = CreateOrUpdateBankResponses[keyof CreateOrUpdateBankResponses];
+
+export type ClearBankMemoriesData = {
+    body?: never;
+    path: {
+        /**
+         * Bank Id
+         */
+        bank_id: string;
+    };
+    query?: {
+        /**
+         * Type
+         *
+         * Optional fact type filter (world, agent, opinion)
+         */
+        type?: string | null;
+    };
+    url: '/v1/default/banks/{bank_id}/memories';
+};
+
+export type ClearBankMemoriesErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ClearBankMemoriesError = ClearBankMemoriesErrors[keyof ClearBankMemoriesErrors];
+
+export type ClearBankMemoriesResponses = {
+    /**
+     * Successful Response
+     */
+    200: DeleteResponse;
+};
+
+export type ClearBankMemoriesResponse = ClearBankMemoriesResponses[keyof ClearBankMemoriesResponses];
+
+export type RetainMemoriesData = {
+    body: RetainRequest;
+    path: {
+        /**
+         * Bank Id
+         */
+        bank_id: string;
+    };
+    query?: never;
+    url: '/v1/default/banks/{bank_id}/memories';
+};
+
+export type RetainMemoriesErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RetainMemoriesError = RetainMemoriesErrors[keyof RetainMemoriesErrors];
+
+export type RetainMemoriesResponses = {
+    /**
+     * Successful Response
+     */
+    200: RetainResponse;
+};
+
+export type RetainMemoriesResponse = RetainMemoriesResponses[keyof RetainMemoriesResponses];

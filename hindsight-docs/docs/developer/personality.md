@@ -2,180 +2,208 @@
 sidebar_position: 4
 ---
 
-# Personality
+# Reflect: How Hindsight Reasons with Personality
 
-Hindsight's personality framework (CARA) uses the Big Five model to influence how agents form and express opinions.
+When you call `reflect()`, Hindsight doesn't just retrieve facts — it **reasons** about them through the lens of the bank's unique personality, forming new opinions and generating contextual responses.
 
-## Big Five Traits
+## Why Reflect?
 
-Each trait is scored 0.0 to 1.0:
+Most AI systems can retrieve facts, but they can't **reason** about them in a consistent way. Every response is generated fresh without a stable perspective or evolving beliefs.
 
-| Trait | Low (0.0) | High (1.0) |
-|-------|-----------|------------|
-| **Openness** | Conventional, practical | Curious, creative |
-| **Conscientiousness** | Flexible, spontaneous | Organized, disciplined |
-| **Extraversion** | Reserved, reflective | Outgoing, energetic |
-| **Agreeableness** | Analytical, direct | Cooperative, diplomatic |
-| **Neuroticism** | Calm, stable | Risk-aware, cautious |
+### The Problem
 
-## Bias Strength
+Without reflect:
+- **No consistent character**: "Should we adopt remote work?" gets a different answer each time based on the LLM's randomness
+- **No opinion formation**: The system never develops beliefs based on accumulated evidence
+- **No reasoning context**: Responses don't reflect what the bank has learned or its perspective
+- **Generic responses**: Every AI sounds the same — no personality, no point of view
 
-The `bias_strength` parameter (0.0-1.0) controls personality influence:
+### The Value
 
-- **0.0**: Purely evidence-based reasoning
-- **0.5**: Balanced personality/evidence mix
-- **1.0**: Strongly personality-driven opinions
+With reflect:
+- **Consistent character**: A bank configured as "detail-oriented, cautious" will consistently emphasize risks and thorough planning
+- **Evolving opinions**: As the bank learns more about a topic, its opinions strengthen, weaken, or change — just like a real expert
+- **Contextual reasoning**: Responses reflect the bank's accumulated knowledge and perspective: "Based on what I know about your team's remote work success..."
+- **Differentiated behavior**: Customer support bots sound diplomatic, code reviewers sound direct, creative assistants sound open-minded
+
+### When to Use Reflect
+
+| Use `recall()` when... | Use `reflect()` when... |
+|------------------------|-------------------------|
+| You need raw facts | You need reasoned interpretation |
+| You're building your own reasoning | You want personality-consistent responses |
+| You need maximum control | You want the bank to "think" for itself |
+| Simple fact lookup | Forming recommendations or opinions |
+
+**Example:**
+- `recall("Alice")` → Returns all Alice facts
+- `reflect("Should we hire Alice?")` → Reasons about Alice's fit based on accumulated knowledge, weighs evidence, forms opinion
+
+---
+
+## The Reflect Process
+
+```
+Query
+  ↓
+Recall relevant memories
+  ↓
+Load bank personality
+  ↓
+Reason with personality context
+  ↓
+Form new opinions
+  ↓
+Response + Sources + New Beliefs
+```
+
+---
+
+## Personality Framework (CARA)
+
+When you create a memory bank, you can configure its personality using **Big Five traits**. These traits influence how the bank interprets information and forms opinions:
+
+You can also provide a natural language **background** that describes the bank's identity and perspective, which shapes how these traits are applied.
+
+| Trait | Low | High |
+|-------|-----|------|
+| **Openness** | Prefers proven methods | Embraces new ideas |
+| **Conscientiousness** | Flexible, spontaneous | Systematic, organized |
+| **Extraversion** | Independent | Collaborative |
+| **Agreeableness** | Direct, analytical | Diplomatic, harmonious |
+| **Neuroticism** | Calm, optimistic | Risk-aware, cautious |
+
+### Background: Natural Language Identity
+
+Beyond numeric traits, you can provide a natural language **background** that describes the bank's identity:
+
+```python
+client.create_bank(
+    bank_id="my-bank",
+    background="I am a senior software architect with 15 years of distributed "
+               "systems experience. I prefer simplicity over cutting-edge technology.",
+    personality={
+        "openness": 0.3,  # Prefers proven methods
+        "conscientiousness": 0.9,  # Highly organized
+        # ... other traits
+    }
+)
+```
+
+The background provides context that shapes how personality traits are applied:
+- "I prefer simplicity" + low openness → consistently favors established solutions
+- "15 years experience" → responses reference this expertise
+- First-person perspective → creates consistent voice
+
+### Bias Strength
+
+The `bias_strength` parameter (0-1) controls how much personality influences reasoning:
+
+- **0.0**: Purely evidence-based
+- **0.5**: Balanced personality and evidence
+- **1.0**: Strongly personality-driven
+
+---
 
 ## Opinion Formation
 
-When agents encounter information:
+When `reflect()` encounters a question that warrants forming an opinion, personality shapes the response.
 
-1. Evidence is retrieved from memory
-2. Personality traits weight different aspects
-3. Confidence score reflects evidence + personality alignment
+### Same Facts, Different Opinions
 
-**Example**: Two agents given the same facts about remote work:
+Two banks with different personalities, given identical facts about remote work:
 
-**Agent A** (openness=0.9, conscientiousness=0.2):
-> "Remote work unlocks creative flexibility and spontaneous innovation."
+**Bank A** (high openness, low conscientiousness):
+> "Remote work unlocks creative flexibility and spontaneous innovation. The freedom to work from anywhere enables breakthrough thinking."
 
-**Agent B** (openness=0.2, conscientiousness=0.9):
-> "Remote work lacks the structure and accountability needed for consistent performance."
+**Bank B** (low openness, high conscientiousness):
+> "Remote work lacks the structure and accountability needed for consistent performance. In-person collaboration is more reliable."
 
-Same facts, different conclusions based on personality.
+**Same facts → Different conclusions** because personality shapes interpretation.
 
-## Opinion Reinforcement
+---
 
-Opinions evolve as new evidence arrives:
+## Opinion Evolution
 
-| Evidence Type | Effect |
-|---------------|--------|
-| **Reinforcing** | Confidence increases (+0.1) |
-| **Weakening** | Confidence decreases (-0.15) |
-| **Contradicting** | Opinion revised, confidence reset |
-
-**Example Evolution**:
+Opinions aren't static — they evolve as new evidence arrives:
 
 ```
-t=0: "Python is best for data science" (0.70)
-t=1: New evidence: Python dominates ML → (0.85)
-t=2: New evidence: Julia is 10x faster → (0.75, text revised)
-t=3: New evidence: Rust taking over production → (0.55, text revised)
+Day 1: retain("Python is widely used in ML")
+       → Opinion formed: "Python is best for data science" (confidence: 0.70)
+
+Day 2: retain("98% of ML engineers use Python")
+       → Opinion reinforced: "Python is best for data science" (confidence: 0.85)
+
+Day 3: retain("Julia is 10x faster for numerical computing")
+       → Opinion revised: "Python is best for data science due to ecosystem,
+                           though Julia excels in performance" (confidence: 0.75)
+
+Day 4: retain("Rust ML libraries growing rapidly")
+       → Opinion updated: "Python remains dominant but Rust is gaining ground
+                           for production systems" (confidence: 0.60)
 ```
 
-## Agent Profile
+This **continuous learning** ensures opinions stay current.
 
-### Setting Personality
+---
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
+## Personality Presets by Use Case
 
-<Tabs>
-<TabItem value="python" label="Python">
+Different use cases benefit from different personality configurations:
 
-```python
-from hindsight_client import Hindsight
+| Use Case | Recommended Traits | Why |
+|----------|-------------------|-----|
+| **Customer Support** | High agreeableness<br/>Low neuroticism | Diplomatic, calm under pressure |
+| **Code Review** | High conscientiousness<br/>Low agreeableness | Detail-oriented, direct feedback |
+| **Creative Writing** | High openness<br/>High extraversion | Embraces novelty, expressive |
+| **Risk Analysis** | High neuroticism<br/>High conscientiousness | Risk-aware, methodical |
+| **Research Assistant** | High openness<br/>High conscientiousness | Curious, thorough |
 
-client = Hindsight(base_url="http://localhost:8888")
+---
 
-client.create_agent(
-    agent_id="my-agent",
-    name="Creative Assistant",
-    background="I am a creative AI interested in new ideas",
-    personality={
-        "openness": 0.8,
-        "conscientiousness": 0.6,
-        "extraversion": 0.5,
-        "agreeableness": 0.7,
-        "neuroticism": 0.3,
-        "bias_strength": 0.7
-    }
-)
-```
+## What You Get from Reflect
 
-</TabItem>
-<TabItem value="node" label="Node.js">
+When you call `reflect()`:
 
-```typescript
-import { OpenAPI, ManagementService } from '@hindsight/client';
+**Returns:**
+- **Response text** — Personality-influenced answer
+- **Based on** — Which memories were used (with relevance scores)
+- **New opinions** — Any beliefs formed during reasoning (with confidence)
 
-OpenAPI.BASE = 'http://localhost:8888';
-
-await ManagementService.createAgentApiAgentsAgentIdPut('my-agent', {
-    name: 'Creative Assistant',
-    background: 'I am a creative AI interested in new ideas',
-    personality: {
-        openness: 0.8,
-        conscientiousness: 0.6,
-        extraversion: 0.5,
-        agreeableness: 0.7,
-        neuroticism: 0.3,
-        bias_strength: 0.7
-    }
-});
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-hindsight agent background my-agent "I am a creative AI interested in new ideas"
-hindsight agent personality my-agent \
-    --openness 0.8 \
-    --conscientiousness 0.6 \
-    --extraversion 0.5 \
-    --agreeableness 0.7 \
-    --neuroticism 0.3 \
-    --bias-strength 0.7
-```
-
-</TabItem>
-</Tabs>
-
-### Background
-
-First-person narrative providing agent context:
-
-```python
-client.create_agent(
-    agent_id="my-agent",
-    background="I am a senior software architect with 15 years of distributed systems experience. I prefer simplicity over cutting-edge technology."
-)
-```
-
-Background influences:
-- How questions are interpreted
-- Perspective in responses
-- Opinion formation context
-
-### Background Merging
-
-New background info is merged intelligently:
-
-- **Conflicts**: New overwrites old
-- **Additions**: Non-conflicting info is added
-- **Normalization**: Converts to first-person ("You are..." → "I am...")
-
-## Default Personality
-
-If unspecified, agents default to neutral (0.5):
-
+**Example:**
 ```json
 {
-  "openness": 0.5,
-  "conscientiousness": 0.5,
-  "extraversion": 0.5,
-  "agreeableness": 0.5,
-  "neuroticism": 0.5,
-  "bias_strength": 0.5
+  "text": "Based on Alice's ML expertise and her work at Google,
+           she'd be an excellent fit for the research team lead position...",
+  "based_on": {
+    "world": [
+      {"text": "Alice works at Google...", "weight": 0.95},
+      {"text": "Alice specializes in ML...", "weight": 0.88}
+    ]
+  },
+  "new_opinions": [
+    {"text": "Alice would excel as research team lead", "confidence": 0.82}
+  ]
 }
 ```
 
-## Use Case Examples
+---
 
-| Use Case | Recommended Traits |
-|----------|-------------------|
-| Customer Support | High agreeableness, low neuroticism |
-| Code Review | High conscientiousness, low agreeableness |
-| Creative Writing | High openness, high extraversion |
-| Risk Analysis | High neuroticism, high conscientiousness |
+## Why Personality Matters
+
+Without personality, all AI assistants sound the same. With personality:
+
+- **Customer support bots** can be diplomatic and empathetic
+- **Code review assistants** can be direct and thorough
+- **Creative assistants** can be open to unconventional ideas
+- **Risk analysts** can be appropriately cautious
+
+Personality creates **consistent character** across conversations while allowing opinions to **evolve with evidence**.
+
+---
+
+## Next Steps
+
+- [**Retain**](./retain) — How rich facts are stored
+- [**Recall**](./retrieval) — How multi-strategy search works
+- [API Reference: Reflect](/developer/api/think) — Code examples and usage

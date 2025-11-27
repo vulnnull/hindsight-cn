@@ -21,50 +21,52 @@ async def api_client(memory):
 
 
 @pytest.fixture
-def test_agent_id():
-    """Provide a unique agent ID for this test run."""
+def test_bank_id():
+    """Provide a unique bank ID for this test run."""
     return f"integration_test_{datetime.now().timestamp()}"
 
 
 @pytest.mark.asyncio
-async def test_full_api_workflow(api_client, test_agent_id):
+async def test_full_api_workflow(api_client, test_bank_id):
     """
     End-to-end test covering all major API endpoints in a realistic workflow.
 
     Workflow:
-    1. Create agent and set profile
-    2. Store memories (put, batch put)
-    3. Search memories
-    4. Think (generate answer)
-    5. List agents and memories
-    6. Get agent profile
+    1. Create bank and set profile
+    2. Store memories (retain)
+    3. Recall memories
+    4. Reflect (generate answer)
+    5. List banks and memories
+    6. Get bank profile
     7. Get visualization data
     8. Track documents
-    9. Clean up
+    9. Test entity endpoints
+    10. Test operations endpoints
+    11. Clean up
     """
 
     # ================================================================
-    # 1. Agent Management
+    # 1. Bank Management
     # ================================================================
 
-    # List agents (should be empty initially or have other test agents)
-    response = await api_client.get("/api/v1/agents")
+    # List banks (should be empty initially or have other test banks)
+    response = await api_client.get("/v1/default/banks")
     assert response.status_code == 200
-    initial_agents_data = response.json()["agents"]
-    initial_agents = [a["agent_id"] for a in initial_agents_data]
-    print(f"Initial agents: {len(initial_agents)}")
+    initial_banks_data = response.json()["banks"]
+    initial_banks = [a["bank_id"] for a in initial_banks_data]
+    print(f"Initial banks: {len(initial_banks)}")
 
-    # Get agent profile (creates default if not exists)
-    response = await api_client.get(f"/api/v1/agents/{test_agent_id}/profile")
+    # Get bank profile (creates default if not exists)
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/profile")
     assert response.status_code == 200
     profile = response.json()
     assert "personality" in profile
     assert "background" in profile
-    print(f"Agent profile created with personality: {profile['personality']}")
+    print(f"Bank profile created with personality: {profile['personality']}")
 
     # Add background
     response = await api_client.post(
-        f"/api/v1/agents/{test_agent_id}/background",
+        f"/v1/default/banks/{test_bank_id}/background",
         json={
             "content": "A software engineer passionate about AI and memory systems."
         }
@@ -79,7 +81,7 @@ async def test_full_api_workflow(api_client, test_agent_id):
 
     # Store single memory (using batch endpoint with single item)
     response = await api_client.post(
-        f"/api/v1/agents/{test_agent_id}/memories",
+        f"/v1/default/banks/{test_bank_id}/memories",
         json={
             "items": [
                 {
@@ -97,7 +99,7 @@ async def test_full_api_workflow(api_client, test_agent_id):
 
     # Store batch memories
     response = await api_client.post(
-        f"/api/v1/agents/{test_agent_id}/memories",
+        f"/v1/default/banks/{test_bank_id}/memories",
         json={
             "items": [
                 {
@@ -118,12 +120,12 @@ async def test_full_api_workflow(api_client, test_agent_id):
     print(f"Stored {batch_result['items_count']} items from batch put")
 
     # ================================================================
-    # 3. Search
+    # 3. Recall (Search)
     # ================================================================
 
-    # Search for memories
+    # Recall memories
     response = await api_client.post(
-        f"/api/v1/agents/{test_agent_id}/memories/search",
+        f"/v1/default/banks/{test_bank_id}/memories/recall",
         json={
             "query": "Who works on machine learning?",
             "thinking_budget": 50
@@ -140,12 +142,12 @@ async def test_full_api_workflow(api_client, test_agent_id):
     assert found_alice, "Should find Alice in search results"
 
     # ================================================================
-    # 4. Think (Reasoning)
+    # 4. Reflect (Reasoning)
     # ================================================================
 
-    # Generate answer using think
+    # Generate answer using reflect
     response = await api_client.post(
-        f"/api/v1/agents/{test_agent_id}/think",
+        f"/v1/default/banks/{test_bank_id}/reflect",
         json={
             "query": "What do you know about the team members?",
             "thinking_budget": 30,
@@ -153,14 +155,14 @@ async def test_full_api_workflow(api_client, test_agent_id):
         }
     )
     assert response.status_code == 200
-    think_result = response.json()
-    assert "text" in think_result
-    assert len(think_result["text"]) > 0
-    assert "based_on" in think_result
-    print(f"Think response: {think_result['text'][:100]}...")
+    reflect_result = response.json()
+    assert "text" in reflect_result
+    assert len(reflect_result["text"]) > 0
+    assert "based_on" in reflect_result
+    print(f"Reflect response: {reflect_result['text'][:100]}...")
 
     # Verify the answer mentions team members
-    answer = think_result["text"].lower()
+    answer = reflect_result["text"].lower()
     assert "alice" in answer or "bob" in answer or "charlie" in answer
 
     # ================================================================
@@ -168,7 +170,7 @@ async def test_full_api_workflow(api_client, test_agent_id):
     # ================================================================
 
     # Get graph data
-    response = await api_client.get(f"/api/v1/agents/{test_agent_id}/graph")
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/graph")
     assert response.status_code == 200
     graph_data = response.json()
     assert "nodes" in graph_data
@@ -176,7 +178,7 @@ async def test_full_api_workflow(api_client, test_agent_id):
     print(f"Graph has {len(graph_data['nodes'])} nodes and {len(graph_data['edges'])} edges")
 
     # Get memory statistics
-    response = await api_client.get(f"/api/v1/agents/{test_agent_id}/stats")
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/stats")
     assert response.status_code == 200
     stats = response.json()
     assert "total_nodes" in stats
@@ -185,7 +187,7 @@ async def test_full_api_workflow(api_client, test_agent_id):
 
     # List memory units
     response = await api_client.get(
-        f"/api/v1/agents/{test_agent_id}/memories/list",
+        f"/v1/default/banks/{test_bank_id}/memories/list",
         params={"limit": 10}
     )
     assert response.status_code == 200
@@ -200,7 +202,7 @@ async def test_full_api_workflow(api_client, test_agent_id):
 
     # Store memory with document
     response = await api_client.post(
-        f"/api/v1/agents/{test_agent_id}/memories",
+        f"/v1/default/banks/{test_bank_id}/memories",
         json={
             "items": [
                 {
@@ -215,7 +217,7 @@ async def test_full_api_workflow(api_client, test_agent_id):
     print("Stored memory with document tracking")
 
     # List documents
-    response = await api_client.get(f"/api/v1/agents/{test_agent_id}/documents")
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/documents")
     assert response.status_code == 200
     documents = response.json()
     assert "items" in documents
@@ -224,7 +226,7 @@ async def test_full_api_workflow(api_client, test_agent_id):
 
     # Get specific document
     response = await api_client.get(
-        f"/api/v1/agents/{test_agent_id}/documents/roadmap-2024-q1"
+        f"/v1/default/banks/{test_bank_id}/documents/roadmap-2024-q1"
     )
     assert response.status_code == 200
     doc_info = response.json()
@@ -235,35 +237,81 @@ async def test_full_api_workflow(api_client, test_agent_id):
     # Note: Document deletion is tested separately in test_document_deletion
 
     # ================================================================
-    # 7. Verify Updated Agent Profile
+    # 7. Update and Verify Bank Personality
     # ================================================================
 
-    # Check profile again (might have formed new opinions)
-    response = await api_client.get(f"/api/v1/agents/{test_agent_id}/profile")
+    # Update personality traits
+    response = await api_client.put(
+        f"/v1/default/banks/{test_bank_id}/profile",
+        json={
+            "personality": {
+                "openness": 0.8,
+                "conscientiousness": 0.7,
+                "extraversion": 0.6,
+                "agreeableness": 0.9,
+                "neuroticism": 0.3,
+                "bias_strength": 0.5
+            }
+        }
+    )
+    assert response.status_code == 200
+    print("Personality updated")
+
+    # Check profile again (should have updated personality)
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/profile")
     assert response.status_code == 200
     updated_profile = response.json()
     assert "software engineer" in updated_profile["background"].lower()
     print("Profile verified")
 
     # ================================================================
-    # 8. List All Agents (should include our test agent)
+    # 8. Test Entity Endpoints
     # ================================================================
 
-    response = await api_client.get("/api/v1/agents")
+    # List entities
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/entities")
     assert response.status_code == 200
-    final_agents_data = response.json()["agents"]
-    final_agents = [a["agent_id"] for a in final_agents_data]
-    assert test_agent_id in final_agents
-    assert len(final_agents) >= len(initial_agents) + 1
-    print(f"Final agent count: {len(final_agents)}")
+    entities_data = response.json()
+    assert "items" in entities_data
+    print(f"Found {len(entities_data['items'])} entities")
+
+    # Get specific entity if any exist
+    if len(entities_data['items']) > 0:
+        entity_id = entities_data['items'][0]['id']
+        response = await api_client.get(
+            f"/v1/default/banks/{test_bank_id}/entities/{entity_id}"
+        )
+        assert response.status_code == 200
+        entity_detail = response.json()
+        assert "id" in entity_detail
+        print(f"Retrieved entity: {entity_detail.get('name', entity_id)}")
+
+        # Test regenerate observations
+        response = await api_client.post(
+            f"/v1/default/banks/{test_bank_id}/entities/{entity_id}/regenerate"
+        )
+        assert response.status_code == 200
+        print(f"Regenerated observations for entity {entity_id}")
 
     # ================================================================
-    # 9. Clean Up
+    # 9. List All Banks (should include our test bank)
     # ================================================================
 
-    # Note: No delete agent endpoint in API, so test data remains in DB
-    # Using timestamped agent IDs prevents conflicts between test runs
-    print(f"Integration test complete for agent {test_agent_id}")
+    response = await api_client.get("/v1/default/banks")
+    assert response.status_code == 200
+    final_banks_data = response.json()["banks"]
+    final_banks = [a["bank_id"] for a in final_banks_data]
+    assert test_bank_id in final_banks
+    assert len(final_banks) >= len(initial_banks) + 1
+    print(f"Final bank count: {len(final_banks)}")
+
+    # ================================================================
+    # 10. Clean Up
+    # ================================================================
+
+    # Note: No delete bank endpoint in API, so test data remains in DB
+    # Using timestamped bank IDs prevents conflicts between test runs
+    print(f"Integration test complete for bank {test_bank_id}")
 
 
 @pytest.mark.asyncio
@@ -272,7 +320,7 @@ async def test_error_handling(api_client):
 
     # Invalid request (missing required field)
     response = await api_client.post(
-        "/api/v1/agents/error_test/memories",
+        "/v1/default/banks/error_test/memories",
         json={
             "items": [
                 {
@@ -284,19 +332,19 @@ async def test_error_handling(api_client):
     )
     assert response.status_code == 422  # Validation error
 
-    # Search with invalid parameters
+    # Recall with invalid parameters
     response = await api_client.post(
-        "/api/v1/agents/error_test/memories/search",
+        "/v1/default/banks/error_test/memories/recall",
         json={
             "query": "test",
-            "thinking_budget": -1  # Invalid negative budget
+            "budget": "invalid_budget"  # Invalid budget value (should be low/mid/high)
         }
     )
     assert response.status_code == 422
 
     # Get non-existent document
     response = await api_client.get(
-        "/api/v1/agents/nonexistent_agent/documents/fake-doc-id"
+        "/v1/default/banks/nonexistent_bank/documents/fake-doc-id"
     )
     assert response.status_code == 404
 
@@ -306,7 +354,7 @@ async def test_error_handling(api_client):
 @pytest.mark.asyncio
 async def test_concurrent_requests(api_client):
     """Test that API can handle concurrent requests."""
-    agent_id = f"concurrent_test_{datetime.now().timestamp()}"
+    bank_id = f"concurrent_test_{datetime.now().timestamp()}"
 
     # Store multiple memories concurrently (simulated with sequential calls)
     responses = []
@@ -319,7 +367,7 @@ async def test_concurrent_requests(api_client):
     ]
     for fact in test_facts:
         response = await api_client.post(
-            f"/api/v1/agents/{agent_id}/memories",
+            f"/v1/default/banks/{bank_id}/memories",
             json={
                 "items": [
                     {
@@ -337,7 +385,7 @@ async def test_concurrent_requests(api_client):
 
     # Verify all facts stored
     response = await api_client.get(
-        f"/api/v1/agents/{agent_id}/memories/list",
+        f"/v1/default/banks/{bank_id}/memories/list",
         params={"limit": 20}
     )
     assert response.status_code == 200
@@ -350,11 +398,11 @@ async def test_concurrent_requests(api_client):
 @pytest.mark.asyncio
 async def test_document_deletion(api_client):
     """Test document deletion including cascade deletion of memory units and links."""
-    test_agent_id = f"doc_delete_test_{datetime.now().timestamp()}"
+    test_bank_id = f"doc_delete_test_{datetime.now().timestamp()}"
 
     # Store a document with memory
     response = await api_client.post(
-        f"/api/v1/agents/{test_agent_id}/memories",
+        f"/v1/default/banks/{test_bank_id}/memories",
         json={
             "items": [
                 {
@@ -370,7 +418,7 @@ async def test_document_deletion(api_client):
 
     # Verify document exists
     response = await api_client.get(
-        f"/api/v1/agents/{test_agent_id}/documents/sales-report-q1-2024"
+        f"/v1/default/banks/{test_bank_id}/documents/sales-report-q1-2024"
     )
     assert response.status_code == 200
     doc_info = response.json()
@@ -380,7 +428,7 @@ async def test_document_deletion(api_client):
 
     # Delete the document
     response = await api_client.delete(
-        f"/api/v1/agents/{test_agent_id}/documents/sales-report-q1-2024"
+        f"/v1/default/banks/{test_bank_id}/documents/sales-report-q1-2024"
     )
     assert response.status_code == 200
     delete_result = response.json()
@@ -391,13 +439,13 @@ async def test_document_deletion(api_client):
 
     # Verify document is gone (should return 404)
     response = await api_client.get(
-        f"/api/v1/agents/{test_agent_id}/documents/sales-report-q1-2024"
+        f"/v1/default/banks/{test_bank_id}/documents/sales-report-q1-2024"
     )
     assert response.status_code == 404
     print("Document deletion verified - returns 404")
 
     # Verify document is not in the list
-    response = await api_client.get(f"/api/v1/agents/{test_agent_id}/documents")
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/documents")
     assert response.status_code == 200
     documents = response.json()
     doc_ids = [doc["id"] for doc in documents["items"]]
@@ -406,7 +454,7 @@ async def test_document_deletion(api_client):
 
     # Try to delete again (should return 404)
     response = await api_client.delete(
-        f"/api/v1/agents/{test_agent_id}/documents/sales-report-q1-2024"
+        f"/v1/default/banks/{test_bank_id}/documents/sales-report-q1-2024"
     )
     assert response.status_code == 404
     print("Double delete returns 404 - verified")

@@ -1,0 +1,1 @@
+{"rustc":16243257175721966122,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[350039288653093011,"build_script_build",false,14160702128762829566]],"local":[{"RerunIfChanged":{"output":"release/build/hindsight-client-9933d827d3e3d55a/output","paths":["/Users/nicoloboschi/dev/memory-poc/openapi.json"]}}],"rustflags":[],"config":0,"compile_kind":0}

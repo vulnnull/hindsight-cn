@@ -1,4 +1,4 @@
-use crate::api::{AgentProfile, Fact, SearchResponse, ThinkResponse, TraceInfo};
+use crate::api::{BankProfileResponse, RecallResult, RecallResponse, ReflectResponse};
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::io::{self, Write};
@@ -9,8 +9,8 @@ pub fn print_section_header(title: &str) {
     println!();
 }
 
-pub fn print_fact(fact: &Fact, show_activation: bool) {
-    let fact_type = fact.fact_type.as_deref().unwrap_or("unknown");
+pub fn print_fact(fact: &RecallResult, show_activation: bool) {
+    let fact_type = fact.type_.as_deref().unwrap_or("unknown");
 
     let type_color = match fact_type {
         "world" => "cyan",
@@ -29,10 +29,10 @@ pub fn print_fact(fact: &Fact, show_activation: bool) {
     print!("{} ", prefix);
     print!("{}", format!("[{}]", fact_type.to_uppercase()).color(type_color).bold());
 
+    // Note: activation field not available in generated SearchResult
+    // The API doesn't return it in the current schema
     if show_activation {
-        if let Some(activation) = fact.activation {
-            print!(" {}", format!("({:.2})", activation).bright_black());
-        }
+        // Placeholder for when activation is added to the API schema
     }
 
     println!();
@@ -44,27 +44,12 @@ pub fn print_fact(fact: &Fact, show_activation: bool) {
     }
 
     // Show temporal information
-    // If occurred_start/end exist, show them; otherwise fall back to event_date
     if let Some(occurred_start) = &fact.occurred_start {
         if let Some(occurred_end) = &fact.occurred_end {
-            if occurred_start == occurred_end {
-                // Point event
-                println!("  {}: {}", "Occurred".bright_black(), occurred_start.bright_black());
-            } else {
-                // Range event
-                println!("  {}: {} to {}", "Occurred".bright_black(), occurred_start.bright_black(), occurred_end.bright_black());
-            }
+            println!("  {}: {} - {}", "Date".bright_black(), occurred_start.bright_black(), occurred_end.bright_black());
         } else {
-            println!("  {}: {}", "Occurred".bright_black(), occurred_start.bright_black());
+            println!("  {}: {}", "Date".bright_black(), occurred_start.bright_black());
         }
-    } else if let Some(event_date) = &fact.event_date {
-        // Fallback for backward compatibility
-        println!("  {}: {}", "Date".bright_black(), event_date.bright_black());
-    }
-
-    // Show when fact was mentioned (learned)
-    if let Some(mentioned_at) = &fact.mentioned_at {
-        println!("  {}: {}", "Mentioned".bright_black(), mentioned_at.bright_black());
     }
 
     // Show document ID if available
@@ -75,7 +60,7 @@ pub fn print_fact(fact: &Fact, show_activation: bool) {
     println!();
 }
 
-pub fn print_search_results(response: &SearchResponse, show_trace: bool) {
+pub fn print_search_results(response: &RecallResponse, show_trace: bool) {
     let results = &response.results;
     print_section_header(&format!("Search Results ({})", results.len()));
 
@@ -95,7 +80,7 @@ pub fn print_search_results(response: &SearchResponse, show_trace: bool) {
     }
 }
 
-pub fn print_think_response(response: &ThinkResponse) {
+pub fn print_think_response(response: &ReflectResponse) {
     println!();
     println!("{}", response.text.bright_white());
     println!();
@@ -105,14 +90,14 @@ pub fn print_think_response(response: &ThinkResponse) {
     }
 }
 
-pub fn print_trace_info(trace: &TraceInfo) {
+pub fn print_trace_info(trace: &serde_json::Map<String, serde_json::Value>) {
     print_section_header("Trace Information");
 
-    if let Some(time) = trace.total_time {
+    if let Some(time) = trace.get("total_time").and_then(|v| v.as_f64()) {
         println!("  ⏱️  Total time: {}", format!("{:.2}ms", time).bright_green());
     }
 
-    if let Some(count) = trace.activation_count {
+    if let Some(count) = trace.get("activation_count").and_then(|v| v.as_i64()) {
         println!("  📊 Activation count: {}", count.to_string().bright_green());
     }
 
@@ -170,8 +155,8 @@ pub fn prompt_confirmation(message: &str) -> io::Result<bool> {
     Ok(input.trim().eq_ignore_ascii_case("y") || input.trim().eq_ignore_ascii_case("yes"))
 }
 
-pub fn print_profile(profile: &AgentProfile) {
-    print_section_header(&format!("Agent Profile: {}", profile.agent_id));
+pub fn print_profile(profile: &BankProfileResponse) {
+    print_section_header(&format!("Bank Profile: {}", profile.bank_id));
 
     // Print name
     println!("{} {}", "Name:".bright_cyan().bold(), profile.name.bright_white());
@@ -200,7 +185,7 @@ pub fn print_profile(profile: &AgentProfile) {
 
     for (name, value, emoji, color) in &traits {
         let bar_length = 40;
-        let filled = (*value * bar_length as f32) as usize;
+        let filled = (*value * bar_length as f64) as usize;
         let empty = bar_length - filled;
 
         let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
@@ -224,7 +209,7 @@ pub fn print_profile(profile: &AgentProfile) {
     println!("{}", "Bias Strength:".bright_yellow());
     let bias = profile.personality.bias_strength;
     let bar_length = 40;
-    let filled = (bias * bar_length as f32) as usize;
+    let filled = (bias * bar_length as f64) as usize;
     let empty = bar_length - filled;
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
 

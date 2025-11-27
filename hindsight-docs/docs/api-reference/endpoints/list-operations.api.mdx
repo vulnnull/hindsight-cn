@@ -28,7 +28,7 @@ import Heading from "@theme/Heading";
 
 <MethodEndpoint
   method={"get"}
-  path={"/api/v1/agents/{agent_id}/operations"}
+  path={"/api/v1/memory banks/{agent_id}/operations"}
   context={"endpoint"}
 >
   
@@ -47,7 +47,7 @@ Get a list of all async operations (pending and failed) for a specific agent, in
 </Heading>
 
 <ParamsDetails
-  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"Agent Id"}}]}
+  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"bank ID"}}]}
 >
   
 </ParamsDetails>

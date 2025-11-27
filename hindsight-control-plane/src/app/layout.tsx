@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AgentProvider } from "@/lib/agent-context";
+import { BankProvider } from "@/lib/bank-context";
 
 export const metadata: Metadata = {
   title: "Hindsight Control Plane",
@@ -15,9 +15,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <AgentProvider>
+        <BankProvider>
           {children}
-        </AgentProvider>
+        </BankProvider>
       </body>
     </html>
   );

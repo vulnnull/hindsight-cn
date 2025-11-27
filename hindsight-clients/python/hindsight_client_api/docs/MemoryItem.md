@@ -1,14 +1,15 @@
 # MemoryItem
 
-Single memory item for batch put.
+Single memory item for retain.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **content** | **str** |  | 
-**event_date** | **datetime** |  | [optional] 
+**timestamp** | **datetime** |  | [optional] 
 **context** | **str** |  | [optional] 
+**metadata** | **Dict[str, str]** |  | [optional] 
 
 ## Example
 

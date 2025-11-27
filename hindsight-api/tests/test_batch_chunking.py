@@ -7,7 +7,7 @@ import os
 
 @pytest.mark.asyncio
 async def test_large_batch_auto_chunks(memory):
-    agent_id = "test_chunking_agent"
+    bank_id = "test_chunking_agent"
     # Create a large batch that should trigger chunking
     # Each item is ~2000 chars, so 30 items = 60k chars (exceeds 50k threshold)
     large_content = "Alice met with Bob at the coffee shop. " * 50  # ~2000 chars
@@ -22,8 +22,8 @@ async def test_large_batch_auto_chunks(memory):
     print(f"Should trigger chunking: {total_chars > 50_000}")
 
     # Ingest the large batch (should auto-chunk)
-    result = await memory.put_batch_async(
-        agent_id=agent_id,
+    result = await memory.retain_batch_async(
+        bank_id=bank_id,
         contents=contents
     )
 
@@ -34,7 +34,7 @@ async def test_large_batch_auto_chunks(memory):
 
 @pytest.mark.asyncio
 async def test_small_batch_no_chunking(memory):
-    agent_id = "test_no_chunking_agent"
+    bank_id = "test_no_chunking_agent"
 
     # Create a small batch that should NOT trigger chunking
     contents = [
@@ -48,8 +48,8 @@ async def test_small_batch_no_chunking(memory):
     print(f"Should NOT trigger chunking: {total_chars <= 50_000}")
 
     # Ingest the small batch (should NOT auto-chunk)
-    result = await memory.put_batch_async(
-        agent_id=agent_id,
+    result = await memory.retain_batch_async(
+        bank_id=bank_id,
         contents=contents
     )
 

@@ -28,7 +28,7 @@ import Heading from "@theme/Heading";
 
 <MethodEndpoint
   method={"delete"}
-  path={"/api/v1/agents/{agent_id}/memories/{unit_id}"}
+  path={"/api/v1/memory banks/{agent_id}/memories/{unit_id}"}
   context={"endpoint"}
 >
   
@@ -47,7 +47,7 @@ Delete a single memory unit and all its associated links (temporal, semantic, an
 </Heading>
 
 <ParamsDetails
-  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"Agent Id"}},{"name":"unit_id","in":"path","required":true,"schema":{"type":"string","title":"Unit Id"}}]}
+  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"bank ID"}},{"name":"unit_id","in":"path","required":true,"schema":{"type":"string","title":"Unit Id"}}]}
 >
   
 </ParamsDetails>

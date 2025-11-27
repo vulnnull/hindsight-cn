@@ -92,10 +92,10 @@ for (const r of results.results) {
 ### Advanced Search
 
 ```typescript
-const results = await SearchService.searchApiSearchPost({
-    agent_id: 'my-agent',
+const results = await SearchService.recallApiRecallPost({
+    bank_id: 'my-agent',
     query: 'What does Alice do?',
-    thinking_budget: 100,
+    budget: 'low',  // 'low', 'mid', or 'high'
     top_k: 10,
 });
 ```
@@ -118,15 +118,15 @@ const opinions = await SearchService.opinionSearchApiOpinionSearchPost({
 });
 ```
 
-## Think (Generate Response)
+## Reflect (Generate Response)
 
 ```typescript
 import { ReasoningService } from '@hindsight/client';
 
-const response = await ReasoningService.thinkApiThinkPost({
-    agent_id: 'my-agent',
+const response = await ReasoningService.reflectApiReflectPost({
+    bank_id: 'my-agent',
     query: 'What should I know about Alice?',
-    thinking_budget: 100,
+    budget: 'low',  // 'low', 'mid', or 'high'
 });
 
 console.log(response.text);        // Generated response
@@ -134,9 +134,9 @@ console.log(response.based_on);    // Memories used
 console.log(response.new_opinions); // New opinions formed
 ```
 
-## Agent Management
+## Memory bank Management
 
-### Create Agent
+### Create Memory bank
 
 ```typescript
 import { ManagementService } from '@hindsight/client';
@@ -163,11 +163,11 @@ console.log(profile.personality);
 console.log(profile.background);
 ```
 
-### List Agents
+### List Memory banks
 
 ```typescript
-const agents = await ManagementService.listAgentsApiAgentsGet();
-for (const agent of agents.agents) {
+const memory banks = await ManagementService.listAgentsApiAgentsGet();
+for (const agent of memory banks.memory banks) {
     console.log(agent.agent_id);
 }
 ```

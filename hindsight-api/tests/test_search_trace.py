@@ -2,6 +2,7 @@
 Test search tracing functionality.
 """
 import pytest
+from hindsight_api.engine.memory_engine import Budget
 from hindsight_api import SearchTrace
 from datetime import datetime, timezone
 
@@ -10,33 +11,33 @@ from datetime import datetime, timezone
 async def test_search_with_trace(memory):
     """Test that search with enable_trace=True returns a valid SearchTrace."""
     # Generate a unique agent ID for this test
-    agent_id = f"test_trace_{datetime.now(timezone.utc).timestamp()}"
+    bank_id = f"test_trace_{datetime.now(timezone.utc).timestamp()}"
 
     try:
 
         # Store some test memories
-        await memory.put_async(
-            agent_id=agent_id,
+        await memory.retain_async(
+            bank_id=bank_id,
             content="Alice works at Google in Mountain View",
             context="test context",
         )
-        await memory.put_async(
-            agent_id=agent_id,
+        await memory.retain_async(
+            bank_id=bank_id,
             content="Bob also works at Google but in New York",
             context="test context",
         )
-        await memory.put_async(
-            agent_id=agent_id,
+        await memory.retain_async(
+            bank_id=bank_id,
             content="Charlie founded a startup called TechCorp",
             context="test context",
         )
 
         # Search with tracing enabled
-        search_result = await memory.search_async(
-            agent_id=agent_id,
+        search_result = await memory.recall_async(
+            bank_id=bank_id,
             query="Who works at Google?",
             fact_type=["world"],
-            thinking_budget=20,
+            budget=Budget.LOW, # 20,
             max_tokens=512,
             enable_trace=True,
         )
@@ -51,7 +52,7 @@ async def test_search_with_trace(memory):
 
         # Verify query info
         assert trace["query"]["query_text"] == "Who works at Google?"
-        assert trace["query"]["thinking_budget"] == 20
+        assert trace["query"]["budget"] == 100  # Budget.LOW = 100
         assert trace["query"]["max_tokens"] == 512
         assert len(trace["query"]["query_embedding"]) > 0, "Query embedding should be populated"
 
@@ -80,7 +81,7 @@ async def test_search_with_trace(memory):
         # Verify summary
         assert trace["summary"]["total_nodes_visited"] == len(trace["visits"])
         assert trace["summary"]["results_returned"] == len(search_result.results)
-        assert trace["summary"]["budget_used"] <= trace["query"]["thinking_budget"]
+        assert trace["summary"]["budget_used"] <= trace["query"]["budget"]
         assert trace["summary"]["total_duration_seconds"] > 0
 
         # Verify phase metrics
@@ -101,29 +102,29 @@ async def test_search_with_trace(memory):
 
     finally:
         # Cleanup
-        await memory.delete_agent(agent_id)
+        await memory.delete_bank(bank_id)
 
 
 @pytest.mark.asyncio
 async def test_search_without_trace(memory):
     """Test that search with enable_trace=False returns None for trace."""
-    agent_id = f"test_no_trace_{datetime.now(timezone.utc).timestamp()}"
+    bank_id = f"test_no_trace_{datetime.now(timezone.utc).timestamp()}"
 
     try:
 
         # Store a test memory
-        await memory.put_async(
-            agent_id=agent_id,
+        await memory.retain_async(
+            bank_id=bank_id,
             content="Test memory without trace",
             context="test",
         )
 
         # Search without tracing
-        search_result = await memory.search_async(
-            agent_id=agent_id,
+        search_result = await memory.recall_async(
+            bank_id=bank_id,
             query="test",
             fact_type=["world"],
-            thinking_budget=10,
+            budget=Budget.LOW, # 10,
             max_tokens=512,
             enable_trace=False,
         )
@@ -136,4 +137,4 @@ async def test_search_without_trace(memory):
 
     finally:
         # Cleanup
-        await memory.delete_agent(agent_id)
+        await memory.delete_bank(bank_id)

@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Temporal Reasoning
 
-Hindsight provides sophisticated temporal reasoning capabilities, allowing agents to understand and query memories based on when events occurred. This enables natural queries like "What did Alice do last spring?" or "What happened between March and May?"
+Hindsight provides sophisticated temporal reasoning capabilities, allowing memory banks to understand and query memories based on when events occurred. This enables natural queries like "What did Alice do last spring?" or "What happened between March and May?"
 
 ## Overview
 
@@ -385,9 +385,9 @@ curl -X POST http://localhost:8888/api/v1/search \
   }'
 ```
 
-## Advanced: Temporal Ranges in Agent Profiles
+## Advanced: Temporal Ranges in Memory bank Profiles
 
-Agents can have temporal ranges that represent their active periods or episodic boundaries:
+Memory banks can have temporal ranges that represent their active periods or episodic boundaries:
 
 ```python
 # Create agent with temporal range
@@ -440,7 +440,7 @@ Hindsight's temporal reasoning capabilities enable natural, time-aware memory qu
 ✅ **Cross-encoder awareness** - Reranker considers temporal alignment
 ✅ **Low overhead** - Only activates when temporal expressions detected
 
-This allows agents to answer complex temporal queries like:
+This allows memory banks to answer complex temporal queries like:
 - "What did I learn last quarter?"
 - "What was Alice working on in March?"
 - "Events between the conference and the project launch"

@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { dataplaneClient } from '@/lib/api';
-import { useAgent } from '@/lib/agent-context';
+import { client } from '@/lib/api';
+import { useBank } from '@/lib/bank-context';
 import cytoscape from 'cytoscape';
 
-type FactType = 'world' | 'agent' | 'opinion';
+type FactType = 'world' | 'bank' | 'opinion';
 type ViewMode = 'graph' | 'table';
 
 interface DataViewProps {
@@ -13,7 +13,7 @@ interface DataViewProps {
 }
 
 export function DataView({ factType }: DataViewProps) {
-  const { currentAgent } = useAgent();
+  const { currentBank } = useBank();
   const [viewMode, setViewMode] = useState<ViewMode>('graph');
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -24,13 +24,13 @@ export function DataView({ factType }: DataViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const loadData = async () => {
-    if (!currentAgent) return;
+    if (!currentBank) return;
 
     setLoading(true);
     try {
-      const graphData: any = await dataplaneClient.getGraphData({
-        agent_id: currentAgent,
-        fact_type: factType,
+      const graphData: any = await client.getGraph({
+        bank_id: currentBank,
+        type: factType,
       });
       console.log('Loaded graph data:', {
         total_units: graphData.total_units,

@@ -1,5 +1,5 @@
 ---
-sidebar_position: 0
+sidebar_position: 1
 ---
 
 # Quick Start
@@ -9,33 +9,16 @@ Get up and running with Hindsight in 60 seconds.
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-## Installation
-
-<Tabs>
-<TabItem value="all-in-one" label="All-in-One (Recommended)">
-
-The `hindsight-all` package includes everything you need: embedded PostgreSQL, HTTP API server, and Python client.
-
-```bash
-pip install hindsight-all
-```
-
-</TabItem>
-<TabItem value="client-only" label="Client Only">
-
-If you already have a Hindsight server running, install just the client:
-
-```bash
-pip install hindsight-client
-```
-
-</TabItem>
-</Tabs>
+:::tip Prerequisites
+Make sure you've [installed Hindsight](./installation) and configured your LLM provider.
+:::
 
 ## Basic Usage
 
 <Tabs>
-<TabItem value="all-in-one" label="All-in-One">
+<TabItem value="python" label="Python">
+
+### With All-in-One Package
 
 ```python
 import os
@@ -44,45 +27,83 @@ from hindsight import HindsightServer, HindsightClient
 # Start embedded server (PostgreSQL + HTTP API)
 with HindsightServer(
     llm_provider="openai",
-    llm_model="gpt-4.1-mini",
+    llm_model="gpt-4o-mini",
     llm_api_key=os.environ["OPENAI_API_KEY"]
 ) as server:
     client = HindsightClient(base_url=server.url)
 
-    # Store memories
-    client.put(agent_id="my-agent", content="Alice works at Google")
-    client.put(agent_id="my-agent", content="Bob prefers Python over JavaScript")
+    # Retain: Store information
+    client.retain(bank_id="my-bank", content="Alice works at Google as a software engineer")
+    client.retain(bank_id="my-bank", content="Bob prefers Python over JavaScript")
 
-    # Search memories
-    results = client.search(agent_id="my-agent", query="What does Alice do?")
+    # Recall: Search memories
+    results = client.recall(bank_id="my-bank", query="What does Alice do?")
     for r in results:
         print(r["text"])
 
-    # Generate response with personality
-    response = client.think(agent_id="my-agent", query="Tell me about Alice")
+    # Reflect: Generate personality-aware response
+    response = client.reflect(bank_id="my-bank", query="Tell me about Alice")
     print(response["text"])
 ```
 
-</TabItem>
-<TabItem value="client-only" label="Client Only">
+### With Client Only
 
 ```python
 from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-# Store memories
-client.put(agent_id="my-agent", content="Alice works at Google")
-client.put(agent_id="my-agent", content="Bob prefers Python over JavaScript")
+# Retain: Store information
+client.retain(bank_id="my-bank", content="Alice works at Google as a software engineer")
 
-# Search memories
-results = client.search(agent_id="my-agent", query="What does Alice do?")
-for r in results:
-    print(r["text"])
+# Recall: Search memories
+results = client.recall(bank_id="my-bank", query="What does Alice do?")
 
-# Generate response with personality
-response = client.think(agent_id="my-agent", query="Tell me about Alice")
+# Reflect: Generate response
+response = client.reflect(bank_id="my-bank", query="Tell me about Alice")
 print(response["text"])
+```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```javascript
+const { HindsightClient } = require('@hindsight/client');
+
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
+
+// Retain: Store information
+await client.retain({
+    bankId: 'my-bank',
+    content: 'Alice works at Google as a software engineer'
+});
+
+// Recall: Search memories
+const results = await client.recall({
+    bankId: 'my-bank',
+    query: 'What does Alice do?'
+});
+
+// Reflect: Generate response
+const response = await client.reflect({
+    bankId: 'my-bank',
+    query: 'Tell me about Alice'
+});
+console.log(response.text);
+```
+
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+# Retain: Store information
+hindsight retain my-bank "Alice works at Google as a software engineer"
+
+# Recall: Search memories
+hindsight recall my-bank "What does Alice do?"
+
+# Reflect: Generate response
+hindsight reflect my-bank "Tell me about Alice"
 ```
 
 </TabItem>
@@ -90,67 +111,14 @@ print(response["text"])
 
 ## What's Happening
 
-1. **Store** — Content is processed, facts are extracted, and entities are linked in a knowledge graph
-2. **Search** — Four search strategies (semantic, keyword, graph, temporal) run in parallel and results are fused
-3. **Think** — Retrieved memories are used to generate a personality-aware response
+**Retain** → Content is processed, facts are extracted, entities are identified and linked in a knowledge graph
 
-## Server Options
+**Recall** → Four search strategies (semantic, keyword, graph, temporal) run in parallel to find relevant memories
 
-When using `HindsightServer`, you can configure:
-
-```python
-from hindsight import HindsightServer
-
-server = HindsightServer(
-    # Database
-    db_url="pg0",                    # "pg0" for embedded PostgreSQL, or a connection URL
-
-    # LLM Configuration
-    llm_provider="openai",           # "openai", "groq", or "ollama"
-    llm_api_key="your-api-key",
-    llm_model="gpt-4.1-mini",
-    llm_base_url=None,               # Custom endpoint (for ollama or proxies)
-
-    # Server
-    host="127.0.0.1",
-    port=None,                       # Auto-select free port if None
-    mcp_enabled=False,               # Enable MCP API
-)
-
-server.start()
-print(f"Server running at {server.url}")
-
-# ... use server ...
-
-server.stop()
-```
-
-## Environment Variables
-
-For production, use environment variables:
-
-```bash
-export OPENAI_API_KEY=sk-...
-# or
-export GROQ_API_KEY=gsk_...
-```
-
-```python
-import os
-from hindsight import HindsightServer, HindsightClient
-
-with HindsightServer(
-    llm_provider="openai",
-    llm_api_key=os.environ["OPENAI_API_KEY"],
-    llm_model="gpt-4.1-mini"
-) as server:
-    client = HindsightClient(base_url=server.url)
-    # ...
-```
+**Reflect** → Retrieved memories are used to generate a personality-aware response with formed opinions
 
 ## Next Steps
 
-- [Ingest Data](./ingest) — Store memories, conversations, and documents
-- [Search Facts](./search) — Multi-strategy retrieval
-- [Think](./think) — Personality-aware response generation
-- [Agent Identity](./agent-identity) — Configure agent personality and background
+- [**Main Methods**](./main-methods) — Detailed guide to retain, recall, and reflect
+- [**Bank Identity**](./bank-identity) — Configure personality and background
+- [**Server Options**](/developer/server) — Production deployment

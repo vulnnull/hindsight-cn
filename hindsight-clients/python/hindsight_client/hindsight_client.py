@@ -10,12 +10,12 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 import hindsight_client_api
-from hindsight_client_api.api import memory_operations_api, reasoning_api, agent_management_api
+from hindsight_client_api.api import default_api
 from hindsight_client_api.models import (
-    search_request,
-    batch_put_request,
+    recall_request,
+    retain_request,
     memory_item,
-    think_request,
+    reflect_request,
 )
 
 
@@ -41,13 +41,13 @@ class Hindsight:
         client = Hindsight(base_url="http://localhost:8888")
 
         # Store a memory
-        client.put(agent_id="alice", content="Alice loves AI")
+        client.retain(bank_id="alice", content="Alice loves AI")
 
-        # Search memories
-        results = client.search(agent_id="alice", query="What does Alice like?")
+        # Recall memories
+        results = client.recall(bank_id="alice", query="What does Alice like?")
 
         # Generate contextual answer
-        answer = client.think(agent_id="alice", query="What are my interests?")
+        answer = client.reflect(bank_id="alice", query="What are my interests?")
         ```
     """
 
@@ -61,9 +61,7 @@ class Hindsight:
         """
         config = hindsight_client_api.Configuration(host=base_url)
         self._api_client = hindsight_client_api.ApiClient(config)
-        self._memory_api = memory_operations_api.MemoryOperationsApi(self._api_client)
-        self._reasoning_api = reasoning_api.ReasoningApi(self._api_client)
-        self._agent_api = agent_management_api.AgentManagementApi(self._api_client)
+        self._api = default_api.DefaultApi(self._api_client)
 
     def __enter__(self):
         """Context manager entry."""
@@ -80,46 +78,50 @@ class Hindsight:
 
     # Simplified methods for main operations
 
-    def put(
+    def retain(
         self,
-        agent_id: str,
+        bank_id: str,
         content: str,
-        event_date: Optional[datetime] = None,
+        timestamp: Optional[datetime] = None,
         context: Optional[str] = None,
         document_id: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Store a single memory (simplified interface).
 
         Args:
-            agent_id: The agent ID
+            bank_id: The memory bank ID
             content: Memory content
-            event_date: Optional event timestamp
+            timestamp: Optional event timestamp
             context: Optional context description
             document_id: Optional document ID for grouping
+            metadata: Optional user-defined metadata
 
         Returns:
             Response with success status
         """
-        return self.put_batch(
-            agent_id=agent_id,
-            items=[{"content": content, "event_date": event_date, "context": context}],
+        return self.retain_batch(
+            bank_id=bank_id,
+            items=[{"content": content, "timestamp": timestamp, "context": context, "metadata": metadata}],
             document_id=document_id,
         )
 
-    def put_batch(
+    def retain_batch(
         self,
-        agent_id: str,
+        bank_id: str,
         items: List[Dict[str, Any]],
         document_id: Optional[str] = None,
+        async_: bool = False,
     ) -> Dict[str, Any]:
         """
         Store multiple memories in batch.
 
         Args:
-            agent_id: The agent ID
-            items: List of memory items with 'content' and optional 'event_date', 'context'
+            bank_id: The memory bank ID
+            items: List of memory items with 'content' and optional 'timestamp', 'context', 'metadata'
             document_id: Optional document ID for grouping memories
+            async_: If True, process asynchronously in background (default: False)
 
         Returns:
             Response with success status and item count
@@ -127,172 +129,193 @@ class Hindsight:
         memory_items = [
             memory_item.MemoryItem(
                 content=item["content"],
-                event_date=item.get("event_date"),
+                timestamp=item.get("timestamp"),
                 context=item.get("context"),
+                metadata=item.get("metadata"),
             )
             for item in items
         ]
 
-        request_obj = batch_put_request.BatchPutRequest(
+        request_obj = retain_request.RetainRequest(
             items=memory_items,
             document_id=document_id,
+            async_=async_,
         )
 
-        response = _run_async(self._memory_api.batch_put_memories(agent_id, request_obj))
+        response = _run_async(self._api.retain_memories(bank_id, request_obj))
         return response.to_dict() if hasattr(response, 'to_dict') else response
 
-    def search(
+    def recall(
         self,
-        agent_id: str,
+        bank_id: str,
         query: str,
-        fact_type: Optional[List[str]] = None,
+        types: Optional[List[str]] = None,
         max_tokens: int = 4096,
-        thinking_budget: int = 100,
+        budget: str = "mid",
     ) -> List[Dict[str, Any]]:
         """
-        Search memories using semantic similarity.
+        Recall memories using semantic similarity.
 
         Args:
-            agent_id: The agent ID
+            bank_id: The memory bank ID
             query: Search query
-            fact_type: Optional list of fact types to filter (world, agent, opinion)
+            types: Optional list of fact types to filter (world, agent, opinion, observation)
             max_tokens: Maximum tokens in results (default: 4096)
-            thinking_budget: Token budget for search (default: 100)
+            budget: Budget level for recall - "low", "mid", or "high" (default: "mid")
 
         Returns:
-            List of search results
+            List of recall results
         """
-        request_obj = search_request.SearchRequest(
+        request_obj = recall_request.RecallRequest(
             query=query,
-            fact_type=fact_type,
-            thinking_budget=thinking_budget,
+            types=types,
+            budget=budget,
             max_tokens=max_tokens,
             trace=False,
         )
 
-        response = _run_async(self._memory_api.search_memories(agent_id, request_obj))
+        response = _run_async(self._api.recall_memories(bank_id, request_obj))
 
         if hasattr(response, 'results'):
             return [r.to_dict() if hasattr(r, 'to_dict') else r for r in response.results]
         return []
 
-    def think(
+    def reflect(
         self,
-        agent_id: str,
+        bank_id: str,
         query: str,
-        thinking_budget: int = 50,
+        budget: str = "low",
         context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Generate a contextual answer based on agent identity and memories.
+        Generate a contextual answer based on bank identity and memories.
 
         Args:
-            agent_id: The agent ID
+            bank_id: The memory bank ID
             query: The question or prompt
-            thinking_budget: Token budget for thinking (default: 50)
+            budget: Budget level for reflection - "low", "mid", or "high" (default: "low")
             context: Optional additional context
 
         Returns:
-            Response with answer text, facts used, and new opinions
+            Response with answer text and optionally facts used
         """
-        request_obj = think_request.ThinkRequest(
+        request_obj = reflect_request.ReflectRequest(
             query=query,
-            thinking_budget=thinking_budget,
+            budget=budget,
             context=context,
         )
 
-        response = _run_async(self._reasoning_api.think(agent_id, request_obj))
+        response = _run_async(self._api.reflect(bank_id, request_obj))
         return response.to_dict() if hasattr(response, 'to_dict') else response
 
     # Full-featured methods (expose more options)
 
-    def search_memories(
+    def recall_memories(
         self,
-        agent_id: str,
+        bank_id: str,
         query: str,
-        fact_type: Optional[List[str]] = None,
-        thinking_budget: int = 100,
+        types: Optional[List[str]] = None,
+        budget: str = "mid",
         max_tokens: int = 4096,
         trace: bool = False,
-        question_date: Optional[str] = None,
+        query_timestamp: Optional[str] = None,
+        include_entities: bool = True,
+        max_entity_tokens: int = 500,
     ) -> Dict[str, Any]:
         """
-        Search memories with all options (full-featured).
+        Recall memories with all options (full-featured).
 
         Args:
-            agent_id: The agent ID
+            bank_id: The memory bank ID
             query: Search query
-            fact_type: Optional list of fact types to filter
-            thinking_budget: Token budget for thinking
+            types: Optional list of fact types to filter (world, agent, opinion, observation)
+            budget: Budget level - "low", "mid", or "high"
             max_tokens: Maximum tokens in results
             trace: Enable trace output
-            question_date: Optional ISO format date string
+            query_timestamp: Optional ISO format date string (e.g., '2023-05-30T23:40:00')
+            include_entities: Include entity observations in results (default: True)
+            max_entity_tokens: Maximum tokens for entity observations (default: 500)
 
         Returns:
-            Full search response with results and optional trace
+            Full recall response with results, optional entities, and optional trace
         """
-        request_obj = search_request.SearchRequest(
-            query=query,
-            fact_type=fact_type,
-            thinking_budget=thinking_budget,
-            max_tokens=max_tokens,
-            trace=trace,
-            question_date=question_date,
+        from hindsight_client_api.models import include_options, entity_include_options
+
+        include_opts = include_options.IncludeOptions(
+            entities=entity_include_options.EntityIncludeOptions(max_tokens=max_entity_tokens) if include_entities else None
         )
 
-        response = _run_async(self._memory_api.search_memories(agent_id, request_obj))
+        request_obj = recall_request.RecallRequest(
+            query=query,
+            types=types,
+            budget=budget,
+            max_tokens=max_tokens,
+            trace=trace,
+            query_timestamp=query_timestamp,
+            include=include_opts,
+        )
+
+        response = _run_async(self._api.recall_memories(bank_id, request_obj))
         return response.to_dict() if hasattr(response, 'to_dict') else response
 
     def list_memories(
         self,
-        agent_id: str,
-        fact_type: Optional[str] = None,
+        bank_id: str,
+        type: Optional[str] = None,
         search_query: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> Dict[str, Any]:
         """List memory units with pagination."""
-        response = _run_async(self._memory_api.list_memories(
-            agent_id=agent_id,
-            fact_type=fact_type,
+        response = _run_async(self._api.list_memories(
+            bank_id=bank_id,
+            type=type,
             q=search_query,
             limit=limit,
             offset=offset,
         ))
         return response.to_dict() if hasattr(response, 'to_dict') else response
 
-    def create_agent(
+    def create_bank(
         self,
-        agent_id: str,
+        bank_id: str,
         name: Optional[str] = None,
         background: Optional[str] = None,
+        personality: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
-        """Create or update an agent."""
-        from hindsight_client_api.models import create_agent_request
+        """Create or update a memory bank."""
+        from hindsight_client_api.models import create_bank_request, personality_traits
 
-        request_obj = create_agent_request.CreateAgentRequest(
+        personality_obj = None
+        if personality:
+            personality_obj = personality_traits.PersonalityTraits(**personality)
+
+        request_obj = create_bank_request.CreateBankRequest(
             name=name,
             background=background,
+            personality=personality_obj,
         )
 
-        response = _run_async(self._agent_api.create_or_update_agent(agent_id, request_obj))
+        response = _run_async(self._api.create_or_update_bank(bank_id, request_obj))
         return response.to_dict() if hasattr(response, 'to_dict') else response
 
     # Async methods (native async, no _run_async wrapper)
 
-    async def aput_batch(
+    async def aretain_batch(
         self,
-        agent_id: str,
+        bank_id: str,
         items: List[Dict[str, Any]],
         document_id: Optional[str] = None,
+        async_: bool = False,
     ) -> Dict[str, Any]:
         """
         Store multiple memories in batch (async).
 
         Args:
-            agent_id: The agent ID
-            items: List of memory items with 'content' and optional 'event_date', 'context'
+            bank_id: The memory bank ID
+            items: List of memory items with 'content' and optional 'timestamp', 'context', 'metadata'
             document_id: Optional document ID for grouping memories
+            async_: If True, process asynchronously in background (default: False)
 
         Returns:
             Response with success status and item count
@@ -300,110 +323,110 @@ class Hindsight:
         memory_items = [
             memory_item.MemoryItem(
                 content=item["content"],
-                event_date=item.get("event_date"),
+                timestamp=item.get("timestamp"),
                 context=item.get("context"),
+                metadata=item.get("metadata"),
             )
             for item in items
         ]
 
-        request_obj = batch_put_request.BatchPutRequest(
+        request_obj = retain_request.RetainRequest(
             items=memory_items,
             document_id=document_id,
+            async_=async_,
         )
 
-        response = await self._memory_api.batch_put_memories(agent_id, request_obj)
+        response = await self._api.retain_memories(bank_id, request_obj)
         return response.to_dict() if hasattr(response, 'to_dict') else response
 
-    async def aput(
+    async def aretain(
         self,
-        agent_id: str,
+        bank_id: str,
         content: str,
-        event_date: Optional[datetime] = None,
+        timestamp: Optional[datetime] = None,
         context: Optional[str] = None,
         document_id: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Store a single memory (async).
 
         Args:
-            agent_id: The agent ID
+            bank_id: The memory bank ID
             content: Memory content
-            event_date: Optional event timestamp
+            timestamp: Optional event timestamp
             context: Optional context description
             document_id: Optional document ID for grouping
+            metadata: Optional user-defined metadata
 
         Returns:
             Response with success status
         """
-        return await self.aput_batch(
-            agent_id=agent_id,
-            items=[{"content": content, "event_date": event_date, "context": context}],
+        return await self.aretain_batch(
+            bank_id=bank_id,
+            items=[{"content": content, "timestamp": timestamp, "context": context, "metadata": metadata}],
             document_id=document_id,
         )
 
-    async def asearch(
+    async def arecall(
         self,
-        agent_id: str,
+        bank_id: str,
         query: str,
-        fact_type: Optional[List[str]] = None,
+        types: Optional[List[str]] = None,
         max_tokens: int = 4096,
-        thinking_budget: int = 100,
+        budget: str = "mid",
     ) -> List[Dict[str, Any]]:
         """
-        Search memories using semantic similarity (async).
+        Recall memories using semantic similarity (async).
 
         Args:
-            agent_id: The agent ID
+            bank_id: The memory bank ID
             query: Search query
-            fact_type: Optional list of fact types to filter (world, agent, opinion)
+            types: Optional list of fact types to filter (world, agent, opinion, observation)
             max_tokens: Maximum tokens in results (default: 4096)
-            thinking_budget: Token budget for search (default: 100)
+            budget: Budget level for recall - "low", "mid", or "high" (default: "mid")
 
         Returns:
-            List of search results
+            List of recall results
         """
-        request_obj = search_request.SearchRequest(
+        request_obj = recall_request.RecallRequest(
             query=query,
-            fact_type=fact_type,
-            thinking_budget=thinking_budget,
+            types=types,
+            budget=budget,
             max_tokens=max_tokens,
             trace=False,
         )
 
-        response = await self._memory_api.search_memories(agent_id, request_obj)
+        response = await self._api.recall_memories(bank_id, request_obj)
 
         if hasattr(response, 'results'):
             return [r.to_dict() if hasattr(r, 'to_dict') else r for r in response.results]
         return []
 
-    async def athink(
+    async def areflect(
         self,
-        agent_id: str,
+        bank_id: str,
         query: str,
-        thinking_budget: int = 50,
+        budget: str = "low",
         context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Generate a contextual answer based on agent identity and memories (async).
+        Generate a contextual answer based on bank identity and memories (async).
 
         Args:
-            agent_id: The agent ID
+            bank_id: The memory bank ID
             query: The question or prompt
-            thinking_budget: Token budget for thinking (default: 50)
+            budget: Budget level for reflection - "low", "mid", or "high" (default: "low")
             context: Optional additional context
 
         Returns:
-            Response with answer text, facts used, and new opinions
+            Response with answer text and optionally facts used
         """
-        request_obj = think_request.ThinkRequest(
+        request_obj = reflect_request.ReflectRequest(
             query=query,
-            thinking_budget=thinking_budget,
+            budget=budget,
             context=context,
         )
 
-        response = await self._reasoning_api.think(agent_id, request_obj)
+        response = await self._api.reflect(bank_id, request_obj)
         return response.to_dict() if hasattr(response, 'to_dict') else response
-
-
-# Alias for backward compatibility
-HindsightClient = Hindsight

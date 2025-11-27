@@ -5,21 +5,21 @@ const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || 'http://loca
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const agentId = searchParams.get('agent_id');
+    const bankId = searchParams.get('bank_id');
 
-    if (!agentId) {
+    if (!bankId) {
       return NextResponse.json(
-        { error: 'agent_id is required' },
+        { error: 'bank_id is required' },
         { status: 400 }
       );
     }
 
-    // Remove agent_id from query params and rebuild query string
+    // Remove bank_id from query params and rebuild query string
     const newSearchParams = new URLSearchParams(searchParams);
-    newSearchParams.delete('agent_id');
+    newSearchParams.delete('bank_id');
     const queryString = newSearchParams.toString();
 
-    const url = `${DATAPLANE_URL}/api/v1/agents/${agentId}/entities${queryString ? `?${queryString}` : ''}`;
+    const url = `${DATAPLANE_URL}/api/v1/banks/${bankId}/entities${queryString ? `?${queryString}` : ''}`;
     const response = await fetch(url);
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });

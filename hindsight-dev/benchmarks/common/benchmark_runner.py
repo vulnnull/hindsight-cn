@@ -76,7 +76,7 @@ class HindsightClientAdapter:
         Store multiple memory items via API.
 
         Args:
-            agent_id: Agent identifier
+            agent_id: Agent identifier (bank_id)
             contents: List of content dicts with 'content', 'event_date', 'context' keys
             document_id: Optional document identifier
 
@@ -87,13 +87,14 @@ class HindsightClientAdapter:
         items = []
         for content in contents:
             item = {"content": content["content"]}
+            # Map event_date to timestamp
             if "event_date" in content and content["event_date"]:
-                item["event_date"] = content["event_date"]
+                item["timestamp"] = content["event_date"]
             if "context" in content and content["context"]:
                 item["context"] = content["context"]
             items.append(item)
 
-        return await self.client.aput_batch(
+        return await self.client.aretain_batch(
             agent_id=agent_id,
             items=items,
             document_id=document_id,
@@ -111,23 +112,26 @@ class HindsightClientAdapter:
         question_date: Optional[datetime] = None
     ) -> 'SearchResult':
         """
-        Search memories via API.
+        Recall memories via API.
 
         Returns:
             SearchResult object with results list
         """
-        from hindsight_client_api.models import search_request
+        from hindsight_client_api.models import recall_request
 
-        request_obj = search_request.SearchRequest(
+        # Map thinking_budget to budget level
+        budget = 'low' if thinking_budget <= 30 else 'mid' if thinking_budget <= 70 else 'high'
+
+        request_obj = recall_request.RecallRequest(
             query=query,
-            fact_type=fact_type,
-            thinking_budget=thinking_budget,
+            types=fact_type,
+            budget=budget,
             max_tokens=max_tokens,
             trace=enable_trace,
-            question_date=question_date.isoformat() if question_date else None,
+            query_timestamp=question_date.isoformat() if question_date else None,
         )
 
-        response = await self.client._memory_api.search_memories(agent_id, request_obj)
+        response = await self.client._memory_api.recall_memories(agent_id, request_obj)
 
         # Convert to expected format - wrap results in an object with .results attribute
         class SearchResult:
@@ -157,15 +161,18 @@ class HindsightClientAdapter:
         context: str = None
     ) -> 'ThinkResult':
         """
-        Generate answer using think API.
+        Generate answer using reflect API.
 
         Returns:
             ThinkResult object with text, based_on, and new_opinions
         """
-        response = await self.client.athink(
+        # Map thinking_budget to budget level
+        budget = 'low' if thinking_budget <= 30 else 'mid' if thinking_budget <= 70 else 'high'
+
+        response = await self.client.areflect(
             agent_id=agent_id,
             query=query,
-            thinking_budget=thinking_budget,
+            budget=budget,
             context=context,
         )
 

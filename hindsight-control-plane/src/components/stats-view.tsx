@@ -1,26 +1,26 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { dataplaneClient } from '@/lib/api';
-import { useAgent } from '@/lib/agent-context';
+import { client } from '@/lib/api';
+import { useBank } from '@/lib/bank-context';
 
 export function StatsView() {
-  const { currentAgent } = useAgent();
+  const { currentBank } = useBank();
   const [stats, setStats] = useState<any>(null);
   const [operations, setOperations] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   const loadStats = async () => {
-    if (!currentAgent) return;
+    if (!currentBank) return;
 
     setLoading(true);
     try {
-      const [statsData, opsData]: [any, any] = await Promise.all([
-        dataplaneClient.getAgentStats(currentAgent),
-        fetch(`/api/operations/${currentAgent}`).then(r => r.json()),
+      const [stats, ops] = await Promise.all([
+        client.getBankStats(currentBank),
+        client.listOperations(currentBank),
       ]);
-      setStats(statsData);
-      setOperations(opsData.operations || []);
+      setStats(stats);
+      setOperations(ops?.operations || []);
     } catch (error) {
       console.error('Error loading stats:', error);
       alert('Error loading stats: ' + (error as Error).message);
@@ -30,15 +30,15 @@ export function StatsView() {
   };
 
   useEffect(() => {
-    if (currentAgent) {
+    if (currentBank) {
       loadStats();
       // Refresh every 5 seconds
       const interval = setInterval(loadStats, 5000);
       return () => clearInterval(interval);
     }
-  }, [currentAgent]);
+  }, [currentBank]);
 
-  if (!currentAgent) {
+  if (!currentBank) {
     return (
       <div className="p-10 text-center text-gray-600 bg-gray-50">
         <h3 className="text-xl font-semibold mb-2">No Agent Selected</h3>

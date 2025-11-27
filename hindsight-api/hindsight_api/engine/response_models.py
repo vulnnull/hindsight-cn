@@ -35,7 +35,7 @@ class MemoryFact(BaseModel):
 
     id: str = Field(description="Unique identifier for the memory fact")
     text: str = Field(description="The actual text content of the memory")
-    fact_type: str = Field(description="Type of fact: 'world', 'agent', 'opinion', or 'observation'")
+    fact_type: str = Field(description="Type of fact: 'world', 'bank', 'opinion', or 'observation'")
     entities: Optional[List[str]] = Field(None, description="Entity names mentioned in this fact")
     context: Optional[str] = Field(None, description="Additional context for the memory")
     occurred_start: Optional[str] = Field(None, description="ISO format date when the event started occurring")
@@ -48,9 +48,9 @@ class MemoryFact(BaseModel):
     activation: Optional[float] = Field(None, description="Internal activation score")
 
 
-class SearchResult(BaseModel):
+class RecallResult(BaseModel):
     """
-    Result from a search operation.
+    Result from a recall operation.
 
     Contains a list of matching memory facts and optional trace information
     for debugging and transparency.
@@ -83,12 +83,12 @@ class SearchResult(BaseModel):
     )
 
 
-class ThinkResult(BaseModel):
+class ReflectResult(BaseModel):
     """
-    Result from a think operation.
+    Result from a reflect operation.
 
     Contains the formulated answer, the facts it was based on (organized by type),
-    and any new opinions that were formed during the thinking process.
+    and any new opinions that were formed during the reflection process.
     """
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -119,7 +119,7 @@ class ThinkResult(BaseModel):
     )
     new_opinions: List[str] = Field(
         default_factory=list,
-        description="List of newly formed opinions during thinking"
+        description="List of newly formed opinions during reflection"
     )
 
 
@@ -127,7 +127,7 @@ class Opinion(BaseModel):
     """
     An opinion with confidence score.
 
-    Opinions represent the agent's formed perspectives on topics,
+    Opinions represent the bank's formed perspectives on topics,
     with a confidence level indicating strength of belief.
     """
     model_config = ConfigDict(json_schema_extra={

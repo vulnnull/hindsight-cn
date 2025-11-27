@@ -9,13 +9,13 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any
 from pydantic import BaseModel, Field
 
-from .response_models import ThinkResult, MemoryFact
+from .response_models import ReflectResult, MemoryFact
 
 logger = logging.getLogger(__name__)
 
 
 class Opinion(BaseModel):
-    """An opinion formed by the agent."""
+    """An opinion formed by the bank."""
     opinion: str = Field(description="The opinion or perspective with reasoning included")
     confidence: float = Field(description="Confidence score for this opinion (0.0 to 1.0, where 1.0 is very confident)")
 

@@ -28,7 +28,7 @@ import Heading from "@theme/Heading";
 
 <MethodEndpoint
   method={"post"}
-  path={"/api/v1/agents/{agent_id}/memories"}
+  path={"/api/v1/memory banks/{agent_id}/memories"}
   context={"endpoint"}
 >
   
@@ -63,7 +63,7 @@ Store multiple memory items in batch with automatic fact extraction.
 </Heading>
 
 <ParamsDetails
-  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"Agent Id"}}]}
+  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"bank ID"}}]}
 >
   
 </ParamsDetails>
@@ -78,7 +78,7 @@ Store multiple memory items in batch with automatic fact extraction.
 <StatusCodes
   id={undefined}
   label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"success":{"type":"boolean","title":"Success"},"message":{"type":"string","title":"Message"},"agent_id":{"type":"string","title":"Agent Id"},"document_id":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Document Id"},"items_count":{"type":"integer","title":"Items Count"}},"type":"object","required":["success","message","agent_id","items_count"],"title":"BatchPutResponse","description":"Response model for batch put endpoint.","example":{"agent_id":"user123","document_id":"conversation_123","items_count":2,"message":"Successfully stored 2 memory items","success":true}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
+  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"success":{"type":"boolean","title":"Success"},"message":{"type":"string","title":"Message"},"agent_id":{"type":"string","title":"bank ID"},"document_id":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Document Id"},"items_count":{"type":"integer","title":"Items Count"}},"type":"object","required":["success","message","agent_id","items_count"],"title":"BatchPutResponse","description":"Response model for batch put endpoint.","example":{"agent_id":"user123","document_id":"conversation_123","items_count":2,"message":"Successfully stored 2 memory items","success":true}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
 >
   
 </StatusCodes>

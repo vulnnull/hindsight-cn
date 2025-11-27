@@ -14,7 +14,7 @@ class QueryInfo(BaseModel):
     query_text: str = Field(description="Original query text")
     query_embedding: List[float] = Field(description="Generated query embedding vector")
     timestamp: datetime = Field(description="When the query was executed")
-    thinking_budget: int = Field(description="Maximum nodes to explore")
+    budget: int = Field(description="Maximum nodes to explore")
     max_tokens: int = Field(description="Maximum tokens to return in results")
 
 

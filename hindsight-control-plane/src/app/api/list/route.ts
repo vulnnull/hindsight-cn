@@ -1,28 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || 'http://localhost:8888';
+import { hindsightClient, sdk, lowLevelClient } from '@/lib/hindsight-client';
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const agentId = searchParams.get('agent_id');
+    const bankId = searchParams.get('bank_id') || searchParams.get('agent_id');
 
-    if (!agentId) {
+    if (!bankId) {
       return NextResponse.json(
-        { error: 'agent_id is required' },
+        { error: 'bank_id is required' },
         { status: 400 }
       );
     }
 
-    // Remove agent_id from query params and rebuild query string
-    const newSearchParams = new URLSearchParams(searchParams);
-    newSearchParams.delete('agent_id');
-    const queryString = newSearchParams.toString();
+    const limit = searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined;
+    const offset = searchParams.get('offset') ? Number(searchParams.get('offset')) : undefined;
+    const type = searchParams.get('type') || searchParams.get('fact_type') || undefined;
+    const q = searchParams.get('q') || undefined;
 
-    const url = `${DATAPLANE_URL}/api/v1/agents/${agentId}/memories/list${queryString ? `?${queryString}` : ''}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    const response = await hindsightClient.listMemories(bankId, {
+      limit,
+      offset,
+      type,
+      q
+    });
+
+    return NextResponse.json(response, { status: 200 });
   } catch (error) {
     console.error('Error listing memory units:', error);
     return NextResponse.json(
@@ -35,12 +38,12 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const agentId = searchParams.get('agent_id');
+    const bankId = searchParams.get('bank_id') || searchParams.get('agent_id');
     const unitId = searchParams.get('unit_id');
 
-    if (!agentId) {
+    if (!bankId) {
       return NextResponse.json(
-        { error: 'agent_id is required' },
+        { error: 'bank_id is required' },
         { status: 400 }
       );
     }
@@ -52,12 +55,12 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const response = await fetch(
-      `${DATAPLANE_URL}/api/v1/agents/${agentId}/memories/${unitId}`,
-      { method: 'DELETE' }
-    );
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    const response = await sdk.sdk.deleteMemoryUnit({
+      client: lowLevelClient,
+      path: { bank_id: bankId, unit_id: unitId }
+    });
+
+    return NextResponse.json(response.data, { status: 200 });
   } catch (error) {
     console.error('Error deleting memory unit:', error);
     return NextResponse.json(

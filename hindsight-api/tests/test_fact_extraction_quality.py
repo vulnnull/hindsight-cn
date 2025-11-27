@@ -773,7 +773,7 @@ class TestFactClassification:
 
         This test addresses the issue where podcast transcripts with context like
         "this was podcast episode between you (Marcus) and Jamie" were extracting
-        all facts as 'world' instead of properly identifying Marcus's statements as 'agent'.
+        all facts as 'world' instead of properly identifying Marcus's statements as 'bank'.
         """
 
         transcript = """
@@ -808,7 +808,7 @@ Jamie: Congratulations! I'd love to read it.
         agent_facts = [f for f in facts if f["fact_type"] == "agent"]
 
         assert len(agent_facts) > 0, \
-            f"Should have at least one 'agent' fact when context identifies 'you (Marcus)'. " \
+            f"Should have at least one 'bank' fact when context identifies 'you (Marcus)'. " \
             f"Got facts: {[f['fact'] + ' [' + f['fact_type'] + ']' for f in facts]}"
 
         for agent_fact in agent_facts:
@@ -1019,10 +1019,10 @@ class TestPersonalityInference:
     async def test_background_merge_with_personality_inference(self, memory):
         """Test that background merge infers personality traits by default."""
         import uuid
-        agent_id = f"test_infer_{uuid.uuid4().hex[:8]}"
+        bank_id = f"test_infer_{uuid.uuid4().hex[:8]}"
 
-        result = await memory.merge_agent_background(
-            agent_id,
+        result = await memory.merge_bank_background(
+            bank_id,
             "I am a creative software engineer who loves innovation and trying new technologies",
             update_personality=True
         )
@@ -1049,13 +1049,13 @@ class TestPersonalityInference:
     async def test_background_merge_without_personality_inference(self, memory):
         """Test that background merge skips personality inference when disabled."""
         import uuid
-        agent_id = f"test_no_infer_{uuid.uuid4().hex[:8]}"
+        bank_id = f"test_no_infer_{uuid.uuid4().hex[:8]}"
 
-        initial_profile = await memory.get_agent_profile(agent_id)
+        initial_profile = await memory.get_bank_profile(bank_id)
         initial_personality = initial_profile["personality"]
 
-        result = await memory.merge_agent_background(
-            agent_id,
+        result = await memory.merge_bank_background(
+            bank_id,
             "I am a data scientist",
             update_personality=False
         )
@@ -1063,7 +1063,7 @@ class TestPersonalityInference:
         assert "background" in result
         assert "personality" not in result
 
-        final_profile = await memory.get_agent_profile(agent_id)
+        final_profile = await memory.get_bank_profile(bank_id)
         final_personality = final_profile["personality"]
 
         assert initial_personality == final_personality
@@ -1072,10 +1072,10 @@ class TestPersonalityInference:
     async def test_personality_inference_for_organized_engineer(self, memory):
         """Test personality inference for organized/conscientious profile."""
         import uuid
-        agent_id = f"test_organized_{uuid.uuid4().hex[:8]}"
+        bank_id = f"test_organized_{uuid.uuid4().hex[:8]}"
 
-        result = await memory.merge_agent_background(
-            agent_id,
+        result = await memory.merge_bank_background(
+            bank_id,
             "I am a methodical engineer who values organization and systematic planning",
             update_personality=True
         )
@@ -1088,10 +1088,10 @@ class TestPersonalityInference:
     async def test_personality_inference_for_startup_founder(self, memory):
         """Test personality inference for entrepreneurial profile."""
         import uuid
-        agent_id = f"test_founder_{uuid.uuid4().hex[:8]}"
+        bank_id = f"test_founder_{uuid.uuid4().hex[:8]}"
 
-        result = await memory.merge_agent_background(
-            agent_id,
+        result = await memory.merge_bank_background(
+            bank_id,
             "I am a startup founder who thrives on risk and social interaction",
             update_personality=True
         )
@@ -1105,17 +1105,17 @@ class TestPersonalityInference:
     async def test_personality_updates_in_database(self, memory):
         """Test that inferred personality is actually stored in database."""
         import uuid
-        agent_id = f"test_db_update_{uuid.uuid4().hex[:8]}"
+        bank_id = f"test_db_update_{uuid.uuid4().hex[:8]}"
 
-        result = await memory.merge_agent_background(
-            agent_id,
+        result = await memory.merge_bank_background(
+            bank_id,
             "I am an innovative designer",
             update_personality=True
         )
 
         inferred_personality = result["personality"]
 
-        profile = await memory.get_agent_profile(agent_id)
+        profile = await memory.get_bank_profile(bank_id)
         db_personality = profile["personality"]
 
         assert db_personality == inferred_personality
@@ -1124,17 +1124,17 @@ class TestPersonalityInference:
     async def test_multiple_background_merges_update_personality(self, memory):
         """Test that each background merge can update personality."""
         import uuid
-        agent_id = f"test_multi_merge_{uuid.uuid4().hex[:8]}"
+        bank_id = f"test_multi_merge_{uuid.uuid4().hex[:8]}"
 
-        result1 = await memory.merge_agent_background(
-            agent_id,
+        result1 = await memory.merge_bank_background(
+            bank_id,
             "I am a software engineer",
             update_personality=True
         )
         personality1 = result1["personality"]
 
-        result2 = await memory.merge_agent_background(
-            agent_id,
+        result2 = await memory.merge_bank_background(
+            bank_id,
             "I love creative problem solving and innovation",
             update_personality=True
         )
@@ -1147,16 +1147,16 @@ class TestPersonalityInference:
     async def test_background_merge_conflict_resolution_with_personality(self, memory):
         """Test that conflicts are resolved and personality reflects final background."""
         import uuid
-        agent_id = f"test_conflict_{uuid.uuid4().hex[:8]}"
+        bank_id = f"test_conflict_{uuid.uuid4().hex[:8]}"
 
-        await memory.merge_agent_background(
-            agent_id,
+        await memory.merge_bank_background(
+            bank_id,
             "I was born in Colorado and prefer stability",
             update_personality=True
         )
 
-        result = await memory.merge_agent_background(
-            agent_id,
+        result = await memory.merge_bank_background(
+            bank_id,
             "You were born in Texas and love taking risks",
             update_personality=True
         )

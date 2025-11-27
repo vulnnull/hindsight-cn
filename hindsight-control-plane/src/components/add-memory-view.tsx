@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { dataplaneClient } from '@/lib/api';
-import { useAgent } from '@/lib/agent-context';
+import { client } from '@/lib/api';
+import { useBank } from '@/lib/bank-context';
 
 export function AddMemoryView() {
-  const { currentAgent } = useAgent();
+  const { currentBank } = useBank();
   const [content, setContent] = useState('');
   const [context, setContext] = useState('');
   const [eventDate, setEventDate] = useState('');
@@ -24,7 +24,7 @@ export function AddMemoryView() {
   };
 
   const submitMemory = async () => {
-    if (!currentAgent || !content) {
+    if (!currentBank || !content) {
       alert('Please enter content');
       return;
     }
@@ -35,21 +35,14 @@ export function AddMemoryView() {
     try {
       const item: any = { content };
       if (context) item.context = context;
-      if (eventDate) item.event_date = eventDate;
+      if (eventDate) item.timestamp = eventDate;
 
-      const params: any = {
-        agent_id: currentAgent,
+      const data: any = await client.retain({
+        bank_id: currentBank,
         items: [item],
-      };
-
-      if (documentId) params.document_id = documentId;
-
-      let data: any;
-      if (async) {
-        data = await dataplaneClient.batchPutAsync(params);
-      } else {
-        data = await dataplaneClient.batchPut(params);
-      }
+        document_id: documentId,
+        async,
+      });
 
       setResult(data.message as string);
       setContent('');
@@ -64,7 +57,7 @@ export function AddMemoryView() {
   return (
     <div className="max-w-4xl">
       <p className="text-muted-foreground mb-4">
-        Submit memories to the selected agent. You can add one or multiple memories at once.
+        Retain memories to the selected memory bank. You can add one or multiple memories at once.
       </p>
 
       <div className="max-w-3xl">
@@ -134,7 +127,7 @@ export function AddMemoryView() {
               disabled={loading}
               className="px-6 py-3 bg-primary text-primary-foreground rounded cursor-pointer font-bold text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Submitting...' : 'Submit Memory'}
+              {loading ? 'Retaining...' : 'Retain Memory'}
             </button>
             <button
               onClick={clearForm}
@@ -154,7 +147,7 @@ export function AddMemoryView() {
         {loading && (
           <div className="text-center py-10 text-muted-foreground">
             <div className="text-5xl mb-2.5">⏳</div>
-            <div className="text-lg">Submitting memory...</div>
+            <div className="text-lg">Retaining memory...</div>
           </div>
         )}
       </div>

@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone, timedelta
 import pytest
 from hindsight_api import MemoryEngine
+from hindsight_api.engine.memory_engine import Budget
 
 
 @pytest.mark.asyncio
@@ -19,11 +20,11 @@ async def test_temporal_ranges_are_written():
     )
     await memory.initialize()
 
-    agent_id = "test_temporal_ranges"
+    bank_id = "test_temporal_ranges"
 
     # Clean up any existing data
     try:
-        await memory.delete_agent(agent_id)
+        await memory.delete_bank(bank_id)
     except Exception:
         pass
 
@@ -31,8 +32,8 @@ async def test_temporal_ranges_are_written():
     conversation_date = datetime(2024, 11, 17, 10, 0, 0, tzinfo=timezone.utc)
     text1 = "Yesterday I went to a pottery workshop where I made a beautiful vase."
 
-    await memory.put_async(
-        agent_id=agent_id,
+    await memory.retain_async(
+        bank_id=bank_id,
         content=text1,
         event_date=conversation_date
     )
@@ -40,8 +41,8 @@ async def test_temporal_ranges_are_written():
     # Test 2: Period event (month range)
     text2 = "In February 2024, Alice visited Paris and explored the Louvre museum."
 
-    await memory.put_async(
-        agent_id=agent_id,
+    await memory.retain_async(
+        bank_id=bank_id,
         content=text2,
         event_date=conversation_date
     )
@@ -56,10 +57,10 @@ async def test_temporal_ranges_are_written():
             """
             SELECT id, text, event_date, occurred_start, occurred_end, mentioned_at
             FROM memory_units
-            WHERE agent_id = $1
+            WHERE bank_id = $1
             ORDER BY created_at
             """,
-            agent_id
+            bank_id
         )
 
     print(f"\n\n=== Retrieved {len(rows)} facts ===")
@@ -113,11 +114,11 @@ async def test_temporal_ranges_are_written():
 
     # Test search results also include temporal fields
     print("\n=== Testing Search Results ===")
-    search_result = await memory.search_async(
-        agent_id=agent_id,
+    search_result = await memory.recall_async(
+        bank_id=bank_id,
         query="pottery workshop",
         fact_type=["event", "world"],
-        thinking_budget=20,
+        budget=Budget.LOW,
         max_tokens=4096
     )
 
@@ -136,7 +137,7 @@ async def test_temporal_ranges_are_written():
             print("⚠ Temporal fields not yet populated in search results (known issue)")
 
     # Clean up
-    await memory.delete_agent(agent_id)
+    await memory.delete_bank(bank_id)
     await memory.close()
 
 

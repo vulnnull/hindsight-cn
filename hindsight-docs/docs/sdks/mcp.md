@@ -36,7 +36,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_URL` | Hindsight API URL | `http://localhost:8888` |
-| `HINDSIGHT_AGENT_ID` | Default agent ID | Required |
+| `HINDSIGHT_AGENT_ID` | Default bank ID | Required |
 
 ## Available Tools
 
@@ -83,7 +83,7 @@ Store new memory:
 
 ### hindsight_agents
 
-List available agents:
+List available memory banks:
 
 ```json
 {

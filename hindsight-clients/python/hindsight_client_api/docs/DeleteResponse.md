@@ -7,7 +7,6 @@ Response model for delete operations.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **success** | **bool** |  | 
-**message** | **str** |  | 
 
 ## Example
 

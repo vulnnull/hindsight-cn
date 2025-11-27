@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || 'http://localhost:8888';
+import { sdk, lowLevelClient } from '@/lib/hindsight-client';
 
 export async function GET(
   request: NextRequest,
@@ -9,20 +8,21 @@ export async function GET(
   try {
     const { documentId } = await params;
     const searchParams = request.nextUrl.searchParams;
-    const agentId = searchParams.get('agent_id');
+    const bankId = searchParams.get('bank_id');
 
-    if (!agentId) {
+    if (!bankId) {
       return NextResponse.json(
-        { error: 'agent_id is required' },
+        { error: 'bank_id is required' },
         { status: 400 }
       );
     }
 
-    const response = await fetch(
-      `${DATAPLANE_URL}/api/v1/agents/${agentId}/documents/${documentId}`
-    );
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    const response = await sdk.getDocument({
+      client: lowLevelClient,
+      path: { bank_id: bankId, document_id: documentId }
+    });
+
+    return NextResponse.json(response.data, { status: 200 });
   } catch (error) {
     console.error('Error fetching document:', error);
     return NextResponse.json(

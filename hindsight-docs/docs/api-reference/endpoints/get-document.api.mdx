@@ -28,7 +28,7 @@ import Heading from "@theme/Heading";
 
 <MethodEndpoint
   method={"get"}
-  path={"/api/v1/agents/{agent_id}/documents/{document_id}"}
+  path={"/api/v1/memory banks/{agent_id}/documents/{document_id}"}
   context={"endpoint"}
 >
   
@@ -47,7 +47,7 @@ Get a specific document including its original text
 </Heading>
 
 <ParamsDetails
-  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"Agent Id"}},{"name":"document_id","in":"path","required":true,"schema":{"type":"string","title":"Document Id"}}]}
+  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"bank ID"}},{"name":"document_id","in":"path","required":true,"schema":{"type":"string","title":"Document Id"}}]}
 >
   
 </ParamsDetails>
@@ -62,7 +62,7 @@ Get a specific document including its original text
 <StatusCodes
   id={undefined}
   label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"id":{"type":"string","title":"Id"},"agent_id":{"type":"string","title":"Agent Id"},"original_text":{"type":"string","title":"Original Text"},"content_hash":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Content Hash"},"created_at":{"type":"string","title":"Created At"},"updated_at":{"type":"string","title":"Updated At"},"memory_unit_count":{"type":"integer","title":"Memory Unit Count"}},"type":"object","required":["id","agent_id","original_text","content_hash","created_at","updated_at","memory_unit_count"],"title":"DocumentResponse","description":"Response model for get document endpoint.","example":{"agent_id":"user123","content_hash":"abc123","created_at":"2024-01-15T10:30:00Z","id":"session_1","memory_unit_count":15,"original_text":"Full document text here...","updated_at":"2024-01-15T10:30:00Z"}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
+  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"id":{"type":"string","title":"Id"},"agent_id":{"type":"string","title":"bank ID"},"original_text":{"type":"string","title":"Original Text"},"content_hash":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Content Hash"},"created_at":{"type":"string","title":"Created At"},"updated_at":{"type":"string","title":"Updated At"},"memory_unit_count":{"type":"integer","title":"Memory Unit Count"}},"type":"object","required":["id","agent_id","original_text","content_hash","created_at","updated_at","memory_unit_count"],"title":"DocumentResponse","description":"Response model for get document endpoint.","example":{"agent_id":"user123","content_hash":"abc123","created_at":"2024-01-15T10:30:00Z","id":"session_1","memory_unit_count":15,"original_text":"Full document text here...","updated_at":"2024-01-15T10:30:00Z"}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
 >
   
 </StatusCodes>

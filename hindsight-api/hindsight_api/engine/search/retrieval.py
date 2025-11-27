@@ -17,7 +17,7 @@ from ..db_utils import acquire_with_retry
 async def retrieve_semantic(
     conn,
     query_emb_str: str,
-    agent_id: str,
+    bank_id: str,
     fact_type: str,
     limit: int
 ) -> List[Tuple[str, Dict[str, Any]]]:
@@ -27,7 +27,7 @@ async def retrieve_semantic(
     Args:
         conn: Database connection
         query_emb_str: Query embedding as string
-        agent_id: Agent ID
+        agent_id: bank ID
         fact_type: Fact type to filter
         limit: Maximum results to return
 
@@ -39,14 +39,14 @@ async def retrieve_semantic(
         SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
-        WHERE agent_id = $2
+        WHERE bank_id = $2
           AND embedding IS NOT NULL
           AND fact_type = $3
           AND (1 - (embedding <=> $1::vector)) >= 0.3
         ORDER BY embedding <=> $1::vector
         LIMIT $4
         """,
-        query_emb_str, agent_id, fact_type, limit
+        query_emb_str, bank_id, fact_type, limit
     )
     return [(str(r["id"]), dict(r)) for r in results]
 
@@ -54,7 +54,7 @@ async def retrieve_semantic(
 async def retrieve_bm25(
     conn,
     query_text: str,
-    agent_id: str,
+    bank_id: str,
     fact_type: str,
     limit: int
 ) -> List[Tuple[str, Dict[str, Any]]]:
@@ -64,7 +64,7 @@ async def retrieve_bm25(
     Args:
         conn: Database connection
         query_text: Query text
-        agent_id: Agent ID
+        agent_id: bank ID
         fact_type: Fact type to filter
         limit: Maximum results to return
 
@@ -93,13 +93,13 @@ async def retrieve_bm25(
         SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
                ts_rank_cd(search_vector, to_tsquery('english', $1)) AS bm25_score
         FROM memory_units
-        WHERE agent_id = $2
+        WHERE bank_id = $2
           AND fact_type = $3
           AND search_vector @@ to_tsquery('english', $1)
         ORDER BY bm25_score DESC
         LIMIT $4
         """,
-        query_tsquery, agent_id, fact_type, limit
+        query_tsquery, bank_id, fact_type, limit
     )
     return [(str(r["id"]), dict(r)) for r in results]
 
@@ -107,7 +107,7 @@ async def retrieve_bm25(
 async def retrieve_graph(
     conn,
     query_emb_str: str,
-    agent_id: str,
+    bank_id: str,
     fact_type: str,
     budget: int
 ) -> List[Tuple[str, Dict[str, Any]]]:
@@ -117,7 +117,7 @@ async def retrieve_graph(
     Args:
         conn: Database connection
         query_emb_str: Query embedding as string
-        agent_id: Agent ID
+        agent_id: bank ID
         fact_type: Fact type to filter
         budget: Node budget for graph traversal
 
@@ -130,14 +130,14 @@ async def retrieve_graph(
         SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
-        WHERE agent_id = $2
+        WHERE bank_id = $2
           AND embedding IS NOT NULL
           AND fact_type = $3
           AND (1 - (embedding <=> $1::vector)) >= 0.5
         ORDER BY embedding <=> $1::vector
         LIMIT 5
         """,
-        query_emb_str, agent_id, fact_type
+        query_emb_str, bank_id, fact_type
     )
 
     if not entry_points:
@@ -221,7 +221,7 @@ async def retrieve_graph(
 async def retrieve_temporal(
     conn,
     query_emb_str: str,
-    agent_id: str,
+    bank_id: str,
     fact_type: str,
     start_date: datetime,
     end_date: datetime,
@@ -239,7 +239,7 @@ async def retrieve_temporal(
     Args:
         conn: Database connection
         query_emb_str: Query embedding as string
-        agent_id: Agent ID
+        agent_id: bank ID
         fact_type: Fact type to filter
         start_date: Start of time range
         end_date: End of time range
@@ -262,7 +262,7 @@ async def retrieve_temporal(
         SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
-        WHERE agent_id = $2
+        WHERE bank_id = $2
           AND fact_type = $3
           AND embedding IS NOT NULL
           AND (
@@ -282,16 +282,16 @@ async def retrieve_temporal(
         ORDER BY COALESCE(occurred_start, mentioned_at, occurred_end) DESC, (embedding <=> $1::vector) ASC
         LIMIT 10
         """,
-        query_emb_str, agent_id, fact_type, start_date, end_date, semantic_threshold
+        query_emb_str, bank_id, fact_type, start_date, end_date, semantic_threshold
     )
 
     if not entry_points:
-        # Check if there are ANY memories with temporal metadata for this agent
+        # Check if there are ANY memories with temporal metadata for this bank
         total_with_dates = await conn.fetchval(
             """SELECT COUNT(*) FROM memory_units
-               WHERE agent_id = $1 AND fact_type = $2
+               WHERE bank_id = $1 AND fact_type = $2
                AND (occurred_start IS NOT NULL OR occurred_end IS NOT NULL OR mentioned_at IS NOT NULL)""",
-            agent_id, fact_type
+            bank_id, fact_type
         )
         return []
 
@@ -418,7 +418,7 @@ async def retrieve_parallel(
     pool,
     query_text: str,
     query_embedding_str: str,
-    agent_id: str,
+    bank_id: str,
     fact_type: str,
     thinking_budget: int,
     question_date: Optional[datetime] = None,
@@ -431,7 +431,7 @@ async def retrieve_parallel(
         pool: Database connection pool
         query_text: Query text
         query_embedding_str: Query embedding as string
-        agent_id: Agent ID
+        agent_id: bank ID
         fact_type: Fact type to filter
         thinking_budget: Budget for graph traversal and retrieval limits
         question_date: Optional date when question was asked (for temporal filtering)
@@ -461,20 +461,20 @@ async def retrieve_parallel(
 
     async def run_semantic():
         async with acquire_with_retry(pool) as conn:
-            return await retrieve_semantic(conn, query_embedding_str, agent_id, fact_type, limit=thinking_budget)
+            return await retrieve_semantic(conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget)
 
     async def run_bm25():
         async with acquire_with_retry(pool) as conn:
-            return await retrieve_bm25(conn, query_text, agent_id, fact_type, limit=thinking_budget)
+            return await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget)
 
     async def run_graph():
         async with acquire_with_retry(pool) as conn:
-            return await retrieve_graph(conn, query_embedding_str, agent_id, fact_type, budget=thinking_budget)
+            return await retrieve_graph(conn, query_embedding_str, bank_id, fact_type, budget=thinking_budget)
 
     async def run_temporal(start_date, end_date):
         async with acquire_with_retry(pool) as conn:
             return await retrieve_temporal(
-                conn, query_embedding_str, agent_id, fact_type,
+                conn, query_embedding_str, bank_id, fact_type,
                 start_date, end_date, budget=thinking_budget, semantic_threshold=0.4
             )
 

@@ -2,6 +2,7 @@
 set -e
 
 # Script to generate Python and TypeScript clients from OpenAPI spec using openapi-generator
+# Note: Rust client is auto-generated at build time via build.rs (uses progenitor)
 # Usage: ./scripts/generate-clients.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,11 +11,16 @@ CLIENTS_DIR="$PROJECT_ROOT/hindsight-clients"
 OPENAPI_SPEC="$PROJECT_ROOT/openapi.json"
 
 echo "=================================================="
-echo "Hindsight API Client Generator (openapi-generator)"
+echo "Hindsight API Client Generator"
 echo "=================================================="
 echo "Project root: $PROJECT_ROOT"
 echo "Clients directory: $CLIENTS_DIR"
 echo "OpenAPI spec: $OPENAPI_SPEC"
+echo ""
+echo "This script generates clients for:"
+echo "  - Rust (via progenitor in build.rs)"
+echo "  - Python (via openapi-generator)"
+echo "  - TypeScript (via @hey-api/openapi-ts)"
 echo ""
 
 # Check if OpenAPI spec exists
@@ -32,6 +38,27 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 echo "✓ Docker available"
+echo ""
+
+# Generate Rust client
+echo "=================================================="
+echo "Generating Rust client..."
+echo "=================================================="
+
+RUST_CLIENT_DIR="$CLIENTS_DIR/rust"
+
+# Clean old generated files
+echo "Cleaning old Rust generated code..."
+rm -rf "$RUST_CLIENT_DIR/target"
+rm -f "$RUST_CLIENT_DIR/Cargo.lock"
+
+# Trigger regeneration by building
+echo "Regenerating Rust client (via build.rs)..."
+cd "$RUST_CLIENT_DIR"
+cargo clean
+cargo build --release
+
+echo "✓ Rust client generated at $RUST_CLIENT_DIR"
 echo ""
 
 # Generate Python client
@@ -93,6 +120,12 @@ if [ -f "setup.py" ]; then
     echo "Note: setup.py generated but we're using pyproject.toml"
 fi
 
+# Remove the auto-generated README (we have our own)
+if [ -f "$PYTHON_CLIENT_DIR/hindsight_client_api_README.md" ]; then
+    echo "Removing auto-generated README..."
+    rm "$PYTHON_CLIENT_DIR/hindsight_client_api_README.md"
+fi
+
 echo "✓ Python client generated at $PYTHON_CLIENT_DIR"
 echo ""
 
@@ -125,6 +158,7 @@ echo "=================================================="
 echo "✅ Client generation complete!"
 echo "=================================================="
 echo ""
+echo "Rust client:       $RUST_CLIENT_DIR"
 echo "Python client:     $PYTHON_CLIENT_DIR"
 echo "TypeScript client: $TYPESCRIPT_CLIENT_DIR"
 echo ""
@@ -134,4 +168,5 @@ echo "Next steps:"
 echo "  1. Review the generated clients"
 echo "  2. Update package versions if needed"
 echo "  3. Test the clients"
+echo "  4. Run 'cargo build' in hindsight-cli to rebuild with new Rust client"
 echo ""

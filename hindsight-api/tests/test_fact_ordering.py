@@ -8,18 +8,19 @@ distinguish between things said earlier vs later.
 import pytest
 from datetime import datetime, timezone
 from hindsight_api import MemoryEngine
+from hindsight_api.engine.memory_engine import Budget
 import os
 
 
 @pytest.mark.asyncio
 async def test_fact_ordering_within_conversation(memory):
-    agent_id = "test_ordering_agent"
+    bank_id = "test_ordering_agent"
 
     # Get/create agent (auto-creates with defaults)
-    await memory.get_agent_profile(agent_id)
+    await memory.get_bank_profile(bank_id)
 
     # Update personality to match Marcus
-    await memory.update_agent_personality(agent_id, {
+    await memory.update_bank_personality(bank_id, {
         "openness": 0.7,
         "conscientiousness": 0.6,
         "extraversion": 0.8,
@@ -40,8 +41,8 @@ Marcus: Yeah, I realized I was being too optimistic about their defense.
     base_event_date = datetime(2024, 11, 14, 10, 0, 0, tzinfo=timezone.utc)
 
     # Store the conversation
-    await memory.put_async(
-        agent_id=agent_id,
+    await memory.retain_async(
+        bank_id=bank_id,
         content=conversation,
         context="podcast discussion about NFL game",
         event_date=base_event_date,
@@ -49,28 +50,28 @@ Marcus: Yeah, I realized I was being too optimistic about their defense.
     )
 
     # Search for all facts about Marcus's predictions
-    results = await memory.search_async(
-        agent_id=agent_id,
+    results = await memory.recall_async(
+        bank_id=bank_id,
         query="Marcus prediction Rams",
-        fact_type=['agent', 'world'],
-        thinking_budget=100,
+        fact_type=['bank', 'world'],
+        budget=Budget.LOW,
         max_tokens=8192
     )
 
     print(f"\n=== Retrieved {len(results.results)} facts ===")
     for i, result in enumerate(results.results):
-        print(f"{i+1}. [{result.event_date}] {result.text[:100]}")
+        print(f"{i+1}. [{result.mentioned_at}] {result.text[:100]}")
 
     # Get all agent facts (Marcus's statements)
-    agent_facts = [r for r in results.results if r.fact_type == 'agent']
+    agent_facts = [r for r in results.results if r.fact_type == 'bank']
 
     print(f"\n=== Agent facts (Marcus's statements) ===")
     for i, fact in enumerate(agent_facts):
-        print(f"{i+1}. [{fact.event_date}] {fact.text}")
+        print(f"{i+1}. [{fact.mentioned_at}] {fact.text}")
 
     # Check that agent facts have different timestamps
     if len(agent_facts) >= 2:
-        timestamps = [datetime.fromisoformat(f.event_date.replace('Z', '+00:00')) for f in agent_facts]
+        timestamps = [datetime.fromisoformat(f.mentioned_at.replace('Z', '+00:00')) for f in agent_facts]
 
         # Verify timestamps are different (have time offsets)
         unique_timestamps = set(timestamps)
@@ -115,7 +116,7 @@ Marcus: Yeah, I realized I was being too optimistic about their defense.
         print(f"\n✅ Temporal ordering preserved: First prediction came before changed prediction")
 
     # Cleanup
-    await memory.delete_agent(agent_id)
+    await memory.delete_bank(bank_id)
 
     print(f"\n✅ Test passed: Fact ordering within conversation is preserved")
 
@@ -123,9 +124,9 @@ Marcus: Yeah, I realized I was being too optimistic about their defense.
 @pytest.mark.asyncio
 async def test_multiple_documents_ordering(memory):
 
-    agent_id = "test_multi_doc_agent"
+    bank_id = "test_multi_doc_agent"
 
-    await memory.get_agent_profile(agent_id)  # Auto-creates with defaults
+    await memory.get_bank_profile(bank_id)  # Auto-creates with defaults
 
     # Two separate conversations with same base time
     base_time = datetime(2024, 11, 14, 10, 0, 0, tzinfo=timezone.utc)
@@ -143,8 +144,8 @@ Alice: I reconsidered the team's experience level.
 """
 
     # Store both conversations with batch
-    await memory.put_batch_async(
-        agent_id=agent_id,
+    await memory.retain_batch_async(
+        bank_id=bank_id,
         contents=[
             {"content": conv1, "context": "project discussion 1", "event_date": base_time},
             {"content": conv2, "context": "project discussion 2", "event_date": base_time}
@@ -152,23 +153,23 @@ Alice: I reconsidered the team's experience level.
     )
 
     # Search for Alice's preferences
-    results = await memory.search_async(
-        agent_id=agent_id,
+    results = await memory.recall_async(
+        bank_id=bank_id,
         query="Alice preference React Vue",
-        fact_type=['agent'],
-        thinking_budget=100,
+        fact_type=['bank'],
+        budget=Budget.LOW,
         max_tokens=8192
     )
 
     print(f"\n=== Retrieved {len(results.results)} agent facts ===")
-    agent_facts = [r for r in results.results if r.fact_type == 'agent']
+    agent_facts = [r for r in results.results if r.fact_type == 'bank']
 
     for i, fact in enumerate(agent_facts):
-        print(f"{i+1}. [{fact.event_date}] {fact.text[:80]}")
+        print(f"{i+1}. [{fact.mentioned_at}] {fact.text[:80]}")
 
     # Each conversation's facts should have different timestamps
     if len(agent_facts) >= 2:
-        timestamps = [datetime.fromisoformat(f.event_date.replace('Z', '+00:00')) for f in agent_facts]
+        timestamps = [datetime.fromisoformat(f.mentioned_at.replace('Z', '+00:00')) for f in agent_facts]
         unique_timestamps = set(timestamps)
 
         assert len(unique_timestamps) >= 2, \
@@ -177,6 +178,6 @@ Alice: I reconsidered the team's experience level.
         print(f"\n✅ Facts from {len(agent_facts)} statements have {len(unique_timestamps)} unique timestamps")
 
     # Cleanup
-    await memory.delete_agent(agent_id)
+    await memory.delete_bank(bank_id)
 
     print(f"\n✅ Test passed: Multiple documents maintain separate ordering")

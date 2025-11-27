@@ -122,7 +122,7 @@ You'll need PostgreSQL with the pgvector extension enabled.
 ├─────────────────────────────────┬───────────────────────────────────────────┤
 │          HTTP API               │              MCP API                       │
 │    /api/memories/*              │         MCP Server (stdio)                 │
-│    /api/agents/*                │      hindsight_search, hindsight_think,    │
+│    /api/memory banks/*                │      hindsight_search, hindsight_think,    │
 │    /api/search, /api/think      │      hindsight_store, hindsight_agents     │
 └─────────────────────────────────┴───────────────────────────────────────────┘
          │                                           │
@@ -155,14 +155,14 @@ You'll need PostgreSQL with the pgvector extension enabled.
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  • Memory Units (facts, opinions)    • HNSW Vector Index                    │
 │  • Entity Graph (nodes, edges)       • GIN Full-Text Index                  │
-│  • Agent Profiles                    • Temporal Indexes                     │
+│  • Memory bank Profiles                    • Temporal Indexes                     │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      CONTROL PLANE (Optional)                                │
 │                         (localhost:3000)                                     │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  • Web UI for administration         • Agent management                     │
+│  • Web UI for administration         • Memory bank management                     │
 │  • Memory visualization              • Graph explorer                       │
 │  • Connects to API Server            • Monitoring dashboard                 │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -290,7 +290,7 @@ CREATE TABLE entity_links (
     PRIMARY KEY (memory_id, entity_id)
 );
 
--- Agent profiles
+-- Memory bank profiles
 CREATE TABLE agent_profiles (
     agent_id VARCHAR PRIMARY KEY,
     background TEXT,
@@ -307,14 +307,14 @@ CREATE TABLE agent_profiles (
 
 - **HNSW Index**: Fast approximate nearest neighbor for vector search
 - **GIN Index**: Full-text search with BM25 ranking
-- **B-tree Indexes**: Agent ID, timestamps, entity lookups
+- **B-tree Indexes**: bank ID, timestamps, entity lookups
 
 ## Health Checks
 
 ### API Server
 
 ```bash
-curl http://localhost:8888/api/v1/agents
+curl http://localhost:8888/api/v1/memory banks
 ```
 
 ### Control Plane

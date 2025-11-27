@@ -1,12 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { dataplaneClient } from '@/lib/api';
-import { useAgent } from '@/lib/agent-context';
+import { client } from '@/lib/api';
+import { useBank } from '@/lib/bank-context';
 
 type Phase = 'retrieval' | 'rrf' | 'rerank' | 'final';
 type RetrievalMethod = 'semantic' | 'bm25' | 'graph' | 'temporal';
-type FactType = 'world' | 'agent' | 'opinion';
+type FactType = 'world' | 'bank' | 'opinion';
 
 interface SearchPane {
   id: number;
@@ -23,7 +23,7 @@ interface SearchPane {
 }
 
 export function SearchDebugView() {
-  const { currentAgent } = useAgent();
+  const { currentBank } = useBank();
   const [panes, setPanes] = useState<SearchPane[]>([
     {
       id: 1,
@@ -72,8 +72,8 @@ export function SearchDebugView() {
   };
 
   const runSearch = async (paneId: number) => {
-    if (!currentAgent) {
-      alert('Please select an agent first');
+    if (!currentBank) {
+      alert('Please select a memory bank first');
       return;
     }
 
@@ -89,11 +89,13 @@ export function SearchDebugView() {
 
     try {
       // Always pass fact types as array for consistent behavior
-      const data: any = await dataplaneClient.search({
+      // Map numeric budget to budget level
+      const budgetValue = pane.thinkingBudget <= 30 ? 'low' : pane.thinkingBudget <= 70 ? 'mid' : 'high';
+      const data: any = await client.recall({
+        bank_id: currentBank,
         query: pane.query,
-        fact_type: pane.factTypes,
-        agent_id: currentAgent,
-        thinking_budget: pane.thinkingBudget,
+        types: pane.factTypes,
+        budget: budgetValue,
         max_tokens: pane.maxTokens,
         trace: true,
       });
@@ -379,11 +381,11 @@ export function SearchDebugView() {
     );
   };
 
-  if (!currentAgent) {
+  if (!currentBank) {
     return (
       <div className="p-10 text-center text-muted-foreground bg-muted rounded-lg">
-        <h3 className="text-xl font-semibold mb-2">No Agent Selected</h3>
-        <p>Please select an agent from the dropdown above to use search debug.</p>
+        <h3 className="text-xl font-semibold mb-2">No Bank Selected</h3>
+        <p>Please select a memory bank from the dropdown above to use recall debug.</p>
       </div>
     );
   }
@@ -395,7 +397,7 @@ export function SearchDebugView() {
           onClick={addPane}
           className="px-5 py-2 bg-secondary text-secondary-foreground rounded font-bold text-sm hover:opacity-90"
         >
-          + Add Search Pane
+          + Add Recall Pane
         </button>
       </div>
 
@@ -404,7 +406,7 @@ export function SearchDebugView() {
           <div key={pane.id} className="border-2 border-primary rounded-lg overflow-hidden flex flex-col shadow-md">
             {/* Header */}
             <div className="bg-card p-2.5 border-b-2 border-primary font-bold flex justify-between items-center">
-              <span className="text-card-foreground">Search Trace #{pane.id}</span>
+              <span className="text-card-foreground">Recall Trace #{pane.id}</span>
               {panes.length > 1 && (
                 <button
                   onClick={() => removePane(pane.id)}
@@ -415,7 +417,7 @@ export function SearchDebugView() {
               )}
             </div>
 
-            {/* Search Controls */}
+            {/* Recall Controls */}
             <div className="p-2.5 bg-accent border-b-2 border-primary">
               <div className="flex gap-2 flex-wrap items-end">
                 <div>
@@ -424,7 +426,7 @@ export function SearchDebugView() {
                     type="text"
                     value={pane.query}
                     onChange={(e) => updatePane(pane.id, { query: e.target.value })}
-                    placeholder="Enter search query..."
+                    placeholder="Enter recall query..."
                     className="w-64 px-2 py-1 border-2 border-border bg-background text-foreground rounded text-xs focus:outline-none focus:ring-2 focus:ring-ring"
                     onKeyDown={(e) => e.key === 'Enter' && runSearch(pane.id)}
                   />
@@ -432,7 +434,7 @@ export function SearchDebugView() {
                 <div>
                   <label className="block text-xs font-bold mb-1 text-accent-foreground">Fact Types:</label>
                   <div className="flex gap-3">
-                    {(['world', 'agent', 'opinion'] as FactType[]).map((ft) => (
+                    {(['world', 'bank', 'opinion'] as FactType[]).map((ft) => (
                       <label key={ft} className="flex items-center gap-1 cursor-pointer">
                         <input
                           type="checkbox"
@@ -477,7 +479,7 @@ export function SearchDebugView() {
                   disabled={pane.loading || !pane.query}
                   className="px-4 py-1 bg-primary text-primary-foreground rounded font-bold text-xs hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {pane.loading ? 'Searching...' : '🔍 Search'}
+                  {pane.loading ? 'Recalling...' : '🔍 Recall'}
                 </button>
               </div>
             </div>
@@ -565,7 +567,7 @@ export function SearchDebugView() {
                 <div className="flex items-center justify-center h-96 text-gray-600">
                   <div>
                     <div className="text-4xl mb-2 text-center">🔄</div>
-                    <div className="text-sm">Searching...</div>
+                    <div className="text-sm">Recalling...</div>
                   </div>
                 </div>
               )}

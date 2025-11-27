@@ -9,17 +9,17 @@ export async function POST(
   try {
     const { entityId } = await params;
     const searchParams = request.nextUrl.searchParams;
-    const agentId = searchParams.get('agent_id');
+    const bankId = searchParams.get('bank_id');
 
-    if (!agentId) {
+    if (!bankId) {
       return NextResponse.json(
-        { error: 'agent_id is required' },
+        { error: 'bank_id is required' },
         { status: 400 }
       );
     }
 
     const decodedEntityId = decodeURIComponent(entityId);
-    const url = `${DATAPLANE_URL}/api/v1/agents/${agentId}/entities/${decodedEntityId}/regenerate`;
+    const url = `${DATAPLANE_URL}/api/v1/banks/${bankId}/entities/${decodedEntityId}/regenerate`;
     const response = await fetch(url, { method: 'POST' });
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });

@@ -28,7 +28,7 @@ import Heading from "@theme/Heading";
 
 <MethodEndpoint
   method={"delete"}
-  path={"/api/v1/agents/{agent_id}/operations/{operation_id}"}
+  path={"/api/v1/memory banks/{agent_id}/operations/{operation_id}"}
   context={"endpoint"}
 >
   
@@ -47,7 +47,7 @@ Cancel a pending async operation by removing it from the queue
 </Heading>
 
 <ParamsDetails
-  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"Agent Id"}},{"name":"operation_id","in":"path","required":true,"schema":{"type":"string","title":"Operation Id"}}]}
+  parameters={[{"name":"agent_id","in":"path","required":true,"schema":{"type":"string","title":"bank ID"}},{"name":"operation_id","in":"path","required":true,"schema":{"type":"string","title":"Operation Id"}}]}
 >
   
 </ParamsDetails>

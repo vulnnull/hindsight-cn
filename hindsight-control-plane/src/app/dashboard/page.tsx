@@ -1,155 +1,146 @@
 'use client';
 
 import { useState } from 'react';
-import { AgentSelector } from '@/components/agent-selector';
+import { BankSelector } from '@/components/bank-selector';
+import { Sidebar } from '@/components/sidebar';
 import { DataView } from '@/components/data-view';
 import { DocumentsView } from '@/components/documents-view';
 import { EntitiesView } from '@/components/entities-view';
 import { ThinkView } from '@/components/think-view';
-import { AddMemoryView } from '@/components/add-memory-view';
-import { StatsView } from '@/components/stats-view';
 import { SearchDebugView } from '@/components/search-debug-view';
-import { useAgent } from '@/lib/agent-context';
+import { StatsView } from '@/components/stats-view';
+import { useBank } from '@/lib/bank-context';
 
-type MainTab = 'data' | 'documents' | 'entities' | 'search' | 'stats' | 'think' | 'add';
-type DataSubTab = 'world' | 'agent' | 'opinion';
+type NavItem = 'recall' | 'reflect' | 'data' | 'documents' | 'entities' | 'bank';
+type DataSubTab = 'world' | 'bank' | 'opinion';
 
 export default function DashboardPage() {
-  const [mainTab, setMainTab] = useState<MainTab>('data');
+  const [currentTab, setCurrentTab] = useState<NavItem>('data');
   const [dataSubTab, setDataSubTab] = useState<DataSubTab>('world');
-  const { currentAgent } = useAgent();
-
-  const TabButton = ({ tab, label }: { tab: MainTab; label: string }) => (
-    <button
-      onClick={() => setMainTab(tab)}
-      className={`px-6 py-3 font-bold text-base transition-colors border-t-2 border-l-2 border-r-2 ${
-        mainTab === tab
-          ? 'bg-background text-foreground border-primary border-b-2 border-b-background -mb-0.5'
-          : 'bg-muted text-muted-foreground border-transparent hover:bg-accent'
-      }`}
-    >
-      {label}
-    </button>
-  );
+  const { currentBank } = useBank();
 
   const DataSubTabButton = ({ tab, label }: { tab: DataSubTab; label: string }) => (
     <button
       onClick={() => setDataSubTab(tab)}
-      className={`px-5 py-2 font-bold text-sm rounded transition-all border-2 ${
+      className={`px-4 py-2 font-semibold text-sm rounded transition-all border-2 ${
         dataSubTab === tab
           ? 'bg-primary text-primary-foreground border-primary'
-          : 'bg-background text-foreground border-primary hover:bg-accent'
+          : 'bg-background text-foreground border-border hover:bg-accent'
       }`}
     >
       {label}
     </button>
   );
 
-  const NoAgentMessage = ({ message }: { message: string }) => (
-    <div className="p-10 text-center text-muted-foreground bg-muted">
-      <h3 className="text-xl font-semibold mb-2">No Agent Selected</h3>
-      <p>{message}</p>
+  const NoAgentMessage = () => (
+    <div className="flex items-center justify-center h-[calc(100vh-80px)] bg-muted/20">
+      <div className="text-center p-10 bg-card rounded-lg border-2 border-border shadow-lg max-w-md">
+        <h3 className="text-2xl font-bold mb-3 text-card-foreground">Welcome to Hindsight</h3>
+        <p className="text-muted-foreground mb-4">
+          Select a memory bank from the dropdown above to get started.
+        </p>
+        <div className="text-6xl mb-4">🧠</div>
+        <p className="text-sm text-muted-foreground">
+          The sidebar will appear once you select a memory bank.
+        </p>
+      </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-background">
-      <AgentSelector />
+    <div className="min-h-screen bg-background flex flex-col">
+      <BankSelector />
 
-      {/* Main Tabs */}
-      <div className="bg-muted border-b-2 border-primary">
-        <TabButton tab="data" label="Data" />
-        <TabButton tab="documents" label="Documents" />
-        <TabButton tab="entities" label="Entities" />
-        <TabButton tab="search" label="Search Debug" />
-        <TabButton tab="stats" label="Stats & Operations" />
-        <TabButton tab="think" label="Think" />
-        <TabButton tab="add" label="Add Memory" />
-      </div>
+      {!currentBank ? (
+        <NoAgentMessage />
+      ) : (
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar currentTab={currentTab} onTabChange={setCurrentTab} />
 
-      {/* Tab Content - All tabs rendered but hidden to preserve state */}
-      <div className="p-5">
-        {/* Data Tab */}
-        <div className={mainTab !== 'data' ? 'hidden' : ''}>
-          {/* Data Sub Tabs */}
-          <div className="bg-accent px-5 py-2.5 border-b-2 border-primary flex gap-2.5">
-            <DataSubTabButton tab="world" label="World" />
-            <DataSubTabButton tab="agent" label="Agent" />
-            <DataSubTabButton tab="opinion" label="Opinions" />
-          </div>
-
-          {/* Data Sub Tab Content - Render all but hide inactive */}
-          <div className="mt-5">
-            {!currentAgent ? (
-              <NoAgentMessage message="Please select an agent from the dropdown above to view data." />
-            ) : (
-              <div>
-                <div className={dataSubTab !== 'world' ? 'hidden' : ''}>
-                  <DataView factType="world" />
+          <main className="flex-1 overflow-y-auto">
+            <div className="p-6">
+              {/* Recall Tab */}
+              {currentTab === 'recall' && (
+                <div>
+                  <h1 className="text-3xl font-bold mb-2 text-foreground">Recall Analyzer</h1>
+                  <p className="text-muted-foreground mb-6">
+                    Analyze memory recall with detailed trace information and retrieval methods.
+                  </p>
+                  <SearchDebugView />
                 </div>
-                <div className={dataSubTab !== 'agent' ? 'hidden' : ''}>
-                  <DataView factType="agent" />
+              )}
+
+              {/* Reflect Tab */}
+              {currentTab === 'reflect' && (
+                <div>
+                  <h1 className="text-3xl font-bold mb-2 text-foreground">Reflect</h1>
+                  <p className="text-muted-foreground mb-6">
+                    Ask questions and get AI-powered answers based on stored memories.
+                  </p>
+                  <ThinkView />
                 </div>
-                <div className={dataSubTab !== 'opinion' ? 'hidden' : ''}>
-                  <DataView factType="opinion" />
+              )}
+
+              {/* Data/Memories Tab */}
+              {currentTab === 'data' && (
+                <div>
+                  <div className="mb-6">
+                    <h1 className="text-3xl font-bold mb-2 text-foreground">Memories</h1>
+                    <p className="text-muted-foreground mb-4">
+                      View and explore different types of memories stored in this memory bank.
+                    </p>
+
+                    <div className="flex gap-2">
+                      <DataSubTabButton tab="world" label="World Facts" />
+                      <DataSubTabButton tab="bank" label="Bank Facts" />
+                      <DataSubTabButton tab="opinion" label="Opinions" />
+                    </div>
+                  </div>
+
+                  <div>
+                    {dataSubTab === 'world' && <DataView factType="world" />}
+                    {dataSubTab === 'bank' && <DataView factType="bank" />}
+                    {dataSubTab === 'opinion' && <DataView factType="opinion" />}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
+              )}
 
-        {/* Documents Tab */}
-        <div className={mainTab !== 'documents' ? 'hidden' : ''}>
-          <h2 className="text-2xl font-bold mb-4">Documents</h2>
-          {!currentAgent ? (
-            <NoAgentMessage message="Please select an agent from the dropdown above to view documents." />
-          ) : (
-            <DocumentsView />
-          )}
-        </div>
+              {/* Documents Tab */}
+              {currentTab === 'documents' && (
+                <div>
+                  <h1 className="text-3xl font-bold mb-2 text-foreground">Documents</h1>
+                  <p className="text-muted-foreground mb-6">
+                    Manage documents and retain new memories.
+                  </p>
+                  <DocumentsView />
+                </div>
+              )}
 
-        {/* Entities Tab */}
-        <div className={mainTab !== 'entities' ? 'hidden' : ''}>
-          <h2 className="text-2xl font-bold mb-4">Entities</h2>
-          {!currentAgent ? (
-            <NoAgentMessage message="Please select an agent from the dropdown above to view entities." />
-          ) : (
-            <EntitiesView />
-          )}
-        </div>
+              {/* Entities Tab */}
+              {currentTab === 'entities' && (
+                <div>
+                  <h1 className="text-3xl font-bold mb-2 text-foreground">Entities</h1>
+                  <p className="text-muted-foreground mb-6">
+                    Explore entities (people, organizations, places) mentioned in memories.
+                  </p>
+                  <EntitiesView />
+                </div>
+              )}
 
-        {/* Search Debug Tab */}
-        <div className={mainTab !== 'search' ? 'hidden' : ''}>
-          <h2 className="text-2xl font-bold mb-4">Search Debug</h2>
-          <SearchDebugView />
+              {/* Memory Bank Tab (Stats & Operations) */}
+              {currentTab === 'bank' && (
+                <div>
+                  <h1 className="text-3xl font-bold mb-2 text-foreground">Memory Bank</h1>
+                  <p className="text-muted-foreground mb-6">
+                    View statistics and operations for this memory bank.
+                  </p>
+                  <StatsView />
+                </div>
+              )}
+            </div>
+          </main>
         </div>
-
-        {/* Stats Tab */}
-        <div className={mainTab !== 'stats' ? 'hidden' : ''}>
-          <h2 className="text-2xl font-bold mb-4">Statistics & Operations</h2>
-          <StatsView />
-        </div>
-
-        {/* Think Tab */}
-        <div className={mainTab !== 'think' ? 'hidden' : ''}>
-          <h2 className="text-2xl font-bold mb-4">Think - AI-Powered Answers</h2>
-          {!currentAgent ? (
-            <NoAgentMessage message="Please select an agent from the dropdown above to use the think feature." />
-          ) : (
-            <ThinkView />
-          )}
-        </div>
-
-        {/* Add Memory Tab */}
-        <div className={mainTab !== 'add' ? 'hidden' : ''}>
-          <h2 className="text-2xl font-bold mb-4">Add Memory</h2>
-          {!currentAgent ? (
-            <NoAgentMessage message="Please select an agent from the dropdown above to add memories." />
-          ) : (
-            <AddMemoryView />
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -7,14 +7,14 @@
  *
  * const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
  *
- * // Store a memory
- * await client.put('alice', 'Alice loves AI');
+ * // Retain a memory
+ * await client.retain('alice', 'Alice loves AI');
  *
- * // Search memories
- * const results = await client.search('alice', 'What does Alice like?');
+ * // Recall memories
+ * const results = await client.recall('alice', 'What does Alice like?');
  *
  * // Generate contextual answer
- * const answer = await client.think('alice', 'What are my interests?');
+ * const answer = await client.reflect('alice', 'What are my interests?');
  * ```
  */
 
@@ -22,16 +22,17 @@ import { createClient, createConfig } from '../generated/client';
 import type { Client } from '../generated/client';
 import * as sdk from '../generated/sdk.gen';
 import type {
-    BatchPutRequest,
-    BatchPutResponse,
-    SearchRequest,
-    SearchResponse,
-    SearchResult,
-    ThinkRequest,
-    ThinkResponse,
+    RetainRequest,
+    RetainResponse,
+    RecallRequest,
+    RecallResponse,
+    RecallResult,
+    ReflectRequest,
+    ReflectResponse,
     ListMemoryUnitsResponse,
-    AgentProfileResponse,
-    CreateAgentRequest,
+    BankProfileResponse,
+    CreateBankRequest,
+    Budget,
 } from '../generated/types.gen';
 
 export interface HindsightClientOptions {
@@ -40,8 +41,9 @@ export interface HindsightClientOptions {
 
 export interface MemoryItemInput {
     content: string;
-    event_date?: string | Date;
+    timestamp?: string | Date;
     context?: string;
+    metadata?: Record<string, string>;
 }
 
 export class HindsightClient {
@@ -56,27 +58,30 @@ export class HindsightClient {
     }
 
     /**
-     * Store a single memory for an agent.
+     * Retain a single memory for a bank.
      */
-    async put(
-        agentId: string,
+    async retain(
+        bankId: string,
         content: string,
-        options?: { eventDate?: Date | string; context?: string }
-    ): Promise<BatchPutResponse> {
-        const item: { content: string; event_date?: string; context?: string } = { content };
-        if (options?.eventDate) {
-            item.event_date =
-                options.eventDate instanceof Date
-                    ? options.eventDate.toISOString()
-                    : options.eventDate;
+        options?: { timestamp?: Date | string; context?: string; metadata?: Record<string, string> }
+    ): Promise<RetainResponse> {
+        const item: { content: string; timestamp?: string; context?: string; metadata?: Record<string, string> } = { content };
+        if (options?.timestamp) {
+            item.timestamp =
+                options.timestamp instanceof Date
+                    ? options.timestamp.toISOString()
+                    : options.timestamp;
         }
         if (options?.context) {
             item.context = options.context;
         }
+        if (options?.metadata) {
+            item.metadata = options.metadata;
+        }
 
-        const response = await sdk.batchPutMemories({
+        const response = await sdk.retainMemories({
             client: this.client,
-            path: { agent_id: agentId },
+            path: { bank_id: bankId },
             body: { items: [item] },
         });
 
@@ -84,42 +89,48 @@ export class HindsightClient {
     }
 
     /**
-     * Store multiple memories in batch.
+     * Retain multiple memories in batch.
      */
-    async putBatch(agentId: string, items: MemoryItemInput[]): Promise<BatchPutResponse> {
+    async retainBatch(bankId: string, items: MemoryItemInput[], options?: { documentId?: string; async?: boolean }): Promise<RetainResponse> {
         const processedItems = items.map((item) => ({
             content: item.content,
             context: item.context,
-            event_date:
-                item.event_date instanceof Date
-                    ? item.event_date.toISOString()
-                    : item.event_date,
+            metadata: item.metadata,
+            timestamp:
+                item.timestamp instanceof Date
+                    ? item.timestamp.toISOString()
+                    : item.timestamp,
         }));
 
-        const response = await sdk.batchPutMemories({
+        const response = await sdk.retainMemories({
             client: this.client,
-            path: { agent_id: agentId },
-            body: { items: processedItems },
+            path: { bank_id: bankId },
+            body: {
+                items: processedItems,
+                document_id: options?.documentId,
+                async: options?.async,
+            },
         });
 
         return response.data!;
     }
 
     /**
-     * Search memories with a natural language query.
-     * Returns a simplified list of search results.
+     * Recall memories with a natural language query.
+     * Returns a simplified list of recall results.
      */
-    async search(
-        agentId: string,
+    async recall(
+        bankId: string,
         query: string,
-        options?: { maxTokens?: number }
-    ): Promise<SearchResult[]> {
-        const response = await sdk.searchMemories({
+        options?: { maxTokens?: number; budget?: Budget }
+    ): Promise<RecallResult[]> {
+        const response = await sdk.recallMemories({
             client: this.client,
-            path: { agent_id: agentId },
+            path: { bank_id: bankId },
             body: {
                 query,
                 max_tokens: options?.maxTokens,
+                budget: options?.budget || 'mid',
             },
         });
 
@@ -127,25 +138,27 @@ export class HindsightClient {
     }
 
     /**
-     * Search memories with full options and response.
+     * Recall memories with full options and response.
      */
-    async searchMemories(
-        agentId: string,
+    async recallMemories(
+        bankId: string,
         options: {
             query: string;
-            factType?: string[];
+            types?: string[];
             maxTokens?: number;
             trace?: boolean;
+            budget?: Budget;
         }
-    ): Promise<SearchResponse> {
-        const response = await sdk.searchMemories({
+    ): Promise<RecallResponse> {
+        const response = await sdk.recallMemories({
             client: this.client,
-            path: { agent_id: agentId },
+            path: { bank_id: bankId },
             body: {
                 query: options.query,
-                fact_type: options.factType,
+                types: options.types,
                 max_tokens: options.maxTokens,
                 trace: options.trace,
+                budget: options.budget || 'mid',
             },
         });
 
@@ -153,20 +166,20 @@ export class HindsightClient {
     }
 
     /**
-     * Think and generate a contextual answer using the agent's identity and memories.
+     * Reflect and generate a contextual answer using the bank's identity and memories.
      */
-    async think(
-        agentId: string,
+    async reflect(
+        bankId: string,
         query: string,
-        options?: { context?: string; thinkingBudget?: number }
-    ): Promise<ThinkResponse> {
-        const response = await sdk.think({
+        options?: { context?: string; budget?: Budget }
+    ): Promise<ReflectResponse> {
+        const response = await sdk.reflect({
             client: this.client,
-            path: { agent_id: agentId },
+            path: { bank_id: bankId },
             body: {
                 query,
                 context: options?.context,
-                thinking_budget: options?.thinkingBudget,
+                budget: options?.budget || 'low',
             },
         });
 
@@ -177,16 +190,16 @@ export class HindsightClient {
      * List memories with pagination.
      */
     async listMemories(
-        agentId: string,
-        options?: { limit?: number; offset?: number; factType?: string; q?: string }
+        bankId: string,
+        options?: { limit?: number; offset?: number; type?: string; q?: string }
     ): Promise<ListMemoryUnitsResponse> {
         const response = await sdk.listMemories({
             client: this.client,
-            path: { agent_id: agentId },
+            path: { bank_id: bankId },
             query: {
                 limit: options?.limit,
                 offset: options?.offset,
-                fact_type: options?.factType,
+                type: options?.type,
                 q: options?.q,
             },
         });
@@ -195,18 +208,19 @@ export class HindsightClient {
     }
 
     /**
-     * Create or update an agent with personality and background.
+     * Create or update a bank with personality and background.
      */
-    async createAgent(
-        agentId: string,
-        options: { name?: string; background?: string }
-    ): Promise<AgentProfileResponse> {
-        const response = await sdk.createOrUpdateAgent({
+    async createBank(
+        bankId: string,
+        options: { name?: string; background?: string; personality?: any }
+    ): Promise<BankProfileResponse> {
+        const response = await sdk.createOrUpdateBank({
             client: this.client,
-            path: { agent_id: agentId },
+            path: { bank_id: bankId },
             body: {
                 name: options.name,
                 background: options.background,
+                personality: options.personality,
             },
         });
 
@@ -214,12 +228,12 @@ export class HindsightClient {
     }
 
     /**
-     * Get an agent's profile.
+     * Get a bank's profile.
      */
-    async getAgentProfile(agentId: string): Promise<AgentProfileResponse> {
-        const response = await sdk.getAgentProfile({
+    async getBankProfile(bankId: string): Promise<BankProfileResponse> {
+        const response = await sdk.getBankProfile({
             client: this.client,
-            path: { agent_id: agentId },
+            path: { bank_id: bankId },
         });
 
         return response.data!;
@@ -228,16 +242,17 @@ export class HindsightClient {
 
 // Re-export types for convenience
 export type {
-    BatchPutRequest,
-    BatchPutResponse,
-    SearchRequest,
-    SearchResponse,
-    SearchResult,
-    ThinkRequest,
-    ThinkResponse,
+    RetainRequest,
+    RetainResponse,
+    RecallRequest,
+    RecallResponse,
+    RecallResult,
+    ReflectRequest,
+    ReflectResponse,
     ListMemoryUnitsResponse,
-    AgentProfileResponse,
-    CreateAgentRequest,
+    BankProfileResponse,
+    CreateBankRequest,
+    Budget,
 };
 
 // Also export low-level SDK functions for advanced usage

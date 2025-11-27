@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || 'http://localhost:8888';
+import { sdk, lowLevelClient } from '@/lib/hindsight-client';
 
 export async function GET(
   request: NextRequest,
@@ -8,9 +7,11 @@ export async function GET(
 ) {
   try {
     const { agentId } = await params;
-    const response = await fetch(`${DATAPLANE_URL}/api/v1/agents/${agentId}/operations`);
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    const response = await sdk.listOperations({
+      client: lowLevelClient,
+      path: { bank_id: agentId }
+    });
+    return NextResponse.json(response.data, { status: 200 });
   } catch (error) {
     console.error('Error fetching operations:', error);
     return NextResponse.json(
@@ -36,12 +37,12 @@ export async function DELETE(
       );
     }
 
-    const response = await fetch(
-      `${DATAPLANE_URL}/api/v1/agents/${agentId}/operations/${operationId}`,
-      { method: 'DELETE' }
-    );
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    const response = await sdk.cancelOperation({
+      client: lowLevelClient,
+      path: { bank_id: agentId, operation_id: operationId }
+    });
+
+    return NextResponse.json(response.data, { status: 200 });
   } catch (error) {
     console.error('Error canceling operation:', error);
     return NextResponse.json(

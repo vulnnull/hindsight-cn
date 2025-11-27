@@ -24,7 +24,7 @@ def _log(log_buffer, message, level='info'):
 async def extract_entities_batch_optimized(
     entity_resolver,
     conn,
-    agent_id: str,
+    bank_id: str,
     unit_ids: List[str],
     sentences: List[str],
     context: str,
@@ -41,7 +41,7 @@ async def extract_entities_batch_optimized(
     Args:
         entity_resolver: EntityResolver instance for entity resolution
         conn: Database connection
-        agent_id: Agent identifier
+        agent_id: bank IDentifier
         unit_ids: List of unit IDs
         sentences: List of fact sentences
         context: Context string
@@ -114,7 +114,7 @@ async def extract_entities_batch_optimized(
                 entities_data = [entity_data for _, entity_data in entities_group]
 
                 batch_resolved = await entity_resolver.resolve_entities_batch(
-                    agent_id=agent_id,
+                    bank_id=bank_id,
                     entities_data=entities_data,
                     context=context,
                     unit_event_date=fact_date,
@@ -209,7 +209,7 @@ async def extract_entities_batch_optimized(
 
 async def create_temporal_links_batch_per_fact(
     conn,
-    agent_id: str,
+    bank_id: str,
     unit_ids: List[str],
     time_window_hours: int = 24,
     log_buffer: List[str] = None,
@@ -222,7 +222,7 @@ async def create_temporal_links_batch_per_fact(
 
     Args:
         conn: Database connection
-        agent_id: Agent identifier
+        agent_id: bank IDentifier
         unit_ids: List of unit IDs
         time_window_hours: Time window in hours for temporal links
         log_buffer: Optional buffer for logging
@@ -257,12 +257,12 @@ async def create_temporal_links_batch_per_fact(
             """
             SELECT id, event_date
             FROM memory_units
-            WHERE agent_id = $1
+            WHERE bank_id = $1
               AND event_date BETWEEN $2 AND $3
               AND id::text != ALL($4)
             ORDER BY event_date DESC
             """,
-            agent_id,
+            bank_id,
             min_date,
             max_date,
             unit_ids
@@ -312,7 +312,7 @@ async def create_temporal_links_batch_per_fact(
 
 async def create_semantic_links_batch(
     conn,
-    agent_id: str,
+    bank_id: str,
     unit_ids: List[str],
     embeddings: List[List[float]],
     top_k: int = 5,
@@ -326,7 +326,7 @@ async def create_semantic_links_batch(
 
     Args:
         conn: Database connection
-        agent_id: Agent identifier
+        agent_id: bank IDentifier
         unit_ids: List of unit IDs
         embeddings: List of embedding vectors
         top_k: Number of top similar units to link
@@ -346,11 +346,11 @@ async def create_semantic_links_batch(
             """
             SELECT id, embedding
             FROM memory_units
-            WHERE agent_id = $1
+            WHERE bank_id = $1
               AND embedding IS NOT NULL
               AND id::text != ALL($2)
             """,
-            agent_id,
+            bank_id,
             unit_ids
         )
         _log(log_buffer, f"      [8.1] Fetch {len(all_existing)} existing embeddings (1 query): {time_mod.time() - fetch_start:.3f}s")

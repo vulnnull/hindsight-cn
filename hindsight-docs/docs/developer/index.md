@@ -7,117 +7,56 @@ slug: /
 
 ## Why Hindsight?
 
-AI assistants forget everything between sessions. Every conversation starts from zero—no context about who you are, what you've discussed, or what the agent has learned. This isn't just inconvenient; it fundamentally limits what AI agents can do.
+AI assistants forget everything between sessions. Every conversation starts from zero—no context about who you are, what you've discussed, or what the memory bank has learned. This isn't just inconvenient; it fundamentally limits what AI memory banks can do.
 
 **The problem is harder than it looks:**
 
 - **Simple vector search isn't enough** — "What did Alice do last spring?" requires temporal reasoning, not just semantic similarity
 - **Facts get disconnected** — Knowing "Alice works at Google" and "Google is in Mountain View" should let you answer "Where does Alice work?" even if you never stored that directly
-- **Agents need opinions** — A coding assistant that remembers "the user prefers functional programming" should weigh that when making recommendations
-- **Context matters** — The same information means different things to different agents with different personalities
+- **Memory banks need opinions** — A coding assistant that remembers "the user prefers functional programming" should weigh that when making recommendations
+- **Context matters** — The same information means different things to different memory banks with different personalities
 
-Hindsight solves these problems with a memory system designed specifically for AI agents.
+Hindsight solves these problems with a memory system designed specifically for AI memory banks.
 
 ## What Hindsight Does
 
 ```mermaid
-graph LR
-    subgraph Clients
-        A[Python Client]
-        B[Node.js Client]
-        C[CLI]
-        D[AI Assistants]
-    end
-
-    subgraph Hindsight Server
-        E[HTTP API]
-        F[MCP API]
-    end
-
-    A --> E
-    B --> E
-    C --> E
-    D --> F
-
-    E --> G[Memory Engine]
-    F --> G
-
-    G --> H[(PostgreSQL + pgvector)]
-```
-
-**Store** conversations and documents → **Search** with multi-strategy retrieval → **Think** with personality-aware reasoning
-
-## Architecture
-
-```mermaid
 graph TB
-    subgraph Input
-        I1[Raw Text]
-        I2[Conversations]
-        I3[Documents]
+    subgraph Your Application
+        Agent[AI Agent]
     end
 
-    subgraph Ingestion
-        E1[LLM Extraction]
-        E2[Entity Resolution]
-        E3[Graph Construction]
+    subgraph Hindsight
+        API[Hindsight API]
+
+        subgraph Memory Bank
+            Documents[Documents]
+            Memories[Memories]
+            Entities[Entities]
+        end
     end
 
-    subgraph Storage
-        S1[World Facts]
-        S2[Agent Facts]
-        S3[Opinions]
-        S4[Entity Graph]
-    end
+    Agent -->|retain| API
+    Agent -->|recall| API
+    Agent -->|reflect| API
 
-    subgraph Retrieval
-        R1[Semantic Search]
-        R2[Keyword Search]
-        R3[Graph Traversal]
-        R4[Temporal Search]
-        R5[RRF Fusion]
-        R6[Cross-Encoder Rerank]
-    end
-
-    subgraph Output
-        O1[Search Results]
-        O2[Think Response]
-    end
-
-    I1 --> E1
-    I2 --> E1
-    I3 --> E1
-    E1 --> E2
-    E2 --> E3
-    E3 --> S1
-    E3 --> S2
-    E3 --> S3
-    E3 --> S4
-
-    S1 --> R1
-    S1 --> R2
-    S4 --> R3
-    S1 --> R4
-
-    R1 --> R5
-    R2 --> R5
-    R3 --> R5
-    R4 --> R5
-    R5 --> R6
-    R6 --> O1
-    R6 --> O2
+    API --> Documents
+    API --> Memories
+    API --> Entities
 ```
+
+**Your AI agent** stores information via `retain()`, searches with `recall()`, and reasons with `reflect()` — all interactions with its dedicated **memory bank**
 
 ## Key Components
 
-### Three Memory Networks
+### Three Memory Types
 
 Hindsight separates memories by type for epistemic clarity:
 
-| Network | What it stores | Example |
-|---------|----------------|---------|
+| Type | What it stores | Example |
+|------|----------------|---------|
 | **World** | Objective facts received | "Alice works at Google" |
-| **Agent** | Agent's own actions | "I recommended Python to Bob" |
+| **Bank** | Bank's own actions | "I recommended Python to Bob" |
 | **Opinion** | Formed beliefs + confidence | "Python is best for ML" (0.85) |
 
 ### Multi-Strategy Retrieval (TEMPR)
@@ -149,7 +88,7 @@ graph LR
 
 ### Personality Framework (CARA)
 
-Agents have Big Five personality traits that influence opinion formation:
+Memory banks have Big Five personality traits that influence opinion formation:
 
 | Trait | Low | High |
 |-------|-----|------|
@@ -161,40 +100,23 @@ Agents have Big Five personality traits that influence opinion formation:
 
 The `bias_strength` parameter (0-1) controls how much personality influences opinions.
 
-## Client-Server Interaction
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant A as Hindsight API
-    participant DB as PostgreSQL
-
-    C->>A: store("Alice works at Google")
-    A->>A: Extract facts & entities
-    A->>A: Build graph links
-    A->>DB: Store memory units
-    A-->>C: Success
-
-    C->>A: search("What does Alice do?")
-    A->>DB: 4-way parallel search
-    A->>A: RRF fusion + rerank
-    A-->>C: Ranked results
-
-    C->>A: think("Tell me about Alice")
-    A->>DB: Retrieve relevant memories
-    A->>A: Generate with personality
-    A-->>C: Response + sources
-```
-
 ## Next Steps
 
-- [Quick Start](/developer/api/quickstart) — Get up and running in 60 seconds
+### Getting Started
+- [**Installation**](./api/installation) — Install Hindsight for Python, Node.js, or CLI
+- [**Quick Start**](./api/quickstart) — Get up and running in 60 seconds
 
-- [Architecture](./developer/architecture) — Deep dive into ingestion, storage, and graph construction
-- [Retrieval](./developer/retrieval) — How TEMPR's 4-way search works
-- [Personality](./developer/personality) — CARA framework and opinion formation
-- [Ingest Data](./developer/api/ingest) — Store memories, conversations, and documents
-- [Search Facts](./developer/api/search) — Multi-strategy retrieval
-- [Think](./developer/api/think) — Personality-aware response generation
-- [Server Deployment](./developer/server) — Deploy with Docker Compose, Helm, or pip
-- [Development Guide](./developer/development) — Set up a local development environment
+### Core Concepts
+- [**Retain**](./retain) — How memories are stored with multi-dimensional facts
+- [**Recall**](./retrieval) — How TEMPR's 4-way search retrieves memories
+- [**Reflect**](./personality) — How personality influences reasoning and opinion formation
+
+### API Methods
+- [**Main Methods**](./api/main-methods) — Overview of retain, recall, reflect
+- [**Memory Banks**](./api/memory-banks) — Configure personality and background
+- [**Entities**](./api/entities) — Track people, places, and concepts
+- [**Documents**](./api/documents) — Manage document sources
+- [**Operations**](./api/operations) — Monitor async tasks
+
+### Deployment
+- [**Server Setup**](./server) — Deploy with Docker Compose, Helm, or pip

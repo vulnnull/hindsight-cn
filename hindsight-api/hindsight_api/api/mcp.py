@@ -24,15 +24,15 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
     mcp = FastMCP("hindsight-mcp-server")
 
     @mcp.tool()
-    async def hindsight_put(agent_id: str, content: str, context: str, explanation: str = "") -> str:
+    async def hindsight_put(bank_id: str, content: str, context: str, explanation: str = "") -> str:
         """
         **CRITICAL: Store important user information to long-term memory.**
 
         **⚠️ PER-USER TOOL - REQUIRES USER IDENTIFICATION:**
-        - This tool is STRICTLY per-user. Each user MUST have a unique `agent_id`.
-        - ONLY use this tool if you have a valid user identifier (user ID, email, session ID, etc.) to map to `agent_id`.
+        - This tool is STRICTLY per-user. Each user MUST have a unique `bank_id`.
+        - ONLY use this tool if you have a valid user identifier (user ID, email, session ID, etc.) to map to `bank_id`.
         - DO NOT use this tool if you cannot identify the specific user.
-        - DO NOT share memories between different users - each user's memories are isolated by their `agent_id`.
+        - DO NOT share memories between different users - each user's memories are isolated by their `bank_id`.
         - If you don't have a user identifier, DO NOT use this tool at all.
 
         Use this tool PROACTIVELY whenever the user shares:
@@ -51,7 +51,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
         "career_goals", "project_details", etc. This helps organize and retrieve related memories later.
 
         Args:
-            agent_id: **REQUIRED** - The unique, persistent identifier for this specific user (e.g., user_id, email, session_id).
+            bank_id: **REQUIRED** - The unique, persistent identifier for this specific user (e.g., user_id, email, session_id).
                      This MUST be consistent across all interactions with the same user.
                      Example: "user_12345", "alice@example.com", "session_abc123"
             content: The fact/memory to store (be specific and include relevant details)
@@ -65,7 +65,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
 
             # Store memory using put_batch_async
             await memory.put_batch_async(
-                agent_id=agent_id,
+                bank_id=bank_id,
                 contents=[{"content": content, "context": context}]
             )
             return f"Fact stored successfully"
@@ -74,15 +74,15 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
             return f"Error: {str(e)}"
 
     @mcp.tool()
-    async def hindsight_search(agent_id: str, query: str, max_tokens: int = 4096, explanation: str = "") -> str:
+    async def hindsight_search(bank_id: str, query: str, max_tokens: int = 4096, explanation: str = "") -> str:
         """
         **CRITICAL: Search user's memory to provide personalized, context-aware responses.**
 
         **⚠️ PER-USER TOOL - REQUIRES USER IDENTIFICATION:**
-        - This tool is STRICTLY per-user. Each user MUST have a unique `agent_id`.
-        - ONLY use this tool if you have a valid user identifier (user ID, email, session ID, etc.) to map to `agent_id`.
+        - This tool is STRICTLY per-user. Each user MUST have a unique `bank_id`.
+        - ONLY use this tool if you have a valid user identifier (user ID, email, session ID, etc.) to map to `bank_id`.
         - DO NOT use this tool if you cannot identify the specific user.
-        - DO NOT search across multiple users - each user's memories are isolated by their `agent_id`.
+        - DO NOT search across multiple users - each user's memories are isolated by their `bank_id`.
         - If you don't have a user identifier, DO NOT use this tool at all.
 
         Use this tool PROACTIVELY at the start of conversations or when making recommendations to:
@@ -103,7 +103,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
         "user's work experience", "user's dietary restrictions", "what does the user know about X?"
 
         Args:
-            agent_id: **REQUIRED** - The unique, persistent identifier for this specific user (e.g., user_id, email, session_id).
+            bank_id: **REQUIRED** - The unique, persistent identifier for this specific user (e.g., user_id, email, session_id).
                      This MUST be consistent across all interactions with the same user.
                      Example: "user_12345", "alice@example.com", "session_abc123"
             query: Natural language search query to find relevant memories
@@ -118,13 +118,14 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
             if explanation:
                 logger.debug(f"Explanation: {explanation}")
 
-            # Search using search_async
-            search_result = await memory.search_async(
-                agent_id=agent_id,
+            # Search using recall_async
+            from hindsight_api.engine.memory_engine import Budget
+            search_result = await memory.recall_async(
+                bank_id=bank_id,
                 query=query,
-                fact_type=["world", "agent", "opinion"],  # Search all fact types
+                fact_type=["world", "bank", "opinion"],  # Search all fact types
                 max_tokens=max_tokens,
-                thinking_budget=100
+                budget=Budget.LOW
             )
 
             # Convert results to dict format

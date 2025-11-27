@@ -171,10 +171,12 @@ opinions = client.search_memories(
 Generate personality-aware responses using retrieved memories:
 
 ```python
-answer = client.think(
-    agent_id="my-agent",
+from hindsight_api.engine.memory_engine import Budget
+
+answer = client.reflect(
+    bank_id="my-agent",
     query="What should I know about Alice?",
-    thinking_budget=100,  # Tokens for query understanding
+    budget=Budget.LOW,  # Budget level for retrieval
 )
 
 print(answer["text"])           # Generated response
@@ -182,9 +184,9 @@ print(answer["based_on"])       # Memories used
 print(answer["new_opinions"])   # New opinions formed
 ```
 
-## Agent Management
+## Memory bank Management
 
-### Create Agent
+### Create Memory bank
 
 ```python
 client.create_agent(
@@ -210,11 +212,11 @@ print(profile["personality"])
 print(profile["background"])
 ```
 
-### List Agents
+### List Memory banks
 
 ```python
-agents = client.list_agents()
-for agent in agents:
+memory banks = client.list_agents()
+for agent in memory banks:
     print(agent["agent_id"])
 ```
 

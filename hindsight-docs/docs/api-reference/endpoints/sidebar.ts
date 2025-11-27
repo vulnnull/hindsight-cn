@@ -4,7 +4,7 @@ const sidebar: SidebarsConfig = {
   apisidebar: [
     {
       type: "doc",
-      id: "api-reference/endpoints/agent-memory-api",
+      id: "api-reference/endpoints/hindsight-api",
     },
     {
       type: "category",
@@ -62,12 +62,6 @@ const sidebar: SidebarsConfig = {
           label: "Cancel a pending async operation",
           className: "api-method delete",
         },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/delete-memory-unit",
-          label: "Delete a memory unit",
-          className: "api-method delete",
-        },
       ],
     },
     {
@@ -86,50 +80,50 @@ const sidebar: SidebarsConfig = {
     },
     {
       type: "category",
-      label: "Agent Management",
+      label: "Memory Bank Management",
       collapsed: false,
       collapsible: false,
       items: [
         {
           type: "doc",
-          id: "api-reference/endpoints/list-agents",
-          label: "List all agents",
+          id: "api-reference/endpoints/list-banks",
+          label: "List all memory banks",
           className: "api-method get",
         },
         {
           type: "doc",
-          id: "api-reference/endpoints/get-agent-stats",
-          label: "Get memory statistics for an agent",
+          id: "api-reference/endpoints/get-bank-stats",
+          label: "Get statistics for memory bank",
           className: "api-method get",
         },
         {
           type: "doc",
-          id: "api-reference/endpoints/clear-agent-memories",
-          label: "Clear agent memories",
+          id: "api-reference/endpoints/clear-bank-memories",
+          label: "Clear memory bank memories",
           className: "api-method delete",
         },
         {
           type: "doc",
-          id: "api-reference/endpoints/get-agent-profile",
-          label: "Get agent profile",
+          id: "api-reference/endpoints/get-bank-profile",
+          label: "Get memory bank profile",
           className: "api-method get",
         },
         {
           type: "doc",
-          id: "api-reference/endpoints/update-agent-personality",
-          label: "Update agent personality",
+          id: "api-reference/endpoints/update-bank-personality",
+          label: "Update memory bank personality",
           className: "api-method put",
         },
         {
           type: "doc",
-          id: "api-reference/endpoints/add-agent-background",
-          label: "Add/merge agent background",
+          id: "api-reference/endpoints/add-bank-background",
+          label: "Add/merge memory bank background",
           className: "api-method post",
         },
         {
           type: "doc",
-          id: "api-reference/endpoints/create-or-update-agent",
-          label: "Create or update agent",
+          id: "api-reference/endpoints/create-or-update-bank",
+          label: "Create or update memory bank",
           className: "api-method put",
         },
       ],

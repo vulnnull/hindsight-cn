@@ -10,14 +10,14 @@ Model Context Protocol (MCP) tools exposed by the Hindsight MCP server.
 
 ### hindsight_search
 
-Search memories for an agent.
+Search memories for a memory bank.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | yes | Search query |
-| `agent_id` | string | no | Agent ID (uses default if not specified) |
+| `agent_id` | string | no | bank ID (uses default if not specified) |
 | `top_k` | integer | no | Number of results (default: 10) |
 
 **Example:**
@@ -57,8 +57,8 @@ Generate a personality-aware response using retrieved memories.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | yes | Question or prompt |
-| `agent_id` | string | no | Agent ID (uses default if not specified) |
-| `thinking_budget` | integer | no | Tokens for reasoning (default: 100) |
+| `agent_id` | string | no | bank ID (uses default if not specified) |
+| `budget` | string | no | Budget level: 'low', 'mid', 'high' (default: 'low') |
 
 **Example:**
 
@@ -94,7 +94,7 @@ Store a new memory.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `content` | string | yes | Memory content to store |
-| `agent_id` | string | no | Agent ID (uses default if not specified) |
+| `agent_id` | string | no | bank ID (uses default if not specified) |
 | `context` | string | no | Context or topic of the memory |
 
 **Example:**
@@ -122,7 +122,7 @@ Store a new memory.
 
 ### hindsight_agents
 
-List all available agents.
+List all available memory banks.
 
 **Parameters:** None
 
@@ -139,7 +139,7 @@ List all available agents.
 
 ```json
 {
-  "agents": [
+  "memory banks": [
     {"agent_id": "default"},
     {"agent_id": "assistant"},
     {"agent_id": "researcher"}
@@ -154,7 +154,7 @@ List all available agents.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_URL` | Hindsight API URL | `http://localhost:8888` |
-| `HINDSIGHT_AGENT_ID` | Default agent ID | Required |
+| `HINDSIGHT_AGENT_ID` | Default bank ID | Required |
 
 ## Error Responses
 
@@ -164,7 +164,7 @@ MCP tools return errors in the standard MCP error format:
 {
   "error": {
     "code": "NOT_FOUND",
-    "message": "Agent 'unknown-agent' not found"
+    "message": "Memory bank 'unknown-agent' not found"
   }
 }
 ```
@@ -172,5 +172,5 @@ MCP tools return errors in the standard MCP error format:
 | Code | Description |
 |------|-------------|
 | `INVALID_PARAMS` | Missing or invalid parameters |
-| `NOT_FOUND` | Agent or resource not found |
+| `NOT_FOUND` | Memory bank or resource not found |
 | `INTERNAL_ERROR` | Server error |

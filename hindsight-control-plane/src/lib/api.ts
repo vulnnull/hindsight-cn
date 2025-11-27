@@ -1,13 +1,10 @@
 /**
- * API client for the control plane API (which proxies to the dataplane)
+ * Client for calling Control Plane API routes (which proxy to the dataplane via SDK)
+ * This should be used in client components, not the SDK directly
  */
 
-export class DataplaneClient {
-  private async fetchApi<T>(
-    path: string,
-    options?: RequestInit
-  ): Promise<T> {
-    // Call the control plane API routes, not the dataplane directly
+export class ControlPlaneClient {
+  private async fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     const response = await fetch(path, {
       ...options,
       headers: {
@@ -25,258 +22,133 @@ export class DataplaneClient {
   }
 
   /**
-   * Search memory using semantic similarity
+   * List all banks
    */
-  async search(params: {
+  async listBanks() {
+    return this.fetchApi<{ banks: any[] }>('/api/banks', { cache: 'no-store' as RequestCache });
+  }
+
+  /**
+   * Recall memories
+   */
+  async recall(params: {
     query: string;
-    fact_type: ('world' | 'agent' | 'opinion')[];
-    agent_id: string;
-    thinking_budget?: number;
+    types?: string[];
+    bank_id: string;
+    budget?: string;
     max_tokens?: number;
     trace?: boolean;
   }) {
-    return this.fetchApi(`/api/search`, {
+    return this.fetchApi('/api/recall', {
       method: 'POST',
       body: JSON.stringify(params),
     });
   }
 
   /**
-   * Think and generate answer
+   * Reflect and generate answer
    */
-  async think(params: {
+  async reflect(params: {
     query: string;
-    agent_id: string;
-    thinking_budget?: number;
+    bank_id: string;
+    budget?: string;
     context?: string;
   }) {
-    return this.fetchApi(`/api/think`, {
+    return this.fetchApi('/api/reflect', {
       method: 'POST',
       body: JSON.stringify(params),
     });
   }
 
   /**
-   * Store multiple memories in batch
+   * Retain memories (batch)
    */
-  async batchPut(params: {
-    agent_id: string;
+  async retain(params: {
+    bank_id: string;
     items: Array<{
       content: string;
-      event_date?: string;
+      timestamp?: string;
       context?: string;
     }>;
     document_id?: string;
+    async?: boolean;
   }) {
-    return this.fetchApi(`/api/memories/batch`, {
+    const endpoint = params.async ? '/api/memories/retain_async' : '/api/memories/retain';
+    return this.fetchApi(endpoint, {
       method: 'POST',
       body: JSON.stringify(params),
     });
   }
 
   /**
-   * Store multiple memories asynchronously
-   * Note: If document_id is provided and already exists, the document will be automatically replaced (upsert behavior).
+   * Get bank statistics
    */
-  async batchPutAsync(params: {
-    agent_id: string;
-    items: Array<{
-      content: string;
-      event_date?: string;
-      context?: string;
-    }>;
-    document_id?: string;
-  }) {
-    return this.fetchApi(`/api/memories/batch_async`, {
-      method: 'POST',
-      body: JSON.stringify(params),
-    });
+  async getBankStats(bankId: string) {
+    return this.fetchApi(`/api/stats/${bankId}`);
   }
 
   /**
-   * List all agents
+   * Get graph data
    */
-  async listAgents() {
-    return this.fetchApi<{ agents: any[] }>('/api/agents', { cache: 'no-store' });
-  }
-
-  /**
-   * Get agent statistics
-   */
-  async getAgentStats(agentId: string) {
-    return this.fetchApi(`/api/stats/${agentId}`);
-  }
-
-  /**
-   * Get graph data for visualization
-   */
-  async getGraphData(params: {
-    agent_id: string;
-    fact_type?: string;
-  }) {
+  async getGraph(params: { bank_id: string; type?: string }) {
     const queryParams = new URLSearchParams();
-    queryParams.append('agent_id', params.agent_id);
-    if (params.fact_type) queryParams.append('fact_type', params.fact_type);
-
+    queryParams.append('bank_id', params.bank_id);
+    if (params.type) queryParams.append('type', params.type);
     return this.fetchApi(`/api/graph?${queryParams}`);
   }
 
   /**
-   * List memory units
+   * List operations
    */
-  async listMemoryUnits(params: {
-    agent_id: string;
-    fact_type?: string;
-    q?: string;
-    limit?: number;
-    offset?: number;
-  }) {
-    const queryParams = new URLSearchParams();
-    queryParams.append('agent_id', params.agent_id);
-    if (params.fact_type) queryParams.append('fact_type', params.fact_type);
-    if (params.q) queryParams.append('q', params.q);
-    if (params.limit) queryParams.append('limit', params.limit.toString());
-    if (params.offset) queryParams.append('offset', params.offset.toString());
+  async listOperations(bankId: string) {
+    return this.fetchApi(`/api/operations/${bankId}`);
+  }
 
-    return this.fetchApi(`/api/list?${queryParams}`);
+  /**
+   * List entities
+   */
+  async listEntities(params: { bank_id: string; limit?: number }) {
+    const queryParams = new URLSearchParams();
+    queryParams.append('bank_id', params.bank_id);
+    if (params.limit) queryParams.append('limit', params.limit.toString());
+    return this.fetchApi(`/api/entities?${queryParams}`);
+  }
+
+  /**
+   * Get entity details
+   */
+  async getEntity(entityId: string, bankId: string) {
+    return this.fetchApi(`/api/entities/${entityId}?bank_id=${bankId}`);
+  }
+
+  /**
+   * Regenerate entity observations
+   */
+  async regenerateEntityObservations(entityId: string, bankId: string) {
+    return this.fetchApi(`/api/entities/${entityId}/regenerate?bank_id=${bankId}`, {
+      method: 'POST',
+    });
   }
 
   /**
    * List documents
    */
-  async listDocuments(params: {
-    agent_id: string;
-    q?: string;
-    limit?: number;
-    offset?: number;
-  }) {
+  async listDocuments(params: { bank_id: string; q?: string; limit?: number; offset?: number }) {
     const queryParams = new URLSearchParams();
-    queryParams.append('agent_id', params.agent_id);
+    queryParams.append('bank_id', params.bank_id);
     if (params.q) queryParams.append('q', params.q);
     if (params.limit) queryParams.append('limit', params.limit.toString());
     if (params.offset) queryParams.append('offset', params.offset.toString());
-
     return this.fetchApi(`/api/documents?${queryParams}`);
   }
 
   /**
-   * Get document by ID
+   * Get document
    */
-  async getDocument(documentId: string, agentId: string) {
-    return this.fetchApi(`/api/documents/${documentId}?agent_id=${agentId}`);
-  }
-
-  /**
-   * List async operations for an agent
-   */
-  async listOperations(agentId: string) {
-    return this.fetchApi(`/api/operations/${agentId}`);
-  }
-
-  /**
-   * Cancel a pending async operation
-   */
-  async cancelOperation(agentId: string, operationId: string) {
-    return this.fetchApi(`/api/operations/${agentId}?operation_id=${operationId}`, {
-      method: 'DELETE',
-    });
-  }
-
-  /**
-   * Delete a memory unit
-   */
-  async deleteMemoryUnit(agentId: string, unitId: string) {
-    return this.fetchApi(`/api/list?agent_id=${agentId}&unit_id=${unitId}`, {
-      method: 'DELETE',
-    });
-  }
-
-  /**
-   * List entities for an agent
-   */
-  async listEntities(params: {
-    agent_id: string;
-    limit?: number;
-  }) {
-    const queryParams = new URLSearchParams();
-    queryParams.append('agent_id', params.agent_id);
-    if (params.limit) queryParams.append('limit', params.limit.toString());
-
-    return this.fetchApi<{
-      entities: Array<{
-        id: string;
-        canonical_name: string;
-        mention_count: number;
-        first_seen?: string;
-        last_seen?: string;
-        metadata?: Record<string, any>;
-      }>;
-    }>(`/api/entities?${queryParams}`);
-  }
-
-  /**
-   * Get entity details with observations
-   */
-  async getEntity(entityId: string, agentId: string) {
-    return this.fetchApi<{
-      id: string;
-      canonical_name: string;
-      mention_count: number;
-      first_seen?: string;
-      last_seen?: string;
-      metadata?: Record<string, any>;
-      observations: Array<{
-        text: string;
-        mentioned_at?: string;
-      }>;
-    }>(`/api/entities/${entityId}?agent_id=${agentId}`);
-  }
-
-  /**
-   * Regenerate observations for an entity
-   */
-  async regenerateEntityObservations(entityId: string, agentId: string) {
-    return this.fetchApi(`/api/entities/${entityId}/regenerate?agent_id=${agentId}`, {
-      method: 'POST',
-    });
+  async getDocument(documentId: string, bankId: string) {
+    return this.fetchApi(`/api/documents/${documentId}?bank_id=${bankId}`);
   }
 }
 
-// Export a singleton instance
-export const dataplaneClient = new DataplaneClient();
-
-/**
- * Server-side dataplane client that calls the dataplane directly
- * Only use this on the server side (in API routes)
- */
-export class ServerDataplaneClient {
-  private baseUrl: string;
-
-  constructor() {
-    this.baseUrl = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || 'http://localhost:8888';
-  }
-
-  async fetchDataplane<T>(
-    path: string,
-    options?: RequestInit
-  ): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Dataplane Error: ${response.status} - ${error}`);
-    }
-
-    return response.json();
-  }
-}
-
-export const serverDataplaneClient = new ServerDataplaneClient();
+// Export singleton instance
+export const client = new ControlPlaneClient();

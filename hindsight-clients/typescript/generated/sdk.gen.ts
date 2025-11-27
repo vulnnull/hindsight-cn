@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddAgentBackgroundData, AddAgentBackgroundErrors, AddAgentBackgroundResponses, BatchPutAsyncData, BatchPutAsyncErrors, BatchPutAsyncResponses, BatchPutMemoriesData, BatchPutMemoriesErrors, BatchPutMemoriesResponses, CancelOperationData, CancelOperationErrors, CancelOperationResponses, ClearAgentMemoriesData, ClearAgentMemoriesErrors, ClearAgentMemoriesResponses, CreateOrUpdateAgentData, CreateOrUpdateAgentErrors, CreateOrUpdateAgentResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, DeleteMemoryUnitData, DeleteMemoryUnitErrors, DeleteMemoryUnitResponses, GetAgentProfileData, GetAgentProfileErrors, GetAgentProfileResponses, GetAgentStatsData, GetAgentStatsErrors, GetAgentStatsResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetGraphData, GetGraphErrors, GetGraphResponses, ListAgentsData, ListAgentsResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, SearchMemoriesData, SearchMemoriesErrors, SearchMemoriesResponses, ThinkData, ThinkErrors, ThinkResponses, UpdateAgentPersonalityData, UpdateAgentPersonalityErrors, UpdateAgentPersonalityResponses } from './types.gen';
+import type { AddBankBackgroundData, AddBankBackgroundErrors, AddBankBackgroundResponses, CancelOperationData, CancelOperationErrors, CancelOperationResponses, ClearBankMemoriesData, ClearBankMemoriesErrors, ClearBankMemoriesResponses, CreateOrUpdateBankData, CreateOrUpdateBankErrors, CreateOrUpdateBankResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, GetAgentStatsData, GetAgentStatsErrors, GetAgentStatsResponses, GetBankProfileData, GetBankProfileErrors, GetBankProfileResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetEntityData, GetEntityErrors, GetEntityResponses, GetGraphData, GetGraphErrors, GetGraphResponses, ListBanksData, ListBanksResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListEntitiesData, ListEntitiesErrors, ListEntitiesResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, RecallMemoriesData, RecallMemoriesErrors, RecallMemoriesResponses, ReflectData, ReflectErrors, ReflectResponses, RegenerateEntityObservationsData, RegenerateEntityObservationsErrors, RegenerateEntityObservationsResponses, RetainMemoriesData, RetainMemoriesErrors, RetainMemoriesResponses, UpdateBankPersonalityData, UpdateBankPersonalityErrors, UpdateBankPersonalityResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -21,29 +21,32 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 /**
  * Get memory graph data
  *
- * Retrieve graph data for visualization, optionally filtered by fact_type (world/agent/opinion). Limited to 1000 most recent items.
+ * Retrieve graph data for visualization, optionally filtered by type (world/agent/opinion). Limited to 1000 most recent items.
  */
-export const getGraph = <ThrowOnError extends boolean = false>(options: Options<GetGraphData, ThrowOnError>) => (options.client ?? client).get<GetGraphResponses, GetGraphErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/graph', ...options });
+export const getGraph = <ThrowOnError extends boolean = false>(options: Options<GetGraphData, ThrowOnError>) => (options.client ?? client).get<GetGraphResponses, GetGraphErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/graph', ...options });
 
 /**
  * List memory units
  *
- * List memory units with pagination and optional full-text search. Supports filtering by fact_type.
+ * List memory units with pagination and optional full-text search. Supports filtering by type.
  */
-export const listMemories = <ThrowOnError extends boolean = false>(options: Options<ListMemoriesData, ThrowOnError>) => (options.client ?? client).get<ListMemoriesResponses, ListMemoriesErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/memories/list', ...options });
+export const listMemories = <ThrowOnError extends boolean = false>(options: Options<ListMemoriesData, ThrowOnError>) => (options.client ?? client).get<ListMemoriesResponses, ListMemoriesErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/memories/list', ...options });
 
 /**
- * Search memory
+ * Recall memory
  *
- * Search memory using semantic similarity and spreading activation.
+ * Recall memory using semantic similarity and spreading activation.
  *
- * The fact_type parameter is optional and must be one of:
+ * The type parameter is optional and must be one of:
  * - 'world': General knowledge about people, places, events, and things that happen
  * - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
- * - 'opinion': The agent's formed beliefs, perspectives, and viewpoints
+ * - 'opinion': The bank's formed beliefs, perspectives, and viewpoints
+ * - 'observation': Synthesized observations about entities (generated automatically)
+ *
+ * Set include_entities=true to get entity observations alongside recall results.
  */
-export const searchMemories = <ThrowOnError extends boolean = false>(options: Options<SearchMemoriesData, ThrowOnError>) => (options.client ?? client).post<SearchMemoriesResponses, SearchMemoriesErrors, ThrowOnError>({
-    url: '/api/v1/agents/{agent_id}/memories/search',
+export const recallMemories = <ThrowOnError extends boolean = false>(options: Options<RecallMemoriesData, ThrowOnError>) => (options.client ?? client).post<RecallMemoriesResponses, RecallMemoriesErrors, ThrowOnError>({
+    url: '/v1/default/banks/{bank_id}/memories/recall',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -52,20 +55,20 @@ export const searchMemories = <ThrowOnError extends boolean = false>(options: Op
 });
 
 /**
- * Think and generate answer
+ * Reflect and generate answer
  *
- * Think and formulate an answer using agent identity, world facts, and opinions.
+ * Reflect and formulate an answer using bank identity, world facts, and opinions.
  *
  * This endpoint:
- * 1. Retrieves agent facts (agent's identity)
+ * 1. Retrieves agent facts (bank's identity)
  * 2. Retrieves world facts relevant to the query
- * 3. Retrieves existing opinions (agent's perspectives)
+ * 3. Retrieves existing opinions (bank's perspectives)
  * 4. Uses LLM to formulate a contextual answer
  * 5. Extracts and stores any new opinions formed
  * 6. Returns plain text answer, the facts used, and new opinions
  */
-export const think = <ThrowOnError extends boolean = false>(options: Options<ThinkData, ThrowOnError>) => (options.client ?? client).post<ThinkResponses, ThinkErrors, ThrowOnError>({
-    url: '/api/v1/agents/{agent_id}/think',
+export const reflect = <ThrowOnError extends boolean = false>(options: Options<ReflectData, ThrowOnError>) => (options.client ?? client).post<ReflectResponses, ReflectErrors, ThrowOnError>({
+    url: '/v1/default/banks/{bank_id}/reflect',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -74,25 +77,46 @@ export const think = <ThrowOnError extends boolean = false>(options: Options<Thi
 });
 
 /**
- * List all agents
+ * List all memory banks
  *
  * Get a list of all agents with their profiles
  */
-export const listAgents = <ThrowOnError extends boolean = false>(options?: Options<ListAgentsData, ThrowOnError>) => (options?.client ?? client).get<ListAgentsResponses, unknown, ThrowOnError>({ url: '/api/v1/agents', ...options });
+export const listBanks = <ThrowOnError extends boolean = false>(options?: Options<ListBanksData, ThrowOnError>) => (options?.client ?? client).get<ListBanksResponses, unknown, ThrowOnError>({ url: '/v1/default/banks', ...options });
 
 /**
- * Get memory statistics for an agent
+ * Get statistics for memory bank
  *
  * Get statistics about nodes and links for a specific agent
  */
-export const getAgentStats = <ThrowOnError extends boolean = false>(options: Options<GetAgentStatsData, ThrowOnError>) => (options.client ?? client).get<GetAgentStatsResponses, GetAgentStatsErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/stats', ...options });
+export const getAgentStats = <ThrowOnError extends boolean = false>(options: Options<GetAgentStatsData, ThrowOnError>) => (options.client ?? client).get<GetAgentStatsResponses, GetAgentStatsErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/stats', ...options });
+
+/**
+ * List entities
+ *
+ * List all entities (people, organizations, etc.) known by the bank, ordered by mention count.
+ */
+export const listEntities = <ThrowOnError extends boolean = false>(options: Options<ListEntitiesData, ThrowOnError>) => (options.client ?? client).get<ListEntitiesResponses, ListEntitiesErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/entities', ...options });
+
+/**
+ * Get entity details
+ *
+ * Get detailed information about an entity including observations (mental model).
+ */
+export const getEntity = <ThrowOnError extends boolean = false>(options: Options<GetEntityData, ThrowOnError>) => (options.client ?? client).get<GetEntityResponses, GetEntityErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/entities/{entity_id}', ...options });
+
+/**
+ * Regenerate entity observations
+ *
+ * Regenerate observations for an entity based on all facts mentioning it.
+ */
+export const regenerateEntityObservations = <ThrowOnError extends boolean = false>(options: Options<RegenerateEntityObservationsData, ThrowOnError>) => (options.client ?? client).post<RegenerateEntityObservationsResponses, RegenerateEntityObservationsErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/entities/{entity_id}/regenerate', ...options });
 
 /**
  * List documents
  *
  * List documents with pagination and optional search. Documents are the source content from which memory units are extracted.
  */
-export const listDocuments = <ThrowOnError extends boolean = false>(options: Options<ListDocumentsData, ThrowOnError>) => (options.client ?? client).get<ListDocumentsResponses, ListDocumentsErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/documents', ...options });
+export const listDocuments = <ThrowOnError extends boolean = false>(options: Options<ListDocumentsData, ThrowOnError>) => (options.client ?? client).get<ListDocumentsResponses, ListDocumentsErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/documents', ...options });
 
 /**
  * Delete a document
@@ -106,26 +130,92 @@ export const listDocuments = <ThrowOnError extends boolean = false>(options: Opt
  *
  * This operation cannot be undone.
  */
-export const deleteDocument = <ThrowOnError extends boolean = false>(options: Options<DeleteDocumentData, ThrowOnError>) => (options.client ?? client).delete<DeleteDocumentResponses, DeleteDocumentErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/documents/{document_id}', ...options });
+export const deleteDocument = <ThrowOnError extends boolean = false>(options: Options<DeleteDocumentData, ThrowOnError>) => (options.client ?? client).delete<DeleteDocumentResponses, DeleteDocumentErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/documents/{document_id}', ...options });
 
 /**
  * Get document details
  *
  * Get a specific document including its original text
  */
-export const getDocument = <ThrowOnError extends boolean = false>(options: Options<GetDocumentData, ThrowOnError>) => (options.client ?? client).get<GetDocumentResponses, GetDocumentErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/documents/{document_id}', ...options });
+export const getDocument = <ThrowOnError extends boolean = false>(options: Options<GetDocumentData, ThrowOnError>) => (options.client ?? client).get<GetDocumentResponses, GetDocumentErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/documents/{document_id}', ...options });
 
 /**
- * Clear agent memories
+ * List async operations
  *
- * Delete memory units for an agent. Optionally filter by fact_type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The agent profile (personality and background) will be preserved.
+ * Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations
  */
-export const clearAgentMemories = <ThrowOnError extends boolean = false>(options: Options<ClearAgentMemoriesData, ThrowOnError>) => (options.client ?? client).delete<ClearAgentMemoriesResponses, ClearAgentMemoriesErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/memories', ...options });
+export const listOperations = <ThrowOnError extends boolean = false>(options: Options<ListOperationsData, ThrowOnError>) => (options.client ?? client).get<ListOperationsResponses, ListOperationsErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/operations', ...options });
 
 /**
- * Store multiple memories
+ * Cancel a pending async operation
  *
- * Store multiple memory items in batch with automatic fact extraction.
+ * Cancel a pending async operation by removing it from the queue
+ */
+export const cancelOperation = <ThrowOnError extends boolean = false>(options: Options<CancelOperationData, ThrowOnError>) => (options.client ?? client).delete<CancelOperationResponses, CancelOperationErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/operations/{operation_id}', ...options });
+
+/**
+ * Get memory bank profile
+ *
+ * Get personality traits and background for a memory bank. Auto-creates agent with defaults if not exists.
+ */
+export const getBankProfile = <ThrowOnError extends boolean = false>(options: Options<GetBankProfileData, ThrowOnError>) => (options.client ?? client).get<GetBankProfileResponses, GetBankProfileErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/profile', ...options });
+
+/**
+ * Update memory bank personality
+ *
+ * Update bank's Big Five personality traits and bias strength
+ */
+export const updateBankPersonality = <ThrowOnError extends boolean = false>(options: Options<UpdateBankPersonalityData, ThrowOnError>) => (options.client ?? client).put<UpdateBankPersonalityResponses, UpdateBankPersonalityErrors, ThrowOnError>({
+    url: '/v1/default/banks/{bank_id}/profile',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Add/merge memory bank background
+ *
+ * Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.
+ */
+export const addBankBackground = <ThrowOnError extends boolean = false>(options: Options<AddBankBackgroundData, ThrowOnError>) => (options.client ?? client).post<AddBankBackgroundResponses, AddBankBackgroundErrors, ThrowOnError>({
+    url: '/v1/default/banks/{bank_id}/background',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Create or update memory bank
+ *
+ * Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.
+ */
+export const createOrUpdateBank = <ThrowOnError extends boolean = false>(options: Options<CreateOrUpdateBankData, ThrowOnError>) => (options.client ?? client).put<CreateOrUpdateBankResponses, CreateOrUpdateBankErrors, ThrowOnError>({
+    url: '/v1/default/banks/{bank_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Clear memory bank memories
+ *
+ * Delete memory units for a memory bank. Optionally filter by type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+ */
+export const clearBankMemories = <ThrowOnError extends boolean = false>(options: Options<ClearBankMemoriesData, ThrowOnError>) => (options.client ?? client).delete<ClearBankMemoriesResponses, ClearBankMemoriesErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/memories', ...options });
+
+/**
+ * Retain memories
+ *
+ * Retain memory items with automatic fact extraction.
+ *
+ * This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing
+ * via the async parameter.
  *
  * Features:
  * - Efficient batch processing
@@ -133,6 +223,7 @@ export const clearAgentMemories = <ThrowOnError extends boolean = false>(options
  * - Entity recognition and linking
  * - Document tracking with automatic upsert (when document_id is provided)
  * - Temporal and semantic linking
+ * - Optional asynchronous processing
  *
  * The system automatically:
  * 1. Extracts semantic facts from the content
@@ -141,113 +232,19 @@ export const clearAgentMemories = <ThrowOnError extends boolean = false>(options
  * 4. Creates temporal, semantic, and entity links
  * 5. Tracks document metadata
  *
- * Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
- */
-export const batchPutMemories = <ThrowOnError extends boolean = false>(options: Options<BatchPutMemoriesData, ThrowOnError>) => (options.client ?? client).post<BatchPutMemoriesResponses, BatchPutMemoriesErrors, ThrowOnError>({
-    url: '/api/v1/agents/{agent_id}/memories',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-/**
- * Store multiple memories asynchronously
+ * When async=true:
+ * - Returns immediately after queuing the task
+ * - Processing happens in the background
+ * - Use the operations endpoint to monitor progress
  *
- * Store multiple memory items in batch asynchronously using the task backend.
- *
- * This endpoint returns immediately after queuing the task, without waiting for completion.
- * The actual processing happens in the background.
- *
- * Features:
- * - Immediate response (non-blocking)
- * - Background processing via task queue
- * - Efficient batch processing
- * - Automatic fact extraction from natural language
- * - Entity recognition and linking
- * - Document tracking with automatic upsert (when document_id is provided)
- * - Temporal and semantic linking
- *
- * The system automatically:
- * 1. Queues the batch put task
- * 2. Returns immediately with success=True, queued=True
- * 3. Processes in background: extracts facts, generates embeddings, creates links
+ * When async=false (default):
+ * - Waits for processing to complete
+ * - Returns after all memories are stored
  *
  * Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
  */
-export const batchPutAsync = <ThrowOnError extends boolean = false>(options: Options<BatchPutAsyncData, ThrowOnError>) => (options.client ?? client).post<BatchPutAsyncResponses, BatchPutAsyncErrors, ThrowOnError>({
-    url: '/api/v1/agents/{agent_id}/memories/async',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-/**
- * List async operations
- *
- * Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations
- */
-export const listOperations = <ThrowOnError extends boolean = false>(options: Options<ListOperationsData, ThrowOnError>) => (options.client ?? client).get<ListOperationsResponses, ListOperationsErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/operations', ...options });
-
-/**
- * Cancel a pending async operation
- *
- * Cancel a pending async operation by removing it from the queue
- */
-export const cancelOperation = <ThrowOnError extends boolean = false>(options: Options<CancelOperationData, ThrowOnError>) => (options.client ?? client).delete<CancelOperationResponses, CancelOperationErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/operations/{operation_id}', ...options });
-
-/**
- * Delete a memory unit
- *
- * Delete a single memory unit and all its associated links (temporal, semantic, and entity links)
- */
-export const deleteMemoryUnit = <ThrowOnError extends boolean = false>(options: Options<DeleteMemoryUnitData, ThrowOnError>) => (options.client ?? client).delete<DeleteMemoryUnitResponses, DeleteMemoryUnitErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/memories/{unit_id}', ...options });
-
-/**
- * Get agent profile
- *
- * Get personality traits and background for an agent. Auto-creates agent with defaults if not exists.
- */
-export const getAgentProfile = <ThrowOnError extends boolean = false>(options: Options<GetAgentProfileData, ThrowOnError>) => (options.client ?? client).get<GetAgentProfileResponses, GetAgentProfileErrors, ThrowOnError>({ url: '/api/v1/agents/{agent_id}/profile', ...options });
-
-/**
- * Update agent personality
- *
- * Update agent's Big Five personality traits and bias strength
- */
-export const updateAgentPersonality = <ThrowOnError extends boolean = false>(options: Options<UpdateAgentPersonalityData, ThrowOnError>) => (options.client ?? client).put<UpdateAgentPersonalityResponses, UpdateAgentPersonalityErrors, ThrowOnError>({
-    url: '/api/v1/agents/{agent_id}/profile',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-/**
- * Add/merge agent background
- *
- * Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.
- */
-export const addAgentBackground = <ThrowOnError extends boolean = false>(options: Options<AddAgentBackgroundData, ThrowOnError>) => (options.client ?? client).post<AddAgentBackgroundResponses, AddAgentBackgroundErrors, ThrowOnError>({
-    url: '/api/v1/agents/{agent_id}/background',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-/**
- * Create or update agent
- *
- * Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.
- */
-export const createOrUpdateAgent = <ThrowOnError extends boolean = false>(options: Options<CreateOrUpdateAgentData, ThrowOnError>) => (options.client ?? client).put<CreateOrUpdateAgentResponses, CreateOrUpdateAgentErrors, ThrowOnError>({
-    url: '/api/v1/agents/{agent_id}',
+export const retainMemories = <ThrowOnError extends boolean = false>(options: Options<RetainMemoriesData, ThrowOnError>) => (options.client ?? client).post<RetainMemoriesResponses, RetainMemoriesErrors, ThrowOnError>({
+    url: '/v1/default/banks/{bank_id}/memories',
     ...options,
     headers: {
         'Content-Type': 'application/json',

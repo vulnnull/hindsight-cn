@@ -4,24 +4,24 @@ sidebar_position: 5
 
 # Opinions
 
-How agents form, store, and evolve beliefs.
+How memory banks form, store, and evolve beliefs.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 ## What Are Opinions?
 
-Opinions are beliefs formed by the agent based on evidence and personality. Unlike world facts (objective information received) or agent facts (actions taken), opinions are **judgments** with confidence scores.
+Opinions are beliefs formed by the memory bank based on evidence and personality. Unlike world facts (objective information received) or agent facts (actions taken), opinions are **judgments** with confidence scores.
 
 | Type | Example | Confidence |
 |------|---------|------------|
 | World Fact | "Python was created in 1991" | — |
-| Agent Fact | "I recommended Python to Bob" | — |
+| Memory bank Fact | "I recommended Python to Bob" | — |
 | Opinion | "Python is the best language for data science" | 0.85 |
 
 ## How Opinions Form
 
-Opinions are created during `think` operations when the agent:
+Opinions are created during `think` operations when the memory bank:
 1. Retrieves relevant facts
 2. Applies personality traits
 3. Forms a judgment
@@ -111,7 +111,7 @@ Different personalities form different opinions from the same facts:
 <TabItem value="python" label="Python">
 
 ```python
-# Create two agents with different personalities
+# Create two memory banks with different personalities
 client.create_agent(
     agent_id="open-minded",
     personality={"openness": 0.9, "conscientiousness": 0.3, "bias_strength": 0.7}

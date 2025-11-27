@@ -34,7 +34,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
-    agent_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    bank_id: Mapped[str] = mapped_column(Text, primary_key=True)
     original_text: Mapped[Optional[str]] = mapped_column(Text)
     content_hash: Mapped[Optional[str]] = mapped_column(Text)
     doc_metadata: Mapped[dict] = mapped_column("metadata", JSONB, server_default=sql_text("'{}'::jsonb"))
@@ -49,7 +49,7 @@ class Document(Base):
     memory_units = relationship("MemoryUnit", back_populates="document", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index("idx_documents_agent_id", "agent_id"),
+        Index("idx_documents_bank_id", "bank_id"),
         Index("idx_documents_content_hash", "content_hash"),
     )
 
@@ -61,7 +61,7 @@ class MemoryUnit(Base):
     id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=sql_text("uuid_generate_v4()")
     )
-    agent_id: Mapped[str] = mapped_column(Text, nullable=False)
+    bank_id: Mapped[str] = mapped_column(Text, nullable=False)
     document_id: Mapped[Optional[str]] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding = mapped_column(Vector(384))  # pgvector type
@@ -99,12 +99,12 @@ class MemoryUnit(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["document_id", "agent_id"],
-            ["documents.id", "documents.agent_id"],
+            ["document_id", "bank_id"],
+            ["documents.id", "documents.bank_id"],
             name="memory_units_document_fkey",
             ondelete="CASCADE",
         ),
-        CheckConstraint("fact_type IN ('world', 'agent', 'opinion', 'observation')"),
+        CheckConstraint("fact_type IN ('world', 'bank', 'opinion', 'observation')"),
         CheckConstraint("confidence_score IS NULL OR (confidence_score >= 0.0 AND confidence_score <= 1.0)"),
         CheckConstraint(
             "(fact_type = 'opinion' AND confidence_score IS NOT NULL) OR "
@@ -112,31 +112,31 @@ class MemoryUnit(Base):
             "(fact_type NOT IN ('opinion', 'observation') AND confidence_score IS NULL)",
             name="confidence_score_fact_type_check"
         ),
-        Index("idx_memory_units_agent_id", "agent_id"),
+        Index("idx_memory_units_bank_id", "bank_id"),
         Index("idx_memory_units_document_id", "document_id"),
         Index("idx_memory_units_event_date", "event_date", postgresql_ops={"event_date": "DESC"}),
-        Index("idx_memory_units_agent_date", "agent_id", "event_date", postgresql_ops={"event_date": "DESC"}),
+        Index("idx_memory_units_bank_date", "bank_id", "event_date", postgresql_ops={"event_date": "DESC"}),
         Index("idx_memory_units_access_count", "access_count", postgresql_ops={"access_count": "DESC"}),
         Index("idx_memory_units_fact_type", "fact_type"),
-        Index("idx_memory_units_agent_fact_type", "agent_id", "fact_type"),
-        Index("idx_memory_units_agent_type_date", "agent_id", "fact_type", "event_date", postgresql_ops={"event_date": "DESC"}),
+        Index("idx_memory_units_bank_fact_type", "bank_id", "fact_type"),
+        Index("idx_memory_units_bank_type_date", "bank_id", "fact_type", "event_date", postgresql_ops={"event_date": "DESC"}),
         Index(
             "idx_memory_units_opinion_confidence",
-            "agent_id",
+            "bank_id",
             "confidence_score",
             postgresql_where=sql_text("fact_type = 'opinion'"),
             postgresql_ops={"confidence_score": "DESC"}
         ),
         Index(
             "idx_memory_units_opinion_date",
-            "agent_id",
+            "bank_id",
             "event_date",
             postgresql_where=sql_text("fact_type = 'opinion'"),
             postgresql_ops={"event_date": "DESC"}
         ),
         Index(
             "idx_memory_units_observation_date",
-            "agent_id",
+            "bank_id",
             "event_date",
             postgresql_where=sql_text("fact_type = 'observation'"),
             postgresql_ops={"event_date": "DESC"}
@@ -158,7 +158,7 @@ class Entity(Base):
         UUID(as_uuid=True), primary_key=True, server_default=sql_text("uuid_generate_v4()")
     )
     canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
-    agent_id: Mapped[str] = mapped_column(Text, nullable=False)
+    bank_id: Mapped[str] = mapped_column(Text, nullable=False)
     entity_metadata: Mapped[dict] = mapped_column("metadata", JSONB, server_default=sql_text("'{}'::jsonb"))
     first_seen: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now()
@@ -185,9 +185,9 @@ class Entity(Base):
     )
 
     __table_args__ = (
-        Index("idx_entities_agent_id", "agent_id"),
+        Index("idx_entities_bank_id", "bank_id"),
         Index("idx_entities_canonical_name", "canonical_name"),
-        Index("idx_entities_agent_name", "agent_id", "canonical_name"),
+        Index("idx_entities_bank_name", "bank_id", "canonical_name"),
     )
 
 
@@ -264,6 +264,11 @@ class MemoryLink(Base):
     entity = relationship("Entity", back_populates="memory_links")
 
     __table_args__ = (
+        CheckConstraint(
+            "link_type IN ('temporal', 'semantic', 'entity', 'causes', 'caused_by', 'enables', 'prevents')",
+            name="memory_links_link_type_check"
+        ),
+        CheckConstraint("weight >= 0.0 AND weight <= 1.0", name="memory_links_weight_check"),
         Index("idx_memory_links_from", "from_unit_id"),
         Index("idx_memory_links_to", "to_unit_id"),
         Index("idx_memory_links_type", "link_type"),
@@ -278,11 +283,11 @@ class MemoryLink(Base):
     )
 
 
-class Agent(Base):
-    """Agent profiles with personality traits and background."""
-    __tablename__ = "agents"
+class Bank(Base):
+    """Memory bank profiles with personality traits and background."""
+    __tablename__ = "banks"
 
-    agent_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    bank_id: Mapped[str] = mapped_column(Text, primary_key=True)
     personality: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,
@@ -300,5 +305,5 @@ class Agent(Base):
     )
 
     __table_args__ = (
-        Index("idx_agents_agent_id", "agent_id"),
+        Index("idx_banks_bank_id", "bank_id"),
     )

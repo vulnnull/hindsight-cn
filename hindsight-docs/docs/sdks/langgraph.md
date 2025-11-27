@@ -128,11 +128,11 @@ graph = StateGraph()
 
 Namespaces are converted to Hindsight agent IDs:
 
-| Namespace | Agent ID |
+| Namespace | bank ID |
 |-----------|----------|
 | `("user",)` | `user` |
 | `("user", "session")` | `user__session` |
 | `("app", "v1", "data")` | `app__v1__data` |
 | `()` | `default_agent_id` |
 
-Agents are created automatically if they don't exist.
+Memory banks are created automatically if they don't exist.

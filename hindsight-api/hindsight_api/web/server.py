@@ -111,6 +111,7 @@ if __name__ == "__main__":
         "log_level": args.log_level,
         "access_log": args.access_log,
         "proxy_headers": args.proxy_headers,
+        "ws": "wsproto",  # Use wsproto instead of websockets to avoid deprecation warnings
     }
 
     # Add optional parameters if provided

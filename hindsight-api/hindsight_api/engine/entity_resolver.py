@@ -31,7 +31,7 @@ class EntityResolver:
 
     async def resolve_entities_batch(
         self,
-        agent_id: str,
+        bank_id: str,
         entities_data: List[Dict],
         context: str,
         unit_event_date,
@@ -44,7 +44,7 @@ class EntityResolver:
         all entities with minimal DB queries.
 
         Args:
-            agent_id: Agent ID
+            bank_id: bank ID
             entities_data: List of dicts with 'text', 'type', 'nearby_entities'
             context: Context where entities appear
             unit_event_date: When this unit was created
@@ -58,34 +58,34 @@ class EntityResolver:
 
         if conn is None:
             async with acquire_with_retry(self.pool) as conn:
-                return await self._resolve_entities_batch_impl(conn, agent_id, entities_data, context, unit_event_date)
+                return await self._resolve_entities_batch_impl(conn, bank_id, entities_data, context, unit_event_date)
         else:
-            return await self._resolve_entities_batch_impl(conn, agent_id, entities_data, context, unit_event_date)
+            return await self._resolve_entities_batch_impl(conn, bank_id, entities_data, context, unit_event_date)
 
-    async def _resolve_entities_batch_impl(self, conn, agent_id: str, entities_data: List[Dict], context: str, unit_event_date) -> List[str]:
-        # Query ALL candidates for this agent
+    async def _resolve_entities_batch_impl(self, conn, bank_id: str, entities_data: List[Dict], context: str, unit_event_date) -> List[str]:
+        # Query ALL candidates for this bank
         all_entities = await conn.fetch(
             """
             SELECT canonical_name, id, metadata, last_seen, mention_count
             FROM entities
-            WHERE agent_id = $1
+            WHERE bank_id = $1
             """,
-            agent_id
+            bank_id
         )
 
         # Build entity ID to name mapping for co-occurrence lookups
         entity_id_to_name = {row['id']: row['canonical_name'].lower() for row in all_entities}
 
-        # Query ALL co-occurrences for this agent's entities in one query
+        # Query ALL co-occurrences for this bank's entities in one query
         # This builds a map of entity_id -> set of co-occurring entity names
         all_cooccurrences = await conn.fetch(
             """
             SELECT ec.entity_id_1, ec.entity_id_2, ec.cooccurrence_count
             FROM entity_cooccurrences ec
-            WHERE ec.entity_id_1 IN (SELECT id FROM entities WHERE agent_id = $1)
-               OR ec.entity_id_2 IN (SELECT id FROM entities WHERE agent_id = $1)
+            WHERE ec.entity_id_1 IN (SELECT id FROM entities WHERE bank_id = $1)
+               OR ec.entity_id_2 IN (SELECT id FROM entities WHERE bank_id = $1)
             """,
-            agent_id
+            bank_id
         )
 
         # Build co-occurrence map: entity_id -> set of co-occurring entity names (lowercase)
@@ -205,18 +205,18 @@ class EntityResolver:
         if entities_to_create:
             for idx, entity_data in entities_to_create:
                 # Use INSERT ... ON CONFLICT to atomically get-or-create
-                # The unique index is on (agent_id, LOWER(canonical_name))
+                # The unique index is on (bank_id, LOWER(canonical_name))
                 row = await conn.fetchrow(
                     """
-                    INSERT INTO entities (agent_id, canonical_name, first_seen, last_seen, mention_count)
+                    INSERT INTO entities (bank_id, canonical_name, first_seen, last_seen, mention_count)
                     VALUES ($1, $2, $3, $4, 1)
-                    ON CONFLICT (agent_id, LOWER(canonical_name))
+                    ON CONFLICT (bank_id, LOWER(canonical_name))
                     DO UPDATE SET
                         mention_count = entities.mention_count + 1,
                         last_seen = EXCLUDED.last_seen
                     RETURNING id
                     """,
-                    agent_id,
+                    bank_id,
                     entity_data['text'],
                     unit_event_date,
                     unit_event_date
@@ -227,7 +227,7 @@ class EntityResolver:
 
     async def resolve_entity(
         self,
-        agent_id: str,
+        bank_id: str,
         entity_text: str,
         context: str,
         nearby_entities: List[Dict],
@@ -237,7 +237,7 @@ class EntityResolver:
         Resolve an entity to a canonical entity ID.
 
         Args:
-            agent_id: Agent ID (entities are scoped to agents)
+            bank_id: bank ID (entities are scoped to agents)
             entity_text: Entity text ("Alice", "Google", etc.)
             context: Context where entity appears
             nearby_entities: Other entities in the same unit
@@ -252,7 +252,7 @@ class EntityResolver:
                 """
                 SELECT id, canonical_name, metadata, last_seen
                 FROM entities
-                WHERE agent_id = $1
+                WHERE bank_id = $1
                   AND (
                     canonical_name ILIKE $2
                     OR canonical_name ILIKE $3
@@ -260,13 +260,13 @@ class EntityResolver:
                   )
                 ORDER BY mention_count DESC
                 """,
-                agent_id, entity_text, f"%{entity_text}%"
+                bank_id, entity_text, f"%{entity_text}%"
             )
 
             if not candidates:
                 # New entity - create it
                 return await self._create_entity(
-                    conn, agent_id, entity_text, unit_event_date
+                    conn, bank_id, entity_text, unit_event_date
                 )
 
             # Score candidates based on:
@@ -351,13 +351,13 @@ class EntityResolver:
             else:
                 # Not confident - create new entity
                 return await self._create_entity(
-                    conn, agent_id, entity_text, unit_event_date
+                    conn, bank_id, entity_text, unit_event_date
                 )
 
     async def _create_entity(
         self,
         conn,
-        agent_id: str,
+        bank_id: str,
         entity_text: str,
         event_date,
     ) -> str:
@@ -369,7 +369,7 @@ class EntityResolver:
 
         Args:
             conn: Database connection
-            agent_id: Agent ID
+            bank_id: bank ID
             entity_text: Entity text
             event_date: When first seen
 
@@ -378,15 +378,15 @@ class EntityResolver:
         """
         entity_id = await conn.fetchval(
             """
-            INSERT INTO entities (agent_id, canonical_name, first_seen, last_seen, mention_count)
+            INSERT INTO entities (bank_id, canonical_name, first_seen, last_seen, mention_count)
             VALUES ($1, $2, $3, $4, 1)
-            ON CONFLICT (agent_id, LOWER(canonical_name))
+            ON CONFLICT (bank_id, LOWER(canonical_name))
             DO UPDATE SET
                 mention_count = entities.mention_count + 1,
                 last_seen = EXCLUDED.last_seen
             RETURNING id
             """,
-            agent_id, entity_text, event_date, event_date
+            bank_id, entity_text, event_date, event_date
         )
         return entity_id
 
@@ -547,14 +547,14 @@ class EntityResolver:
 
     async def get_entity_by_text(
         self,
-        agent_id: str,
+        bank_id: str,
         entity_text: str,
     ) -> Optional[str]:
         """
         Find an entity by text (for query resolution).
 
         Args:
-            agent_id: Agent ID
+            bank_id: bank ID
             entity_text: Entity text to search for
 
         Returns:
@@ -564,12 +564,12 @@ class EntityResolver:
             row = await conn.fetchrow(
                 """
                 SELECT id FROM entities
-                WHERE agent_id = $1
+                WHERE bank_id = $1
                   AND canonical_name ILIKE $2
                 ORDER BY mention_count DESC
                 LIMIT 1
                 """,
-                agent_id, entity_text
+                bank_id, entity_text
             )
 
             return row['id'] if row else None

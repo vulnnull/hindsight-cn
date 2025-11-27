@@ -16,7 +16,7 @@ The HTTP API reference is automatically generated from our OpenAPI specification
 |----------|-----------|
 | **Memory Operations** | Store, search, list, delete memories |
 | **Reasoning** | Think and generate personality-aware responses |
-| **Agent Management** | Create, update, list agents and profiles |
+| **Memory bank Management** | Create, update, list memory banks and profiles |
 | **Documents** | Manage document groupings |
 | **Visualization** | Get entity graph data |
 
@@ -29,7 +29,7 @@ The MCP (Model Context Protocol) API exposes Hindsight tools for AI assistants l
 | `hindsight_search` | Search memories |
 | `hindsight_think` | Generate personality-aware response |
 | `hindsight_store` | Store new memory |
-| `hindsight_agents` | List available agents |
+| `hindsight_agents` | List available memory banks |
 
 [MCP Tools Reference →](/api-reference/mcp)
 
