@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { agentId } = await params;
-    const response = await sdk.getBankStats({
+    const response = await sdk.getAgentStats({
       client: lowLevelClient,
       path: { bank_id: agentId }
     });

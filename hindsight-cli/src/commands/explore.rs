@@ -74,6 +74,7 @@ struct App {
 
     documents: Vec<Map<String, Value>>,
     documents_state: ListState,
+    viewing_document: Option<Map<String, Value>>,
 
     // Recall state
     recall_query: String,
@@ -121,6 +122,7 @@ impl App {
 
             documents: Vec::new(),
             documents_state: ListState::default(),
+            viewing_document: None,
 
             recall_query: String::new(),
             recall_results: Vec::new(),
@@ -459,12 +461,46 @@ impl App {
                     }
                 }
             }
+            View::Documents(bank_id) => {
+                if let Some(i) = self.documents_state.selected() {
+                    if let Some(doc) = self.documents.get(i) {
+                        // Fetch full document content
+                        let doc_id = doc.get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+
+                        if !doc_id.is_empty() {
+                            match self.client.get_document(bank_id, doc_id, false) {
+                                Ok(full_doc) => {
+                                    // Convert to Map for display
+                                    let doc_map: Map<String, Value> = serde_json::from_value(
+                                        serde_json::to_value(full_doc)?
+                                    )?;
+                                    self.viewing_document = Some(doc_map);
+                                    self.status_message = format!("Viewing document: {}", doc_id);
+                                }
+                                Err(e) => {
+                                    self.error_message = format!("Failed to load document: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
     }
 
     fn go_back(&mut self) {
+        // If viewing a document, close it first
+        if self.viewing_document.is_some() {
+            self.viewing_document = None;
+            self.status_message = "Closed document view".to_string();
+            return;
+        }
+
+        // Otherwise go back to previous view
         if let Some(prev_view) = self.view_history.pop() {
             self.view = prev_view;
             let _ = self.refresh();
@@ -476,6 +512,31 @@ impl App {
             self.view_history.push(self.view.clone());
             self.view = new_view;
             self.refresh()?;
+        }
+        Ok(())
+    }
+
+    fn delete_selected_document(&mut self) -> Result<()> {
+        if let View::Documents(bank_id) = &self.view {
+            if let Some(i) = self.documents_state.selected() {
+                if let Some(doc) = self.documents.get(i) {
+                    let doc_id = doc.get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    if !doc_id.is_empty() {
+                        match self.client.delete_document(bank_id, doc_id, false) {
+                            Ok(_) => {
+                                self.status_message = format!("Deleted document: {}", doc_id);
+                                self.refresh()?;
+                            }
+                            Err(e) => {
+                                self.error_message = format!("Failed to delete document: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -779,31 +840,77 @@ fn render_entities(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_documents(f: &mut Frame, app: &mut App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .documents
-        .iter()
-        .map(|doc| {
-            let id = doc.get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            let content_type = doc.get("content_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            let content = format!("{} ({})", id, content_type);
-            ListItem::new(content).style(Style::default().fg(Color::White))
-        })
-        .collect();
+    // If viewing a document, show its content
+    if let Some(doc) = &app.viewing_document {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(5),  // Document metadata
+                Constraint::Min(0),     // Content
+            ])
+            .split(area);
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Documents"))
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol(">> ");
+        // Metadata section
+        let doc_id = doc.get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let content_type = doc.get("content_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let created_at = doc.get("created_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
 
-    f.render_stateful_widget(list, area, &mut app.documents_state);
+        let metadata_text = format!(
+            "ID: {}\nType: {}\nCreated: {}\n",
+            doc_id, content_type, created_at
+        );
+
+        let metadata = Paragraph::new(metadata_text)
+            .block(Block::default().borders(Borders::ALL).title("Document Metadata"))
+            .style(Style::default().fg(Color::Cyan));
+
+        f.render_widget(metadata, chunks[0]);
+
+        // Content section
+        let content = doc.get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("No content available");
+
+        let content_widget = Paragraph::new(content)
+            .block(Block::default().borders(Borders::ALL).title("Content (Esc to close)"))
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(Color::White));
+
+        f.render_widget(content_widget, chunks[1]);
+    } else {
+        // Show document list
+        let items: Vec<ListItem> = app
+            .documents
+            .iter()
+            .map(|doc| {
+                let id = doc.get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let content_type = doc.get("content_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let content = format!("{} ({})", id, content_type);
+                ListItem::new(content).style(Style::default().fg(Color::White))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("Documents"))
+            .highlight_style(
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(">> ");
+
+        f.render_stateful_widget(list, area, &mut app.documents_state);
+    }
 }
 
 fn render_recall(f: &mut Frame, app: &mut App, area: Rect) {
@@ -1007,6 +1114,13 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<()> {
                             KeyCode::Char('/') => {
                                 if matches!(app.view, View::Recall(_) | View::Reflect(_)) {
                                     app.input_mode = InputMode::Query;
+                                }
+                            }
+
+                            // Delete document
+                            KeyCode::Delete => {
+                                if matches!(app.view, View::Documents(_)) {
+                                    app.delete_selected_document()?;
                                 }
                             }
 

@@ -11,7 +11,9 @@ export async function GET(
       client: lowLevelClient,
       path: { bank_id: agentId }
     });
-    return NextResponse.json(response.data, { status: 200 });
+    // Ensure proper JSON serialization
+    const data = JSON.parse(JSON.stringify(response.data));
+    return NextResponse.json(data, { status: 200 });
   } catch (error) {
     console.error('Error fetching operations:', error);
     return NextResponse.json(
@@ -42,7 +44,9 @@ export async function DELETE(
       path: { bank_id: agentId, operation_id: operationId }
     });
 
-    return NextResponse.json(response.data, { status: 200 });
+    // Ensure proper JSON serialization
+    const data = JSON.parse(JSON.stringify(response.data));
+    return NextResponse.json(data, { status: 200 });
   } catch (error) {
     console.error('Error canceling operation:', error);
     return NextResponse.json(
