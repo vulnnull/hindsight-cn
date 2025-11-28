@@ -8,11 +8,13 @@ type Phase = 'retrieval' | 'rrf' | 'rerank' | 'final';
 type RetrievalMethod = 'semantic' | 'bm25' | 'graph' | 'temporal';
 type FactType = 'world' | 'bank' | 'opinion';
 
+type Budget = 'low' | 'mid' | 'high';
+
 interface SearchPane {
   id: number;
   query: string;
   factTypes: FactType[];
-  thinkingBudget: number;
+  budget: Budget;
   maxTokens: number;
   results: any[] | null;
   trace: any | null;
@@ -29,7 +31,7 @@ export function SearchDebugView() {
       id: 1,
       query: '',
       factTypes: ['world'],
-      thinkingBudget: 100,
+      budget: 'mid',
       maxTokens: 4096,
       results: null,
       trace: null,
@@ -48,7 +50,7 @@ export function SearchDebugView() {
         id: nextPaneId,
         query: '',
         factTypes: ['world'],
-        thinkingBudget: 100,
+        budget: 'mid',
         maxTokens: 4096,
         results: null,
         trace: null,
@@ -89,13 +91,11 @@ export function SearchDebugView() {
 
     try {
       // Always pass fact types as array for consistent behavior
-      // Map numeric budget to budget level
-      const budgetValue = pane.thinkingBudget <= 30 ? 'low' : pane.thinkingBudget <= 70 ? 'mid' : 'high';
       const data: any = await client.recall({
         bank_id: currentBank,
         query: pane.query,
         types: pane.factTypes,
-        budget: budgetValue,
+        budget: pane.budget,
         max_tokens: pane.maxTokens,
         trace: true,
       });
@@ -454,14 +454,17 @@ export function SearchDebugView() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold mb-1 text-accent-foreground">Budget:</label>
-                  <input
-                    type="number"
-                    value={pane.thinkingBudget}
+                  <select
+                    value={pane.budget}
                     onChange={(e) =>
-                      updatePane(pane.id, { thinkingBudget: parseInt(e.target.value) })
+                      updatePane(pane.id, { budget: e.target.value as Budget })
                     }
-                    className="w-16 px-2 py-1 border-2 border-border bg-background text-foreground rounded text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
+                    className="px-2 py-1 border-2 border-border bg-background text-foreground rounded text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="low">Low</option>
+                    <option value="mid">Mid</option>
+                    <option value="high">High</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold mb-1 text-accent-foreground">Max Tokens:</label>

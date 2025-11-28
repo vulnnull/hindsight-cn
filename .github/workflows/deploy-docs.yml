@@ -2,7 +2,7 @@ name: Deploy Docs to GitHub Pages
 
 on:
   push:
-    branches: [main, renaming-pre-launch]
+    branches: [main]
     paths:
       - 'hindsight-docs/**'
       - '.github/workflows/deploy-docs.yml'

@@ -23,19 +23,13 @@ import logging
 from pydantic import BaseModel, Field
 
 from .query_analyzer import QueryAnalyzer
-from .utils import (
-    extract_facts,
+from .search.scoring import (
     calculate_recency_weight,
     calculate_frequency_weight,
 )
 from .entity_resolver import EntityResolver
-from . import (
-    embedding_utils,
-    link_utils,
-    think_utils,
-    bank_utils,
-    observation_utils,
-)
+from .retain import embedding_utils, bank_utils
+from .search import think_utils, observation_utils
 from .llm_wrapper import LLMConfig
 from .response_models import RecallResult as RecallResultModel, ReflectResult, MemoryFact, EntityState, EntityObservation
 from .task_backend import TaskBackend, AsyncIOQueueBackend
@@ -119,13 +113,14 @@ class MemoryEngine:
                           Increase for parallel think/search operations (e.g., 200-300 for 100+ parallel thinks)
             task_backend: Custom task backend for async task execution. If not provided, uses AsyncIOQueueBackend
         """
+        if not db_url:
+            raise ValueError("Database url is required")
         # Track pg0 instance (if used)
         self._pg0: Optional[EmbeddedPostgres] = None
 
         # Initialize PostgreSQL connection URL
-        # "pg0" or "embedded-pg" are special values that trigger embedded PostgreSQL via pg0
         # The actual URL will be set during initialize() after starting the server
-        self._use_pg0 = db_url in ("pg0", "embedded-pg")
+        self._use_pg0 = db_url == "pg0"
         self.db_url = db_url if not self._use_pg0 else None
 
 
@@ -326,7 +321,6 @@ class MemoryEngine:
                     "DELETE FROM async_operations WHERE id = $1",
                     uuid.UUID(operation_id)
                 )
-            logger.debug(f"Deleted async operation record: {operation_id}")
         except Exception as e:
             logger.error(f"Failed to delete async operation record {operation_id}: {e}")
 
@@ -361,7 +355,7 @@ class MemoryEngine:
         if self._use_pg0:
             self._pg0 = EmbeddedPostgres()
             self.db_url = await self._pg0.ensure_running()
-            logger.info(f"pg0 PostgreSQL running at: {self.db_url}")
+        logger.info(f"Connecting to PostGre instance at {self.db_url}")
 
         # Create connection pool
         # For read-heavy workloads with many parallel think/search operations,
@@ -410,18 +404,12 @@ class MemoryEngine:
         logger.info("close() started")
 
         # Shutdown task backend
-        logger.debug("shutting down task backend")
         await self._task_backend.shutdown()
-        logger.debug("task backend shutdown complete")
 
         # Close pool
         if self._pool is not None:
-            logger.debug("closing connection pool")
             self._pool.terminate()
-            logger.debug("connection pool closed")
             self._pool = None
-        else:
-            logger.debug("no pool to close")
 
         self._initialized = False
 
@@ -432,7 +420,6 @@ class MemoryEngine:
             self._pg0 = None
             logger.info("pg0 stopped")
 
-        logger.debug("close() completed")
 
     async def wait_for_background_tasks(self):
         """
@@ -516,7 +503,6 @@ class MemoryEngine:
             """,
             bank_id, time_lower, time_upper
         )
-        logger.debug(f"      [3.X] Fetched {len(existing_facts)} existing facts in {time_mod.time() - fetch_start:.3f}s")
 
         # If no existing facts, nothing is duplicate
         if not existing_facts:
@@ -563,7 +549,6 @@ class MemoryEngine:
             max_similarity = np.max(similarities) if len(similarities) > 0 else 0
             is_duplicate.append(max_similarity > similarity_threshold)
 
-        logger.debug(f"      [3.X] Computed {len(texts)} x {len(existing_facts)} similarities in {time_mod.time() - comp_start:.3f}s")
 
         return is_duplicate
 
@@ -771,461 +756,25 @@ class MemoryEngine:
         """
         # Backpressure: limit concurrent retains to prevent database contention
         async with self._put_semaphore:
-            start_time = time.time()
-            total_chars = sum(len(item.get("content", "")) for item in contents)
+            # Use the new modular orchestrator
+            from .retain import orchestrator
 
-            # Buffer all logs to avoid interleaving
-            log_buffer = []
-            log_buffer.append(f"{'='*60}")
-            log_buffer.append(f"RETAIN_BATCH_ASYNC START: {bank_id}")
-            log_buffer.append(f"Batch size: {len(contents)} content items, {total_chars:,} chars")
-            log_buffer.append(f"{'='*60}")
-
-            # Get agent name for fact extraction
             pool = await self._get_pool()
-            profile = await bank_utils.get_bank_profile(pool, bank_id)
-            agent_name = profile["name"]
-
-            # Step 1: Extract facts from ALL contents in parallel
-            step_start = time.time()
-
-            # If fact_type_override is 'opinion', extract only opinions; otherwise extract world and agent facts
-            extract_opinions = (fact_type_override == 'opinion')
-
-            # Create tasks for parallel fact extraction using configured LLM
-            fact_extraction_tasks = []
-            for item in contents:
-                content = item["content"]
-                context = item.get("context", "")
-                event_date = item.get("event_date") or utcnow()
-                metadata = item.get("metadata") or {}
-
-                task = extract_facts(content, event_date, context, llm_config=self._llm_config, agent_name=agent_name, extract_opinions=extract_opinions)
-                fact_extraction_tasks.append((task, event_date, context, metadata))
-
-            # Wait for all fact extractions to complete
-            all_fact_results = await asyncio.gather(*[task for task, _, _, _ in fact_extraction_tasks])
-            log_buffer.append(f"[1] Extract facts (parallel): {len(fact_extraction_tasks)} contents in {time.time() - step_start:.3f}s")
-
-            # Flatten and track which facts belong to which content
-            all_fact_texts = []
-            all_fact_dates = []
-            all_occurred_starts = []  # NEW: When fact occurred (range start)
-            all_occurred_ends = []    # NEW: When fact occurred (range end)
-            all_mentioned_ats = []    # NEW: When fact was mentioned
-            all_contexts = []
-            all_fact_entities = []  # NEW: Store LLM-extracted entities per fact
-            all_fact_types = []  # Store fact type (world or agent)
-            all_causal_relations = []  # NEW: Store causal relationships per fact
-            all_metadata = []  # User-defined metadata for each fact
-            content_boundaries = []  # [(start_idx, end_idx), ...]
-
-            current_idx = 0
-            for i, ((_, event_date, context, metadata), fact_dicts) in enumerate(zip(fact_extraction_tasks, all_fact_results)):
-                start_idx = current_idx
-
-                for fact_dict in fact_dicts:
-                    all_fact_texts.append(fact_dict['fact'])
-
-                    # Extract temporal fields (new schema with ranges)
-
-                    try:
-                        # Try new schema first (occurred_start/end)
-                        occurred_start = date_parser.isoparse(fact_dict['occurred_start'])
-                        occurred_end = date_parser.isoparse(fact_dict['occurred_end'])
-                        all_occurred_starts.append(occurred_start)
-                        all_occurred_ends.append(occurred_end)
-                        # Use occurred_start as event_date for backward compatibility
-                        all_fact_dates.append(occurred_start)
-                    except (KeyError, Exception):
-                        # Fallback to old schema (single 'date' field)
-                        try:
-                            fact_date = date_parser.isoparse(fact_dict['date'])
-                        except Exception:
-                            fact_date = event_date
-                        all_fact_dates.append(fact_date)
-                        # For old schema, use same date for start and end (point event)
-                        all_occurred_starts.append(fact_date)
-                        all_occurred_ends.append(fact_date)
-
-                    # mentioned_at is when the fact was mentioned (conversation date)
-                    all_mentioned_ats.append(event_date)
-
-                    all_contexts.append(context)
-                    # Extract entities from fact (default to empty list if not present)
-                    all_fact_entities.append(fact_dict.get('entities', []))
-                    # Extract fact type (use override if provided, else use extracted type or default to 'world')
-                    if fact_type_override:
-                        all_fact_types.append(fact_type_override)
-                    else:
-                        all_fact_types.append(fact_dict.get('fact_type', 'world'))
-                    # Extract causal relations (with global index adjustment)
-                    # Causal relations use fact indices within each content, need to adjust to global indices
-                    causal_relations = fact_dict.get('causal_relations', []) or []
-                    # Adjust target_fact_index to global index by adding start_idx
-                    adjusted_relations = []
-                    for rel in causal_relations:
-                        adjusted_rel = dict(rel)
-                        adjusted_rel['target_fact_index'] = start_idx + rel['target_fact_index']
-                        adjusted_relations.append(adjusted_rel)
-                    all_causal_relations.append(adjusted_relations)
-                    # Each fact inherits metadata from its source content item
-                    all_metadata.append(metadata)
-
-                end_idx = current_idx + len(fact_dicts)
-                content_boundaries.append((start_idx, end_idx))
-                current_idx = end_idx
-
-            total_facts = len(all_fact_texts)
-
-            if total_facts == 0:
-                return [[] for _ in contents]
-
-            # Step 1.5: Add time offsets to preserve fact ordering within each document
-            # This allows retrieval to distinguish between facts that happened earlier vs later
-            # in the same conversation, even when the base event_date is the same
-            SECONDS_PER_FACT = 10  # Each fact gets 10 seconds offset
-            for start_idx, end_idx in content_boundaries:
-                # For each content item, offset its facts sequentially
-                for i in range(start_idx, end_idx):
-                    fact_position = i - start_idx  # 0, 1, 2, ...
-                    offset = timedelta(seconds=fact_position * SECONDS_PER_FACT)
-                    # Add incremental offset to preserve order (facts appear in extraction order)
-                    all_fact_dates[i] = all_fact_dates[i] + offset
-                    all_occurred_starts[i] = all_occurred_starts[i] + offset
-                    all_occurred_ends[i] = all_occurred_ends[i] + offset
-
-            log_buffer.append(f"[1.5] Added time offsets: {SECONDS_PER_FACT}s per fact to preserve ordering")
-
-            # Step 2: Augment fact texts with readable dates for better temporal matching
-            # This allows queries like "camping in June" to match facts that happened in June
-            augmented_texts = []
-            for fact_text, fact_date in zip(all_fact_texts, all_fact_dates):
-                # Format date in readable form
-                readable_date = self._format_readable_date(fact_date)
-                # Augment text with date for embedding (but store original text in DB)
-                augmented_text = f"{fact_text} (happened in {readable_date})"
-                augmented_texts.append(augmented_text)
-
-            # Step 2b: Generate ALL embeddings in ONE batch using augmented texts (HUGE speedup!)
-            step_start = time.time()
-            all_embeddings = await embedding_utils.generate_embeddings_batch(self.embeddings, augmented_texts)
-            log_buffer.append(f"[2] Generate embeddings (parallel): {len(all_embeddings)} embeddings in {time.time() - step_start:.3f}s")
-
-            # Step 3: Process everything in ONE database transaction
-            logger.debug("Getting connection pool")
-            pool = await self._get_pool()
-            logger.debug("Acquiring connection from pool")
-            async with acquire_with_retry(pool) as conn:
-                logger.debug("Starting transaction")
-                async with conn.transaction():
-                    logger.debug("Inside transaction")
-                    try:
-                        # Ensure agent exists in agents table (create with defaults if not exists)
-                        # Update updated_at to reflect recent activity
-                        logger.debug(f"Ensuring agent '{bank_id}' exists in agents table")
-                        await conn.execute(
-                            """
-                            INSERT INTO banks (bank_id, personality, background)
-                            VALUES ($1, $2::jsonb, $3)
-                            ON CONFLICT (bank_id) DO UPDATE
-                            SET updated_at = NOW()
-                            """,
-                            bank_id,
-                            '{"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5, "bias_strength": 0.5}',
-                            ""
-                        )
-
-                        # Handle document tracking with automatic upsert
-                        if document_id:
-                            logger.debug(f"Handling document tracking for {document_id}")
-                            import hashlib
-                            import json
-
-                            # Calculate content hash from all content items
-                            combined_content = "\n".join([c.get("content", "") for c in contents])
-                            content_hash = hashlib.sha256(combined_content.encode()).hexdigest()
-
-                            # Always delete old document first if it exists (cascades to units and links)
-                            # Only delete on the first batch to avoid deleting data we just inserted
-                            if is_first_batch:
-                                deleted = await conn.fetchval(
-                                    "DELETE FROM documents WHERE id = $1 AND bank_id = $2 RETURNING id",
-                                    document_id, bank_id
-                                )
-                                if deleted:
-                                    logger.debug(f"[3.1] Upsert: Deleted existing document '{document_id}' and all its units")
-
-                            # Insert document (or update if exists from concurrent operations)
-                            # Use ON CONFLICT for idempotent behavior in edge cases
-                            await conn.execute(
-                                """
-                                INSERT INTO documents (id, bank_id, original_text, content_hash, metadata)
-                                VALUES ($1, $2, $3, $4, $5)
-                                ON CONFLICT (id, bank_id) DO UPDATE
-                                SET original_text = EXCLUDED.original_text,
-                                    content_hash = EXCLUDED.content_hash,
-                                    metadata = EXCLUDED.metadata,
-                                    updated_at = NOW()
-                                """,
-                                document_id,
-                                bank_id,
-                                combined_content,
-                                content_hash,
-                                json.dumps({})  # Empty metadata dict
-                            )
-                            logger.debug(f"[3.2] Document '{document_id}' stored/updated")
-
-                        # Deduplication check for all facts (batched by time window)
-                        logger.debug("Starting deduplication check")
-                        step_start = time.time()
-
-                        # Group facts by event_date (rounded to 12-hour buckets) for batching
-                        from collections import defaultdict
-                        time_buckets = defaultdict(list)
-                        for idx, (sentence, embedding, fact_date) in enumerate(zip(all_fact_texts, all_embeddings, all_fact_dates)):
-                            # Round to 12-hour bucket to group similar times
-                            bucket_key = fact_date.replace(hour=(fact_date.hour // 12) * 12, minute=0, second=0, microsecond=0)
-                            time_buckets[bucket_key].append((idx, sentence, embedding, fact_date))
-
-                        # Process each bucket in batch
-                        all_is_duplicate = [False] * total_facts  # Initialize all as not duplicate
-                        for bucket_date, bucket_items in time_buckets.items():
-                            indices = [item[0] for item in bucket_items]
-                            sentences = [item[1] for item in bucket_items]
-                            embeddings = [item[2] for item in bucket_items]
-                            # Use bucket_date as representative for time window
-                            dup_flags = await self._find_duplicate_facts_batch(
-                                conn, bank_id, sentences, embeddings, bucket_date, time_window_hours=24
-                            )
-                            # Map results back to original indices
-                            for idx, is_dup in zip(indices, dup_flags):
-                                all_is_duplicate[idx] = is_dup
-
-                        duplicates_filtered = sum(all_is_duplicate)
-                        new_facts = total_facts - duplicates_filtered
-                        logger.debug(f"Deduplication complete: {duplicates_filtered} duplicates filtered, {new_facts} new facts ({len(time_buckets)} time buckets)")
-                        log_buffer.append(f"[3] Deduplication check: {duplicates_filtered} duplicates filtered, {new_facts} new facts in {time.time() - step_start:.3f}s")
-
-                        # Filter out duplicates
-                        filtered_sentences = [s for s, is_dup in zip(all_fact_texts, all_is_duplicate) if not is_dup]
-                        filtered_embeddings = [e for e, is_dup in zip(all_embeddings, all_is_duplicate) if not is_dup]
-                        filtered_dates = [d for d, is_dup in zip(all_fact_dates, all_is_duplicate) if not is_dup]
-                        filtered_occurred_starts = [d for d, is_dup in zip(all_occurred_starts, all_is_duplicate) if not is_dup]
-                        filtered_occurred_ends = [d for d, is_dup in zip(all_occurred_ends, all_is_duplicate) if not is_dup]
-                        filtered_mentioned_ats = [d for d, is_dup in zip(all_mentioned_ats, all_is_duplicate) if not is_dup]
-                        filtered_contexts = [c for c, is_dup in zip(all_contexts, all_is_duplicate) if not is_dup]
-                        filtered_entities = [ents for ents, is_dup in zip(all_fact_entities, all_is_duplicate) if not is_dup]
-                        filtered_fact_types = [ft for ft, is_dup in zip(all_fact_types, all_is_duplicate) if not is_dup]
-                        filtered_metadata = [m for m, is_dup in zip(all_metadata, all_is_duplicate) if not is_dup]
-
-                        # Build index mapping from old indices to new indices (accounting for removed duplicates)
-                        old_to_new_index = {}
-                        new_idx = 0
-                        for old_idx, is_dup in enumerate(all_is_duplicate):
-                            if not is_dup:
-                                old_to_new_index[old_idx] = new_idx
-                                new_idx += 1
-
-                        # Filter and remap causal relations
-                        filtered_causal_relations = []
-                        for old_idx, (relations, is_dup) in enumerate(zip(all_causal_relations, all_is_duplicate)):
-                            if not is_dup:
-                                # Keep relations where both source and target survived deduplication
-                                valid_relations = []
-                                for rel in relations:
-                                    target_idx = rel['target_fact_index']
-                                    # Only keep if target fact wasn't filtered out
-                                    if target_idx in old_to_new_index:
-                                        remapped_rel = dict(rel)
-                                        remapped_rel['target_fact_index'] = old_to_new_index[target_idx]
-                                        valid_relations.append(remapped_rel)
-                                filtered_causal_relations.append(valid_relations)
-
-                        if not filtered_sentences:
-                            logger.debug(f"[PUT_BATCH_ASYNC] All facts were duplicates, returning empty")
-                            return [[] for _ in contents]
-
-                        # Batch insert ALL units
-                        step_start = time.time()
-                        # Convert embeddings to strings for asyncpg vector type
-                        filtered_embeddings_str = [str(emb) for emb in filtered_embeddings]
-                        # Prepare confidence scores (only for opinions)
-                        # If fact_type is 'opinion' and no confidence_score provided, use default of 1.0
-                        confidence_scores = [
-                            confidence_score if confidence_score is not None else 1.0
-                            if ft == 'opinion'
-                            else None
-                            for ft in filtered_fact_types
-                        ]
-                        # Convert metadata dicts to JSON strings for asyncpg
-                        import json
-                        filtered_metadata_json = [json.dumps(m) if m else '{}' for m in filtered_metadata]
-                        results = await conn.fetch(
-                            """
-                            INSERT INTO memory_units (bank_id, document_id, text, context, embedding, event_date, occurred_start, occurred_end, mentioned_at, fact_type, confidence_score, access_count, metadata)
-                            SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::vector[], $6::timestamptz[], $7::timestamptz[], $8::timestamptz[], $9::timestamptz[], $10::text[], $11::float[], $12::integer[], $13::jsonb[])
-                            RETURNING id
-                            """,
-                            [bank_id] * len(filtered_sentences),
-                            [document_id] * len(filtered_sentences) if document_id else [None] * len(filtered_sentences),
-                            filtered_sentences,
-                            filtered_contexts,
-                            filtered_embeddings_str,
-                            filtered_dates,
-                            filtered_occurred_starts,
-                            filtered_occurred_ends,
-                            filtered_mentioned_ats,
-                            filtered_fact_types,
-                            confidence_scores,
-                            [0] * len(filtered_sentences),
-                            filtered_metadata_json
-                        )
-
-                        created_unit_ids = [str(row['id']) for row in results]
-                        logger.debug(f"Batch insert complete: {len(created_unit_ids)} units created")
-                        log_buffer.append(f"[5] Batch insert units: {len(created_unit_ids)} units in {time.time() - step_start:.3f}s")
-
-                        # Process entities for ALL units
-                        logger.debug("Processing entities")
-                        step_start = time.time()
-                        all_entity_links = await link_utils.extract_entities_batch_optimized(
-                            self.entity_resolver, conn, bank_id, created_unit_ids, filtered_sentences, "", filtered_dates, filtered_entities, log_buffer
-                        )
-                        logger.debug(f"Entity processing complete: {len(all_entity_links)} links")
-                        log_buffer.append(f"[6] Process entities (batched): {time.time() - step_start:.3f}s")
-
-                        # Create temporal links
-                        logger.debug("Creating temporal links")
-                        step_start = time.time()
-                        await link_utils.create_temporal_links_batch_per_fact(conn, bank_id, created_unit_ids, log_buffer=log_buffer)
-                        logger.debug("Temporal links complete")
-                        log_buffer.append(f"[7] Batch create temporal links: {time.time() - step_start:.3f}s")
-
-                        # Create semantic links
-                        logger.debug("Creating semantic links")
-                        step_start = time.time()
-                        await link_utils.create_semantic_links_batch(conn, bank_id, created_unit_ids, filtered_embeddings, log_buffer=log_buffer)
-                        logger.debug("Semantic links complete")
-                        log_buffer.append(f"[8] Batch create semantic links: {time.time() - step_start:.3f}s")
-
-                        # Insert entity links
-                        logger.debug("Inserting entity links")
-                        step_start = time.time()
-                        if all_entity_links:
-                            await link_utils.insert_entity_links_batch(conn, all_entity_links)
-                        logger.debug("Entity links inserted")
-                        log_buffer.append(f"[9] Batch insert entity links: {time.time() - step_start:.3f}s")
-
-                        # Create causal links
-                        logger.debug("Creating causal links")
-                        step_start = time.time()
-                        causal_link_count = await link_utils.create_causal_links_batch(
-                            conn, created_unit_ids, filtered_causal_relations
-                        )
-                        logger.debug(f"Causal links complete: {causal_link_count} links created")
-                        log_buffer.append(f"[10] Batch create causal links: {causal_link_count} links in {time.time() - step_start:.3f}s")
-
-                        # Transaction auto-commits on success
-                        commit_start = time.time()
-                        logger.debug(f"[10] Commit: {time.time() - commit_start:.3f}s")
-
-                        # Map created unit IDs back to original content items
-                        # Account for duplicates when mapping back
-                        result_unit_ids = []
-                        filtered_idx = 0
-
-                        for start_idx, end_idx in content_boundaries:
-                            content_unit_ids = []
-                            for i in range(start_idx, end_idx):
-                                if not all_is_duplicate[i]:
-                                    content_unit_ids.append(created_unit_ids[filtered_idx])
-                                    filtered_idx += 1
-                            result_unit_ids.append(content_unit_ids)
-
-                        total_time = time.time() - start_time
-                        log_buffer.append(f"{'='*60}")
-                        log_buffer.append(f"PUT_BATCH_ASYNC COMPLETE: {len(created_unit_ids)} units from {len(contents)} contents in {total_time:.3f}s")
-                        log_buffer.append(f"{'='*60}")
-
-                        # Flush all logs at once to avoid interleaving
-                        logger.info("\n" + "\n".join(log_buffer) + "\n")
-
-                        # Trigger opinion reinforcement in background (non-blocking)
-                        # Only trigger if there are entities in the new units
-                        if any(filtered_entities):
-                            await self._task_backend.submit_task({
-                                'type': 'reinforce_opinion',
-                                'bank_id': bank_id,
-                                'created_unit_ids': created_unit_ids,
-                                'unit_texts': filtered_sentences,
-                                'unit_entities': filtered_entities
-                            })
-                            logger.debug("[PUT_BATCH_ASYNC] Opinion reinforcement task queued in background")
-
-                        # Trigger observation regeneration for entities in new units
-                        # Only regenerate for top-N entities with at least min_facts
-                        TOP_N_ENTITIES = 5
-                        MIN_FACTS_THRESHOLD = 5
-
-                        if all_entity_links:
-                            unique_entity_ids = set()
-                            for link in all_entity_links:
-                                # links are tuples: (from_unit_id, to_unit_id, link_type, weight, entity_id)
-                                if len(link) >= 5 and link[4]:
-                                    unique_entity_ids.add(str(link[4]))
-
-                            if unique_entity_ids:
-                                # Query entities with their fact counts and whether they have observations
-                                # Only consider entities that:
-                                # 1. Are in top-N by mention count AND have >= min_facts, OR
-                                # 2. Already have observations (to keep them updated)
-                                entity_rows = await conn.fetch(
-                                    """
-                                    WITH entity_fact_counts AS (
-                                        SELECT
-                                            e.id,
-                                            e.canonical_name,
-                                            e.last_seen,
-                                            e.mention_count,
-                                            COUNT(DISTINCT mu.id) FILTER (WHERE mu.fact_type IN ('world', 'agent')) as fact_count,
-                                            COUNT(DISTINCT mu.id) FILTER (WHERE mu.fact_type = 'observation') as obs_count,
-                                            RANK() OVER (ORDER BY e.mention_count DESC) as rank
-                                        FROM entities e
-                                        LEFT JOIN unit_entities ue ON e.id = ue.entity_id
-                                        LEFT JOIN memory_units mu ON ue.unit_id = mu.id AND mu.bank_id = $1
-                                        WHERE e.bank_id = $1 AND e.id = ANY($2::uuid[])
-                                        GROUP BY e.id, e.canonical_name, e.last_seen, e.mention_count
-                                    )
-                                    SELECT id, canonical_name, last_seen, fact_count, obs_count
-                                    FROM entity_fact_counts
-                                    WHERE (rank <= $3 AND fact_count >= $4) OR obs_count > 0
-                                    """,
-                                    bank_id,
-                                    [uuid.UUID(eid) for eid in unique_entity_ids],
-                                    TOP_N_ENTITIES,
-                                    MIN_FACTS_THRESHOLD
-                                )
-
-                                # Submit observation regeneration tasks for qualifying entities
-                                for row in entity_rows:
-                                    await self._task_backend.submit_task({
-                                        'type': 'regenerate_observations',
-                                        'bank_id': bank_id,
-                                        'entity_id': str(row['id']),
-                                        'entity_name': row['canonical_name'],
-                                        'version': row['last_seen'].isoformat() if row['last_seen'] else None
-                                    })
-                                if entity_rows:
-                                    logger.debug(f"[PUT_BATCH_ASYNC] Observation regeneration tasks queued for {len(entity_rows)} entities (top-{TOP_N_ENTITIES}, min {MIN_FACTS_THRESHOLD} facts)")
-
-                        return result_unit_ids
-
-                    except Exception as e:
-                        # Transaction auto-rolls back on exception
-                        import traceback
-                        traceback.print_exc()
-                        raise Exception(f"Failed to store batch memory: {str(e)}")
+            return await orchestrator.retain_batch(
+                pool=pool,
+                embeddings_model=self.embeddings,
+                llm_config=self._llm_config,
+                entity_resolver=self.entity_resolver,
+                task_backend=self._task_backend,
+                format_date_fn=self._format_readable_date,
+                duplicate_checker_fn=self._find_duplicate_facts_batch,
+                bank_id=bank_id,
+                contents_dicts=contents,
+                document_id=document_id,
+                is_first_batch=is_first_batch,
+                fact_type_override=fact_type_override,
+                confidence_score=confidence_score
+            )
 
     def recall(
         self,
@@ -1269,6 +818,8 @@ class MemoryEngine:
         question_date: Optional[datetime] = None,
         include_entities: bool = False,
         max_entity_tokens: int = 1024,
+        include_chunks: bool = False,
+        max_chunk_tokens: int = 8192,
     ) -> RecallResultModel:
         """
         Recall memories using N*4-way parallel retrieval (N fact types × 4 retrieval methods).
@@ -1292,12 +843,15 @@ class MemoryEngine:
             question_date: Optional date when question was asked (for temporal filtering)
             include_entities: Whether to include entity observations in the response
             max_entity_tokens: Maximum tokens for entity observations (default 500)
+            include_chunks: Whether to include raw chunks in the response
+            max_chunk_tokens: Maximum tokens for chunks (default 8192)
 
         Returns:
             RecallResultModel containing:
             - results: List of MemoryFact objects
             - trace: Optional trace information for debugging
             - entities: Optional dict of entity states (if include_entities=True)
+            - chunks: Optional dict of chunks (if include_chunks=True)
         """
         # Map budget enum to thinking_budget number
         budget_mapping = {
@@ -1315,7 +869,7 @@ class MemoryEngine:
                 try:
                     return await self._search_with_retries(
                         bank_id, query, fact_type, thinking_budget, max_tokens, enable_trace, question_date,
-                        include_entities, max_entity_tokens
+                        include_entities, max_entity_tokens, include_chunks, max_chunk_tokens
                     )
                 except Exception as e:
                     # Check if it's a connection error
@@ -1336,6 +890,7 @@ class MemoryEngine:
                     else:
                         # Not a connection error or out of retries - raise
                         raise
+            raise Exception("Exceeded maximum retries for search due to connection errors.")
 
     async def _search_with_retries(
         self,
@@ -1348,6 +903,8 @@ class MemoryEngine:
         question_date: Optional[datetime] = None,
         include_entities: bool = False,
         max_entity_tokens: int = 500,
+        include_chunks: bool = False,
+        max_chunk_tokens: int = 8192,
     ) -> RecallResultModel:
         """
         Search implementation with modular retrieval and reranking.
@@ -1368,12 +925,14 @@ class MemoryEngine:
             enable_trace: Whether to return search trace (deprecated)
             include_entities: Whether to include entity observations
             max_entity_tokens: Maximum tokens for entity observations
+            include_chunks: Whether to include raw chunks
+            max_chunk_tokens: Maximum tokens for chunks
 
         Returns:
-            RecallResultModel with results, trace, and optional entities
+            RecallResultModel with results, trace, optional entities, and optional chunks
         """
         # Initialize tracer if requested
-        from .search_tracer import SearchTracer
+        from .search.tracer import SearchTracer
         tracer = SearchTracer(query, thinking_budget, max_tokens) if enable_trace else None
         if tracer:
             tracer.start()
@@ -1451,12 +1010,16 @@ class MemoryEngine:
                 timing_parts.append(f"temporal={len(temporal_results)}({aggregated_timings['temporal']:.3f}s)")
             log_buffer.append(f"  [2] {total_retrievals}-way retrieval ({len(fact_type)} fact_types): {', '.join(timing_parts)} in {step_duration:.3f}s")
 
-            # Record retrieval results for tracer
+            # Record retrieval results for tracer (convert typed results to old format)
             if tracer:
+                # Convert RetrievalResult to old tuple format for tracer
+                def to_tuple_format(results):
+                    return [(r.id, r.__dict__) for r in results]
+
                 # Add semantic retrieval results
                 tracer.add_retrieval_results(
                     method_name="semantic",
-                    results=semantic_results,
+                    results=to_tuple_format(semantic_results),
                     duration_seconds=aggregated_timings["semantic"],
                     score_field="similarity",
                     metadata={"limit": thinking_budget}
@@ -1465,7 +1028,7 @@ class MemoryEngine:
                 # Add BM25 retrieval results
                 tracer.add_retrieval_results(
                     method_name="bm25",
-                    results=bm25_results,
+                    results=to_tuple_format(bm25_results),
                     duration_seconds=aggregated_timings["bm25"],
                     score_field="bm25_score",
                     metadata={"limit": thinking_budget}
@@ -1474,7 +1037,7 @@ class MemoryEngine:
                 # Add graph retrieval results
                 tracer.add_retrieval_results(
                     method_name="graph",
-                    results=graph_results,
+                    results=to_tuple_format(graph_results),
                     duration_seconds=aggregated_timings["graph"],
                     score_field="similarity",  # Graph uses similarity for activation
                     metadata={"budget": thinking_budget}
@@ -1484,16 +1047,15 @@ class MemoryEngine:
                 if temporal_results:
                     tracer.add_retrieval_results(
                         method_name="temporal",
-                        results=temporal_results,
+                        results=to_tuple_format(temporal_results),
                         duration_seconds=aggregated_timings["temporal"],
                         score_field="temporal_score",
                         metadata={"budget": thinking_budget}
                     )
 
                 # Record entry points (from semantic results) for legacy graph view
-                for rank, (doc_id, data) in enumerate(semantic_results[:10], start=1):  # Top 10 as entry points
-                    similarity = data.get("similarity", 0.0)
-                    tracer.add_entry_point(doc_id, data.get("text", ""), similarity, rank)
+                for rank, retrieval in enumerate(semantic_results[:10], start=1):  # Top 10 as entry points
+                    tracer.add_entry_point(retrieval.id, retrieval.text, retrieval.similarity or 0.0, rank)
 
                 tracer.add_phase_metric("parallel_retrieval", step_duration, {
                     "semantic_count": len(semantic_results),
@@ -1504,7 +1066,7 @@ class MemoryEngine:
 
             # Step 3: Merge with RRF
             step_start = time.time()
-            from .search_helpers import reciprocal_rank_fusion
+            from .search.fusion import reciprocal_rank_fusion
 
             # Merge 3 or 4 result lists depending on temporal constraint
             if temporal_results:
@@ -1516,165 +1078,127 @@ class MemoryEngine:
             log_buffer.append(f"  [3] RRF merge: {len(merged_candidates)} unique candidates in {step_duration:.3f}s")
 
             if tracer:
-                tracer.add_rrf_merged(merged_candidates)
+                # Convert MergedCandidate to old tuple format for tracer
+                tracer_merged = [(mc.id, mc.retrieval.__dict__, {"rrf_score": mc.rrf_score, **mc.source_ranks})
+                                for mc in merged_candidates]
+                tracer.add_rrf_merged(tracer_merged)
                 tracer.add_phase_metric("rrf_merge", step_duration, {"candidates_merged": len(merged_candidates)})
 
-            # Step 4: Build candidate objects for reranking
+            # Step 4: Rerank using cross-encoder (MergedCandidate -> ScoredResult)
             step_start = time.time()
-
-            # Build result objects with all necessary data
-            results = []
-            for doc_id, data, rrf_meta in merged_candidates:
-                # Extract scores from different sources
-                semantic_sim = data.get("similarity", 0.0)
-                bm25_score = data.get("bm25_score", 0.0)
-
-                # Convert embedding from string to list if needed
-                embedding = data.get("embedding")
-                if embedding is not None:
-                    if isinstance(embedding, str):
-                        import json
-                        embedding = json.loads(embedding)
-                    elif not isinstance(embedding, (list, np.ndarray)):
-                        embedding = list(embedding)
-
-                result_obj = {
-                    "id": doc_id,
-                    "text": data["text"],
-                    "context": data.get("context", ""),
-                    "occurred_start": data.get("occurred_start"),
-                    "occurred_end": data.get("occurred_end"),
-                    "mentioned_at": data.get("mentioned_at"),
-                    "document_id": data.get("document_id"),
-                    "fact_type": data.get("fact_type"),  # Include fact type for filtering
-                    "access_count": data.get("access_count", 0),
-                    "semantic_similarity": semantic_sim,
-                    "bm25_score": bm25_score,
-                    "embedding": embedding,
-                    "rrf_score": rrf_meta.get("rrf_score", 0.0),
-                    **rrf_meta  # Include all RRF metadata
-                }
-
-                # Include temporal scores if present
-                if "temporal_score" in data:
-                    result_obj["temporal_score"] = data["temporal_score"]
-                if "temporal_proximity" in data:
-                    result_obj["temporal_proximity"] = data["temporal_proximity"]
-
-                results.append(result_obj)
-
-            # Step 5: Rerank using cross-encoder
             reranker_instance = self._cross_encoder_reranker
             log_buffer.append(f"  [4] Using cross-encoder reranker")
 
             # Rerank using cross-encoder
-            results = reranker_instance.rerank(query, results)
+            scored_results = reranker_instance.rerank(query, merged_candidates)
 
             step_duration = time.time() - step_start
-            log_buffer.append(f"  [4] Reranking: {len(results)} candidates scored in {step_duration:.3f}s")
+            log_buffer.append(f"  [4] Reranking: {len(scored_results)} candidates scored in {step_duration:.3f}s")
 
             if tracer:
-                tracer.add_reranked(results, merged_candidates)
+                # Convert to old format for tracer
+                results_dict = [sr.to_dict() for sr in scored_results]
+                tracer_merged = [(mc.id, mc.retrieval.__dict__, {"rrf_score": mc.rrf_score, **mc.source_ranks})
+                                for mc in merged_candidates]
+                tracer.add_reranked(results_dict, tracer_merged)
                 tracer.add_phase_metric("reranking", step_duration, {
                     "reranker_type": "cross-encoder",
-                    "candidates_reranked": len(results)
+                    "candidates_reranked": len(scored_results)
                 })
 
             # Step 4.5: Combine cross-encoder score with retrieval signals
             # This preserves retrieval work (RRF, temporal, recency) instead of pure cross-encoder ranking
-            if results:
+            if scored_results:
                 # Normalize RRF scores to [0, 1] range
-                rrf_scores = [r.get("rrf_score", 0) for r in results]
+                rrf_scores = [sr.candidate.rrf_score for sr in scored_results]
                 max_rrf = max(rrf_scores) if rrf_scores else 1.0
                 min_rrf = min(rrf_scores) if rrf_scores else 0.0
                 rrf_range = max_rrf - min_rrf if max_rrf > min_rrf else 1.0
 
                 # Calculate recency based on occurred_start (more recent = higher score)
                 now = utcnow()
-                for r in results:
+                for sr in scored_results:
                     # Normalize RRF score
-                    rrf_normalized = (r.get("rrf_score", 0) - min_rrf) / rrf_range if rrf_range > 0 else 0.5
+                    sr.rrf_normalized = (sr.candidate.rrf_score - min_rrf) / rrf_range if rrf_range > 0 else 0.5
 
                     # Calculate recency (decay over 365 days, minimum 0.1)
-                    recency = 0.5  # default for missing dates
-                    if r.get("occurred_start"):
-                        occurred = r["occurred_start"]
+                    sr.recency = 0.5  # default for missing dates
+                    if sr.retrieval.occurred_start:
+                        occurred = sr.retrieval.occurred_start
                         if hasattr(occurred, 'tzinfo') and occurred.tzinfo is None:
                             from datetime import timezone
                             occurred = occurred.replace(tzinfo=timezone.utc)
                         days_ago = (now - occurred).total_seconds() / 86400
-                        recency = max(0.1, 1.0 - (days_ago / 365))  # Linear decay over 1 year
+                        sr.recency = max(0.1, 1.0 - (days_ago / 365))  # Linear decay over 1 year
 
                     # Get temporal proximity if available (already 0-1)
-                    temporal = r.get("temporal_proximity", 0.5)
+                    sr.temporal = sr.retrieval.temporal_proximity if sr.retrieval.temporal_proximity is not None else 0.5
 
                     # Weighted combination
                     # Cross-encoder: 60% (semantic relevance)
                     # RRF: 20% (retrieval consensus)
                     # Temporal proximity: 10% (time relevance for temporal queries)
                     # Recency: 10% (prefer recent facts)
-                    cross_encoder_score = r.get("cross_encoder_score_normalized", 0)
-                    combined_score = (
-                        0.6 * cross_encoder_score +
-                        0.2 * rrf_normalized +
-                        0.1 * temporal +
-                        0.1 * recency
+                    sr.combined_score = (
+                        0.6 * sr.cross_encoder_score_normalized +
+                        0.2 * sr.rrf_normalized +
+                        0.1 * sr.temporal +
+                        0.1 * sr.recency
                     )
-
-                    r["rrf_normalized"] = rrf_normalized
-                    r["recency"] = recency
-                    r["combined_score"] = combined_score
-                    r["weight"] = combined_score  # Update weight for final ranking
+                    sr.weight = sr.combined_score  # Update weight for final ranking
 
                 # Re-sort by combined score
-                results.sort(key=lambda x: x["weight"], reverse=True)
+                scored_results.sort(key=lambda x: x.weight, reverse=True)
                 log_buffer.append(f"  [4.6] Combined scoring: cross_encoder(0.6) + rrf(0.2) + temporal(0.1) + recency(0.1)")
 
             # Step 5: Truncate to thinking_budget * 2 for token filtering
             rerank_limit = thinking_budget * 2
-            top_results = results[:rerank_limit]
-            log_buffer.append(f"  [5] Truncated to top {len(top_results)} results")
+            top_scored = scored_results[:rerank_limit]
+            log_buffer.append(f"  [5] Truncated to top {len(top_scored)} results")
 
             # Step 6: Token budget filtering
             step_start = time.time()
 
-            # Filter results to fit within max_tokens budget
-            # Token counting using tiktoken (cached at module level)
-            filtered_results, total_tokens = self._filter_by_token_budget(top_results, max_tokens)
+            # Convert to dict for token filtering (backward compatibility)
+            top_dicts = [sr.to_dict() for sr in top_scored]
+            filtered_dicts, total_tokens = self._filter_by_token_budget(top_dicts, max_tokens)
 
-            top_results = filtered_results
+            # Convert back to list of IDs and filter scored_results
+            filtered_ids = {d["id"] for d in filtered_dicts}
+            top_scored = [sr for sr in top_scored if sr.id in filtered_ids]
+
             step_duration = time.time() - step_start
-            log_buffer.append(f"  [6] Token filtering: {len(top_results)} results, {total_tokens}/{max_tokens} tokens in {step_duration:.3f}s")
+            log_buffer.append(f"  [6] Token filtering: {len(top_scored)} results, {total_tokens}/{max_tokens} tokens in {step_duration:.3f}s")
 
             if tracer:
                 tracer.add_phase_metric("token_filtering", step_duration, {
-                    "results_selected": len(top_results),
+                    "results_selected": len(top_scored),
                     "tokens_used": total_tokens,
                     "max_tokens": max_tokens
                 })
 
             # Record visits for all retrieved nodes
             if tracer:
-                for result in results:
+                for sr in scored_results:
                     tracer.visit_node(
-                        node_id=result["id"],
-                        text=result["text"],
-                        context=result.get("context", ""),
-                        event_date=result.get("occurred_start"),
-                        access_count=result.get("access_count", 0),
-                        is_entry_point=(result["id"] in [ep.node_id for ep in tracer.entry_points]),
+                        node_id=sr.id,
+                        text=sr.retrieval.text,
+                        context=sr.retrieval.context or "",
+                        event_date=sr.retrieval.occurred_start,
+                        access_count=sr.retrieval.access_count,
+                        is_entry_point=(sr.id in [ep.node_id for ep in tracer.entry_points]),
                         parent_node_id=None,  # In parallel retrieval, there's no clear parent
                         link_type=None,
                         link_weight=None,
-                        activation=result.get("rrf_score", 0.0),  # Use RRF score as activation
-                        semantic_similarity=result.get("semantic_similarity", 0.0),
-                        recency=result.get("recency_normalized", 0.0),
-                        frequency=result.get("frequency_normalized", 0.0),
-                        final_weight=result.get("weight", 0.0)
+                        activation=sr.candidate.rrf_score,  # Use RRF score as activation
+                        semantic_similarity=sr.retrieval.similarity or 0.0,
+                        recency=sr.recency,
+                        frequency=0.0,
+                        final_weight=sr.weight
                     )
 
             # Step 8: Queue access count updates for visited nodes
-            visited_ids = list(set([r["id"] for r in results[:50]]))  # Top 50
+            visited_ids = list(set([sr.id for sr in scored_results[:50]]))  # Top 50
             if visited_ids:
                 await self._task_backend.submit_task({
                     'type': 'access_count_update',
@@ -1683,27 +1207,31 @@ class MemoryEngine:
                 log_buffer.append(f"  [7] Queued access count updates for {len(visited_ids)} nodes")
 
             total_time = time.time() - search_start
-            log_buffer.append(f"[SEARCH {search_id}] Complete: {len(top_results)} results ({total_tokens} tokens) in {total_time:.3f}s")
+            log_buffer.append(f"[SEARCH {search_id}] Complete: {len(top_scored)} results ({total_tokens} tokens) in {total_time:.3f}s")
 
             # Log all buffered logs at once
             logger.info("\n" + "\n".join(log_buffer))
 
-            # Convert datetime objects to ISO strings for JSON serialization
-            for result in top_results:
-                if result.get("occurred_start"):
-                    occurred_start = result["occurred_start"]
-                    result["occurred_start"] = occurred_start.isoformat() if hasattr(occurred_start, 'isoformat') else occurred_start
-                if result.get("occurred_end"):
-                    occurred_end = result["occurred_end"]
-                    result["occurred_end"] = occurred_end.isoformat() if hasattr(occurred_end, 'isoformat') else occurred_end
-                if result.get("mentioned_at"):
-                    mentioned_at = result["mentioned_at"]
-                    result["mentioned_at"] = mentioned_at.isoformat() if hasattr(mentioned_at, 'isoformat') else mentioned_at
+            # Convert ScoredResult to dicts with ISO datetime strings
+            top_results_dicts = []
+            for sr in top_scored:
+                result_dict = sr.to_dict()
+                # Convert datetime objects to ISO strings for JSON serialization
+                if result_dict.get("occurred_start"):
+                    occurred_start = result_dict["occurred_start"]
+                    result_dict["occurred_start"] = occurred_start.isoformat() if hasattr(occurred_start, 'isoformat') else occurred_start
+                if result_dict.get("occurred_end"):
+                    occurred_end = result_dict["occurred_end"]
+                    result_dict["occurred_end"] = occurred_end.isoformat() if hasattr(occurred_end, 'isoformat') else occurred_end
+                if result_dict.get("mentioned_at"):
+                    mentioned_at = result_dict["mentioned_at"]
+                    result_dict["mentioned_at"] = mentioned_at.isoformat() if hasattr(mentioned_at, 'isoformat') else mentioned_at
+                top_results_dicts.append(result_dict)
 
             # Get entities for each fact if include_entities is requested
             fact_entity_map = {}  # unit_id -> list of (entity_id, entity_name)
-            if include_entities and top_results:
-                unit_ids = [uuid.UUID(str(r.get("id"))) for r in top_results if r.get("id")]
+            if include_entities and top_scored:
+                unit_ids = [uuid.UUID(sr.id) for sr in top_scored]
                 if unit_ids:
                     async with acquire_with_retry(pool) as entity_conn:
                         entity_rows = await entity_conn.fetch(
@@ -1726,8 +1254,8 @@ class MemoryEngine:
 
             # Convert results to MemoryFact objects
             memory_facts = []
-            for result in top_results:
-                result_id = str(result.get("id"))
+            for result_dict in top_results_dicts:
+                result_id = str(result_dict.get("id"))
                 # Get entity names for this fact
                 entity_names = None
                 if include_entities and result_id in fact_entity_map:
@@ -1735,32 +1263,43 @@ class MemoryEngine:
 
                 memory_facts.append(MemoryFact(
                     id=result_id,
-                    text=result.get("text"),
-                    fact_type=result.get("fact_type", "world"),
+                    text=result_dict.get("text"),
+                    fact_type=result_dict.get("fact_type", "world"),
                     entities=entity_names,
-                    context=result.get("context"),
-                    occurred_start=result.get("occurred_start"),
-                    occurred_end=result.get("occurred_end"),
-                    mentioned_at=result.get("mentioned_at"),
-                    document_id=result.get("document_id"),
-                    activation=result.get("activation")
+                    context=result_dict.get("context"),
+                    occurred_start=result_dict.get("occurred_start"),
+                    occurred_end=result_dict.get("occurred_end"),
+                    mentioned_at=result_dict.get("mentioned_at"),
+                    document_id=result_dict.get("document_id"),
+                    chunk_id=result_dict.get("chunk_id"),
+                    activation=result_dict.get("weight")  # Use final weight as activation
                 ))
 
             # Fetch entity observations if requested
             entities_dict = None
             if include_entities and fact_entity_map:
-                # Collect unique entities from top results
-                unique_entities = {}  # entity_id -> entity_name
-                for entity_list in fact_entity_map.values():
-                    for entity in entity_list:
-                        unique_entities[entity['entity_id']] = entity['canonical_name']
+                # Collect unique entities in order of fact relevance (preserving order from top_scored)
+                # Use a list to maintain order, but track seen entities to avoid duplicates
+                entities_ordered = []  # list of (entity_id, entity_name) tuples
+                seen_entity_ids = set()
 
-                # Fetch observations for each entity (respect token budget)
+                # Iterate through facts in relevance order
+                for sr in top_scored:
+                    unit_id = sr.id
+                    if unit_id in fact_entity_map:
+                        for entity in fact_entity_map[unit_id]:
+                            entity_id = entity['entity_id']
+                            entity_name = entity['canonical_name']
+                            if entity_id not in seen_entity_ids:
+                                entities_ordered.append((entity_id, entity_name))
+                                seen_entity_ids.add(entity_id)
+
+                # Fetch observations for each entity (respect token budget, in order)
                 entities_dict = {}
                 total_entity_tokens = 0
                 encoding = _get_tiktoken_encoding()
 
-                for entity_id, entity_name in unique_entities.items():
+                for entity_id, entity_name in entities_ordered:
                     if total_entity_tokens >= max_entity_tokens:
                         break
 
@@ -1785,13 +1324,79 @@ class MemoryEngine:
                         )
                         total_entity_tokens += entity_tokens
 
+            # Fetch chunks if requested
+            chunks_dict = None
+            if include_chunks and top_scored:
+                from .response_models import ChunkInfo
+
+                # Collect chunk_ids in order of fact relevance (preserving order from top_scored)
+                # Use a list to maintain order, but track seen chunks to avoid duplicates
+                chunk_ids_ordered = []
+                seen_chunk_ids = set()
+                for sr in top_scored:
+                    chunk_id = sr.retrieval.chunk_id
+                    if chunk_id and chunk_id not in seen_chunk_ids:
+                        chunk_ids_ordered.append(chunk_id)
+                        seen_chunk_ids.add(chunk_id)
+
+                if chunk_ids_ordered:
+                    # Fetch chunk data from database using chunk_ids (no ORDER BY to preserve input order)
+                    async with acquire_with_retry(pool) as conn:
+                        chunks_rows = await conn.fetch(
+                            """
+                            SELECT chunk_id, chunk_text, chunk_index
+                            FROM chunks
+                            WHERE chunk_id = ANY($1::text[])
+                            """,
+                            chunk_ids_ordered
+                        )
+
+                    # Create a lookup dict for fast access
+                    chunks_lookup = {row['chunk_id']: row for row in chunks_rows}
+
+                    # Apply token limit and build chunks_dict in the order of chunk_ids_ordered
+                    chunks_dict = {}
+                    total_chunk_tokens = 0
+                    encoding = _get_tiktoken_encoding()
+
+                    for chunk_id in chunk_ids_ordered:
+                        if chunk_id not in chunks_lookup:
+                            continue
+
+                        row = chunks_lookup[chunk_id]
+                        chunk_text = row['chunk_text']
+                        chunk_tokens = len(encoding.encode(chunk_text))
+
+                        # Check if adding this chunk would exceed the limit
+                        if total_chunk_tokens + chunk_tokens > max_chunk_tokens:
+                            # Truncate the chunk to fit within the remaining budget
+                            remaining_tokens = max_chunk_tokens - total_chunk_tokens
+                            if remaining_tokens > 0:
+                                # Truncate to remaining tokens
+                                truncated_text = encoding.decode(encoding.encode(chunk_text)[:remaining_tokens])
+                                chunks_dict[chunk_id] = ChunkInfo(
+                                    chunk_text=truncated_text,
+                                    chunk_index=row['chunk_index'],
+                                    truncated=True
+                                )
+                                total_chunk_tokens = max_chunk_tokens
+                            # Stop adding more chunks once we hit the limit
+                            break
+                        else:
+                            chunks_dict[chunk_id] = ChunkInfo(
+                                chunk_text=chunk_text,
+                                chunk_index=row['chunk_index'],
+                                truncated=False
+                            )
+                            total_chunk_tokens += chunk_tokens
+
             # Finalize trace if enabled
             trace_dict = None
             if tracer:
-                trace = tracer.finalize(top_results)
+                trace = tracer.finalize(top_results_dicts)
                 trace_dict = trace.to_dict() if trace else None
 
-            return RecallResultModel(results=memory_facts, trace=trace_dict, entities=entities_dict)
+            return RecallResultModel(results=memory_facts, trace=trace_dict, entities=entities_dict, chunks=chunks_dict)
 
         except Exception as e:
             log_buffer.append(f"[SEARCH {search_id}] ERROR after {time.time() - search_start:.3f}s: {str(e)}")
@@ -2024,10 +1629,10 @@ class MemoryEngine:
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
 
             units = await conn.fetch(f"""
-                SELECT id, text, event_date, context
+                SELECT id, text, event_date, context, occurred_start, occurred_end, mentioned_at
                 FROM memory_units
                 {where_clause}
-                ORDER BY event_date DESC
+                ORDER BY mentioned_at DESC NULLS LAST, event_date DESC
                 LIMIT 1000
             """, *query_params)
 
@@ -2143,7 +1748,10 @@ class MemoryEngine:
                 "id": str(unit_id)[:8] + "...",
                 "text": row['text'],
                 "context": row['context'] if row['context'] else "N/A",
-                "date": row['event_date'].strftime("%Y-%m-%d %H:%M") if row['event_date'] else "N/A",
+                "occurred_start": row['occurred_start'].isoformat() if row['occurred_start'] else None,
+                "occurred_end": row['occurred_end'].isoformat() if row['occurred_end'] else None,
+                "mentioned_at": row['mentioned_at'].isoformat() if row['mentioned_at'] else None,
+                "date": row['event_date'].strftime("%Y-%m-%d %H:%M") if row['event_date'] else "N/A",  # Deprecated, kept for backwards compatibility
                 "entities": ", ".join(entities) if entities else "None"
             })
 
@@ -2532,7 +2140,6 @@ Guidelines:
         answer_text = task_dict['answer_text']
         query = task_dict['query']
 
-        logger.debug(f"[TASK] Handling form_opinion task for agent {bank_id}")
         await self._extract_and_store_opinions_async(
             bank_id=bank_id,
             answer_text=answer_text,
@@ -2581,13 +2188,15 @@ Guidelines:
             entity_names = set()
             for entities_list in unit_entities:
                 for entity in entities_list:
-                    entity_names.add(entity['text'])
+                    # Handle both Entity objects and dicts
+                    if hasattr(entity, 'text'):
+                        entity_names.add(entity.text)
+                    elif isinstance(entity, dict):
+                        entity_names.add(entity['text'])
 
             if not entity_names:
-                logger.debug("[REINFORCE] No entities found in new units, skipping opinion reinforcement")
                 return
 
-            logger.debug(f"[REINFORCE] Starting opinion reinforcement for {len(entity_names)} entities")
 
             pool = await self._get_pool()
             async with acquire_with_retry(pool) as conn:
@@ -2607,10 +2216,8 @@ Guidelines:
                 )
 
                 if not opinions:
-                    logger.debug("[REINFORCE] No existing opinions found for these entities")
                     return
 
-                logger.debug(f"[REINFORCE] Found {len(opinions)} opinions to potentially reinforce")
 
                 # Use cached LLM config
                 if self._llm_config is None:
@@ -2670,7 +2277,6 @@ Guidelines:
                                     evaluation['new_confidence'],
                                     uuid.UUID(opinion_id)
                                 )
-                                logger.debug(f"[REINFORCE] Updated opinion {opinion_id[:8]}... (action: {evaluation['action']}, confidence: {evaluation['new_confidence']:.2f})")
                             else:
                                 # Only update confidence
                                 await conn.execute(
@@ -2682,11 +2288,9 @@ Guidelines:
                                     evaluation['new_confidence'],
                                     uuid.UUID(opinion_id)
                                 )
-                                logger.debug(f"[REINFORCE] Updated confidence for opinion {opinion_id[:8]}... (confidence: {evaluation['new_confidence']:.2f})")
 
-                    logger.debug(f"[REINFORCE] Applied {len(updates_to_apply)} opinion updates")
                 else:
-                    logger.debug("[REINFORCE] No opinion updates needed")
+                    pass  # No opinions to update
 
         except Exception as e:
             logger.error(f"[REINFORCE] Error during opinion reinforcement: {str(e)}")
@@ -2695,7 +2299,7 @@ Guidelines:
 
     # ==================== bank profile Methods ====================
 
-    async def get_bank_profile(self, bank_id: str) -> Dict:
+    async def get_bank_profile(self, bank_id: str) -> "bank_utils.BankProfile":
         """
         Get bank profile (name, personality + background).
         Auto-creates agent with default values if not exists.
@@ -2704,7 +2308,7 @@ Guidelines:
             bank_id: bank IDentifier
 
         Returns:
-            Dict with 'name' (str), 'personality' (dict) and 'background' (str) keys
+            BankProfile with name, typed PersonalityTraits, and background
         """
         pool = await self._get_pool()
         return await bank_utils.get_bank_profile(pool, bank_id)
@@ -2825,7 +2429,7 @@ Guidelines:
         # Get bank profile (name, personality + background)
         profile = await self.get_bank_profile(bank_id)
         name = profile["name"]
-        personality = profile["personality"]
+        personality = profile["personality"]  # Typed as PersonalityTraits
         background = profile["background"]
 
         # Build the prompt
@@ -2841,7 +2445,6 @@ Guidelines:
         )
 
         logger.info(f"[THINK] Full prompt length: {len(prompt)} chars")
-        logger.debug(f"[THINK] Prompt preview (first 500 chars): {prompt[:500]}")
 
         system_message = think_utils.get_system_message(personality)
 
@@ -2858,14 +2461,12 @@ Guidelines:
         answer_text = answer_text.strip()
 
         # Submit form_opinion task for background processing
-        logger.debug(f"[THINK] Submitting form_opinion task for agent {bank_id}")
         await self._task_backend.submit_task({
             'type': 'form_opinion',
             'bank_id': bank_id,
             'answer_text': answer_text,
             'query': query
         })
-        logger.debug(f"[THINK] form_opinion task submitted")
 
         # Return response with facts split by type
         return ReflectResult(
@@ -2895,28 +2496,25 @@ Guidelines:
             query: The original query
         """
         try:
-            logger.debug(f"[THINK] Extracting opinions from answer for agent {bank_id}")
             # Extract opinions from the answer
             new_opinions = await think_utils.extract_opinions_from_text(
                 self._llm_config, text=answer_text, query=query
             )
-            logger.debug(f"[THINK] Extracted {len(new_opinions)} opinions")
 
             # Store new opinions
             if new_opinions:
                 from datetime import datetime, timezone
                 current_time = datetime.now(timezone.utc)
-                for opinion_dict in new_opinions:
+                for opinion in new_opinions:
                     await self.retain_async(
                         bank_id=bank_id,
-                        content=opinion_dict["text"],
+                        content=opinion.opinion,
                         context=f"formed during thinking about: {query}",
                         event_date=current_time,
                         fact_type_override='opinion',
-                        confidence_score=opinion_dict["confidence"]
+                        confidence_score=opinion.confidence
                     )
 
-                logger.debug(f"[THINK] Extracted and stored {len(new_opinions)} new opinions")
         except Exception as e:
             logger.warning(f"[THINK] Failed to extract/store opinions: {str(e)}")
 
@@ -3078,7 +2676,6 @@ Guidelines:
                 )
 
                 if current_last_seen and current_last_seen.isoformat() != version:
-                    logger.debug(f"[OBSERVATIONS] Skipping {entity_name} - version mismatch (newer task pending)")
                     return []
 
         # Step 2: Get all facts mentioning this entity (exclude observations themselves)
@@ -3098,7 +2695,6 @@ Guidelines:
             )
 
         if not rows:
-            logger.debug(f"[OBSERVATIONS] No facts found for entity {entity_name}")
             return []
 
         # Convert to MemoryFact objects for the observation extraction
@@ -3121,7 +2717,6 @@ Guidelines:
         )
 
         if not observations:
-            logger.debug(f"[OBSERVATIONS] No observations extracted for entity {entity_name}")
             return []
 
         # Step 4: Delete old observations and insert new ones in a transaction

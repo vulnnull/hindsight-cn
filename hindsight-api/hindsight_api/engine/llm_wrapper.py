@@ -88,6 +88,7 @@ class LLMConfig:
         max_retries: int = 5,
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
+        skip_validation: bool = False,
         **kwargs
     ) -> Any:
         """
@@ -126,36 +127,51 @@ class LLMConfig:
 
         for attempt in range(max_retries + 1):
             try:
+                # Use the appropriate response format
                 if response_format is not None:
-                    # Use structured output parsing and return .parsed
-                    response = await self._client.beta.chat.completions.parse(
-                        response_format=response_format,
-                        **call_params
-                    )
-                    result = response.choices[0].message.parsed
+                    # Use JSON mode instead of strict parse for flexibility with optional fields
+                    # This allows the LLM to omit optional fields without validation errors
+                    import json
+
+                    # Add schema to the system message
+                    if hasattr(response_format, 'model_json_schema'):
+                        schema = response_format.model_json_schema()
+                        schema_msg = f"\n\nYou must respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
+
+                        # Add schema to the system message if present, otherwise prepend as user message
+                        if call_params['messages'] and call_params['messages'][0].get('role') == 'system':
+                            call_params['messages'][0]['content'] += schema_msg
+                        else:
+                            # No system message, add schema instruction to first user message
+                            if call_params['messages']:
+                                call_params['messages'][0]['content'] = schema_msg + "\n\n" + call_params['messages'][0]['content']
+
+                    call_params['response_format'] = {"type": "json_object"}
+                    response = await self._client.chat.completions.create(**call_params)
+
+                    # Parse the JSON response
+                    content = response.choices[0].message.content
+                    json_data = json.loads(content)
+
+                    # Return raw JSON if skip_validation is True, otherwise validate with Pydantic
+                    if skip_validation:
+                        result = json_data
+                    else:
+                        result = response_format.model_validate(json_data)
                 else:
                     # Standard completion and return text content
                     response = await self._client.chat.completions.create(**call_params)
                     result = response.choices[0].message.content
 
-                # Log call details on success
+                # Log call details only if it takes more than 5 seconds
                 duration = time.time() - start_time
                 usage = response.usage
-                ratio = max(1, usage.completion_tokens) / usage.prompt_tokens
-                if ratio > 3:
-                    raw_content = response.choices[0].message.content
-                    raw_len = len(raw_content) if raw_content else 0
+                if duration > 10.0:
+                    ratio = max(1, usage.completion_tokens) / usage.prompt_tokens
                     logger.info(
-                        f"model={self.provider}/{self.model}, "
+                        f"slow llm call: model={self.provider}/{self.model}, "
                         f"input_tokens={usage.prompt_tokens}, output_tokens={usage.completion_tokens}, "
-                        f"total_tokens={usage.total_tokens}, time={duration:.3f}s, ratio out/in={ratio:.2f}, HIGH RATIO - raw_content_chars={raw_len}, \n\nin={messages}\n\nout={result}\n\nraw={raw_content}\n\n"
-                    )
-                else:
-
-                    logger.info(
-                        f"model={self.provider}/{self.model}, "
-                        f"input_tokens={usage.prompt_tokens}, output_tokens={usage.completion_tokens}, "
-                        f"total_tokens={usage.total_tokens}, time={duration:.3f}s, ratio out/in={ratio:.2f}, "
+                        f"total_tokens={usage.total_tokens}, time={duration:.3f}s, ratio out/in={ratio:.2f}"
                     )
 
                 return result
@@ -182,17 +198,17 @@ class LLMConfig:
                     )
                     await asyncio.sleep(sleep_time)
                 else:
-                    logger.error(f"Non-retryable API error after {max_retries + 1} attempts: {str(e)}, input {messages}")
+                    logger.error(f"Non-retryable API error after {max_retries + 1} attempts: {str(e)}")
                     raise
 
             except Exception as e:
-                logger.error(f"Unexpected error during LLM call: {type(e).__name__}: {str(e)}, input {messages}")
+                logger.error(f"Unexpected error during LLM call: {type(e).__name__}: {str(e)}")
                 raise
 
         # This should never be reached, but just in case
         if last_exception:
             raise last_exception
-        raise RuntimeError(f"LLM call failed after all retries with no exception captured, input {messages}")
+        raise RuntimeError(f"LLM call failed after all retries with no exception captured")
 
     @classmethod
     def for_memory(cls) -> "LLMConfig":

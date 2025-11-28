@@ -312,4 +312,4 @@ hindsight reflect my-bank "Analyze our tech stack" --budget high
 - [**Retain**](./retain) — Advanced options for storing memories
 - [**Recall**](./recall) — Tuning search quality and performance
 - [**Reflect**](./reflect) — Configuring personality and opinions
-- [**Bank Identity**](./bank-identity) — Managing memory bank personality
+- [**Memory Banks**](./memory-banks) — Managing memory bank personality

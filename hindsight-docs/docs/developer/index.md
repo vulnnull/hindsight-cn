@@ -103,20 +103,22 @@ The `bias_strength` parameter (0-1) controls how much personality influences opi
 ## Next Steps
 
 ### Getting Started
-- [**Installation**](./api/installation) — Install Hindsight for Python, Node.js, or CLI
-- [**Quick Start**](./api/quickstart) — Get up and running in 60 seconds
+- [**Installation**](/developer/api/installation) — Install Hindsight for Python, Node.js, or CLI
+- [**Quick Start**](/developer/api/quickstart) — Get up and running in 60 seconds
 
 ### Core Concepts
-- [**Retain**](./retain) — How memories are stored with multi-dimensional facts
-- [**Recall**](./retrieval) — How TEMPR's 4-way search retrieves memories
-- [**Reflect**](./personality) — How personality influences reasoning and opinion formation
+- [**Retain**](/developer/retain) — How memories are stored with multi-dimensional facts
+- [**Recall**](/developer/retrieval) — How TEMPR's 4-way search retrieves memories
+- [**Reflect**](/developer/personality) — How personality influences reasoning and opinion formation
 
 ### API Methods
-- [**Main Methods**](./api/main-methods) — Overview of retain, recall, reflect
-- [**Memory Banks**](./api/memory-banks) — Configure personality and background
-- [**Entities**](./api/entities) — Track people, places, and concepts
-- [**Documents**](./api/documents) — Manage document sources
-- [**Operations**](./api/operations) — Monitor async tasks
+- [**Retain**](/developer/api/retain) — Store information in memory banks
+- [**Recall**](/developer/api/recall) — Search and retrieve memories
+- [**Reflect**](/developer/api/reflect) — Reason with personality
+- [**Memory Banks**](/developer/api/memory-banks) — Configure personality and background
+- [**Entities**](/developer/api/entities) — Track people, places, and concepts
+- [**Documents**](/developer/api/documents) — Manage document sources
+- [**Operations**](/developer/api/operations) — Monitor async tasks
 
 ### Deployment
-- [**Server Setup**](./server) — Deploy with Docker Compose, Helm, or pip
+- [**Server Setup**](/developer/server) — Deploy with Docker Compose, Helm, or pip

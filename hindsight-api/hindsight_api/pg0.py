@@ -141,7 +141,6 @@ class EmbeddedPostgres:
         Downloads and installs the binary if not already present.
         """
         if self.is_installed():
-            logger.debug(f"pg0 already installed at {self.binary_path}")
             return
 
         logger.info("Installing pg0 CLI...")
@@ -248,7 +247,6 @@ class EmbeddedPostgres:
         if returncode != 0:
             # Don't raise if server wasn't running
             if "not running" in stderr.lower():
-                logger.debug("PostgreSQL was not running")
                 return
             raise RuntimeError(f"Failed to stop PostgreSQL: {stderr}")
 

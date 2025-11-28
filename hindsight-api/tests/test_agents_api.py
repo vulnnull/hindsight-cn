@@ -28,12 +28,12 @@ class TestAgentProfile:
         assert "background" in profile
 
         personality = profile["personality"]
-        assert personality["openness"] == 0.5
-        assert personality["conscientiousness"] == 0.5
-        assert personality["extraversion"] == 0.5
-        assert personality["agreeableness"] == 0.5
-        assert personality["neuroticism"] == 0.5
-        assert personality["bias_strength"] == 0.5
+        assert personality.openness == 0.5
+        assert personality.conscientiousness == 0.5
+        assert personality.extraversion == 0.5
+        assert personality.agreeableness == 0.5
+        assert personality.neuroticism == 0.5
+        assert personality.bias_strength == 0.5
 
         assert profile["background"] == ""
 
@@ -43,7 +43,7 @@ class TestAgentProfile:
         bank_id = unique_agent_id("test_profile_update")
 
         profile = await memory.get_bank_profile(bank_id)
-        assert profile["personality"]["openness"] == 0.5
+        assert profile["personality"].openness == 0.5
 
         new_personality = {
             "openness": 0.8,
@@ -56,8 +56,13 @@ class TestAgentProfile:
         await memory.update_bank_personality(bank_id, new_personality)
 
         updated_profile = await memory.get_bank_profile(bank_id)
-        for key in new_personality:
-            assert abs(updated_profile["personality"][key] - new_personality[key]) < 0.001
+        personality = updated_profile["personality"]
+        assert abs(personality.openness - new_personality["openness"]) < 0.001
+        assert abs(personality.conscientiousness - new_personality["conscientiousness"]) < 0.001
+        assert abs(personality.extraversion - new_personality["extraversion"]) < 0.001
+        assert abs(personality.agreeableness - new_personality["agreeableness"]) < 0.001
+        assert abs(personality.neuroticism - new_personality["neuroticism"]) < 0.001
+        assert abs(personality.bias_strength - new_personality["bias_strength"]) < 0.001
 
     @pytest.mark.asyncio
     async def test_list_agents(self, memory: MemoryEngine):
@@ -177,8 +182,8 @@ class TestAgentEndpoint:
 
         final_profile = await memory.get_bank_profile(bank_id)
 
-        assert final_profile["personality"]["openness"] == 0.8
-        assert final_profile["personality"]["bias_strength"] == 0.7
+        assert final_profile["personality"].openness == 0.8
+        assert final_profile["personality"].bias_strength == 0.7
         assert final_profile["background"] == "I am a creative software engineer"
 
     @pytest.mark.asyncio
@@ -208,7 +213,7 @@ class TestAgentEndpoint:
 
         final_profile = await memory.get_bank_profile(bank_id)
 
-        assert final_profile["personality"]["openness"] == 0.5
+        assert final_profile["personality"].openness == 0.5
         assert final_profile["background"] == "I am a data scientist"
 
 

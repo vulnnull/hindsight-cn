@@ -12,6 +12,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 import asyncio
 from ..db_utils import acquire_with_retry
+from .types import RetrievalResult
 
 
 async def retrieve_semantic(
@@ -20,7 +21,7 @@ async def retrieve_semantic(
     bank_id: str,
     fact_type: str,
     limit: int
-) -> List[Tuple[str, Dict[str, Any]]]:
+) -> List[RetrievalResult]:
     """
     Semantic retrieval via vector similarity.
 
@@ -32,11 +33,11 @@ async def retrieve_semantic(
         limit: Maximum results to return
 
     Returns:
-        List of (doc_id, data) tuples
+        List of RetrievalResult objects
     """
     results = await conn.fetch(
         """
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE bank_id = $2
@@ -48,7 +49,7 @@ async def retrieve_semantic(
         """,
         query_emb_str, bank_id, fact_type, limit
     )
-    return [(str(r["id"]), dict(r)) for r in results]
+    return [RetrievalResult.from_db_row(dict(r)) for r in results]
 
 
 async def retrieve_bm25(
@@ -57,7 +58,7 @@ async def retrieve_bm25(
     bank_id: str,
     fact_type: str,
     limit: int
-) -> List[Tuple[str, Dict[str, Any]]]:
+) -> List[RetrievalResult]:
     """
     BM25 keyword retrieval via full-text search.
 
@@ -69,7 +70,7 @@ async def retrieve_bm25(
         limit: Maximum results to return
 
     Returns:
-        List of (doc_id, data) tuples
+        List of RetrievalResult objects
     """
     import re
 
@@ -90,7 +91,7 @@ async def retrieve_bm25(
 
     results = await conn.fetch(
         """
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
                ts_rank_cd(search_vector, to_tsquery('english', $1)) AS bm25_score
         FROM memory_units
         WHERE bank_id = $2
@@ -101,7 +102,7 @@ async def retrieve_bm25(
         """,
         query_tsquery, bank_id, fact_type, limit
     )
-    return [(str(r["id"]), dict(r)) for r in results]
+    return [RetrievalResult.from_db_row(dict(r)) for r in results]
 
 
 async def retrieve_graph(
@@ -110,7 +111,7 @@ async def retrieve_graph(
     bank_id: str,
     fact_type: str,
     budget: int
-) -> List[Tuple[str, Dict[str, Any]]]:
+) -> List[RetrievalResult]:
     """
     Graph retrieval via spreading activation.
 
@@ -122,12 +123,12 @@ async def retrieve_graph(
         budget: Node budget for graph traversal
 
     Returns:
-        List of (doc_id, data) tuples
+        List of RetrievalResult objects
     """
     # Find entry points
     entry_points = await conn.fetch(
         """
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE bank_id = $2
@@ -146,7 +147,7 @@ async def retrieve_graph(
     # BFS-style spreading activation with batched neighbor fetching
     visited = set()
     results = []
-    queue = [(dict(r), r["similarity"]) for r in entry_points]
+    queue = [(RetrievalResult.from_db_row(dict(r)), r["similarity"]) for r in entry_points]
     budget_remaining = budget
 
     # Process nodes in batches to reduce DB roundtrips
@@ -159,13 +160,13 @@ async def retrieve_graph(
 
         while queue and len(batch_nodes) < batch_size and budget_remaining > 0:
             current, activation = queue.pop(0)
-            unit_id = str(current["id"])
+            unit_id = current.id
 
             if unit_id not in visited:
                 visited.add(unit_id)
                 budget_remaining -= 1
-                results.append((unit_id, current))
-                batch_nodes.append(current["id"])
+                results.append(current)
+                batch_nodes.append(current.id)
                 batch_activations[unit_id] = activation
 
         # Batch fetch neighbors for all nodes in this batch
@@ -175,7 +176,7 @@ async def retrieve_graph(
             neighbors = await conn.fetch(
                 """
                 SELECT mu.id, mu.text, mu.context, mu.occurred_start, mu.occurred_end, mu.mentioned_at,
-                       mu.access_count, mu.embedding, mu.fact_type, mu.document_id,
+                       mu.access_count, mu.embedding, mu.fact_type, mu.document_id, mu.chunk_id,
                        ml.weight, ml.link_type, ml.from_unit_id
                 FROM memory_links ml
                 JOIN memory_units mu ON ml.to_unit_id = mu.id
@@ -213,7 +214,8 @@ async def retrieve_graph(
                     effective_weight = base_weight * causal_boost
                     new_activation = activation * effective_weight * 0.8
                     if new_activation > 0.1:
-                        queue.append((dict(n), new_activation))
+                        neighbor_result = RetrievalResult.from_db_row(dict(n))
+                        queue.append((neighbor_result, new_activation))
 
     return results
 
@@ -227,7 +229,7 @@ async def retrieve_temporal(
     end_date: datetime,
     budget: int,
     semantic_threshold: float = 0.4
-) -> List[Tuple[str, Dict[str, Any]]]:
+) -> List[RetrievalResult]:
     """
     Temporal retrieval with spreading activation.
 
@@ -247,7 +249,7 @@ async def retrieve_temporal(
         semantic_threshold: Minimum semantic similarity to include
 
     Returns:
-        List of (doc_id, data) tuples with temporal_score
+        List of RetrievalResult objects with temporal scores
     """
     from datetime import timezone
 
@@ -259,7 +261,7 @@ async def retrieve_temporal(
 
     entry_points = await conn.fetch(
         """
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
                1 - (embedding <=> $1::vector) AS similarity
         FROM memory_units
         WHERE bank_id = $2
@@ -325,24 +327,25 @@ async def retrieve_temporal(
         else:
             temporal_proximity = 0.5  # Fallback if no dates (shouldn't happen due to WHERE clause)
 
-        data = dict(ep)
-        data["temporal_score"] = temporal_proximity
-        data["temporal_proximity"] = temporal_proximity
-        results.append((unit_id, data))
+        # Create RetrievalResult with temporal scores
+        ep_result = RetrievalResult.from_db_row(dict(ep))
+        ep_result.temporal_score = temporal_proximity
+        ep_result.temporal_proximity = temporal_proximity
+        results.append(ep_result)
 
     # Spread through temporal links
-    queue = [(dict(ep), ep["similarity"], 1.0) for ep in entry_points]  # (unit, semantic_sim, temporal_score)
+    queue = [(RetrievalResult.from_db_row(dict(ep)), ep["similarity"], 1.0) for ep in entry_points]  # (unit, semantic_sim, temporal_score)
     budget_remaining = budget - len(entry_points)
 
     while queue and budget_remaining > 0:
         current, semantic_sim, temporal_score = queue.pop(0)
-        current_id = str(current["id"])
+        current_id = current.id
 
         # Get neighbors via temporal and causal links
         if budget_remaining > 0:
             neighbors = await conn.fetch(
                 """
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding, mu.fact_type, mu.document_id,
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding, mu.fact_type, mu.document_id, mu.chunk_id,
                        ml.weight, ml.link_type,
                        1 - (mu.embedding <=> $1::vector) AS similarity
                 FROM memory_links ml
@@ -356,7 +359,7 @@ async def retrieve_temporal(
                 ORDER BY ml.weight DESC
                 LIMIT 10
                 """,
-                query_emb_str, current["id"], fact_type, semantic_threshold
+                query_emb_str, current.id, fact_type, semantic_threshold
             )
 
             for n in neighbors:
@@ -399,14 +402,15 @@ async def retrieve_temporal(
                 # Combined temporal score
                 combined_temporal = max(neighbor_temporal_proximity, propagated_temporal)
 
-                neighbor_data = dict(n)
-                neighbor_data["temporal_score"] = combined_temporal
-                neighbor_data["temporal_proximity"] = neighbor_temporal_proximity
-                results.append((neighbor_id, neighbor_data))
+                # Create RetrievalResult with temporal scores
+                neighbor_result = RetrievalResult.from_db_row(dict(n))
+                neighbor_result.temporal_score = combined_temporal
+                neighbor_result.temporal_proximity = neighbor_temporal_proximity
+                results.append(neighbor_result)
 
                 # Add to queue for further spreading
                 if budget_remaining > 0 and combined_temporal > 0.2:
-                    queue.append((dict(n), n["similarity"], combined_temporal))
+                    queue.append((neighbor_result, n["similarity"], combined_temporal))
 
                 if budget_remaining <= 0:
                     break
@@ -423,7 +427,7 @@ async def retrieve_parallel(
     thinking_budget: int,
     question_date: Optional[datetime] = None,
     query_analyzer: Optional["QueryAnalyzer"] = None
-) -> Tuple[List, List, List, Optional[List], Dict[str, float]]:
+) -> Tuple[List[RetrievalResult], List[RetrievalResult], List[RetrievalResult], Optional[List[RetrievalResult]], Dict[str, float]]:
     """
     Run 3-way or 4-way parallel retrieval (adds temporal if detected).
 
@@ -439,6 +443,7 @@ async def retrieve_parallel(
 
     Returns:
         Tuple of (semantic_results, bm25_results, graph_results, temporal_results, timings)
+        Each results list contains RetrievalResult objects
         temporal_results is None if no temporal constraint detected
         timings is a dict with per-method latencies in seconds
     """

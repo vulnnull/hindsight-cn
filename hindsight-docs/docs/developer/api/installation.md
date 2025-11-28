@@ -55,7 +55,7 @@ The CLI is included with the Rust distribution. See [CLI documentation](/sdks/cl
 
 ## LLM Provider Setup
 
-Hindsight requires an LLM for fact extraction and reasoning. Configure your provider:
+Hindsight requires an LLM that supports **structured output** for fact extraction and reasoning. Configure your provider:
 
 <Tabs>
 <TabItem value="openai" label="OpenAI">
@@ -64,7 +64,7 @@ Hindsight requires an LLM for fact extraction and reasoning. Configure your prov
 export OPENAI_API_KEY=sk-...
 ```
 
-**Models:** `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`
+**Requirement:** Model must support structured output (JSON mode)
 
 </TabItem>
 <TabItem value="groq" label="Groq">
@@ -73,7 +73,7 @@ export OPENAI_API_KEY=sk-...
 export GROQ_API_KEY=gsk_...
 ```
 
-**Models:** `llama-3.3-70b-versatile`, `mixtral-8x7b-32768`
+**Requirement:** Model must support structured output (JSON mode)
 
 </TabItem>
 <TabItem value="ollama" label="Ollama (Local)">
@@ -82,7 +82,7 @@ export GROQ_API_KEY=gsk_...
 # No API key needed - runs locally
 ```
 
-**Models:** `llama3.1`, `mistral`, `qwen2.5`
+**Requirement:** Model must support structured output (JSON mode)
 
 See [Ollama documentation](https://ollama.ai) for setup.
 

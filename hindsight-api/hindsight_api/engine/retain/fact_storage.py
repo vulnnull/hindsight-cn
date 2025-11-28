@@ -1,0 +1,168 @@
+"""
+Fact storage for retain pipeline.
+
+Handles insertion of facts into the database.
+"""
+import logging
+import json
+from typing import List, Optional
+from uuid import UUID
+
+from .types import ProcessedFact
+
+logger = logging.getLogger(__name__)
+
+
+async def insert_facts_batch(
+    conn,
+    bank_id: str,
+    facts: List[ProcessedFact],
+    document_id: Optional[str] = None
+) -> List[str]:
+    """
+    Insert facts into the database in batch.
+
+    Args:
+        conn: Database connection
+        bank_id: Bank identifier
+        facts: List of ProcessedFact objects to insert
+        document_id: Optional document ID to associate with facts
+
+    Returns:
+        List of unit IDs (UUIDs as strings) for the inserted facts
+    """
+    if not facts:
+        return []
+
+    # Prepare data for batch insert
+    fact_texts = []
+    embeddings = []
+    occurred_starts = []
+    occurred_ends = []
+    mentioned_ats = []
+    contexts = []
+    fact_types = []
+    confidence_scores = []
+    access_counts = []
+    metadata_jsons = []
+    chunk_ids = []
+    document_ids = []
+
+    for fact in facts:
+        fact_texts.append(fact.fact_text)
+        # Convert embedding to string for asyncpg vector type
+        embeddings.append(str(fact.embedding))
+        occurred_starts.append(fact.occurred_start)
+        occurred_ends.append(fact.occurred_end)
+        mentioned_ats.append(fact.mentioned_at)
+        contexts.append(fact.context)
+        fact_types.append(fact.fact_type)
+        # confidence_score is only for opinion facts
+        confidence_scores.append(1.0 if fact.fact_type == 'opinion' else None)
+        access_counts.append(0)  # Initial access count
+        metadata_jsons.append(json.dumps(fact.metadata))
+        chunk_ids.append(fact.chunk_id)
+        document_ids.append(document_id)
+
+    # Batch insert all facts
+    # Note: event_date is set to occurred_start for backward compatibility
+    results = await conn.fetch(
+        """
+        INSERT INTO memory_units (bank_id, text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+                                 context, fact_type, confidence_score, access_count, metadata, chunk_id, document_id)
+        SELECT $1, * FROM unnest(
+            $2::text[], $3::vector[], $4::timestamptz[], $5::timestamptz[], $6::timestamptz[], $7::timestamptz[],
+            $8::text[], $9::text[], $10::float[], $11::int[], $12::jsonb[], $13::text[], $14::text[]
+        )
+        RETURNING id
+        """,
+        bank_id,
+        fact_texts,
+        embeddings,
+        occurred_starts,  # event_date (for backward compatibility)
+        occurred_starts,
+        occurred_ends,
+        mentioned_ats,
+        contexts,
+        fact_types,
+        confidence_scores,
+        access_counts,
+        metadata_jsons,
+        chunk_ids,
+        document_ids
+    )
+
+    unit_ids = [str(row['id']) for row in results]
+    return unit_ids
+
+
+async def ensure_bank_exists(conn, bank_id: str) -> None:
+    """
+    Ensure bank exists in the database.
+
+    Creates bank with default values if it doesn't exist.
+
+    Args:
+        conn: Database connection
+        bank_id: Bank identifier
+    """
+    await conn.execute(
+        """
+        INSERT INTO banks (bank_id, personality, background)
+        VALUES ($1, $2::jsonb, $3)
+        ON CONFLICT (bank_id) DO UPDATE
+        SET updated_at = NOW()
+        """,
+        bank_id,
+        '{"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5, "bias_strength": 0.5}',
+        ""
+    )
+
+
+async def handle_document_tracking(
+    conn,
+    bank_id: str,
+    document_id: str,
+    combined_content: str,
+    is_first_batch: bool
+) -> None:
+    """
+    Handle document tracking in the database.
+
+    Args:
+        conn: Database connection
+        bank_id: Bank identifier
+        document_id: Document identifier
+        combined_content: Combined content text from all content items
+        is_first_batch: Whether this is the first batch (for chunked operations)
+    """
+    import hashlib
+
+    # Calculate content hash
+    content_hash = hashlib.sha256(combined_content.encode()).hexdigest()
+
+    # Always delete old document first if it exists (cascades to units and links)
+    # Only delete on the first batch to avoid deleting data we just inserted
+    if is_first_batch:
+        await conn.fetchval(
+            "DELETE FROM documents WHERE id = $1 AND bank_id = $2 RETURNING id",
+            document_id, bank_id
+        )
+
+    # Insert document (or update if exists from concurrent operations)
+    await conn.execute(
+        """
+        INSERT INTO documents (id, bank_id, original_text, content_hash, metadata)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (id, bank_id) DO UPDATE
+        SET original_text = EXCLUDED.original_text,
+            content_hash = EXCLUDED.content_hash,
+            metadata = EXCLUDED.metadata,
+            updated_at = NOW()
+        """,
+        document_id,
+        bank_id,
+        combined_content,
+        content_hash,
+        json.dumps({})  # Empty metadata dict
+    )

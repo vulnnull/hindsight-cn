@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
 
     const { items, document_id } = body;
 
-    const response = await sdk.sdk.retainMemories({
+    const response = await sdk.retainMemories({
       client: lowLevelClient,
       path: { bank_id: bankId },
       body: { items, document_id, async: true }

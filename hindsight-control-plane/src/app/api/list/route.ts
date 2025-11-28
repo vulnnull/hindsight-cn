@@ -35,37 +35,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Note: Individual memory unit deletion is not yet supported by the API
+// Use clearBankMemories to delete all memories for a bank instead
 export async function DELETE(request: NextRequest) {
-  try {
-    const searchParams = request.nextUrl.searchParams;
-    const bankId = searchParams.get('bank_id') || searchParams.get('agent_id');
-    const unitId = searchParams.get('unit_id');
-
-    if (!bankId) {
-      return NextResponse.json(
-        { error: 'bank_id is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!unitId) {
-      return NextResponse.json(
-        { error: 'unit_id is required' },
-        { status: 400 }
-      );
-    }
-
-    const response = await sdk.sdk.deleteMemoryUnit({
-      client: lowLevelClient,
-      path: { bank_id: bankId, unit_id: unitId }
-    });
-
-    return NextResponse.json(response.data, { status: 200 });
-  } catch (error) {
-    console.error('Error deleting memory unit:', error);
-    return NextResponse.json(
-      { error: 'Failed to delete memory unit' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json(
+    { error: 'Individual memory unit deletion is not yet supported. Use clear all memories instead.' },
+    { status: 501 } // Not Implemented
+  );
 }

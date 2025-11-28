@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 from benchmarks.common.benchmark_runner import BenchmarkRunner
-from hindsight_api import MemoryEngine
 
 import json
 from datetime import datetime, timezone
@@ -112,7 +111,7 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
     async def generate_answer(
         self,
         question: str,
-        memories: List[Dict[str, Any]],
+        recall_result: Dict[str, Any],
         question_date: Optional[datetime] = None
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
@@ -120,14 +119,14 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
 
         Args:
             question: The question text
-            memories: Retrieved memories
+            recall_result: Full RecallResult dict containing results, entities, chunks, and trace
             question_date: Date when the question was asked (for temporal context)
 
         Returns:
             Tuple of (answer, reasoning, None)
-            - None indicates to use the memories passed in
+            - None indicates to use the memories from recall_result
         """
-        context = json.dumps(memories)
+        context = json.dumps(recall_result)
 
         # Format question date if provided
         question_date_str = ""
@@ -152,12 +151,11 @@ You have access to facts and entities from a conversation.
 1. Carefully analyze all provided memories
 2. Pay special attention to the timestamps to determine the answer
 3. If the question asks about a specific event or fact, look for direct evidence in the memories
-4. If the memories contain contradictory information, prioritize the most recent memory
+4. If the memories contain contradictory information or multiple instances of an event, say them all
 5. Always convert relative time references to specific dates, months, or years.
 6. Be as specific as possible when talking about people, places, and events
-7. Timestamps in memories represent the actual time the event occurred, not the time the event was mentioned in a message.
-8. Include wider range of information and provide a complete answer, including all the dimensions of the question (emotional, factual..)
-9. If the answer is not explicitly stated in the memories, use logical reasoning based on the information available to answer (e.g. calculate duration of an event from different memories).
+7. If the answer is not explicitly stated in the memories, use logical reasoning based on the information available to answer (e.g. calculate duration of an event from different memories).
+
 Context:
 
 {context}
@@ -202,7 +200,7 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
     async def generate_answer(
         self,
         question: str,
-        memories: List[Dict[str, Any]],
+        recall_result: Dict[str, Any],
         question_date: Optional[datetime] = None
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
@@ -213,7 +211,7 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
 
         Args:
             question: Question to answer
-            memories: Not used (empty list), as think does its own retrieval
+            recall_result: Not used (empty dict), as think does its own retrieval
             question_date: Date when the question was asked (currently not used by think API)
 
         Returns:
@@ -330,15 +328,10 @@ async def run_benchmark(
     if api_url:
         from benchmarks.common.benchmark_runner import HindsightClientAdapter
         memory = HindsightClientAdapter(base_url=api_url)
+        await memory.initialize()
     else:
-        memory = MemoryEngine(
-            db_url=os.getenv("HINDSIGHT_API_DATABASE_URL"),
-            memory_llm_provider=os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq"),
-            memory_llm_api_key=os.getenv("HINDSIGHT_API_LLM_API_KEY"),
-            memory_llm_model=os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"),
-            memory_llm_base_url=os.getenv("HINDSIGHT_API_LLM_BASE_URL") or None,  # Use None to get provider defaults
-        )
-    await memory.initialize()
+        from benchmarks.common.benchmark_runner import create_memory_engine
+        memory = await create_memory_engine()
 
     if use_think:
         answer_generator = LoComoThinkAnswerGenerator(
@@ -381,6 +374,14 @@ async def run_benchmark(
             return filtered_items[:max_items] if max_items else filtered_items
         dataset.load = filtered_load
 
+    # Determine output filename based on mode
+    suffix = "_think" if use_think else ""
+    results_filename = f'benchmark_results{suffix}.json'
+    output_path = Path(__file__).parent / 'results' / results_filename
+
+    # Merge with existing results if running a specific conversation or using filters
+    merge_with_existing = conversation is not None or only_failed or only_invalid
+
     # Run benchmark with parallel conversation processing
     # Each conversation gets its own agent ID (locomo_conv-26, locomo_conv-30, etc.)
     # This allows conversations to run in parallel (up to max_concurrent_items at a time)
@@ -397,18 +398,13 @@ async def run_benchmark(
         specific_item=conversation,
         clear_agent_per_item=True,  # Use unique agent ID per conversation
         max_concurrent_items=3,  # Process up to 3 conversations in parallel
+        output_path=output_path,  # Save results incrementally
+        merge_with_existing=merge_with_existing
     )
 
-    # Display and save results
+    # Display results (final save already happened incrementally)
     runner.display_results(results)
-
-    # Determine output filename based on mode
-    suffix = "_think" if use_think else ""
-    results_filename = f'benchmark_results{suffix}.json'
-
-    # Merge with existing results if running a specific conversation or using filters
-    merge_with_existing = conversation is not None or only_failed or only_invalid
-    runner.save_results(results, Path(__file__).parent / 'results' / results_filename, merge_with_existing=merge_with_existing)
+    console.print(f"\n[green]✓[/green] Results saved incrementally to {output_path}")
 
     # Generate markdown table
     generate_markdown_table(results, use_think)

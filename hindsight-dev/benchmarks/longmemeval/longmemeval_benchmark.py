@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 from benchmarks.common.benchmark_runner import BenchmarkRunner
-from hindsight_api import MemoryEngine
 
 import json
 from datetime import datetime, timezone
@@ -63,29 +62,15 @@ class LongMemEvalDataset(BenchmarkDataset):
             # Parse session date
             session_date = self._parse_date(date_str) if date_str else datetime.now(timezone.utc)
 
-            # Combine all turns in the session into one content string
-            session_content_parts = []
-            for turn_dict in session_turns:
-                role = turn_dict.get("role", "")
-                content = turn_dict.get("content", "")
-
-                if not content.strip():
-                    continue
-
-                # Format as "role: content"
-                session_content_parts.append(f"{role}: {content}")
-
-            # Add session to batch
-            if session_content_parts:
-                session_content = "\n".join(session_content_parts)
-                question_id = item.get("question_id", "unknown")
-                document_id = f"{question_id}_{session_id}"
-                batch_contents.append({
-                    "content": session_content,
-                    "context": f"Session {session_id}",
-                    "event_date": session_date,
-                    "document_id": document_id
-                })
+            session_content = json.dumps(session_turns)
+            question_id = item.get("question_id", "unknown")
+            document_id = f"{question_id}_{session_id}"
+            batch_contents.append({
+                "content": session_content,
+                "context": f"Session {session_id} - you are the assistant in this conversation - happened on {session_date.strftime('%Y-%m-%d %H:%M:%S')} UTC.",
+                "event_date": session_date,
+                "document_id": document_id
+            })
 
         return batch_contents
 
@@ -128,7 +113,7 @@ class LongMemEvalDataset(BenchmarkDataset):
             # Fallback: try ISO format
             return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
         except Exception:
-            return datetime.now(timezone.utc)
+            raise ValueError(f"Failed to parse date string: {date_str}")
 
 
 class QuestionAnswer(pydantic.BaseModel):
@@ -147,7 +132,7 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
     async def generate_answer(
                 self,
                 question: str,
-                memories: List[Dict[str, Any]],
+                recall_result: Dict[str, Any],
                 question_date: Optional[datetime] = None
         ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
             """
@@ -155,20 +140,14 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
 
             Args:
                 question: The question text
-                memories: Retrieved memories
+                recall_result: Full RecallResult dict containing results, entities, chunks, and trace
                 question_date: Date when the question was asked (for temporal context)
 
             Returns:
                 Tuple of (answer, reasoning, None)
-                - None indicates to use the memories passed in
+                - None indicates to use the memories from recall_result
             """
-            # Format context
-            context_parts = []
-            for result in memories:
-                context_parts.append({"text": result.get("text"), "context": result.get("context"),
-                                      "event_date": result.get("event_date")})
-
-            context = json.dumps(context_parts)
+            context = json.dumps(recall_result)
 
             # Format question date if provided
             question_date_str = ""
@@ -187,7 +166,7 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
                             "role": "user",
                             "content": f"""
     # CONTEXT:
-    You have access to facts and entities from a conversation.
+    You have access to memories from a conversation.
 {question_date_str}
     # INSTRUCTIONS:
     1. Carefully analyze all provided memories
@@ -247,11 +226,11 @@ async def run_benchmark(
     thinking_budget: int = 500,
     max_tokens: int = 8192,
     skip_ingestion: bool = False,
-    api_url: str = None,
     filln: bool = False,
     question_id: str = None,
     only_failed: bool = False,
-    only_invalid: bool = False
+    only_invalid: bool = False,
+    category: str = None
 ):
     """
     Run the LongMemEval benchmark.
@@ -262,11 +241,11 @@ async def run_benchmark(
         thinking_budget: Thinking budget for spreading activation search
         max_tokens: Maximum tokens to retrieve from memories
         skip_ingestion: Whether to skip ingestion and use existing data
-        api_url: Optional API URL to connect to (default: use local memory)
         filln: If True, only process questions where the agent has no indexed data yet
         question_id: Optional question ID to filter (e.g., 'e47becba'). Useful with --skip-ingestion.
         only_failed: If True, only run questions that were previously marked as incorrect (is_correct=False)
         only_invalid: If True, only run questions that were previously marked as invalid (is_invalid=True)
+        category: Optional category to filter questions (e.g., 'single-session-user', 'multi-session', 'temporal-reasoning')
     """
     from rich.console import Console
     console = Console()
@@ -309,6 +288,33 @@ async def run_benchmark(
     # Initialize components
     dataset = LongMemEvalDataset()
 
+    # Start with all items or load from dataset
+    original_dataset_items = None
+    filtered_items = None
+
+    # Filter dataset by category if specified
+    if category:
+        console.print(f"[cyan]Filtering questions by category: {category}[/cyan]")
+        if original_dataset_items is None:
+            # Load full dataset without max_instances limit for filtering
+            original_dataset_items = dataset.load(dataset_path, max_items=None)
+
+        filtered_items = [item for item in original_dataset_items if item.get('question_type') == category]
+
+        if not filtered_items:
+            console.print(f"[yellow]No questions found for category '{category}'. Available categories:[/yellow]")
+            available_categories = set(item.get('question_type', 'unknown') for item in original_dataset_items)
+            for cat in sorted(available_categories):
+                console.print(f"  - {cat}")
+            return
+
+        total_found = len(filtered_items)
+        will_run = min(total_found, max_instances) if max_instances else total_found
+        if max_instances and total_found > max_instances:
+            console.print(f"[green]Found {total_found} questions for category '{category}' (will run {will_run} due to --max-instances)[/green]")
+        else:
+            console.print(f"[green]Found {total_found} questions for category '{category}'[/green]")
+
     # Filter dataset based on failed/invalid flags
     if only_failed or only_invalid:
         target_ids = failed_question_ids if only_failed else invalid_question_ids
@@ -316,27 +322,31 @@ async def run_benchmark(
             filter_type = "failed" if only_failed else "invalid"
             console.print(f"[yellow]No {filter_type} questions found in previous results. Nothing to run.[/yellow]")
             return
-        # Override question_id to be None if we're filtering by failed/invalid
-        # The filtering will happen when we load the dataset
-        original_dataset_items = dataset.load(dataset_path, max_instances)
-        filtered_items = [item for item in original_dataset_items if dataset.get_item_id(item) in target_ids]
-        console.print(f"[green]Found {len(filtered_items)} items to re-evaluate[/green]")
+
+        # Load original items if not already loaded
+        if original_dataset_items is None:
+            # Load full dataset without max_instances limit for filtering
+            original_dataset_items = dataset.load(dataset_path, max_items=None)
+
+        # If we already have filtered_items from category filtering, filter those
+        # Otherwise start with all items
+        items_to_filter = filtered_items if filtered_items is not None else original_dataset_items
+        filtered_items = [item for item in items_to_filter if dataset.get_item_id(item) in target_ids]
+
+        filter_type = "failed" if only_failed else "invalid"
+        total_found = len(filtered_items)
+        will_run = min(total_found, max_instances) if max_instances else total_found
+        if max_instances and total_found > max_instances:
+            console.print(f"[green]Found {total_found} {filter_type} items to re-evaluate (will run {will_run} due to --max-instances)[/green]")
+        else:
+            console.print(f"[green]Found {total_found} {filter_type} items to re-evaluate[/green]")
 
     answer_generator = LongMemEvalAnswerGenerator()
     answer_evaluator = LLMAnswerEvaluator()
 
-    # Use remote API client if api_url is provided, otherwise use local memory
-    if api_url:
-        from benchmarks.common.benchmark_runner import HindsightClientAdapter
-        memory = HindsightClientAdapter(base_url=api_url)
-    else:
-        memory = MemoryEngine(
-            db_url=os.getenv("HINDSIGHT_API_DATABASE_URL"),
-            memory_llm_provider=os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq"),
-            memory_llm_api_key=os.getenv("HINDSIGHT_API_LLM_API_KEY"),
-            memory_llm_model=os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"),
-            memory_llm_base_url=os.getenv("HINDSIGHT_API_LLM_BASE_URL") or None,  # Use None to get provider defaults
-        )
+    # Create local memory engine
+    from benchmarks.common.benchmark_runner import create_memory_engine
+    memory = await create_memory_engine()
 
     # Create benchmark runner
     runner = BenchmarkRunner(
@@ -346,9 +356,9 @@ async def run_benchmark(
         memory=memory
     )
 
-    # If filtering by failed/invalid, we need to use a custom dataset that only returns those items
+    # If filtering by category, failed, or invalid, we need to use a custom dataset that only returns those items
     # We'll temporarily replace the dataset's load method
-    if only_failed or only_invalid:
+    if filtered_items is not None:
         original_load = dataset.load
         def filtered_load(path: Path, max_items: Optional[int] = None):
             return filtered_items[:max_items] if max_items else filtered_items
@@ -357,6 +367,9 @@ async def run_benchmark(
     # Run benchmark
     # Single-phase approach: each question gets its own isolated agent_id
     # This ensures each question only has access to its own context
+    output_path = Path(__file__).parent / 'results' / 'benchmark_results.json'
+    merge_with_existing = (filln or question_id is not None or only_failed or only_invalid or category is not None)
+
     results = await runner.run(
         dataset_path=dataset_path,
         agent_id="longmemeval",  # Will be suffixed with question_id per item
@@ -370,16 +383,14 @@ async def run_benchmark(
         separate_ingestion_phase=False,  # Process each question independently
         clear_agent_per_item=True,  # Use unique agent_id per question
         filln=filln,  # Only process questions without indexed data
-        specific_item=question_id  # Optional filter for specific question ID
+        specific_item=question_id,  # Optional filter for specific question ID
+        output_path=output_path,  # Save results incrementally
+        merge_with_existing=merge_with_existing  # Merge when using --fill, --category, --only-failed, --only-invalid flags or specific question
     )
 
-    # Display and save results
+    # Display results (final save already happened incrementally)
     runner.display_results(results)
-    runner.save_results(
-        results,
-        Path(__file__).parent / 'results' / 'benchmark_results.json',
-        merge_with_existing=(filln or question_id is not None or only_failed or only_invalid)  # Merge when using --fill, --only-failed, --only-invalid flags or specific question
-    )
+    console.print(f"\n[green]✓[/green] Results saved incrementally to {output_path}")
 
     # Generate detailed report by question type
     generate_type_report(results)
@@ -507,12 +518,6 @@ if __name__ == "__main__":
         help="Skip ingestion and use existing data"
     )
     parser.add_argument(
-        "--api-url",
-        type=str,
-        default=None,
-        help="Hindsight API URL (default: use local memory, example: http://localhost:8888)"
-    )
-    parser.add_argument(
         "--fill",
         action="store_true",
         help="Only process questions where the agent has no indexed data yet (for resuming interrupted runs)"
@@ -533,6 +538,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Only run questions that were previously marked as invalid (is_invalid=True). Requires existing results file."
     )
+    parser.add_argument(
+        "--category",
+        type=str,
+        default=None,
+        help="Filter questions by category/question_type. Available categories: 'single-session-user', 'multi-session', 'single-session-preference', 'temporal-reasoning', 'knowledge-update', 'single-session-assistant'."
+    )
 
     args = parser.parse_args()
 
@@ -546,9 +557,9 @@ if __name__ == "__main__":
         thinking_budget=args.thinking_budget,
         max_tokens=args.max_tokens,
         skip_ingestion=args.skip_ingestion,
-        api_url=args.api_url,
         filln=args.fill,
         question_id=args.question_id,
         only_failed=args.only_failed,
-        only_invalid=args.only_invalid
+        only_invalid=args.only_invalid,
+        category=args.category
     ))

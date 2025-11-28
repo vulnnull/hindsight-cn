@@ -137,7 +137,6 @@ class AsyncIOQueueBackend(TaskBackend):
         await self._queue.put(task_dict)
         task_type = task_dict.get('type', 'unknown')
         task_id = task_dict.get('id')
-        logger.debug(f"Task submitted: {task_type} (id: {task_id})")
 
     async def wait_for_pending_tasks(self, timeout: float = 5.0):
         """
@@ -180,7 +179,7 @@ class AsyncIOQueueBackend(TaskBackend):
             try:
                 await self._worker_task
             except asyncio.CancelledError:
-                logger.debug("Worker task cancelled successfully")
+                pass  # Worker cancelled successfully
 
         self._initialized = False
         logger.info("AsyncIOQueueBackend shutdown complete")
@@ -211,7 +210,6 @@ class AsyncIOQueueBackend(TaskBackend):
 
                 # Process batch
                 if tasks:
-                    logger.debug(f"Processing batch of {len(tasks)} tasks")
                     # Execute tasks concurrently
                     await asyncio.gather(
                         *[self._execute_task(task_dict) for task_dict in tasks],

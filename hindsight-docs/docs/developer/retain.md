@@ -191,4 +191,4 @@ All stored in your isolated **memory bank**, ready for `recall()` and `reflect()
 
 - [**Recall**](./retrieval) — How multi-strategy search retrieves relevant memories
 - [**Reflect**](./personality) — How personality influences reasoning and opinion formation
-- [API Reference](/developer/api/ingest) — Code examples for retaining memories
+- [API Reference](./api/retain) — Code examples for retaining memories

@@ -15,7 +15,7 @@ export function BankSelector() {
           className="px-3 py-1.5 border-2 border-primary rounded bg-background text-foreground text-sm font-bold cursor-pointer transition-all hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring"
         >
           <option value="">Select a memory bank...</option>
-          {banks.map((bank) => (
+          {[...banks].sort((a, b) => a.localeCompare(b)).map((bank) => (
             <option key={bank} value={bank}>
               {bank}
             </option>

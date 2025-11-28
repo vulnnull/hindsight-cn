@@ -20,7 +20,7 @@ export function StatsView() {
         client.listOperations(currentBank),
       ]);
       setStats(stats);
-      setOperations(ops?.operations || []);
+      setOperations((ops as any)?.operations || []);
     } catch (error) {
       console.error('Error loading stats:', error);
       alert('Error loading stats: ' + (error as Error).message);

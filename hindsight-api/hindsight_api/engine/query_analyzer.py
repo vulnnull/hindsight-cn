@@ -105,12 +105,10 @@ class TransformerQueryAnalyzer(QueryAnalyzer):
                     "Install it with: pip install transformers"
                 )
 
-            logger.debug(f"Loading T5 model: {self.model_name}...")
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self._model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
             self._model.to(self.device)
             self._model.eval()
-            logger.debug(f"Model loaded on {self.device}")
 
     def analyze(
         self, query: str, reference_date: Optional[datetime] = None
@@ -158,7 +156,6 @@ what is the weather = none
             )
 
         result = self._tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-        logger.debug(f"T5 generated: '{result}'")
 
         # Parse the generated output
         temporal = self._parse_generated_output(result, reference_date)
@@ -216,7 +213,6 @@ what is the weather = none
                 return TemporalConstraint(start_date=start_date, end_date=end_date)
 
         except (ValueError, AttributeError) as e:
-            logger.debug(f"Failed to parse T5 output '{result}': {e}")
             return None
 
         return None

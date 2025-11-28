@@ -1,0 +1,29 @@
+services:
+  hindsight:
+    build:
+      context: ../..
+      dockerfile: docker/standalone/Dockerfile
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    ports:
+      - "3000:3000"
+      - "8888:8888"
+    environment:
+      # Pass through all HINDSIGHT_* environment variables from host
+      HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_API_LLM_API_KEY:-}
+      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_API_LLM_MODEL:-}
+      HINDSIGHT_API_LLM_BASE_URL: ${HINDSIGHT_API_LLM_BASE_URL:-}
+      HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_API_LLM_PROVIDER:-}
+      HINDSIGHT_API_HOST: ${HINDSIGHT_API_HOST:-0.0.0.0}
+      HINDSIGHT_API_PORT: ${HINDSIGHT_API_PORT:-8888}
+      HINDSIGHT_API_LOG_LEVEL: ${HINDSIGHT_API_LOG_LEVEL:-info}
+      # HINDSIGHT_API_DATABASE_URL can be set if you want to use an external database
+      # If not set, embedded pg0 will be used automatically
+      # Add any other HINDSIGHT_* vars you need here
+    volumes:
+      - hindsight_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  hindsight_data:

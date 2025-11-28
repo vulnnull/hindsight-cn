@@ -1,65 +1,41 @@
 #!/bin/bash
-set -e
+# Start Hindsight (standalone all-in-one)
 
 cd "$(dirname "$0")"
 
-echo "🚀 Starting Hindsight Services"
-echo "============================"
-echo ""
-
-# Check if .env file exists in root
-if [ ! -f ../.env ]; then
-    echo "⚠️  No .env file found in project root!"
-    echo ""
-    echo "Creating .env from .env.example..."
-    cp ../.env.example ../.env
-    echo ""
-    echo "⚠️  Please edit .env and set your API keys:"
-    echo "   - HINDSIGHT_API_LLM_API_KEY"
-    echo ""
-    echo "Then run this script again."
-    exit 1
+# Check for --build flag
+BUILD_FLAG=""
+if [[ "$1" == "--build" ]] || [[ "$1" == "-b" ]]; then
+  BUILD_FLAG="--build"
+  echo "🔨 Forcing rebuild of images..."
+  echo ""
 fi
 
-echo "📦 Building and starting services..."
-docker compose --env-file ../.env up --build -d
-
-echo ""
-echo "⏳ Waiting for services to be healthy..."
+echo "🚀 Starting Hindsight..."
 echo ""
 
-# Wait for PostgreSQL
-echo "  Waiting for PostgreSQL..."
-until docker exec hindsight-postgres pg_isready -U hindsight > /dev/null 2>&1; do
-  sleep 1
-done
-echo "  ✅ PostgreSQL is ready"
+# Load .env file from project root if it exists
+if [ -f ../.env ]; then
+  echo "📝 Loading environment variables from .env file..."
+  export $(grep -v '^#' ../.env | grep -v '^$' | xargs)
+fi
 
-# Wait for API
-echo "  Waiting for API..."
-until curl -f http://localhost:8888/api/v1/agents > /dev/null 2>&1; do
-  sleep 2
-done
-echo "  ✅ API is ready"
+# Check for required HINDSIGHT_API_LLM_API_KEY
+if [ -z "$HINDSIGHT_API_LLM_API_KEY" ]; then
+  echo "⚠️  Warning: HINDSIGHT_API_LLM_API_KEY is not set"
+  echo ""
+  echo "Set it by either:"
+  echo "  1. Creating a .env file in the project root with: HINDSIGHT_API_LLM_API_KEY=your-key"
+  echo "  2. Exporting: export HINDSIGHT_API_LLM_API_KEY=your-key"
+  echo ""
+  read -p "Continue anyway? (y/N) " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    exit 1
+  fi
+fi
 
-# Wait for Control Plane
-echo "  Waiting for Control Plane..."
-until curl -f http://localhost:9999 > /dev/null 2>&1; do
-  sleep 2
-done
-echo "  ✅ Control Plane is ready"
+cd standalone
 
-echo ""
-echo "✅ All services are running!"
-echo ""
-echo "📊 Service URLs:"
-echo "   Control Plane: http://localhost:9999"
-echo "   API:           http://localhost:8888"
-echo "   PostgreSQL:    localhost:5432"
-echo ""
-echo "🔍 View logs:"
-echo "   docker compose logs -f"
-echo ""
-echo "🛑 Stop services:"
-echo "   ./stop.sh"
-echo ""
+# Run docker-compose with optional --build flag
+docker-compose up $BUILD_FLAG

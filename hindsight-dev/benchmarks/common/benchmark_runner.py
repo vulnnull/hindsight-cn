@@ -31,272 +31,36 @@ from rich import box
 import pydantic
 
 from hindsight_api import MemoryEngine
+from hindsight_api.engine.memory_engine import Budget
 from openai import AsyncOpenAI
+import os
 
 console = Console()
 
 
-class HindsightClientAdapter:
+async def create_memory_engine() -> MemoryEngine:
     """
-    Adapter that wraps the Hindsight Python client to provide the interface
-    expected by the benchmark runner.
+    Create and initialize a MemoryEngine instance from environment variables.
 
-    This allows benchmarks to use the Python client instead of RemoteMemoryClient
-    while maintaining the same interface for put_batch_async, search_async, etc.
+    Reads configuration from:
+    - HINDSIGHT_API_DATABASE_URL (default: "pg0")
+    - HINDSIGHT_API_LLM_PROVIDER (default: "groq")
+    - HINDSIGHT_API_LLM_API_KEY
+    - HINDSIGHT_API_LLM_MODEL (default: "openai/gpt-oss-120b")
+    - HINDSIGHT_API_LLM_BASE_URL (optional)
+
+    Returns:
+        Initialized MemoryEngine instance
     """
-
-    def __init__(self, base_url: str = "http://localhost:8888", timeout: float = 300.0):
-        """
-        Initialize the adapter with the Hindsight client.
-
-        Args:
-            base_url: Base URL of the Hindsight API server
-            timeout: Request timeout in seconds
-        """
-        from hindsight_client import Hindsight
-        self.base_url = base_url.rstrip('/')
-        self.timeout = timeout
-        self.client = Hindsight(base_url=base_url, timeout=timeout)
-
-    async def initialize(self):
-        """Initialize the client (no-op for HTTP client)."""
-        pass
-
-    async def close(self):
-        """Close the HTTP client."""
-        self.client.close()
-
-    async def put_batch_async(
-        self,
-        agent_id: str,
-        contents: List[Dict[str, Any]],
-        document_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Store multiple memory items via API.
-
-        Args:
-            agent_id: Agent identifier (bank_id)
-            contents: List of content dicts with 'content', 'event_date', 'context' keys
-            document_id: Optional document identifier
-
-        Returns:
-            Result dict with success status
-        """
-        # Convert to format expected by client
-        items = []
-        for content in contents:
-            item = {"content": content["content"]}
-            # Map event_date to timestamp
-            if "event_date" in content and content["event_date"]:
-                item["timestamp"] = content["event_date"]
-            if "context" in content and content["context"]:
-                item["context"] = content["context"]
-            items.append(item)
-
-        return await self.client.aretain_batch(
-            agent_id=agent_id,
-            items=items,
-            document_id=document_id,
-        )
-
-    async def search_async(
-        self,
-        agent_id: str,
-        query: str,
-        thinking_budget: int = 100,
-        max_tokens: int = 4096,
-        enable_trace: bool = False,
-        reranker: str = "heuristic",
-        fact_type: Optional[List[str]] = None,
-        question_date: Optional[datetime] = None
-    ) -> 'SearchResult':
-        """
-        Recall memories via API.
-
-        Returns:
-            SearchResult object with results list
-        """
-        from hindsight_client_api.models import recall_request
-
-        # Map thinking_budget to budget level
-        budget = 'low' if thinking_budget <= 30 else 'mid' if thinking_budget <= 70 else 'high'
-
-        request_obj = recall_request.RecallRequest(
-            query=query,
-            types=fact_type,
-            budget=budget,
-            max_tokens=max_tokens,
-            trace=enable_trace,
-            query_timestamp=question_date.isoformat() if question_date else None,
-        )
-
-        response = await self.client._memory_api.recall_memories(agent_id, request_obj)
-
-        # Convert to expected format - wrap results in an object with .results attribute
-        class SearchResult:
-            def __init__(self, results):
-                self.results = results
-
-        class MemoryFact:
-            def __init__(self, data):
-                self._data = data
-
-            def model_dump(self):
-                return self._data
-
-        results = []
-        if hasattr(response, 'results'):
-            for r in response.results:
-                data = r.to_dict() if hasattr(r, 'to_dict') else r
-                results.append(MemoryFact(data))
-
-        return SearchResult(results)
-
-    async def think_async(
-        self,
-        agent_id: str,
-        query: str,
-        thinking_budget: int = 50,
-        context: str = None
-    ) -> 'ThinkResult':
-        """
-        Generate answer using reflect API.
-
-        Returns:
-            ThinkResult object with text, based_on, and new_opinions
-        """
-        # Map thinking_budget to budget level
-        budget = 'low' if thinking_budget <= 30 else 'mid' if thinking_budget <= 70 else 'high'
-
-        response = await self.client.areflect(
-            agent_id=agent_id,
-            query=query,
-            budget=budget,
-            context=context,
-        )
-
-        # Convert to expected format with attribute access
-        class MemoryFact:
-            def __init__(self, data):
-                self._data = data
-
-            def model_dump(self):
-                return self._data
-
-            def get(self, key, default=None):
-                return self._data.get(key, default)
-
-        class ThinkResult:
-            def __init__(self, data):
-                self.text = data.get('text', '')
-                # Convert based_on facts to MemoryFact objects
-                based_on_raw = data.get('based_on', {})
-                self.based_on = {
-                    'world': [MemoryFact(f) for f in based_on_raw.get('world', [])],
-                    'agent': [MemoryFact(f) for f in based_on_raw.get('agent', [])],
-                    'opinion': [MemoryFact(f) for f in based_on_raw.get('opinion', [])],
-                }
-                self.new_opinions = data.get('new_opinions', [])
-
-        return ThinkResult(response)
-
-    async def delete_agent(self, agent_id: str) -> Dict[str, Any]:
-        """
-        Delete all data for an agent.
-
-        Args:
-            agent_id: Agent identifier
-
-        Returns:
-            Result dict
-        """
-        import httpx
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.delete(f"{self.base_url}/api/v1/agents/{agent_id}")
-            if response.status_code == 404:
-                return {"success": True, "message": "Agent not found (already deleted)"}
-            response.raise_for_status()
-            return response.json()
-
-    async def list_agents(self) -> List[str]:
-        """
-        List all agents.
-
-        Returns:
-            List of agent IDs
-        """
-        import httpx
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.get(f"{self.base_url}/api/v1/agents")
-            response.raise_for_status()
-            result = response.json()
-            return [a.get('agent_id', a) if isinstance(a, dict) else a for a in result.get("agents", [])]
-
-    async def get_agent_stats(self, agent_id: str) -> Dict[str, Any]:
-        """
-        Get statistics for an agent.
-
-        Args:
-            agent_id: Agent identifier
-
-        Returns:
-            Dict with statistics including total_nodes, total_links, and pending_operations
-        """
-        import httpx
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.get(f"{self.base_url}/api/v1/agents/{agent_id}/stats")
-            response.raise_for_status()
-            return response.json()
-
-    async def wait_for_backlog_completion(
-        self,
-        agent_id: str,
-        poll_interval: float = 1.0,
-        timeout: float = 300.0,
-        verbose: bool = True
-    ) -> Dict[str, Any]:
-        """
-        Poll agent stats until pending_operations is zero or timeout is reached.
-
-        Args:
-            agent_id: Agent identifier
-            poll_interval: Time to wait between polls in seconds
-            timeout: Maximum time to wait in seconds
-            verbose: Whether to print status updates
-
-        Returns:
-            Final stats dict
-
-        Raises:
-            TimeoutError: If pending_operations doesn't clear within timeout
-        """
-        import time
-        start_time = time.time()
-
-        while True:
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                raise TimeoutError(
-                    f"Timeout waiting for pending operations to clear for agent '{agent_id}' "
-                    f"after {timeout}s"
-                )
-
-            stats = await self.get_agent_stats(agent_id)
-            pending_operations = stats.get("pending_operations", 0)
-
-            if verbose:
-                print(
-                    f"Agent '{agent_id}' pending operations: {pending_operations} "
-                    f"(elapsed: {elapsed:.1f}s)"
-                )
-
-            if pending_operations == 0:
-                if verbose:
-                    print(f"All operations completed for agent '{agent_id}' in {elapsed:.1f}s")
-                return stats
-
-            await asyncio.sleep(poll_interval)
+    memory = MemoryEngine(
+        db_url=os.getenv("HINDSIGHT_API_DATABASE_URL", "pg0"),
+        memory_llm_provider=os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq"),
+        memory_llm_api_key=os.getenv("HINDSIGHT_API_LLM_API_KEY"),
+        memory_llm_model=os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"),
+        memory_llm_base_url=os.getenv("HINDSIGHT_API_LLM_BASE_URL") or None,  # Use None to get provider defaults
+    )
+    await memory.initialize()
+    return memory
 
 
 class BenchmarkDataset(ABC):
@@ -355,7 +119,7 @@ class LLMAnswerGenerator(ABC):
     async def generate_answer(
         self,
         question: str,
-        memories: List[Dict[str, Any]],
+        recall_result: Dict[str, Any],
         question_date: Optional[datetime] = None
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
@@ -363,7 +127,7 @@ class LLMAnswerGenerator(ABC):
 
         Args:
             question: The question text
-            memories: Retrieved memories to use for answering
+            recall_result: Full RecallResult dict containing results, entities, chunks, and trace
             question_date: Optional date when the question was asked (for temporal context)
 
         Returns:
@@ -371,7 +135,7 @@ class LLMAnswerGenerator(ABC):
             - answer: The generated answer text
             - reasoning: Explanation of how the answer was derived
             - retrieved_memories_override: Optional list of memories to include in results
-              - None: Use memories passed in (traditional mode)
+              - None: Use memories from recall_result (traditional mode)
               - List: Use these memories instead (integrated mode like think API)
         """
         pass
@@ -493,11 +257,11 @@ class BenchmarkRunner:
         self.answer_generator = answer_generator
         self.answer_evaluator = answer_evaluator
         self.memory = memory or MemoryEngine(
-            db_url=os.getenv("HINDSIGHT_API_DATABASE_URL"),
+            db_url=os.getenv("HINDSIGHT_API_DATABASE_URL", "pg0"),
             memory_llm_provider=os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq"),
             memory_llm_api_key=os.getenv("HINDSIGHT_API_LLM_API_KEY"),
-            memory_llm_model=os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"),
-            memory_llm_base_url=os.getenv("HINDSIGHT_API_LLM_BASE_URL") or None,  # Use None to get provider defaults
+            memory_llm_model=os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-20b"),
+            memory_llm_base_url=os.getenv("HINDSIGHT_API_LLM_BASE_URL") or None,
         )
 
     def calculate_data_stats(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -547,14 +311,10 @@ class BenchmarkRunner:
         batch_contents = self.dataset.prepare_sessions_for_ingestion(item)
 
         if batch_contents:
-            await self.memory.put_batch_async(
-                agent_id=agent_id,
+            await self.memory.retain_batch_async(
+                bank_id=agent_id,
                 contents=batch_contents
             )
-
-            # If using remote API, wait for this batch to complete before continuing
-            if isinstance(self.memory, HindsightClientAdapter):
-                await self.memory.wait_for_backlog_completion(agent_id, verbose=False)
 
         return len(batch_contents)
 
@@ -565,7 +325,7 @@ class BenchmarkRunner:
         thinking_budget: int = 500,
         max_tokens: int = 4096,
         question_date: Optional[datetime] = None,
-    ) -> Tuple[str, str, List[Dict]]:
+    ) -> Tuple[str, str, List[Dict], Dict[str, Dict]]:
         """
         Answer a question using memory retrieval.
 
@@ -577,44 +337,54 @@ class BenchmarkRunner:
             question_date: Date when the question was asked (for temporal filtering)
 
         Returns:
-            Tuple of (answer, reasoning, retrieved_memories)
+            Tuple of (answer, reasoning, retrieved_memories, chunks)
         """
         # Check if generator needs external search
         if self.answer_generator.needs_external_search():
             # Traditional flow: search then generate
-            # Search both 'world' and 'agent' fact types in parallel
-            search_result = await self.memory.search_async(
-                agent_id=agent_id,
+            # Use MemoryEngine directly
+            # Map thinking_budget to budget level
+            budget = Budget.LOW if thinking_budget <= 30 else Budget.MID if thinking_budget <= 70 else Budget.HIGH
+            search_result = await self.memory.recall_async(
+                bank_id=agent_id,
                 query=question,
-                thinking_budget=thinking_budget,
+                budget=budget,
                 max_tokens=max_tokens,
-                fact_type=["world", "agent"],
+                fact_type=["world", "bank"],
                 question_date=question_date,
-                include_entities=True
+                include_entities=True,
+                include_chunks=True
             )
 
-            # Convert MemoryFact objects to dictionaries for compatibility
-            results = [fact.model_dump() for fact in search_result.results]
+            # Convert entire RecallResult to dictionary for answer generation
+            recall_result_dict = search_result.model_dump()
 
-            if not results:
-                return "I don't have enough information to answer that question.", "No relevant memories found.", []
+            # Extract chunks from search result
+            chunks = {}
+            if search_result.chunks:
+                for chunk_key, chunk_info in search_result.chunks.items():
+                    chunks[chunk_key] = chunk_info.model_dump()
 
-            # Generate answer using LLM
-            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, results, question_date)
+            # Check if we have any results
+            if not search_result.results:
+                return "I don't have enough information to answer that question.", "No relevant memories found.", [], {}
 
-            # Use override if provided, otherwise use search results
-            final_memories = memories_override if memories_override is not None else results
+            # Generate answer using LLM - pass entire recall result
+            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, recall_result_dict, question_date)
 
-            return answer, reasoning, final_memories
+            # Use override if provided, otherwise use the results from recall
+            final_memories = memories_override if memories_override is not None else [fact.model_dump() for fact in search_result.results]
+
+            return answer, reasoning, final_memories, chunks
         else:
             # Integrated flow: generator does its own search (e.g., think API)
-            # Pass empty memories list since generator doesn't need them
-            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, [], question_date)
+            # Pass empty recall result since generator doesn't need them
+            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, {"results": []}, question_date)
 
             # Use memories from generator (should not be None for integrated mode)
             final_memories = memories_override if memories_override is not None else []
 
-            return answer, reasoning, final_memories
+            return answer, reasoning, final_memories, {}
 
     async def evaluate_qa_task(
         self,
@@ -660,8 +430,8 @@ class BenchmarkRunner:
                     question_date = qa.get('question_date')
 
                     try:
-                        # Get predicted answer, reasoning, and retrieved memories
-                        predicted_answer, reasoning, retrieved_memories = await self.answer_question(
+                        # Get predicted answer, reasoning, retrieved memories, and chunks
+                        predicted_answer, reasoning, retrieved_memories, chunks = await self.answer_question(
                             agent_id, question, thinking_budget, max_tokens, question_date
                         )
 
@@ -812,21 +582,14 @@ class BenchmarkRunner:
             True if agent has at least one memory unit, False otherwise
         """
         try:
-            # Check if we're using a remote client or local memory
-            if isinstance(self.memory, HindsightClientAdapter):
-                # Use stats API for remote client
-                stats = await self.memory.get_agent_stats(agent_id)
-                total_nodes = stats.get("total_nodes", 0)
-                return total_nodes > 0
-            else:
-                # Use direct database access for local memory
-                pool = await self.memory._get_pool()
-                async with pool.acquire() as conn:
-                    result = await conn.fetchrow(
-                        "SELECT COUNT(*) as count FROM memory_units WHERE agent_id = $1 LIMIT 1",
-                        agent_id
-                    )
-                    return result['count'] > 0
+            # Use direct database access for local memory
+            pool = await self.memory._get_pool()
+            async with pool.acquire() as conn:
+                result = await conn.fetchrow(
+                    "SELECT COUNT(*) as count FROM memory_units WHERE bank_id = $1 LIMIT 1",
+                    agent_id
+                )
+                return result['count'] > 0
         except Exception as e:
             console.print(f"  [red]Warning: Error checking agent data: {e}[/red]")
             return False
@@ -863,7 +626,7 @@ class BenchmarkRunner:
             # Clear agent data before ingesting
             if clear_this_agent:
                 console.print("  [1] Clearing previous agent data...")
-                await self.memory.delete_agent(agent_id)
+                await self.memory.delete_bank(agent_id)
                 console.print(f"      [green]✓[/green] Cleared '{agent_id}' agent data")
 
             # Ingest conversation
@@ -914,6 +677,8 @@ class BenchmarkRunner:
         separate_ingestion_phase: bool = False,
         filln: bool = False,
         max_concurrent_items: int = 1,  # Max concurrent items (conversations) to process in parallel
+        output_path: Optional[Path] = None,  # Path to save results incrementally
+        merge_with_existing: bool = False,  # Whether to merge with existing results
     ) -> Dict[str, Any]:
         """
         Run the full benchmark evaluation.
@@ -963,7 +728,8 @@ class BenchmarkRunner:
             return await self._run_two_phase(
                 items, agent_id, thinking_budget, max_tokens,
                 skip_ingestion, max_questions_per_item,
-                max_concurrent_questions, eval_semaphore_size
+                max_concurrent_questions, eval_semaphore_size,
+                output_path, merge_with_existing
             )
         else:
             # Original approach: process each item independently
@@ -971,7 +737,8 @@ class BenchmarkRunner:
                 items, agent_id, thinking_budget, max_tokens,
                 skip_ingestion, max_questions_per_item,
                 max_concurrent_questions, eval_semaphore_size,
-                clear_agent_per_item, filln, max_concurrent_items
+                clear_agent_per_item, filln, max_concurrent_items,
+                output_path, merge_with_existing
             )
 
     async def _run_single_phase(
@@ -987,6 +754,8 @@ class BenchmarkRunner:
         clear_agent_per_item: bool,
         filln: bool = False,
         max_concurrent_items: int = 1,
+        output_path: Optional[Path] = None,
+        merge_with_existing: bool = False,
     ) -> Dict[str, Any]:
         """Original single-phase approach: process each item independently."""
         # Create semaphore for question processing
@@ -998,14 +767,16 @@ class BenchmarkRunner:
             all_results = await self._process_items_parallel(
                 items, agent_id, thinking_budget, max_tokens,
                 skip_ingestion, max_questions_per_item, question_semaphore,
-                eval_semaphore_size, filln, max_concurrent_items
+                eval_semaphore_size, filln, max_concurrent_items,
+                output_path, merge_with_existing
             )
         else:
             # Sequential item processing (original behavior)
             all_results = await self._process_items_sequential(
                 items, agent_id, thinking_budget, max_tokens,
                 skip_ingestion, max_questions_per_item, question_semaphore,
-                eval_semaphore_size, clear_agent_per_item, filln
+                eval_semaphore_size, clear_agent_per_item, filln,
+                output_path, merge_with_existing
             )
 
         # Calculate overall metrics
@@ -1038,9 +809,21 @@ class BenchmarkRunner:
         eval_semaphore_size: int,
         clear_agent_per_item: bool,
         filln: bool,
+        output_path: Optional[Path] = None,
+        merge_with_existing: bool = False,
     ) -> List[Dict]:
         """Process items sequentially (original behavior)."""
         all_results = []
+        existing_item_ids = set()
+
+        # Load existing results if merge_with_existing is True
+        if merge_with_existing and output_path and output_path.exists():
+            with open(output_path, 'r') as f:
+                existing_data = json.load(f)
+                if 'item_results' in existing_data:
+                    all_results = existing_data['item_results']
+                    existing_item_ids = {r['item_id'] for r in all_results}
+                    console.print(f"[cyan]Loaded {len(all_results)} existing results from {output_path}[/cyan]")
 
         for i, item in enumerate(items, 1):
             # Use unique agent ID per item if requested (for isolation in benchmarks like LongMemEval)
@@ -1069,7 +852,19 @@ class BenchmarkRunner:
                 skip_ingestion, question_semaphore, eval_semaphore_size,
                 clear_this_agent,
             )
+
+            # Replace existing result or append new one
+            result_item_id = result['item_id']
+            if result_item_id in existing_item_ids:
+                # Replace existing result
+                all_results = [r for r in all_results if r['item_id'] != result_item_id]
+                console.print(f"  [cyan]↻[/cyan] Updating existing result for {result_item_id}")
             all_results.append(result)
+            existing_item_ids.add(result_item_id)
+
+            # Save results incrementally after each item
+            if output_path:
+                self._save_incremental_results(all_results, output_path)
 
         return all_results
 
@@ -1085,8 +880,23 @@ class BenchmarkRunner:
         eval_semaphore_size: int,
         filln: bool,
         max_concurrent_items: int,
+        output_path: Optional[Path] = None,
+        merge_with_existing: bool = False,
     ) -> List[Dict]:
         """Process items in parallel (requires unique agent IDs per item)."""
+        # Load existing results if merge_with_existing is True
+        all_results = []
+        existing_item_ids = set()
+        result_lock = asyncio.Lock()  # Lock for thread-safe updates to all_results
+
+        if merge_with_existing and output_path and output_path.exists():
+            with open(output_path, 'r') as f:
+                existing_data = json.load(f)
+                if 'item_results' in existing_data:
+                    all_results = existing_data['item_results']
+                    existing_item_ids = {r['item_id'] for r in all_results}
+                    console.print(f"[cyan]Loaded {len(all_results)} existing results from {output_path}[/cyan]")
+
         # Create semaphore for item-level parallelism
         item_semaphore = asyncio.Semaphore(max_concurrent_items)
 
@@ -1116,11 +926,23 @@ class BenchmarkRunner:
         # Create all tasks
         tasks = [process_item_wrapper(i, item) for i, item in enumerate(items, 1)]
 
-        # Run in parallel and collect results
-        results = await asyncio.gather(*tasks)
+        # Run in parallel and collect results incrementally
+        for completed_task in asyncio.as_completed(tasks):
+            result = await completed_task
+            if result is not None:
+                async with result_lock:
+                    # Replace existing result or append new one
+                    result_item_id = result['item_id']
+                    if result_item_id in existing_item_ids:
+                        # Replace existing result
+                        all_results = [r for r in all_results if r['item_id'] != result_item_id]
+                        console.print(f"  [cyan]↻[/cyan] Updating existing result for {result_item_id}")
+                    all_results.append(result)
+                    existing_item_ids.add(result_item_id)
 
-        # Filter out None results (skipped items)
-        all_results = [r for r in results if r is not None]
+                    # Save results incrementally after each item completes
+                    if output_path:
+                        self._save_incremental_results(all_results, output_path)
 
         return all_results
 
@@ -1134,15 +956,14 @@ class BenchmarkRunner:
         max_questions_per_item: Optional[int],
         max_concurrent_questions: int,
         eval_semaphore_size: int,
+        output_path: Optional[Path] = None,
+        merge_with_existing: bool = False,
     ) -> Dict[str, Any]:
         """
         Two-phase approach: ingest all data into single agent, then evaluate all questions.
 
         More realistic scenario where agent accumulates memories over time.
         """
-        # Check if using remote API client
-        is_remote = isinstance(self.memory, HindsightClientAdapter)
-
         # Phase 1: Ingestion
         if not skip_ingestion:
             # Calculate and display data statistics
@@ -1156,51 +977,26 @@ class BenchmarkRunner:
 
             console.print(f"\n[4] Phase 1: Ingesting all data into agent '{agent_id}'...")
             console.print(f"    [yellow]Clearing previous agent data...[/yellow]")
-            await self.memory.delete_agent(agent_id)
+            await self.memory.delete_bank(agent_id)
             console.print(f"    [green]✓[/green] Cleared agent data")
 
-            if is_remote:
-                # For remote API: send one request per instance, then poll
-                console.print(f"    [yellow]Sending {len(items)} instances (one request per instance)...[/yellow]")
-                total_sessions = 0
+            # Collect all sessions and send in one batch (with auto-chunking)
+            console.print(f"    [yellow]Collecting sessions from all items...[/yellow]")
+            all_sessions = []
+            for item in items:
+                item_sessions = self.dataset.prepare_sessions_for_ingestion(item)
+                all_sessions.extend(item_sessions)
 
-                for i, item in enumerate(items, 1):
-                    item_sessions = self.dataset.prepare_sessions_for_ingestion(item)
-                    total_sessions += len(item_sessions)
+            console.print(f"    [cyan]Collected {len(all_sessions)} sessions from {len(items)} items[/cyan]")
+            console.print(f"    [yellow]Ingesting in one batch (auto-chunks if needed)...[/yellow]")
 
-                    if item_sessions:
-                        await self.memory.put_batch_async(
-                            agent_id=agent_id,
-                            contents=item_sessions
-                        )
+            # Ingest all sessions in one batch call (will auto-chunk if too large)
+            await self.memory.retain_batch_async(
+                bank_id=agent_id,
+                contents=all_sessions
+            )
 
-                    if i % 10 == 0 or i == len(items):
-                        console.print(f"        Sent {i}/{len(items)} instances ({total_sessions} sessions so far)")
-
-                console.print(f"    [green]✓[/green] Sent all {len(items)} instances ({total_sessions} sessions total)")
-
-                # Wait for all background processing to complete
-                console.print(f"    [yellow]Waiting for background processing to complete...[/yellow]")
-                await self.memory.wait_for_backlog_completion(agent_id, verbose=False)
-                console.print(f"    [green]✓[/green] Background processing complete")
-            else:
-                # For local memory: collect all and send in one batch (faster with auto-chunking)
-                console.print(f"    [yellow]Collecting sessions from all items...[/yellow]")
-                all_sessions = []
-                for item in items:
-                    item_sessions = self.dataset.prepare_sessions_for_ingestion(item)
-                    all_sessions.extend(item_sessions)
-
-                console.print(f"    [cyan]Collected {len(all_sessions)} sessions from {len(items)} items[/cyan]")
-                console.print(f"    [yellow]Ingesting in one batch (auto-chunks if needed)...[/yellow]")
-
-                # Ingest all sessions in one batch call (will auto-chunk if too large)
-                await self.memory.put_batch_async(
-                    agent_id=agent_id,
-                    contents=all_sessions
-                )
-
-                console.print(f"    [green]✓[/green] Ingested {len(all_sessions)} sessions from {len(items)} items")
+            console.print(f"    [green]✓[/green] Ingested {len(all_sessions)} sessions from {len(items)} items")
         else:
             console.print(f"\n[3] Skipping ingestion (using existing data)")
 
@@ -1351,6 +1147,34 @@ class BenchmarkRunner:
             'num_items': len(merged_item_results),
             'item_results': merged_item_results
         }
+
+    def _save_incremental_results(self, all_results: List[Dict], output_path: Path):
+        """
+        Save results incrementally to JSON file.
+
+        Args:
+            all_results: Current list of all item results
+            output_path: Path to save results to
+        """
+        # Calculate metrics from current results
+        total_correct = sum(r['metrics']['correct'] for r in all_results)
+        total_questions = sum(r['metrics']['total'] for r in all_results)
+        total_invalid = sum(r['metrics'].get('invalid', 0) for r in all_results)
+        total_valid = total_questions - total_invalid
+        overall_accuracy = (total_correct / total_valid * 100) if total_valid > 0 else 0
+
+        results_dict = {
+            'overall_accuracy': overall_accuracy,
+            'total_correct': total_correct,
+            'total_questions': total_questions,
+            'total_invalid': total_invalid,
+            'total_valid': total_valid,
+            'num_items': len(all_results),
+            'item_results': all_results
+        }
+
+        with open(output_path, 'w') as f:
+            json.dump(results_dict, f, indent=2, default=str)
 
     def save_results(self, results: Dict[str, Any], output_path: Path, merge_with_existing: bool = False):
         """

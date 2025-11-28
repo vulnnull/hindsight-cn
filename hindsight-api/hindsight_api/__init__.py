@@ -4,7 +4,7 @@ Memory System for AI Agents.
 Temporal + Semantic Memory Architecture using PostgreSQL with pgvector.
 """
 from .engine.memory_engine import MemoryEngine
-from .engine.search_trace import (
+from .engine.search.trace import (
     SearchTrace,
     QueryInfo,
     EntryPoint,
@@ -15,7 +15,7 @@ from .engine.search_trace import (
     SearchSummary,
     SearchPhaseMetrics,
 )
-from .engine.search_tracer import SearchTracer
+from .engine.search.tracer import SearchTracer
 from .engine.embeddings import Embeddings, SentenceTransformersEmbeddings
 from .engine.llm_wrapper import LLMConfig
 

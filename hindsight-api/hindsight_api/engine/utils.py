@@ -7,11 +7,12 @@ from typing import List, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .llm_wrapper import LLMConfig
+    from .retain.fact_extraction import Fact
 
-from .fact_extraction import extract_facts_from_text
+from .retain.fact_extraction import extract_facts_from_text
 
 
-async def extract_facts(text: str, event_date: datetime, context: str = "", llm_config: 'LLMConfig' = None, agent_name: str = None, extract_opinions: bool = False) -> List[Dict[str, str]]:
+async def extract_facts(text: str, event_date: datetime, context: str = "", llm_config: 'LLMConfig' = None, agent_name: str = None, extract_opinions: bool = False) -> tuple[List['Fact'], List[tuple[str, int]]]:
     """
     Extract semantic facts from text using LLM.
 
@@ -30,21 +31,23 @@ async def extract_facts(text: str, event_date: datetime, context: str = "", llm_
         extract_opinions: If True, extract ONLY opinions. If False, extract world and agent facts (no opinions)
 
     Returns:
-        List of fact dictionaries with keys: 'fact' (text) and 'date' (ISO string)
+        Tuple of (facts, chunks) where:
+        - facts: List of Fact model instances
+        - chunks: List of tuples (chunk_text, fact_count) for each chunk
 
     Raises:
         Exception: If LLM fact extraction fails
     """
     if not text or not text.strip():
-        return []
+        return [], []
 
-    fact_dicts = await extract_facts_from_text(text, event_date, context=context, llm_config=llm_config, agent_name=agent_name, extract_opinions=extract_opinions)
+    facts, chunks = await extract_facts_from_text(text, event_date, context=context, llm_config=llm_config, agent_name=agent_name, extract_opinions=extract_opinions)
 
-    if not fact_dicts:
+    if not facts:
         logging.warning(f"LLM extracted 0 facts from text of length {len(text)}. This may indicate the text contains no meaningful information, or the LLM failed to extract facts. Full text: {text}")
-        return []
+        return [], chunks
 
-    return fact_dicts
+    return facts, chunks
 
 
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:

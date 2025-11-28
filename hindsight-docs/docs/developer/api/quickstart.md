@@ -119,6 +119,8 @@ hindsight reflect my-bank "Tell me about Alice"
 
 ## Next Steps
 
-- [**Main Methods**](./main-methods) — Detailed guide to retain, recall, and reflect
-- [**Bank Identity**](./bank-identity) — Configure personality and background
+- [**Retain**](./retain) — Advanced options for storing memories
+- [**Recall**](./recall) — Search and retrieval strategies
+- [**Reflect**](./reflect) — Personality-aware reasoning
+- [**Memory Banks**](./memory-banks) — Configure personality and background
 - [**Server Options**](/developer/server) — Production deployment

@@ -10,6 +10,31 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 
 
+class PersonalityTraits(BaseModel):
+    """
+    Personality traits for a bank using the Big Five model.
+
+    All traits are scored 0.0-1.0 where higher values indicate stronger presence of the trait.
+    """
+    openness: float = Field(description="Openness to experience (0.0-1.0)")
+    conscientiousness: float = Field(description="Conscientiousness and organization (0.0-1.0)")
+    extraversion: float = Field(description="Extraversion and sociability (0.0-1.0)")
+    agreeableness: float = Field(description="Agreeableness and cooperation (0.0-1.0)")
+    neuroticism: float = Field(description="Emotional sensitivity and neuroticism (0.0-1.0)")
+    bias_strength: float = Field(description="How strongly personality influences thinking (0.0-1.0)")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "openness": 0.8,
+            "conscientiousness": 0.6,
+            "extraversion": 0.4,
+            "agreeableness": 0.7,
+            "neuroticism": 0.3,
+            "bias_strength": 0.5
+        }
+    })
+
+
 class MemoryFact(BaseModel):
     """
     A single memory fact returned by search or think operations.
@@ -29,6 +54,7 @@ class MemoryFact(BaseModel):
             "mentioned_at": "2024-01-15T10:30:00Z",
             "document_id": "session_abc123",
             "metadata": {"source": "slack"},
+            "chunk_id": "bank123_session_abc123_0",
             "activation": 0.95
         }
     })
@@ -43,9 +69,17 @@ class MemoryFact(BaseModel):
     mentioned_at: Optional[str] = Field(None, description="ISO format date when the fact was mentioned/learned")
     document_id: Optional[str] = Field(None, description="ID of the document this memory belongs to")
     metadata: Optional[Dict[str, str]] = Field(None, description="User-defined metadata")
+    chunk_id: Optional[str] = Field(None, description="ID of the chunk this fact was extracted from (format: bank_id_document_id_chunk_index)")
 
     # Internal metrics (used by system but may not be exposed in API)
     activation: Optional[float] = Field(None, description="Internal activation score")
+
+
+class ChunkInfo(BaseModel):
+    """Information about a chunk."""
+    chunk_text: str = Field(description="The raw chunk text")
+    chunk_index: int = Field(description="Index of the chunk within the document")
+    truncated: bool = Field(default=False, description="Whether the chunk was truncated due to token limits")
 
 
 class RecallResult(BaseModel):
@@ -80,6 +114,10 @@ class RecallResult(BaseModel):
     entities: Optional[Dict[str, "EntityState"]] = Field(
         None,
         description="Entity states for entities mentioned in results (keyed by canonical name)"
+    )
+    chunks: Optional[Dict[str, ChunkInfo]] = Field(
+        None,
+        description="Chunks for facts, keyed by '{document_id}_{chunk_index}'"
     )
 
 

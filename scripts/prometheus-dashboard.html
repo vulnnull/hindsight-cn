@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hindsight Metrics Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f1419;
+            color: #e6e6e6;
+            padding: 20px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 600;
+        }
+
+        .subtitle {
+            opacity: 0.9;
+            margin-top: 5px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: #1a1f2e;
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid #2d3548;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #a0aec0;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat {
+            background: #1a1f2e;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #2d3548;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #a0aec0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .stat-unit {
+            font-size: 14px;
+            color: #a0aec0;
+            margin-left: 4px;
+        }
+
+        .error {
+            background: #2d1b1b;
+            border: 1px solid #7d2828;
+            color: #f56565;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #a0aec0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧠 Hindsight Metrics Dashboard</h1>
+        <div class="subtitle">Real-time performance monitoring • Updates every 15s</div>
+    </div>
+
+    <div id="error-container"></div>
+    <div id="loading" class="loading">Loading metrics...</div>
+
+    <div class="stats" id="stats" style="display: none;"></div>
+
+    <div class="grid" id="charts" style="display: none;">
+        <div class="card">
+            <div class="card-title">📊 Recall Latency Percentiles</div>
+            <div class="chart-container">
+                <canvas id="latencyChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">⚡ Operations per Second</div>
+            <div class="chart-container">
+                <canvas id="opsChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">🎯 Latency by Bank</div>
+            <div class="chart-container">
+                <canvas id="bankLatencyChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">💰 Token Usage Rate</div>
+            <div class="chart-container">
+                <canvas id="tokenChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const PROMETHEUS_URL = 'http://localhost:9090';
+        const UPDATE_INTERVAL = 15000; // 15 seconds
+
+        // Chart configurations
+        const chartConfig = {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: '#e6e6e6' }
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: '#a0aec0' },
+                        grid: { color: '#2d3548' }
+                    },
+                    y: {
+                        ticks: { color: '#a0aec0' },
+                        grid: { color: '#2d3548' }
+                    }
+                }
+            }
+        };
+
+        let charts = {};
+
+        async function queryPrometheus(query) {
+            const url = `${PROMETHEUS_URL}/api/v1/query?query=${encodeURIComponent(query)}`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            if (data.status !== 'success') throw new Error('Query failed');
+            return data.data.result;
+        }
+
+        async function queryRange(query, minutes = 30) {
+            const end = Math.floor(Date.now() / 1000);
+            const start = end - (minutes * 60);
+            const url = `${PROMETHEUS_URL}/api/v1/query_range?query=${encodeURIComponent(query)}&start=${start}&end=${end}&step=30`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            if (data.status !== 'success') throw new Error('Query failed');
+            return data.data.result;
+        }
+
+        function showError(message) {
+            const container = document.getElementById('error-container');
+            container.innerHTML = `
+                <div class="error">
+                    <strong>⚠️ Error:</strong> ${message}<br>
+                    <small>Make sure Prometheus is running at ${PROMETHEUS_URL}</small>
+                </div>
+            `;
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('stats').style.display = 'grid';
+            document.getElementById('charts').style.display = 'grid';
+        }
+
+        async function updateStats() {
+            try {
+                // Query current stats
+                const totalOps = await queryPrometheus('sum(hindsight_operation_total)');
+                const successRate = await queryPrometheus('sum(hindsight_operation_total{success="true"}) / sum(hindsight_operation_total)');
+                const opsRate = await queryPrometheus('sum(rate(hindsight_operation_total[5m]))');
+
+                const stats = [
+                    {
+                        label: 'Total Operations',
+                        value: totalOps[0]?.value[1] || '0',
+                        unit: ''
+                    },
+                    {
+                        label: 'Success Rate',
+                        value: ((parseFloat(successRate[0]?.value[1] || 1) * 100).toFixed(1)),
+                        unit: '%'
+                    },
+                    {
+                        label: 'Ops/sec',
+                        value: (parseFloat(opsRate[0]?.value[1] || 0).toFixed(2)),
+                        unit: 'ops/s'
+                    }
+                ];
+
+                document.getElementById('stats').innerHTML = stats.map(stat => `
+                    <div class="stat">
+                        <div class="stat-label">${stat.label}</div>
+                        <div class="stat-value">
+                            ${stat.value}
+                            <span class="stat-unit">${stat.unit}</span>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('Error updating stats:', error);
+            }
+        }
+
+        async function updateCharts() {
+            try {
+                // Latency percentiles over time
+                const p50Data = await queryRange('histogram_quantile(0.50, rate(hindsight_operation_duration_seconds_bucket{operation="recall"}[5m]))');
+                const p95Data = await queryRange('histogram_quantile(0.95, rate(hindsight_operation_duration_seconds_bucket{operation="recall"}[5m]))');
+                const p99Data = await queryRange('histogram_quantile(0.99, rate(hindsight_operation_duration_seconds_bucket{operation="recall"}[5m]))');
+
+                if (p50Data.length > 0) {
+                    const timestamps = p50Data[0].values.map(v => new Date(v[0] * 1000).toLocaleTimeString());
+
+                    if (!charts.latency) {
+                        charts.latency = new Chart(document.getElementById('latencyChart'), {
+                            ...chartConfig,
+                            data: {
+                                labels: timestamps,
+                                datasets: [
+                                    { label: 'p50', data: p50Data[0].values.map(v => parseFloat(v[1])), borderColor: '#48bb78', tension: 0.4 },
+                                    { label: 'p95', data: p95Data[0].values.map(v => parseFloat(v[1])), borderColor: '#ed8936', tension: 0.4 },
+                                    { label: 'p99', data: p99Data[0].values.map(v => parseFloat(v[1])), borderColor: '#f56565', tension: 0.4 }
+                                ]
+                            }
+                        });
+                    } else {
+                        charts.latency.data.labels = timestamps;
+                        charts.latency.data.datasets[0].data = p50Data[0].values.map(v => parseFloat(v[1]));
+                        charts.latency.data.datasets[1].data = p95Data[0].values.map(v => parseFloat(v[1]));
+                        charts.latency.data.datasets[2].data = p99Data[0].values.map(v => parseFloat(v[1]));
+                        charts.latency.update();
+                    }
+                }
+
+                // Operations per second
+                const opsData = await queryRange('sum by (operation) (rate(hindsight_operation_total[5m]))');
+                if (opsData.length > 0) {
+                    const timestamps = opsData[0].values.map(v => new Date(v[0] * 1000).toLocaleTimeString());
+                    const datasets = opsData.map((series, i) => ({
+                        label: series.metric.operation,
+                        data: series.values.map(v => parseFloat(v[1])),
+                        borderColor: ['#667eea', '#48bb78', '#ed8936'][i % 3],
+                        tension: 0.4
+                    }));
+
+                    if (!charts.ops) {
+                        charts.ops = new Chart(document.getElementById('opsChart'), {
+                            ...chartConfig,
+                            data: { labels: timestamps, datasets }
+                        });
+                    } else {
+                        charts.ops.data.labels = timestamps;
+                        charts.ops.data.datasets = datasets;
+                        charts.ops.update();
+                    }
+                }
+
+                // Latency by bank
+                const bankLatency = await queryRange('histogram_quantile(0.95, sum by (bank_id, le) (rate(hindsight_operation_duration_seconds_bucket{operation="recall"}[5m])))');
+                if (bankLatency.length > 0) {
+                    const timestamps = bankLatency[0].values.map(v => new Date(v[0] * 1000).toLocaleTimeString());
+                    const datasets = bankLatency.map((series, i) => ({
+                        label: series.metric.bank_id,
+                        data: series.values.map(v => parseFloat(v[1])),
+                        borderColor: ['#667eea', '#48bb78', '#ed8936', '#f56565'][i % 4],
+                        tension: 0.4
+                    }));
+
+                    if (!charts.bankLatency) {
+                        charts.bankLatency = new Chart(document.getElementById('bankLatencyChart'), {
+                            ...chartConfig,
+                            data: { labels: timestamps, datasets }
+                        });
+                    } else {
+                        charts.bankLatency.data.labels = timestamps;
+                        charts.bankLatency.data.datasets = datasets;
+                        charts.bankLatency.update();
+                    }
+                }
+
+                // Token usage
+                const tokenInput = await queryRange('sum(rate(hindsight_tokens_input_total[5m]))');
+                const tokenOutput = await queryRange('sum(rate(hindsight_tokens_output_total[5m]))');
+                if (tokenInput.length > 0) {
+                    const timestamps = tokenInput[0].values.map(v => new Date(v[0] * 1000).toLocaleTimeString());
+
+                    if (!charts.tokens) {
+                        charts.tokens = new Chart(document.getElementById('tokenChart'), {
+                            ...chartConfig,
+                            data: {
+                                labels: timestamps,
+                                datasets: [
+                                    { label: 'Input', data: tokenInput[0].values.map(v => parseFloat(v[1])), borderColor: '#667eea', tension: 0.4 },
+                                    { label: 'Output', data: tokenOutput[0]?.values.map(v => parseFloat(v[1])) || [], borderColor: '#48bb78', tension: 0.4 }
+                                ]
+                            }
+                        });
+                    } else {
+                        charts.tokens.data.labels = timestamps;
+                        charts.tokens.data.datasets[0].data = tokenInput[0].values.map(v => parseFloat(v[1]));
+                        charts.tokens.data.datasets[1].data = tokenOutput[0]?.values.map(v => parseFloat(v[1])) || [];
+                        charts.tokens.update();
+                    }
+                }
+
+                hideLoading();
+
+            } catch (error) {
+                console.error('Error updating charts:', error);
+                showError(error.message);
+            }
+        }
+
+        async function update() {
+            await updateStats();
+            await updateCharts();
+        }
+
+        // Initial update
+        update();
+
+        // Update every 15 seconds
+        setInterval(update, UPDATE_INTERVAL);
+    </script>
+</body>
+</html>

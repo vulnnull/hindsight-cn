@@ -10,7 +10,7 @@ This package contains all the implementation details of the memory engine:
 from .memory_engine import MemoryEngine
 from .db_utils import acquire_with_retry
 from .embeddings import Embeddings, SentenceTransformersEmbeddings
-from .search_trace import (
+from .search.trace import (
     SearchTrace,
     QueryInfo,
     EntryPoint,
@@ -21,7 +21,7 @@ from .search_trace import (
     SearchSummary,
     SearchPhaseMetrics,
 )
-from .search_tracer import SearchTracer
+from .search.tracer import SearchTracer
 from .llm_wrapper import LLMConfig
 from .response_models import RecallResult, ReflectResult, MemoryFact
 

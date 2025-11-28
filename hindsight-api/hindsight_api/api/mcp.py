@@ -61,7 +61,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
         try:
             # Log explanation if provided
             if explanation:
-                logger.debug(f"Explanation: {explanation}")
+                pass  # Explanation provided
 
             # Store memory using put_batch_async
             await memory.put_batch_async(
@@ -116,7 +116,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
 
             # Log explanation if provided
             if explanation:
-                logger.debug(f"Explanation: {explanation}")
+                pass  # Explanation provided
 
             # Search using recall_async
             from hindsight_api.engine.memory_engine import Budget

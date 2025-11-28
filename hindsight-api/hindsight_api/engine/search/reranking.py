@@ -2,7 +2,8 @@
 Cross-encoder neural reranking for search results.
 """
 
-from typing import List, Dict, Any
+from typing import List
+from .types import MergedCandidate, ScoredResult
 
 
 class CrossEncoderReranker:
@@ -31,23 +32,34 @@ class CrossEncoderReranker:
     def rerank(
         self,
         query: str,
-        candidates: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Rerank using cross-encoder scores."""
+        candidates: List[MergedCandidate]
+    ) -> List[ScoredResult]:
+        """
+        Rerank candidates using cross-encoder scores.
+
+        Args:
+            query: Search query
+            candidates: Merged candidates from RRF
+
+        Returns:
+            List of ScoredResult objects sorted by cross-encoder score
+        """
         if not candidates:
-            return candidates
+            return []
 
         # Prepare query-document pairs with date information
         pairs = []
-        for c in candidates:
+        for candidate in candidates:
+            retrieval = candidate.retrieval
+
             # Use text + context for better ranking
-            doc_text = c["text"]
-            if c.get("context"):
-                doc_text = f"{c['context']}: {doc_text}"
+            doc_text = retrieval.text
+            if retrieval.context:
+                doc_text = f"{retrieval.context}: {doc_text}"
 
             # Add formatted date information for temporal awareness
-            if c.get("occurred_start"):
-                occurred_start = c["occurred_start"]
+            if retrieval.occurred_start:
+                occurred_start = retrieval.occurred_start
 
                 # Format in two styles for better model understanding
                 # 1. ISO format: YYYY-MM-DD
@@ -72,13 +84,18 @@ class CrossEncoderReranker:
 
         normalized_scores = [sigmoid(score) for score in scores]
 
-        # Assign normalized scores to candidates
-        for c, raw_score, norm_score in zip(candidates, scores, normalized_scores):
-            c["weight"] = float(norm_score)
-            c["cross_encoder_score"] = float(raw_score)
-            c["cross_encoder_score_normalized"] = float(norm_score)
+        # Create ScoredResult objects with cross-encoder scores
+        scored_results = []
+        for candidate, raw_score, norm_score in zip(candidates, scores, normalized_scores):
+            scored_result = ScoredResult(
+                candidate=candidate,
+                cross_encoder_score=float(raw_score),
+                cross_encoder_score_normalized=float(norm_score),
+                weight=float(norm_score)  # Initial weight is just cross-encoder score
+            )
+            scored_results.append(scored_result)
 
         # Sort by cross-encoder score
-        candidates.sort(key=lambda x: x["weight"], reverse=True)
+        scored_results.sort(key=lambda x: x.weight, reverse=True)
 
-        return candidates
+        return scored_results

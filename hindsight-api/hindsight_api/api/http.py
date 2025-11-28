@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from hindsight_api import MemoryEngine
 from hindsight_api.engine.memory_engine import Budget
 from hindsight_api.engine.db_utils import acquire_with_retry
+from hindsight_api.metrics import get_metrics_collector, initialize_metrics, create_metrics_collector
 
 
 logger = logging.getLogger(__name__)
@@ -61,11 +62,20 @@ class EntityIncludeOptions(BaseModel):
     max_tokens: int = Field(default=500, description="Maximum tokens for entity observations")
 
 
+class ChunkIncludeOptions(BaseModel):
+    """Options for including chunks in recall results."""
+    max_tokens: int = Field(default=8192, description="Maximum tokens for chunks (chunks may be truncated)")
+
+
 class IncludeOptions(BaseModel):
     """Options for including additional data in recall results."""
     entities: Optional[EntityIncludeOptions] = Field(
         default=EntityIncludeOptions(),
         description="Include entity observations. Set to null to disable entity inclusion."
+    )
+    chunks: Optional[ChunkIncludeOptions] = Field(
+        default=None,
+        description="Include raw chunks. Set to {} to enable, null to disable (default: disabled)."
     )
 
 
@@ -113,7 +123,8 @@ class RecallResult(BaseModel):
                 "occurred_end": "2024-01-15T10:30:00Z",
                 "mentioned_at": "2024-01-15T10:30:00Z",
                 "document_id": "session_abc123",
-                "metadata": {"source": "slack"}
+                "metadata": {"source": "slack"},
+                "chunk_id": "456e7890-e12b-34d5-a678-901234567890"
             }
         }
     }
@@ -128,6 +139,7 @@ class RecallResult(BaseModel):
     mentioned_at: Optional[str] = None  # ISO format date when the fact was mentioned
     document_id: Optional[str] = None  # Document this memory belongs to
     metadata: Optional[Dict[str, str]] = None  # User-defined metadata
+    chunk_id: Optional[str] = None  # Chunk this fact was extracted from
 
 
 class EntityObservationResponse(BaseModel):
@@ -206,6 +218,14 @@ class EntityDetailResponse(BaseModel):
     observations: List[EntityObservationResponse]
 
 
+class ChunkData(BaseModel):
+    """Chunk data for a single chunk."""
+    id: str
+    text: str
+    chunk_index: int
+    truncated: bool = Field(default=False, description="Whether the chunk text was truncated due to token limits")
+
+
 class RecallResponse(BaseModel):
     """Response model for recall endpoints."""
     model_config = ConfigDict(json_schema_extra={
@@ -218,7 +238,8 @@ class RecallResponse(BaseModel):
                     "entities": ["Alice", "Google"],
                     "context": "work info",
                     "occurred_start": "2024-01-15T10:30:00Z",
-                    "occurred_end": "2024-01-15T10:30:00Z"
+                    "occurred_end": "2024-01-15T10:30:00Z",
+                    "chunk_id": "456e7890-e12b-34d5-a678-901234567890"
                 }
             ],
             "trace": {
@@ -234,6 +255,13 @@ class RecallResponse(BaseModel):
                         {"text": "Alice works at Google on the AI team", "mentioned_at": "2024-01-15T10:30:00Z"}
                     ]
                 }
+            },
+            "chunks": {
+                "456e7890-e12b-34d5-a678-901234567890": {
+                    "id": "456e7890-e12b-34d5-a678-901234567890",
+                    "text": "Alice works at Google on the AI team. She's been there for 3 years...",
+                    "chunk_index": 0
+                }
             }
         }
     })
@@ -241,6 +269,7 @@ class RecallResponse(BaseModel):
     results: List[RecallResult]
     trace: Optional[Dict[str, Any]] = None
     entities: Optional[Dict[str, EntityStateResponse]] = Field(default=None, description="Entity states for entities mentioned in results")
+    chunks: Optional[Dict[str, ChunkData]] = Field(default=None, description="Chunks for facts, keyed by chunk_id")
 
 
 class MemoryItem(BaseModel):
@@ -690,6 +719,20 @@ def create_app(memory: MemoryEngine, run_migrations: bool = True, initialize_mem
         Lifespan context manager for startup and shutdown events.
         Note: This only fires when running the app standalone, not when mounted.
         """
+        # Initialize OpenTelemetry metrics
+        try:
+            prometheus_reader = initialize_metrics(
+                service_name="hindsight-api",
+                service_version="1.0.0"
+            )
+            create_metrics_collector()
+            app.state.prometheus_reader = prometheus_reader
+            logging.info("Metrics initialized - available at /metrics endpoint")
+        except Exception as e:
+            logging.warning(f"Failed to initialize metrics: {e}. Metrics will be disabled (using no-op collector).")
+            app.state.prometheus_reader = None
+            # Metrics collector is already initialized as no-op by default
+
         # Startup: Initialize database and memory system
         if initialize_memory:
             await memory.initialize()
@@ -735,6 +778,19 @@ def create_app(memory: MemoryEngine, run_migrations: bool = True, initialize_mem
 def _register_routes(app: FastAPI):
     """Register all API routes on the given app instance."""
 
+    @app.get(
+        "/metrics",
+        summary="Prometheus metrics endpoint",
+        description="Exports metrics in Prometheus format for scraping",
+        tags=["Monitoring"]
+    )
+    async def metrics_endpoint():
+        """Return Prometheus metrics."""
+        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+        from fastapi.responses import Response
+
+        metrics_data = generate_latest()
+        return Response(content=metrics_data, media_type=CONTENT_TYPE_LATEST)
 
     @app.get(
         "/v1/default/banks/{bank_id}/graph",
@@ -818,6 +874,8 @@ def _register_routes(app: FastAPI):
     )
     async def api_recall(bank_id: str, request: RecallRequest):
         """Run a recall and return results with trace."""
+        metrics = get_metrics_collector()
+
         try:
             # Validate types
             valid_fact_types = ["world", "agent", "opinion", "observation"]
@@ -846,18 +904,25 @@ def _register_routes(app: FastAPI):
             include_entities = request.include.entities is not None
             max_entity_tokens = request.include.entities.max_tokens if include_entities else 500
 
-            # Run recall with tracing
-            core_result = await app.state.memory.recall_async(
-                bank_id=bank_id,
-                query=request.query,
-                budget=request.budget,
-                max_tokens=request.max_tokens,
-                enable_trace=request.trace,
-                fact_type=fact_types,
-                question_date=question_date,
-                include_entities=include_entities,
-                max_entity_tokens=max_entity_tokens
-            )
+            # Determine chunk inclusion settings
+            include_chunks = request.include.chunks is not None
+            max_chunk_tokens = request.include.chunks.max_tokens if include_chunks else 8192
+
+            # Run recall with tracing (record metrics)
+            with metrics.record_operation("recall", bank_id=bank_id, budget=request.budget.value, max_tokens=request.max_tokens):
+                core_result = await app.state.memory.recall_async(
+                    bank_id=bank_id,
+                    query=request.query,
+                    budget=request.budget,
+                    max_tokens=request.max_tokens,
+                    enable_trace=request.trace,
+                    fact_type=fact_types,
+                    question_date=question_date,
+                    include_entities=include_entities,
+                    max_entity_tokens=max_entity_tokens,
+                    include_chunks=include_chunks,
+                    max_chunk_tokens=max_chunk_tokens
+                )
 
             # Convert core MemoryFact objects to API RecallResult objects (excluding internal metrics)
             recall_results = [
@@ -870,10 +935,23 @@ def _register_routes(app: FastAPI):
                     occurred_start=fact.occurred_start,
                     occurred_end=fact.occurred_end,
                     mentioned_at=fact.mentioned_at,
-                    document_id=fact.document_id
+                    document_id=fact.document_id,
+                    chunk_id=fact.chunk_id
                 )
                 for fact in core_result.results
             ]
+
+            # Convert chunks from engine to HTTP API format
+            chunks_response = None
+            if core_result.chunks:
+                chunks_response = {}
+                for chunk_id, chunk_info in core_result.chunks.items():
+                    chunks_response[chunk_id] = ChunkData(
+                        id=chunk_id,
+                        text=chunk_info.chunk_text,
+                        chunk_index=chunk_info.chunk_index,
+                        truncated=chunk_info.truncated
+                    )
 
             # Convert core EntityState objects to API EntityStateResponse objects
             entities_response = None
@@ -892,7 +970,8 @@ def _register_routes(app: FastAPI):
             return RecallResponse(
                 results=recall_results,
                 trace=core_result.trace,
-                entities=entities_response
+                entities=entities_response,
+                chunks=chunks_response
             )
         except HTTPException:
             raise
@@ -921,14 +1000,17 @@ def _register_routes(app: FastAPI):
         operation_id="reflect"
     )
     async def api_reflect(bank_id: str, request: ReflectRequest):
+        metrics = get_metrics_collector()
+
         try:
-            # Use the memory system's reflect_async method
-            core_result = await app.state.memory.reflect_async(
-                bank_id=bank_id,
-                query=request.query,
-                budget=request.budget,
-                context=request.context
-            )
+            # Use the memory system's reflect_async method (record metrics)
+            with metrics.record_operation("reflect", bank_id=bank_id, budget=request.budget.value):
+                core_result = await app.state.memory.reflect_async(
+                    bank_id=bank_id,
+                    query=request.query,
+                    budget=request.budget,
+                    context=request.context
+                )
 
             # Convert core MemoryFact objects to API ReflectFact objects if facts are requested
             based_on_facts = []
@@ -1449,7 +1531,7 @@ This operation cannot be undone.
             return BankProfileResponse(
                 bank_id=bank_id,
                 name=profile["name"],
-                personality=PersonalityTraits(**profile["personality"]),
+                personality=profile["personality"],  # Already a PersonalityTraits object
                 background=profile["background"]
             )
         except Exception as e:
@@ -1482,7 +1564,7 @@ This operation cannot be undone.
             return BankProfileResponse(
                 bank_id=bank_id,
                 name=profile["name"],
-                personality=PersonalityTraits(**profile["personality"]),
+                personality=profile["personality"],  # Already a PersonalityTraits object
                 background=profile["background"]
             )
         except Exception as e:
@@ -1582,7 +1664,7 @@ This operation cannot be undone.
             return BankProfileResponse(
                 bank_id=bank_id,
                 name=final_profile["name"],
-                personality=PersonalityTraits(**final_profile["personality"]),
+                personality=final_profile["personality"],  # Already a PersonalityTraits object
                 background=final_profile["background"]
             )
         except Exception as e:
@@ -1632,6 +1714,8 @@ This operation cannot be undone.
     )
     async def api_retain(bank_id: str, request: RetainRequest):
         """Retain memories with optional async processing."""
+        metrics = get_metrics_collector()
+
         try:
             # Prepare contents for processing
             contents = []
@@ -1683,12 +1767,13 @@ This operation cannot be undone.
                     async_=True
                 )
             else:
-                # Synchronous processing: wait for completion
-                result = await app.state.memory.retain_batch_async(
-                    bank_id=bank_id,
-                    contents=contents,
-                    document_id=request.document_id
-                )
+                # Synchronous processing: wait for completion (record metrics)
+                with metrics.record_operation("retain", bank_id=bank_id):
+                    result = await app.state.memory.retain_batch_async(
+                        bank_id=bank_id,
+                        contents=contents,
+                        document_id=request.document_id
+                    )
 
                 return RetainResponse(
                     success=True,
