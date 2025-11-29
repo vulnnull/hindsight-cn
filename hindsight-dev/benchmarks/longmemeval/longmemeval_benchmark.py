@@ -160,7 +160,7 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are a helpful expert assistant answering questions from lme_experiment users based on the provided context."
+                            "content": "You are a helpful expert assistant answering questions from users based on the provided context."
                         },
                         {
                             "role": "user",
@@ -173,12 +173,8 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
     2. Pay special attention to the timestamps to determine the answer
     3. If the question asks about a specific event or fact, look for direct evidence in the memories
     4. If the memories contain contradictory information, prioritize the most recent memory
-    5. Always convert relative time references to specific dates, months, or years.
-    6. Be as specific as possible when talking about people, places, and events
-    7. Timestamps in memories represent the actual time the event occurred, not the time the event was mentioned in a message.
-
-    Clarification:
-    When interpreting memories, use the timestamp to determine when the described event happened, not when someone talked about the event.
+    5. Be as specific as possible when talking about people, places, and events
+    6. The questions are from the users, so when they say "Did I ..", it's referred to the user.
 
     Example:
 
@@ -187,21 +183,6 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
     Correct Answer: March 15, 2023
     Explanation:
     Even though the phrase says "yesterday," the timestamp shows the event was recorded as happening on March 15th. Therefore, the actual vet visit happened on that date, regardless of the word "yesterday" in the text.
-
-
-    # APPROACH (Think step by step):
-    1. First, examine all memories that contain information related to the question
-    2. Examine the timestamps and content of these memories carefully
-    3. Look for explicit mentions of dates, times, locations, or events that answer the question
-    4. If the answer requires calculation (e.g., converting relative time references), show your work
-    5. Formulate a precise, concise answer based solely on the evidence in the memories
-    6. Double-check that your answer directly addresses the question asked
-    7. Ensure your final answer is specific and avoids vague time references
-    8. If you're not exactly sure, still try to attempt an answer. Sometimes the terms are sligtly different from the question, so it's better to try with the current evidence than just say you don't know.
-    9. Say that you cannot answer if no evidence is related to the question.
-    10. Instead of saying "I don't know", you can use the most relevant information you found in the memories to construct a best-effort answer (but you need to use the provided context).
-    11. Provide a complete answer with your reasoning.
-
     Context:
 
     {context}
