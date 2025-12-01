@@ -40,7 +40,9 @@ class TestEntityDetailResponse(unittest.TestCase):
                 mention_count = 56,
                 first_seen = '',
                 last_seen = '',
-                metadata = { },
+                metadata = {
+                    'key' : null
+                    },
                 observations = [
                     hindsight_client_api.models.entity_observation_response.EntityObservationResponse(
                         text = '', 

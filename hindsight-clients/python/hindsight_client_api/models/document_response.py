@@ -27,13 +27,13 @@ class DocumentResponse(BaseModel):
     Response model for get document endpoint.
     """ # noqa: E501
     id: StrictStr
-    agent_id: StrictStr
+    bank_id: StrictStr
     original_text: StrictStr
     content_hash: Optional[StrictStr]
     created_at: StrictStr
     updated_at: StrictStr
     memory_unit_count: StrictInt
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "original_text", "content_hash", "created_at", "updated_at", "memory_unit_count"]
+    __properties: ClassVar[List[str]] = ["id", "bank_id", "original_text", "content_hash", "created_at", "updated_at", "memory_unit_count"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -92,7 +92,7 @@ class DocumentResponse(BaseModel):
 
         _obj = cls.model_validate({
             "id": obj.get("id"),
-            "agent_id": obj.get("agent_id"),
+            "bank_id": obj.get("bank_id"),
             "original_text": obj.get("original_text"),
             "content_hash": obj.get("content_hash"),
             "created_at": obj.get("created_at"),

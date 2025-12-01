@@ -160,6 +160,14 @@ enum MemoryCommands {
         /// Show trace information
         #[arg(long)]
         trace: bool,
+
+        /// Include chunks in results
+        #[arg(long)]
+        include_chunks: bool,
+
+        /// Maximum tokens for chunks (only used with --include-chunks)
+        #[arg(long, default_value = "8192")]
+        chunk_max_tokens: i64,
     },
 
     /// Generate answers using bank identity (reflect/reasoning)
@@ -379,8 +387,8 @@ fn run() -> Result<()> {
         },
 
         Commands::Memory(memory_cmd) => match memory_cmd {
-            MemoryCommands::Recall { bank_id, query, fact_type, budget, max_tokens, trace } => {
-                commands::memory::recall(&client, &bank_id, query, fact_type, budget, max_tokens, trace, verbose, output_format)
+            MemoryCommands::Recall { bank_id, query, fact_type, budget, max_tokens, trace, include_chunks, chunk_max_tokens } => {
+                commands::memory::recall(&client, &bank_id, query, fact_type, budget, max_tokens, trace, include_chunks, chunk_max_tokens, verbose, output_format)
             }
             MemoryCommands::Reflect { bank_id, query, budget, context } => {
                 commands::memory::reflect(&client, &bank_id, query, budget, context, verbose, output_format)

@@ -36,7 +36,9 @@ class TestListDocumentsResponse(unittest.TestCase):
         if include_optional:
             return ListDocumentsResponse(
                 items = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 total = 56,
                 limit = 56,
@@ -45,7 +47,9 @@ class TestListDocumentsResponse(unittest.TestCase):
         else:
             return ListDocumentsResponse(
                 items = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 total = 56,
                 limit = 56,

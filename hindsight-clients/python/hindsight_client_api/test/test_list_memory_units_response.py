@@ -36,7 +36,9 @@ class TestListMemoryUnitsResponse(unittest.TestCase):
         if include_optional:
             return ListMemoryUnitsResponse(
                 items = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 total = 56,
                 limit = 56,
@@ -45,7 +47,9 @@ class TestListMemoryUnitsResponse(unittest.TestCase):
         else:
             return ListMemoryUnitsResponse(
                 items = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 total = 56,
                 limit = 56,

@@ -18,6 +18,7 @@ __version__ = "0.0.7"
 
 # Define package exports
 __all__ = [
+    "MonitoringApi",
     "DefaultApi",
     "ApiResponse",
     "ApiClient",
@@ -34,6 +35,8 @@ __all__ = [
     "BankListResponse",
     "BankProfileResponse",
     "Budget",
+    "ChunkData",
+    "ChunkIncludeOptions",
     "CreateBankRequest",
     "DeleteResponse",
     "DocumentResponse",
@@ -66,6 +69,7 @@ __all__ = [
 ]
 
 # import apis into sdk package
+from hindsight_client_api.api.monitoring_api import MonitoringApi as MonitoringApi
 from hindsight_client_api.api.default_api import DefaultApi as DefaultApi
 
 # import ApiClient
@@ -86,6 +90,8 @@ from hindsight_client_api.models.bank_list_item import BankListItem as BankListI
 from hindsight_client_api.models.bank_list_response import BankListResponse as BankListResponse
 from hindsight_client_api.models.bank_profile_response import BankProfileResponse as BankProfileResponse
 from hindsight_client_api.models.budget import Budget as Budget
+from hindsight_client_api.models.chunk_data import ChunkData as ChunkData
+from hindsight_client_api.models.chunk_include_options import ChunkIncludeOptions as ChunkIncludeOptions
 from hindsight_client_api.models.create_bank_request import CreateBankRequest as CreateBankRequest
 from hindsight_client_api.models.delete_response import DeleteResponse as DeleteResponse
 from hindsight_client_api.models.document_response import DocumentResponse as DocumentResponse

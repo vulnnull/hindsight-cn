@@ -35,13 +35,13 @@ class TestEntityListResponse(unittest.TestCase):
         model = EntityListResponse()
         if include_optional:
             return EntityListResponse(
-                entities = [
+                items = [
                     {canonical_name=John, first_seen=2024-01-15T10:30:00Z, id=123e4567-e89b-12d3-a456-426614174000, last_seen=2024-02-01T14:00:00Z, mention_count=15}
                     ]
             )
         else:
             return EntityListResponse(
-                entities = [
+                items = [
                     {canonical_name=John, first_seen=2024-01-15T10:30:00Z, id=123e4567-e89b-12d3-a456-426614174000, last_seen=2024-02-01T14:00:00Z, mention_count=15}
                     ],
         )

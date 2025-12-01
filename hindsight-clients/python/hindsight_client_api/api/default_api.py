@@ -3699,7 +3699,7 @@ class DefaultApi:
     ) -> ListMemoryUnitsResponse:
         """List memory units
 
-        List memory units with pagination and optional full-text search. Supports filtering by type.
+        List memory units with pagination and optional full-text search. Supports filtering by type. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).
 
         :param bank_id: (required)
         :type bank_id: str
@@ -3783,7 +3783,7 @@ class DefaultApi:
     ) -> ApiResponse[ListMemoryUnitsResponse]:
         """List memory units
 
-        List memory units with pagination and optional full-text search. Supports filtering by type.
+        List memory units with pagination and optional full-text search. Supports filtering by type. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).
 
         :param bank_id: (required)
         :type bank_id: str
@@ -3867,7 +3867,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """List memory units
 
-        List memory units with pagination and optional full-text search. Supports filtering by type.
+        List memory units with pagination and optional full-text search. Supports filtering by type. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).
 
         :param bank_id: (required)
         :type bank_id: str

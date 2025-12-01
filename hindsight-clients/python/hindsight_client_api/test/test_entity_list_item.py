@@ -40,7 +40,9 @@ class TestEntityListItem(unittest.TestCase):
                 mention_count = 56,
                 first_seen = '',
                 last_seen = '',
-                metadata = { }
+                metadata = {
+                    'key' : null
+                    }
             )
         else:
             return EntityListItem(

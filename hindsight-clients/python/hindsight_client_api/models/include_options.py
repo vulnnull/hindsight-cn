@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List, Optional
+from hindsight_client_api.models.chunk_include_options import ChunkIncludeOptions
 from hindsight_client_api.models.entity_include_options import EntityIncludeOptions
 from typing import Optional, Set
 from typing_extensions import Self
@@ -28,7 +29,8 @@ class IncludeOptions(BaseModel):
     Options for including additional data in recall results.
     """ # noqa: E501
     entities: Optional[EntityIncludeOptions] = None
-    __properties: ClassVar[List[str]] = ["entities"]
+    chunks: Optional[ChunkIncludeOptions] = None
+    __properties: ClassVar[List[str]] = ["entities", "chunks"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -72,10 +74,18 @@ class IncludeOptions(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of entities
         if self.entities:
             _dict['entities'] = self.entities.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of chunks
+        if self.chunks:
+            _dict['chunks'] = self.chunks.to_dict()
         # set to None if entities (nullable) is None
         # and model_fields_set contains the field
         if self.entities is None and "entities" in self.model_fields_set:
             _dict['entities'] = None
+
+        # set to None if chunks (nullable) is None
+        # and model_fields_set contains the field
+        if self.chunks is None and "chunks" in self.model_fields_set:
+            _dict['chunks'] = None
 
         return _dict
 
@@ -89,7 +99,8 @@ class IncludeOptions(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "entities": EntityIncludeOptions.from_dict(obj["entities"]) if obj.get("entities") is not None else None
+            "entities": EntityIncludeOptions.from_dict(obj["entities"]) if obj.get("entities") is not None else None,
+            "chunks": ChunkIncludeOptions.from_dict(obj["chunks"]) if obj.get("chunks") is not None else None
         })
         return _obj
 

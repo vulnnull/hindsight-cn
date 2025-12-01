@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || 'http://localhost:8888';
+import { sdk, lowLevelClient } from '@/lib/hindsight-client';
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,15 +13,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Remove bank_id from query params and rebuild query string
-    const newSearchParams = new URLSearchParams(searchParams);
-    newSearchParams.delete('bank_id');
-    const queryString = newSearchParams.toString();
+    const limit = searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined;
 
-    const url = `${DATAPLANE_URL}/api/v1/banks/${bankId}/entities${queryString ? `?${queryString}` : ''}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    const response = await sdk.listEntities({
+      client: lowLevelClient,
+      path: { bank_id: bankId },
+      query: { limit }
+    });
+
+    return NextResponse.json(response.data, { status: 200 });
   } catch (error) {
     console.error('Error listing entities:', error);
     return NextResponse.json(

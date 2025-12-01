@@ -41,8 +41,9 @@ async def check_duplicates_batch(
     # Group facts by event_date (rounded to 12-hour buckets) for efficient batching
     time_buckets = defaultdict(list)
     for idx, fact in enumerate(facts):
-        # Use occurred_start as the representative date
-        fact_date = fact.occurred_start
+        # Use occurred_start if available, otherwise use mentioned_at
+        # For deduplication purposes, we need a time reference
+        fact_date = fact.occurred_start if fact.occurred_start is not None else fact.mentioned_at
         # Round to 12-hour bucket to group similar times
         bucket_key = fact_date.replace(
             hour=(fact_date.hour // 12) * 12,

@@ -3,6 +3,10 @@
 import { useState, useEffect } from 'react';
 import { client } from '@/lib/api';
 import { useBank } from '@/lib/bank-context';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { RefreshCw, AlertCircle, CheckCircle, Clock } from 'lucide-react';
 
 export function StatsView() {
   const { currentBank } = useBank();
@@ -40,157 +44,191 @@ export function StatsView() {
 
   if (!currentBank) {
     return (
-      <div className="p-10 text-center text-gray-600 bg-gray-50">
-        <h3 className="text-xl font-semibold mb-2">No Agent Selected</h3>
-        <p>Please select an agent from the dropdown above to view statistics.</p>
-      </div>
+      <Card>
+        <CardContent className="p-10 text-center">
+          <h3 className="text-xl font-semibold mb-2 text-card-foreground">No Bank Selected</h3>
+          <p className="text-muted-foreground">Please select a memory bank from the dropdown above to view statistics.</p>
+        </CardContent>
+      </Card>
     );
   }
 
   if (loading && !stats) {
     return (
-      <div className="text-center py-10 text-gray-600">
-        <div className="text-5xl mb-2.5">📊</div>
-        <div className="text-lg">Loading statistics...</div>
-      </div>
+      <Card>
+        <CardContent className="text-center py-10">
+          <Clock className="w-12 h-12 mx-auto mb-3 text-muted-foreground animate-pulse" />
+          <div className="text-lg text-muted-foreground">Loading statistics...</div>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div>
+    <div className="space-y-6">
       {/* Stats Section */}
       {stats && (
-        <div className="bg-white border-2 border-slate-800 rounded-lg p-5 mb-5 shadow">
-          <h3 className="mt-0 mb-5 text-slate-800 text-lg font-bold flex items-center justify-between">
-            <span>📊 Memory Statistics</span>
-            <button
-              onClick={loadStats}
-              className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              🔄 Refresh
-            </button>
-          </h3>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-gray-50 border-2 border-gray-300 rounded p-4 text-center transition-all hover:border-blue-400 hover:shadow">
-              <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">Total Nodes</div>
-              <div className="text-3xl font-bold text-slate-800">{stats.total_nodes || 0}</div>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Memory Statistics</CardTitle>
+                <CardDescription>Overview of stored memories and connections</CardDescription>
+              </div>
+              <Button
+                onClick={loadStats}
+                size="sm"
+                variant="outline"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh
+              </Button>
             </div>
-            <div className="bg-gray-50 border-2 border-gray-300 rounded p-4 text-center transition-all hover:border-blue-400 hover:shadow">
-              <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">World Facts</div>
-              <div className="text-3xl font-bold text-slate-800">{stats.nodes_by_type?.world || 0}</div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center transition-all hover:bg-muted">
+                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Total Nodes</div>
+                <div className="text-3xl font-bold text-foreground">{stats.total_nodes || 0}</div>
+              </div>
+              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center transition-all hover:bg-muted">
+                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">World Facts</div>
+                <div className="text-3xl font-bold text-foreground">{stats.nodes_by_fact_type?.world || 0}</div>
+              </div>
+              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center transition-all hover:bg-muted">
+                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Bank Facts</div>
+                <div className="text-3xl font-bold text-foreground">{stats.nodes_by_fact_type?.bank || 0}</div>
+              </div>
+              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center transition-all hover:bg-muted">
+                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Opinions</div>
+                <div className="text-3xl font-bold text-foreground">{stats.nodes_by_fact_type?.opinion || 0}</div>
+              </div>
+              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center transition-all hover:bg-muted">
+                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Total Links</div>
+                <div className="text-3xl font-bold text-foreground">{stats.total_links || 0}</div>
+              </div>
+              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center transition-all hover:bg-muted">
+                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Temporal Links</div>
+                <div className="text-3xl font-bold text-foreground">{stats.links_by_link_type?.temporal || 0}</div>
+              </div>
+              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center transition-all hover:bg-muted">
+                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Semantic Links</div>
+                <div className="text-3xl font-bold text-foreground">{stats.links_by_link_type?.semantic || 0}</div>
+              </div>
+              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center transition-all hover:bg-muted">
+                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Entity Links</div>
+                <div className="text-3xl font-bold text-foreground">{stats.links_by_link_type?.entity || 0}</div>
+              </div>
+              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center transition-all hover:bg-muted">
+                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Documents</div>
+                <div className="text-3xl font-bold text-foreground">{stats.total_documents || 0}</div>
+              </div>
             </div>
-            <div className="bg-gray-50 border-2 border-gray-300 rounded p-4 text-center transition-all hover:border-blue-400 hover:shadow">
-              <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">Agent Facts</div>
-              <div className="text-3xl font-bold text-slate-800">{stats.nodes_by_type?.agent || 0}</div>
-            </div>
-            <div className="bg-gray-50 border-2 border-gray-300 rounded p-4 text-center transition-all hover:border-blue-400 hover:shadow">
-              <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">Opinions</div>
-              <div className="text-3xl font-bold text-slate-800">{stats.nodes_by_type?.opinion || 0}</div>
-            </div>
-            <div className="bg-gray-50 border-2 border-gray-300 rounded p-4 text-center transition-all hover:border-blue-400 hover:shadow">
-              <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">Total Links</div>
-              <div className="text-3xl font-bold text-slate-800">{stats.total_links || 0}</div>
-            </div>
-            <div className="bg-gray-50 border-2 border-gray-300 rounded p-4 text-center transition-all hover:border-blue-400 hover:shadow">
-              <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">Temporal Links</div>
-              <div className="text-3xl font-bold text-slate-800">{stats.links_by_type?.temporal || 0}</div>
-            </div>
-            <div className="bg-gray-50 border-2 border-gray-300 rounded p-4 text-center transition-all hover:border-blue-400 hover:shadow">
-              <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">Semantic Links</div>
-              <div className="text-3xl font-bold text-slate-800">{stats.links_by_type?.semantic || 0}</div>
-            </div>
-            <div className="bg-gray-50 border-2 border-gray-300 rounded p-4 text-center transition-all hover:border-blue-400 hover:shadow">
-              <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">Entity Links</div>
-              <div className="text-3xl font-bold text-slate-800">{stats.links_by_type?.entity || 0}</div>
-            </div>
-            <div className="bg-gray-50 border-2 border-gray-300 rounded p-4 text-center transition-all hover:border-blue-400 hover:shadow">
-              <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">Documents</div>
-              <div className="text-3xl font-bold text-slate-800">{stats.total_documents || 0}</div>
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Operations Section */}
-      <div className="bg-white border-2 border-slate-800 rounded-lg p-5 shadow">
-        <h3 className="mt-0 mb-5 text-slate-800 text-lg font-bold">⚙️ Async Operations</h3>
-
-        {stats && (stats.pending_operations > 0 || stats.failed_operations > 0) && (
-          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-300 rounded">
-            <div className="flex gap-4">
-              {stats.pending_operations > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-yellow-600 font-semibold">⏳ Pending:</span>
-                  <span className="text-yellow-800 font-bold">{stats.pending_operations}</span>
-                </div>
-              )}
-              {stats.failed_operations > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-red-600 font-semibold">❌ Failed:</span>
-                  <span className="text-red-800 font-bold">{stats.failed_operations}</span>
-                </div>
-              )}
+      <Card>
+        <CardHeader>
+          <CardTitle>Async Operations</CardTitle>
+          <CardDescription>Background tasks and their status</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {stats && (stats.pending_operations > 0 || stats.failed_operations > 0) && (
+            <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
+              <div className="flex gap-4">
+                {stats.pending_operations > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    <span className="text-amber-700 dark:text-amber-300 font-semibold">Pending:</span>
+                    <span className="text-amber-900 dark:text-amber-100 font-bold">{stats.pending_operations}</span>
+                  </div>
+                )}
+                {stats.failed_operations > 0 && (
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-destructive" />
+                    <span className="text-destructive font-semibold">Failed:</span>
+                    <span className="text-destructive font-bold">{stats.failed_operations}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {operations.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-xs">
-              <thead>
-                <tr>
-                  <th className="p-2.5 text-left border border-gray-300 bg-gray-100">ID</th>
-                  <th className="p-2.5 text-left border border-gray-300 bg-gray-100">Type</th>
-                  <th className="p-2.5 text-left border border-gray-300 bg-gray-100">Items</th>
-                  <th className="p-2.5 text-left border border-gray-300 bg-gray-100">Document ID</th>
-                  <th className="p-2.5 text-left border border-gray-300 bg-gray-100">Created</th>
-                  <th className="p-2.5 text-left border border-gray-300 bg-gray-100">Status</th>
-                  <th className="p-2.5 text-left border border-gray-300 bg-gray-100">Error</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Document ID</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Error</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {operations.map((op) => (
-                  <tr key={op.id} className={op.status === 'failed' ? 'bg-red-50' : ''}>
-                    <td className="p-2 border border-gray-300" title={op.id}>
+                  <TableRow key={op.id} className={op.status === 'failed' ? 'bg-destructive/5' : ''}>
+                    <TableCell title={op.id} className="font-mono text-xs">
                       {op.id.substring(0, 8)}...
-                    </td>
-                    <td className="p-2 border border-gray-300">{op.task_type}</td>
-                    <td className="p-2 border border-gray-300">{op.items_count}</td>
-                    <td className="p-2 border border-gray-300">{op.document_id || 'N/A'}</td>
-                    <td className="p-2 border border-gray-300">
+                    </TableCell>
+                    <TableCell>{op.task_type}</TableCell>
+                    <TableCell>{op.items_count}</TableCell>
+                    <TableCell className="font-mono text-xs">{op.document_id || 'N/A'}</TableCell>
+                    <TableCell className="text-sm">
                       {new Date(op.created_at).toLocaleString()}
-                    </td>
-                    <td className="p-2 border border-gray-300">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-bold ${
-                          op.status === 'pending'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : op.status === 'failed'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-green-100 text-green-800'
-                        }`}
-                      >
-                        {op.status}
-                      </span>
-                    </td>
-                    <td className="p-2 border border-gray-300">
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {op.status === 'pending' && (
+                          <>
+                            <Clock className="w-3 h-3 text-amber-600" />
+                            <span className="px-2 py-1 rounded text-xs font-semibold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
+                              {op.status}
+                            </span>
+                          </>
+                        )}
+                        {op.status === 'failed' && (
+                          <>
+                            <AlertCircle className="w-3 h-3 text-destructive" />
+                            <span className="px-2 py-1 rounded text-xs font-semibold bg-destructive/10 text-destructive border border-destructive/20">
+                              {op.status}
+                            </span>
+                          </>
+                        )}
+                        {op.status === 'completed' && (
+                          <>
+                            <CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" />
+                            <span className="px-2 py-1 rounded text-xs font-semibold bg-green-100 dark:bg-green-950 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-800">
+                              {op.status}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
                       {op.error_message ? (
-                        <span className="text-red-600" title={op.error_message}>
+                        <span className="text-destructive text-sm" title={op.error_message}>
                           {op.error_message.substring(0, 50)}...
                         </span>
                       ) : (
-                        'None'
+                        <span className="text-muted-foreground">None</span>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         ) : (
-          <p className="text-gray-600 text-center py-5">No operations found</p>
+          <p className="text-muted-foreground text-center py-5">No operations found</p>
         )}
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

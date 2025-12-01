@@ -47,8 +47,13 @@ async def process_entities_batch(
 
     # Extract data for link_utils function
     fact_texts = [fact.fact_text for fact in facts]
-    fact_dates = [fact.occurred_start for fact in facts]
-    entities_per_fact = [[entity.name for entity in (fact.entities or [])] for fact in facts]
+    # Use occurred_start if available, otherwise use mentioned_at for entity timestamps
+    fact_dates = [fact.occurred_start if fact.occurred_start is not None else fact.mentioned_at for fact in facts]
+    # Convert EntityRef objects to dict format expected by link_utils
+    entities_per_fact = [
+        [{'text': entity.name, 'type': 'CONCEPT'} for entity in (fact.entities or [])]
+        for fact in facts
+    ]
 
     # Use existing link_utils function for entity processing
     entity_links = await link_utils.extract_entities_batch_optimized(

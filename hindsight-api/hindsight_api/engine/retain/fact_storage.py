@@ -37,6 +37,7 @@ async def insert_facts_batch(
     # Prepare data for batch insert
     fact_texts = []
     embeddings = []
+    event_dates = []
     occurred_starts = []
     occurred_ends = []
     mentioned_ats = []
@@ -52,6 +53,9 @@ async def insert_facts_batch(
         fact_texts.append(fact.fact_text)
         # Convert embedding to string for asyncpg vector type
         embeddings.append(str(fact.embedding))
+        # event_date: Use occurred_start if available, otherwise use mentioned_at
+        # This maintains backward compatibility while handling None occurred_start
+        event_dates.append(fact.occurred_start if fact.occurred_start is not None else fact.mentioned_at)
         occurred_starts.append(fact.occurred_start)
         occurred_ends.append(fact.occurred_end)
         mentioned_ats.append(fact.mentioned_at)
@@ -65,7 +69,6 @@ async def insert_facts_batch(
         document_ids.append(document_id)
 
     # Batch insert all facts
-    # Note: event_date is set to occurred_start for backward compatibility
     results = await conn.fetch(
         """
         INSERT INTO memory_units (bank_id, text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
@@ -79,7 +82,7 @@ async def insert_facts_batch(
         bank_id,
         fact_texts,
         embeddings,
-        occurred_starts,  # event_date (for backward compatibility)
+        event_dates,  # event_date: occurred_start if available, else mentioned_at
         occurred_starts,
         occurred_ends,
         mentioned_ats,

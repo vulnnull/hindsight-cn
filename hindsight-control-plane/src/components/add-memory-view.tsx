@@ -3,6 +3,10 @@
 import { useState } from 'react';
 import { client } from '@/lib/api';
 import { useBank } from '@/lib/bank-context';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 
 export function AddMemoryView() {
   const { currentBank } = useBank();
@@ -66,43 +70,40 @@ export function AddMemoryView() {
 
           <div className="mb-4">
             <label className="font-bold block mb-1 text-card-foreground">Content *</label>
-            <textarea
+            <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="Enter the memory content..."
-              className="w-full min-h-[100px] px-2.5 py-2 border-2 border-border bg-background text-foreground rounded text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+              className="min-h-[100px] resize-y"
             />
           </div>
 
           <div className="mb-4">
             <label className="font-bold block mb-1 text-card-foreground">Context</label>
-            <input
+            <Input
               type="text"
               value={context}
               onChange={(e) => setContext(e.target.value)}
               placeholder="Optional context about this memory..."
-              className="w-full px-2.5 py-2 border-2 border-border bg-background text-foreground rounded text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
 
           <div className="mb-4">
             <label className="font-bold block mb-1 text-card-foreground">Event Date</label>
-            <input
+            <Input
               type="datetime-local"
               value={eventDate}
               onChange={(e) => setEventDate(e.target.value)}
-              className="w-full px-2.5 py-2 border-2 border-border bg-background text-foreground rounded text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
 
           <div className="mb-4">
             <label className="font-bold block mb-1 text-card-foreground">Document ID</label>
-            <input
+            <Input
               type="text"
               value={documentId}
               onChange={(e) => setDocumentId(e.target.value)}
               placeholder="Optional document identifier (automatically upserts if document exists)..."
-              className="w-full px-2.5 py-2 border-2 border-border bg-background text-foreground rounded text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <small className="text-muted-foreground text-xs mt-1 block">
               Note: If a document with this ID already exists, it will be automatically replaced with the new content.
@@ -110,31 +111,31 @@ export function AddMemoryView() {
           </div>
 
           <div className="mb-4">
-            <label className="flex items-center cursor-pointer">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="async"
                 checked={async}
-                onChange={(e) => setAsync(e.target.checked)}
-                className="mr-2 w-4 h-4 cursor-pointer"
+                onCheckedChange={(checked) => setAsync(checked as boolean)}
               />
-              <span className="font-bold text-card-foreground">Async (process in background)</span>
-            </label>
+              <label htmlFor="async" className="font-bold text-card-foreground cursor-pointer">
+                Async (process in background)
+              </label>
+            </div>
           </div>
 
           <div className="flex gap-2.5">
-            <button
+            <Button
               onClick={submitMemory}
               disabled={loading}
-              className="px-6 py-3 bg-primary text-primary-foreground rounded cursor-pointer font-bold text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Retaining...' : 'Retain Memory'}
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={clearForm}
-              className="px-6 py-3 bg-secondary text-secondary-foreground rounded cursor-pointer font-bold text-sm hover:opacity-90"
+              variant="secondary"
             >
               Clear Form
-            </button>
+            </Button>
           </div>
         </div>
 

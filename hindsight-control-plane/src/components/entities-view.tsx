@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { client } from '@/lib/api';
 import { useBank } from '@/lib/bank-context';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 interface Entity {
   id: string;
@@ -37,7 +39,7 @@ export function EntitiesView() {
         bank_id: currentBank,
         limit: 100,
       });
-      setEntities(result.entities || []);
+      setEntities(result.items || []);
     } catch (error) {
       console.error('Error loading entities:', error);
       alert('Error loading entities: ' + (error as Error).message);
@@ -93,55 +95,56 @@ export function EntitiesView() {
     <div className="flex gap-4">
       {/* Entity List */}
       <div className="flex-1">
-        <div className="mb-4 p-2.5 bg-card rounded-lg border-2 border-primary flex gap-4 items-center">
-          <button
-            onClick={loadEntities}
-            disabled={loading}
-            className="px-5 py-2 bg-primary text-primary-foreground rounded font-bold text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Loading...' : entities.length > 0 ? 'Refresh Entities' : 'Load Entities'}
-          </button>
-          {entities.length > 0 && (
-            <span className="text-muted-foreground text-sm">
-              ({entities.length} entities)
-            </span>
-          )}
-        </div>
-
-        {entities.length > 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="text-center">
+              <div className="text-4xl mb-2">⏳</div>
+              <div className="text-sm text-muted-foreground">Loading entities...</div>
+            </div>
+          </div>
+        ) : entities.length > 0 ? (
+          <>
+            <div className="mb-4 text-sm text-muted-foreground">
+              {entities.length} entities
+            </div>
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="p-2.5 text-left border border-border bg-card text-card-foreground">ID</th>
-                  <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Name</th>
-                  <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Mentions</th>
-                  <th className="p-2.5 text-left border border-border bg-card text-card-foreground">First Seen</th>
-                  <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Last Seen</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Mentions</TableHead>
+                  <TableHead>First Seen</TableHead>
+                  <TableHead>Last Seen</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {entities.map((entity) => (
-                  <tr
+                  <TableRow
                     key={entity.id}
                     onClick={() => loadEntityDetail(entity.id)}
-                    className={`cursor-pointer hover:bg-muted ${
-                      selectedEntity?.id === entity.id ? 'bg-accent' : 'bg-background'
+                    className={`cursor-pointer ${
+                      selectedEntity?.id === entity.id ? 'bg-accent' : ''
                     }`}
                   >
-                    <td className="p-2 border border-border text-xs text-muted-foreground font-mono" title={entity.id}>{entity.id.slice(0, 8)}...</td>
-                    <td className="p-2 border border-border font-medium">{entity.canonical_name}</td>
-                    <td className="p-2 border border-border">{entity.mention_count}</td>
-                    <td className="p-2 border border-border">{formatDate(entity.first_seen)}</td>
-                    <td className="p-2 border border-border">{formatDate(entity.last_seen)}</td>
-                  </tr>
+                    <TableCell className="text-xs text-muted-foreground font-mono" title={entity.id}>{entity.id.slice(0, 8)}...</TableCell>
+                    <TableCell className="font-medium">{entity.canonical_name}</TableCell>
+                    <TableCell>{entity.mention_count}</TableCell>
+                    <TableCell>{formatDate(entity.first_seen)}</TableCell>
+                    <TableCell>{formatDate(entity.last_seen)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
-        ) : !loading && (
-          <div className="p-10 text-center text-muted-foreground bg-muted rounded">
-            No entities found. Entities are extracted from facts when memories are added.
+          </>
+        ) : (
+          <div className="flex items-center justify-center py-20">
+            <div className="text-center">
+              <div className="text-4xl mb-2">👥</div>
+              <div className="text-sm text-muted-foreground">No entities found</div>
+              <div className="text-xs text-muted-foreground mt-1">Entities are extracted from facts when memories are added.</div>
+            </div>
           </div>
         )}
       </div>
@@ -151,12 +154,13 @@ export function EntitiesView() {
         <div className="w-96 bg-card border-2 border-primary rounded-lg p-4">
           <div className="flex justify-between items-start mb-4">
             <h3 className="text-lg font-bold text-card-foreground">{selectedEntity.canonical_name}</h3>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setSelectedEntity(null)}
-              className="text-muted-foreground hover:text-foreground"
             >
               X
-            </button>
+            </Button>
           </div>
 
           <div className="text-sm text-muted-foreground mb-4">
@@ -168,13 +172,14 @@ export function EntitiesView() {
           <div className="mb-4">
             <div className="flex justify-between items-center mb-2">
               <h4 className="font-bold text-card-foreground">Observations</h4>
-              <button
+              <Button
                 onClick={regenerateObservations}
                 disabled={regenerating}
-                className="px-3 py-1 bg-secondary text-secondary-foreground rounded text-xs font-bold hover:opacity-90 disabled:opacity-50"
+                variant="secondary"
+                size="sm"
               >
                 {regenerating ? 'Regenerating...' : 'Regenerate'}
-              </button>
+              </Button>
             </div>
 
             {loadingDetail ? (

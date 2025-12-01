@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddBankBackgroundData, AddBankBackgroundErrors, AddBankBackgroundResponses, CancelOperationData, CancelOperationErrors, CancelOperationResponses, ClearBankMemoriesData, ClearBankMemoriesErrors, ClearBankMemoriesResponses, CreateOrUpdateBankData, CreateOrUpdateBankErrors, CreateOrUpdateBankResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, GetAgentStatsData, GetAgentStatsErrors, GetAgentStatsResponses, GetBankProfileData, GetBankProfileErrors, GetBankProfileResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetEntityData, GetEntityErrors, GetEntityResponses, GetGraphData, GetGraphErrors, GetGraphResponses, ListBanksData, ListBanksResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListEntitiesData, ListEntitiesErrors, ListEntitiesResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, RecallMemoriesData, RecallMemoriesErrors, RecallMemoriesResponses, ReflectData, ReflectErrors, ReflectResponses, RegenerateEntityObservationsData, RegenerateEntityObservationsErrors, RegenerateEntityObservationsResponses, RetainMemoriesData, RetainMemoriesErrors, RetainMemoriesResponses, UpdateBankPersonalityData, UpdateBankPersonalityErrors, UpdateBankPersonalityResponses } from './types.gen';
+import type { AddBankBackgroundData, AddBankBackgroundErrors, AddBankBackgroundResponses, CancelOperationData, CancelOperationErrors, CancelOperationResponses, ClearBankMemoriesData, ClearBankMemoriesErrors, ClearBankMemoriesResponses, CreateOrUpdateBankData, CreateOrUpdateBankErrors, CreateOrUpdateBankResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, GetAgentStatsData, GetAgentStatsErrors, GetAgentStatsResponses, GetBankProfileData, GetBankProfileErrors, GetBankProfileResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetEntityData, GetEntityErrors, GetEntityResponses, GetGraphData, GetGraphErrors, GetGraphResponses, ListBanksData, ListBanksResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListEntitiesData, ListEntitiesErrors, ListEntitiesResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, MetricsEndpointMetricsGetData, MetricsEndpointMetricsGetResponses, RecallMemoriesData, RecallMemoriesErrors, RecallMemoriesResponses, ReflectData, ReflectErrors, ReflectResponses, RegenerateEntityObservationsData, RegenerateEntityObservationsErrors, RegenerateEntityObservationsResponses, RetainMemoriesData, RetainMemoriesErrors, RetainMemoriesResponses, UpdateBankPersonalityData, UpdateBankPersonalityErrors, UpdateBankPersonalityResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -19,6 +19,13 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 };
 
 /**
+ * Prometheus metrics endpoint
+ *
+ * Exports metrics in Prometheus format for scraping
+ */
+export const metricsEndpointMetricsGet = <ThrowOnError extends boolean = false>(options?: Options<MetricsEndpointMetricsGetData, ThrowOnError>) => (options?.client ?? client).get<MetricsEndpointMetricsGetResponses, unknown, ThrowOnError>({ url: '/metrics', ...options });
+
+/**
  * Get memory graph data
  *
  * Retrieve graph data for visualization, optionally filtered by type (world/agent/opinion). Limited to 1000 most recent items.
@@ -28,7 +35,7 @@ export const getGraph = <ThrowOnError extends boolean = false>(options: Options<
 /**
  * List memory units
  *
- * List memory units with pagination and optional full-text search. Supports filtering by type.
+ * List memory units with pagination and optional full-text search. Supports filtering by type. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).
  */
 export const listMemories = <ThrowOnError extends boolean = false>(options: Options<ListMemoriesData, ThrowOnError>) => (options.client ?? client).get<ListMemoriesResponses, ListMemoriesErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/memories/list', ...options });
 

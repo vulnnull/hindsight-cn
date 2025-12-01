@@ -25,8 +25,7 @@ enum View {
     Memories(String),  // bank_id
     Entities(String),  // bank_id
     Documents(String), // bank_id
-    Recall(String),    // bank_id
-    Reflect(String),   // bank_id
+    Query(String),     // bank_id - combines recall and reflect
 }
 
 impl View {
@@ -36,17 +35,23 @@ impl View {
             View::Memories(_) => "Memories",
             View::Entities(_) => "Entities",
             View::Documents(_) => "Documents",
-            View::Recall(_) => "Recall",
-            View::Reflect(_) => "Reflect",
+            View::Query(_) => "Query",
         }
     }
 
     fn bank_id(&self) -> Option<&str> {
         match self {
             View::Banks => None,
-            View::Memories(id) | View::Entities(id) | View::Documents(id) | View::Recall(id) | View::Reflect(id) => Some(id),
+            View::Memories(id) | View::Entities(id) | View::Documents(id) | View::Query(id) => Some(id),
         }
     }
+}
+
+/// Query mode for the Query view
+#[derive(Debug, Clone, PartialEq)]
+enum QueryMode {
+    Recall,
+    Reflect,
 }
 
 /// Input mode for recall/reflect queries
@@ -65,25 +70,32 @@ struct App {
     // List states
     banks: Vec<BankListItem>,
     banks_state: ListState,
+    selected_bank_id: Option<String>,
 
     memories: Vec<Map<String, Value>>,
     memories_state: ListState,
+    viewing_memory: Option<Map<String, Value>>,
+    memories_limit: i64,
+    memories_offset: i64,
+    horizontal_scroll: usize,
 
     entities: Vec<EntityListItem>,
     entities_state: ListState,
+    viewing_entity: Option<EntityListItem>,
 
     documents: Vec<Map<String, Value>>,
     documents_state: ListState,
     viewing_document: Option<Map<String, Value>>,
 
-    // Recall state
-    recall_query: String,
-    recall_results: Vec<RecallResult>,
-    recall_results_state: ListState,
-
-    // Reflect state
-    reflect_query: String,
-    reflect_response: String,
+    // Query state (unified recall/reflect)
+    query_mode: QueryMode,
+    query_text: String,
+    query_budget: Budget,
+    query_max_tokens: i64,
+    query_results: Vec<RecallResult>,
+    query_results_state: ListState,
+    query_response: String,
+    viewing_recall_result: Option<RecallResult>,
 
     // Input mode
     input_mode: InputMode,
@@ -113,26 +125,34 @@ impl App {
 
             banks: Vec::new(),
             banks_state: ListState::default(),
+            selected_bank_id: None,
 
             memories: Vec::new(),
             memories_state: ListState::default(),
+            viewing_memory: None,
+            memories_limit: 500,
+            memories_offset: 0,
+            horizontal_scroll: 0,
 
             entities: Vec::new(),
             entities_state: ListState::default(),
+            viewing_entity: None,
 
             documents: Vec::new(),
             documents_state: ListState::default(),
             viewing_document: None,
 
-            recall_query: String::new(),
-            recall_results: Vec::new(),
-            recall_results_state: ListState::default(),
-
-            reflect_query: String::new(),
-            reflect_response: String::new(),
+            query_mode: QueryMode::Recall,
+            query_text: String::new(),
+            query_budget: Budget::Mid,
+            query_max_tokens: 4096,
+            query_results: Vec::new(),
+            query_results_state: ListState::default(),
+            query_response: String::new(),
+            viewing_recall_result: None,
 
             input_mode: InputMode::Normal,
-            status_message: String::from("Press ? for help"),
+            status_message: String::from("Select a bank to start. Press ? for help"),
             error_message: String::new(),
             show_help: false,
             loading: false,
@@ -146,7 +166,8 @@ impl App {
         app.banks_state.select(Some(0));
         app.memories_state.select(Some(0));
         app.entities_state.select(Some(0));
-        app.recall_results_state.select(Some(0));
+        app.documents_state.select(Some(0));
+        app.query_results_state.select(Some(0));
 
         app
     }
@@ -160,8 +181,7 @@ impl App {
             View::Memories(bank_id) => self.load_memories(&bank_id),
             View::Entities(bank_id) => self.load_entities(&bank_id),
             View::Documents(bank_id) => self.load_documents(&bank_id),
-            View::Recall(_) => Ok(()), // Recall is query-driven
-            View::Reflect(_) => Ok(()), // Reflect is query-driven
+            View::Query(_) => Ok(()), // Query is query-driven
         };
 
         self.loading = false;
@@ -207,20 +227,46 @@ impl App {
     }
 
     fn load_memories(&mut self, bank_id: &str) -> Result<()> {
-        let response = self.client.list_memories(bank_id, None, None, Some(100), Some(0), false)?;
+        let response = self.client.list_memories(
+            bank_id,
+            None,
+            None,
+            Some(self.memories_limit),
+            Some(self.memories_offset),
+            false
+        )?;
         self.memories = response.items;
 
         if !self.memories.is_empty() && self.memories_state.selected().is_none() {
             self.memories_state.select(Some(0));
         }
 
-        self.status_message = format!("Loaded {} memories", self.memories.len());
+        self.status_message = format!("Loaded {} memories (limit: {}, offset: {})",
+            self.memories.len(), self.memories_limit, self.memories_offset);
+        Ok(())
+    }
+
+    fn load_more_memories(&mut self) -> Result<()> {
+        if let View::Memories(bank_id) = &self.view {
+            let bank_id = bank_id.clone();
+            self.memories_offset += self.memories_limit;
+            self.load_memories(&bank_id)?;
+        }
+        Ok(())
+    }
+
+    fn load_prev_memories(&mut self) -> Result<()> {
+        if let View::Memories(bank_id) = &self.view {
+            let bank_id = bank_id.clone();
+            self.memories_offset = (self.memories_offset - self.memories_limit).max(0);
+            self.load_memories(&bank_id)?;
+        }
         Ok(())
     }
 
     fn load_entities(&mut self, bank_id: &str) -> Result<()> {
         let response = self.client.list_entities(bank_id, Some(100), false)?;
-        self.entities = response.entities;
+        self.entities = response.items;
 
         if !self.entities.is_empty() && self.entities_state.selected().is_none() {
             self.entities_state.select(Some(0));
@@ -242,9 +288,9 @@ impl App {
         Ok(())
     }
 
-    fn execute_recall(&mut self) -> Result<()> {
-        if let View::Recall(bank_id) = &self.view {
-            if self.recall_query.is_empty() {
+    fn execute_query(&mut self) -> Result<()> {
+        if let View::Query(bank_id) = &self.view {
+            if self.query_text.is_empty() {
                 self.error_message = "Query cannot be empty".to_string();
                 return Ok(());
             }
@@ -252,59 +298,91 @@ impl App {
             self.loading = true;
             self.error_message.clear();
 
-            let request = RecallRequest {
-                query: self.recall_query.clone(),
-                types: None,
-                budget: Some(Budget::Mid),
-                max_tokens: 4096,
-                trace: false,
-                query_timestamp: None,
-                filters: None,
-                include: None,
-            };
+            match self.query_mode {
+                QueryMode::Recall => {
+                    let request = RecallRequest {
+                        query: self.query_text.clone(),
+                        types: None,
+                        budget: Some(self.query_budget.clone()),
+                        max_tokens: self.query_max_tokens,
+                        trace: false,
+                        query_timestamp: None,
+                        filters: None,
+                        include: None,
+                    };
 
-            let response = self.client.recall(bank_id, &request, false)?;
-            self.recall_results = response.results;
+                    let response = self.client.recall(bank_id, &request, false)?;
+                    self.query_results = response.results;
 
-            if !self.recall_results.is_empty() {
-                self.recall_results_state.select(Some(0));
+                    if !self.query_results.is_empty() {
+                        self.query_results_state.select(Some(0));
+                    }
+
+                    self.loading = false;
+                    self.status_message = format!("Found {} results", self.query_results.len());
+                }
+                QueryMode::Reflect => {
+                    let request = ReflectRequest {
+                        query: self.query_text.clone(),
+                        budget: Some(self.query_budget.clone()),
+                        context: None,
+                        filters: None,
+                        include: None,
+                    };
+
+                    let response = self.client.reflect(bank_id, &request, false)?;
+                    self.query_response = response.text;
+
+                    self.loading = false;
+                    self.status_message = "Reflection complete".to_string();
+                }
             }
 
-            self.loading = false;
-            self.status_message = format!("Found {} results", self.recall_results.len());
             self.input_mode = InputMode::Normal;
         }
 
         Ok(())
     }
 
-    fn execute_reflect(&mut self) -> Result<()> {
-        if let View::Reflect(bank_id) = &self.view {
-            if self.reflect_query.is_empty() {
-                self.error_message = "Query cannot be empty".to_string();
-                return Ok(());
-            }
+    fn toggle_query_mode(&mut self) {
+        self.query_mode = match self.query_mode {
+            QueryMode::Recall => QueryMode::Reflect,
+            QueryMode::Reflect => QueryMode::Recall,
+        };
+        self.status_message = format!("Switched to {} mode", match self.query_mode {
+            QueryMode::Recall => "Recall",
+            QueryMode::Reflect => "Reflect",
+        });
+    }
 
-            self.loading = true;
-            self.error_message.clear();
+    fn cycle_budget(&mut self) {
+        self.query_budget = match self.query_budget {
+            Budget::Low => Budget::Mid,
+            Budget::Mid => Budget::High,
+            Budget::High => Budget::Low,
+        };
+        self.status_message = format!("Budget: {:?}", self.query_budget);
+    }
 
-            let request = ReflectRequest {
-                query: self.reflect_query.clone(),
-                budget: Some(Budget::Mid),
-                context: None,
-                filters: None,
-                include: None,
-            };
-
-            let response = self.client.reflect(bank_id, &request, false)?;
-            self.reflect_response = response.text;
-
-            self.loading = false;
-            self.status_message = "Reflection complete".to_string();
-            self.input_mode = InputMode::Normal;
+    fn adjust_max_tokens(&mut self, increase: bool) {
+        if increase {
+            self.query_max_tokens = (self.query_max_tokens + 1024).min(16384);
+        } else {
+            self.query_max_tokens = (self.query_max_tokens - 1024).max(512);
         }
+        self.status_message = format!("Max tokens: {}", self.query_max_tokens);
+    }
 
-        Ok(())
+    fn scroll_left(&mut self) {
+        self.horizontal_scroll = self.horizontal_scroll.saturating_sub(10);
+    }
+
+    fn scroll_right(&mut self) {
+        self.horizontal_scroll = (self.horizontal_scroll + 10).min(200);
+    }
+
+    fn reset_horizontal_scroll(&mut self) {
+        self.horizontal_scroll = 0;
     }
 
     fn next_item(&mut self) {
@@ -361,20 +439,21 @@ impl App {
                 };
                 self.documents_state.select(Some(i));
             }
-            View::Recall(_) => {
-                let i = match self.recall_results_state.selected() {
-                    Some(i) => {
-                        if i >= self.recall_results.len().saturating_sub(1) {
-                            0
-                        } else {
-                            i + 1
+            View::Query(_) => {
+                if self.query_mode == QueryMode::Recall {
+                    let i = match self.query_results_state.selected() {
+                        Some(i) => {
+                            if i >= self.query_results.len().saturating_sub(1) {
+                                0
+                            } else {
+                                i + 1
+                            }
                         }
-                    }
-                    None => 0,
-                };
-                self.recall_results_state.select(Some(i));
+                        None => 0,
+                    };
+                    self.query_results_state.select(Some(i));
+                }
             }
-            View::Reflect(_) => {} // No list to navigate
         }
     }
 
@@ -432,20 +511,21 @@ impl App {
                 };
                 self.documents_state.select(Some(i));
             }
-            View::Recall(_) => {
-                let i = match self.recall_results_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.recall_results.len().saturating_sub(1)
-                        } else {
-                            i - 1
+            View::Query(_) => {
+                if self.query_mode == QueryMode::Recall {
+                    let i = match self.query_results_state.selected() {
+                        Some(i) => {
+                            if i == 0 {
+                                self.query_results.len().saturating_sub(1)
+                            } else {
+                                i - 1
+                            }
                         }
-                    }
-                    None => 0,
-                };
-                self.recall_results_state.select(Some(i));
+                        None => 0,
+                    };
+                    self.query_results_state.select(Some(i));
+                }
             }
-            View::Reflect(_) => {} // No list to navigate
         }
     }
 
@@ -455,9 +535,26 @@ impl App {
                 if let Some(i) = self.banks_state.selected() {
                     if let Some(bank) = self.banks.get(i) {
                         let bank_id = bank.bank_id.clone();
+                        self.selected_bank_id = Some(bank_id.clone());
                         self.view_history.push(self.view.clone());
                         self.view = View::Memories(bank_id.clone());
                         self.load_memories(&bank_id)?;
+                    }
+                }
+            }
+            View::Memories(_) => {
+                if let Some(i) = self.memories_state.selected() {
+                    if let Some(memory) = self.memories.get(i) {
+                        self.viewing_memory = Some(memory.clone());
+                        self.status_message = "Viewing memory details (Esc to close)".to_string();
+                    }
+                }
+            }
+            View::Entities(_) => {
+                if let Some(i) = self.entities_state.selected() {
+                    if let Some(entity) = self.entities.get(i).cloned() {
+                        self.viewing_entity = Some(entity);
+                        self.status_message = "Viewing entity details (Esc to close)".to_string();
                     }
                 }
             }
@@ -487,16 +584,42 @@ impl App {
                     }
                 }
             }
+            View::Query(_) => {
+                // View recall result details if in recall mode
+                if self.query_mode == QueryMode::Recall {
+                    if let Some(i) = self.query_results_state.selected() {
+                        if let Some(result) = self.query_results.get(i).cloned() {
+                            self.viewing_recall_result = Some(result);
+                            self.status_message = "Viewing recall result (Esc to close)".to_string();
+                        }
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
     }
 
     fn go_back(&mut self) {
-        // If viewing a document, close it first
+        // If viewing a detail view, close it first
+        if self.viewing_memory.is_some() {
+            self.viewing_memory = None;
+            self.status_message = "Closed memory view".to_string();
+            return;
+        }
+        if self.viewing_entity.is_some() {
+            self.viewing_entity = None;
+            self.status_message = "Closed entity view".to_string();
+            return;
+        }
         if self.viewing_document.is_some() {
             self.viewing_document = None;
             self.status_message = "Closed document view".to_string();
+            return;
+        }
+        if self.viewing_recall_result.is_some() {
+            self.viewing_recall_result = None;
+            self.status_message = "Closed recall result view".to_string();
             return;
         }
 
@@ -568,8 +691,7 @@ fn ui(f: &mut Frame, app: &mut App) {
             View::Memories(_) => render_memories(f, app, chunks[2]),
             View::Entities(_) => render_entities(f, app, chunks[2]),
             View::Documents(_) => render_documents(f, app, chunks[2]),
-            View::Recall(_) => render_recall(f, app, chunks[2]),
-            View::Reflect(_) => render_reflect(f, app, chunks[2]),
+            View::Query(_) => render_query(f, app, chunks[2]),
         }
     }
 
@@ -582,69 +704,59 @@ fn render_control_bar(f: &mut Frame, app: &App, area: Rect) {
     let shortcuts = match (&app.view, &app.input_mode) {
         (View::Banks, InputMode::Normal) => vec![
             ("Enter", "Select", Color::Cyan),
-            ("m", "Mem", Color::Green),
-            ("e", "Ent", Color::Green),
-            ("d", "Docs", Color::Green),
             ("R", "Refresh", Color::Yellow),
-            ("a", if app.auto_refresh_enabled { "Auto" } else { "Auto" },
-             if app.auto_refresh_enabled { Color::Green } else { Color::DarkGray }),
             ("?", "Help", Color::Magenta),
             ("q", "Quit", Color::Red),
         ],
         (View::Memories(_), InputMode::Normal) => vec![
             ("Enter", "View", Color::Cyan),
+            ("/", "Query", Color::Green),
+            ("←→", "Scroll", Color::Cyan),
+            ("n", "Next", Color::Green),
+            ("p", "Prev", Color::Green),
             ("Esc", "Back", Color::Yellow),
-            ("r", "Recall", Color::Green),
-            ("t", "Reflect", Color::Green),
             ("R", "Refresh", Color::Yellow),
-            ("a", if app.auto_refresh_enabled { "Auto" } else { "Auto" },
-             if app.auto_refresh_enabled { Color::Green } else { Color::DarkGray }),
             ("?", "Help", Color::Magenta),
             ("q", "Quit", Color::Red),
         ],
         (View::Entities(_), InputMode::Normal) => vec![
             ("Enter", "View", Color::Cyan),
+            ("/", "Query", Color::Green),
+            ("←→", "Scroll", Color::Cyan),
             ("Esc", "Back", Color::Yellow),
             ("R", "Refresh", Color::Yellow),
-            ("a", if app.auto_refresh_enabled { "Auto" } else { "Auto" },
-             if app.auto_refresh_enabled { Color::Green } else { Color::DarkGray }),
             ("?", "Help", Color::Magenta),
             ("q", "Quit", Color::Red),
         ],
         (View::Documents(_), InputMode::Normal) => vec![
             ("Enter", "View", Color::Cyan),
+            ("/", "Query", Color::Green),
+            ("←→", "Scroll", Color::Cyan),
             ("Del", "Delete", Color::Red),
             ("Esc", "Back", Color::Yellow),
             ("R", "Refresh", Color::Yellow),
-            ("a", if app.auto_refresh_enabled { "Auto" } else { "Auto" },
-             if app.auto_refresh_enabled { Color::Green } else { Color::DarkGray }),
             ("?", "Help", Color::Magenta),
             ("q", "Quit", Color::Red),
         ],
-        (View::Recall(_), InputMode::Normal) => vec![
-            ("/", "Query", Color::Green),
-            ("Esc", "Back", Color::Yellow),
-            ("R", "Refresh", Color::Yellow),
-            ("a", if app.auto_refresh_enabled { "Auto" } else { "Auto" },
-             if app.auto_refresh_enabled { Color::Green } else { Color::DarkGray }),
-            ("?", "Help", Color::Magenta),
-            ("q", "Quit", Color::Red),
-        ],
-        (View::Recall(_), InputMode::Query) => vec![
-            ("Enter", "Search", Color::Green),
-            ("Esc", "Cancel", Color::Red),
-        ],
-        (View::Reflect(_), InputMode::Normal) => vec![
-            ("/", "Query", Color::Green),
-            ("Esc", "Back", Color::Yellow),
-            ("R", "Refresh", Color::Yellow),
-            ("a", if app.auto_refresh_enabled { "Auto" } else { "Auto" },
-             if app.auto_refresh_enabled { Color::Green } else { Color::DarkGray }),
-            ("?", "Help", Color::Magenta),
-            ("q", "Quit", Color::Red),
-        ],
-        (View::Reflect(_), InputMode::Query) => vec![
-            ("Enter", "Reflect", Color::Green),
+        (View::Query(_), InputMode::Normal) => {
+            let mut shortcuts = vec![
+                ("/", "Query", Color::Green),
+                ("m", "Mode", Color::Cyan),
+            ];
+            if app.query_mode == QueryMode::Recall {
+                shortcuts.push(("←→", "Scroll", Color::Cyan));
+            }
+            shortcuts.extend_from_slice(&[
+                ("b", "Budget", Color::Yellow),
+                ("+/-", "Tokens", Color::Yellow),
+                ("Esc", "Back", Color::Yellow),
+                ("?", "Help", Color::Magenta),
+                ("q", "Quit", Color::Red),
+            ]);
+            shortcuts
+        },
+        (View::Query(_), InputMode::Query) => vec![
+            ("Enter", "Execute", Color::Green),
             ("Esc", "Cancel", Color::Red),
         ],
         _ => vec![
@@ -665,11 +777,16 @@ fn render_control_bar(f: &mut Frame, app: &App, area: Rect) {
     // Left: Context info
     let context_info = match &app.view {
         View::Banks => "Context: Banks List".to_string(),
-        View::Memories(bank_id) => format!("Context: Memories [{}]", bank_id),
-        View::Entities(bank_id) => format!("Context: Entities [{}]", bank_id),
-        View::Documents(bank_id) => format!("Context: Documents [{}]", bank_id),
-        View::Recall(bank_id) => format!("Context: Recall [{}]", bank_id),
-        View::Reflect(bank_id) => format!("Context: Reflect [{}]", bank_id),
+        View::Memories(bank_id) => format!("Context: Memories\nBank: {}", bank_id),
+        View::Entities(bank_id) => format!("Context: Entities\nBank: {}", bank_id),
+        View::Documents(bank_id) => format!("Context: Documents\nBank: {}", bank_id),
+        View::Query(_bank_id) => {
+            let mode = match app.query_mode {
+                QueryMode::Recall => "Recall",
+                QueryMode::Reflect => "Reflect",
+            };
+            format!("Mode: {}\nBudget: {:?} | Tokens: {}", mode, app.query_budget, app.query_max_tokens)
+        }
     };
 
     let context_widget = Paragraph::new(context_info)
@@ -695,9 +812,8 @@ fn render_control_bar(f: &mut Frame, app: &App, area: Rect) {
             if idx < shortcuts.len() {
                 let (key, desc, color) = &shortcuts[idx];
 
-                // Each shortcut gets fixed width: <key> desc = total 17 chars with spacing
-                // Format: "<key> desc     " (padded to 17 for alignment)
-                let shortcut_text = format!("<{:>6}> {:<9}", key, desc);
+                // Each shortcut with proper alignment
+                let shortcut_text = format!("<{}> {:<10}", key, desc);
 
                 line_spans.push(Span::styled(
                     shortcut_text,
@@ -784,59 +900,149 @@ fn render_banks(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_memories(f: &mut Frame, app: &mut App, area: Rect) {
-    // K9s-style table with columns
-    let mut items = vec![
-        // Header row
-        ListItem::new(format!("{:<12} {:<20} {}", "TYPE", "CREATED", "TEXT"))
-            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-    ];
+    // If viewing a memory, show its details
+    if let Some(memory) = &app.viewing_memory {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(7),  // Memory metadata
+                Constraint::Min(0),     // Full text content
+            ])
+            .split(area);
 
-    // Data rows
-    for memory in &app.memories {
-        let mem_type = memory.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let created = memory.get("created_at")
+        // Metadata section
+        let mem_type = memory.get("fact_type")
             .and_then(|v| v.as_str())
-            .and_then(|s| s.split('T').next())
             .unwrap_or("unknown");
-        let text = memory.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        let preview = text.chars().take(60).collect::<String>();
+        let mentioned_at = memory.get("mentioned_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let occurred_start = memory.get("occurred_start")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let occurred_end = memory.get("occurred_end")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
 
-        let content = format!("{:<12} {:<20} {}", mem_type, created, preview);
-        items.push(ListItem::new(content).style(Style::default().fg(Color::White)));
+        let metadata_text = format!(
+            "Type: {}\nMentioned At: {}\nOccurred: {} to {}",
+            mem_type, mentioned_at, occurred_start, occurred_end
+        );
+
+        let metadata = Paragraph::new(metadata_text)
+            .block(Block::default().borders(Borders::ALL).title("Memory Metadata"))
+            .style(Style::default().fg(Color::Cyan));
+
+        f.render_widget(metadata, chunks[0]);
+
+        // Full text content
+        let text = memory.get("text").and_then(|v| v.as_str()).unwrap_or("No text available");
+
+        let content_widget = Paragraph::new(text)
+            .block(Block::default().borders(Borders::ALL).title("Full Text (Esc to close)"))
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(Color::White));
+
+        f.render_widget(content_widget, chunks[1]);
+    } else {
+        // Show memory list as table
+        let mut items = vec![
+            // Header row
+            ListItem::new(format!("{:<10} {:<18} {:<18} {}", "TYPE", "MENTIONED AT", "OCCURRED AT", "TEXT"))
+                .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        ];
+
+        // Data rows
+        for memory in &app.memories {
+            let mem_type = memory.get("fact_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let mentioned = memory.get("mentioned_at")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.split('T').next())
+                .unwrap_or("-");
+            let occurred = memory.get("occurred_start")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.split('T').next())
+                .unwrap_or("-");
+            let text = memory.get("text").and_then(|v| v.as_str()).unwrap_or("");
+
+            // Apply horizontal scroll
+            let scrolled_text: String = text.chars().skip(app.horizontal_scroll).take(80).collect();
+
+            let content = format!("{:<10} {:<18} {:<18} {}", mem_type, mentioned, occurred, scrolled_text);
+            items.push(ListItem::new(content).style(Style::default().fg(Color::White)));
+        }
+
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(format!("Memories ({}) - Press Enter to view full text", app.memories.len())))
+            .highlight_style(
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(">> ");
+
+        f.render_stateful_widget(list, area, &mut app.memories_state);
     }
-
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Memories"))
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol(">> ");
-
-    f.render_stateful_widget(list, area, &mut app.memories_state);
 }
 
 fn render_entities(f: &mut Frame, app: &mut App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .entities
-        .iter()
-        .map(|entity| {
-            let content = format!("{} (mentioned {} times)", entity.canonical_name, entity.mention_count);
-            ListItem::new(content).style(Style::default().fg(Color::White))
-        })
-        .collect();
+    // If viewing an entity, show its details
+    if let Some(entity) = &app.viewing_entity {
+        let entity_type = entity.metadata.as_ref()
+            .and_then(|m| m.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let metadata_text = format!(
+            "Name: {}\nType: {}\nMentions: {}\nFirst Seen: {}\nLast Seen: {}",
+            entity.canonical_name,
+            entity_type,
+            entity.mention_count,
+            entity.first_seen.as_deref().unwrap_or("unknown"),
+            entity.last_seen.as_deref().unwrap_or("unknown")
+        );
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Entities"))
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol(">> ");
+        let metadata = Paragraph::new(metadata_text)
+            .block(Block::default().borders(Borders::ALL).title("Entity Details (Esc to close)"))
+            .style(Style::default().fg(Color::Cyan))
+            .wrap(Wrap { trim: false });
 
-    f.render_stateful_widget(list, area, &mut app.entities_state);
+        f.render_widget(metadata, area);
+    } else {
+        // Show entity list as table
+        let mut items = vec![
+            // Header row
+            ListItem::new(format!("{:<40} {:<15} {:<10}", "NAME", "TYPE", "MENTIONS"))
+                .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        ];
+
+        // Data rows
+        for entity in &app.entities {
+            let name = &entity.canonical_name;
+            // Apply horizontal scroll to name
+            let scrolled_name: String = name.chars().skip(app.horizontal_scroll).take(40).collect();
+            let entity_type = entity.metadata.as_ref()
+                .and_then(|m| m.get("type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let mentions = entity.mention_count;
+
+            let content = format!("{:<40} {:<15} {:<10}", scrolled_name, entity_type, mentions);
+            items.push(ListItem::new(content).style(Style::default().fg(Color::White)));
+        }
+
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(format!("Entities ({}) - Press Enter to view details", app.entities.len())))
+            .highlight_style(
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(">> ");
+
+        f.render_stateful_widget(list, area, &mut app.entities_state);
+    }
 }
 
 fn render_documents(f: &mut Frame, app: &mut App, area: Rect) {
@@ -884,24 +1090,34 @@ fn render_documents(f: &mut Frame, app: &mut App, area: Rect) {
 
         f.render_widget(content_widget, chunks[1]);
     } else {
-        // Show document list
-        let items: Vec<ListItem> = app
-            .documents
-            .iter()
-            .map(|doc| {
-                let id = doc.get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let content_type = doc.get("content_type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let content = format!("{} ({})", id, content_type);
-                ListItem::new(content).style(Style::default().fg(Color::White))
-            })
-            .collect();
+        // Show document list as table
+        let mut items = vec![
+            // Header row
+            ListItem::new(format!("{:<40} {:<20} {}", "ID", "TYPE", "CREATED"))
+                .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        ];
+
+        // Data rows
+        for doc in &app.documents {
+            let id = doc.get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            // Apply horizontal scroll to id
+            let scrolled_id: String = id.chars().skip(app.horizontal_scroll).take(40).collect();
+            let content_type = doc.get("content_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let created = doc.get("created_at")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.split('T').next())
+                .unwrap_or("unknown");
+
+            let content = format!("{:<40} {:<20} {}", scrolled_id, content_type, created);
+            items.push(ListItem::new(content).style(Style::default().fg(Color::White)));
+        }
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("Documents"))
+            .block(Block::default().borders(Borders::ALL).title(format!("Documents ({}) - Press Enter to view content", app.documents.len())))
             .highlight_style(
                 Style::default()
                     .bg(Color::DarkGray)
@@ -913,12 +1129,12 @@ fn render_documents(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn render_recall(f: &mut Frame, app: &mut App, area: Rect) {
+fn render_query(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),  // Query input
-            Constraint::Min(0),     // Results
+            Constraint::Min(0),     // Results or Response
         ])
         .split(area);
 
@@ -929,65 +1145,108 @@ fn render_recall(f: &mut Frame, app: &mut App, area: Rect) {
         Style::default()
     };
 
-    let query = Paragraph::new(app.recall_query.as_str())
-        .style(query_style)
-        .block(Block::default().borders(Borders::ALL).title("Query (press / to edit)"));
-
-    f.render_widget(query, chunks[0]);
-
-    // Results
-    let items: Vec<ListItem> = app
-        .recall_results
-        .iter()
-        .map(|result| {
-            let preview = result.text.chars().take(100).collect::<String>();
-            let type_field = result.type_.as_deref().unwrap_or("unknown");
-            let content = format!("[{}] {}", type_field, preview);
-            ListItem::new(content).style(Style::default().fg(Color::White))
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(format!("Results ({})", app.recall_results.len())))
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol(">> ");
-
-    f.render_stateful_widget(list, chunks[1], &mut app.recall_results_state);
-}
-
-fn render_reflect(f: &mut Frame, app: &mut App, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),  // Query input
-            Constraint::Min(0),     // Response
-        ])
-        .split(area);
-
-    // Query input
-    let query_style = if app.input_mode == InputMode::Query {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
+    let mode_label = match app.query_mode {
+        QueryMode::Recall => "Recall",
+        QueryMode::Reflect => "Reflect",
     };
+    let title = format!("{} Query (press / to edit, m to toggle mode)", mode_label);
 
-    let query = Paragraph::new(app.reflect_query.as_str())
+    let query = Paragraph::new(app.query_text.as_str())
         .style(query_style)
-        .block(Block::default().borders(Borders::ALL).title("Query (press / to edit)"));
+        .block(Block::default().borders(Borders::ALL).title(title));
 
     f.render_widget(query, chunks[0]);
 
-    // Response
-    let response = Paragraph::new(app.reflect_response.as_str())
-        .style(Style::default())
-        .block(Block::default().borders(Borders::ALL).title("Response"))
-        .wrap(Wrap { trim: false });
+    // Results or Response based on mode
+    match app.query_mode {
+        QueryMode::Recall => {
+            // If viewing a recall result, show its details
+            if let Some(result) = &app.viewing_recall_result {
+                let recall_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(7),  // Metadata
+                        Constraint::Min(0),     // Full text
+                    ])
+                    .split(chunks[1]);
 
-    f.render_widget(response, chunks[1]);
+                // Metadata section
+                let mem_type = result.type_.as_deref().unwrap_or("unknown");
+                let occurred_start = result.occurred_start.as_deref().unwrap_or("unknown");
+                let occurred_end = result.occurred_end.as_deref().unwrap_or("unknown");
+                let mentioned_at = result.mentioned_at.as_deref().unwrap_or("unknown");
+
+                let metadata_text = format!(
+                    "Type: {}\nMentioned At: {}\nOccurred: {} to {}",
+                    mem_type, mentioned_at, occurred_start, occurred_end
+                );
+
+                let metadata = Paragraph::new(metadata_text)
+                    .block(Block::default().borders(Borders::ALL).title("Recall Result Metadata"))
+                    .style(Style::default().fg(Color::Cyan));
+
+                f.render_widget(metadata, recall_chunks[0]);
+
+                // Full text content
+                let content_widget = Paragraph::new(result.text.as_str())
+                    .block(Block::default().borders(Borders::ALL).title("Full Text (Esc to close)"))
+                    .wrap(Wrap { trim: false })
+                    .style(Style::default().fg(Color::White));
+
+                f.render_widget(content_widget, recall_chunks[1]);
+            } else {
+                // Show results as a table like memories
+                let mut items = vec![
+                    // Header row
+                    ListItem::new(format!("{:<10} {:<18} {:<18} {}", "TYPE", "OCCURRED START", "OCCURRED END", "TEXT"))
+                        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                ];
+
+                // Data rows
+                for result in &app.query_results {
+                    let mem_type = result.type_.as_deref().unwrap_or("unknown");
+                    let occurred_start = result.occurred_start.as_deref()
+                        .and_then(|s| s.split('T').next())
+                        .unwrap_or("-");
+                    let occurred_end = result.occurred_end.as_deref()
+                        .and_then(|s| s.split('T').next())
+                        .unwrap_or("-");
+                    let text = &result.text;
+
+                    // Apply horizontal scroll
+                    let scrolled_text: String = text.chars().skip(app.horizontal_scroll).take(80).collect();
+
+                    let content = format!("{:<10} {:<18} {:<18} {}", mem_type, occurred_start, occurred_end, scrolled_text);
+                    items.push(ListItem::new(content).style(Style::default().fg(Color::White)));
+                }
+
+                let list = List::new(items)
+                    .block(Block::default().borders(Borders::ALL).title(format!("Recall Results ({}) - Press Enter to view full text", app.query_results.len())))
+                    .highlight_style(
+                        Style::default()
+                            .bg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                    .highlight_symbol(">> ");
+
+                f.render_stateful_widget(list, chunks[1], &mut app.query_results_state);
+            }
+        }
+        QueryMode::Reflect => {
+            let response_text = if app.query_response.is_empty() {
+                "No response yet. Enter a query and press Enter to get a reflection."
+            } else {
+                app.query_response.as_str()
+            };
+
+            let response = Paragraph::new(response_text)
+                .style(Style::default().fg(Color::White))
+                .block(Block::default().borders(Borders::ALL).title("Reflect Response"))
+                .wrap(Wrap { trim: false });
+
+            f.render_widget(response, chunks[1]);
+        }
+    }
 }
 
 fn render_help(f: &mut Frame, area: Rect) {
@@ -995,31 +1254,33 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from(Span::styled("Hindsight Explorer - Keyboard Shortcuts", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("Navigation Flow", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from("  1. Start by selecting a bank (Enter)"),
+        Line::from("  2. View memories, entities, or documents for that bank"),
+        Line::from("  3. Press / from any view to query (recall/reflect)"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Basic Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ]),
         Line::from("  ↑/↓, j/k    - Navigate up/down in lists"),
-        Line::from("  Enter       - Select item / drill down"),
-        Line::from("  Esc         - Go back to previous view"),
+        Line::from("  ←/→, h/l    - Scroll text left/right in tables"),
+        Line::from("  Enter       - Select item / view details"),
+        Line::from("  Esc         - Go back / close detail view"),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Views (from Bank selection)", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("Query View", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ]),
-        Line::from("  m           - View memories for selected bank"),
-        Line::from("  e           - View entities for selected bank"),
-        Line::from("  r           - Recall (search) in selected bank"),
-        Line::from("  t           - Reflect (think) with selected bank"),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Actions", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from("  /           - Enter query (in Recall/Reflect views)"),
-        Line::from("  Enter       - Execute query (when in query mode)"),
-        Line::from("  R           - Refresh current view"),
-        Line::from("  a           - Toggle auto-refresh (5s interval)"),
+        Line::from("  /           - Start or edit query (from any non-bank view)"),
+        Line::from("  m           - Toggle mode (Recall ↔ Reflect)"),
+        Line::from("  b           - Cycle budget (Low → Mid → High)"),
+        Line::from("  +/-         - Adjust max tokens"),
+        Line::from("  Enter       - Execute query"),
         Line::from(""),
         Line::from(vec![
             Span::styled("General", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ]),
+        Line::from("  R           - Refresh current view"),
         Line::from("  ?           - Toggle this help screen"),
         Line::from("  q           - Quit"),
         Line::from(""),
@@ -1056,48 +1317,15 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<()> {
                             // Navigation
                             KeyCode::Down | KeyCode::Char('j') => app.next_item(),
                             KeyCode::Up | KeyCode::Char('k') => app.previous_item(),
-                            KeyCode::Enter => app.enter_view()?,
-                            KeyCode::Esc => app.go_back(),
-
-                            // View switching (only from Banks view or same bank)
-                            KeyCode::Char('m') => {
-                                if let Some(i) = app.banks_state.selected() {
-                                    if let Some(bank) = app.banks.get(i) {
-                                        app.switch_to_view(View::Memories(bank.bank_id.clone()))?;
-                                    }
-                                }
+                            KeyCode::Left | KeyCode::Char('h') => app.scroll_left(),
+                            KeyCode::Right | KeyCode::Char('l') => app.scroll_right(),
+                            KeyCode::Enter => {
+                                app.reset_horizontal_scroll();
+                                app.enter_view()?;
                             }
-                            KeyCode::Char('e') => {
-                                if let Some(i) = app.banks_state.selected() {
-                                    if let Some(bank) = app.banks.get(i) {
-                                        app.switch_to_view(View::Entities(bank.bank_id.clone()))?;
-                                    }
-                                }
-                            }
-                            KeyCode::Char('d') => {
-                                if let Some(i) = app.banks_state.selected() {
-                                    if let Some(bank) = app.banks.get(i) {
-                                        app.switch_to_view(View::Documents(bank.bank_id.clone()))?;
-                                    }
-                                }
-                            }
-                            KeyCode::Char('r') => {
-                                if let Some(i) = app.banks_state.selected() {
-                                    if let Some(bank) = app.banks.get(i) {
-                                        app.switch_to_view(View::Recall(bank.bank_id.clone()))?;
-                                    }
-                                } else if let Some(bank_id) = app.view.bank_id() {
-                                    app.switch_to_view(View::Recall(bank_id.to_string()))?;
-                                }
-                            }
-                            KeyCode::Char('t') => {
-                                if let Some(i) = app.banks_state.selected() {
-                                    if let Some(bank) = app.banks.get(i) {
-                                        app.switch_to_view(View::Reflect(bank.bank_id.clone()))?;
-                                    }
-                                } else if let Some(bank_id) = app.view.bank_id() {
-                                    app.switch_to_view(View::Reflect(bank_id.to_string()))?;
-                                }
+                            KeyCode::Esc => {
+                                app.reset_horizontal_scroll();
+                                app.go_back();
                             }
 
                             // Refresh
@@ -1105,15 +1333,46 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<()> {
                                 app.refresh()?;
                             }
 
-                            // Toggle auto-refresh
-                            KeyCode::Char('a') => {
-                                app.toggle_auto_refresh();
+                            // Query input - start query from any non-bank view
+                            KeyCode::Char('/') => {
+                                match &app.view {
+                                    View::Banks => {
+                                        app.error_message = "Select a bank first".to_string();
+                                    }
+                                    View::Query(_) => {
+                                        app.input_mode = InputMode::Query;
+                                    }
+                                    _ => {
+                                        // Switch to Query view using current bank
+                                        if let Some(bank_id) = app.selected_bank_id.clone() {
+                                            app.switch_to_view(View::Query(bank_id))?;
+                                            app.input_mode = InputMode::Query;
+                                        } else {
+                                            app.error_message = "No bank selected".to_string();
+                                        }
+                                    }
+                                }
                             }
 
-                            // Query input
-                            KeyCode::Char('/') => {
-                                if matches!(app.view, View::Recall(_) | View::Reflect(_)) {
-                                    app.input_mode = InputMode::Query;
+                            // Query view controls
+                            KeyCode::Char('m') => {
+                                if matches!(app.view, View::Query(_)) {
+                                    app.toggle_query_mode();
+                                }
+                            }
+                            KeyCode::Char('b') => {
+                                if matches!(app.view, View::Query(_)) {
+                                    app.cycle_budget();
+                                }
+                            }
+                            KeyCode::Char('+') | KeyCode::Char('=') => {
+                                if matches!(app.view, View::Query(_)) {
+                                    app.adjust_max_tokens(true);
+                                }
+                            }
+                            KeyCode::Char('-') => {
+                                if matches!(app.view, View::Query(_)) {
+                                    app.adjust_max_tokens(false);
                                 }
                             }
 
@@ -1124,33 +1383,39 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<()> {
                                 }
                             }
 
+                            // Pagination for memories
+                            KeyCode::Char('n') => {
+                                if matches!(app.view, View::Memories(_)) {
+                                    app.load_more_memories()?;
+                                }
+                            }
+                            KeyCode::Char('p') => {
+                                if matches!(app.view, View::Memories(_)) {
+                                    app.load_prev_memories()?;
+                                }
+                            }
+
                             _ => {}
                         }
                     }
                     InputMode::Query => {
                         match key.code {
                             KeyCode::Enter => {
-                                match &app.view {
-                                    View::Recall(_) => app.execute_recall()?,
-                                    View::Reflect(_) => app.execute_reflect()?,
-                                    _ => {}
+                                if matches!(app.view, View::Query(_)) {
+                                    app.execute_query()?;
                                 }
                             }
                             KeyCode::Esc => {
                                 app.input_mode = InputMode::Normal;
                             }
                             KeyCode::Char(c) => {
-                                match &app.view {
-                                    View::Recall(_) => app.recall_query.push(c),
-                                    View::Reflect(_) => app.reflect_query.push(c),
-                                    _ => {}
+                                if matches!(app.view, View::Query(_)) {
+                                    app.query_text.push(c);
                                 }
                             }
                             KeyCode::Backspace => {
-                                match &app.view {
-                                    View::Recall(_) => { app.recall_query.pop(); }
-                                    View::Reflect(_) => { app.reflect_query.pop(); }
-                                    _ => {}
+                                if matches!(app.view, View::Query(_)) {
+                                    app.query_text.pop();
                                 }
                             }
                             _ => {}

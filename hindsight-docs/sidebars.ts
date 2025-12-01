@@ -5,7 +5,7 @@ const sidebars: SidebarsConfig = {
   developerSidebar: [
     {
       type: 'category',
-      label: 'Concepts',
+      label: 'Architecture',
       collapsible: false,
       items: [
         {
@@ -27,6 +27,11 @@ const sidebars: SidebarsConfig = {
           type: 'doc',
           id: 'developer/personality',
           label: 'Reflect',
+        },
+        {
+          type: 'doc',
+          id: 'developer/performance',
+          label: 'Performance',
         },
       ],
     },
@@ -91,13 +96,28 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Server',
+      label: 'Hosting',
       collapsible: false,
       items: [
         {
           type: 'doc',
-          id: 'developer/server',
-          label: 'Administration',
+          id: 'developer/installation',
+          label: 'Installation',
+        },
+        {
+          type: 'doc',
+          id: 'developer/configuration',
+          label: 'Configuration',
+        },
+        {
+          type: 'doc',
+          id: 'developer/models',
+          label: 'Models',
+        },
+        {
+          type: 'doc',
+          id: 'developer/metrics',
+          label: 'Metrics',
         },
       ],
     },

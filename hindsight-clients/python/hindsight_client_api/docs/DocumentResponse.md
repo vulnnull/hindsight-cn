@@ -7,7 +7,7 @@ Response model for get document endpoint.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **str** |  | 
-**agent_id** | **str** |  | 
+**bank_id** | **str** |  | 
 **original_text** | **str** |  | 
 **content_hash** | **str** |  | 
 **created_at** | **str** |  | 

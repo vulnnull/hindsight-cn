@@ -99,6 +99,11 @@ RUN chmod +x /app/start-all.sh
 # Create data directory for pg0
 RUN mkdir -p /app/data
 
+# Install pg0 to /root/.hindsight/bin/pg0
+RUN mkdir -p /root/.hindsight/bin /root/.local/bin && \
+    export PATH="/root/.hindsight/bin:/root/.local/bin:$PATH" && \
+    curl -fsSL https://raw.githubusercontent.com/vectorize-io/pg0/main/install.sh | bash
+
 # Expose ports
 EXPOSE 8888 3000
 

@@ -28,3 +28,7 @@ nltk_data/
 logs/
 
 .DS_Store
+
+
+hindsight-dev/benchmarks/locomo/results/
+hindsight-dev/benchmarks/longmemeval/results/

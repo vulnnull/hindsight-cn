@@ -53,6 +53,7 @@ export class ControlPlaneClient {
     bank_id: string;
     budget?: string;
     context?: string;
+    include_facts?: boolean;
   }) {
     return this.fetchApi('/api/reflect', {
       method: 'POST',

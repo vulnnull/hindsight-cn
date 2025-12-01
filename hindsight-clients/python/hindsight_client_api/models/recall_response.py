@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List, Optional
+from hindsight_client_api.models.chunk_data import ChunkData
 from hindsight_client_api.models.entity_state_response import EntityStateResponse
 from hindsight_client_api.models.recall_result import RecallResult
 from typing import Optional, Set
@@ -31,7 +32,8 @@ class RecallResponse(BaseModel):
     results: List[RecallResult]
     trace: Optional[Dict[str, Any]] = None
     entities: Optional[Dict[str, EntityStateResponse]] = None
-    __properties: ClassVar[List[str]] = ["results", "trace", "entities"]
+    chunks: Optional[Dict[str, ChunkData]] = None
+    __properties: ClassVar[List[str]] = ["results", "trace", "entities", "chunks"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -86,6 +88,13 @@ class RecallResponse(BaseModel):
                 if self.entities[_key_entities]:
                     _field_dict[_key_entities] = self.entities[_key_entities].to_dict()
             _dict['entities'] = _field_dict
+        # override the default output from pydantic by calling `to_dict()` of each value in chunks (dict)
+        _field_dict = {}
+        if self.chunks:
+            for _key_chunks in self.chunks:
+                if self.chunks[_key_chunks]:
+                    _field_dict[_key_chunks] = self.chunks[_key_chunks].to_dict()
+            _dict['chunks'] = _field_dict
         # set to None if trace (nullable) is None
         # and model_fields_set contains the field
         if self.trace is None and "trace" in self.model_fields_set:
@@ -95,6 +104,11 @@ class RecallResponse(BaseModel):
         # and model_fields_set contains the field
         if self.entities is None and "entities" in self.model_fields_set:
             _dict['entities'] = None
+
+        # set to None if chunks (nullable) is None
+        # and model_fields_set contains the field
+        if self.chunks is None and "chunks" in self.model_fields_set:
+            _dict['chunks'] = None
 
         return _dict
 
@@ -115,6 +129,12 @@ class RecallResponse(BaseModel):
                 for _k, _v in obj["entities"].items()
             )
             if obj.get("entities") is not None
+            else None,
+            "chunks": dict(
+                (_k, ChunkData.from_dict(_v))
+                for _k, _v in obj["chunks"].items()
+            )
+            if obj.get("chunks") is not None
             else None
         })
         return _obj

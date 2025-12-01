@@ -406,7 +406,15 @@ class BenchmarkRunner:
             List of QA results
         """
         # Filter out questions without answers (category 5)
-        qa_pairs = [pair for pair in qa_pairs if pair.get('answer')]
+        # First, identify and log category 5 questions that will be skipped
+        category_5_questions = [pair for pair in qa_pairs if pair.get('category') == 5]
+        if category_5_questions:
+            logging.info(f"Skipping {len(category_5_questions)} category=5 questions for {item_id}")
+            for q in category_5_questions:
+                logging.debug(f"  Skipped category=5 question: {q.get('question', 'N/A')[:100]}")
+
+        # Filter out category 5 and questions without answers
+        qa_pairs = [pair for pair in qa_pairs if pair.get('category') != 5 and pair.get('answer')]
         questions_to_eval = qa_pairs[:max_questions] if max_questions else qa_pairs
 
         with Progress(

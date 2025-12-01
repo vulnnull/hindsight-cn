@@ -36,9 +36,11 @@ class TestRecallResponse(unittest.TestCase):
         if include_optional:
             return RecallResponse(
                 results = [
-                    {context=work info, document_id=session_abc123, entities=[Alice, Google], id=123e4567-e89b-12d3-a456-426614174000, mentioned_at=2024-01-15T10:30:00Z, metadata={source=slack}, occurred_end=2024-01-15T10:30:00Z, occurred_start=2024-01-15T10:30:00Z, text=Alice works at Google on the AI team, type=world}
+                    {chunk_id=456e7890-e12b-34d5-a678-901234567890, context=work info, document_id=session_abc123, entities=[Alice, Google], id=123e4567-e89b-12d3-a456-426614174000, mentioned_at=2024-01-15T10:30:00Z, metadata={source=slack}, occurred_end=2024-01-15T10:30:00Z, occurred_start=2024-01-15T10:30:00Z, text=Alice works at Google on the AI team, type=world}
                     ],
-                trace = { },
+                trace = {
+                    'key' : null
+                    },
                 entities = {
                     'key' : hindsight_client_api.models.entity_state_response.EntityStateResponse(
                         entity_id = '', 
@@ -48,12 +50,19 @@ class TestRecallResponse(unittest.TestCase):
                                 text = '', 
                                 mentioned_at = '', )
                             ], )
+                    },
+                chunks = {
+                    'key' : hindsight_client_api.models.chunk_data.ChunkData(
+                        id = '', 
+                        text = '', 
+                        chunk_index = 56, 
+                        truncated = True, )
                     }
             )
         else:
             return RecallResponse(
                 results = [
-                    {context=work info, document_id=session_abc123, entities=[Alice, Google], id=123e4567-e89b-12d3-a456-426614174000, mentioned_at=2024-01-15T10:30:00Z, metadata={source=slack}, occurred_end=2024-01-15T10:30:00Z, occurred_start=2024-01-15T10:30:00Z, text=Alice works at Google on the AI team, type=world}
+                    {chunk_id=456e7890-e12b-34d5-a678-901234567890, context=work info, document_id=session_abc123, entities=[Alice, Google], id=123e4567-e89b-12d3-a456-426614174000, mentioned_at=2024-01-15T10:30:00Z, metadata={source=slack}, occurred_end=2024-01-15T10:30:00Z, occurred_start=2024-01-15T10:30:00Z, text=Alice works at Google on the AI team, type=world}
                     ],
         )
         """

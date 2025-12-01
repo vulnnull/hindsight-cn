@@ -8,8 +8,8 @@ use crate::config;
 use crate::output::{self, OutputFormat};
 use crate::ui;
 
-// Import Budget type from generated client
-use hindsight_client::types::Budget;
+// Import types from generated client
+use hindsight_client::types::{Budget, ChunkIncludeOptions, IncludeOptions};
 
 // Helper function to parse budget string to Budget enum
 fn parse_budget(budget: &str) -> Budget {
@@ -28,11 +28,25 @@ pub fn recall(
     budget: String,
     max_tokens: i64,
     trace: bool,
+    include_chunks: bool,
+    chunk_max_tokens: i64,
     verbose: bool,
     output_format: OutputFormat,
 ) -> Result<()> {
     let spinner = if output_format == OutputFormat::Pretty {
         Some(ui::create_spinner("Recalling memories..."))
+    } else {
+        None
+    };
+
+    // Build include options if chunks are requested
+    let include = if include_chunks {
+        Some(IncludeOptions {
+            chunks: Some(ChunkIncludeOptions {
+                max_tokens: chunk_max_tokens,
+            }),
+            entities: None,
+        })
     } else {
         None
     };
@@ -45,7 +59,7 @@ pub fn recall(
         trace,
         query_timestamp: None,
         filters: None,
-        include: None,
+        include,
     };
 
     let response = client.recall(agent_id, &request, verbose);
@@ -57,7 +71,7 @@ pub fn recall(
     match response {
         Ok(result) => {
             if output_format == OutputFormat::Pretty {
-                ui::print_search_results(&result, trace);
+                ui::print_search_results(&result, trace, include_chunks);
             } else {
                 output::print_output(&result, output_format)?;
             }

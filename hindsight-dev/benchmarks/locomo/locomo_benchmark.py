@@ -62,7 +62,7 @@ class LoComoDataset(BenchmarkDataset):
 
             # Get session date
             date_key = f"{session_key}_date_time"
-            session_date = self._parse_date(conv.get(date_key, "n/a"))
+            session_date = self._parse_date(conv.get(date_key))
             session_content = json.dumps(session_data)
             document_id = f"{item['sample_id']}_{session_key}"
             session_items.append({
@@ -90,7 +90,7 @@ class LoComoDataset(BenchmarkDataset):
             dt = datetime.strptime(date_string, "%I:%M %p on %d %B, %Y")
             return dt.replace(tzinfo=timezone.utc)
         except:
-            return datetime.now(timezone.utc)
+            raise
 
 
 class QuestionAnswer(pydantic.BaseModel):
@@ -379,6 +379,9 @@ async def run_benchmark(
     results_filename = f'benchmark_results{suffix}.json'
     output_path = Path(__file__).parent / 'results' / results_filename
 
+    # Create results directory if it doesn't exist
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     # Merge with existing results if running a specific conversation or using filters
     merge_with_existing = conversation is not None or only_failed or only_invalid
 
@@ -468,6 +471,7 @@ def generate_markdown_table(results: dict, use_think: bool = False):
     # Write to file with suffix
     suffix = "_think" if use_think else ""
     output_file = Path(__file__).parent / 'results' / f'results_table{suffix}.md'
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text('\n'.join(lines))
     console.print(f"\n[green]✓[/green] Results table saved to {output_file}")
 

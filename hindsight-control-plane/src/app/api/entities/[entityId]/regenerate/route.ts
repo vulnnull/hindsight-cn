@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || 'http://localhost:8888';
+import { sdk, lowLevelClient } from '@/lib/hindsight-client';
 
 export async function POST(
   request: NextRequest,
@@ -19,10 +18,16 @@ export async function POST(
     }
 
     const decodedEntityId = decodeURIComponent(entityId);
-    const url = `${DATAPLANE_URL}/api/v1/banks/${bankId}/entities/${decodedEntityId}/regenerate`;
-    const response = await fetch(url, { method: 'POST' });
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+
+    const response = await sdk.regenerateEntityObservations({
+      client: lowLevelClient,
+      path: {
+        bank_id: bankId,
+        entity_id: decodedEntityId
+      }
+    });
+
+    return NextResponse.json(response.data, { status: 200 });
   } catch (error) {
     console.error('Error regenerating entity observations:', error);
     return NextResponse.json(

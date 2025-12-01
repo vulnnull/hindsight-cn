@@ -16,6 +16,7 @@ Name | Type | Description | Notes
 **mentioned_at** | **str** |  | [optional] 
 **document_id** | **str** |  | [optional] 
 **metadata** | **Dict[str, str]** |  | [optional] 
+**chunk_id** | **str** |  | [optional] 
 
 ## Example
 

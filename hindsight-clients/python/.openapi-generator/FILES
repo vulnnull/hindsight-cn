@@ -1,6 +1,7 @@
 hindsight_client_api/__init__.py
 hindsight_client_api/api/__init__.py
 hindsight_client_api/api/default_api.py
+hindsight_client_api/api/monitoring_api.py
 hindsight_client_api/api_client.py
 hindsight_client_api/api_response.py
 hindsight_client_api/configuration.py
@@ -10,6 +11,8 @@ hindsight_client_api/docs/BankListItem.md
 hindsight_client_api/docs/BankListResponse.md
 hindsight_client_api/docs/BankProfileResponse.md
 hindsight_client_api/docs/Budget.md
+hindsight_client_api/docs/ChunkData.md
+hindsight_client_api/docs/ChunkIncludeOptions.md
 hindsight_client_api/docs/CreateBankRequest.md
 hindsight_client_api/docs/DefaultApi.md
 hindsight_client_api/docs/DeleteResponse.md
@@ -27,6 +30,7 @@ hindsight_client_api/docs/ListDocumentsResponse.md
 hindsight_client_api/docs/ListMemoryUnitsResponse.md
 hindsight_client_api/docs/MemoryItem.md
 hindsight_client_api/docs/MetadataFilter.md
+hindsight_client_api/docs/MonitoringApi.md
 hindsight_client_api/docs/PersonalityTraits.md
 hindsight_client_api/docs/RecallRequest.md
 hindsight_client_api/docs/RecallResponse.md
@@ -48,6 +52,8 @@ hindsight_client_api/models/bank_list_item.py
 hindsight_client_api/models/bank_list_response.py
 hindsight_client_api/models/bank_profile_response.py
 hindsight_client_api/models/budget.py
+hindsight_client_api/models/chunk_data.py
+hindsight_client_api/models/chunk_include_options.py
 hindsight_client_api/models/create_bank_request.py
 hindsight_client_api/models/delete_response.py
 hindsight_client_api/models/document_response.py
@@ -85,6 +91,8 @@ hindsight_client_api/test/test_bank_list_item.py
 hindsight_client_api/test/test_bank_list_response.py
 hindsight_client_api/test/test_bank_profile_response.py
 hindsight_client_api/test/test_budget.py
+hindsight_client_api/test/test_chunk_data.py
+hindsight_client_api/test/test_chunk_include_options.py
 hindsight_client_api/test/test_create_bank_request.py
 hindsight_client_api/test/test_default_api.py
 hindsight_client_api/test/test_delete_response.py
@@ -102,6 +110,7 @@ hindsight_client_api/test/test_list_documents_response.py
 hindsight_client_api/test/test_list_memory_units_response.py
 hindsight_client_api/test/test_memory_item.py
 hindsight_client_api/test/test_metadata_filter.py
+hindsight_client_api/test/test_monitoring_api.py
 hindsight_client_api/test/test_personality_traits.py
 hindsight_client_api/test/test_recall_request.py
 hindsight_client_api/test/test_recall_response.py

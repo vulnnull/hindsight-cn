@@ -141,9 +141,15 @@ class EmbeddedPostgres:
         Downloads and installs the binary if not already present.
         """
         if self.is_installed():
+            logger.info(f"pg0 already installed at {self.binary_path}")
             return
 
         logger.info("Installing pg0 CLI...")
+
+        # Log platform information
+        binary_name = get_platform_binary_name()
+        logger.info(f"Detected platform: system={platform.system()}, machine={platform.machine()}")
+        logger.info(f"Will download binary: {binary_name}")
 
         # Create install directory
         self.install_dir.mkdir(parents=True, exist_ok=True)

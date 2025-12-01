@@ -48,6 +48,8 @@ class TestRecallRequest(unittest.TestCase):
                     ],
                 include = hindsight_client_api.models.include_options.IncludeOptions(
                     entities = hindsight_client_api.models.entity_include_options.EntityIncludeOptions(
+                        max_tokens = 56, ), 
+                    chunks = hindsight_client_api.models.chunk_include_options.ChunkIncludeOptions(
                         max_tokens = 56, ), )
             )
         else:

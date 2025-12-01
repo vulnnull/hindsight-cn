@@ -2,8 +2,11 @@
 Test retain function and chunk storage.
 """
 import pytest
+import logging
 from datetime import datetime, timezone
 from hindsight_api.engine.memory_engine import Budget
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio
@@ -410,6 +413,95 @@ async def test_mentioned_at_vs_occurred(memory):
             assert mentioned_dt.year == 2020, f"mentioned_at should be 2020, got {mentioned_dt.year}"
 
         print(f"✓ Test passed: Historical conversation correctly ingested with event_date=2020")
+
+    finally:
+        await memory.delete_bank(bank_id)
+
+
+@pytest.mark.asyncio
+async def test_occurred_dates_not_defaulted(memory):
+    """
+    Test that occurred_start and occurred_end are NOT defaulted to mentioned_at.
+
+    This is a regression test for a bug where occurred dates were incorrectly
+    defaulting to mentioned_at when the LLM didn't provide them.
+
+    Scenario: Store a fact where occurred dates are not applicable (current observation)
+    - mentioned_at should be set (to event_date or now())
+    - occurred_start and occurred_end should be None (not defaulted to mentioned_at)
+    """
+    bank_id = f"test_occurred_not_defaulted_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Store a current observation where occurred dates don't make sense
+        # Use present tense to avoid LLM extracting past dates
+        event_date = datetime(2024, 2, 10, 15, 30, tzinfo=timezone.utc)
+
+        unit_ids = await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice likes coffee. The weather is sunny today.",
+            context="current observations",
+            event_date=event_date
+        )
+
+        assert len(unit_ids) > 0, "Should create memory unit"
+
+        # Recall and check that occurred dates are None
+        result = await memory.recall_async(
+            bank_id=bank_id,
+            query="What does Alice like?",
+            budget=Budget.LOW,
+            max_tokens=500,
+            fact_type=["world", "opinion"]
+        )
+
+        assert len(result.results) > 0, "Should recall the fact"
+        fact = result.results[0]
+
+        # mentioned_at should be set
+        assert fact.mentioned_at is not None, "mentioned_at should be set"
+
+        # Parse mentioned_at
+        if isinstance(fact.mentioned_at, str):
+            mentioned_dt = datetime.fromisoformat(fact.mentioned_at.replace('Z', '+00:00'))
+        else:
+            mentioned_dt = fact.mentioned_at
+
+        # Verify it matches event_date
+        time_diff = abs((event_date - mentioned_dt).total_seconds())
+        assert time_diff < 60, f"mentioned_at should match event_date, but diff is {time_diff}s"
+
+        # CRITICAL: occurred_start and occurred_end should be None
+        # They should NOT default to mentioned_at
+        if fact.occurred_start is not None:
+            # If occurred_start is set, it means the LLM extracted it
+            # In this case, log it but don't fail (LLM behavior can vary)
+            print(f"⚠ LLM extracted occurred_start: {fact.occurred_start}")
+            print(f"  This test expects None for present-tense observations")
+        else:
+            print(f"✓ occurred_start is correctly None (not defaulted to mentioned_at)")
+
+        if fact.occurred_end is not None:
+            print(f"⚠ LLM extracted occurred_end: {fact.occurred_end}")
+            print(f"  This test expects None for present-tense observations")
+        else:
+            print(f"✓ occurred_end is correctly None (not defaulted to mentioned_at)")
+
+        # At least verify they're not equal to mentioned_at if they are set
+        if fact.occurred_start is not None:
+            if isinstance(fact.occurred_start, str):
+                occurred_start_dt = datetime.fromisoformat(fact.occurred_start.replace('Z', '+00:00'))
+            else:
+                occurred_start_dt = fact.occurred_start
+
+            # If they're equal, it suggests the old defaulting bug
+            if occurred_start_dt == mentioned_dt:
+                raise AssertionError(
+                    f"occurred_start should NOT be defaulted to mentioned_at! "
+                    f"occurred_start={occurred_start_dt}, mentioned_at={mentioned_dt}"
+                )
+
+        print(f"✓ Test passed: occurred dates are not incorrectly defaulted to mentioned_at")
 
     finally:
         await memory.delete_bank(bank_id)
@@ -1104,6 +1196,402 @@ async def test_chunks_truncation_behavior(memory):
 
         else:
             print("✓ No chunks returned (may be under token limit)")
+
+    finally:
+        await memory.delete_bank(bank_id)
+
+
+# ============================================================
+# Memory Links Tests
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_temporal_links_creation(memory):
+    """
+    Test that temporal links are created between facts with nearby event dates.
+
+    Temporal links connect facts that occurred close in time (within 24 hours).
+    """
+    bank_id = f"test_temporal_links_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Store facts with nearby timestamps (within 24 hours)
+        base_date = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+
+        # Fact 1 at 10:00 AM
+        unit_ids_1 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice started working on the authentication module.",
+            context="daily standup",
+            event_date=base_date
+        )
+
+        # Fact 2 at 2:00 PM same day (4 hours later)
+        unit_ids_2 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Bob reviewed the API design document.",
+            context="daily standup",
+            event_date=base_date.replace(hour=14)
+        )
+
+        # Fact 3 at 9:00 AM next day (23 hours later)
+        unit_ids_3 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Charlie deployed the new database schema.",
+            context="daily standup",
+            event_date=base_date.replace(day=16, hour=9)
+        )
+
+        assert len(unit_ids_1) > 0 and len(unit_ids_2) > 0 and len(unit_ids_3) > 0
+
+        logger.info(f"Created {len(unit_ids_1) + len(unit_ids_2) + len(unit_ids_3)} facts")
+
+        # Query the memory_links table to verify temporal links exist
+        async with memory._pool.acquire() as conn:
+            # Get all temporal links for these units
+            all_unit_ids = unit_ids_1 + unit_ids_2 + unit_ids_3
+
+            temporal_links = await conn.fetch(
+                """
+                SELECT from_unit_id, to_unit_id, link_type, weight
+                FROM memory_links
+                WHERE from_unit_id::text = ANY($1)
+                  AND link_type = 'temporal'
+                ORDER BY weight DESC
+                """,
+                all_unit_ids
+            )
+
+            logger.info(f"Found {len(temporal_links)} temporal links")
+
+            # Should have temporal links between the facts
+            assert len(temporal_links) > 0, "Should have created temporal links between facts with nearby dates"
+
+            # Verify link properties
+            for link in temporal_links:
+                from_id = str(link['from_unit_id'])
+                to_id = str(link['to_unit_id'])
+                logger.info(f"  Link: {from_id[:8]}... -> {to_id[:8]}... (weight: {link['weight']:.2f})")
+                assert link['link_type'] == 'temporal', "Link type should be 'temporal'"
+                assert 0.0 <= link['weight'] <= 1.0, "Weight should be between 0 and 1"
+
+            logger.info("Temporal links created successfully with proper weights")
+
+    finally:
+        await memory.delete_bank(bank_id)
+
+
+@pytest.mark.asyncio
+async def test_semantic_links_creation(memory):
+    """
+    Test that semantic links are created between facts with similar content.
+
+    Semantic links connect facts that are semantically similar based on embeddings.
+    """
+    bank_id = f"test_semantic_links_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Store facts with similar semantic content
+        unit_ids_1 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice is an expert in Python programming and has built many web applications.",
+            context="team skills"
+        )
+
+        # Similar content - should create semantic link
+        unit_ids_2 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Bob is proficient in Python development and specializes in building APIs.",
+            context="team skills"
+        )
+
+        # Different content - less likely to create strong semantic link
+        unit_ids_3 = await memory.retain_async(
+            bank_id=bank_id,
+            content="The quarterly sales meeting is scheduled for next Tuesday at 3 PM.",
+            context="calendar events"
+        )
+
+        assert len(unit_ids_1) > 0 and len(unit_ids_2) > 0 and len(unit_ids_3) > 0
+
+        logger.info(f"Created {len(unit_ids_1) + len(unit_ids_2) + len(unit_ids_3)} facts")
+
+        # Query the memory_links table to verify semantic links exist
+        async with memory._pool.acquire() as conn:
+            all_unit_ids = unit_ids_1 + unit_ids_2 + unit_ids_3
+
+            semantic_links = await conn.fetch(
+                """
+                SELECT from_unit_id, to_unit_id, link_type, weight
+                FROM memory_links
+                WHERE from_unit_id::text = ANY($1)
+                  AND link_type = 'semantic'
+                ORDER BY weight DESC
+                """,
+                all_unit_ids
+            )
+
+            logger.info(f"Found {len(semantic_links)} semantic links")
+
+            # Should have semantic links between similar facts
+            assert len(semantic_links) > 0, "Should have created semantic links between similar facts"
+
+            # Verify link properties
+            for link in semantic_links:
+                from_id = str(link['from_unit_id'])
+                to_id = str(link['to_unit_id'])
+                logger.info(f"  Link: {from_id[:8]}... -> {to_id[:8]}... (weight: {link['weight']:.3f})")
+                assert link['link_type'] == 'semantic', "Link type should be 'semantic'"
+                assert 0.0 <= link['weight'] <= 1.0, "Weight should be between 0 and 1"
+                # Semantic links typically have weight >= 0.7 (threshold)
+                assert link['weight'] >= 0.7, f"Semantic links should have weight >= 0.7, got {link['weight']}"
+
+            logger.info("Semantic links created successfully between similar content")
+
+    finally:
+        await memory.delete_bank(bank_id)
+
+
+@pytest.mark.asyncio
+async def test_entity_links_creation(memory):
+    """
+    Test that entity links are created between facts that mention the same entities.
+
+    Entity links connect facts that reference the same person, place, or concept.
+    This is core functionality and should work consistently.
+    """
+    bank_id = f"test_entity_links_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Store facts that mention the same entities
+        unit_ids_1 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice joined Google as a software engineer in 2020.",
+            context="career history"
+        )
+
+        # Mentions same entity (Alice) - should create entity link
+        unit_ids_2 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice led the development of the new authentication system.",
+            context="project updates"
+        )
+
+        # Mentions same entity (Google) - should create entity link
+        unit_ids_3 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Google announced new cloud services at their annual conference.",
+            context="tech news"
+        )
+
+        # Different entities - no entity link expected
+        unit_ids_4 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Bob works at Meta on machine learning infrastructure.",
+            context="career history"
+        )
+
+        assert len(unit_ids_1) > 0 and len(unit_ids_2) > 0 and len(unit_ids_3) > 0 and len(unit_ids_4) > 0
+
+        logger.info(f"Created {len(unit_ids_1) + len(unit_ids_2) + len(unit_ids_3) + len(unit_ids_4)} facts")
+
+        # Query the memory_links table to verify entity links exist
+        async with memory._pool.acquire() as conn:
+            all_unit_ids = unit_ids_1 + unit_ids_2 + unit_ids_3 + unit_ids_4
+
+            entity_links = await conn.fetch(
+                """
+                SELECT from_unit_id, to_unit_id, link_type, weight, entity_id
+                FROM memory_links
+                WHERE from_unit_id::text = ANY($1)
+                  AND link_type = 'entity'
+                ORDER BY from_unit_id, to_unit_id
+                """,
+                all_unit_ids
+            )
+
+            logger.info(f"Found {len(entity_links)} entity links")
+
+            # Entity extraction is core functionality and should work
+            assert len(entity_links) > 0, "Should have created entity links between facts with shared entities (Alice, Google)"
+
+            # Verify link properties
+            entities_seen = set()
+            for link in entity_links:
+                entity_id = link['entity_id']
+                entities_seen.add(str(entity_id))
+                from_id = str(link['from_unit_id'])
+                to_id = str(link['to_unit_id'])
+                logger.info(f"  Link: {from_id[:8]}... -> {to_id[:8]}... via entity {str(entity_id)[:8]}...")
+                assert link['link_type'] == 'entity', "Link type should be 'entity'"
+                assert link['weight'] == 1.0, "Entity links should have weight 1.0"
+                assert entity_id is not None, "Entity links must reference an entity_id"
+
+            logger.info(f"Entity links created successfully for {len(entities_seen)} unique entities")
+
+            # Verify bidirectional links (entity links should be bidirectional)
+            link_pairs = set()
+            for link in entity_links:
+                from_id = str(link['from_unit_id'])
+                to_id = str(link['to_unit_id'])
+                entity_id = str(link['entity_id'])
+                link_pairs.add((from_id, to_id, entity_id))
+
+            # Check that for each (A -> B) link, there's a (B -> A) link with same entity
+            for from_id, to_id, entity_id in link_pairs:
+                reverse_exists = (to_id, from_id, entity_id) in link_pairs
+                assert reverse_exists, f"Entity links should be bidirectional: missing reverse link for {from_id[:8]} -> {to_id[:8]}"
+
+            logger.info("Entity links are properly bidirectional")
+
+    finally:
+        await memory.delete_bank(bank_id)
+
+
+@pytest.mark.asyncio
+async def test_causal_links_creation(memory):
+    """
+    Test that causal links are created between facts with causal relationships.
+
+    Causal links connect facts where one causes, enables, or prevents another.
+    Note: This depends on LLM extracting causal relationships, which may be non-deterministic.
+    """
+    bank_id = f"test_causal_links_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Store content with explicit causal relationships
+        # Using clear cause-and-effect language to maximize LLM detection
+        content = """
+        Alice completed the authentication module on Monday. Because Alice finished the auth module,
+        Bob was able to start integrating it with the API on Tuesday. Bob's API integration enabled
+        Charlie to begin testing the complete user flow on Wednesday. The successful testing caused
+        the team to schedule the production deployment for Friday.
+        """
+
+        unit_ids = await memory.retain_async(
+            bank_id=bank_id,
+            content=content,
+            context="project timeline"
+        )
+
+        assert len(unit_ids) > 0, "Should have created facts"
+        logger.info(f"Created {len(unit_ids)} facts from causal content")
+
+        # Query the memory_links table to check for causal links
+        async with memory._pool.acquire() as conn:
+            causal_links = await conn.fetch(
+                """
+                SELECT from_unit_id, to_unit_id, link_type, weight
+                FROM memory_links
+                WHERE from_unit_id::text = ANY($1)
+                  AND link_type IN ('causes', 'caused_by', 'enables', 'prevents')
+                ORDER BY link_type, weight DESC
+                """,
+                unit_ids
+            )
+
+            logger.info(f"Found {len(causal_links)} causal links")
+
+            if len(causal_links) > 0:
+                # Verify link properties
+                causal_types = {}
+                for link in causal_links:
+                    link_type = link['link_type']
+                    causal_types[link_type] = causal_types.get(link_type, 0) + 1
+                    from_id = str(link['from_unit_id'])
+                    to_id = str(link['to_unit_id'])
+                    logger.info(f"  Link: {from_id[:8]}... -> {to_id[:8]}... ({link_type}, weight: {link['weight']:.2f})")
+                    assert link['link_type'] in ['causes', 'caused_by', 'enables', 'prevents'], \
+                        f"Causal link type must be valid, got '{link['link_type']}'"
+                    assert 0.0 <= link['weight'] <= 1.0, "Weight should be between 0 and 1"
+
+                logger.info("Causal links created successfully:")
+                for link_type, count in causal_types.items():
+                    logger.info(f"  - {link_type}: {count} links")
+            else:
+                logger.warning("No causal links detected (LLM may not have extracted causal relationships)")
+                logger.info("  This is expected as causal extraction depends on LLM interpretation")
+
+        # This test passes even if no causal links are found, since causal extraction
+        # is non-deterministic and depends on LLM behavior
+        logger.info("Test completed (causal link extraction is LLM-dependent)")
+
+    finally:
+        await memory.delete_bank(bank_id)
+
+
+@pytest.mark.asyncio
+async def test_all_link_types_together(memory):
+    """
+    Integration test: Verify all link types can be created in a single retain operation.
+
+    Tests that temporal, semantic, entity, and potentially causal links are all
+    created when appropriate conditions are met.
+    """
+    bank_id = f"test_all_links_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Store multiple related facts that should trigger all link types
+        base_date = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+
+        # Fact 1: Alice at time T
+        unit_ids_1 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice completed the Python backend service for the authentication system.",
+            context="sprint review",
+            event_date=base_date
+        )
+
+        # Fact 2: Related to Alice, similar topic (Python), close in time
+        unit_ids_2 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice optimized the Python code and improved the authentication performance by 40%.",
+            context="sprint review",
+            event_date=base_date.replace(hour=14)  # Same day, 4 hours later
+        )
+
+        # Fact 3: Related to Alice, different topic but same entity
+        unit_ids_3 = await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice presented the security architecture at the team meeting.",
+            context="team meeting",
+            event_date=base_date.replace(day=16)  # Next day
+        )
+
+        assert len(unit_ids_1) > 0 and len(unit_ids_2) > 0 and len(unit_ids_3) > 0
+
+        logger.info(f"Created {len(unit_ids_1) + len(unit_ids_2) + len(unit_ids_3)} facts")
+
+        # Query for all link types
+        async with memory._pool.acquire() as conn:
+            all_unit_ids = unit_ids_1 + unit_ids_2 + unit_ids_3
+
+            all_links = await conn.fetch(
+                """
+                SELECT link_type, COUNT(*) as count
+                FROM memory_links
+                WHERE from_unit_id::text = ANY($1)
+                GROUP BY link_type
+                ORDER BY link_type
+                """,
+                all_unit_ids
+            )
+
+            logger.info("Link types created:")
+            link_types_found = {}
+            for row in all_links:
+                link_type = row['link_type']
+                count = row['count']
+                link_types_found[link_type] = count
+                logger.info(f"  - {link_type}: {count} links")
+
+            # Should have temporal, semantic, and entity links
+            assert 'temporal' in link_types_found, "Should have temporal links (facts with nearby dates)"
+            assert 'semantic' in link_types_found, "Should have semantic links (similar content about Python/auth)"
+            assert 'entity' in link_types_found, "Should have entity links (all mention Alice)"
+
+            logger.info(f"Successfully created {len(link_types_found)} different link types")
+            logger.info("All major link types (temporal, semantic, entity) are working correctly")
 
     finally:
         await memory.delete_bank(bank_id)

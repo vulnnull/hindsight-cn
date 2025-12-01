@@ -1,9 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { client } from '@/lib/api';
 import { useBank } from '@/lib/bank-context';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { X } from 'lucide-react';
 
 export function DocumentsView() {
   const { currentBank } = useBank();
@@ -21,6 +27,10 @@ export function DocumentsView() {
   const [async, setAsync] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitResult, setSubmitResult] = useState<string | null>(null);
+
+  // Document view panel state
+  const [selectedDocument, setSelectedDocument] = useState<any>(null);
+  const [loadingDocument, setLoadingDocument] = useState(false);
 
   const loadDocuments = async () => {
     if (!currentBank) return;
@@ -45,12 +55,18 @@ export function DocumentsView() {
   const viewDocumentText = async (documentId: string) => {
     if (!currentBank) return;
 
+    setLoadingDocument(true);
+    setSelectedDocument({ id: documentId }); // Set placeholder to show loading
+
     try {
       const doc: any = await client.getDocument(documentId, currentBank);
-      alert(`Document: ${doc.id}\n\nCreated: ${doc.created_at}\nMemory Units: ${doc.memory_unit_count}\n\n${doc.original_text}`);
+      setSelectedDocument(doc);
     } catch (error) {
       console.error('Error loading document:', error);
       alert('Error loading document: ' + (error as Error).message);
+      setSelectedDocument(null);
+    } finally {
+      setLoadingDocument(false);
     }
   };
 
@@ -98,87 +114,92 @@ export function DocumentsView() {
     }
   };
 
+  // Auto-load documents when component mounts
+  useEffect(() => {
+    if (currentBank) {
+      loadDocuments();
+    }
+  }, [currentBank]);
+
   return (
     <div>
       {/* Retain Memory Section */}
       <div className="mb-6 bg-card rounded-lg border-2 border-primary overflow-hidden">
-        <button
+        <Button
+          variant="ghost"
           onClick={() => setShowAddMemory(!showAddMemory)}
-          className="w-full flex items-center justify-between p-4 hover:bg-accent transition-colors"
+          className="w-full flex items-center justify-between p-4 h-auto"
         >
           <div className="flex items-center gap-2">
             <span className="text-lg font-semibold text-card-foreground">Retain Memory</span>
             <span className="text-sm text-muted-foreground">Add new memories to this memory bank</span>
           </div>
           {showAddMemory ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-        </button>
+        </Button>
 
         {showAddMemory && (
           <div className="p-4 border-t border-border bg-background">
             <div className="max-w-3xl">
               <div className="mb-4">
                 <label className="font-bold block mb-1 text-card-foreground">Content *</label>
-                <textarea
+                <Textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   placeholder="Enter the memory content..."
-                  className="w-full min-h-[100px] px-2.5 py-2 border-2 border-border bg-background text-foreground rounded text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="min-h-[100px] resize-y"
                 />
               </div>
 
               <div className="mb-4">
                 <label className="font-bold block mb-1 text-card-foreground">Context</label>
-                <input
+                <Input
                   type="text"
                   value={context}
                   onChange={(e) => setContext(e.target.value)}
                   placeholder="Optional context about this memory..."
-                  className="w-full px-2.5 py-2 border-2 border-border bg-background text-foreground rounded text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="font-bold block mb-1 text-card-foreground">Event Date</label>
-                  <input
+                  <Input
                     type="datetime-local"
                     value={eventDate}
                     onChange={(e) => setEventDate(e.target.value)}
-                    className="w-full px-2.5 py-2 border-2 border-border bg-background text-foreground rounded text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
 
                 <div>
                   <label className="font-bold block mb-1 text-card-foreground">Document ID</label>
-                  <input
+                  <Input
                     type="text"
                     value={documentId}
                     onChange={(e) => setDocumentId(e.target.value)}
                     placeholder="Optional document identifier..."
-                    className="w-full px-2.5 py-2 border-2 border-border bg-background text-foreground rounded text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
               </div>
 
               <div className="mb-4">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="async-docs"
                     checked={async}
-                    onChange={(e) => setAsync(e.target.checked)}
-                    className="mr-2 w-4 h-4 cursor-pointer"
+                    onCheckedChange={(checked) => setAsync(checked as boolean)}
                   />
-                  <span className="text-sm text-card-foreground">Async (process in background)</span>
-                </label>
+                  <label htmlFor="async-docs" className="text-sm text-card-foreground cursor-pointer">
+                    Async (process in background)
+                  </label>
+                </div>
               </div>
 
-              <button
+              <Button
                 onClick={submitMemory}
                 disabled={submitLoading || !content}
-                className="px-6 py-2.5 bg-primary text-primary-foreground rounded font-bold text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submitLoading ? 'Retaining...' : 'Retain Memory'}
-              </button>
+              </Button>
 
               {submitResult && (
                 <div className={`mt-4 p-3 rounded-lg border-2 text-sm ${submitResult.startsWith('Error') ? 'bg-destructive/10 border-destructive text-destructive' : 'bg-primary/10 border-primary text-primary'}`}>
@@ -191,75 +212,163 @@ export function DocumentsView() {
       </div>
 
       {/* Documents List Section */}
-      <div className="mb-4 p-2.5 bg-card rounded-lg border-2 border-primary flex gap-4 items-center flex-wrap">
-        <button
-          onClick={loadDocuments}
-          disabled={loading}
-          className="px-5 py-2 bg-primary text-primary-foreground rounded font-bold text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? '⏳ Loading...' : documents.length > 0 ? '🔄 Refresh Documents' : '📄 Load Documents'}
-        </button>
-        {documents.length > 0 && (
-          <span className="text-muted-foreground text-sm">({total} total documents)</span>
-        )}
-      </div>
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <div className="text-4xl mb-2">⏳</div>
+            <div className="text-sm text-muted-foreground">Loading documents...</div>
+          </div>
+        </div>
+      ) : documents.length > 0 ? (
+        <div className="mb-4 text-sm text-muted-foreground">
+          {total} total documents
+        </div>
+      ) : (
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <div className="text-4xl mb-2">📄</div>
+            <div className="text-sm text-muted-foreground">No documents found</div>
+          </div>
+        </div>
+      )}
 
-      <input
-        type="text"
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        placeholder="Search documents (ID)..."
-        className="w-full max-w-2xl px-2.5 py-2 mb-4 mx-5 border-2 border-border bg-background text-foreground rounded text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-      />
+      {/* Documents List and Detail Panel */}
+      {documents.length > 0 && (
+        <div className="flex gap-4">
+          {/* Documents Table */}
+          <div className={`transition-all ${selectedDocument ? 'w-1/2' : 'w-full'}`}>
+          <div className="px-5 mb-4">
+            <Input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search documents (ID)..."
+              className="max-w-2xl"
+            />
+          </div>
 
-      <div className="overflow-x-auto px-5 pb-5">
-        <table className="w-full border-collapse text-xs max-w-7xl">
-          <thead>
-            <tr>
-              <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Document ID</th>
-              <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Created</th>
-              <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Updated</th>
-              <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Text Length</th>
-              <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Memory Units</th>
-              <th className="p-2.5 text-left border border-border bg-card text-card-foreground">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {documents.length > 0 ? (
-              documents.map((doc) => (
-                <tr key={doc.id} className="bg-background hover:bg-muted">
-                  <td className="p-2 border border-border" title={doc.id}>
-                    {doc.id.length > 30 ? doc.id.substring(0, 30) + '...' : doc.id}
-                  </td>
-                  <td className="p-2 border border-border">
-                    {doc.created_at ? new Date(doc.created_at).toLocaleString() : 'N/A'}
-                  </td>
-                  <td className="p-2 border border-border">
-                    {doc.updated_at ? new Date(doc.updated_at).toLocaleString() : 'N/A'}
-                  </td>
-                  <td className="p-2 border border-border">{doc.text_length?.toLocaleString()} chars</td>
-                  <td className="p-2 border border-border">{doc.memory_unit_count}</td>
-                  <td className="p-2 border border-border">
-                    <button
-                      onClick={() => viewDocumentText(doc.id)}
-                      className="px-2.5 py-1 bg-primary text-primary-foreground rounded text-xs font-bold hover:opacity-90"
-                      title="View original text"
+          <div className="overflow-x-auto px-5 pb-5">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Document ID</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Updated</TableHead>
+                  <TableHead>Text Length</TableHead>
+                  <TableHead>Memory Units</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {documents.length > 0 ? (
+                  documents.map((doc) => (
+                    <TableRow
+                      key={doc.id}
+                      className={selectedDocument?.id === doc.id ? 'bg-accent' : ''}
                     >
-                      View Text
-                    </button>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={6} className="p-10 text-center text-muted-foreground bg-muted">
-                  Click "Load Documents" to view data
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                      <TableCell title={doc.id}>
+                        {doc.id.length > 30 ? doc.id.substring(0, 30) + '...' : doc.id}
+                      </TableCell>
+                      <TableCell>
+                        {doc.created_at ? new Date(doc.created_at).toLocaleString() : 'N/A'}
+                      </TableCell>
+                      <TableCell>
+                        {doc.updated_at ? new Date(doc.updated_at).toLocaleString() : 'N/A'}
+                      </TableCell>
+                      <TableCell>{doc.text_length?.toLocaleString()} chars</TableCell>
+                      <TableCell>{doc.memory_unit_count}</TableCell>
+                      <TableCell>
+                        <Button
+                          onClick={() => viewDocumentText(doc.id)}
+                          size="sm"
+                          variant={selectedDocument?.id === doc.id ? 'default' : 'outline'}
+                          title="View original text"
+                        >
+                          View Text
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center">
+                      Click "Load Documents" to view data
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+
+        {/* Document Detail Panel */}
+        {selectedDocument && (
+          <div className="w-1/2 pr-5 pb-5">
+            <div className="bg-card border-2 border-primary rounded-lg p-4 sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-card-foreground">Document Details</h3>
+                  <p className="text-sm text-muted-foreground">View the original document text and metadata</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedDocument(null)}
+                  className="h-8 w-8 p-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {loadingDocument ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="text-center">
+                    <div className="text-4xl mb-2">⏳</div>
+                    <div className="text-sm text-muted-foreground">Loading document...</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="p-3 bg-muted rounded-lg">
+                      <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Document ID</div>
+                      <div className="text-sm font-mono break-all">{selectedDocument.id}</div>
+                    </div>
+                    {selectedDocument.created_at && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="p-3 bg-muted rounded-lg">
+                          <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Created</div>
+                          <div className="text-sm">{new Date(selectedDocument.created_at).toLocaleString()}</div>
+                        </div>
+                        <div className="p-3 bg-muted rounded-lg">
+                          <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Memory Units</div>
+                          <div className="text-sm">{selectedDocument.memory_unit_count}</div>
+                        </div>
+                      </div>
+                    )}
+                    {selectedDocument.original_text && (
+                      <div className="p-3 bg-muted rounded-lg">
+                        <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Text Length</div>
+                        <div className="text-sm">{selectedDocument.original_text.length.toLocaleString()} characters</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedDocument.original_text && (
+                    <div>
+                      <div className="text-sm font-bold text-foreground mb-2">Original Text</div>
+                      <div className="p-4 bg-muted rounded-lg border border-border">
+                        <pre className="text-sm whitespace-pre-wrap font-mono">{selectedDocument.original_text}</pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        </div>
+      )}
     </div>
   );
 }

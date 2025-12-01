@@ -23,7 +23,7 @@ done
 # Start Control Plane
 echo "🎛️  Starting Control Plane..."
 cd /app/control-plane
-npm start &
+node .next/standalone/server.js &
 CP_PID=$!
 
 echo ""

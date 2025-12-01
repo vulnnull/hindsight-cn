@@ -953,7 +953,7 @@ No authorization required
 
 List memory units
 
-List memory units with pagination and optional full-text search. Supports filtering by type.
+List memory units with pagination and optional full-text search. Supports filtering by type. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).
 
 ### Example
 

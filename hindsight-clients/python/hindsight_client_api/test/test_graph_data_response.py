@@ -36,26 +36,38 @@ class TestGraphDataResponse(unittest.TestCase):
         if include_optional:
             return GraphDataResponse(
                 nodes = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 edges = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 table_rows = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 total_units = 56
             )
         else:
             return GraphDataResponse(
                 nodes = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 edges = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 table_rows = [
-                    { }
+                    {
+                        'key' : null
+                        }
                     ],
                 total_units = 56,
         )

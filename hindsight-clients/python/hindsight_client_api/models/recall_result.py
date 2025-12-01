@@ -36,7 +36,8 @@ class RecallResult(BaseModel):
     mentioned_at: Optional[StrictStr] = None
     document_id: Optional[StrictStr] = None
     metadata: Optional[Dict[str, StrictStr]] = None
-    __properties: ClassVar[List[str]] = ["id", "text", "type", "entities", "context", "occurred_start", "occurred_end", "mentioned_at", "document_id", "metadata"]
+    chunk_id: Optional[StrictStr] = None
+    __properties: ClassVar[List[str]] = ["id", "text", "type", "entities", "context", "occurred_start", "occurred_end", "mentioned_at", "document_id", "metadata", "chunk_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -117,6 +118,11 @@ class RecallResult(BaseModel):
         if self.metadata is None and "metadata" in self.model_fields_set:
             _dict['metadata'] = None
 
+        # set to None if chunk_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.chunk_id is None and "chunk_id" in self.model_fields_set:
+            _dict['chunk_id'] = None
+
         return _dict
 
     @classmethod
@@ -138,7 +144,8 @@ class RecallResult(BaseModel):
             "occurred_end": obj.get("occurred_end"),
             "mentioned_at": obj.get("mentioned_at"),
             "document_id": obj.get("document_id"),
-            "metadata": obj.get("metadata")
+            "metadata": obj.get("metadata"),
+            "chunk_id": obj.get("chunk_id")
         })
         return _obj
 

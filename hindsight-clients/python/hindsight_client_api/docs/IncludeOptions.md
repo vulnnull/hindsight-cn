@@ -7,6 +7,7 @@ Options for including additional data in recall results.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **entities** | [**EntityIncludeOptions**](EntityIncludeOptions.md) |  | [optional] 
+**chunks** | [**ChunkIncludeOptions**](ChunkIncludeOptions.md) |  | [optional] 
 
 ## Example
 

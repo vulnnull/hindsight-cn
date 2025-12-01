@@ -350,10 +350,6 @@ class ReflectIncludeOptions(BaseModel):
         default=None,
         description="Include facts that the answer is based on. Set to {} to enable, null to disable (default: disabled)."
     )
-    entities: Optional[EntityIncludeOptions] = Field(
-        default=None,
-        description="Include entity observations. Set to {max_tokens: N} to enable, null to disable (default: disabled)."
-    )
 
 
 class ReflectRequest(BaseModel):
@@ -365,8 +361,7 @@ class ReflectRequest(BaseModel):
             "context": "This is for a research paper on AI ethics",
             "filters": [{"key": "source", "value": "slack", "match_unset": True}],
             "include": {
-                "facts": {},
-                "entities": {"max_tokens": 500}
+                "facts": {}
             }
         }
     })
@@ -375,7 +370,7 @@ class ReflectRequest(BaseModel):
     budget: Budget = Budget.LOW
     context: Optional[str] = None
     filters: Optional[List[MetadataFilter]] = Field(default=None, description="Filter by metadata. Multiple filters are ANDed together.")
-    include: ReflectIncludeOptions = Field(default_factory=ReflectIncludeOptions, description="Options for including additional data (both disabled by default)")
+    include: ReflectIncludeOptions = Field(default_factory=ReflectIncludeOptions, description="Options for including additional data (disabled by default)")
 
 
 class OpinionItem(BaseModel):
@@ -1026,12 +1021,6 @@ def _register_routes(app: FastAPI):
                             occurred_end=fact.occurred_end
                         ))
 
-            # TODO: Handle entities inclusion when supported in reflect
-            # entities_response = None
-            # if request.include.entities is not None:
-            #     max_entity_tokens = request.include.entities.max_tokens
-            #     # ... fetch and format entities
-
             return ReflectResponse(
                 text=core_result.text,
                 based_on=based_on_facts,
@@ -1437,10 +1426,10 @@ This operation cannot be undone.
             async with acquire_with_retry(pool) as conn:
                 operations = await conn.fetch(
                     """
-                    SELECT id, bank_id, task_type, items_count, document_id, created_at, status, error_message
+                    SELECT operation_id, bank_id, operation_type, created_at, status, error_message, result_metadata
                     FROM async_operations
                     WHERE bank_id = $1
-                    ORDER BY created_at ASC
+                    ORDER BY created_at DESC
                     """,
                     bank_id
                 )
@@ -1449,10 +1438,10 @@ This operation cannot be undone.
                     "bank_id": bank_id,
                     "operations": [
                         {
-                            "id": str(row['id']),
-                            "task_type": row['task_type'],
-                            "items_count": row['items_count'],
-                            "document_id": row['document_id'],
+                            "id": str(row['operation_id']),
+                            "task_type": row['operation_type'],
+                            "items_count": row['result_metadata'].get('items_count', 0) if row['result_metadata'] else 0,
+                            "document_id": row['result_metadata'].get('document_id') if row['result_metadata'] else None,
                             "created_at": row['created_at'].isoformat(),
                             "status": row['status'],
                             "error_message": row['error_message']

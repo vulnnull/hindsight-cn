@@ -349,6 +349,10 @@ async def run_benchmark(
     # Single-phase approach: each question gets its own isolated agent_id
     # This ensures each question only has access to its own context
     output_path = Path(__file__).parent / 'results' / 'benchmark_results.json'
+
+    # Create results directory if it doesn't exist
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     merge_with_existing = (filln or question_id is not None or only_failed or only_invalid or category is not None)
 
     results = await runner.run(

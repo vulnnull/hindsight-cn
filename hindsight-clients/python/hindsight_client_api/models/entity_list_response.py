@@ -27,8 +27,8 @@ class EntityListResponse(BaseModel):
     """
     Response model for entity list endpoint.
     """ # noqa: E501
-    entities: List[EntityListItem]
-    __properties: ClassVar[List[str]] = ["entities"]
+    items: List[EntityListItem]
+    __properties: ClassVar[List[str]] = ["items"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -69,13 +69,13 @@ class EntityListResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in entities (list)
+        # override the default output from pydantic by calling `to_dict()` of each item in items (list)
         _items = []
-        if self.entities:
-            for _item_entities in self.entities:
-                if _item_entities:
-                    _items.append(_item_entities.to_dict())
-            _dict['entities'] = _items
+        if self.items:
+            for _item_items in self.items:
+                if _item_items:
+                    _items.append(_item_items.to_dict())
+            _dict['items'] = _items
         return _dict
 
     @classmethod
@@ -88,7 +88,7 @@ class EntityListResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "entities": [EntityListItem.from_dict(_item) for _item in obj["entities"]] if obj.get("entities") is not None else None
+            "items": [EntityListItem.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
         })
         return _obj
 

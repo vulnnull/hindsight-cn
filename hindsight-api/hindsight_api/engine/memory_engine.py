@@ -1583,6 +1583,10 @@ class MemoryEngine:
                         # Delete all data for the bank
                         units_count = await conn.fetchval("SELECT COUNT(*) FROM memory_units WHERE bank_id = $1", bank_id)
                         entities_count = await conn.fetchval("SELECT COUNT(*) FROM entities WHERE bank_id = $1", bank_id)
+                        documents_count = await conn.fetchval("SELECT COUNT(*) FROM documents WHERE bank_id = $1", bank_id)
+
+                        # Delete documents (cascades to chunks)
+                        await conn.execute("DELETE FROM documents WHERE bank_id = $1", bank_id)
 
                         # Delete memory units (cascades to unit_entities, memory_links)
                         await conn.execute("DELETE FROM memory_units WHERE bank_id = $1", bank_id)
@@ -1592,7 +1596,8 @@ class MemoryEngine:
 
                         return {
                             "memory_units_deleted": units_count,
-                            "entities_deleted": entities_count
+                            "entities_deleted": entities_count,
+                            "documents_deleted": documents_count
                         }
 
                 except Exception as e:
@@ -1629,7 +1634,7 @@ class MemoryEngine:
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
 
             units = await conn.fetch(f"""
-                SELECT id, text, event_date, context, occurred_start, occurred_end, mentioned_at
+                SELECT id, text, event_date, context, occurred_start, occurred_end, mentioned_at, document_id
                 FROM memory_units
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, event_date DESC
@@ -1745,14 +1750,15 @@ class MemoryEngine:
             entities = entity_map.get(unit_id, [])
 
             table_rows.append({
-                "id": str(unit_id)[:8] + "...",
+                "id": str(unit_id),
                 "text": row['text'],
                 "context": row['context'] if row['context'] else "N/A",
                 "occurred_start": row['occurred_start'].isoformat() if row['occurred_start'] else None,
                 "occurred_end": row['occurred_end'].isoformat() if row['occurred_end'] else None,
                 "mentioned_at": row['mentioned_at'].isoformat() if row['mentioned_at'] else None,
                 "date": row['event_date'].strftime("%Y-%m-%d %H:%M") if row['event_date'] else "N/A",  # Deprecated, kept for backwards compatibility
-                "entities": ", ".join(entities) if entities else "None"
+                "entities": ", ".join(entities) if entities else "None",
+                "document_id": row['document_id']
             })
 
         return {
@@ -1827,7 +1833,7 @@ class MemoryEngine:
             query_params.append(offset)
 
             units = await conn.fetch(f"""
-                SELECT id, text, event_date, context, fact_type
+                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end
                 FROM memory_units
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, created_at DESC
@@ -1868,6 +1874,9 @@ class MemoryEngine:
                     "context": row['context'] if row['context'] else "",
                     "date": row['event_date'].isoformat() if row['event_date'] else "",
                     "fact_type": row['fact_type'],
+                    "mentioned_at": row['mentioned_at'].isoformat() if row['mentioned_at'] else None,
+                    "occurred_start": row['occurred_start'].isoformat() if row['occurred_start'] else None,
+                    "occurred_end": row['occurred_end'].isoformat() if row['occurred_end'] else None,
                     "entities": ", ".join(entities) if entities else ""
                 })
 

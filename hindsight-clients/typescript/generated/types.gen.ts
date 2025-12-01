@@ -107,6 +107,46 @@ export type BankProfileResponse = {
 export type Budget = 'low' | 'mid' | 'high';
 
 /**
+ * ChunkData
+ *
+ * Chunk data for a single chunk.
+ */
+export type ChunkData = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Text
+     */
+    text: string;
+    /**
+     * Chunk Index
+     */
+    chunk_index: number;
+    /**
+     * Truncated
+     *
+     * Whether the chunk text was truncated due to token limits
+     */
+    truncated?: boolean;
+};
+
+/**
+ * ChunkIncludeOptions
+ *
+ * Options for including chunks in recall results.
+ */
+export type ChunkIncludeOptions = {
+    /**
+     * Max Tokens
+     *
+     * Maximum tokens for chunks (chunks may be truncated)
+     */
+    max_tokens?: number;
+};
+
+/**
  * CreateBankRequest
  *
  * Request model for creating/updating a bank.
@@ -146,9 +186,9 @@ export type DocumentResponse = {
      */
     id: string;
     /**
-     * Agent Id
+     * Bank Id
      */
-    agent_id: string;
+    bank_id: string;
     /**
      * Original Text
      */
@@ -264,9 +304,9 @@ export type EntityListItem = {
  */
 export type EntityListResponse = {
     /**
-     * Entities
+     * Items
      */
-    entities: Array<EntityListItem>;
+    items: Array<EntityListItem>;
 };
 
 /**
@@ -364,6 +404,10 @@ export type IncludeOptions = {
      * Include entity observations. Set to null to disable entity inclusion.
      */
     entities?: EntityIncludeOptions | null;
+    /**
+     * Include raw chunks. Set to {} to enable, null to disable (default: disabled).
+     */
+    chunks?: ChunkIncludeOptions | null;
 };
 
 /**
@@ -581,6 +625,14 @@ export type RecallResponse = {
     entities?: {
         [key: string]: EntityStateResponse;
     } | null;
+    /**
+     * Chunks
+     *
+     * Chunks for facts, keyed by chunk_id
+     */
+    chunks?: {
+        [key: string]: ChunkData;
+    } | null;
 };
 
 /**
@@ -631,6 +683,10 @@ export type RecallResult = {
     metadata?: {
         [key: string]: string;
     } | null;
+    /**
+     * Chunk Id
+     */
+    chunk_id?: string | null;
 };
 
 /**
@@ -801,6 +857,20 @@ export type ValidationError = {
      * Error Type
      */
     type: string;
+};
+
+export type MetricsEndpointMetricsGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/metrics';
+};
+
+export type MetricsEndpointMetricsGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
 };
 
 export type GetGraphData = {

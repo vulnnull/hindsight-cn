@@ -25,14 +25,14 @@ pub fn list(
     if output_format == OutputFormat::Pretty {
         ui::print_section_header(&format!("Entities for Bank: {}", bank_id));
 
-        if response.entities.is_empty() {
+        if response.items.is_empty() {
             ui::print_warning("No entities found");
             return Ok(());
         }
 
-        println!("Total entities: {}\n", response.entities.len());
+        println!("Total entities: {}\n", response.items.len());
 
-        for entity in &response.entities {
+        for entity in &response.items {
             println!("ID: {}", entity.id);
             println!("  Name: {}", entity.canonical_name);
             println!("  Mentions: {}", entity.mention_count);

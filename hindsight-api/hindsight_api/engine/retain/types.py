@@ -102,8 +102,8 @@ class ProcessedFact:
     embedding: List[float]
 
     # Temporal data
-    occurred_start: datetime
-    occurred_end: datetime
+    occurred_start: Optional[datetime]
+    occurred_end: Optional[datetime]
     mentioned_at: datetime
 
     # Context and metadata
@@ -146,9 +146,9 @@ class ProcessedFact:
         """
         from datetime import datetime, timezone
 
-        # Use occurred dates if available, otherwise use mentioned_at
-        occurred_start = extracted_fact.occurred_start or extracted_fact.mentioned_at
-        occurred_end = extracted_fact.occurred_end or extracted_fact.mentioned_at
+        # Use occurred dates only if explicitly provided by LLM
+        occurred_start = extracted_fact.occurred_start
+        occurred_end = extracted_fact.occurred_end
         mentioned_at = extracted_fact.mentioned_at or datetime.now(timezone.utc)
 
         # Convert entity strings to EntityRef objects

@@ -1,5 +1,6 @@
 use crate::api::{BankProfileResponse, RecallResult, RecallResponse, ReflectResponse};
 use colored::*;
+use hindsight_client::types::ChunkData;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::io::{self, Write};
 
@@ -60,7 +61,29 @@ pub fn print_fact(fact: &RecallResult, show_activation: bool) {
     println!();
 }
 
-pub fn print_search_results(response: &RecallResponse, show_trace: bool) {
+pub fn print_chunk(chunk: &ChunkData) {
+    println!("  {}", "─── Source Chunk ───".bright_blue());
+
+    // Split text into lines and indent each line
+    for line in chunk.text.lines() {
+        println!("  {}", line.bright_white());
+    }
+
+    if chunk.truncated {
+        println!("  {}", "[Truncated due to token limit]".bright_yellow());
+    }
+
+    println!("  {}: {} | {}: {}",
+        "Chunk ID".bright_black(),
+        chunk.id.bright_black(),
+        "Index".bright_black(),
+        chunk.chunk_index.to_string().bright_black()
+    );
+
+    println!();
+}
+
+pub fn print_search_results(response: &RecallResponse, show_trace: bool, show_chunks: bool) {
     let results = &response.results;
     print_section_header(&format!("Search Results ({})", results.len()));
 
@@ -70,6 +93,17 @@ pub fn print_search_results(response: &RecallResponse, show_trace: bool) {
         for (i, fact) in results.iter().enumerate() {
             println!("{}", format!("  Result #{}", i + 1).bright_black());
             print_fact(fact, true);
+
+            // Show chunk if available and requested
+            if show_chunks {
+                if let Some(chunk_id) = &fact.chunk_id {
+                    if let Some(chunks) = &response.chunks {
+                        if let Some(chunk) = chunks.get(chunk_id) {
+                            print_chunk(chunk);
+                        }
+                    }
+                }
+            }
         }
     }
 

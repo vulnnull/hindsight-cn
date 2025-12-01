@@ -3,8 +3,6 @@ services:
     build:
       context: ../..
       dockerfile: docker/standalone/Dockerfile
-      platforms:
-        - linux/amd64
     platform: linux/amd64
     ports:
       - "3000:3000"

@@ -73,7 +73,7 @@ pub fn get(
         Ok(doc) => {
             if output_format == OutputFormat::Pretty {
                 ui::print_info(&format!("Document: {}", doc.id));
-                println!("  Agent ID: {}", doc.agent_id);
+                println!("  Bank ID: {}", doc.bank_id);
                 println!("  Created: {}", doc.created_at);
                 println!("  Updated: {}", doc.updated_at);
                 println!("  Memory Units: {}", doc.memory_unit_count);

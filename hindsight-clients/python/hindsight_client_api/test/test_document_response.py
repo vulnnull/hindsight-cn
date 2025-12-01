@@ -36,7 +36,7 @@ class TestDocumentResponse(unittest.TestCase):
         if include_optional:
             return DocumentResponse(
                 id = '',
-                agent_id = '',
+                bank_id = '',
                 original_text = '',
                 content_hash = '',
                 created_at = '',
@@ -46,7 +46,7 @@ class TestDocumentResponse(unittest.TestCase):
         else:
             return DocumentResponse(
                 id = '',
-                agent_id = '',
+                bank_id = '',
                 original_text = '',
                 content_hash = '',
                 created_at = '',

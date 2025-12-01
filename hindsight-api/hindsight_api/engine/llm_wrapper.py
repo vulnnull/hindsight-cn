@@ -85,7 +85,7 @@ class LLMConfig:
         messages: List[Dict[str, str]],
         response_format: Optional[Any] = None,
         scope: str = "memory",
-        max_retries: int = 5,
+        max_retries: int = 10,
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
         skip_validation: bool = False,

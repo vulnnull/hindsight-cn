@@ -60,6 +60,7 @@ class SentenceTransformersEmbeddings(Embeddings):
         """
         self.model_name = model_name
         self._model = None
+        self._load_model()
 
     def _load_model(self):
         """Lazy load and validate the SentenceTransformer model."""
@@ -96,6 +97,5 @@ class SentenceTransformersEmbeddings(Embeddings):
         Returns:
             List of 384-dimensional embedding vectors
         """
-        self._load_model()
         embeddings = self._model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
         return [emb.tolist() for emb in embeddings]

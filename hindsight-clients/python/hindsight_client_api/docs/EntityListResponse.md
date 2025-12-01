@@ -6,7 +6,7 @@ Response model for entity list endpoint.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**entities** | [**List[EntityListItem]**](EntityListItem.md) |  | 
+**items** | [**List[EntityListItem]**](EntityListItem.md) |  | 
 
 ## Example
 

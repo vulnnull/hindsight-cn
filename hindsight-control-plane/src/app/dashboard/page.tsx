@@ -19,19 +19,6 @@ export default function DashboardPage() {
   const [dataSubTab, setDataSubTab] = useState<DataSubTab>('world');
   const { currentBank } = useBank();
 
-  const DataSubTabButton = ({ tab, label }: { tab: DataSubTab; label: string }) => (
-    <button
-      onClick={() => setDataSubTab(tab)}
-      className={`px-4 py-2 font-semibold text-sm rounded transition-all border-2 ${
-        dataSubTab === tab
-          ? 'bg-primary text-primary-foreground border-primary'
-          : 'bg-background text-foreground border-border hover:bg-accent'
-      }`}
-    >
-      {label}
-    </button>
-  );
-
   const NoAgentMessage = () => (
     <div className="flex items-center justify-center h-[calc(100vh-80px)] bg-muted/20">
       <div className="text-center p-10 bg-card rounded-lg border-2 border-border shadow-lg max-w-md">
@@ -84,23 +71,59 @@ export default function DashboardPage() {
               {/* Data/Memories Tab */}
               {currentTab === 'data' && (
                 <div>
-                  <div className="mb-6">
-                    <h1 className="text-3xl font-bold mb-2 text-foreground">Memories</h1>
-                    <p className="text-muted-foreground mb-4">
-                      View and explore different types of memories stored in this memory bank.
-                    </p>
+                  <h1 className="text-3xl font-bold mb-2 text-foreground">Memories</h1>
+                  <p className="text-muted-foreground mb-6">
+                    View and explore different types of memories stored in this memory bank.
+                  </p>
 
-                    <div className="flex gap-2">
-                      <DataSubTabButton tab="world" label="World Facts" />
-                      <DataSubTabButton tab="bank" label="Bank Facts" />
-                      <DataSubTabButton tab="opinion" label="Opinions" />
+                  <div className="mb-6 border-b border-border">
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => setDataSubTab('world')}
+                        className={`px-6 py-3 font-semibold text-sm transition-all relative ${
+                          dataSubTab === 'world'
+                            ? 'text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        World Facts
+                        {dataSubTab === 'world' && (
+                          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => setDataSubTab('bank')}
+                        className={`px-6 py-3 font-semibold text-sm transition-all relative ${
+                          dataSubTab === 'bank'
+                            ? 'text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        Bank Facts
+                        {dataSubTab === 'bank' && (
+                          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => setDataSubTab('opinion')}
+                        className={`px-6 py-3 font-semibold text-sm transition-all relative ${
+                          dataSubTab === 'opinion'
+                            ? 'text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        Opinions
+                        {dataSubTab === 'opinion' && (
+                          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                        )}
+                      </button>
                     </div>
                   </div>
 
                   <div>
-                    {dataSubTab === 'world' && <DataView factType="world" />}
-                    {dataSubTab === 'bank' && <DataView factType="bank" />}
-                    {dataSubTab === 'opinion' && <DataView factType="opinion" />}
+                    {dataSubTab === 'world' && <DataView key="world" factType="world" />}
+                    {dataSubTab === 'bank' && <DataView key="bank" factType="bank" />}
+                    {dataSubTab === 'opinion' && <DataView key="opinion" factType="opinion" />}
                   </div>
                 </div>
               )}
@@ -127,10 +150,10 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Memory Bank Tab (Stats & Operations) */}
+              {/* Stats Tab (Stats & Operations) */}
               {currentTab === 'bank' && (
                 <div>
-                  <h1 className="text-3xl font-bold mb-2 text-foreground">Memory Bank</h1>
+                  <h1 className="text-3xl font-bold mb-2 text-foreground">Stats</h1>
                   <p className="text-muted-foreground mb-6">
                     View statistics and operations for this memory bank.
                   </p>

@@ -109,7 +109,7 @@ class ExtractedFact(BaseModel):
     )
     observations: Optional[str] = Field(
         default=None,
-        description="Observations and inferences as a COMPLETE SENTENCE. Include subject + observed/inferred fact. Examples: 'Calvin traveled to Miami for the shoot', 'Gina won dance trophies in competitions', 'She knows programming from previous projects'"
+        description="Observations, inferences, and specific details/metrics as a COMPLETE SENTENCE. Include subject + observed fact. Use this to capture: background facts, achievements, metrics, personal records, skills. Examples: 'Calvin traveled to Miami for the shoot', 'Gina won dance trophies in competitions', 'She knows programming from previous projects', 'User's personal best 5K time is 25:50', 'Sarah has completed 15 marathons', 'He speaks three languages fluently'"
     )
 
     # Fact kind - optional hint for LLM thinking, not critical for extraction
@@ -122,11 +122,11 @@ class ExtractedFact(BaseModel):
     # Temporal fields - optional
     occurred_start: Optional[str] = Field(
         default=None,
-        description="Optional: ISO format timestamp for when event started. Only needed for specific events."
+        description="WHEN THE EVENT ACTUALLY HAPPENED (not when mentioned). ISO timestamp. For datable events only (fact_kind='event'). Examples: 'went to Tokyo last spring' on June 10 → occurred_start='2024-03-01' (spring start), 'accident yesterday' on March 15 → occurred_start='2024-03-14' (yesterday). Leave null for general info (fact_kind='conversation')."
     )
     occurred_end: Optional[str] = Field(
         default=None,
-        description="Optional: ISO format timestamp for when event ended. Only needed for specific events."
+        description="WHEN THE EVENT ACTUALLY ENDED (not when mentioned). ISO timestamp. For datable events with duration (fact_kind='event'). Examples: 'went to Tokyo last spring' → occurred_end='2024-05-31' (spring end). Can be same as occurred_start for single-day events. Leave null for general info."
     )
 
     # Classification (CRITICAL - required)
@@ -261,294 +261,142 @@ async def _extract_facts_from_chunk(
     else:
         fact_types_instruction = "Extract ONLY 'world' and 'assistant' type facts. DO NOT extract opinions - those are extracted separately."
 
-    prompt = f"""You are extracting comprehensive, narrative facts from conversations/document for an AI memory system.
+    prompt = f"""Extract comprehensive facts from user text for an AI memory system.
 
 {fact_types_instruction}
 
-## CONTEXT INFORMATION
-- Context: {context if context else 'no additional context provided'}{agent_context}
+## CONTEXT
+- Context: {context if context else 'none'}{agent_context}
 
-**TEMPORAL EXTRACTION **:
-- **occurred_start/end** (OPTIONAL): Only extract these for specific events mentioned within the conversation
-  - Example: "I'm hosting a party next month" - extract when the party will happen (resolve to absolute dates using the reference date)
-  - Leave empty if no specific event timing is mentioned
-  - Use the reference date (event_date) to resolve relative time expressions to absolute ISO timestamps
+═══════════════════════════════════════════════════════════════════════════════
+SECTION 1: TEMPORAL HANDLING (CRITICAL)
+═══════════════════════════════════════════════════════════════════════════════
 
-## CORE PRINCIPLE: Extract ALL Meaningful Information Efficiently
+### 1.1 DETECT TEMPORAL MARKERS
+Watch for: "yesterday", "last week/month/year/summer", "ago", "tomorrow", "next", "happened", "occurred", past tense verbs ("went", "visited", "saw")
 
-**GOAL**: Capture ALL meaningful information, but combine related exchanges efficiently. Don't create separate facts for questions - merge Q&A into single facts.
+### 1.2 DUAL FACT CREATION (KEY RULE)
+When text mentions a past/future event → Create TWO facts:
+1. MENTION FACT: "On [context date], it was mentioned that..." (occurred_start = context date)
+2. EVENT FACT: "[Action] in [absolute date]" (occurred_start = actual event date)
 
-Each fact should:
-1. **CAPTURE ALL MEANINGFUL CONTENT** - Activities, projects, preferences, recommendations, encouragement WITH specific content
-2. **BE SELF-CONTAINED** - Readable without the original text
-3. **PRESERVE SPECIFIC CONTENT** - Capture WHAT was said, not just THAT something was said
-4. **COMBINE Q&A** - A question and its answer = ONE fact, not two separate facts
+### 1.3 ABSOLUTE DATE CONVERSION
+ALWAYS convert relative → absolute in factual_core text:
+- "yesterday" → "on [date-1]"
+- "last week" → "around [specific week]"
+- "last summer" → "in summer [year] (June-August [year])"
+- "next month" → "in [month name] [year]"
 
-## Q&A HANDLING - CRITICAL!
+### 1.4 occurred_start/end FIELDS ⚠️ CRITICAL
 
-### WHEN TO COMBINE (simple informational questions):
+**WHAT THEY REPRESENT:**
+- occurred_start/end = WHEN THE EVENT ACTUALLY HAPPENED (NOT when it was mentioned!)
+- These answer: "When did this event occur in reality?"
 
-**❌ BAD (2 separate facts):**
-- "James asks what projects John is working on"
-- "John is working on a website for a local small business"
+**WHEN TO SET THEM:**
+✅ SET for datable events (fact_kind="event"):
+   - "went to Tokyo last spring" → occurred_start = March 1, 2024 (spring started)
+   - "accident yesterday" → occurred_start = context date - 1 day
+   - "party next Saturday" → occurred_start = next Saturday's date
 
-**✅ GOOD (1 combined fact):**
-- "John is working on a website for a local small business; it's his first professional project outside of class"
+❌ LEAVE NULL for general info (fact_kind="conversation"):
+   - "loves coffee" → no occurred dates (timeless preference)
+   - "works as engineer" → no occurred dates (ongoing state)
+   - "is expanding business" → no occurred dates (ongoing activity)
 
-### WHEN TO SPLIT (user requests/instructions to assistant):
+**KEY DISTINCTION:**
+- occurred_start/end: When the event happened/will happen
+- mentioned_at: When this was said/written (set automatically to context date)
+- These are DIFFERENT! Example: On June 10, saying "went to Tokyo in March" → occurred_start=March, mentioned_at=June 10
 
-**CRITICAL**: When user asks assistant to DO something, extract BOTH facts separately!
+**FORMAT:** ISO timestamps "2024-06-15T00:00:00Z"
 
-**✅ GOOD (2 separate BANK facts):**
-1. "User requested a children's book about dinosaurs with image placeholders in '::title:: == ::description::' format"
-2. "I wrote a children's book titled 'The Amazing Adventures of Dinosaurs' with chapters about T-Rex, Pterodactyl, Plesiosaur, and Triceratops, including image descriptions"
+### 1.5 EXAMPLES - STUDY THESE CAREFULLY
 
-**❌ BAD (missing user request):**
-- Only extracting: "I wrote a children's book about dinosaurs..."
+**Example 1: "yesterday" temporal detection**
+Input (Context: March 15, 2024): "Hey Taylor! The volunteers were amazing yesterday. But something unexpected happened - a vehicle accident near the center. Everyone was okay though."
 
-**Rule**: If user says "write...", "create...", "help me...", "explain...", etc. → Extract user's request AND assistant's response as SEPARATE bank facts!
+Output (3 facts):
+1. factual_core: "On March 15, 2024, Alex told Taylor that the volunteers were amazing"
+   occurred_start: "2024-03-15T00:00:00Z", entities: ["Alex", "Taylor"]
 
-## WHAT TO SKIP (only these!)
+2. factual_core: "On March 15, 2024, Alex mentioned that something unexpected happened the previous day - a vehicle accident"
+   occurred_start: "2024-03-15T00:00:00Z", entities: ["Alex"]
 
-- **Pure filler with no content** - "Always happy to help", "Sounds good", "Thanks!"
-- **Greetings** - "Hey!", "What's up?"
-- **Standalone simple questions that are answered** - merge informational Q&A, but DON'T skip user requests!
+3. factual_core: "On March 14, 2024, a vehicle accident occurred near the center, but everyone was okay"
+   occurred_start: "2024-03-14T00:00:00Z" ← THE ACTUAL EVENT DATE (yesterday from March 15)
 
-## WHAT TO ALWAYS EXTRACT
+**Example 2: "last spring" temporal detection**
+Input (Context: June 10, 2024): "Casey went to Tokyo last spring. They had an incredible time visiting temples and trying authentic ramen."
 
-- **USER REQUESTS** (CRITICAL!): "User requested a children's book about dinosaurs", "User asked for help with debugging"
-- **ASSISTANT ACTIONS**: "I wrote a story", "I recommended meditation", "I explained the concept"
-- Specific encouragement WITH content: "James says hiccups are normal, use them to learn and grow, push through"
-- Reactions that reveal preferences: "John says the art is awesome, takes him back to reading fantasy books"
-- Recommendations: "John recommends 'The Name of the Wind' - great novel with awesome writing"
-- Plans/intentions: "James will check out 'The Name of the Wind'"
-- All activities, projects, purchases, events with details
+Output (2 facts):
+1. factual_core: "On June 10, 2024, it was mentioned that Casey went to Tokyo the previous spring"
+   occurred_start: "2024-06-10T00:00:00Z", entities: ["Casey", "Tokyo"]
 
-## ESSENTIAL DETAILS TO PRESERVE - NEVER LOSE THESE
+2. factual_core: "Casey went to Tokyo in spring 2024 (March-May 2024) and visited temples and tried authentic ramen"
+   occurred_start: "2024-03-01T00:00:00Z", occurred_end: "2024-05-31T23:59:59Z" ← THE ACTUAL EVENT DATES
+   emotional_significance: "Casey had an incredible time in Tokyo"
+   entities: ["Casey", "Tokyo"]
 
-When extracting facts, you MUST preserve:
+═══════════════════════════════════════════════════════════════════════════════
+SECTION 2: EXTRACTION RULES
+═══════════════════════════════════════════════════════════════════════════════
 
-1. **ALL PARTICIPANTS** - Who said/did what
-2. **INDIVIDUAL PREFERENCES** - Each person's specific likes/favorites! "Jon's favorite is contemporary because it's expressive" - DO NOT LOSE THIS!
-3. **FULL REASONING** - Why decisions were made, motivations, explanations
-4. **TEMPORAL CONTEXT - CRITICAL** - ALWAYS convert relative time references to SPECIFIC ABSOLUTE dates in the fact text!
-   - "last week" (doc date Aug 23) → "around August 16, 2023" (NOT just "in August 2023"!)
-   - "last month" (doc date Aug 2023) → "in July 2023"
-   - "yesterday" (doc date Aug 19) → "on August 18, 2023"
-   - "next week" (doc date Aug 19) → "around August 26, 2023"
-   - "three days ago" (doc date Aug 19) → "on August 16, 2023"
-   - "last year" → "in 2022"
-   - BE SPECIFIC! "last week" is NOT "in August" - calculate the actual week!
-5. **VISUAL/MEDIA ELEMENTS** - Photos, images, videos shared
-6. **MODIFIERS** - "new", "first", "old", "favorite" (critical context)
-7. **POSSESSIVE RELATIONSHIPS** - "their kids" → "Person's kids"
-8. **BIOGRAPHICAL DETAILS** - Origins, locations, jobs, family background
-9. **SOCIAL DYNAMICS** - Nicknames, how people address each other, relationships
+### 2.1 WHAT TO EXTRACT
+✅ User requests to assistant + assistant actions (extract separately)
+✅ Preferences, recommendations, plans, activities, encouragement (with actual content)
+✅ Possessions, achievements, metrics, skills, background facts
 
-## STRUCTURED FACT DIMENSIONS - CRITICAL ⚠️
+### 2.2 WHAT TO SKIP
+❌ Greetings, filler ("thanks", "cool"), structural statements
 
-Each fact MUST be extracted into structured dimensions. This ensures no important context is lost.
+### 2.3 Q&A HANDLING
+- Combine simple informational Q&A into one fact
+- Split user requests to assistant into two facts (request + response)
 
-**CRITICAL FORMATTING RULE**: Each dimension MUST be a complete, grammatically correct sentence that includes the subject and can stand alone. These dimensions will be combined with " - " separators, so they must read naturally together.
+═══════════════════════════════════════════════════════════════════════════════
+SECTION 3: STRUCTURED DIMENSIONS
+═══════════════════════════════════════════════════════════════════════════════
 
-### Required field:
-- **factual_core**: ACTUAL FACTS - capture WHAT was said, not just THAT something was said!
-  - ❌ BAD: "Jon received encouragement from Gina" (loses what Gina actually said)
-  - ✅ GOOD: "Gina said Jon is the perfect mentor with positivity and determination; his studio will be a hit"
-  - ❌ BAD: "Jon supports Gina" (generic)
-  - ✅ GOOD: "Gina found the perfect spot for her store; Jon says her hard work is paying off"
-  - Preserve: compliments, assessments, descriptions, predictions, key phrases
+### 3.1 REQUIRED FIELD
+- **factual_core**: Capture WHAT was said, not just THAT something was said. Complete sentence.
 
-### Optional fields (include when present in text):
-- **emotional_significance**: Emotions, feelings, personal meaning, AND qualitative descriptors - COMPLETE SENTENCE with subject
-  - ❌ BAD: "felt thrilled" (fragment, missing subject)
-  - ✅ GOOD: "Sarah felt thrilled about the opportunity"
-  - ❌ BAD: "was her favorite memory" (vague subject)
-  - ✅ GOOD: "This was her favorite memory from childhood"
-  - More examples: "The experience was magical for everyone involved", "John found the loss devastating", "She considers this her proudest moment"
-  - Captures: emotions, intensity, personal significance, AND experiential descriptors ("magical", "wonderful", "amazing", "thrilling", "beautiful")
+### 3.2 OPTIONAL FIELDS (use when present in text)
+- **emotional_significance**: Emotions, feelings, qualitative descriptors. Complete sentence with subject.
+- **reasoning_motivation**: Why it happened, intentions, goals. Complete sentence with subject.
+- **preferences_opinions**: Likes, dislikes, beliefs, values. Complete sentence with subject. Use for: "ideal", "favorite", "dream", "perfect"
+- **sensory_details**: Visual, auditory, physical descriptions. Complete sentence. USE EXACT WORDS from text!
+- **observations**: Background facts, possessions, achievements, metrics, skills. Complete sentence with subject.
 
-- **reasoning_motivation**: WHY it happened, intentions, goals, causes - COMPLETE SENTENCE with subject
-  - ❌ BAD: "because she wanted to celebrate" (fragment, no subject)
-  - ✅ GOOD: "She did this because she wanted to celebrate with friends"
-  - More examples: "He wrote the book to cope with grief", "She was motivated by curiosity about the topic", "They moved there to be closer to family"
-  - Captures: reasons, intentions, goals, causal explanations
+### 3.3 FORMATTING RULE
+Each dimension MUST be a complete, grammatically correct sentence with subject that can stand alone.
 
-- **preferences_opinions**: Likes, dislikes, beliefs, values, ideals - COMPLETE SENTENCE with subject
-  - ❌ BAD: "loves coffee" (fragment)
-  - ✅ GOOD: "Sarah loves coffee and drinks it every morning"
-  - ❌ BAD: "prefers remote work" (fragment)
-  - ✅ GOOD: "He prefers working remotely over office work"
-  - More examples: "Jon's ideal dance studio would be located by the water", "Jon's favorite dance style is contemporary because it's expressive", "She thinks AI is transformative technology"
-  - Captures: preferences, opinions, beliefs, judgments, ideals, dreams
-  - PREFERENCE INDICATORS: "ideal", "favorite", "dream", "perfect", "love", "hate", "prefer" → MUST capture in this dimension!
-  - CRITICAL: Never lose individual preferences! Always include who has the preference!
+═══════════════════════════════════════════════════════════════════════════════
+SECTION 4: FACT CLASSIFICATION
+═══════════════════════════════════════════════════════════════════════════════
 
-- **sensory_details**: Visual, auditory, physical descriptions AND all descriptive adjectives - COMPLETE SENTENCE with subject - USE EXACT WORDS!
-  - ❌ BAD: "bright orange hair" (fragment)
-  - ✅ GOOD: "She has bright orange hair"
-  - ❌ BAD: "so graceful" (fragment)
-  - ✅ GOOD: "The dancer moved so gracefully across the stage"
-  - More examples: "The music was very loud", "The water was freezing cold", "The beach was awesome", "The movie had epic visuals"
-  - Captures: colors, sounds, textures, temperatures, appearances, AND adjectives describing people/things/performances
-  - CRITICAL: Use the EXACT adjectives from the text! If they said "awesome" don't write "amazing". If they said "epic" don't write "perfect"!
+### 4.1 fact_kind (temporal nature)
+- **conversation**: General info, ongoing activities (no occurred dates)
+- **event**: Specific datable occurrence (MUST set occurred_start/end)
+- **other**: Catch-all
 
-- **observations**: Things that can be inferred/deduced from the conversation - COMPLETE SENTENCE with subject
-  - ❌ BAD: "traveled to Miami" (fragment)
-  - ✅ GOOD: "Calvin traveled to Miami for the photo shoot"
-  - ❌ BAD: "won dance trophies" (fragment)
-  - ✅ GOOD: "Gina won dance trophies in past competitions"
-  - More examples: "She knows programming from previous projects", "They own a house in the suburbs", "He has experience with public speaking"
-  - TRAVEL: "doing the shoot in Miami" → "Calvin traveled to Miami for the shoot"
-  - POSSESSION: "my trophy" → "She won the trophy"
-  - CAPABILITIES: "she coded it" → "She knows programming"
+### 4.2 fact_type (subject matter)
+- **world**: Everything NOT involving assistant (user background, other people, events)
+- **assistant**: Interactions BY or TO assistant (requests, recommendations, actions in THIS conversation)
 
-### Example extraction:
+Rule: If it would exist without this conversation → world. If only exists because of this conversation → assistant.
 
-**Input**: "I used to compete in dance competitions - my fav memory was when my team won first place at regionals at age fifteen. It was an awesome feeling of accomplishment!"
+═══════════════════════════════════════════════════════════════════════════════
+SECTION 5: ENTITIES & CAUSALITY
+═══════════════════════════════════════════════════════════════════════════════
 
-**Output**:
-```
-factual_core: "Gina's team won first place at a regional dance competition when she was 15"
-emotional_significance: "This was Gina's favorite memory; she felt an awesome sense of accomplishment"
-reasoning_motivation: null
-preferences_opinions: null
-sensory_details: null
-```
+### 5.1 ENTITIES
+Extract: People names, organizations, specific places, products
+Skip: Generic relations (mom, friend), pronouns, common nouns
 
-**Combined result**: "Gina's team won first place at a regional dance competition when she was 15 - This was Gina's favorite memory; she felt an awesome sense of accomplishment"
+### 5.2 CAUSAL RELATIONS
+Link facts when explicit causation: causes, caused_by, enables, prevents"""
 
-### CRITICAL: Never strip away dimensions!
-- ❌ BAD: Only extracting factual_core and ignoring emotional context
-- ✅ GOOD: Capturing ALL dimensions present in the text
-- ❌ BAD: Using fragments like "felt happy" or "loves pizza"
-- ✅ GOOD: Using complete sentences like "She felt happy about the news" or "John loves pizza and orders it weekly"
-
-## TEMPORAL CLASSIFICATION (fact_kind field) - About WHEN/TIMING
-
-⚠️ **WARNING**: Do NOT confuse fact_kind with fact_type (see below)! These are DIFFERENT fields!
-
-### fact_kind determines if occurred dates are set:
-
-**`conversation`** - General info, activities, preferences, ongoing things
-- NO occurred_start/end (leave null)
-- Examples: "Jon is expanding his studio", "Jon loves dance", "Gina's ideal studio is by water"
-
-**`event`** - Specific datable occurrence (competition, wedding, meeting, trip, loss, start/end of something)
-- MUST set occurred_start/end
-- Ask: "Is this a SPECIFIC EVENT with a DATE?"
-- Examples: "Dance competition on May 15", "Lost job in January 2023", "Wedding next Saturday"
-
-**`other`** - Anything else that doesn't fit above
-- NO occurred_start/end (leave null)
-- Catch-all to not lose information
-
-### Rules:
-1. **ALWAYS include dates in fact text** - "in January 2023", "on May 15, 2024"
-2. **Only 'event' gets occurred dates** - conversation and other = null
-3. **SPLIT events from conversation facts** - "Jon is expanding his studio (conversation) and hosting a competition next month (event)" → 2 separate facts!
-
-## CAUSAL RELATIONSHIPS
-
-When splitting related facts, link them with causal_relations:
-- **causes**: This fact causes the target
-- **caused_by**: This fact was caused by target
-- **enables/prevents**: This fact enables/prevents the target
-
-Only link when there's explicit or clear implicit causation ("because", "so", "therefore").
-
-## FACT TYPE CLASSIFICATION - The Simple Rule
-
-⚠️ **WARNING**: Do NOT confuse fact_type with fact_kind (see above)! These are DIFFERENT fields!
-- fact_kind = temporal nature (conversation/event/other)
-- fact_type = who/what this is about (world/assistant)
-
-### The Rule: Everything NOT involving the assistant = 'world'
-
-- **'world'**: Facts about people, places, events, things that exist independently of assistant interactions
-  - **User's background/experience**: "User worked as marketing specialist at startup", "User has 5 years of Python experience"
-  - **User's skills/knowledge**: "User has used Trello", "User is familiar with Kanban methodology", "User knows React"
-  - **User's preferences/interests**: "User prefers async communication", "User is interested in exploring project management tools"
-  - **Other people's lives**: "Sarah got promoted", "John traveled to Paris", "Mom retired last year"
-  - **Events and facts**: "The meeting was cancelled", "The project launched in 2023"
-  - **RULE**: If it would still be true even if this conversation never happened → **world**
-
-- **'assistant'**: Interactions BY or TO the assistant (what happened in THIS conversation)
-  - **User's questions/requests TO assistant**: "User asked about ClickUp features", "User requested comparison between tools", "User wanted to know strengths and weaknesses"
-  - **Assistant's actions/responses**: "I recommended trying meditation", "I explained the difference between Trello and ClickUp", "I suggested exploring alternatives"
-  - **Conversational events**: "User thanked me for the suggestion", "I clarified the technical details"
-  - Use "user" or their name for user's questions/requests
-  - Use FIRST PERSON ("I") for assistant's actions
-  - **RULE**: If this only exists because of this conversation with the assistant → **assistant**
-
-**CRITICAL EXAMPLES**:
-- "User worked at startup" → **world** (would be true even without this conversation)
-- "User asked me about ClickUp" → **assistant** (only exists because of this conversation)
-- "User has experience with Trello" → **world** (independent fact about user)
-- "User wanted to explore options" → Could be either:
-  - **world** if it's a general preference: "User is interested in exploring project management alternatives"
-  - **assistant** if it's what they expressed in this conversation: "User asked me to help explore other options"
-
-**Real Example**:
-User says: "I've used Trello in my previous role as a marketing specialist at a small startup and I'm familiar with its features. But I'm interested in exploring other options as well. Could you tell me more about ClickUp?"
-
-Extract these facts:
-1. **world**: "User worked as marketing specialist at small startup"
-2. **world**: "User has used Trello in previous role"
-3. **world**: "User is familiar with Trello features"
-4. **world**: "User is interested in exploring project management alternatives"
-5. **assistant**: "User asked me about ClickUp and how it differs from Trello"
-
-**Speaker attribution**: If context says "Your name: Marcus", extract 'assistant' facts from both "Marcus:" and "Assistant:" lines.
-
-## WHAT TO SKIP
-- Greetings, filler words, pure reactions ("wow", "cool")
-- Structural statements ("let's get started", "see you next time")
-- Calls to action ("subscribe", "follow")
-
-## EXAMPLE: SPLITTING CONVERSATION VS EVENT FACTS
-
-**Input (conversation date: April 3, 2023):**
-"I'm expanding my dance studio's social media presence and offering workshops to local schools. I'm also hosting a dance competition next month to showcase local talent. The dancers are so excited!"
-
-**Output (2 facts - conversation + event):**
-
-**Fact 1 (kind=conversation - ongoing activities, no occurred dates):**
-```
-fact_kind: "conversation"
-factual_core: "Jon is expanding his dance studio's social media presence in April 2023; offering workshops and classes to local schools and centers; seeing progress and dancers are excited"
-emotional_significance: "excited and proud of progress"
-preferences_opinions: "Jon loves giving dancers a place to express themselves"
-observations: "Jon owns/runs a dance studio"
-occurred_start: null  ← conversation kind = no occurred dates
-occurred_end: null
-```
-
-**Fact 2 (kind=event - specific datable occurrence):**
-```
-fact_kind: "event"
-factual_core: "Jon will host a dance competition in May 2023 to showcase local talent and bring attention to his studio"
-emotional_significance: "excited about the event"
-occurred_start: "2023-05-01T00:00:00Z"  ← event kind = HAS occurred dates
-occurred_end: "2023-05-31T23:59:59Z"
-```
-
-**❌ BAD:** Combining both into one fact with occurred=May (makes ongoing activities look like they happened in May!)
-
-## TEXT TO EXTRACT FROM:
-{chunk}
-
-## CRITICAL REMINDERS:
-1. **NEVER MISS USER REQUESTS** - If user asks assistant to do something ("write...", "create...", "help me..."), extract BOTH the request AND the response as separate BANK facts!
-2. **BANK FACT PERSPECTIVE** - Use "I" for assistant actions ("I recommended", "I wrote"), use "user" or their name for user actions ("User requested", "Marcus said")
-3. **COMBINE SIMPLE Q&A** - Merge simple informational questions with answers. But don't merge user requests - extract them separately!
-4. **CAPTURE ALL MEANINGFUL CONTENT** - Activities, encouragement (with specific words!), recommendations, reactions, preferences
-5. **CONVERT RELATIVE DATES TO SPECIFIC DATES** - "last week" → "around August 16" (NOT "in August"!), "yesterday" → "on August 18". Be precise!
-6. **CAPTURE WHAT WAS SAID** - "Gina said Jon is perfect mentor with determination" NOT "Jon received encouragement". Preserve the actual content!
-7. **FACT_KIND DETERMINES OCCURRED DATES** - Only 'event' gets occurred_start/end. 'conversation' and 'other' = null
-8. **CAPTURE PREFERENCES** - "ideal", "favorite", "love" → preferences_opinions
-9. **CAPTURE EXACT ADJECTIVES** - Use the EXACT words! "awesome" not "amazing", "epic" not "perfect" → sensory_details
-10. **CAPTURE OBSERVATIONS** - "shooting in Miami" → observations: "traveled to Miami". Infer travel, achievements, capabilities!"""
 
     import logging
     from openai import BadRequestError
@@ -559,19 +407,25 @@ occurred_end: "2023-05-31T23:59:59Z"
     max_retries = 2
     last_error = None
 
+    # inject all the chunk metadata for better reasoning
+    chunk_data = json.dumps({
+        "chunk_index": chunk_index,
+        "total_chunks": total_chunks,
+        "event_date": event_date.isoformat(),
+        "context": context,
+        "chunk_content": chunk
+    })
     for attempt in range(max_retries):
         try:
-            # Get raw JSON response without strict Pydantic validation
-            # We'll handle the data leniently to be resilient to LLM weirdness
             extraction_response_json = await llm_config.call(
                 messages=[
                     {
                         "role": "system",
-                        "content": "Extract ALL meaningful content. NEVER MISS USER REQUESTS - if user asks assistant to do something ('write...', 'create...', 'help me...'), extract BOTH request AND response as separate BANK facts! COMBINE simple informational Q&A. BANK facts: use 'I' for assistant actions ('I recommended'), use 'user'/name for user actions ('User requested', 'Marcus said'). CONVERT RELATIVE DATES TO SPECIFIC DATES ('last week' → 'around Aug 16' NOT 'in August'!). factual_core = WHAT was said, not THAT something was said! fact_kind: 'conversation'/'event'/'other'. Only 'event' gets occurred dates. Optional fields: include 'entities', 'causal_relations', 'occurred_start', 'occurred_end', 'emotional_significance', 'reasoning_motivation', 'preferences_opinions', 'sensory_details', 'observations' only if they have meaningful values (can omit if not applicable)."
+                        "content": prompt
                     },
                     {
                         "role": "user",
-                        "content": prompt
+                        "content": chunk_data
                     }
                 ],
                 response_format=FactExtractionResponse,
@@ -596,7 +450,7 @@ occurred_end: "2023-05-31T23:59:59Z"
             if not raw_facts:
                 logger.warning(
                     f"LLM response missing 'facts' field or returned empty list. "
-                    f"Keys: {list(extraction_response_json.keys())}"
+                    f"Response: {extraction_response_json}"
                 )
 
             for i, llm_fact in enumerate(raw_facts):
@@ -653,6 +507,9 @@ occurred_end: "2023-05-31T23:59:59Z"
                               'sensory_details', 'observations']:
                     value = get_value(field)
                     if value:
+                        # Handle case where LLM returns list instead of string
+                        if isinstance(value, list):
+                            value = '; '.join(str(v) for v in value)
                         fact_data[field] = value
                         dimension_parts.append(value)
 

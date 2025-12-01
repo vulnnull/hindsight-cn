@@ -48,7 +48,8 @@ class TestRecallResult(unittest.TestCase):
                 document_id = '',
                 metadata = {
                     'key' : ''
-                    }
+                    },
+                chunk_id = ''
             )
         else:
             return RecallResult(

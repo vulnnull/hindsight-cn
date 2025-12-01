@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useBank } from '@/lib/bank-context';
-import { Search, Sparkles, Database, FileText, Users, Brain } from 'lucide-react';
+import { Search, Sparkles, Database, FileText, Users, Brain, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type NavItem = 'recall' | 'reflect' | 'data' | 'documents' | 'entities' | 'bank';
@@ -13,6 +14,7 @@ interface SidebarProps {
 
 export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
   const { currentBank } = useBank();
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   if (!currentBank) {
     return null;
@@ -24,13 +26,29 @@ export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
     { id: 'data' as NavItem, label: 'Memories', icon: Database },
     { id: 'documents' as NavItem, label: 'Documents', icon: FileText },
     { id: 'entities' as NavItem, label: 'Entities', icon: Users },
-    { id: 'bank' as NavItem, label: 'Memory Bank', icon: Brain },
+    { id: 'bank' as NavItem, label: 'Stats', icon: Brain },
   ];
 
   return (
-    <aside className="w-64 bg-card border-r border-border flex flex-col">
-      <div className="p-4 border-b border-border">
-        <h2 className="text-lg font-semibold text-card-foreground">Navigation</h2>
+    <aside className={cn(
+      'bg-card border-r border-border flex flex-col transition-all duration-300',
+      isCollapsed ? 'w-16' : 'w-64'
+    )}>
+      <div className="p-4 border-b border-border flex items-center justify-between">
+        {!isCollapsed && (
+          <h2 className="text-lg font-semibold text-card-foreground">Hindsight</h2>
+        )}
+        <button
+          onClick={() => setIsCollapsed(!isCollapsed)}
+          className="p-1 rounded-lg hover:bg-accent transition-colors ml-auto"
+          title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="w-5 h-5" />
+          ) : (
+            <ChevronLeft className="w-5 h-5" />
+          )}
+        </button>
       </div>
 
       <nav className="flex-1 p-3">
@@ -47,11 +65,13 @@ export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
                     'w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all',
                     isActive
                       ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                    isCollapsed && 'justify-center px-0'
                   )}
+                  title={isCollapsed ? item.label : undefined}
                 >
-                  <Icon className="w-5 h-5" />
-                  <span>{item.label}</span>
+                  <Icon className="w-5 h-5 flex-shrink-0" />
+                  {!isCollapsed && <span>{item.label}</span>}
                 </button>
               </li>
             );

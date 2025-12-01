@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **results** | [**List[RecallResult]**](RecallResult.md) |  | 
 **trace** | **Dict[str, object]** |  | [optional] 
 **entities** | [**Dict[str, EntityStateResponse]**](EntityStateResponse.md) |  | [optional] 
+**chunks** | [**Dict[str, ChunkData]**](ChunkData.md) |  | [optional] 
 
 ## Example
 
