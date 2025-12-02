@@ -15,7 +15,7 @@ produces semantically correct and complete facts.
 import pytest
 import re
 from datetime import datetime, timezone
-from hindsight_api.engine.fact_extraction import extract_facts_from_text
+from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
 from hindsight_api import LLMConfig
 
 

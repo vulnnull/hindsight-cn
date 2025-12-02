@@ -120,7 +120,8 @@ class LLMAnswerGenerator(ABC):
         self,
         question: str,
         recall_result: Dict[str, Any],
-        question_date: Optional[datetime] = None
+        question_date: Optional[datetime] = None,
+        question_type: Optional[str] = None
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer from retrieved memories.
@@ -129,6 +130,7 @@ class LLMAnswerGenerator(ABC):
             question: The question text
             recall_result: Full RecallResult dict containing results, entities, chunks, and trace
             question_date: Optional date when the question was asked (for temporal context)
+            question_type: Optional question category/type (e.g., 'multi-session', 'temporal-reasoning')
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories_override)
@@ -162,32 +164,77 @@ class LLMAnswerEvaluator:
         question: str,
         correct_answer: str,
         predicted_answer: str,
-        semaphore: asyncio.Semaphore
+        semaphore: asyncio.Semaphore,
+        category: Optional[str] = None,
+        max_retries: int = 3
     ) -> Tuple[bool, str]:
         """
-        Evaluate predicted answer using LLM-as-judge.
+        Evaluate predicted answer using LLM-as-judge with category-specific prompts.
 
         Args:
             question: The question
             correct_answer: Gold/correct answer
             predicted_answer: Predicted answer
             semaphore: Semaphore for rate limiting
+            category: Question category for LongMemEval-specific evaluation
+            max_retries: Maximum retry attempts for validation errors
 
         Returns:
             Tuple of (is_correct, reasoning)
         """
         async with semaphore:
-            try:
-                judgement = await self.llm_config.call(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are an expert grader that determines if answers to questions match a gold standard answer"
-                        },
-                        {
-                            "role": "user",
-                            "content": f"""
-Your task is to label an answer to a question as 'CORRECT' or 'WRONG'. You will be given the following data:
+            for attempt in range(max_retries):
+                try:
+                    # LongMemEval-specific evaluation prompts
+                    if category in ['single-session-user', 'single-session-assistant', 'multi-session']:
+                        prompt_content = f"""Evaluate if the model response contains the correct answer to the question.
+                        
+I will give you a question, a correct answer, and a response from a model. 
+Please set correct=true if the response contains the correct answer. Otherwise, set correct=no. 
+If the response is equivalent to the correct answer or contains all the intermediate steps to get the correct answer, you should also set correct=true. 
+If the response only contains a subset of the information required by the answer, set correct=false
+
+Question: {question}
+
+Correct Answer: {correct_answer}
+
+Model Response: {predicted_answer}
+
+Evaluation criteria:
+- Set correct=true if the response contains the correct answer
+- Set correct=true if the response is equivalent to the correct answer or contains intermediate steps
+- Set correct=false if the response is incorrect or missing key information
+
+Provide your evaluation as JSON with:
+- reasoning: One sentence explanation
+- correct: true or false"""
+
+                    elif category == 'temporal-reasoning':
+                        prompt_content = f"""
+I will give you a question, a correct answer, and a response from a model. 
+Please set correct=true if the response contains the correct answer. Otherwise, set correct=false. 
+If the response is equivalent to the correct answer or contains all the intermediate steps to get the correct answer, you should also set correct=true. 
+If the response only contains a subset of the information required by the answer, answer correct=false. 
+In addition, do not penalize off-by-one errors for the number of days. If the question asks for the number of days/weeks/months, etc., and the model makes off-by-one errors (e.g., predicting 19 days when the answer is 18), the model's response is still correct.
+"""
+
+                    elif category == 'knowledge-update':
+                        prompt_content = f"""
+I will give you a question, a correct answer, and a response from a model. 
+Please set correct=true if the response contains the correct answer. Otherwise, set correct=false. 
+If the response contains some previous information along with an updated answer, the response should be considered as correct as long as the updated answer is the required answer.
+"""
+
+                    elif category == 'single-session-preference':
+                        prompt_content = f"""
+I will give you a question, a answer for desired personalized response, and a response from a model. 
+Please set correct=true if the response satisfies the desired response. Otherwise, set correct=false. 
+The model does not need to reflect all the points in the desired response. The response is correct as long as it recalls and utilizes the user's personal information correctly.
+"""
+
+                    else:
+                        # Default LoComo-style evaluation
+                        prompt_content = f"""Your task is to label an answer to a question as 'CORRECT' or 'WRONG'. You will be given the following data:
         (1) a question (posed by one user to another user),
         (2) a 'gold' (ground truth) answer,
         (3) a generated answer
@@ -200,29 +247,46 @@ Your task is to label an answer to a question as 'CORRECT' or 'WRONG'. You will 
     The generated answer might be much longer, but you should be generous with your grading - as long as it touches on the same topic as the gold answer, it should be counted as CORRECT.
 
     For time related questions, the gold answer will be a specific date, month, year, etc. The generated answer might be much longer or use relative time references (like "last Tuesday" or "next month"), but you should be generous with your grading - as long as it refers to the same date or time period as the gold answer, it should be counted as CORRECT. Even if the format differs (e.g., "May 7th" vs "7 May"), consider it CORRECT if it's the same date.
-    There's an edge case where the actual answer can't be found in the data and in that case the gold answer will say so (e.g. 'You did not mention this information.'); if the generated answer says that it cannot be answered or it doesn't know all the details, it should be counted as CORRECT. 
-
-    Now it's time for the real question:
-    Question: {question}
-    Gold answer: {correct_answer}
-    Generated answer: {predicted_answer}
-
-    First, provide a short (one sentence) explanation of your reasoning. Short reasoning is preferred.
-    If it's correct, set correct=true.
+    There's an edge case where the actual answer can't be found in the data and in that case the gold answer will say so (e.g. 'You did not mention this information.'); if the generated answer says that it cannot be answered or it doesn't know all the details, it should be counted as CORRECT.
 """
-                        }
-                    ],
-                    response_format=JudgeResponse,
-                    scope="judge",
-                    temperature=0,
-                    max_tokens=4096
-                )
 
-                return judgement.correct, judgement.reasoning
+                    judgement = await self.llm_config.call(
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": f"""{prompt_content}
+                                
 
-            except Exception as e:
-                print(f"Error judging answer: {e}")
-                return False, f"Error: {str(e)}"
+Question: {question}
+Gold answer: {correct_answer}
+Generated answer: {predicted_answer}
+First, provide a short (one sentence) explanation of your reasoning. Short reasoning is preferred.
+If it's correct, set correct=true.
+"""
+                            }
+                        ],
+                        response_format=JudgeResponse,
+                        scope="judge",
+                        temperature=0,
+                        max_tokens=4096
+                    )
+
+                    return judgement.correct, judgement.reasoning
+
+                except Exception as e:
+                    # Check if it's a validation error (LLM returned malformed JSON)
+                    error_str = str(e)
+                    is_validation_error = "ValidationError" in error_str or "Field required" in error_str
+
+                    # Retry on validation errors, fail immediately on other errors
+                    if is_validation_error and attempt < max_retries - 1:
+                        print(f"Judge validation error on attempt {attempt + 1}/{max_retries}, retrying...")
+                        await asyncio.sleep(0.5)  # Small delay before retry
+                        continue
+
+                    # Final attempt or non-validation error - log and return error
+                    print(f"Error judging answer after {attempt + 1} attempts: {e}")
+                    return False, f"Error: {str(e)}"
 
 
 class BenchmarkRunner:
@@ -325,6 +389,7 @@ class BenchmarkRunner:
         thinking_budget: int = 500,
         max_tokens: int = 4096,
         question_date: Optional[datetime] = None,
+        question_type: Optional[str] = None,
     ) -> Tuple[str, str, List[Dict], Dict[str, Dict]]:
         """
         Answer a question using memory retrieval.
@@ -335,6 +400,7 @@ class BenchmarkRunner:
             thinking_budget: Thinking budget for search
             max_tokens: Maximum tokens to retrieve
             question_date: Date when the question was asked (for temporal filtering)
+            question_type: Question category/type (e.g., 'multi-session', 'temporal-reasoning')
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories, chunks)
@@ -370,7 +436,7 @@ class BenchmarkRunner:
                 return "I don't have enough information to answer that question.", "No relevant memories found.", [], {}
 
             # Generate answer using LLM - pass entire recall result
-            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, recall_result_dict, question_date)
+            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, recall_result_dict, question_date, question_type)
 
             # Use override if provided, otherwise use the results from recall
             final_memories = memories_override if memories_override is not None else [fact.model_dump() for fact in search_result.results]
@@ -379,7 +445,7 @@ class BenchmarkRunner:
         else:
             # Integrated flow: generator does its own search (e.g., think API)
             # Pass empty recall result since generator doesn't need them
-            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, {"results": []}, question_date)
+            answer, reasoning, memories_override = await self.answer_generator.generate_answer(question, {"results": []}, question_date, question_type)
 
             # Use memories from generator (should not be None for integrated mode)
             final_memories = memories_override if memories_override is not None else []
@@ -440,7 +506,7 @@ class BenchmarkRunner:
                     try:
                         # Get predicted answer, reasoning, retrieved memories, and chunks
                         predicted_answer, reasoning, retrieved_memories, chunks = await self.answer_question(
-                            agent_id, question, thinking_budget, max_tokens, question_date
+                            agent_id, question, thinking_budget, max_tokens, question_date, category
                         )
 
                         # Remove embeddings from retrieved memories to reduce file size
@@ -526,7 +592,8 @@ class BenchmarkRunner:
                         result['question'],
                         result['correct_answer'],
                         result['predicted_answer'],
-                        semaphore
+                        semaphore,
+                        category=result.get('category')
                     )
                     result['is_correct'] = is_correct
                     result['correctness_reasoning'] = eval_reasoning

@@ -23,6 +23,7 @@ from hindsight_client_api.models.add_background_request import AddBackgroundRequ
 from hindsight_client_api.models.background_response import BackgroundResponse
 from hindsight_client_api.models.bank_list_response import BankListResponse
 from hindsight_client_api.models.bank_profile_response import BankProfileResponse
+from hindsight_client_api.models.chunk_response import ChunkResponse
 from hindsight_client_api.models.create_bank_request import CreateBankRequest
 from hindsight_client_api.models.delete_response import DeleteResponse
 from hindsight_client_api.models.document_response import DocumentResponse
@@ -1986,6 +1987,269 @@ class DefaultApi:
         return self.api_client.param_serialize(
             method='GET',
             resource_path='/v1/default/banks/{bank_id}/profile',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    async def get_chunk(
+        self,
+        chunk_id: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ChunkResponse:
+        """Get chunk details
+
+        Get a specific chunk by its ID
+
+        :param chunk_id: (required)
+        :type chunk_id: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._get_chunk_serialize(
+            chunk_id=chunk_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ChunkResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    async def get_chunk_with_http_info(
+        self,
+        chunk_id: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[ChunkResponse]:
+        """Get chunk details
+
+        Get a specific chunk by its ID
+
+        :param chunk_id: (required)
+        :type chunk_id: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._get_chunk_serialize(
+            chunk_id=chunk_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ChunkResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    async def get_chunk_without_preload_content(
+        self,
+        chunk_id: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Get chunk details
+
+        Get a specific chunk by its ID
+
+        :param chunk_id: (required)
+        :type chunk_id: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._get_chunk_serialize(
+            chunk_id=chunk_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ChunkResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _get_chunk_serialize(
+        self,
+        chunk_id,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if chunk_id is not None:
+            _path_params['chunk_id'] = chunk_id
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='GET',
+            resource_path='/v1/default/chunks/{chunk_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -5150,7 +5414,7 @@ class DefaultApi:
     ) -> RetainResponse:
         """Retain memories
 
-        Retain memory items with automatic fact extraction.      This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing     via the async parameter.      Features:     - Efficient batch processing     - Automatic fact extraction from natural language     - Entity recognition and linking     - Document tracking with automatic upsert (when document_id is provided)     - Temporal and semantic linking     - Optional asynchronous processing      The system automatically:     1. Extracts semantic facts from the content     2. Generates embeddings     3. Deduplicates similar facts     4. Creates temporal, semantic, and entity links     5. Tracks document metadata      When async=true:     - Returns immediately after queuing the task     - Processing happens in the background     - Use the operations endpoint to monitor progress      When async=false (default):     - Waits for processing to complete     - Returns after all memories are stored      Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
+        Retain memory items with automatic fact extraction.      This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing     via the async parameter.      Features:     - Efficient batch processing     - Automatic fact extraction from natural language     - Entity recognition and linking     - Document tracking with automatic upsert (when document_id is provided on items)     - Temporal and semantic linking     - Optional asynchronous processing      The system automatically:     1. Extracts semantic facts from the content     2. Generates embeddings     3. Deduplicates similar facts     4. Creates temporal, semantic, and entity links     5. Tracks document metadata      When async=true:     - Returns immediately after queuing the task     - Processing happens in the background     - Use the operations endpoint to monitor progress      When async=false (default):     - Waits for processing to complete     - Returns after all memories are stored      Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -5222,7 +5486,7 @@ class DefaultApi:
     ) -> ApiResponse[RetainResponse]:
         """Retain memories
 
-        Retain memory items with automatic fact extraction.      This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing     via the async parameter.      Features:     - Efficient batch processing     - Automatic fact extraction from natural language     - Entity recognition and linking     - Document tracking with automatic upsert (when document_id is provided)     - Temporal and semantic linking     - Optional asynchronous processing      The system automatically:     1. Extracts semantic facts from the content     2. Generates embeddings     3. Deduplicates similar facts     4. Creates temporal, semantic, and entity links     5. Tracks document metadata      When async=true:     - Returns immediately after queuing the task     - Processing happens in the background     - Use the operations endpoint to monitor progress      When async=false (default):     - Waits for processing to complete     - Returns after all memories are stored      Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
+        Retain memory items with automatic fact extraction.      This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing     via the async parameter.      Features:     - Efficient batch processing     - Automatic fact extraction from natural language     - Entity recognition and linking     - Document tracking with automatic upsert (when document_id is provided on items)     - Temporal and semantic linking     - Optional asynchronous processing      The system automatically:     1. Extracts semantic facts from the content     2. Generates embeddings     3. Deduplicates similar facts     4. Creates temporal, semantic, and entity links     5. Tracks document metadata      When async=true:     - Returns immediately after queuing the task     - Processing happens in the background     - Use the operations endpoint to monitor progress      When async=false (default):     - Waits for processing to complete     - Returns after all memories are stored      Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -5294,7 +5558,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Retain memories
 
-        Retain memory items with automatic fact extraction.      This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing     via the async parameter.      Features:     - Efficient batch processing     - Automatic fact extraction from natural language     - Entity recognition and linking     - Document tracking with automatic upsert (when document_id is provided)     - Temporal and semantic linking     - Optional asynchronous processing      The system automatically:     1. Extracts semantic facts from the content     2. Generates embeddings     3. Deduplicates similar facts     4. Creates temporal, semantic, and entity links     5. Tracks document metadata      When async=true:     - Returns immediately after queuing the task     - Processing happens in the background     - Use the operations endpoint to monitor progress      When async=false (default):     - Waits for processing to complete     - Returns after all memories are stored      Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
+        Retain memory items with automatic fact extraction.      This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing     via the async parameter.      Features:     - Efficient batch processing     - Automatic fact extraction from natural language     - Entity recognition and linking     - Document tracking with automatic upsert (when document_id is provided on items)     - Temporal and semantic linking     - Optional asynchronous processing      The system automatically:     1. Extracts semantic facts from the content     2. Generates embeddings     3. Deduplicates similar facts     4. Creates temporal, semantic, and entity links     5. Tracks document metadata      When async=true:     - Returns immediately after queuing the task     - Processing happens in the background     - Use the operations endpoint to monitor progress      When async=false (default):     - Waits for processing to complete     - Returns after all memories are stored      Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.
 
         :param bank_id: (required)
         :type bank_id: str

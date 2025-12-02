@@ -1,6 +1,8 @@
 'use client';
 
 import * as React from 'react';
+import { Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useBank } from '@/lib/bank-context';
 import { Button } from '@/components/ui/button';
 import {
@@ -16,11 +18,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Check, ChevronsUpDown, RefreshCw } from 'lucide-react';
+import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export function BankSelector() {
-  const { currentBank, setCurrentBank, banks, loadBanks } = useBank();
+function BankSelectorInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { currentBank, setCurrentBank, banks } = useBank();
   const [open, setOpen] = React.useState(false);
 
   const sortedBanks = React.useMemo(() => {
@@ -54,8 +58,13 @@ export function BankSelector() {
                       key={bank}
                       value={bank}
                       onSelect={(value) => {
-                        setCurrentBank(value === currentBank ? null : value);
+                        setCurrentBank(value);
                         setOpen(false);
+                        // Preserve current view and subTab when switching banks
+                        const view = searchParams.get('view') || 'data';
+                        const subTab = searchParams.get('subTab');
+                        const queryString = subTab ? `?view=${view}&subTab=${subTab}` : `?view=${view}`;
+                        router.push(`/banks/${value}${queryString}`);
                       }}
                     >
                       <Check
@@ -72,16 +81,29 @@ export function BankSelector() {
             </Command>
           </PopoverContent>
         </Popover>
-        <Button
-          onClick={loadBanks}
-          variant="default"
-          size="sm"
-          className="ml-2"
-          title="Refresh memory banks"
-        >
-          <RefreshCw className="h-4 w-4" />
-        </Button>
       </div>
     </div>
+  );
+}
+
+export function BankSelector() {
+  return (
+    <Suspense fallback={
+      <div className="bg-card text-card-foreground px-5 py-3 border-b-4 border-primary">
+        <div className="flex items-center gap-2.5 text-sm">
+          <span className="font-medium">Memory Bank:</span>
+          <Button
+            variant="outline"
+            className="w-[300px] justify-between font-bold border-2 border-primary"
+            disabled
+          >
+            Loading...
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </div>
+      </div>
+    }>
+      <BankSelectorInner />
+    </Suspense>
   );
 }

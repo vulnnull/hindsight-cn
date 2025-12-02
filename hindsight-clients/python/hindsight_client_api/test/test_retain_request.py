@@ -36,15 +36,14 @@ class TestRetainRequest(unittest.TestCase):
         if include_optional:
             return RetainRequest(
                 items = [
-                    {content=Alice mentioned she's working on a new ML model, context=team meeting, metadata={channel=engineering, source=slack}, timestamp=2024-01-15T10:30:00Z}
+                    {content=Alice mentioned she's working on a new ML model, context=team meeting, document_id=meeting_notes_2024_01_15, metadata={channel=engineering, source=slack}, timestamp=2024-01-15T10:30:00Z}
                     ],
-                document_id = '',
                 var_async = True
             )
         else:
             return RetainRequest(
                 items = [
-                    {content=Alice mentioned she's working on a new ML model, context=team meeting, metadata={channel=engineering, source=slack}, timestamp=2024-01-15T10:30:00Z}
+                    {content=Alice mentioned she's working on a new ML model, context=team meeting, document_id=meeting_notes_2024_01_15, metadata={channel=engineering, source=slack}, timestamp=2024-01-15T10:30:00Z}
                     ],
         )
         """

@@ -28,6 +28,8 @@ export function DataView({ factType }: DataViewProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
   const [loadingDocument, setLoadingDocument] = useState(false);
+  const [selectedChunk, setSelectedChunk] = useState<any>(null);
+  const [loadingChunk, setLoadingChunk] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 100;
   const cyRef = useRef<any>(null);
@@ -48,6 +50,7 @@ export function DataView({ factType }: DataViewProps) {
 
     setLoadingDocument(true);
     setSelectedDocument({ id: documentId });
+    setSelectedChunk(null); // Clear chunk when viewing document
 
     try {
       const doc: any = await client.getDocument(documentId, currentBank);
@@ -58,6 +61,25 @@ export function DataView({ factType }: DataViewProps) {
       setSelectedDocument(null);
     } finally {
       setLoadingDocument(false);
+    }
+  };
+
+  const viewChunk = async (chunkId: string) => {
+    if (!chunkId) return;
+
+    setLoadingChunk(true);
+    setSelectedChunk({ chunk_id: chunkId });
+    setSelectedDocument(null); // Clear document when viewing chunk
+
+    try {
+      const chunk: any = await client.getChunk(chunkId);
+      setSelectedChunk(chunk);
+    } catch (error) {
+      console.error('Error loading chunk:', error);
+      alert('Error loading chunk: ' + (error as Error).message);
+      setSelectedChunk(null);
+    } finally {
+      setLoadingChunk(false);
     }
   };
 
@@ -306,7 +328,7 @@ export function DataView({ factType }: DataViewProps) {
 
           {viewMode === 'table' && (
             <div className="flex gap-4">
-              <div className={`transition-all ${selectedDocument ? 'w-1/2' : 'w-full'}`}>
+              <div className={`transition-all ${selectedDocument || selectedChunk ? 'w-1/2' : 'w-full'}`}>
                 <div className="px-5 mb-4">
                   <Input
                     type="text"
@@ -395,17 +417,28 @@ export function DataView({ factType }: DataViewProps) {
                               <TableCell>{mentionedDisplay}</TableCell>
                               <TableCell>{row.entities || 'None'}</TableCell>
                               <TableCell>
-                                {row.document_id ? (
-                                  <Button
-                                    onClick={() => viewDocument(row.document_id)}
-                                    size="sm"
-                                    variant={selectedDocument?.id === row.document_id ? 'default' : 'outline'}
-                                  >
-                                    View
-                                  </Button>
-                                ) : (
-                                  <span className="text-muted-foreground text-sm">N/A</span>
-                                )}
+                                <div className="flex gap-2">
+                                  {row.document_id ? (
+                                    <Button
+                                      onClick={() => viewDocument(row.document_id)}
+                                      size="sm"
+                                      variant={selectedDocument?.id === row.document_id ? 'default' : 'outline'}
+                                    >
+                                      Doc
+                                    </Button>
+                                  ) : (
+                                    <span className="text-muted-foreground text-sm">-</span>
+                                  )}
+                                  {row.chunk_id ? (
+                                    <Button
+                                      onClick={() => viewChunk(row.chunk_id)}
+                                      size="sm"
+                                      variant={selectedChunk?.chunk_id === row.chunk_id ? 'default' : 'outline'}
+                                    >
+                                      Chunk
+                                    </Button>
+                                  ) : null}
+                                </div>
                               </TableCell>
                             </TableRow>
                           );
@@ -535,6 +568,77 @@ export function DataView({ factType }: DataViewProps) {
                 </div>
               </div>
             )}
+
+            {/* Chunk Detail Panel */}
+            {selectedChunk && (
+              <div className="w-1/2 pr-5 pb-5">
+                <div className="bg-card border-2 border-primary rounded-lg p-4 sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-card-foreground">Chunk Details</h3>
+                      <p className="text-sm text-muted-foreground">View the chunk text and metadata</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedChunk(null)}
+                      className="h-8 w-8 p-0"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  {loadingChunk ? (
+                    <div className="flex items-center justify-center py-20">
+                      <div className="text-center">
+                        <div className="text-4xl mb-2">⏳</div>
+                        <div className="text-sm text-muted-foreground">Loading chunk...</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="space-y-3">
+                        <div className="p-3 bg-muted rounded-lg">
+                          <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Chunk ID</div>
+                          <div className="text-sm font-mono break-all">{selectedChunk.chunk_id}</div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="p-3 bg-muted rounded-lg">
+                            <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Document ID</div>
+                            <div className="text-sm font-mono break-all">{selectedChunk.document_id}</div>
+                          </div>
+                          <div className="p-3 bg-muted rounded-lg">
+                            <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Chunk Index</div>
+                            <div className="text-sm">{selectedChunk.chunk_index}</div>
+                          </div>
+                        </div>
+                        {selectedChunk.created_at && (
+                          <div className="p-3 bg-muted rounded-lg">
+                            <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Created</div>
+                            <div className="text-sm">{new Date(selectedChunk.created_at).toLocaleString()}</div>
+                          </div>
+                        )}
+                        {selectedChunk.chunk_text && (
+                          <div className="p-3 bg-muted rounded-lg">
+                            <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Text Length</div>
+                            <div className="text-sm">{selectedChunk.chunk_text.length.toLocaleString()} characters</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {selectedChunk.chunk_text && (
+                        <div>
+                          <div className="text-sm font-bold text-foreground mb-2">Chunk Text</div>
+                          <div className="p-4 bg-muted rounded-lg border border-border">
+                            <pre className="text-sm whitespace-pre-wrap font-mono">{selectedChunk.chunk_text}</pre>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           )}
 
@@ -576,6 +680,16 @@ function TimelineView({ data, onViewDocument }: { data: any; onViewDocument: (id
       });
 
     const withoutDates = data.table_rows.filter((row: any) => !row.occurred_start);
+
+    // Debug logging
+    console.log('Timeline data:', {
+      total: data.table_rows.length,
+      withDates: withDates.length,
+      withoutDates: withoutDates.length,
+      sampleWithDate: withDates[0],
+      sampleWithoutDate: withoutDates[0]
+    });
+
     return { sortedItems: withDates, itemsWithoutDates: withoutDates };
   }, [data]);
 

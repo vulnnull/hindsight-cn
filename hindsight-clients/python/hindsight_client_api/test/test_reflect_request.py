@@ -42,9 +42,7 @@ class TestReflectRequest(unittest.TestCase):
                     {key=source, match_unset=true, value=slack}
                     ],
                 include = hindsight_client_api.models.reflect_include_options.ReflectIncludeOptions(
-                    facts = hindsight_client_api.models.facts_include_options.FactsIncludeOptions(), 
-                    entities = hindsight_client_api.models.entity_include_options.EntityIncludeOptions(
-                        max_tokens = 56, ), )
+                    facts = hindsight_client_api.models.facts_include_options.FactsIncludeOptions(), )
             )
         else:
             return ReflectRequest(

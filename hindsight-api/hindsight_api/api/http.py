@@ -84,7 +84,7 @@ class RecallRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "query": "What did Alice say about machine learning?",
-            "types": ["world", "agent"],
+            "types": ["world", "bank"],
             "budget": "mid",
             "max_tokens": 4096,
             "trace": True,
@@ -279,7 +279,8 @@ class MemoryItem(BaseModel):
             "content": "Alice mentioned she's working on a new ML model",
             "timestamp": "2024-01-15T10:30:00Z",
             "context": "team meeting",
-            "metadata": {"source": "slack", "channel": "engineering"}
+            "metadata": {"source": "slack", "channel": "engineering"},
+            "document_id": "meeting_notes_2024_01_15"
         }
     })
 
@@ -287,6 +288,10 @@ class MemoryItem(BaseModel):
     timestamp: Optional[datetime] = None
     context: Optional[str] = None
     metadata: Optional[Dict[str, str]] = None
+    document_id: Optional[str] = Field(
+        default=None,
+        description="Optional document ID for this memory item."
+    )
 
 
 class RetainRequest(BaseModel):
@@ -296,20 +301,20 @@ class RetainRequest(BaseModel):
             "items": [
                 {
                     "content": "Alice works at Google",
-                    "context": "work"
+                    "context": "work",
+                    "document_id": "conversation_123"
                 },
                 {
                     "content": "Bob went hiking yesterday",
-                    "timestamp": "2024-01-15T10:00:00Z"
+                    "timestamp": "2024-01-15T10:00:00Z",
+                    "document_id": "conversation_123"
                 }
             ],
-            "document_id": "conversation_123",
             "async": False
         }
     })
 
     items: List[MemoryItem]
-    document_id: Optional[str] = None
     async_: bool = Field(
         default=False,
         alias="async",
@@ -325,7 +330,6 @@ class RetainResponse(BaseModel):
             "example": {
                 "success": True,
                 "bank_id": "user123",
-                "document_id": "conversation_123",
                 "items_count": 2,
                 "async": False
             }
@@ -334,7 +338,6 @@ class RetainResponse(BaseModel):
 
     success: bool
     bank_id: str
-    document_id: Optional[str] = None
     items_count: int
     async_: bool = Field(alias="async", serialization_alias="async", description="Whether the operation was processed asynchronously")
 
@@ -414,7 +417,7 @@ class ReflectResponse(BaseModel):
                 {
                     "id": "456",
                     "text": "I discussed AI applications last week",
-                    "type": "agent"
+                    "type": "bank"
                 }
             ]
         }
@@ -680,6 +683,27 @@ class DocumentResponse(BaseModel):
     memory_unit_count: int
 
 
+class ChunkResponse(BaseModel):
+    """Response model for get chunk endpoint."""
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "chunk_id": "user123_session_1_0",
+            "document_id": "session_1",
+            "bank_id": "user123",
+            "chunk_index": 0,
+            "chunk_text": "This is the first chunk of the document...",
+            "created_at": "2024-01-15T10:30:00Z"
+        }
+    })
+
+    chunk_id: str
+    document_id: str
+    bank_id: str
+    chunk_index: int
+    chunk_text: str
+    created_at: str
+
+
 class DeleteResponse(BaseModel):
     """Response model for delete operations."""
     model_config = ConfigDict(json_schema_extra={
@@ -859,9 +883,8 @@ def _register_routes(app: FastAPI):
 
     The type parameter is optional and must be one of:
     - 'world': General knowledge about people, places, events, and things that happen
-    - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
+    - 'bank': Memories about what the AI agent did, actions taken, and tasks performed
     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints
-    - 'observation': Synthesized observations about entities (generated automatically)
 
     Set include_entities=true to get entity observations alongside recall results.
         """,
@@ -873,10 +896,10 @@ def _register_routes(app: FastAPI):
 
         try:
             # Validate types
-            valid_fact_types = ["world", "agent", "opinion", "observation"]
+            valid_fact_types = ["world", "bank", "opinion"]
 
             # Default to world, agent, opinion if not specified (exclude observation by default)
-            fact_types = request.types if request.types else ["world", "agent", "opinion"]
+            fact_types = request.types if request.types else ["world", "bank", "opinion"]
             for ft in fact_types:
                 if ft not in valid_fact_types:
                     raise HTTPException(
@@ -1367,6 +1390,34 @@ def _register_routes(app: FastAPI):
             raise HTTPException(status_code=500, detail=str(e))
 
 
+    @app.get(
+        "/v1/default/chunks/{chunk_id}",
+        response_model=ChunkResponse,
+        summary="Get chunk details",
+        description="Get a specific chunk by its ID",
+        operation_id="get_chunk"
+    )
+    async def api_get_chunk(chunk_id: str):
+        """
+        Get a specific chunk with its text.
+
+        Args:
+            chunk_id: Chunk ID (from path, format: bank_id_document_id_chunk_index)
+        """
+        try:
+            chunk = await app.state.memory.get_chunk(chunk_id)
+            if not chunk:
+                raise HTTPException(status_code=404, detail="Chunk not found")
+            return chunk
+        except HTTPException:
+            raise
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Error in /v1/default/chunks/{chunk_id}: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
     @app.delete(
         "/v1/default/banks/{bank_id}/documents/{document_id}",
         summary="Delete a document",
@@ -1517,10 +1568,12 @@ This operation cannot be undone.
         """Get memory bank profile (personality + background)."""
         try:
             profile = await app.state.memory.get_bank_profile(bank_id)
+            # Convert PersonalityTraits object to dict for Pydantic
+            personality_dict = profile["personality"].model_dump() if hasattr(profile["personality"], 'model_dump') else dict(profile["personality"])
             return BankProfileResponse(
                 bank_id=bank_id,
                 name=profile["name"],
-                personality=profile["personality"],  # Already a PersonalityTraits object
+                personality=PersonalityTraits(**personality_dict),
                 background=profile["background"]
             )
         except Exception as e:
@@ -1550,10 +1603,11 @@ This operation cannot be undone.
 
             # Get updated profile
             profile = await app.state.memory.get_bank_profile(bank_id)
+            personality_dict = profile["personality"].model_dump() if hasattr(profile["personality"], 'model_dump') else dict(profile["personality"])
             return BankProfileResponse(
                 bank_id=bank_id,
                 name=profile["name"],
-                personality=profile["personality"],  # Already a PersonalityTraits object
+                personality=PersonalityTraits(**personality_dict),
                 background=profile["background"]
             )
         except Exception as e:
@@ -1638,7 +1692,7 @@ This operation cannot be undone.
                 async with acquire_with_retry(pool) as conn:
                     await conn.execute(
                         """
-                        UPDATE agents
+                        UPDATE banks
                         SET background = $2,
                             updated_at = NOW()
                         WHERE bank_id = $1
@@ -1650,10 +1704,11 @@ This operation cannot be undone.
 
             # Get final profile
             final_profile = await app.state.memory.get_bank_profile(bank_id)
+            personality_dict = final_profile["personality"].model_dump() if hasattr(final_profile["personality"], 'model_dump') else dict(final_profile["personality"])
             return BankProfileResponse(
                 bank_id=bank_id,
                 name=final_profile["name"],
-                personality=final_profile["personality"],  # Already a PersonalityTraits object
+                personality=PersonalityTraits(**personality_dict),
                 background=final_profile["background"]
             )
         except Exception as e:
@@ -1677,7 +1732,7 @@ This operation cannot be undone.
     - Efficient batch processing
     - Automatic fact extraction from natural language
     - Entity recognition and linking
-    - Document tracking with automatic upsert (when document_id is provided)
+    - Document tracking with automatic upsert (when document_id is provided on items)
     - Temporal and semantic linking
     - Optional asynchronous processing
 
@@ -1697,7 +1752,7 @@ This operation cannot be undone.
     - Waits for processing to complete
     - Returns after all memories are stored
 
-    Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
+    Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.
         """,
         operation_id="retain_memories"
     )
@@ -1716,6 +1771,8 @@ This operation cannot be undone.
                     content_dict["context"] = item.context
                 if item.metadata:
                     content_dict["metadata"] = item.metadata
+                if item.document_id:
+                    content_dict["document_id"] = item.document_id
                 contents.append(content_dict)
 
             if request.async_:
@@ -1727,14 +1784,13 @@ This operation cannot be undone.
                 async with acquire_with_retry(pool) as conn:
                     await conn.execute(
                         """
-                        INSERT INTO async_operations (id, bank_id, task_type, items_count, document_id)
-                        VALUES ($1, $2, $3, $4, $5)
+                        INSERT INTO async_operations (id, bank_id, task_type, items_count)
+                        VALUES ($1, $2, $3, $4)
                         """,
                         operation_id,
                         bank_id,
                         'retain',
-                        len(contents),
-                        request.document_id
+                        len(contents)
                     )
 
                 # Submit task to background queue
@@ -1742,8 +1798,7 @@ This operation cannot be undone.
                     'type': 'batch_put',
                     'operation_id': str(operation_id),
                     'bank_id': bank_id,
-                    'contents': contents,
-                    'document_id': request.document_id
+                    'contents': contents
                 })
 
                 logging.info(f"Retain task queued for bank_id={bank_id}, {len(contents)} items, operation_id={operation_id}")
@@ -1751,7 +1806,6 @@ This operation cannot be undone.
                 return RetainResponse(
                     success=True,
                     bank_id=bank_id,
-                    document_id=request.document_id,
                     items_count=len(contents),
                     async_=True
                 )
@@ -1760,14 +1814,12 @@ This operation cannot be undone.
                 with metrics.record_operation("retain", bank_id=bank_id):
                     result = await app.state.memory.retain_batch_async(
                         bank_id=bank_id,
-                        contents=contents,
-                        document_id=request.document_id
+                        contents=contents
                     )
 
                 return RetainResponse(
                     success=True,
                     bank_id=bank_id,
-                    document_id=request.document_id,
                     items_count=len(contents),
                     async_=False
                 )

@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,10 +28,9 @@ class RetainResponse(BaseModel):
     """ # noqa: E501
     success: StrictBool
     bank_id: StrictStr
-    document_id: Optional[StrictStr] = None
     items_count: StrictInt
     var_async: StrictBool = Field(description="Whether the operation was processed asynchronously", alias="async")
-    __properties: ClassVar[List[str]] = ["success", "bank_id", "document_id", "items_count", "async"]
+    __properties: ClassVar[List[str]] = ["success", "bank_id", "items_count", "async"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -72,11 +71,6 @@ class RetainResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # set to None if document_id (nullable) is None
-        # and model_fields_set contains the field
-        if self.document_id is None and "document_id" in self.model_fields_set:
-            _dict['document_id'] = None
-
         return _dict
 
     @classmethod
@@ -91,7 +85,6 @@ class RetainResponse(BaseModel):
         _obj = cls.model_validate({
             "success": obj.get("success"),
             "bank_id": obj.get("bank_id"),
-            "document_id": obj.get("document_id"),
             "items_count": obj.get("items_count"),
             "async": obj.get("async")
         })

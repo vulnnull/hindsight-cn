@@ -66,7 +66,8 @@ async def insert_facts_batch(
         access_counts.append(0)  # Initial access count
         metadata_jsons.append(json.dumps(fact.metadata))
         chunk_ids.append(fact.chunk_id)
-        document_ids.append(document_id)
+        # Use per-fact document_id if available, otherwise fallback to batch-level document_id
+        document_ids.append(fact.document_id if fact.document_id else document_id)
 
     # Batch insert all facts
     results = await conn.fetch(
@@ -127,7 +128,8 @@ async def handle_document_tracking(
     bank_id: str,
     document_id: str,
     combined_content: str,
-    is_first_batch: bool
+    is_first_batch: bool,
+    retain_params: Optional[dict] = None
 ) -> None:
     """
     Handle document tracking in the database.
@@ -138,6 +140,7 @@ async def handle_document_tracking(
         document_id: Document identifier
         combined_content: Combined content text from all content items
         is_first_batch: Whether this is the first batch (for chunked operations)
+        retain_params: Optional parameters passed during retain (context, event_date, etc.)
     """
     import hashlib
 
@@ -155,17 +158,19 @@ async def handle_document_tracking(
     # Insert document (or update if exists from concurrent operations)
     await conn.execute(
         """
-        INSERT INTO documents (id, bank_id, original_text, content_hash, metadata)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO documents (id, bank_id, original_text, content_hash, metadata, retain_params)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (id, bank_id) DO UPDATE
         SET original_text = EXCLUDED.original_text,
             content_hash = EXCLUDED.content_hash,
             metadata = EXCLUDED.metadata,
+            retain_params = EXCLUDED.retain_params,
             updated_at = NOW()
         """,
         document_id,
         bank_id,
         combined_content,
         content_hash,
-        json.dumps({})  # Empty metadata dict
+        json.dumps({}),  # Empty metadata dict
+        json.dumps(retain_params) if retain_params else None
     )

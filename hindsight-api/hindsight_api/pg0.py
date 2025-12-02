@@ -28,7 +28,8 @@ def get_platform_binary_name() -> str:
 
     Supported platforms:
     - macOS ARM64 (darwin-aarch64)
-    - Linux x86_64
+    - Linux x86_64 (gnu)
+    - Linux ARM64 (gnu)
     - Windows x86_64
     """
     system = platform.system().lower()
@@ -42,19 +43,21 @@ def get_platform_binary_name() -> str:
     else:
         raise RuntimeError(
             f"Embedded PostgreSQL is not supported on architecture: {machine}. "
-            f"Supported architectures: x86_64/amd64 (Linux, Windows), aarch64/arm64 (macOS)"
+            f"Supported architectures: x86_64/amd64 (Linux, Windows), aarch64/arm64 (macOS, Linux)"
         )
 
     if system == "darwin" and arch == "aarch64":
         return "pg0-darwin-aarch64"
     elif system == "linux" and arch == "x86_64":
-        return "pg0-linux-x86_64"
+        return "pg0-linux-x86_64-gnu"
+    elif system == "linux" and arch == "aarch64":
+        return "pg0-linux-aarch64-gnu"
     elif system == "windows" and arch == "x86_64":
         return "pg0-windows-x86_64.exe"
     else:
         raise RuntimeError(
             f"Embedded PostgreSQL is not supported on {system}-{arch}. "
-            f"Supported platforms: darwin-aarch64 (macOS ARM), linux-x86_64, windows-x86_64"
+            f"Supported platforms: darwin-aarch64 (macOS ARM), linux-x86_64-gnu, linux-aarch64-gnu, windows-x86_64"
         )
 
 

@@ -253,7 +253,7 @@ export function DocumentsView() {
                 <TableRow>
                   <TableHead>Document ID</TableHead>
                   <TableHead>Created</TableHead>
-                  <TableHead>Updated</TableHead>
+                  <TableHead>Context</TableHead>
                   <TableHead>Text Length</TableHead>
                   <TableHead>Memory Units</TableHead>
                   <TableHead>Actions</TableHead>
@@ -273,7 +273,7 @@ export function DocumentsView() {
                         {doc.created_at ? new Date(doc.created_at).toLocaleString() : 'N/A'}
                       </TableCell>
                       <TableCell>
-                        {doc.updated_at ? new Date(doc.updated_at).toLocaleString() : 'N/A'}
+                        {doc.retain_params?.context || '-'}
                       </TableCell>
                       <TableCell>{doc.text_length?.toLocaleString()} chars</TableCell>
                       <TableCell>{doc.memory_unit_count}</TableCell>
@@ -350,6 +350,25 @@ export function DocumentsView() {
                       <div className="p-3 bg-muted rounded-lg">
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Text Length</div>
                         <div className="text-sm">{selectedDocument.original_text.length.toLocaleString()} characters</div>
+                      </div>
+                    )}
+                    {selectedDocument.retain_params && (
+                      <div className="p-3 bg-muted rounded-lg">
+                        <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Retain Parameters</div>
+                        <div className="text-sm space-y-1">
+                          {selectedDocument.retain_params.context && (
+                            <div><span className="font-semibold">Context:</span> {selectedDocument.retain_params.context}</div>
+                          )}
+                          {selectedDocument.retain_params.event_date && (
+                            <div><span className="font-semibold">Event Date:</span> {new Date(selectedDocument.retain_params.event_date).toLocaleString()}</div>
+                          )}
+                          {selectedDocument.retain_params.metadata && (
+                            <div className="mt-2">
+                              <span className="font-semibold">Metadata:</span>
+                              <pre className="mt-1 text-xs">{JSON.stringify(selectedDocument.retain_params.metadata, null, 2)}</pre>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>

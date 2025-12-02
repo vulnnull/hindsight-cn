@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { client } from './api';
 
 interface BankContextType {
@@ -13,6 +14,7 @@ interface BankContextType {
 const BankContext = createContext<BankContextType | undefined>(undefined);
 
 export function BankProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [currentBank, setCurrentBank] = useState<string | null>(null);
   const [banks, setBanks] = useState<string[]>([]);
 
@@ -26,6 +28,14 @@ export function BankProvider({ children }: { children: React.ReactNode }) {
       console.error('Error loading banks:', error);
     }
   };
+
+  // Initialize bank from URL on mount
+  useEffect(() => {
+    const bankMatch = pathname?.match(/^\/banks\/([^/?]+)/);
+    if (bankMatch) {
+      setCurrentBank(decodeURIComponent(bankMatch[1]));
+    }
+  }, [pathname]);
 
   useEffect(() => {
     loadBanks();

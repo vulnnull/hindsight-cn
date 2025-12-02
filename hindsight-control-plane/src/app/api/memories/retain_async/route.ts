@@ -13,12 +13,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { items, document_id } = body;
+    const { items } = body;
 
     const response = await sdk.retainMemories({
       client: lowLevelClient,
       path: { bank_id: bankId },
-      body: { items, document_id, async: true }
+      body: { items, async: true }
     });
 
     return NextResponse.json(response.data, { status: 200 });

@@ -147,6 +147,38 @@ export type ChunkIncludeOptions = {
 };
 
 /**
+ * ChunkResponse
+ *
+ * Response model for get chunk endpoint.
+ */
+export type ChunkResponse = {
+    /**
+     * Chunk Id
+     */
+    chunk_id: string;
+    /**
+     * Document Id
+     */
+    document_id: string;
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Chunk Index
+     */
+    chunk_index: number;
+    /**
+     * Chunk Text
+     */
+    chunk_text: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+};
+
+/**
  * CreateBankRequest
  *
  * Request model for creating/updating a bank.
@@ -486,6 +518,12 @@ export type MemoryItem = {
     metadata?: {
         [key: string]: string;
     } | null;
+    /**
+     * Document Id
+     *
+     * Optional document ID for this memory item. Items with the same document_id are grouped together for efficient processing.
+     */
+    document_id?: string | null;
 };
 
 /**
@@ -731,10 +769,6 @@ export type ReflectIncludeOptions = {
      * Include facts that the answer is based on. Set to {} to enable, null to disable (default: disabled).
      */
     facts?: FactsIncludeOptions | null;
-    /**
-     * Include entity observations. Set to {max_tokens: N} to enable, null to disable (default: disabled).
-     */
-    entities?: EntityIncludeOptions | null;
 };
 
 /**
@@ -759,7 +793,7 @@ export type ReflectRequest = {
      */
     filters?: Array<MetadataFilter> | null;
     /**
-     * Options for including additional data (both disabled by default)
+     * Options for including additional data (disabled by default)
      */
     include?: ReflectIncludeOptions;
 };
@@ -791,10 +825,6 @@ export type RetainRequest = {
      */
     items: Array<MemoryItem>;
     /**
-     * Document Id
-     */
-    document_id?: string | null;
-    /**
      * Async
      *
      * If true, process asynchronously in background. If false, wait for completion (default: false)
@@ -816,10 +846,6 @@ export type RetainResponse = {
      * Bank Id
      */
     bank_id: string;
-    /**
-     * Document Id
-     */
-    document_id?: string | null;
     /**
      * Items Count
      */
@@ -1272,6 +1298,36 @@ export type GetDocumentResponses = {
 };
 
 export type GetDocumentResponse = GetDocumentResponses[keyof GetDocumentResponses];
+
+export type GetChunkData = {
+    body?: never;
+    path: {
+        /**
+         * Chunk Id
+         */
+        chunk_id: string;
+    };
+    query?: never;
+    url: '/v1/default/chunks/{chunk_id}';
+};
+
+export type GetChunkErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GetChunkError = GetChunkErrors[keyof GetChunkErrors];
+
+export type GetChunkResponses = {
+    /**
+     * Successful Response
+     */
+    200: ChunkResponse;
+};
+
+export type GetChunkResponse = GetChunkResponses[keyof GetChunkResponses];
 
 export type ListOperationsData = {
     body?: never;

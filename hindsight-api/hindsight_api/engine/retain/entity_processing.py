@@ -18,7 +18,8 @@ async def process_entities_batch(
     conn,
     bank_id: str,
     unit_ids: List[str],
-    facts: List[ProcessedFact]
+    facts: List[ProcessedFact],
+    log_buffer: List[str] = None
 ) -> List[Tuple[str, str, float]]:
     """
     Process entities for all facts and create entity links.
@@ -35,6 +36,7 @@ async def process_entities_batch(
         bank_id: Bank identifier
         unit_ids: List of unit IDs (same length as facts)
         facts: List of ProcessedFact objects
+        log_buffer: Optional buffer for detailed logging
 
     Returns:
         List of entity link tuples: (unit_id, entity_id, confidence)
@@ -65,7 +67,7 @@ async def process_entities_batch(
         "",  # context (not used in current implementation)
         fact_dates,
         entities_per_fact,
-        []  # log_buffer (optional)
+        log_buffer  # Pass log_buffer for detailed logging
     )
 
     return entity_links

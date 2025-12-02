@@ -303,7 +303,9 @@ class SearchTracer:
         """
         retrieval_results = []
         for rank, (doc_id, data) in enumerate(results, start=1):
-            score = data.get(score_field, 0.0)
+            score = data.get(score_field)
+            if score is None:
+                score = 0.0
             retrieval_results.append(
                 RetrievalResult(
                     rank=rank,
@@ -311,6 +313,7 @@ class SearchTracer:
                     text=data.get("text", ""),
                     context=data.get("context", ""),
                     event_date=data.get("event_date"),
+                    fact_type=data.get("fact_type"),
                     score=score,
                     score_name=score_field,
                 )

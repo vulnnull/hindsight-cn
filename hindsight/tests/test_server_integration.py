@@ -24,7 +24,7 @@ def llm_config():
     """Get LLM configuration from environment (session-scoped)."""
     provider = os.getenv("HINDSIGHT_LLM_PROVIDER", "groq")
     api_key = os.getenv("HINDSIGHT_LLM_API_KEY", "")
-    model = os.getenv("HINDSIGHT_LLM_MODEL", "llama-3.3-70b-versatile")
+    model = os.getenv("HINDSIGHT_LLM_MODEL", "openai/gpt-oss-120b")
 
     if not api_key:
         pytest.skip("LLM API key not configured. Set HINDSIGHT_LLM_API_KEY environment variable.")

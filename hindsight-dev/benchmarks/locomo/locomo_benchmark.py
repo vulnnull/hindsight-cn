@@ -112,7 +112,8 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
         self,
         question: str,
         recall_result: Dict[str, Any],
-        question_date: Optional[datetime] = None
+        question_date: Optional[datetime] = None,
+        question_type: Optional[str] = None
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer from retrieved memories using Groq.
@@ -121,6 +122,7 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
             question: The question text
             recall_result: Full RecallResult dict containing results, entities, chunks, and trace
             question_date: Date when the question was asked (for temporal context)
+            question_type: Question category (unused in Locomo)
 
         Returns:
             Tuple of (answer, reasoning, None)
@@ -201,7 +203,8 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
         self,
         question: str,
         recall_result: Dict[str, Any],
-        question_date: Optional[datetime] = None
+        question_date: Optional[datetime] = None,
+        question_type: Optional[str] = None
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer using the integrated think API.
@@ -213,6 +216,7 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
             question: Question to answer
             recall_result: Not used (empty dict), as think does its own retrieval
             question_date: Date when the question was asked (currently not used by think API)
+            question_type: Question category (unused in think API)
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories)

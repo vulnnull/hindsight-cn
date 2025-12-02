@@ -39,6 +39,7 @@ async def retain_batch(
     task_backend,
     format_date_fn,
     duplicate_checker_fn,
+    regenerate_observations_fn,
     bank_id: str,
     contents_dicts: List[Dict[str, Any]],
     document_id: Optional[str] = None,
@@ -57,6 +58,7 @@ async def retain_batch(
         task_backend: Task backend for background jobs
         format_date_fn: Function to format datetime to readable string
         duplicate_checker_fn: Function to check for duplicate facts
+        regenerate_observations_fn: Async function to regenerate observations for entities
         bank_id: Bank identifier
         contents_dicts: List of content dictionaries
         document_id: Optional document ID
@@ -102,7 +104,7 @@ async def retain_batch(
         agent_name,
         extract_opinions
     )
-    log_buffer.append(f"[1] Extract facts: {len(extracted_facts)} facts from {len(contents)} contents in {time.time() - step_start:.3f}s")
+    log_buffer.append(f"[1] Extract facts: {len(extracted_facts)} facts, {len(chunks)} chunks from {len(contents)} contents in {time.time() - step_start:.3f}s")
 
     if not extracted_facts:
         return [[] for _ in contents]
@@ -124,39 +126,140 @@ async def retain_batch(
         for extracted_fact, embedding in zip(extracted_facts, embeddings)
     ]
 
+    # Track document IDs for logging
+    document_ids_added = []
+
+    # Group contents by document_id for document tracking and chunk storage
+    from collections import defaultdict
+    contents_by_doc = defaultdict(list)
+    for idx, content_dict in enumerate(contents_dicts):
+        doc_id = content_dict.get("document_id")
+        contents_by_doc[doc_id].append((idx, content_dict))
+
     # Step 4: Database transaction
     async with acquire_with_retry(pool) as conn:
         async with conn.transaction():
             # Ensure bank exists
             await fact_storage.ensure_bank_exists(conn, bank_id)
 
-            # Handle document tracking
-            if document_id:
-                combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
-                await fact_storage.handle_document_tracking(
-                    conn, bank_id, document_id, combined_content, is_first_batch
-                )
-            elif chunks:
-                # Generate document_id for chunk storage
-                document_id = str(uuid.uuid4())
-                combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
-                await fact_storage.handle_document_tracking(
-                    conn, bank_id, document_id, combined_content, is_first_batch
-                )
-                log_buffer.append(f"[2.5] Generated document_id: {document_id}")
-
-            # Store chunks and map to facts
+            # Handle document tracking for all documents
             step_start = time.time()
-            chunk_id_map = {}
-            if document_id and chunks:
-                chunk_id_map = await chunk_storage.store_chunks_batch(conn, bank_id, document_id, chunks)
-                log_buffer.append(f"[3] Store chunks: {len(chunks)} chunks in {time.time() - step_start:.3f}s")
+            # Map None document_id to generated UUIDs
+            doc_id_mapping = {}  # Maps original doc_id (including None) to actual doc_id used
 
-                # Map chunk_ids to facts
-                facts_chunk_indices = [fact.chunk_index for fact in extracted_facts]
-                chunk_ids = chunk_storage.map_facts_to_chunks(facts_chunk_indices, chunk_id_map)
-                for processed_fact, chunk_id in zip(processed_facts, chunk_ids):
-                    processed_fact.chunk_id = chunk_id
+            if document_id:
+                # Legacy: single document_id parameter
+                combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
+                retain_params = {}
+                if contents_dicts:
+                    first_item = contents_dicts[0]
+                    if first_item.get("context"):
+                        retain_params["context"] = first_item["context"]
+                    if first_item.get("event_date"):
+                        retain_params["event_date"] = first_item["event_date"].isoformat() if hasattr(first_item["event_date"], "isoformat") else str(first_item["event_date"])
+                    if first_item.get("metadata"):
+                        retain_params["metadata"] = first_item["metadata"]
+
+                await fact_storage.handle_document_tracking(
+                    conn, bank_id, document_id, combined_content, is_first_batch, retain_params
+                )
+                document_ids_added.append(document_id)
+                doc_id_mapping[None] = document_id  # For backwards compatibility
+            else:
+                # Handle per-item document_ids (create documents if any item has document_id or if chunks exist)
+                has_any_doc_ids = any(item.get("document_id") for item in contents_dicts)
+
+                if has_any_doc_ids or chunks:
+                    for original_doc_id, doc_contents in contents_by_doc.items():
+                        actual_doc_id = original_doc_id
+
+                        # Only create document record if:
+                        # 1. Item has explicit document_id, OR
+                        # 2. There are chunks (need document for chunk storage)
+                        should_create_doc = (original_doc_id is not None) or chunks
+
+                        if should_create_doc:
+                            if actual_doc_id is None:
+                                # No document_id but have chunks - generate one
+                                actual_doc_id = str(uuid.uuid4())
+
+                            # Store mapping for later use
+                            doc_id_mapping[original_doc_id] = actual_doc_id
+
+                            # Combine content for this document
+                            combined_content = "\n".join([c.get("content", "") for _, c in doc_contents])
+
+                            # Extract retain params from first content item
+                            retain_params = {}
+                            if doc_contents:
+                                first_item = doc_contents[0][1]
+                                if first_item.get("context"):
+                                    retain_params["context"] = first_item["context"]
+                                if first_item.get("event_date"):
+                                    retain_params["event_date"] = first_item["event_date"].isoformat() if hasattr(first_item["event_date"], "isoformat") else str(first_item["event_date"])
+                                if first_item.get("metadata"):
+                                    retain_params["metadata"] = first_item["metadata"]
+
+                            await fact_storage.handle_document_tracking(
+                                conn, bank_id, actual_doc_id, combined_content, is_first_batch, retain_params
+                            )
+                            document_ids_added.append(actual_doc_id)
+
+            if document_ids_added:
+                log_buffer.append(f"[2.5] Document tracking: {len(document_ids_added)} documents in {time.time() - step_start:.3f}s")
+
+            # Store chunks and map to facts for all documents
+            step_start = time.time()
+            chunk_id_map_by_doc = {}  # Maps (doc_id, chunk_index) -> chunk_id
+
+            if chunks:
+                # Group chunks by their source document
+                chunks_by_doc = defaultdict(list)
+                for chunk in chunks:
+                    # chunk.content_index tells us which content this chunk came from
+                    original_doc_id = contents_dicts[chunk.content_index].get("document_id")
+                    # Map to actual document_id (handles None -> generated UUID mapping)
+                    actual_doc_id = doc_id_mapping.get(original_doc_id, original_doc_id)
+                    if actual_doc_id is None and document_id:
+                        actual_doc_id = document_id
+                    chunks_by_doc[actual_doc_id].append(chunk)
+
+                # Store chunks for each document
+                for doc_id, doc_chunks in chunks_by_doc.items():
+                    chunk_id_map = await chunk_storage.store_chunks_batch(conn, bank_id, doc_id, doc_chunks)
+                    # Store mapping with document context
+                    for chunk_idx, chunk_id in chunk_id_map.items():
+                        chunk_id_map_by_doc[(doc_id, chunk_idx)] = chunk_id
+
+                log_buffer.append(f"[3] Store chunks: {len(chunks)} chunks for {len(chunks_by_doc)} documents in {time.time() - step_start:.3f}s")
+
+                # Map chunk_ids and document_ids to facts
+                for fact, processed_fact in zip(extracted_facts, processed_facts):
+                    # Get the original document_id for this fact's source content
+                    original_doc_id = contents_dicts[fact.content_index].get("document_id")
+                    # Map to actual document_id (handles None -> generated UUID mapping)
+                    actual_doc_id = doc_id_mapping.get(original_doc_id, original_doc_id)
+                    if actual_doc_id is None and document_id:
+                        actual_doc_id = document_id
+
+                    # Set document_id on the fact
+                    processed_fact.document_id = actual_doc_id
+
+                    # Map chunk_id if this fact came from a chunk
+                    if fact.chunk_index is not None:
+                        # Look up chunk_id using (doc_id, chunk_index)
+                        chunk_id = chunk_id_map_by_doc.get((actual_doc_id, fact.chunk_index))
+                        if chunk_id:
+                            processed_fact.chunk_id = chunk_id
+            else:
+                # No chunks - still need to set document_id on facts
+                for fact, processed_fact in zip(extracted_facts, processed_facts):
+                    original_doc_id = contents_dicts[fact.content_index].get("document_id")
+                    # Map to actual document_id (handles None -> generated UUID mapping)
+                    actual_doc_id = doc_id_mapping.get(original_doc_id, original_doc_id)
+                    if actual_doc_id is None and document_id:
+                        actual_doc_id = document_id
+                    processed_fact.document_id = actual_doc_id
 
             # Deduplication
             step_start = time.time()
@@ -171,15 +274,15 @@ async def retain_batch(
             if not non_duplicate_facts:
                 return [[] for _ in contents]
 
-            # Insert facts
+            # Insert facts (document_id is now stored per-fact)
             step_start = time.time()
-            unit_ids = await fact_storage.insert_facts_batch(conn, bank_id, non_duplicate_facts, document_id)
+            unit_ids = await fact_storage.insert_facts_batch(conn, bank_id, non_duplicate_facts)
             log_buffer.append(f"[5] Insert facts: {len(unit_ids)} units in {time.time() - step_start:.3f}s")
 
             # Process entities
             step_start = time.time()
             entity_links = await entity_processing.process_entities_batch(
-                entity_resolver, conn, bank_id, unit_ids, non_duplicate_facts
+                entity_resolver, conn, bank_id, unit_ids, non_duplicate_facts, log_buffer
             )
             log_buffer.append(f"[6] Process entities: {len(entity_links)} links in {time.time() - step_start:.3f}s")
 
@@ -213,20 +316,23 @@ async def retain_batch(
             total_time = time.time() - start_time
             log_buffer.append(f"{'='*60}")
             log_buffer.append(f"RETAIN_BATCH COMPLETE: {len(unit_ids)} units in {total_time:.3f}s")
+            if document_ids_added:
+                log_buffer.append(f"Documents: {', '.join(document_ids_added)}")
             log_buffer.append(f"{'='*60}")
 
             logger.info("\n" + "\n".join(log_buffer) + "\n")
 
-            # Trigger background tasks
-            await _trigger_background_tasks(
-                task_backend,
-                bank_id,
-                unit_ids,
-                non_duplicate_facts,
-                entity_links
-            )
+        # Trigger background tasks AFTER transaction commits
+        await _trigger_background_tasks(
+            task_backend,
+            regenerate_observations_fn,
+            bank_id,
+            unit_ids,
+            non_duplicate_facts,
+            entity_links
+        )
 
-            return result_unit_ids
+        return result_unit_ids
 
 
 def _map_results_to_contents(
@@ -261,12 +367,13 @@ def _map_results_to_contents(
 
 async def _trigger_background_tasks(
     task_backend,
+    regenerate_observations_fn,
     bank_id: str,
     unit_ids: List[str],
     facts: List[ProcessedFact],
     entity_links: List
 ) -> None:
-    """Trigger opinion reinforcement and observation regeneration tasks."""
+    """Trigger opinion reinforcement and observation regeneration (sync)."""
     # Trigger opinion reinforcement if there are entities
     fact_entities = [[e.name for e in fact.entities] for fact in facts]
     if any(fact_entities):
@@ -278,11 +385,11 @@ async def _trigger_background_tasks(
             'unit_entities': fact_entities
         })
 
-    # Trigger observation regeneration for top entities
+    # Regenerate observations synchronously for top entities
     TOP_N_ENTITIES = 5
     MIN_FACTS_THRESHOLD = 5
 
-    if entity_links:
+    if entity_links and regenerate_observations_fn:
         unique_entity_ids = set()
         for link in entity_links:
             # links are tuples: (unit_id, entity_id, confidence)
@@ -290,9 +397,9 @@ async def _trigger_background_tasks(
                 unique_entity_ids.add(str(link[1]))
 
         if unique_entity_ids:
-            await task_backend.submit_task({
-                'type': 'regenerate_observations',
-                'bank_id': bank_id,
-                'entity_ids': list(unique_entity_ids)[:TOP_N_ENTITIES],
-                'min_facts': MIN_FACTS_THRESHOLD
-            })
+            # Run observation regeneration synchronously
+            await regenerate_observations_fn(
+                bank_id=bank_id,
+                entity_ids=list(unique_entity_ids)[:TOP_N_ENTITIES],
+                min_facts=MIN_FACTS_THRESHOLD
+            )

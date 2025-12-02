@@ -79,6 +79,7 @@ class ExtractedFact:
     entities: List[str] = field(default_factory=list)
     occurred_start: Optional[datetime] = None
     occurred_end: Optional[datetime] = None
+    where: Optional[str] = None  # WHERE the fact occurred or is about
     causal_relations: List[CausalRelation] = field(default_factory=list)
 
     # Context from the content item
@@ -110,6 +111,9 @@ class ProcessedFact:
     context: str
     metadata: Dict[str, str]
 
+    # Location data
+    where: Optional[str] = None
+
     # Entities
     entities: List[EntityRef] = field(default_factory=list)
 
@@ -118,6 +122,9 @@ class ProcessedFact:
 
     # Chunk reference
     chunk_id: Optional[str] = None
+
+    # Document reference (denormalized for query performance)
+    document_id: Optional[str] = None
 
     # DB fields (set after insertion)
     unit_id: Optional[UUID] = None

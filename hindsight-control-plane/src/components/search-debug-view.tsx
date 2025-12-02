@@ -175,6 +175,14 @@ export function SearchDebugView() {
       );
     }
 
+    // Filter by fact type if multiple fact types are selected
+    let filteredResults = methodData.results;
+    if (pane.factTypes.length > 1 && pane.currentRetrievalFactType) {
+      filteredResults = methodData.results.filter(
+        (result: any) => result.fact_type === pane.currentRetrievalFactType
+      );
+    }
+
     // Get method-specific score description
     const scoreTooltips: Record<string, string> = {
       semantic: "Vector similarity score - measures conceptual similarity and paraphrasing (higher = more relevant)",
@@ -189,21 +197,36 @@ export function SearchDebugView() {
       <div className="p-4 overflow-auto">
         <h3 className="text-base font-bold mb-2 text-foreground">
           {methodData.method_name.toUpperCase()} Retrieval
-          {' '}({methodData.results.length} results, {methodData.duration_seconds?.toFixed(3)}s)
+          {pane.currentRetrievalFactType && pane.factTypes.length > 1 && (
+            <span className="ml-2 text-sm font-normal bg-primary/20 px-2 py-0.5 rounded">
+              {pane.currentRetrievalFactType} facts only
+            </span>
+          )}
+          {' '}({filteredResults.length} results{pane.factTypes.length > 1 && ` of ${methodData.results.length}`}, {methodData.duration_seconds?.toFixed(3)}s)
         </h3>
         <Table>
           <TableHeader>
             <TableRow className="bg-card border-2 border-primary">
               <TableHead><ColumnHeader label="Rank" tooltip="Position in this retrieval method's results" /></TableHead>
               <TableHead><ColumnHeader label="Text" tooltip="The memory content" /></TableHead>
+              {pane.factTypes.length > 1 && (
+                <TableHead><ColumnHeader label="Type" tooltip="Fact type (world, bank, opinion)" /></TableHead>
+              )}
               <TableHead><ColumnHeader label="Score" tooltip={scoreTooltip} /></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {methodData.results.map((result: any, idx: number) => (
+            {filteredResults.map((result: any, idx: number) => (
               <TableRow key={idx}>
                 <TableCell className="font-bold">#{result.rank}</TableCell>
                 <TableCell className="max-w-md">{result.text}</TableCell>
+                {pane.factTypes.length > 1 && (
+                  <TableCell>
+                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-primary/20">
+                      {result.fact_type || 'unknown'}
+                    </span>
+                  </TableCell>
+                )}
                 <TableCell>{result.score?.toFixed(4)}</TableCell>
               </TableRow>
             ))}

@@ -75,6 +75,13 @@ class TestDefaultApi(unittest.IsolatedAsyncioTestCase):
         """
         pass
 
+    async def test_get_chunk(self) -> None:
+        """Test case for get_chunk
+
+        Get chunk details
+        """
+        pass
+
     async def test_get_document(self) -> None:
         """Test case for get_document
 

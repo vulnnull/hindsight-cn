@@ -37,6 +37,7 @@ __all__ = [
     "Budget",
     "ChunkData",
     "ChunkIncludeOptions",
+    "ChunkResponse",
     "CreateBankRequest",
     "DeleteResponse",
     "DocumentResponse",
@@ -92,6 +93,7 @@ from hindsight_client_api.models.bank_profile_response import BankProfileRespons
 from hindsight_client_api.models.budget import Budget as Budget
 from hindsight_client_api.models.chunk_data import ChunkData as ChunkData
 from hindsight_client_api.models.chunk_include_options import ChunkIncludeOptions as ChunkIncludeOptions
+from hindsight_client_api.models.chunk_response import ChunkResponse as ChunkResponse
 from hindsight_client_api.models.create_bank_request import CreateBankRequest as CreateBankRequest
 from hindsight_client_api.models.delete_response import DeleteResponse as DeleteResponse
 from hindsight_client_api.models.document_response import DocumentResponse as DocumentResponse

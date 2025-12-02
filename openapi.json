@@ -658,6 +658,46 @@
         }
       }
     },
+    "/v1/default/chunks/{chunk_id}": {
+      "get": {
+        "summary": "Get chunk details",
+        "description": "Get a specific chunk by its ID",
+        "operationId": "get_chunk",
+        "parameters": [
+          {
+            "name": "chunk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chunk Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChunkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/default/banks/{bank_id}/operations": {
       "get": {
         "summary": "List async operations",
@@ -934,7 +974,7 @@
     "/v1/default/banks/{bank_id}/memories": {
       "post": {
         "summary": "Retain memories",
-        "description": "Retain memory items with automatic fact extraction.\n\n    This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing\n    via the async parameter.\n\n    Features:\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with automatic upsert (when document_id is provided)\n    - Temporal and semantic linking\n    - Optional asynchronous processing\n\n    The system automatically:\n    1. Extracts semantic facts from the content\n    2. Generates embeddings\n    3. Deduplicates similar facts\n    4. Creates temporal, semantic, and entity links\n    5. Tracks document metadata\n\n    When async=true:\n    - Returns immediately after queuing the task\n    - Processing happens in the background\n    - Use the operations endpoint to monitor progress\n\n    When async=false (default):\n    - Waits for processing to complete\n    - Returns after all memories are stored\n\n    Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).",
+        "description": "Retain memory items with automatic fact extraction.\n\n    This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing\n    via the async parameter.\n\n    Features:\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with automatic upsert (when document_id is provided on items)\n    - Temporal and semantic linking\n    - Optional asynchronous processing\n\n    The system automatically:\n    1. Extracts semantic facts from the content\n    2. Generates embeddings\n    3. Deduplicates similar facts\n    4. Creates temporal, semantic, and entity links\n    5. Tracks document metadata\n\n    When async=true:\n    - Returns immediately after queuing the task\n    - Processing happens in the background\n    - Use the operations endpoint to monitor progress\n\n    When async=false (default):\n    - Waits for processing to complete\n    - Returns after all memories are stored\n\n    Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.",
         "operationId": "retain_memories",
         "parameters": [
           {
@@ -1279,6 +1319,53 @@
         "type": "object",
         "title": "ChunkIncludeOptions",
         "description": "Options for including chunks in recall results."
+      },
+      "ChunkResponse": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "bank_id": {
+            "type": "string",
+            "title": "Bank Id"
+          },
+          "chunk_index": {
+            "type": "integer",
+            "title": "Chunk Index"
+          },
+          "chunk_text": {
+            "type": "string",
+            "title": "Chunk Text"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "document_id",
+          "bank_id",
+          "chunk_index",
+          "chunk_text",
+          "created_at"
+        ],
+        "title": "ChunkResponse",
+        "description": "Response model for get chunk endpoint.",
+        "example": {
+          "bank_id": "user123",
+          "chunk_id": "user123_session_1_0",
+          "chunk_index": 0,
+          "chunk_text": "This is the first chunk of the document...",
+          "created_at": "2024-01-15T10:30:00Z",
+          "document_id": "session_1"
+        }
       },
       "CreateBankRequest": {
         "properties": {
@@ -1908,6 +1995,18 @@
               }
             ],
             "title": "Metadata"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id",
+            "description": "Optional document ID for this memory item. Items with the same document_id are grouped together for efficient processing."
           }
         },
         "type": "object",
@@ -1919,6 +2018,7 @@
         "example": {
           "content": "Alice mentioned she's working on a new ML model",
           "context": "team meeting",
+          "document_id": "meeting_notes_2024_01_15",
           "metadata": {
             "channel": "engineering",
             "source": "slack"
@@ -2457,17 +2557,6 @@
               }
             ],
             "description": "Include facts that the answer is based on. Set to {} to enable, null to disable (default: disabled)."
-          },
-          "entities": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/EntityIncludeOptions"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Include entity observations. Set to {max_tokens: N} to enable, null to disable (default: disabled)."
           }
         },
         "type": "object",
@@ -2512,7 +2601,7 @@
           },
           "include": {
             "$ref": "#/components/schemas/ReflectIncludeOptions",
-            "description": "Options for including additional data (both disabled by default)"
+            "description": "Options for including additional data (disabled by default)"
           }
         },
         "type": "object",
@@ -2532,9 +2621,6 @@
             }
           ],
           "include": {
-            "entities": {
-              "max_tokens": 500
-            },
             "facts": {}
           },
           "query": "What do you think about artificial intelligence?"
@@ -2586,17 +2672,6 @@
             "type": "array",
             "title": "Items"
           },
-          "document_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Document Id"
-          },
           "async": {
             "type": "boolean",
             "title": "Async",
@@ -2612,14 +2687,15 @@
         "description": "Request model for retain endpoint.",
         "example": {
           "async": false,
-          "document_id": "conversation_123",
           "items": [
             {
               "content": "Alice works at Google",
-              "context": "work"
+              "context": "work",
+              "document_id": "conversation_123"
             },
             {
               "content": "Bob went hiking yesterday",
+              "document_id": "conversation_123",
               "timestamp": "2024-01-15T10:00:00Z"
             }
           ]
@@ -2634,17 +2710,6 @@
           "bank_id": {
             "type": "string",
             "title": "Bank Id"
-          },
-          "document_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Document Id"
           },
           "items_count": {
             "type": "integer",
@@ -2668,7 +2733,6 @@
         "example": {
           "async": false,
           "bank_id": "user123",
-          "document_id": "conversation_123",
           "items_count": 2,
           "success": true
         }

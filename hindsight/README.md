@@ -11,7 +11,7 @@ from hindsight import start_server, HindsightClient
 server = start_server(
     llm_provider="groq",
     llm_api_key="your-api-key",
-    llm_model="llama-3.3-70b-versatile"
+    llm_model="openai/gpt-oss-120b"
 )
 
 # Create client

@@ -8,7 +8,6 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **success** | **bool** |  | 
 **bank_id** | **str** |  | 
-**document_id** | **str** |  | [optional] 
 **items_count** | **int** |  | 
 **var_async** | **bool** | Whether the operation was processed asynchronously | 
 

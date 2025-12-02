@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **timestamp** | **datetime** |  | [optional] 
 **context** | **str** |  | [optional] 
 **metadata** | **Dict[str, str]** |  | [optional] 
+**document_id** | **str** |  | [optional] 
 
 ## Example
 

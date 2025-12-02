@@ -12,6 +12,14 @@ if [ ! -f "$ROOT_DIR/.env" ]; then
   echo ""
 fi
 
+echo "🔨 Building TypeScript SDK first to ensure it's up to date..."
+cd "$ROOT_DIR/hindsight-clients/typescript" || exit 1
+npm run build
+echo "✅ SDK built successfully"
+echo ""
+
+cd "$ROOT_DIR/hindsight-control-plane" || exit 1
+
 echo "🚀 Starting Control Plane (Next.js dev server)..."
 if [ -f "$ROOT_DIR/.env" ]; then
   echo "📄 Loading environment from $ROOT_DIR/.env"

@@ -13,6 +13,7 @@ hindsight_client_api/docs/BankProfileResponse.md
 hindsight_client_api/docs/Budget.md
 hindsight_client_api/docs/ChunkData.md
 hindsight_client_api/docs/ChunkIncludeOptions.md
+hindsight_client_api/docs/ChunkResponse.md
 hindsight_client_api/docs/CreateBankRequest.md
 hindsight_client_api/docs/DefaultApi.md
 hindsight_client_api/docs/DeleteResponse.md
@@ -54,6 +55,7 @@ hindsight_client_api/models/bank_profile_response.py
 hindsight_client_api/models/budget.py
 hindsight_client_api/models/chunk_data.py
 hindsight_client_api/models/chunk_include_options.py
+hindsight_client_api/models/chunk_response.py
 hindsight_client_api/models/create_bank_request.py
 hindsight_client_api/models/delete_response.py
 hindsight_client_api/models/document_response.py
@@ -93,6 +95,7 @@ hindsight_client_api/test/test_bank_profile_response.py
 hindsight_client_api/test/test_budget.py
 hindsight_client_api/test/test_chunk_data.py
 hindsight_client_api/test/test_chunk_include_options.py
+hindsight_client_api/test/test_chunk_response.py
 hindsight_client_api/test/test_create_bank_request.py
 hindsight_client_api/test/test_default_api.py
 hindsight_client_api/test/test_delete_response.py

@@ -62,12 +62,22 @@ class LongMemEvalDataset(BenchmarkDataset):
             # Parse session date
             session_date = self._parse_date(date_str) if date_str else datetime.now(timezone.utc)
 
-            session_content = json.dumps(session_turns)
+            # Clean session turns - remove has_answer key if present
+            cleaned_turns = []
+            for turn in session_turns:
+                if isinstance(turn, dict):
+                    # Create a copy without has_answer
+                    cleaned_turn = {k: v for k, v in turn.items() if k != 'has_answer'}
+                    cleaned_turns.append(cleaned_turn)
+                else:
+                    cleaned_turns.append(turn)
+
+            session_content = json.dumps(cleaned_turns)
             question_id = item.get("question_id", "unknown")
             document_id = f"{question_id}_{session_id}"
             batch_contents.append({
                 "content": session_content,
-                "context": f"Session {session_id} - you are the assistant in this conversation - happened on {session_date.strftime('%Y-%m-%d %H:%M:%S')} UTC.",
+                "context": f"Session {document_id} - you are the assistant in this conversation - happened on {session_date.strftime('%Y-%m-%d %H:%M:%S')} UTC.",
                 "event_date": session_date,
                 "document_id": document_id
             })
@@ -125,7 +135,7 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
 
     def __init__(self):
         """Initialize with LLM configuration for memory operations."""
-        self.llm_config = LLMConfig.for_memory()
+        self.llm_config = LLMConfig.for_judge()
         self.client = self.llm_config._client
         self.model = self.llm_config.model
 
@@ -133,7 +143,8 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
                 self,
                 question: str,
                 recall_result: Dict[str, Any],
-                question_date: Optional[datetime] = None
+                question_date: Optional[datetime] = None,
+                question_type: Optional[str] = None
         ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
             """
             Generate answer from retrieved memories using Groq.
@@ -142,6 +153,7 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
                 question: The question text
                 recall_result: Full RecallResult dict containing results, entities, chunks, and trace
                 question_date: Date when the question was asked (for temporal context)
+                question_type: Question category (e.g., 'single-session-user', 'multi-session-assistant')
 
             Returns:
                 Tuple of (answer, reasoning, None)
@@ -150,59 +162,53 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
             context = json.dumps(recall_result)
 
             # Format question date if provided
-            question_date_str = ""
-            if question_date:
-                question_date_str = f"\n# CURRENT DATE:\nThe question is being asked on: {question_date.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            formatted_question_date = question_date.strftime('%Y-%m-%d %H:%M:%S UTC') if question_date else "Not specified"
 
             # Use LLM to generate answer
             try:
                 answer_obj = await self.llm_config.call(
                     messages=[
                         {
-                            "role": "system",
-                            "content": "You are a helpful expert assistant answering questions from users based on the provided context."
-                        },
-                        {
                             "role": "user",
-                            "content": f"""
-    # CONTEXT:
-    You have access to memories from a conversation.
-{question_date_str}
-    # INSTRUCTIONS:
-    1. Carefully analyze all provided memories
-    2. Pay special attention to the timestamps to determine the answer
-    3. If the question asks about a specific event or fact, look for direct evidence in the memories
-    4. If the memories contain contradictory information, prioritize the most recent memory
-    5. Be as specific as possible when talking about people, places, and events
-    6. The questions are from the users, so when they say "Did I ..", it's referred to the user.
+                            "content": f"""You are a helpful assistant that must answer user questions based on the previous conversations.
 
-    Example:
+**How to Answer:**
+1. Start by scanning retrieved context to understand the facts and events that happened and the timeline.
+2. Reason about all the memories and find the right answer, considering the most recent memory as an update of the current facts
 
-    Memory: (2023-03-15T16:33:00Z) I went to the vet yesterday.
-    Question: What day did I go to the vet?
-    Correct Answer: March 15, 2023
-    Explanation:
-    Even though the phrase says "yesterday," the timestamp shows the event was recorded as happening on March 15th. Therefore, the actual vet visit happened on that date, regardless of the word "yesterday" in the text.
-    Context:
+In general the answer must be comprehensive and plenty of details from the retrieved context.
 
-    {context}
+For quantitative questions, use numbers and units. Example: 'How many..', just answer the number and which ones. Include EACH item even if it's not the most recent one. Reason and do calculation for complex questions.
+If questions asks a location (where...?) make sure to include the location name.
+For recommendations/suggestions, use the context to understand the user's preferences and provide a possible answer based on that and explain why you chose that answer based on user preferences. Include as much preferences as possible in your answer.
+For specific number/value questions, use the context to understand what is the most up-to-date number based on recency.
+For open questions, include as much details as possible from different sources that are relevant.
+For questions where a specific entity is mentioned and it's different from your memory, just say the truth, don't make up anything just to fulfill the question. For example, if the question is about a specific sport, you should consider if the memories and the question are about the same sport. 
 
-    Question: {question}
-    Answer:
 
-    """
+Question: {question}
+Question Date: {formatted_question_date}
+
+Retrieved Context:
+{context}
+
+
+Answer:
+"""
                         }
                     ],
                     response_format=QuestionAnswer,
-                    scope="memory"
+                    scope="memory",
+                    max_tokens=8192,
                 )
-                return answer_obj.answer, answer_obj.reasoning, None
+                return answer_obj.answer, answer_obj.reasoning + " (question date: " + formatted_question_date + ")", None
             except Exception as e:
                 return f"Error generating answer: {str(e)}", "Error occurred during answer generation.", None
 
 
 async def run_benchmark(
     max_instances: int = None,
+    max_instances_per_category: int = None,
     max_questions_per_instance: int = None,
     thinking_budget: int = 500,
     max_tokens: int = 8192,
@@ -211,13 +217,15 @@ async def run_benchmark(
     question_id: str = None,
     only_failed: bool = False,
     only_invalid: bool = False,
-    category: str = None
+    category: str = None,
+    max_concurrent_items: int = 1
 ):
     """
     Run the LongMemEval benchmark.
 
     Args:
-        max_instances: Maximum number of instances to evaluate (None for all)
+        max_instances: Maximum number of instances to evaluate (None for all). Mutually exclusive with max_instances_per_category and category.
+        max_instances_per_category: Maximum number of instances per category (None for all). Mutually exclusive with max_instances and category.
         max_questions_per_instance: Maximum questions per instance (for testing)
         thinking_budget: Thinking budget for spreading activation search
         max_tokens: Maximum tokens to retrieve from memories
@@ -226,10 +234,17 @@ async def run_benchmark(
         question_id: Optional question ID to filter (e.g., 'e47becba'). Useful with --skip-ingestion.
         only_failed: If True, only run questions that were previously marked as incorrect (is_correct=False)
         only_invalid: If True, only run questions that were previously marked as invalid (is_invalid=True)
-        category: Optional category to filter questions (e.g., 'single-session-user', 'multi-session', 'temporal-reasoning')
+        category: Optional category to filter questions (e.g., 'single-session-user', 'multi-session', 'temporal-reasoning'). Mutually exclusive with max_instances and max_instances_per_category.
+        max_concurrent_items: Maximum number of instances to process in parallel (default: 1 for sequential)
     """
     from rich.console import Console
     console = Console()
+
+    # Validate mutually exclusive arguments
+    exclusive_args = [max_instances is not None, max_instances_per_category is not None, category is not None]
+    if sum(exclusive_args) > 1:
+        console.print("[red]Error: --max-instances, --max-questions-per-category, and --category are mutually exclusive[/red]")
+        return
 
     # Check dataset exists, download if needed
     dataset_path = Path(__file__).parent / "datasets" / "longmemeval_s_cleaned.json"
@@ -238,6 +253,35 @@ async def run_benchmark(
             console.print(f"[red]Failed to download dataset. Please download manually:[/red]")
             console.print("[yellow]curl -L 'https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json' -o benchmarks/longmemeval/datasets/longmemeval_s_cleaned.json[/yellow]")
             return
+
+    # Initialize components
+    dataset = LongMemEvalDataset()
+
+    # Start with all items or load from dataset
+    original_dataset_items = None
+    filtered_items = None
+
+    # Handle max_instances_per_category (aka max_questions_per_category)
+    if max_instances_per_category:
+        console.print(f"[cyan]Limiting to {max_instances_per_category} questions per category[/cyan]")
+        if original_dataset_items is None:
+            original_dataset_items = dataset.load(dataset_path, max_items=None)
+
+        # Group by category and take max_instances_per_category from each
+        from collections import defaultdict
+        category_items = defaultdict(list)
+        for item in original_dataset_items:
+            cat = item.get('question_type', 'unknown')
+            category_items[cat].append(item)
+
+        # Take up to max_instances_per_category from each category
+        filtered_items = []
+        for cat, items in sorted(category_items.items()):
+            limited = items[:max_instances_per_category]
+            filtered_items.extend(limited)
+            console.print(f"  [green]{cat}:[/green] {len(limited)} questions (of {len(items)} available)")
+
+        console.print(f"[green]Total: {len(filtered_items)} questions across {len(category_items)} categories[/green]")
 
     # Load previous results if filtering for failed/invalid questions
     failed_question_ids = set()
@@ -265,13 +309,6 @@ async def run_benchmark(
             console.print(f"[cyan]Filtering to {len(failed_question_ids)} questions that failed (is_correct=False)[/cyan]")
         if only_invalid:
             console.print(f"[cyan]Filtering to {len(invalid_question_ids)} questions that were invalid (is_invalid=True)[/cyan]")
-
-    # Initialize components
-    dataset = LongMemEvalDataset()
-
-    # Start with all items or load from dataset
-    original_dataset_items = None
-    filtered_items = None
 
     # Filter dataset by category if specified
     if category:
@@ -337,7 +374,7 @@ async def run_benchmark(
         memory=memory
     )
 
-    # If filtering by category, failed, or invalid, we need to use a custom dataset that only returns those items
+    # If filtering by category, failed, invalid, or max_instances_per_category, we need to use a custom dataset that only returns those items
     # We'll temporarily replace the dataset's load method
     if filtered_items is not None:
         original_load = dataset.load
@@ -353,12 +390,12 @@ async def run_benchmark(
     # Create results directory if it doesn't exist
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    merge_with_existing = (filln or question_id is not None or only_failed or only_invalid or category is not None)
+    merge_with_existing = (filln or question_id is not None or only_failed or only_invalid or category is not None or max_instances_per_category is not None)
 
     results = await runner.run(
         dataset_path=dataset_path,
         agent_id="longmemeval",  # Will be suffixed with question_id per item
-        max_items=max_instances,
+        max_items=max_instances if not max_instances_per_category else None,  # Don't apply max_items when using per-category limit
         max_questions_per_item=max_questions_per_instance,
         thinking_budget=thinking_budget,
         max_tokens=max_tokens,
@@ -369,6 +406,7 @@ async def run_benchmark(
         clear_agent_per_item=True,  # Use unique agent_id per question
         filln=filln,  # Only process questions without indexed data
         specific_item=question_id,  # Optional filter for specific question ID
+        max_concurrent_items=max_concurrent_items,  # Parallel instance processing
         output_path=output_path,  # Save results incrementally
         merge_with_existing=merge_with_existing  # Merge when using --fill, --category, --only-failed, --only-invalid flags or specific question
     )
@@ -477,7 +515,15 @@ if __name__ == "__main__":
         "--max-instances",
         type=int,
         default=None,
-        help="Limit number of instances to evaluate (default: all 500)"
+        help="Limit TOTAL number of questions to evaluate (default: all 500). For per-category limits, use --max-questions-per-category instead."
+    )
+    parser.add_argument(
+        "--max-instances-per-category",
+        "--max-questions-per-category",  # Alias since each instance = 1 question in LongMemEval
+        type=int,
+        default=None,
+        dest="max_instances_per_category",
+        help="Limit number of questions per category (e.g., 20 = 20 questions from each of the 6 categories = 120 total). Mutually exclusive with --max-instances and --category."
     )
     parser.add_argument(
         "--max-questions",
@@ -527,7 +573,13 @@ if __name__ == "__main__":
         "--category",
         type=str,
         default=None,
-        help="Filter questions by category/question_type. Available categories: 'single-session-user', 'multi-session', 'single-session-preference', 'temporal-reasoning', 'knowledge-update', 'single-session-assistant'."
+        help="Filter questions by category/question_type. Available categories: 'single-session-user', 'multi-session', 'single-session-preference', 'temporal-reasoning', 'knowledge-update', 'single-session-assistant'. Mutually exclusive with --max-instances and --max-instances-per-category."
+    )
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=1,
+        help="Number of instances to process in parallel (default: 1 for sequential). Higher values speed up evaluation but use more memory."
     )
 
     args = parser.parse_args()
@@ -536,8 +588,18 @@ if __name__ == "__main__":
     if args.only_failed and args.only_invalid:
         parser.error("Cannot use both --only-failed and --only-invalid at the same time")
 
+    # Validate mutually exclusive arguments
+    exclusive_count = sum([
+        args.max_instances is not None,
+        args.max_instances_per_category is not None,
+        args.category is not None
+    ])
+    if exclusive_count > 1:
+        parser.error("--max-instances, --max-questions-per-category, and --category are mutually exclusive")
+
     results = asyncio.run(run_benchmark(
         max_instances=args.max_instances,
+        max_instances_per_category=args.max_instances_per_category,
         max_questions_per_instance=args.max_questions,
         thinking_budget=args.thinking_budget,
         max_tokens=args.max_tokens,
@@ -546,5 +608,6 @@ if __name__ == "__main__":
         question_id=args.question_id,
         only_failed=args.only_failed,
         only_invalid=args.only_invalid,
-        category=args.category
+        category=args.category,
+        max_concurrent_items=args.parallel
     ))

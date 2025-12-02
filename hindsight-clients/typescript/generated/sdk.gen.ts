@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddBankBackgroundData, AddBankBackgroundErrors, AddBankBackgroundResponses, CancelOperationData, CancelOperationErrors, CancelOperationResponses, ClearBankMemoriesData, ClearBankMemoriesErrors, ClearBankMemoriesResponses, CreateOrUpdateBankData, CreateOrUpdateBankErrors, CreateOrUpdateBankResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, GetAgentStatsData, GetAgentStatsErrors, GetAgentStatsResponses, GetBankProfileData, GetBankProfileErrors, GetBankProfileResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetEntityData, GetEntityErrors, GetEntityResponses, GetGraphData, GetGraphErrors, GetGraphResponses, ListBanksData, ListBanksResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListEntitiesData, ListEntitiesErrors, ListEntitiesResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, MetricsEndpointMetricsGetData, MetricsEndpointMetricsGetResponses, RecallMemoriesData, RecallMemoriesErrors, RecallMemoriesResponses, ReflectData, ReflectErrors, ReflectResponses, RegenerateEntityObservationsData, RegenerateEntityObservationsErrors, RegenerateEntityObservationsResponses, RetainMemoriesData, RetainMemoriesErrors, RetainMemoriesResponses, UpdateBankPersonalityData, UpdateBankPersonalityErrors, UpdateBankPersonalityResponses } from './types.gen';
+import type { AddBankBackgroundData, AddBankBackgroundErrors, AddBankBackgroundResponses, CancelOperationData, CancelOperationErrors, CancelOperationResponses, ClearBankMemoriesData, ClearBankMemoriesErrors, ClearBankMemoriesResponses, CreateOrUpdateBankData, CreateOrUpdateBankErrors, CreateOrUpdateBankResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, GetAgentStatsData, GetAgentStatsErrors, GetAgentStatsResponses, GetBankProfileData, GetBankProfileErrors, GetBankProfileResponses, GetChunkData, GetChunkErrors, GetChunkResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetEntityData, GetEntityErrors, GetEntityResponses, GetGraphData, GetGraphErrors, GetGraphResponses, ListBanksData, ListBanksResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListEntitiesData, ListEntitiesErrors, ListEntitiesResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, MetricsEndpointMetricsGetData, MetricsEndpointMetricsGetResponses, RecallMemoriesData, RecallMemoriesErrors, RecallMemoriesResponses, ReflectData, ReflectErrors, ReflectResponses, RegenerateEntityObservationsData, RegenerateEntityObservationsErrors, RegenerateEntityObservationsResponses, RetainMemoriesData, RetainMemoriesErrors, RetainMemoriesResponses, UpdateBankPersonalityData, UpdateBankPersonalityErrors, UpdateBankPersonalityResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -147,6 +147,13 @@ export const deleteDocument = <ThrowOnError extends boolean = false>(options: Op
 export const getDocument = <ThrowOnError extends boolean = false>(options: Options<GetDocumentData, ThrowOnError>) => (options.client ?? client).get<GetDocumentResponses, GetDocumentErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/documents/{document_id}', ...options });
 
 /**
+ * Get chunk details
+ *
+ * Get a specific chunk by its ID
+ */
+export const getChunk = <ThrowOnError extends boolean = false>(options: Options<GetChunkData, ThrowOnError>) => (options.client ?? client).get<GetChunkResponses, GetChunkErrors, ThrowOnError>({ url: '/v1/default/chunks/{chunk_id}', ...options });
+
+/**
  * List async operations
  *
  * Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations
@@ -228,7 +235,7 @@ export const clearBankMemories = <ThrowOnError extends boolean = false>(options:
  * - Efficient batch processing
  * - Automatic fact extraction from natural language
  * - Entity recognition and linking
- * - Document tracking with automatic upsert (when document_id is provided)
+ * - Document tracking with automatic upsert (when document_id is provided on items)
  * - Temporal and semantic linking
  * - Optional asynchronous processing
  *
@@ -248,7 +255,7 @@ export const clearBankMemories = <ThrowOnError extends boolean = false>(options:
  * - Waits for processing to complete
  * - Returns after all memories are stored
  *
- * Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
+ * Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.
  */
 export const retainMemories = <ThrowOnError extends boolean = false>(options: Options<RetainMemoriesData, ThrowOnError>) => (options.client ?? client).post<RetainMemoriesResponses, RetainMemoriesErrors, ThrowOnError>({
     url: '/v1/default/banks/{bank_id}/memories',

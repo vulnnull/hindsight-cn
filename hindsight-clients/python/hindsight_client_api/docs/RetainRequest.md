@@ -7,7 +7,6 @@ Request model for retain endpoint.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **items** | [**List[MemoryItem]**](MemoryItem.md) |  | 
-**document_id** | **str** |  | [optional] 
 **var_async** | **bool** | If true, process asynchronously in background. If false, wait for completion (default: false) | [optional] [default to False]
 
 ## Example

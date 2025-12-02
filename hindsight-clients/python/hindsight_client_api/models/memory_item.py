@@ -31,7 +31,8 @@ class MemoryItem(BaseModel):
     timestamp: Optional[datetime] = None
     context: Optional[StrictStr] = None
     metadata: Optional[Dict[str, StrictStr]] = None
-    __properties: ClassVar[List[str]] = ["content", "timestamp", "context", "metadata"]
+    document_id: Optional[StrictStr] = None
+    __properties: ClassVar[List[str]] = ["content", "timestamp", "context", "metadata", "document_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -87,6 +88,11 @@ class MemoryItem(BaseModel):
         if self.metadata is None and "metadata" in self.model_fields_set:
             _dict['metadata'] = None
 
+        # set to None if document_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.document_id is None and "document_id" in self.model_fields_set:
+            _dict['document_id'] = None
+
         return _dict
 
     @classmethod
@@ -102,7 +108,8 @@ class MemoryItem(BaseModel):
             "content": obj.get("content"),
             "timestamp": obj.get("timestamp"),
             "context": obj.get("context"),
-            "metadata": obj.get("metadata")
+            "metadata": obj.get("metadata"),
+            "document_id": obj.get("document_id")
         })
         return _obj
 

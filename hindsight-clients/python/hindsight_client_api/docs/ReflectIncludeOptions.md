@@ -7,7 +7,6 @@ Options for including additional data in reflect results.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **facts** | **object** | Options for including facts (based_on) in reflect results. | [optional] 
-**entities** | [**EntityIncludeOptions**](EntityIncludeOptions.md) |  | [optional] 
 
 ## Example
 

@@ -28,23 +28,19 @@ class Fact(BaseModel):
     Final fact model for storage - built from lenient parsing of LLM response.
 
     This is what fact_extraction returns and what the rest of the pipeline expects.
-    Only includes fields with meaningful values - nulls/empties are omitted.
+    Combined fact text format: "what | when | where | who | why"
     """
     # Required fields
-    fact: str = Field(description="Combined fact text from all dimensions")
+    fact: str = Field(description="Combined fact text: what | when | where | who | why")
     fact_type: Literal["world", "bank", "opinion"] = Field(description="Perspective: world/bank/opinion")
-
-    # Optional dimension fields
-    emotional_significance: Optional[str] = None
-    reasoning_motivation: Optional[str] = None
-    preferences_opinions: Optional[str] = None
-    sensory_details: Optional[str] = None
-    observations: Optional[str] = None
 
     # Optional temporal fields
     occurred_start: Optional[str] = None
     occurred_end: Optional[str] = None
     mentioned_at: Optional[str] = None
+
+    # Optional location field
+    where: Optional[str] = Field(None, description="WHERE the fact occurred or is about (specific location, place, or area)")
 
     # Optional structured data
     entities: Optional[List[Entity]] = None
@@ -74,75 +70,93 @@ class CausalRelation(BaseModel):
 
 
 class ExtractedFact(BaseModel):
-    """A single extracted fact with structured dimensions for comprehensive capture."""
+    """A single extracted fact with 5 required dimensions for comprehensive capture."""
 
     model_config = ConfigDict(
         json_schema_mode="validation",
-        # Only require truly critical fields - be lenient with everything else
         json_schema_extra={
-            "required": ["factual_core", "fact_type"]
+            "required": ["what", "when", "where", "who", "why", "fact_type"]
         }
     )
 
-    # Core factual dimension (CRITICAL - required)
-    factual_core: str = Field(
-        description="ACTUAL FACTS - what literally happened/was said. MUST be a complete, grammatically correct sentence with subject and verb. Capture WHAT was said, not just THAT something was said! 'Gina said Jon is the perfect mentor with positivity and determination' NOT 'Jon received encouragement'. Preserve: compliments, assessments, descriptions, key phrases. Be specific!"
+    # ==========================================================================
+    # FIVE REQUIRED DIMENSIONS - LLM must think about each one
+    # ==========================================================================
+
+    what: str = Field(
+        description="WHAT happened - COMPLETE, DETAILED description with ALL specifics. "
+                   "NEVER summarize or omit details. Include: exact actions, objects, quantities, specifics. "
+                   "BE VERBOSE - capture every detail that was mentioned. "
+                   "Example: 'Emily got married to Sarah at a rooftop garden ceremony with 50 guests attending and a live jazz band playing' "
+                   "NOT: 'A wedding happened' or 'Emily got married'"
     )
 
-    # Optional dimensions - only include if present in the text
-    # CRITICAL: Each dimension MUST be a complete, standalone sentence that reads naturally
-    emotional_significance: Optional[str] = Field(
-        default=None,
-        description="Emotions, feelings, personal meaning as a COMPLETE SENTENCE. Include subject + emotion/feeling. Examples: 'Sarah felt thrilled about the promotion', 'This was her favorite memory from childhood', 'The experience was magical for everyone involved', 'John found the loss devastating', 'She considers this her proudest moment'"
-    )
-    reasoning_motivation: Optional[str] = Field(
-        default=None,
-        description="WHY it happened as a COMPLETE SENTENCE. Include subject + motivation/reason. Examples: 'She did this because she wanted to celebrate', 'He wrote the book to cope with grief', 'She was motivated by curiosity about the topic'"
-    )
-    preferences_opinions: Optional[str] = Field(
-        default=None,
-        description="Likes, dislikes, beliefs, values as a COMPLETE SENTENCE. Include subject + preference/opinion. Examples: 'Sarah loves coffee and drinks it daily', 'He thinks AI is transformative technology', 'She prefers working remotely over office work'"
-    )
-    sensory_details: Optional[str] = Field(
-        default=None,
-        description="Visual, auditory, physical descriptions as a COMPLETE SENTENCE. Include subject + descriptive details. USE EXACT WORDS from text! Examples: 'She has bright orange hair', 'The dancer moved so gracefully on stage', 'The beach was awesome', 'The movie had epic visuals', 'The water was freezing cold'"
-    )
-    observations: Optional[str] = Field(
-        default=None,
-        description="Observations, inferences, and specific details/metrics as a COMPLETE SENTENCE. Include subject + observed fact. Use this to capture: background facts, achievements, metrics, personal records, skills. Examples: 'Calvin traveled to Miami for the shoot', 'Gina won dance trophies in competitions', 'She knows programming from previous projects', 'User's personal best 5K time is 25:50', 'Sarah has completed 15 marathons', 'He speaks three languages fluently'"
+    when: str = Field(
+        description="WHEN it happened - ALWAYS include temporal information if mentioned. "
+                   "Include: specific dates, times, durations, relative time references. "
+                   "Examples: 'on June 15th, 2024 at 3pm', 'last weekend', 'for the past 3 years', 'every morning at 6am'. "
+                   "Write 'N/A' ONLY if absolutely no temporal context exists. Prefer converting to absolute dates when possible."
     )
 
-    # Fact kind - optional hint for LLM thinking, not critical for extraction
-    # We don't strictly validate this since it's just guidance for temporal handling
-    fact_kind: Optional[str] = Field(
+    where: str = Field(
+        description="WHERE it happened or is about - SPECIFIC locations, places, areas, regions if applicable. "
+                   "Include: cities, neighborhoods, venues, buildings, countries, specific addresses when mentioned. "
+                   "Examples: 'downtown San Francisco at a rooftop garden venue', 'at the user's home in Brooklyn', 'online via Zoom', 'Paris, France'. "
+                   "Write 'N/A' ONLY if absolutely no location context exists or if the fact is completely location-agnostic."
+    )
+
+    who: str = Field(
+        description="WHO is involved - ALL people/entities with FULL context and relationships. "
+                   "Include: names, roles, relationships to user, background details. "
+                   "Resolve coreferences (if 'my roommate' is later named 'Emily', write 'Emily, the user's college roommate'). "
+                   "BE DETAILED about relationships and roles. "
+                   "Example: 'Emily (user's college roommate from Stanford, now works at Google), Sarah (Emily's partner of 5 years, software engineer)' "
+                   "NOT: 'my friend' or 'Emily and Sarah'"
+    )
+
+    why: str = Field(
+        description="WHY it matters - ALL emotional, contextual, and motivational details. "
+                   "Include EVERYTHING: feelings, preferences, motivations, observations, context, background, significance. "
+                   "BE VERBOSE - capture all the nuance and meaning. "
+                   "FOR ASSISTANT FACTS: MUST include what the user asked/requested that led to this interaction! "
+                   "Example (world): 'The user felt thrilled and inspired, has always dreamed of an outdoor ceremony, mentioned wanting a similar garden venue, was particularly moved by the intimate atmosphere and personal vows' "
+                   "Example (assistant): 'User asked how to fix slow API performance with 1000+ concurrent users, expected 70-80% reduction in database load' "
+                   "NOT: 'User liked it' or 'To help user'"
+    )
+
+    # ==========================================================================
+    # CLASSIFICATION
+    # ==========================================================================
+
+    fact_kind: str = Field(
         default="conversation",
-        description="Optional hint: 'conversation' = general info, 'event' = specific datable occurrence, 'other' = anything else. Helps determine if occurred dates should be set, but not critical."
+        description="'event' = specific datable occurrence (set occurred dates), 'conversation' = general info (no occurred dates)"
     )
 
     # Temporal fields - optional
     occurred_start: Optional[str] = Field(
         default=None,
-        description="WHEN THE EVENT ACTUALLY HAPPENED (not when mentioned). ISO timestamp. For datable events only (fact_kind='event'). Examples: 'went to Tokyo last spring' on June 10 → occurred_start='2024-03-01' (spring start), 'accident yesterday' on March 15 → occurred_start='2024-03-14' (yesterday). Leave null for general info (fact_kind='conversation')."
+        description="WHEN the event happened (ISO timestamp). Only for fact_kind='event'. Leave null for conversations."
     )
     occurred_end: Optional[str] = Field(
         default=None,
-        description="WHEN THE EVENT ACTUALLY ENDED (not when mentioned). ISO timestamp. For datable events with duration (fact_kind='event'). Examples: 'went to Tokyo last spring' → occurred_end='2024-05-31' (spring end). Can be same as occurred_start for single-day events. Leave null for general info."
+        description="WHEN the event ended (ISO timestamp). Only for events with duration. Leave null for conversations."
     )
 
     # Classification (CRITICAL - required)
     # Note: LLM uses "assistant" but we convert to "bank" for storage
     fact_type: Literal["world", "assistant"] = Field(
-        description="REQUIRED: 'world' = everything NOT involving the assistant (user's background, skills, experiences, other people's lives, events). 'assistant' = interactions BY or TO the assistant (user asked assistant, assistant recommended, assistant helped user, etc.)"
+        description="'world' = about the user/others (background, experiences). 'assistant' = interactions with the assistant."
     )
 
-    # Entities and relations
+    # Entities - extracted from 'who' field
     entities: Optional[List[Entity]] = Field(
         default=None,
-        description="ONLY specific, named entities worth tracking: people's names (e.g., 'Sarah', 'Dr. Smith'), organizations (e.g., 'Google', 'MIT'), specific places (e.g., 'Paris', 'Central Park'). DO NOT include: generic relations (mom, friend, boss, colleague), common nouns (apple, car, house), pronouns (he, she), or vague references (someone, a guy). Can be null or empty list [] if no entities."
+        description="Named entities from 'who': people names, organizations, places. NOT generic relations."
     )
     causal_relations: Optional[List[CausalRelation]] = Field(
         default=None,
-        description="Causal links to other facts in this batch. Example: fact about rain causes fact about cancelled game. Can be null or empty list [] if no causal relations."
+        description="Causal links to other facts. Can be null."
     )
 
     @field_validator('entities', mode='before')
@@ -163,25 +177,20 @@ class ExtractedFact(BaseModel):
 
     def build_fact_text(self) -> str:
         """Combine all dimensions into a single comprehensive fact string."""
-        parts = [self.factual_core]
+        parts = [self.what]
 
-        if self.emotional_significance:
-            parts.append(self.emotional_significance)
-        if self.reasoning_motivation:
-            parts.append(self.reasoning_motivation)
-        if self.preferences_opinions:
-            parts.append(self.preferences_opinions)
-        if self.sensory_details:
-            parts.append(self.sensory_details)
-        if self.observations:
-            parts.append(self.observations)
+        # Add 'who' if not N/A
+        if self.who and self.who.upper() != 'N/A':
+            parts.append(f"Involving: {self.who}")
 
-        # Join with appropriate connectors
+        # Add 'why' if not N/A
+        if self.why and self.why.upper() != 'N/A':
+            parts.append(self.why)
+
         if len(parts) == 1:
             return parts[0]
 
-        # Combine: "Core fact - emotional/significance context"
-        return f"{parts[0]} - {' - '.join(parts[1:])}"
+        return " | ".join(parts)
 
 
 class FactExtractionResponse(BaseModel):
@@ -193,27 +202,35 @@ class FactExtractionResponse(BaseModel):
 
 def chunk_text(text: str, max_chars: int) -> List[str]:
     """
-    Split text into chunks at sentence boundaries using LangChain's text splitter.
+    Split text into chunks, preserving conversation structure when possible.
 
-    Uses RecursiveCharacterTextSplitter which intelligently splits at sentence boundaries
-    and allows chunks to slightly exceed max_chars to finish sentences naturally.
+    For JSON conversation arrays (user/assistant turns), splits at turn boundaries
+    while preserving speaker context. For plain text, uses sentence-aware splitting.
 
     Args:
-        text: Input text to chunk
+        text: Input text to chunk (plain text or JSON conversation)
         max_chars: Maximum characters per chunk (default 120k ≈ 30k tokens)
-                   Note: chunks may slightly exceed this to complete sentences
 
     Returns:
         List of text chunks, roughly under max_chars
     """
+    import json
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
     # If text is small enough, return as-is
     if len(text) <= max_chars:
         return [text]
 
-    # Configure splitter to split at sentence boundaries first
-    # Separators in order of preference: paragraphs, newlines, sentences, words
+    # Try to parse as JSON conversation array
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list) and all(isinstance(turn, dict) for turn in parsed):
+            # This looks like a conversation - chunk at turn boundaries
+            return _chunk_conversation(parsed, max_chars)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Fall back to sentence-aware text splitting
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=max_chars,
         chunk_overlap=0,
@@ -233,6 +250,45 @@ def chunk_text(text: str, max_chars: int) -> List[str]:
     )
 
     return splitter.split_text(text)
+
+
+def _chunk_conversation(turns: List[dict], max_chars: int) -> List[str]:
+    """
+    Chunk a conversation array at turn boundaries, preserving complete turns.
+
+    Args:
+        turns: List of conversation turn dicts (with 'role' and 'content' keys)
+        max_chars: Maximum characters per chunk
+
+    Returns:
+        List of JSON-serialized chunks, each containing complete turns
+    """
+    import json
+
+    chunks = []
+    current_chunk = []
+    current_size = 2  # Account for "[]"
+
+    for turn in turns:
+        # Estimate size of this turn when serialized (with comma separator)
+        turn_json = json.dumps(turn, ensure_ascii=False)
+        turn_size = len(turn_json) + 1  # +1 for comma
+
+        # If adding this turn would exceed limit and we have turns, save current chunk
+        if current_size + turn_size > max_chars and current_chunk:
+            chunks.append(json.dumps(current_chunk, ensure_ascii=False))
+            current_chunk = []
+            current_size = 2  # Reset to "[]"
+
+        # Add turn to current chunk
+        current_chunk.append(turn)
+        current_size += turn_size
+
+    # Add final chunk if non-empty
+    if current_chunk:
+        chunks.append(json.dumps(current_chunk, ensure_ascii=False))
+
+    return chunks if chunks else [json.dumps(turns, ensure_ascii=False)]
 
 
 async def _extract_facts_from_chunk(
@@ -261,141 +317,145 @@ async def _extract_facts_from_chunk(
     else:
         fact_types_instruction = "Extract ONLY 'world' and 'assistant' type facts. DO NOT extract opinions - those are extracted separately."
 
-    prompt = f"""Extract comprehensive facts from user text for an AI memory system.
+    prompt = f"""Extract facts from text into structured format with FOUR required dimensions - BE EXTREMELY DETAILED.
 
 {fact_types_instruction}
 
-## CONTEXT
-- Context: {context if context else 'none'}{agent_context}
+Context: {context if context else 'none'}{agent_context}
 
-═══════════════════════════════════════════════════════════════════════════════
-SECTION 1: TEMPORAL HANDLING (CRITICAL)
-═══════════════════════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════
+FACT FORMAT - ALL FIVE DIMENSIONS REQUIRED - MAXIMUM VERBOSITY
+══════════════════════════════════════════════════════════════════════════
 
-### 1.1 DETECT TEMPORAL MARKERS
-Watch for: "yesterday", "last week/month/year/summer", "ago", "tomorrow", "next", "happened", "occurred", past tense verbs ("went", "visited", "saw")
+For EACH fact, CAPTURE ALL DETAILS - NEVER SUMMARIZE OR OMIT:
 
-### 1.2 DUAL FACT CREATION (KEY RULE)
-When text mentions a past/future event → Create TWO facts:
-1. MENTION FACT: "On [context date], it was mentioned that..." (occurred_start = context date)
-2. EVENT FACT: "[Action] in [absolute date]" (occurred_start = actual event date)
+1. **what**: WHAT happened - COMPLETE description with ALL specifics (objects, actions, quantities, details)
+2. **when**: WHEN it happened - ALWAYS include temporal info (dates, times, durations, relative times)
+3. **where**: WHERE it happened or is about - SPECIFIC locations, places, areas, regions (if applicable)
+4. **who**: WHO is involved - ALL people/entities with FULL relationships and background
+5. **why**: WHY it matters - ALL emotions, preferences, motivations, significance, nuance
+   - For assistant facts: MUST include what the user asked/requested that triggered this!
 
-### 1.3 ABSOLUTE DATE CONVERSION
-ALWAYS convert relative → absolute in factual_core text:
-- "yesterday" → "on [date-1]"
-- "last week" → "around [specific week]"
-- "last summer" → "in summer [year] (June-August [year])"
-- "next month" → "in [month name] [year]"
+Plus: fact_type, fact_kind, entities, occurred_start/end (for structured dates), where (structured location)
 
-### 1.4 occurred_start/end FIELDS ⚠️ CRITICAL
+VERBOSITY REQUIREMENT: Include EVERY detail mentioned. More detail is ALWAYS better than less.
 
-**WHAT THEY REPRESENT:**
-- occurred_start/end = WHEN THE EVENT ACTUALLY HAPPENED (NOT when it was mentioned!)
-- These answer: "When did this event occur in reality?"
+══════════════════════════════════════════════════════════════════════════
+COREFERENCE RESOLUTION (CRITICAL)
+══════════════════════════════════════════════════════════════════════════
 
-**WHEN TO SET THEM:**
-✅ SET for datable events (fact_kind="event"):
-   - "went to Tokyo last spring" → occurred_start = March 1, 2024 (spring started)
-   - "accident yesterday" → occurred_start = context date - 1 day
-   - "party next Saturday" → occurred_start = next Saturday's date
+When text uses BOTH a generic relation AND a name for the same person → LINK THEM!
 
-❌ LEAVE NULL for general info (fact_kind="conversation"):
-   - "loves coffee" → no occurred dates (timeless preference)
-   - "works as engineer" → no occurred dates (ongoing state)
-   - "is expanding business" → no occurred dates (ongoing activity)
+Example input: "I went to my college roommate's wedding last June. Emily finally married Sarah after 5 years together."
 
-**KEY DISTINCTION:**
-- occurred_start/end: When the event happened/will happen
-- mentioned_at: When this was said/written (set automatically to context date)
-- These are DIFFERENT! Example: On June 10, saying "went to Tokyo in March" → occurred_start=March, mentioned_at=June 10
+CORRECT output:
+- what: "Emily got married to Sarah at a rooftop garden ceremony"
+- when: "in June 2024, after dating for 5 years"
+- where: "downtown San Francisco, at a rooftop garden venue"
+- who: "Emily (user's college roommate), Sarah (Emily's partner of 5 years)"
+- why: "User found it romantic and beautiful, dreams of similar outdoor ceremony"
+- where (structured): "San Francisco"
 
-**FORMAT:** ISO timestamps "2024-06-15T00:00:00Z"
+WRONG output:
+- what: "User's roommate got married" ← LOSES THE NAME!
+- who: "the roommate" ← WRONG - use the actual name!
+- where: (missing) ← WRONG - include the location!
 
-### 1.5 EXAMPLES - STUDY THESE CAREFULLY
+══════════════════════════════════════════════════════════════════════════
+TEMPORAL HANDLING
+══════════════════════════════════════════════════════════════════════════
 
-**Example 1: "yesterday" temporal detection**
-Input (Context: March 15, 2024): "Hey Taylor! The volunteers were amazing yesterday. But something unexpected happened - a vehicle accident near the center. Everyone was okay though."
+For EVENTS (fact_kind="event"):
+- Convert relative dates → absolute: "yesterday" on March 15 → "March 14, 2024"
+- Set occurred_start/occurred_end to WHEN IT HAPPENED (not when mentioned)
 
-Output (3 facts):
-1. factual_core: "On March 15, 2024, Alex told Taylor that the volunteers were amazing"
-   occurred_start: "2024-03-15T00:00:00Z", entities: ["Alex", "Taylor"]
+For CONVERSATIONS (fact_kind="conversation"):
+- General info, preferences, ongoing states → NO occurred dates
+- Examples: "loves coffee", "works as engineer"
 
-2. factual_core: "On March 15, 2024, Alex mentioned that something unexpected happened the previous day - a vehicle accident"
-   occurred_start: "2024-03-15T00:00:00Z", entities: ["Alex"]
+══════════════════════════════════════════════════════════════════════════
+FACT TYPE
+══════════════════════════════════════════════════════════════════════════
 
-3. factual_core: "On March 14, 2024, a vehicle accident occurred near the center, but everyone was okay"
-   occurred_start: "2024-03-14T00:00:00Z" ← THE ACTUAL EVENT DATE (yesterday from March 15)
+- **world**: User's life, other people, events (would exist without this conversation)
+- **assistant**: Interactions with assistant (requests, recommendations, help)
+  ⚠️ CRITICAL for assistant facts: ALWAYS capture the user's request/question in the fact!
+  Include: what the user asked, what problem they wanted solved, what context they provided
 
-**Example 2: "last spring" temporal detection**
-Input (Context: June 10, 2024): "Casey went to Tokyo last spring. They had an incredible time visiting temples and trying authentic ramen."
+══════════════════════════════════════════════════════════════════════════
+USER PREFERENCES (CRITICAL)
+══════════════════════════════════════════════════════════════════════════
 
-Output (2 facts):
-1. factual_core: "On June 10, 2024, it was mentioned that Casey went to Tokyo the previous spring"
-   occurred_start: "2024-06-10T00:00:00Z", entities: ["Casey", "Tokyo"]
+ALWAYS extract user preferences as separate facts! Watch for these keywords:
+- "enjoy", "like", "love", "prefer", "hate", "dislike", "favorite", "ideal", "dream", "want"
 
-2. factual_core: "Casey went to Tokyo in spring 2024 (March-May 2024) and visited temples and tried authentic ramen"
-   occurred_start: "2024-03-01T00:00:00Z", occurred_end: "2024-05-31T23:59:59Z" ← THE ACTUAL EVENT DATES
-   emotional_significance: "Casey had an incredible time in Tokyo"
-   entities: ["Casey", "Tokyo"]
+Example: "I love Italian food and prefer outdoor dining"
+→ Fact 1: what="User loves Italian food", who="user", why="This is a food preference", entities=["user"]
+→ Fact 2: what="User prefers outdoor dining", who="user", why="This is a dining preference", entities=["user"]
 
-═══════════════════════════════════════════════════════════════════════════════
-SECTION 2: EXTRACTION RULES
-═══════════════════════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════
+ENTITIES - INCLUDE "user" (CRITICAL)
+══════════════════════════════════════════════════════════════════════════
 
-### 2.1 WHAT TO EXTRACT
-✅ User requests to assistant + assistant actions (extract separately)
-✅ Preferences, recommendations, plans, activities, encouragement (with actual content)
-✅ Possessions, achievements, metrics, skills, background facts
+When a fact is ABOUT the user (their preferences, plans, experiences), ALWAYS include "user" in entities!
 
-### 2.2 WHAT TO SKIP
-❌ Greetings, filler ("thanks", "cool"), structural statements
+✅ CORRECT: entities=["user"] for "User loves coffee"
+✅ CORRECT: entities=["user", "Emily"] for "User attended Emily's wedding"
+❌ WRONG: entities=[] for facts about the user
 
-### 2.3 Q&A HANDLING
-- Combine simple informational Q&A into one fact
-- Split user requests to assistant into two facts (request + response)
+══════════════════════════════════════════════════════════════════════════
+EXAMPLES
+══════════════════════════════════════════════════════════════════════════
 
-═══════════════════════════════════════════════════════════════════════════════
-SECTION 3: STRUCTURED DIMENSIONS
-═══════════════════════════════════════════════════════════════════════════════
+Example 1 - World Facts (Context: June 10, 2024):
+Input: "I'm planning my wedding and want a small outdoor ceremony. I just got back from my college roommate Emily's wedding - she married Sarah at a rooftop garden, it was so romantic!"
 
-### 3.1 REQUIRED FIELD
-- **factual_core**: Capture WHAT was said, not just THAT something was said. Complete sentence.
+Output facts:
 
-### 3.2 OPTIONAL FIELDS (use when present in text)
-- **emotional_significance**: Emotions, feelings, qualitative descriptors. Complete sentence with subject.
-- **reasoning_motivation**: Why it happened, intentions, goals. Complete sentence with subject.
-- **preferences_opinions**: Likes, dislikes, beliefs, values. Complete sentence with subject. Use for: "ideal", "favorite", "dream", "perfect"
-- **sensory_details**: Visual, auditory, physical descriptions. Complete sentence. USE EXACT WORDS from text!
-- **observations**: Background facts, possessions, achievements, metrics, skills. Complete sentence with subject.
+1. User's wedding preference
+   - what: "User wants a small outdoor ceremony for their wedding"
+   - who: "user"
+   - why: "User prefers intimate outdoor settings"
+   - fact_type: "world", fact_kind: "conversation"
+   - entities: ["user"]
 
-### 3.3 FORMATTING RULE
-Each dimension MUST be a complete, grammatically correct sentence with subject that can stand alone.
+2. User planning wedding
+   - what: "User is planning their own wedding"
+   - who: "user"
+   - why: "Inspired by Emily's ceremony"
+   - fact_type: "world", fact_kind: "conversation"
+   - entities: ["user"]
 
-═══════════════════════════════════════════════════════════════════════════════
-SECTION 4: FACT CLASSIFICATION
-═══════════════════════════════════════════════════════════════════════════════
+3. Emily's wedding (THE EVENT)
+   - what: "Emily got married to Sarah at a rooftop garden ceremony in the city"
+   - who: "Emily (user's college roommate), Sarah (Emily's partner)"
+   - why: "User found it romantic and beautiful"
+   - fact_type: "world", fact_kind: "event"
+   - occurred_start: "2024-06-09T00:00:00Z" (recently, user "just got back")
+   - entities: ["user", "Emily", "Sarah"]
 
-### 4.1 fact_kind (temporal nature)
-- **conversation**: General info, ongoing activities (no occurred dates)
-- **event**: Specific datable occurrence (MUST set occurred_start/end)
-- **other**: Catch-all
+Example 2 - Assistant Facts (Context: March 5, 2024):
+Input: "User: My API is really slow when we have 1000+ concurrent users. What can I do?
+Assistant: I'd recommend implementing Redis for caching frequently-accessed data, which should reduce your database load by 70-80%."
 
-### 4.2 fact_type (subject matter)
-- **world**: Everything NOT involving assistant (user background, other people, events)
-- **assistant**: Interactions BY or TO assistant (requests, recommendations, actions in THIS conversation)
+Output fact:
+   - what: "Assistant recommended implementing Redis for caching frequently-accessed data to improve API performance"
+   - when: "March 5, 2024 during conversation"
+   - who: "user, assistant"
+   - why: "User asked how to fix slow API performance with 1000+ concurrent users, expected 70-80% reduction in database load"
+   - fact_type: "assistant", fact_kind: "conversation"
+   - entities: ["user"]
 
-Rule: If it would exist without this conversation → world. If only exists because of this conversation → assistant.
+Note how the "why" field captures the FULL STORY: what the user asked AND what outcome was expected!
 
-═══════════════════════════════════════════════════════════════════════════════
-SECTION 5: ENTITIES & CAUSALITY
-═══════════════════════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════
+WHAT TO EXTRACT vs SKIP
+══════════════════════════════════════════════════════════════════════════
 
-### 5.1 ENTITIES
-Extract: People names, organizations, specific places, products
-Skip: Generic relations (mom, friend), pronouns, common nouns
+✅ EXTRACT: User preferences (ALWAYS as separate facts!), feelings, plans, events, relationships, achievements
+❌ SKIP: Greetings, filler ("thanks", "cool"), purely structural statements"""
 
-### 5.2 CAUSAL RELATIONS
-Link facts when explicit causation: causes, caused_by, enables, prevents"""
+
 
 
     import logging
@@ -407,14 +467,16 @@ Link facts when explicit causation: causes, caused_by, enables, prevents"""
     max_retries = 2
     last_error = None
 
-    # inject all the chunk metadata for better reasoning
-    chunk_data = json.dumps({
-        "chunk_index": chunk_index,
-        "total_chunks": total_chunks,
-        "event_date": event_date.isoformat(),
-        "context": context,
-        "chunk_content": chunk
-    })
+    # Build user message with metadata and chunk content in a clear format
+    user_message = f"""Extract facts from the following text chunk.
+
+Chunk: {chunk_index + 1}/{total_chunks}
+Event Date: {event_date.isoformat()}
+Context: {context if context else 'none'}
+
+Text:
+{chunk}"""
+
     for attempt in range(max_retries):
         try:
             extraction_response_json = await llm_config.call(
@@ -425,7 +487,7 @@ Link facts when explicit causation: causes, caused_by, enables, prevents"""
                     },
                     {
                         "role": "user",
-                        "content": chunk_data
+                        "content": user_message
                     }
                 ],
                 response_format=FactExtractionResponse,
@@ -437,32 +499,58 @@ Link facts when explicit causation: causes, caused_by, enables, prevents"""
 
             # Lenient parsing of facts from raw JSON
             chunk_facts = []
+            has_malformed_facts = False
 
             # Handle malformed LLM responses
             if not isinstance(extraction_response_json, dict):
-                logger.warning(
-                    f"LLM returned non-dict JSON: {type(extraction_response_json).__name__}. "
-                    f"Raw: {str(extraction_response_json)[:500]}"
-                )
-                return []
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"LLM returned non-dict JSON on attempt {attempt + 1}/{max_retries}: {type(extraction_response_json).__name__}. Retrying..."
+                    )
+                    continue
+                else:
+                    logger.warning(
+                        f"LLM returned non-dict JSON after {max_retries} attempts: {type(extraction_response_json).__name__}. "
+                        f"Raw: {str(extraction_response_json)[:500]}"
+                    )
+                    return []
 
             raw_facts = extraction_response_json.get('facts', [])
             if not raw_facts:
-                logger.warning(
+                logger.debug(
                     f"LLM response missing 'facts' field or returned empty list. "
-                    f"Response: {extraction_response_json}"
+                    f"Response: {extraction_response_json}. "
+                    f"Input: "
+                    f"date: {event_date.isoformat()}, "
+                    f"context: {context if context else 'none'}, "
+                    f"text: {chunk}"
                 )
 
             for i, llm_fact in enumerate(raw_facts):
-                # Skip non-dict entries
+                # Skip non-dict entries but track them for retry
                 if not isinstance(llm_fact, dict):
                     logger.warning(f"Skipping non-dict fact at index {i}")
+                    has_malformed_facts = True
                     continue
 
-                # Critical field: factual_core (MUST have this)
-                factual_core = llm_fact.get('factual_core')
-                if not factual_core:
-                    logger.warning(f"Skipping fact {i}: missing factual_core")
+                # Helper to get non-empty value
+                def get_value(field_name):
+                    value = llm_fact.get(field_name)
+                    if value and value != '' and value != [] and value != {} and str(value).upper() != 'N/A':
+                        return value
+                    return None
+
+                # NEW FORMAT: what, when, who, why (all required)
+                what = get_value('what')
+                when = get_value('when')
+                who = get_value('who')
+                why = get_value('why')
+
+                # Fallback to old format if new fields not present
+                if not what:
+                    what = get_value('factual_core')
+                if not what:
+                    logger.warning(f"Skipping fact {i}: missing 'what' field")
                     continue
 
                 # Critical field: fact_type
@@ -491,34 +579,20 @@ Link facts when explicit causation: causes, caused_by, enables, prevents"""
                 if fact_kind not in ['conversation', 'event', 'other']:
                     fact_kind = 'conversation'
 
-                # Build combined fact text from dimensions
-                dimension_parts = []
+                # Build combined fact text from the 4 dimensions: what | when | who | why
                 fact_data = {}
+                combined_parts = [what]
 
-                # Helper to get non-empty value
-                def get_value(field_name):
-                    value = llm_fact.get(field_name)
-                    if value and value != '' and value != [] and value != {}:
-                        return value
-                    return None
+                if when:
+                    combined_parts.append(f"When: {when}")
 
-                # Collect dimension fields
-                for field in ['emotional_significance', 'reasoning_motivation', 'preferences_opinions',
-                              'sensory_details', 'observations']:
-                    value = get_value(field)
-                    if value:
-                        # Handle case where LLM returns list instead of string
-                        if isinstance(value, list):
-                            value = '; '.join(str(v) for v in value)
-                        fact_data[field] = value
-                        dimension_parts.append(value)
+                if who:
+                    combined_parts.append(f"Involving: {who}")
 
-                # Build combined fact text
-                combined_parts = [factual_core] + dimension_parts
-                if len(combined_parts) == 1:
-                    combined_text = combined_parts[0]
-                else:
-                    combined_text = f"{combined_parts[0]} - {' - '.join(combined_parts[1:])}"
+                if why:
+                    combined_parts.append(why)
+
+                combined_text = " | ".join(combined_parts)
 
                 # Add temporal fields
                 # For events: occurred_start/occurred_end (when the event happened)
@@ -575,7 +649,16 @@ Link facts when explicit causation: causes, caused_by, enables, prevents"""
                     chunk_facts.append(fact)
                 except Exception as e:
                     logger.error(f"Failed to create Fact model for fact {i}: {e}")
+                    has_malformed_facts = True
                     continue
+
+            # If we got malformed facts and haven't exhausted retries, try again
+            if has_malformed_facts and len(chunk_facts) < len(raw_facts) * 0.8 and attempt < max_retries - 1:
+                logger.warning(
+                    f"Got {len(raw_facts) - len(chunk_facts)} malformed facts out of {len(raw_facts)} on attempt {attempt + 1}/{max_retries}. Retrying..."
+                )
+                continue
+
             return chunk_facts
 
         except BadRequestError as e:

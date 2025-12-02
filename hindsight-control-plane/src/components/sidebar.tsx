@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import { useBank } from '@/lib/bank-context';
-import { Search, Sparkles, Database, FileText, Users, Brain, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Sparkles, Database, FileText, Users, Brain, ChevronLeft, ChevronRight, UserCircle, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type NavItem = 'recall' | 'reflect' | 'data' | 'documents' | 'entities' | 'bank';
+type NavItem = 'recall' | 'reflect' | 'data' | 'documents' | 'entities' | 'profile' | 'stats';
 
 interface SidebarProps {
   currentTab: NavItem;
@@ -26,7 +26,8 @@ export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
     { id: 'data' as NavItem, label: 'Memories', icon: Database },
     { id: 'documents' as NavItem, label: 'Documents', icon: FileText },
     { id: 'entities' as NavItem, label: 'Entities', icon: Users },
-    { id: 'bank' as NavItem, label: 'Stats', icon: Brain },
+    { id: 'stats' as NavItem, label: 'Stats', icon: BarChart3 },
+    { id: 'profile' as NavItem, label: 'Profile', icon: UserCircle },
   ];
 
   return (

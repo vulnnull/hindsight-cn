@@ -33,7 +33,7 @@ class ReflectRequest(BaseModel):
     budget: Optional[Budget] = None
     context: Optional[StrictStr] = None
     filters: Optional[List[MetadataFilter]] = None
-    include: Optional[ReflectIncludeOptions] = Field(default=None, description="Options for including additional data (both disabled by default)")
+    include: Optional[ReflectIncludeOptions] = Field(default=None, description="Options for including additional data (disabled by default)")
     __properties: ClassVar[List[str]] = ["query", "budget", "context", "filters", "include"]
 
     model_config = ConfigDict(

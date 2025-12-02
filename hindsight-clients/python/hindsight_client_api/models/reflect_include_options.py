@@ -19,7 +19,6 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
-from hindsight_client_api.models.entity_include_options import EntityIncludeOptions
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,8 +27,7 @@ class ReflectIncludeOptions(BaseModel):
     Options for including additional data in reflect results.
     """ # noqa: E501
     facts: Optional[Dict[str, Any]] = Field(default=None, description="Options for including facts (based_on) in reflect results.")
-    entities: Optional[EntityIncludeOptions] = None
-    __properties: ClassVar[List[str]] = ["facts", "entities"]
+    __properties: ClassVar[List[str]] = ["facts"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -70,14 +68,6 @@ class ReflectIncludeOptions(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of entities
-        if self.entities:
-            _dict['entities'] = self.entities.to_dict()
-        # set to None if entities (nullable) is None
-        # and model_fields_set contains the field
-        if self.entities is None and "entities" in self.model_fields_set:
-            _dict['entities'] = None
-
         return _dict
 
     @classmethod
@@ -90,8 +80,7 @@ class ReflectIncludeOptions(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "facts": obj.get("facts"),
-            "entities": EntityIncludeOptions.from_dict(obj["entities"]) if obj.get("entities") is not None else None
+            "facts": obj.get("facts")
         })
         return _obj
 

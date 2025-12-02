@@ -44,6 +44,12 @@ async def check_duplicates_batch(
         # Use occurred_start if available, otherwise use mentioned_at
         # For deduplication purposes, we need a time reference
         fact_date = fact.occurred_start if fact.occurred_start is not None else fact.mentioned_at
+
+        # Defensive: if both are None (shouldn't happen), use now()
+        if fact_date is None:
+            from datetime import datetime, timezone
+            fact_date = datetime.now(timezone.utc)
+
         # Round to 12-hour bucket to group similar times
         bucket_key = fact_date.replace(
             hour=(fact_date.hour // 12) * 12,

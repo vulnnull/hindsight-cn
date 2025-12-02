@@ -44,6 +44,7 @@ export interface MemoryItemInput {
     timestamp?: string | Date;
     context?: string;
     metadata?: Record<string, string>;
+    document_id?: string;
 }
 
 export class HindsightClient {
@@ -96,18 +97,24 @@ export class HindsightClient {
             content: item.content,
             context: item.context,
             metadata: item.metadata,
+            document_id: item.document_id,
             timestamp:
                 item.timestamp instanceof Date
                     ? item.timestamp.toISOString()
                     : item.timestamp,
         }));
 
+        // If documentId is provided at the batch level, add it to all items that don't have one
+        const itemsWithDocId = processedItems.map(item => ({
+            ...item,
+            document_id: item.document_id || options?.documentId
+        }));
+
         const response = await sdk.retainMemories({
             client: this.client,
             path: { bank_id: bankId },
             body: {
-                items: processedItems,
-                document_id: options?.documentId,
+                items: itemsWithDocId,
                 async: options?.async,
             },
         });
@@ -162,7 +169,12 @@ export class HindsightClient {
             },
         });
 
-        return response.data!;
+        if (!response.data) {
+            console.error('recallMemories: No data in response', { response, error: response.error });
+            throw new Error(`API returned no data: ${JSON.stringify(response.error || 'Unknown error')}`);
+        }
+
+        return response.data;
     }
 
     /**

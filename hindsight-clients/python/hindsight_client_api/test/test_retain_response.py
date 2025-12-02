@@ -37,7 +37,6 @@ class TestRetainResponse(unittest.TestCase):
             return RetainResponse(
                 success = True,
                 bank_id = '',
-                document_id = '',
                 items_count = 56,
                 var_async = True
             )

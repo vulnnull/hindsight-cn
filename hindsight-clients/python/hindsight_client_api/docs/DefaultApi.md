@@ -11,6 +11,7 @@ Method | HTTP request | Description
 [**delete_document**](DefaultApi.md#delete_document) | **DELETE** /v1/default/banks/{bank_id}/documents/{document_id} | Delete a document
 [**get_agent_stats**](DefaultApi.md#get_agent_stats) | **GET** /v1/default/banks/{bank_id}/stats | Get statistics for memory bank
 [**get_bank_profile**](DefaultApi.md#get_bank_profile) | **GET** /v1/default/banks/{bank_id}/profile | Get memory bank profile
+[**get_chunk**](DefaultApi.md#get_chunk) | **GET** /v1/default/chunks/{chunk_id} | Get chunk details
 [**get_document**](DefaultApi.md#get_document) | **GET** /v1/default/banks/{bank_id}/documents/{document_id} | Get document details
 [**get_entity**](DefaultApi.md#get_entity) | **GET** /v1/default/banks/{bank_id}/entities/{entity_id} | Get entity details
 [**get_graph**](DefaultApi.md#get_graph) | **GET** /v1/default/banks/{bank_id}/graph | Get memory graph data
@@ -506,6 +507,75 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**BankProfileResponse**](BankProfileResponse.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **get_chunk**
+> ChunkResponse get_chunk(chunk_id)
+
+Get chunk details
+
+Get a specific chunk by its ID
+
+### Example
+
+
+```python
+import hindsight_client_api
+from hindsight_client_api.models.chunk_response import ChunkResponse
+from hindsight_client_api.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = hindsight_client_api.Configuration(
+    host = "http://localhost"
+)
+
+
+# Enter a context with an instance of the API client
+async with hindsight_client_api.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = hindsight_client_api.DefaultApi(api_client)
+    chunk_id = 'chunk_id_example' # str | 
+
+    try:
+        # Get chunk details
+        api_response = await api_instance.get_chunk(chunk_id)
+        print("The response of DefaultApi->get_chunk:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling DefaultApi->get_chunk: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **chunk_id** | **str**|  | 
+
+### Return type
+
+[**ChunkResponse**](ChunkResponse.md)
 
 ### Authorization
 
@@ -1338,7 +1408,7 @@ Retain memory items with automatic fact extraction.
     - Efficient batch processing
     - Automatic fact extraction from natural language
     - Entity recognition and linking
-    - Document tracking with automatic upsert (when document_id is provided)
+    - Document tracking with automatic upsert (when document_id is provided on items)
     - Temporal and semantic linking
     - Optional asynchronous processing
 
@@ -1358,7 +1428,7 @@ Retain memory items with automatic fact extraction.
     - Waits for processing to complete
     - Returns after all memories are stored
 
-    Note: If document_id is provided and already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).
+    Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.
 
 ### Example
 

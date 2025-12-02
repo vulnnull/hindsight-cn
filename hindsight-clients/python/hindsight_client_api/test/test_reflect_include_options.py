@@ -35,9 +35,7 @@ class TestReflectIncludeOptions(unittest.TestCase):
         model = ReflectIncludeOptions()
         if include_optional:
             return ReflectIncludeOptions(
-                facts = hindsight_client_api.models.facts_include_options.FactsIncludeOptions(),
-                entities = hindsight_client_api.models.entity_include_options.EntityIncludeOptions(
-                    max_tokens = 56, )
+                facts = hindsight_client_api.models.facts_include_options.FactsIncludeOptions()
             )
         else:
             return ReflectIncludeOptions(

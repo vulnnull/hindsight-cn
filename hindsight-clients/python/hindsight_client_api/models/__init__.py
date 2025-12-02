@@ -21,6 +21,7 @@ from hindsight_client_api.models.bank_profile_response import BankProfileRespons
 from hindsight_client_api.models.budget import Budget
 from hindsight_client_api.models.chunk_data import ChunkData
 from hindsight_client_api.models.chunk_include_options import ChunkIncludeOptions
+from hindsight_client_api.models.chunk_response import ChunkResponse
 from hindsight_client_api.models.create_bank_request import CreateBankRequest
 from hindsight_client_api.models.delete_response import DeleteResponse
 from hindsight_client_api.models.document_response import DocumentResponse

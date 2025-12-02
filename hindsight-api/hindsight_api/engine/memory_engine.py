@@ -11,7 +11,7 @@ This implements a sophisticated memory architecture that combines:
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, TypedDict
 import asyncpg
 import asyncio
 from .embeddings import Embeddings, SentenceTransformersEmbeddings
@@ -21,6 +21,23 @@ import numpy as np
 import uuid
 import logging
 from pydantic import BaseModel, Field
+
+
+class RetainContentDict(TypedDict, total=False):
+    """Type definition for content items in retain_batch_async.
+
+    Fields:
+        content: Text content to store (required)
+        context: Context about the content (optional)
+        event_date: When the content occurred (optional, defaults to now)
+        metadata: Custom key-value metadata (optional)
+        document_id: Document ID for this content item (optional)
+    """
+    content: str  # Required
+    context: str
+    event_date: datetime
+    metadata: Dict[str, str]
+    document_id: str
 
 from .query_analyzer import QueryAnalyzer
 from .search.scoring import (
@@ -218,19 +235,17 @@ class MemoryEngine:
         Handler for batch retain tasks.
 
         Args:
-            task_dict: Dict with 'bank_id', 'contents', 'document_id'
+            task_dict: Dict with 'bank_id', 'contents'
         """
         try:
             bank_id = task_dict.get('bank_id')
             contents = task_dict.get('contents', [])
-            document_id = task_dict.get('document_id')
 
             logger.info(f"[BATCH_RETAIN_TASK] Starting background batch retain for bank_id={bank_id}, {len(contents)} items")
 
             await self.retain_batch_async(
                 bank_id=bank_id,
-                contents=contents,
-                document_id=document_id
+                contents=contents
             )
 
             logger.info(f"[BATCH_RETAIN_TASK] Completed background batch retain for bank_id={bank_id}")
@@ -604,15 +619,19 @@ class MemoryEngine:
         Returns:
             List of created unit IDs
         """
+        # Build content dict
+        content_dict: RetainContentDict = {
+            "content": content,
+            "context": context,
+            "event_date": event_date
+        }
+        if document_id:
+            content_dict["document_id"] = document_id
+
         # Use retain_batch_async with a single item (avoids code duplication)
         result = await self.retain_batch_async(
             bank_id=bank_id,
-            contents=[{
-                "content": content,
-                "context": context,
-                "event_date": event_date
-            }],
-            document_id=document_id,
+            contents=[content_dict],
             fact_type_override=fact_type_override,
             confidence_score=confidence_score
         )
@@ -623,7 +642,7 @@ class MemoryEngine:
     async def retain_batch_async(
         self,
         bank_id: str,
-        contents: List[Dict[str, Any]],
+        contents: List[RetainContentDict],
         document_id: Optional[str] = None,
         fact_type_override: Optional[str] = None,
         confidence_score: Optional[float] = None,
@@ -643,19 +662,32 @@ class MemoryEngine:
                 - "content" (required): Text content to store
                 - "context" (optional): Context about the memory
                 - "event_date" (optional): When the event occurred
-            document_id: Optional document ID for tracking (always upserts if document already exists)
+                - "document_id" (optional): Document ID for this specific content item
+            document_id: **DEPRECATED** - Use "document_id" key in each content dict instead.
+                        Applies the same document_id to ALL content items that don't specify their own.
             fact_type_override: Override fact type for all facts ('world', 'bank', 'opinion')
             confidence_score: Confidence score for opinions (0.0 to 1.0)
 
         Returns:
             List of lists of unit IDs (one list per content item)
 
-        Example:
+        Example (new style - per-content document_id):
             unit_ids = await memory.retain_batch_async(
                 bank_id="user123",
                 contents=[
-                    {"content": "Alice works at Google", "context": "conversation"},
-                    {"content": "Bob loves Python", "context": "conversation"},
+                    {"content": "Alice works at Google", "document_id": "doc1"},
+                    {"content": "Bob loves Python", "document_id": "doc2"},
+                    {"content": "More about Alice", "document_id": "doc1"},
+                ]
+            )
+            # Returns: [["unit-id-1"], ["unit-id-2"], ["unit-id-3"]]
+
+        Example (deprecated style - batch-level document_id):
+            unit_ids = await memory.retain_batch_async(
+                bank_id="user123",
+                contents=[
+                    {"content": "Alice works at Google"},
+                    {"content": "Bob loves Python"},
                 ],
                 document_id="meeting-2024-01-15"
             )
@@ -666,11 +698,17 @@ class MemoryEngine:
         if not contents:
             return []
 
+        # Apply batch-level document_id to contents that don't have their own (backwards compatibility)
+        if document_id:
+            for item in contents:
+                if "document_id" not in item:
+                    item["document_id"] = document_id
+
         # Auto-chunk large batches by character count to avoid timeouts and memory issues
         # Calculate total character count
         total_chars = sum(len(item.get("content", "")) for item in contents)
 
-        CHARS_PER_BATCH = 500_000
+        CHARS_PER_BATCH = 600_000
 
         if total_chars > CHARS_PER_BATCH:
             # Split into smaller batches based on character count
@@ -732,7 +770,7 @@ class MemoryEngine:
     async def _retain_batch_async_internal(
         self,
         bank_id: str,
-        contents: List[Dict[str, Any]],
+        contents: List[RetainContentDict],
         document_id: Optional[str] = None,
         is_first_batch: bool = True,
         fact_type_override: Optional[str] = None,
@@ -768,6 +806,7 @@ class MemoryEngine:
                 task_backend=self._task_backend,
                 format_date_fn=self._format_readable_date,
                 duplicate_checker_fn=self._find_duplicate_facts_batch,
+                regenerate_observations_fn=self._regenerate_observations_sync,
                 bank_id=bank_id,
                 contents_dicts=contents,
                 document_id=document_id,
@@ -982,7 +1021,11 @@ class MemoryEngine:
             temporal_results = []
             aggregated_timings = {"semantic": 0.0, "bm25": 0.0, "graph": 0.0, "temporal": 0.0}
 
-            for ft_semantic, ft_bm25, ft_graph, ft_temporal, ft_timings in all_retrievals:
+            for idx, (ft_semantic, ft_bm25, ft_graph, ft_temporal, ft_timings) in enumerate(all_retrievals):
+                # Log fact types in this retrieval batch
+                ft_name = fact_type[idx] if idx < len(fact_type) else "unknown"
+                logger.debug(f"[SEARCH {search_id}] Fact type '{ft_name}': semantic={len(ft_semantic)}, bm25={len(ft_bm25)}, graph={len(ft_graph)}, temporal={len(ft_temporal) if ft_temporal else 0}")
+
                 semantic_results.extend(ft_semantic)
                 bm25_results.extend(ft_bm25)
                 graph_results.extend(ft_graph)
@@ -995,6 +1038,14 @@ class MemoryEngine:
             # If no temporal results from any fact type, set to None
             if not temporal_results:
                 temporal_results = None
+
+            # Sort combined results by score (descending) so higher-scored results
+            # get better ranks in the trace, regardless of fact type
+            semantic_results.sort(key=lambda r: r.similarity if hasattr(r, 'similarity') else 0, reverse=True)
+            bm25_results.sort(key=lambda r: r.bm25_score if hasattr(r, 'bm25_score') else 0, reverse=True)
+            graph_results.sort(key=lambda r: r.activation if hasattr(r, 'activation') else 0, reverse=True)
+            if temporal_results:
+                temporal_results.sort(key=lambda r: r.combined_score if hasattr(r, 'combined_score') else 0, reverse=True)
 
             retrieval_duration = time.time() - retrieval_start
 
@@ -1206,8 +1257,15 @@ class MemoryEngine:
                 })
                 log_buffer.append(f"  [7] Queued access count updates for {len(visited_ids)} nodes")
 
+            # Log fact_type distribution in results
+            fact_type_counts = {}
+            for sr in top_scored:
+                ft = sr.retrieval.fact_type
+                fact_type_counts[ft] = fact_type_counts.get(ft, 0) + 1
+
             total_time = time.time() - search_start
-            log_buffer.append(f"[SEARCH {search_id}] Complete: {len(top_scored)} results ({total_tokens} tokens) in {total_time:.3f}s")
+            fact_type_summary = ", ".join([f"{ft}={count}" for ft, count in sorted(fact_type_counts.items())])
+            log_buffer.append(f"[SEARCH {search_id}] Complete: {len(top_scored)} results ({fact_type_summary}) ({total_tokens} tokens) in {total_time:.3f}s")
 
             # Log all buffered logs at once
             logger.info("\n" + "\n".join(log_buffer))
@@ -1634,7 +1692,7 @@ class MemoryEngine:
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
 
             units = await conn.fetch(f"""
-                SELECT id, text, event_date, context, occurred_start, occurred_end, mentioned_at, document_id
+                SELECT id, text, event_date, context, occurred_start, occurred_end, mentioned_at, document_id, chunk_id, fact_type
                 FROM memory_units
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, event_date DESC
@@ -1758,7 +1816,9 @@ class MemoryEngine:
                 "mentioned_at": row['mentioned_at'].isoformat() if row['mentioned_at'] else None,
                 "date": row['event_date'].strftime("%Y-%m-%d %H:%M") if row['event_date'] else "N/A",  # Deprecated, kept for backwards compatibility
                 "entities": ", ".join(entities) if entities else "None",
-                "document_id": row['document_id']
+                "document_id": row['document_id'],
+                "chunk_id": row['chunk_id'] if row['chunk_id'] else None,
+                "fact_type": row['fact_type']
             })
 
         return {
@@ -1833,7 +1893,7 @@ class MemoryEngine:
             query_params.append(offset)
 
             units = await conn.fetch(f"""
-                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end
+                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end, chunk_id
                 FROM memory_units
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, created_at DESC
@@ -1877,7 +1937,8 @@ class MemoryEngine:
                     "mentioned_at": row['mentioned_at'].isoformat() if row['mentioned_at'] else None,
                     "occurred_start": row['occurred_start'].isoformat() if row['occurred_start'] else None,
                     "occurred_end": row['occurred_end'].isoformat() if row['occurred_end'] else None,
-                    "entities": ", ".join(entities) if entities else ""
+                    "entities": ", ".join(entities) if entities else "",
+                    "chunk_id": row['chunk_id'] if row['chunk_id'] else None
                 })
 
             return {
@@ -1950,7 +2011,8 @@ class MemoryEngine:
                     content_hash,
                     created_at,
                     updated_at,
-                    LENGTH(original_text) as text_length
+                    LENGTH(original_text) as text_length,
+                    retain_params
                 FROM documents
                 {where_clause}
                 ORDER BY created_at DESC
@@ -1998,7 +2060,8 @@ class MemoryEngine:
                     "created_at": row['created_at'].isoformat() if row['created_at'] else "",
                     "updated_at": row['updated_at'].isoformat() if row['updated_at'] else "",
                     "text_length": row['text_length'] or 0,
-                    "memory_unit_count": unit_count
+                    "memory_unit_count": unit_count,
+                    "retain_params": row['retain_params'] if row['retain_params'] else None
                 })
 
             return {
@@ -2032,7 +2095,8 @@ class MemoryEngine:
                     original_text,
                     content_hash,
                     created_at,
-                    updated_at
+                    updated_at,
+                    retain_params
                 FROM documents
                 WHERE id = $1 AND bank_id = $2
             """, document_id, bank_id)
@@ -2054,7 +2118,47 @@ class MemoryEngine:
                 "content_hash": doc['content_hash'],
                 "created_at": doc['created_at'].isoformat() if doc['created_at'] else "",
                 "updated_at": doc['updated_at'].isoformat() if doc['updated_at'] else "",
-                "memory_unit_count": unit_count_row['unit_count'] if unit_count_row else 0
+                "memory_unit_count": unit_count_row['unit_count'] if unit_count_row else 0,
+                "retain_params": doc['retain_params'] if doc['retain_params'] else None
+            }
+
+    async def get_chunk(
+        self,
+        chunk_id: str
+    ):
+        """
+        Get a specific chunk by its ID.
+
+        Args:
+            chunk_id: Chunk ID (format: bank_id_document_id_chunk_index)
+
+        Returns:
+            Dict with chunk details including chunk_text, or None if not found
+        """
+        pool = await self._get_pool()
+        async with acquire_with_retry(pool) as conn:
+            chunk = await conn.fetchrow("""
+                SELECT
+                    chunk_id,
+                    document_id,
+                    bank_id,
+                    chunk_index,
+                    chunk_text,
+                    created_at
+                FROM chunks
+                WHERE chunk_id = $1
+            """, chunk_id)
+
+            if not chunk:
+                return None
+
+            return {
+                "chunk_id": chunk['chunk_id'],
+                "document_id": chunk['document_id'],
+                "bank_id": chunk['bank_id'],
+                "chunk_index": chunk['chunk_index'],
+                "chunk_text": chunk['chunk_text'],
+                "created_at": chunk['created_at'].isoformat() if chunk['created_at'] else ""
             }
 
     async def _evaluate_opinion_update_async(
@@ -2792,24 +2896,127 @@ Guidelines:
         logger.info(f"[OBSERVATIONS] {entity_name}: {len(facts)} facts -> {len(created_ids)} observations")
         return created_ids
 
+    async def _regenerate_observations_sync(
+        self,
+        bank_id: str,
+        entity_ids: List[str],
+        min_facts: int = 5
+    ) -> None:
+        """
+        Regenerate observations for entities synchronously (called during retain).
+
+        Args:
+            bank_id: Bank identifier
+            entity_ids: List of entity IDs to process
+            min_facts: Minimum facts required to regenerate observations
+        """
+        if not bank_id or not entity_ids:
+            return
+
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            for entity_id in entity_ids:
+                try:
+                    entity_uuid = uuid.UUID(entity_id) if isinstance(entity_id, str) else entity_id
+
+                    # Check if entity exists
+                    entity_exists = await conn.fetchrow(
+                        "SELECT canonical_name FROM entities WHERE id = $1 AND bank_id = $2",
+                        entity_uuid, bank_id
+                    )
+
+                    if not entity_exists:
+                        logger.debug(f"[OBSERVATIONS] Entity {entity_id} not yet in bank {bank_id}, skipping")
+                        continue
+
+                    entity_name = entity_exists['canonical_name']
+
+                    # Count facts linked to this entity
+                    fact_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM unit_entities WHERE entity_id = $1",
+                        entity_uuid
+                    ) or 0
+
+                    # Only regenerate if entity has enough facts
+                    if fact_count >= min_facts:
+                        await self.regenerate_entity_observations(bank_id, entity_id, entity_name, version=None)
+                    else:
+                        logger.debug(f"[OBSERVATIONS] Skipping {entity_name} ({fact_count} facts < {min_facts} threshold)")
+
+                except Exception as e:
+                    logger.error(f"[OBSERVATIONS] Error processing entity {entity_id}: {e}")
+                    continue
+
     async def _handle_regenerate_observations(self, task_dict: Dict[str, Any]):
         """
         Handler for regenerate_observations tasks.
 
         Args:
-            task_dict: Dict with 'bank_id', 'entity_id', 'entity_name', 'version'
+            task_dict: Dict with 'bank_id' and either:
+                       - 'entity_ids' (list): Process multiple entities
+                       - 'entity_id', 'entity_name': Process single entity (legacy)
         """
         try:
             bank_id = task_dict.get('bank_id')
-            entity_id = task_dict.get('entity_id')
-            entity_name = task_dict.get('entity_name')
-            version = task_dict.get('version')  # last_seen timestamp for deduplication
 
-            if not all([bank_id, entity_id, entity_name]):
-                logger.error(f"[OBSERVATIONS] Missing required fields in task: {task_dict}")
-                return
+            # New format: multiple entity_ids
+            if 'entity_ids' in task_dict:
+                entity_ids = task_dict.get('entity_ids', [])
+                min_facts = task_dict.get('min_facts', 5)
 
-            await self.regenerate_entity_observations(bank_id, entity_id, entity_name, version)
+                if not bank_id or not entity_ids:
+                    logger.error(f"[OBSERVATIONS] Missing required fields in task: {task_dict}")
+                    return
+
+                # Process each entity
+                pool = await self._get_pool()
+                async with pool.acquire() as conn:
+                    for entity_id in entity_ids:
+                        try:
+                            # Fetch entity name and check fact count
+                            import uuid as uuid_module
+                            entity_uuid = uuid_module.UUID(entity_id) if isinstance(entity_id, str) else entity_id
+
+                            # First check if entity exists
+                            entity_exists = await conn.fetchrow(
+                                "SELECT canonical_name FROM entities WHERE id = $1 AND bank_id = $2",
+                                entity_uuid, bank_id
+                            )
+
+                            if not entity_exists:
+                                logger.debug(f"[OBSERVATIONS] Entity {entity_id} not yet in bank {bank_id}, skipping")
+                                continue
+
+                            entity_name = entity_exists['canonical_name']
+
+                            # Count facts linked to this entity
+                            fact_count = await conn.fetchval(
+                                "SELECT COUNT(*) FROM unit_entities WHERE entity_id = $1",
+                                entity_uuid
+                            ) or 0
+
+                            # Only regenerate if entity has enough facts
+                            if fact_count >= min_facts:
+                                await self.regenerate_entity_observations(bank_id, entity_id, entity_name, version=None)
+                            else:
+                                logger.debug(f"[OBSERVATIONS] Skipping {entity_name} ({fact_count} facts < {min_facts} threshold)")
+
+                        except Exception as e:
+                            logger.error(f"[OBSERVATIONS] Error processing entity {entity_id}: {e}")
+                            continue
+
+            # Legacy format: single entity
+            else:
+                entity_id = task_dict.get('entity_id')
+                entity_name = task_dict.get('entity_name')
+                version = task_dict.get('version')
+
+                if not all([bank_id, entity_id, entity_name]):
+                    logger.error(f"[OBSERVATIONS] Missing required fields in task: {task_dict}")
+                    return
+
+                await self.regenerate_entity_observations(bank_id, entity_id, entity_name, version)
+
         except Exception as e:
             logger.error(f"[OBSERVATIONS] Error regenerating observations: {e}")
             import traceback

@@ -40,7 +40,8 @@ class TestMemoryItem(unittest.TestCase):
                 context = '',
                 metadata = {
                     'key' : ''
-                    }
+                    },
+                document_id = ''
             )
         else:
             return MemoryItem(

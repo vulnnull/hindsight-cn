@@ -149,6 +149,53 @@ export class ControlPlaneClient {
   async getDocument(documentId: string, bankId: string) {
     return this.fetchApi(`/api/documents/${documentId}?bank_id=${bankId}`);
   }
+
+  /**
+   * Get chunk
+   */
+  async getChunk(chunkId: string) {
+    return this.fetchApi(`/api/chunks/${chunkId}`);
+  }
+
+  /**
+   * Get bank profile
+   */
+  async getBankProfile(bankId: string) {
+    return this.fetchApi<{
+      bank_id: string;
+      name: string;
+      personality: {
+        openness: number;
+        conscientiousness: number;
+        extraversion: number;
+        agreeableness: number;
+        neuroticism: number;
+        bias_strength: number;
+      };
+      background: string;
+    }>(`/api/profile/${bankId}`);
+  }
+
+  /**
+   * Update bank profile
+   */
+  async updateBankProfile(bankId: string, profile: {
+    name?: string;
+    personality?: {
+      openness: number;
+      conscientiousness: number;
+      extraversion: number;
+      agreeableness: number;
+      neuroticism: number;
+      bias_strength: number;
+    };
+    background?: string;
+  }) {
+    return this.fetchApi(`/api/profile/${bankId}`, {
+      method: 'PUT',
+      body: JSON.stringify(profile),
+    });
+  }
 }
 
 // Export singleton instance

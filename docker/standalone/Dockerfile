@@ -64,13 +64,20 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install Node.js, curl, and uv
+# Install Node.js, curl, uv, and pg0 dependencies
 RUN apt-get update && apt-get install -y \
     curl \
+    libxml2 \
+    libssl3 \
+    libgssapi-krb5-2 \
+    && apt-get install -y libicu72 || apt-get install -y libicu74 || apt-get install -y libicu* \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir uv
+
+# Create non-root user (PostgreSQL cannot run as root)
+RUN useradd -m -s /bin/bash hindsight
 
 # Copy API with virtual environment from builder
 COPY --from=api-base /app/api /app/api
@@ -96,13 +103,19 @@ WORKDIR /app
 COPY docker/standalone/start-all.sh /app/start-all.sh
 RUN chmod +x /app/start-all.sh
 
-# Create data directory for pg0
-RUN mkdir -p /app/data
+# Create data directory for pg0 and set ownership
+RUN mkdir -p /app/data && chown -R hindsight:hindsight /app
 
-# Install pg0 to /root/.hindsight/bin/pg0
-RUN mkdir -p /root/.hindsight/bin /root/.local/bin && \
-    export PATH="/root/.hindsight/bin:/root/.local/bin:$PATH" && \
-    curl -fsSL https://raw.githubusercontent.com/vectorize-io/pg0/main/install.sh | bash
+# Switch to non-root user
+USER hindsight
+
+# Install pg0
+RUN curl -fsSL https://raw.githubusercontent.com/vectorize-io/pg0/main/install.sh | bash
+
+# Start pg0 once to verify it works and pre-download PostgreSQL libraries
+RUN pg0 --help && \
+    pg0 start --wait && \
+    pg0 stop
 
 # Expose ports
 EXPOSE 8888 3000
@@ -113,7 +126,7 @@ ENV HINDSIGHT_API_PORT=8888
 ENV HINDSIGHT_API_LOG_LEVEL=info
 ENV NODE_ENV=production
 ENV HINDSIGHT_CP_DATAPLANE_API_URL=http://localhost:8888
-ENV PATH="/app/api/.venv/bin:$PATH"
+ENV PATH="/home/hindsight/.local/bin:/app/api/.venv/bin:${PATH}"
 
 # Run startup script
 CMD ["/app/start-all.sh"]

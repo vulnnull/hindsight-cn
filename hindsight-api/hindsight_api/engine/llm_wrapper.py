@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 # Disable httpx logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+# Global semaphore to limit concurrent LLM requests across all instances
+_global_llm_semaphore = asyncio.Semaphore(32)
+
 
 class OutputTooLongError(Exception):
     """
@@ -69,12 +72,13 @@ class LLMConfig:
             )
 
         # Create client (private - use .call() method instead)
+        # Disable automatic retries - we handle retries in the call() method
         if self.provider == "ollama":
-            self._client = AsyncOpenAI(api_key="ollama", base_url=self.base_url)
+            self._client = AsyncOpenAI(api_key="ollama", base_url=self.base_url, max_retries=0)
         elif self.base_url:
-            self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+            self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url, max_retries=0)
         else:
-            self._client = AsyncOpenAI(api_key=self.api_key)
+            self._client = AsyncOpenAI(api_key=self.api_key, max_retries=0)
 
         logger.info(
             f"Initialized LLM: provider={self.provider}, model={self.model}, base_url={self.base_url}"
@@ -109,106 +113,107 @@ class LLMConfig:
         Raises:
             Exception: Re-raises any API errors after all retries are exhausted
         """
-        start_time = time.time()
+        # Use global semaphore to limit concurrent requests
+        async with _global_llm_semaphore:
+            start_time = time.time()
 
-        call_params = {
-            "model": self.model,
-            "messages": messages,
-            **kwargs
-        }
-        if self.provider == "groq":
-            call_params["extra_body"] = {
-                "service_tier": "auto",
-                "reasoning_effort": "low",  # Reduce reasoning overhead
-                "include_reasoning": False,  # Disable hidden reasoning tokens
+            call_params = {
+                "model": self.model,
+                "messages": messages,
+                **kwargs
             }
+            if self.provider == "groq":
+                call_params["extra_body"] = {
+                    "service_tier": "auto",
+                    "reasoning_effort": "low",  # Reduce reasoning overhead
+                    "include_reasoning": False,  # Disable hidden reasoning tokens
+                }
 
-        last_exception = None
+            last_exception = None
 
-        for attempt in range(max_retries + 1):
-            try:
-                # Use the appropriate response format
-                if response_format is not None:
-                    # Use JSON mode instead of strict parse for flexibility with optional fields
-                    # This allows the LLM to omit optional fields without validation errors
-                    import json
+            for attempt in range(max_retries + 1):
+                try:
+                    # Use the appropriate response format
+                    if response_format is not None:
+                        # Use JSON mode instead of strict parse for flexibility with optional fields
+                        # This allows the LLM to omit optional fields without validation errors
+                        import json
 
-                    # Add schema to the system message
-                    if hasattr(response_format, 'model_json_schema'):
-                        schema = response_format.model_json_schema()
-                        schema_msg = f"\n\nYou must respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
+                        # Add schema to the system message
+                        if hasattr(response_format, 'model_json_schema'):
+                            schema = response_format.model_json_schema()
+                            schema_msg = f"\n\nYou must respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
 
-                        # Add schema to the system message if present, otherwise prepend as user message
-                        if call_params['messages'] and call_params['messages'][0].get('role') == 'system':
-                            call_params['messages'][0]['content'] += schema_msg
+                            # Add schema to the system message if present, otherwise prepend as user message
+                            if call_params['messages'] and call_params['messages'][0].get('role') == 'system':
+                                call_params['messages'][0]['content'] += schema_msg
+                            else:
+                                # No system message, add schema instruction to first user message
+                                if call_params['messages']:
+                                    call_params['messages'][0]['content'] = schema_msg + "\n\n" + call_params['messages'][0]['content']
+
+                        call_params['response_format'] = {"type": "json_object"}
+                        response = await self._client.chat.completions.create(**call_params)
+
+                        # Parse the JSON response
+                        content = response.choices[0].message.content
+                        json_data = json.loads(content)
+
+                        # Return raw JSON if skip_validation is True, otherwise validate with Pydantic
+                        if skip_validation:
+                            result = json_data
                         else:
-                            # No system message, add schema instruction to first user message
-                            if call_params['messages']:
-                                call_params['messages'][0]['content'] = schema_msg + "\n\n" + call_params['messages'][0]['content']
-
-                    call_params['response_format'] = {"type": "json_object"}
-                    response = await self._client.chat.completions.create(**call_params)
-
-                    # Parse the JSON response
-                    content = response.choices[0].message.content
-                    json_data = json.loads(content)
-
-                    # Return raw JSON if skip_validation is True, otherwise validate with Pydantic
-                    if skip_validation:
-                        result = json_data
+                            result = response_format.model_validate(json_data)
                     else:
-                        result = response_format.model_validate(json_data)
-                else:
-                    # Standard completion and return text content
-                    response = await self._client.chat.completions.create(**call_params)
-                    result = response.choices[0].message.content
+                        # Standard completion and return text content
+                        response = await self._client.chat.completions.create(**call_params)
+                        result = response.choices[0].message.content
 
-                # Log call details only if it takes more than 5 seconds
-                duration = time.time() - start_time
-                usage = response.usage
-                if duration > 10.0:
-                    ratio = max(1, usage.completion_tokens) / usage.prompt_tokens
-                    logger.info(
-                        f"slow llm call: model={self.provider}/{self.model}, "
-                        f"input_tokens={usage.prompt_tokens}, output_tokens={usage.completion_tokens}, "
-                        f"total_tokens={usage.total_tokens}, time={duration:.3f}s, ratio out/in={ratio:.2f}"
-                    )
+                    # Log call details only if it takes more than 5 seconds
+                    duration = time.time() - start_time
+                    usage = response.usage
+                    if duration > 10.0:
+                        ratio = max(1, usage.completion_tokens) / usage.prompt_tokens
+                        logger.info(
+                            f"slow llm call: model={self.provider}/{self.model}, "
+                            f"input_tokens={usage.prompt_tokens}, output_tokens={usage.completion_tokens}, "
+                            f"total_tokens={usage.total_tokens}, time={duration:.3f}s, ratio out/in={ratio:.2f}"
+                        )
 
-                return result
+                    return result
 
-            except LengthFinishReasonError as e:
-                # Output exceeded token limits - raise bridge exception for caller to handle
-                logger.warning(f"LLM output exceeded token limits: {str(e)}")
-                raise OutputTooLongError(
-                    f"LLM output exceeded token limits. Input may need to be split into smaller chunks."
-                ) from e
+                except LengthFinishReasonError as e:
+                    # Output exceeded token limits - raise bridge exception for caller to handle
+                    logger.warning(f"LLM output exceeded token limits: {str(e)}")
+                    raise OutputTooLongError(
+                        f"LLM output exceeded token limits. Input may need to be split into smaller chunks."
+                    ) from e
 
-            except APIStatusError as e:
-                last_exception = e
-                if attempt < max_retries:
-                    # Calculate exponential backoff with jitter
-                    backoff = min(initial_backoff * (2 ** attempt), max_backoff)
-                    # Add jitter (±20%)
-                    jitter = backoff * 0.2 * (2 * (time.time() % 1) - 1)
-                    sleep_time = backoff + jitter
+                except APIStatusError as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        # Calculate exponential backoff with jitter
+                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                        # Add jitter (±20%)
+                        jitter = backoff * 0.2 * (2 * (time.time() % 1) - 1)
+                        sleep_time = backoff + jitter
 
-                    logger.warning(
-                        f"LLM error on attempt {attempt + 1}/{max_retries + 1}. "
-                        f"Retrying in {sleep_time:.2f}s... Error: {str(e)}"
-                    )
-                    await asyncio.sleep(sleep_time)
-                else:
-                    logger.error(f"Non-retryable API error after {max_retries + 1} attempts: {str(e)}")
+                        # Only log if it's a non-retryable error or final attempt
+                        # Silent retry for common transient errors like capacity exceeded
+                        await asyncio.sleep(sleep_time)
+                    else:
+                        # Log only on final failed attempt
+                        logger.error(f"API error after {max_retries + 1} attempts: {str(e)}")
+                        raise
+
+                except Exception as e:
+                    logger.error(f"Unexpected error during LLM call: {type(e).__name__}: {str(e)}")
                     raise
 
-            except Exception as e:
-                logger.error(f"Unexpected error during LLM call: {type(e).__name__}: {str(e)}")
-                raise
-
-        # This should never be reached, but just in case
-        if last_exception:
-            raise last_exception
-        raise RuntimeError(f"LLM call failed after all retries with no exception captured")
+            # This should never be reached, but just in case
+            if last_exception:
+                raise last_exception
+            raise RuntimeError(f"LLM call failed after all retries with no exception captured")
 
     @classmethod
     def for_memory(cls) -> "LLMConfig":

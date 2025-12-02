@@ -41,7 +41,7 @@ class Server:
             db_url="pg0",
             llm_provider="groq",
             llm_api_key="your-api-key",
-            llm_model="llama-3.3-70b-versatile"
+            llm_model="openai/gpt-oss-120b"
         )
         server.start()
 
@@ -58,7 +58,7 @@ class Server:
         db_url: str = "pg0",
         llm_provider: str = "groq",
         llm_api_key: str = "",
-        llm_model: str = "llama-3.3-70b-versatile",
+        llm_model: str = "openai/gpt-oss-120b",
         llm_base_url: Optional[str] = None,
         host: str = "127.0.0.1",
         port: Optional[int] = None,
@@ -222,7 +222,7 @@ def start_server(
     db_url: str = "pg0",
     llm_provider: str = "groq",
     llm_api_key: str = "",
-    llm_model: str = "llama-3.3-70b-versatile",
+    llm_model: str = "openai/gpt-oss-120b",
     llm_base_url: Optional[str] = None,
     host: str = "127.0.0.1",
     port: Optional[int] = None,
@@ -258,7 +258,7 @@ def start_server(
             db_url="pg0",
             llm_provider="groq",
             llm_api_key="your-api-key",
-            llm_model="llama-3.3-70b-versatile"
+            llm_model="openai/gpt-oss-120b"
         )
 
         client = Client(base_url=server.url)

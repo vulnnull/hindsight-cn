@@ -97,37 +97,56 @@ async def extract_entities_batch_optimized(
         if all_entities_flat:
             # [6.2.2] Batch resolve entities
             substep_6_2_2_start = time.time()
-            # Group by date for batch resolution (most will have same date)
+            # Group by date for batch resolution (round to hour to reduce buckets)
             entities_by_date = {}
             for idx, (unit_id, local_idx, fact_date) in enumerate(entity_to_unit):
-                date_key = fact_date
+                # Round to hour to group facts from same time period
+                date_key = fact_date.replace(minute=0, second=0, microsecond=0)
                 if date_key not in entities_by_date:
                     entities_by_date[date_key] = []
                 entities_by_date[date_key].append((idx, all_entities_flat[idx]))
 
-            _log(log_buffer, f"    [6.2.2] Grouped into {len(entities_by_date)} date buckets, resolving...")
+            _log(log_buffer, f"    [6.2.2] Grouped into {len(entities_by_date)} date buckets, resolving in parallel...")
 
-            # Resolve each date group in batch
+            # Resolve all date groups in PARALLEL using asyncio.gather
             resolved_entity_ids = [None] * len(all_entities_flat)
-            for date_idx, (fact_date, entities_group) in enumerate(entities_by_date.items(), 1):
+
+            # Prepare all resolution tasks
+            async def resolve_date_bucket(date_idx, date_key, entities_group):
                 date_bucket_start = time.time()
                 indices = [idx for idx, _ in entities_group]
                 entities_data = [entity_data for _, entity_data in entities_group]
+                # Use the first fact's date for this bucket (all should be in same hour)
+                fact_date = entity_to_unit[indices[0]][2]
 
+                # Pass conn=None to let each parallel task acquire its own connection
                 batch_resolved = await entity_resolver.resolve_entities_batch(
                     bank_id=bank_id,
                     entities_data=entities_data,
                     context=context,
                     unit_event_date=fact_date,
-                    conn=conn
+                    conn=None  # Each task gets its own connection from pool
                 )
 
+                if len(entities_by_date) <= 10:  # Only log individual buckets if there aren't too many
+                    _log(log_buffer, f"      [6.2.2.{date_idx}] Resolved {len(entities_data)} entities in {time.time() - date_bucket_start:.3f}s")
+
+                return indices, batch_resolved
+
+            # Execute all resolution tasks in parallel
+            import asyncio
+            tasks = [
+                resolve_date_bucket(date_idx, date_key, entities_group)
+                for date_idx, (date_key, entities_group) in enumerate(entities_by_date.items(), 1)
+            ]
+            results = await asyncio.gather(*tasks)
+
+            # Map results back to resolved_entity_ids
+            for indices, batch_resolved in results:
                 for idx, entity_id in zip(indices, batch_resolved):
                     resolved_entity_ids[idx] = entity_id
 
-                _log(log_buffer, f"      [6.2.2.{date_idx}] Resolved {len(entities_data)} entities in {time.time() - date_bucket_start:.3f}s")
-
-            _log(log_buffer, f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_2_start:.3f}s")
+            _log(log_buffer, f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities across {len(entities_by_date)} buckets in {time.time() - substep_6_2_2_start:.3f}s")
 
             # [6.2.3] Create unit-entity links in BATCH
             substep_6_2_3_start = time.time()
@@ -444,17 +463,14 @@ async def insert_entity_links_batch(conn, links: List[tuple]):
     if not links:
         return
 
-    try:
-        await conn.executemany(
-            """
-            INSERT INTO memory_links (from_unit_id, to_unit_id, link_type, weight, entity_id)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
-            """,
-            links
-        )
-    except Exception as e:
-        logger.warning(f"Failed to insert entity links: {str(e)}")
+    await conn.executemany(
+        """
+        INSERT INTO memory_links (from_unit_id, to_unit_id, link_type, weight, entity_id)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
+        """,
+        links
+    )
 
 
 async def create_causal_links_batch(
