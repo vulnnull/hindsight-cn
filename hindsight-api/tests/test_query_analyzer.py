@@ -3,7 +3,7 @@ Test query analyzer for temporal extraction.
 """
 import pytest
 from datetime import datetime
-from hindsight_api.engine.query_analyzer import TransformerQueryAnalyzer, QueryAnalysis
+from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer, QueryAnalysis
 
 
 def test_query_analyzer_june_2024(query_analyzer):
@@ -106,5 +106,129 @@ def test_query_analyzer_activities_june_2024(query_analyzer):
     assert analysis.temporal_constraint.end_date.year == 2024
     assert analysis.temporal_constraint.end_date.month == 6
     assert analysis.temporal_constraint.end_date.day == 30
+
+
+def test_query_analyzer_last_saturday(query_analyzer):
+    """Test extraction of 'last Saturday' relative date."""
+    # Reference date is Wednesday, January 15, 2025
+    # Last Saturday would be January 11, 2025
+    reference_date = datetime(2025, 1, 15, 12, 0, 0)
+
+    query = "I received a piece of jewelry last Saturday from whom?"
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    print(f"\nQuery: '{query}'")
+    print(f"Reference date: {reference_date.strftime('%A, %Y-%m-%d')}")
+    print(f"Analysis: {analysis}")
+
+    assert analysis.temporal_constraint is not None, "Should extract temporal constraint for 'last Saturday'"
+    # Last Saturday from Wed Jan 15 is Sat Jan 11
+    assert analysis.temporal_constraint.start_date.year == 2025
+    assert analysis.temporal_constraint.start_date.month == 1
+    assert analysis.temporal_constraint.start_date.day == 11
+    assert analysis.temporal_constraint.end_date.year == 2025
+    assert analysis.temporal_constraint.end_date.month == 1
+    assert analysis.temporal_constraint.end_date.day == 11
+
+
+def test_query_analyzer_yesterday(query_analyzer):
+    """Test extraction of 'yesterday' relative date."""
+    # Reference date is Wednesday, January 15, 2025
+    # Yesterday would be January 14, 2025
+    reference_date = datetime(2025, 1, 15, 12, 0, 0)
+
+    query = "what did I do yesterday?"
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    print(f"\nQuery: '{query}'")
+    print(f"Reference date: {reference_date.strftime('%A, %Y-%m-%d')}")
+    print(f"Analysis: {analysis}")
+
+    assert analysis.temporal_constraint is not None, "Should extract temporal constraint for 'yesterday'"
+    assert analysis.temporal_constraint.start_date.year == 2025
+    assert analysis.temporal_constraint.start_date.month == 1
+    assert analysis.temporal_constraint.start_date.day == 14
+    assert analysis.temporal_constraint.end_date.day == 14
+
+
+def test_query_analyzer_last_week(query_analyzer):
+    """Test extraction of 'last week' relative date."""
+    # Reference date is Wednesday, January 15, 2025
+    # Last week would be January 6-12, 2025 (Mon-Sun)
+    reference_date = datetime(2025, 1, 15, 12, 0, 0)
+
+    query = "what meetings did I have last week?"
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    print(f"\nQuery: '{query}'")
+    print(f"Reference date: {reference_date.strftime('%A, %Y-%m-%d')}")
+    print(f"Analysis: {analysis}")
+
+    assert analysis.temporal_constraint is not None, "Should extract temporal constraint for 'last week'"
+    assert analysis.temporal_constraint.start_date.year == 2025
+    assert analysis.temporal_constraint.start_date.month == 1
+    assert analysis.temporal_constraint.start_date.day == 6  # Monday
+    assert analysis.temporal_constraint.end_date.day == 12  # Sunday
+
+
+def test_query_analyzer_last_month(query_analyzer):
+    """Test extraction of 'last month' relative date."""
+    # Reference date is Wednesday, January 15, 2025
+    # Last month would be December 2024
+    reference_date = datetime(2025, 1, 15, 12, 0, 0)
+
+    query = "expenses from last month"
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    print(f"\nQuery: '{query}'")
+    print(f"Reference date: {reference_date.strftime('%A, %Y-%m-%d')}")
+    print(f"Analysis: {analysis}")
+
+    assert analysis.temporal_constraint is not None, "Should extract temporal constraint for 'last month'"
+    assert analysis.temporal_constraint.start_date.year == 2024
+    assert analysis.temporal_constraint.start_date.month == 12
+    assert analysis.temporal_constraint.start_date.day == 1
+    assert analysis.temporal_constraint.end_date.month == 12
+    assert analysis.temporal_constraint.end_date.day == 31
+
+
+def test_query_analyzer_last_friday(query_analyzer):
+    """Test extraction of 'last Friday' relative date."""
+    # Reference date is Wednesday, January 15, 2025
+    # Last Friday would be January 10, 2025
+    reference_date = datetime(2025, 1, 15, 12, 0, 0)
+
+    query = "who did I meet last Friday?"
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    print(f"\nQuery: '{query}'")
+    print(f"Reference date: {reference_date.strftime('%A, %Y-%m-%d')}")
+    print(f"Analysis: {analysis}")
+
+    assert analysis.temporal_constraint is not None, "Should extract temporal constraint for 'last Friday'"
+    assert analysis.temporal_constraint.start_date.year == 2025
+    assert analysis.temporal_constraint.start_date.month == 1
+    assert analysis.temporal_constraint.start_date.day == 10
+    assert analysis.temporal_constraint.end_date.day == 10
+
+
+def test_query_analyzer_last_weekend(query_analyzer):
+    """Test extraction of 'last weekend' relative date."""
+    # Reference date is Wednesday, January 15, 2025
+    # Last weekend would be January 11-12, 2025 (Sat-Sun)
+    reference_date = datetime(2025, 1, 15, 12, 0, 0)
+
+    query = "what did I do last weekend?"
+    analysis = query_analyzer.analyze(query, reference_date)
+
+    print(f"\nQuery: '{query}'")
+    print(f"Reference date: {reference_date.strftime('%A, %Y-%m-%d')}")
+    print(f"Analysis: {analysis}")
+
+    assert analysis.temporal_constraint is not None, "Should extract temporal constraint for 'last weekend'"
+    assert analysis.temporal_constraint.start_date.year == 2025
+    assert analysis.temporal_constraint.start_date.month == 1
+    assert analysis.temporal_constraint.start_date.day == 11  # Saturday
+    assert analysis.temporal_constraint.end_date.day == 12  # Sunday
 
 

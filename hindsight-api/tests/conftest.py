@@ -12,7 +12,7 @@ import asyncpg
 from testcontainers.postgres import PostgresContainer
 
 from hindsight_api.engine.cross_encoder import SentenceTransformersCrossEncoder
-from hindsight_api.engine.query_analyzer import TransformerQueryAnalyzer
+from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer
 
 
 # Load environment variables from .env at the start of test session
@@ -91,7 +91,7 @@ def cross_encoder():
 
 @pytest.fixture(scope="session")
 def query_analyzer():
-    return TransformerQueryAnalyzer()
+    return DateparserQueryAnalyzer()
 
 
 

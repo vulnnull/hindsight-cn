@@ -169,8 +169,8 @@ class MemoryEngine:
         if query_analyzer is not None:
             self.query_analyzer = query_analyzer
         else:
-            from .query_analyzer import TransformerQueryAnalyzer
-            self.query_analyzer = TransformerQueryAnalyzer()
+            from .query_analyzer import DateparserQueryAnalyzer
+            self.query_analyzer = DateparserQueryAnalyzer()
 
         # Initialize LLM configuration
         self._llm_config = LLMConfig(

@@ -146,11 +146,11 @@ pub fn retain(
         context,
         metadata: None,
         timestamp: None,
+        document_id: Some(doc_id.clone()),
     };
 
     let request = RetainRequest {
         items: vec![item],
-        document_id: Some(doc_id.clone()),
         async_: r#async,
     };
 
@@ -239,7 +239,6 @@ pub fn retain_files(
     let pb = ui::create_progress_bar(files.len() as u64, "Processing files");
 
     let mut items = Vec::new();
-    let mut document_id = None;
 
     for file_path in &files {
         let content = fs::read_to_string(file_path)
@@ -251,15 +250,12 @@ pub fn retain_files(
             .map(|s| s.to_string())
             .unwrap_or_else(config::generate_doc_id);
 
-        if document_id.is_none() {
-            document_id = Some(doc_id);
-        }
-
         items.push(MemoryItem {
             content,
             context: context.clone(),
             metadata: None,
             timestamp: None,
+            document_id: Some(doc_id),
         });
 
         pb.inc(1);
@@ -275,7 +271,6 @@ pub fn retain_files(
 
     let request = RetainRequest {
         items,
-        document_id,
         async_: r#async,
     };
 

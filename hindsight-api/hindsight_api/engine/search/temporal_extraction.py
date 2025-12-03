@@ -7,7 +7,7 @@ Handles natural language temporal expressions using transformer-based query anal
 from typing import Optional, Tuple
 from datetime import datetime
 import logging
-from hindsight_api.engine.query_analyzer import QueryAnalyzer, TransformerQueryAnalyzer
+from hindsight_api.engine.query_analyzer import QueryAnalyzer, DateparserQueryAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +20,14 @@ def get_default_analyzer() -> QueryAnalyzer:
     """
     Get or create the default query analyzer.
 
-    Uses lazy initialization to avoid loading model at import time.
+    Uses lazy initialization to avoid loading at import time.
 
     Returns:
-        Default TransformerQueryAnalyzer instance
+        Default DateparserQueryAnalyzer instance
     """
     global _default_analyzer
     if _default_analyzer is None:
-        _default_analyzer = TransformerQueryAnalyzer()
+        _default_analyzer = DateparserQueryAnalyzer()
     return _default_analyzer
 
 
@@ -37,14 +37,14 @@ def extract_temporal_constraint(
     analyzer: Optional[QueryAnalyzer] = None,
 ) -> Optional[Tuple[datetime, datetime]]:
     """
-    Extract temporal constraint from query using transformer-based analysis.
+    Extract temporal constraint from query.
 
     Returns (start_date, end_date) tuple if temporal constraint found, else None.
 
     Args:
         query: Search query
         reference_date: Reference date for relative terms (defaults to now)
-        analyzer: Custom query analyzer (defaults to TransformerQueryAnalyzer)
+        analyzer: Custom query analyzer (defaults to DateparserQueryAnalyzer)
 
     Returns:
         (start_date, end_date) tuple or None

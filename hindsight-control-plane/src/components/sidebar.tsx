@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useBank } from '@/lib/bank-context';
-import { Search, Sparkles, Database, FileText, Users, Brain, ChevronLeft, ChevronRight, UserCircle, BarChart3 } from 'lucide-react';
+import { Search, Sparkles, Database, FileText, Users, ChevronLeft, ChevronRight, UserCircle, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 
 type NavItem = 'recall' | 'reflect' | 'data' | 'documents' | 'entities' | 'profile' | 'stats';
 
@@ -57,11 +58,21 @@ export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentTab === item.id;
+            const href = `/banks/${currentBank}?view=${item.id}`;
 
             return (
               <li key={item.id}>
-                <button
-                  onClick={() => onTabChange(item.id)}
+                <Link
+                  href={href}
+                  onClick={(e) => {
+                    // For left-click, prevent default and use the callback
+                    // This allows the parent to handle navigation without full page reload
+                    if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      onTabChange(item.id);
+                    }
+                    // Middle-click or Ctrl/Cmd+click will naturally open in new tab
+                  }}
                   className={cn(
                     'w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all',
                     isActive
@@ -73,7 +84,7 @@ export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
                 >
                   <Icon className="w-5 h-5 flex-shrink-0" />
                   {!isCollapsed && <span>{item.label}</span>}
-                </button>
+                </Link>
               </li>
             );
           })}

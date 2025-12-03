@@ -178,12 +178,18 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
 
 In general the answer must be comprehensive and plenty of details from the retrieved context.
 
-For quantitative questions, use numbers and units. Example: 'How many..', just answer the number and which ones. Include EACH item even if it's not the most recent one. Reason and do calculation for complex questions.
+For quantitative questions, use numbers and units. Example: 'How many..', just answer the number and which ones. Consider EACH item even if it's not the most recent one. Reason and do calculation for complex questions.
 If questions asks a location (where...?) make sure to include the location name.
-For recommendations/suggestions, use the context to understand the user's preferences and provide a possible answer based on that and explain why you chose that answer based on user preferences. Include as much preferences as possible in your answer.
-For specific number/value questions, use the context to understand what is the most up-to-date number based on recency.
+For recommendations/suggestions, use the retrieved context to understand the user's preferences and provide a possible answer based on those. Include the reasoning and explicitly say what the user prefers, before making suggestions (user previous experiences or specific requests FROM the user). Consider as much user preferences as possible in your answer.
+For questions asking for help or instructions, consider the users' latest purchases and previous interactions with the assistant to understand which details to focus your answer on (include these references in your answer).
+For specific number/value questions, use the context to understand what is the most up-to-date number based on recency, but also include the reasoning (in the answer) on previous possible values and why you think are less relevant.
 For open questions, include as much details as possible from different sources that are relevant.
-For questions where a specific entity is mentioned and it's different from your memory, just say the truth, don't make up anything just to fulfill the question. For example, if the question is about a specific sport, you should consider if the memories and the question are about the same sport. 
+For questions where a specific entity is mentioned and it's different from your memory, just say the truth, don't make up anything just to fulfill the question. For example, if the question is about a specific sport, you should consider if the memories and the question are about the same sport.
+For comparative questions , say you don't know the answer if you don't have information about both sides. (or more sides) 
+For questions related to time/date, carefully review the question date and the memories date to correctly answer the question.
+For questions related to time/date calculation (e.g. How many days passed between X and Y?), carefully review the memories date to correctly answer the question and only provide an answer if you have information about both X and Y, otherwise say it's not possible to calculate and why.
+
+Consider assistant's previous actions (e.g., bookings, reminders) as impactful to the user experiences.
 
 
 Question: {question}

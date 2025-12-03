@@ -9,10 +9,15 @@ description = "Development utilities for Hindsight"
 requires-python = ">=3.11"
 dependencies = [
     "hindsight-api",
+    "python-fasthtml>=0.12.33",
+    "streamlit>=1.51.0",
+    "openai>=1.0.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["hindsight_dev"]
+packages = ["hindsight_dev", "benchmarks"]
 
 [tool.uv.sources]
 hindsight-api = { workspace = true }

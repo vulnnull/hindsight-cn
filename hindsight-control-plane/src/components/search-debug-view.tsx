@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Info } from 'lucide-react';
 import JsonView from 'react18-json-view';
 import 'react18-json-view/src/style.css';
+import { MemoryDetailPanel } from './memory-detail-panel';
 
 type Phase = 'retrieval' | 'rrf' | 'rerank' | 'final' | 'json';
 type RetrievalMethod = 'semantic' | 'bm25' | 'graph' | 'temporal';
@@ -44,9 +45,12 @@ interface SearchPane {
   factTypes: FactType[];
   budget: Budget;
   maxTokens: number;
+  queryDate: string;
   includeChunks: boolean;
   includeEntities: boolean;
   results: any[] | null;
+  entities: any[] | null;
+  chunks: any[] | null;
   trace: any | null;
   loading: boolean;
   currentPhase: Phase;
@@ -64,9 +68,12 @@ export function SearchDebugView() {
       factTypes: ['world'],
       budget: 'mid',
       maxTokens: 4096,
+      queryDate: '',
       includeChunks: false,
       includeEntities: false,
       results: null,
+      entities: null,
+      chunks: null,
       trace: null,
       loading: false,
       currentPhase: 'retrieval',
@@ -76,6 +83,7 @@ export function SearchDebugView() {
     },
   ]);
   const [nextPaneId, setNextPaneId] = useState(2);
+  const [selectedMemory, setSelectedMemory] = useState<any | null>(null);
 
   const addPane = () => {
     setPanes([
@@ -86,9 +94,12 @@ export function SearchDebugView() {
         factTypes: ['world'],
         budget: 'mid',
         maxTokens: 4096,
+        queryDate: '',
         includeChunks: false,
         includeEntities: false,
         results: null,
+        entities: null,
+        chunks: null,
         trace: null,
         loading: false,
         currentPhase: 'retrieval',
@@ -138,7 +149,8 @@ export function SearchDebugView() {
         include: {
           entities: pane.includeEntities ? { max_tokens: 500 } : null,
           chunks: pane.includeChunks ? { max_tokens: 8192 } : null
-        }
+        },
+        ...(pane.queryDate && { query_timestamp: pane.queryDate })
       };
 
       const data: any = await client.recall(requestBody);
@@ -148,6 +160,8 @@ export function SearchDebugView() {
 
       updatePane(paneId, {
         results: data.results || [],
+        entities: data.entities || null,
+        chunks: data.chunks || null,
         trace: data.trace || null,
         loading: false,
         currentRetrievalFactType: defaultFactType,
@@ -220,7 +234,11 @@ export function SearchDebugView() {
           </TableHeader>
           <TableBody>
             {filteredResults.map((result: any, idx: number) => (
-              <TableRow key={idx}>
+              <TableRow
+                key={idx}
+                className="cursor-pointer hover:bg-muted/50"
+                onClick={() => setSelectedMemory(result)}
+              >
                 <TableCell className="font-bold">#{result.rank}</TableCell>
                 <TableCell className="max-w-md">{result.text}</TableCell>
                 {pane.factTypes.length > 1 && (
@@ -278,7 +296,11 @@ export function SearchDebugView() {
                 : 'N/A';
 
               return (
-                <TableRow key={idx}>
+                <TableRow
+                  key={idx}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => setSelectedMemory(result)}
+                >
                   <TableCell className="font-bold">
                     #{result.final_rrf_rank || result.finalRrfRank || result.rank}
                   </TableCell>
@@ -358,7 +380,11 @@ export function SearchDebugView() {
               );
 
               return (
-                <TableRow key={idx} className={rowBg}>
+                <TableRow
+                  key={idx}
+                  className={`cursor-pointer hover:bg-muted/50 ${rowBg}`}
+                  onClick={() => setSelectedMemory(result)}
+                >
                   <TableCell className="font-bold">#{result.rerank_rank}</TableCell>
                   <TableCell>#{result.rrf_rank}</TableCell>
                   <TableCell className={`font-bold ${changeColor}`}>
@@ -444,7 +470,11 @@ export function SearchDebugView() {
                 : 'N/A';
 
               return (
-                <TableRow key={idx}>
+                <TableRow
+                  key={idx}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => setSelectedMemory(result)}
+                >
                   <TableCell className="font-bold">#{idx + 1}</TableCell>
                   <TableCell className="max-w-xs">{result.text}</TableCell>
                   <TableCell className="max-w-32">
@@ -478,17 +508,18 @@ export function SearchDebugView() {
   }
 
   return (
-    <div>
-      <div className="mb-4">
-        <Button
-          onClick={addPane}
-          variant="secondary"
-        >
-          + Add Recall Pane
-        </Button>
-      </div>
+    <div className="flex gap-4">
+      <div className={selectedMemory ? 'flex-1' : 'w-full'}>
+        <div className="mb-4">
+          <Button
+            onClick={addPane}
+            variant="secondary"
+          >
+            + Add Recall Pane
+          </Button>
+        </div>
 
-      <div className="grid grid-cols-1 gap-5">
+        <div className="grid grid-cols-1 gap-5">
         {panes.map((pane) => (
           <div key={pane.id} className="border-2 border-primary rounded-lg overflow-hidden flex flex-col shadow-md">
             {/* Header */}
@@ -628,11 +659,6 @@ export function SearchDebugView() {
                 <span className="text-muted-foreground">|</span>
                 <span>
                   <strong>Entry points:</strong> {pane.trace.summary.entry_points_found}
-                </span>
-                <span className="text-muted-foreground">|</span>
-                <span>
-                  <strong>Budget used:</strong> {pane.trace.summary.budget_used} /{' '}
-                  {pane.trace.summary.budget_used + pane.trace.summary.budget_remaining}
                 </span>
                 <span className="text-muted-foreground">|</span>
                 <span>
@@ -777,7 +803,11 @@ export function SearchDebugView() {
                       </p>
                       <div className="bg-muted p-4 rounded border border-border overflow-auto max-h-[800px]">
                         <JsonView
-                          src={{ results: pane.results }}
+                          src={{
+                            results: pane.results,
+                            ...(pane.entities && { entities: pane.entities }),
+                            ...(pane.chunks && { chunks: pane.chunks }),
+                          }}
                           collapsed={1}
                           theme="default"
                         />
@@ -789,7 +819,19 @@ export function SearchDebugView() {
             </div>
           </div>
         ))}
+        </div>
       </div>
+
+      {/* Memory Detail Panel */}
+      {selectedMemory && (
+        <div className="w-80 flex-shrink-0">
+          <MemoryDetailPanel
+            memory={selectedMemory}
+            onClose={() => setSelectedMemory(null)}
+            compact
+          />
+        </div>
+      )}
     </div>
   );
 }

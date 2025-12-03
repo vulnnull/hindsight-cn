@@ -7,7 +7,8 @@ import cytoscape from 'cytoscape';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Copy, Check, X, Calendar, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileText, Layers } from 'lucide-react';
+import { Copy, Check, Calendar, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MemoryDetailPanel } from './memory-detail-panel';
 
 type FactType = 'world' | 'bank' | 'opinion';
@@ -26,10 +27,6 @@ export function DataView({ factType }: DataViewProps) {
   const [layout, setLayout] = useState('circle');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [selectedDocument, setSelectedDocument] = useState<any>(null);
-  const [loadingDocument, setLoadingDocument] = useState(false);
-  const [selectedChunk, setSelectedChunk] = useState<any>(null);
-  const [loadingChunk, setLoadingChunk] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedGraphNode, setSelectedGraphNode] = useState<any>(null);
   const [selectedTableMemory, setSelectedTableMemory] = useState<any>(null);
@@ -44,44 +41,6 @@ export function DataView({ factType }: DataViewProps) {
       setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
-    }
-  };
-
-  const viewDocument = async (documentId: string) => {
-    if (!currentBank || !documentId) return;
-
-    setLoadingDocument(true);
-    setSelectedDocument({ id: documentId });
-    setSelectedChunk(null); // Clear chunk when viewing document
-
-    try {
-      const doc: any = await client.getDocument(documentId, currentBank);
-      setSelectedDocument(doc);
-    } catch (error) {
-      console.error('Error loading document:', error);
-      alert('Error loading document: ' + (error as Error).message);
-      setSelectedDocument(null);
-    } finally {
-      setLoadingDocument(false);
-    }
-  };
-
-  const viewChunk = async (chunkId: string) => {
-    if (!chunkId) return;
-
-    setLoadingChunk(true);
-    setSelectedChunk({ chunk_id: chunkId });
-    setSelectedDocument(null); // Clear document when viewing chunk
-
-    try {
-      const chunk: any = await client.getChunk(chunkId);
-      setSelectedChunk(chunk);
-    } catch (error) {
-      console.error('Error loading chunk:', error);
-      alert('Error loading chunk: ' + (error as Error).message);
-      setSelectedChunk(null);
-    } finally {
-      setLoadingChunk(false);
     }
   };
 
@@ -354,16 +313,6 @@ export function DataView({ factType }: DataViewProps) {
                   <MemoryDetailPanel
                     memory={selectedGraphNode}
                     onClose={() => setSelectedGraphNode(null)}
-                    onViewDocument={(docId) => {
-                      viewDocument(docId);
-                      setSelectedGraphNode(null);
-                      setViewMode('table');
-                    }}
-                    onViewChunk={(chunkId) => {
-                      viewChunk(chunkId);
-                      setSelectedGraphNode(null);
-                      setViewMode('table');
-                    }}
                   />
                 </div>
               )}
@@ -372,13 +321,13 @@ export function DataView({ factType }: DataViewProps) {
 
           {viewMode === 'table' && (
             <div className="flex gap-4">
-              <div className={`transition-all ${selectedDocument || selectedChunk || selectedTableMemory ? 'w-2/3' : 'w-full'}`}>
+              <div className={`transition-all ${selectedTableMemory ? 'w-2/3' : 'w-full'}`}>
                 <div className="px-5 mb-4">
                   <Input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search memories (text, context)..."
+                    placeholder="Search memories (text, context, ID)..."
                     className="max-w-2xl"
                   />
                 </div>
@@ -390,7 +339,8 @@ export function DataView({ factType }: DataViewProps) {
                         const query = searchQuery.toLowerCase();
                         return (
                           row.text?.toLowerCase().includes(query) ||
-                          row.context?.toLowerCase().includes(query)
+                          row.context?.toLowerCase().includes(query) ||
+                          row.id?.toLowerCase().includes(query)
                         );
                       });
 
@@ -401,109 +351,85 @@ export function DataView({ factType }: DataViewProps) {
 
                       return (
                         <>
-                          <div className="grid gap-3">
-                            {paginatedRows.map((row: any, idx: number) => {
-                              const occurredDisplay = row.occurred_start
-                                ? new Date(row.occurred_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                                : null;
+                          <div className="border rounded-lg overflow-hidden">
+                            <Table>
+                              <TableHeader>
+                                <TableRow className="bg-muted/50">
+                                  <TableHead className="w-[80px]">ID</TableHead>
+                                  <TableHead>Text</TableHead>
+                                  <TableHead className="w-[150px]">Context</TableHead>
+                                  <TableHead className="w-[120px]">Occurred</TableHead>
+                                  <TableHead className="w-[60px]">Actions</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {paginatedRows.map((row: any, idx: number) => {
+                                  const occurredDisplay = row.occurred_start
+                                    ? new Date(row.occurred_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                    : null;
 
-                              return (
-                                <div
-                                  key={row.id || idx}
-                                  onClick={() => setSelectedTableMemory(row)}
-                                  className={`group p-4 bg-card border rounded-lg cursor-pointer transition-all hover:border-primary hover:shadow-md ${
-                                    selectedTableMemory?.id === row.id ? 'border-primary ring-2 ring-primary/20' : 'border-border'
-                                  }`}
-                                >
-                                  <div className="flex items-start gap-4">
-                                    {/* Main content */}
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-sm text-foreground line-clamp-2 mb-2">
-                                        {row.text}
-                                      </p>
-                                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                                        {occurredDisplay && (
+                                  return (
+                                    <TableRow
+                                      key={row.id || idx}
+                                      onClick={() => setSelectedTableMemory(row)}
+                                      className={`cursor-pointer hover:bg-muted/50 ${
+                                        selectedTableMemory?.id === row.id ? 'bg-primary/10' : ''
+                                      }`}
+                                    >
+                                      <TableCell className="font-mono text-xs text-muted-foreground" title={row.id}>
+                                        {row.id?.substring(0, 8)}...
+                                      </TableCell>
+                                      <TableCell>
+                                        <div className="line-clamp-2 text-sm">{row.text}</div>
+                                        {row.entities && (
+                                          <div className="flex gap-1 mt-1 flex-wrap">
+                                            {row.entities.split(', ').slice(0, 3).map((entity: string, i: number) => (
+                                              <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
+                                                {entity}
+                                              </span>
+                                            ))}
+                                            {row.entities.split(', ').length > 3 && (
+                                              <span className="text-[10px] text-muted-foreground">
+                                                +{row.entities.split(', ').length - 3}
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </TableCell>
+                                      <TableCell className="text-xs text-muted-foreground truncate max-w-[150px]" title={row.context}>
+                                        {row.context || '-'}
+                                      </TableCell>
+                                      <TableCell className="text-xs">
+                                        {occurredDisplay ? (
                                           <span className="flex items-center gap-1">
                                             <Calendar className="h-3 w-3" />
                                             {occurredDisplay}
                                           </span>
-                                        )}
-                                        {row.context && (
-                                          <span className="truncate max-w-[200px]" title={row.context}>
-                                            {row.context}
-                                          </span>
-                                        )}
-                                        <span className="font-mono opacity-50" title={row.id}>
-                                          {row.id.substring(0, 8)}...
-                                        </span>
-                                      </div>
-                                      {row.entities && (
-                                        <div className="flex gap-1 mt-2 flex-wrap">
-                                          {row.entities.split(', ').slice(0, 5).map((entity: string, i: number) => (
-                                            <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
-                                              {entity}
-                                            </span>
-                                          ))}
-                                          {row.entities.split(', ').length > 5 && (
-                                            <span className="text-[10px] text-muted-foreground">
-                                              +{row.entities.split(', ').length - 5}
-                                            </span>
+                                        ) : '-'}
+                                      </TableCell>
+                                      <TableCell>
+                                        <Button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            copyToClipboard(row.id);
+                                          }}
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 w-7 p-0"
+                                          title="Copy ID"
+                                        >
+                                          {copiedId === row.id ? (
+                                            <Check className="h-3 w-3 text-green-600" />
+                                          ) : (
+                                            <Copy className="h-3 w-3" />
                                           )}
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* Action buttons */}
-                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      {row.document_id && (
-                                        <Button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            viewDocument(row.document_id);
-                                          }}
-                                          size="sm"
-                                          variant="ghost"
-                                          className="h-8 w-8 p-0"
-                                          title="View Document"
-                                        >
-                                          <FileText className="h-4 w-4" />
                                         </Button>
-                                      )}
-                                      {row.chunk_id && (
-                                        <Button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            viewChunk(row.chunk_id);
-                                          }}
-                                          size="sm"
-                                          variant="ghost"
-                                          className="h-8 w-8 p-0"
-                                          title="View Chunk"
-                                        >
-                                          <Layers className="h-4 w-4" />
-                                        </Button>
-                                      )}
-                                      <Button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          copyToClipboard(row.id);
-                                        }}
-                                        size="sm"
-                                        variant="ghost"
-                                        className="h-8 w-8 p-0"
-                                        title="Copy ID"
-                                      >
-                                        {copiedId === row.id ? (
-                                          <Check className="h-4 w-4 text-green-600" />
-                                        ) : (
-                                          <Copy className="h-4 w-4" />
-                                        )}
-                                      </Button>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                              </TableBody>
+                            </Table>
                           </div>
 
                           {/* Pagination Controls */}
@@ -566,166 +492,20 @@ export function DataView({ factType }: DataViewProps) {
                 </div>
               </div>
 
-            {/* Memory Detail Panel for Table View */}
-            {selectedTableMemory && !selectedDocument && !selectedChunk && (
-              <div className="w-1/3 pr-5 pb-5">
-                <MemoryDetailPanel
-                  memory={selectedTableMemory}
-                  onClose={() => setSelectedTableMemory(null)}
-                  onViewDocument={(docId) => {
-                    viewDocument(docId);
-                    setSelectedTableMemory(null);
-                  }}
-                  onViewChunk={(chunkId) => {
-                    viewChunk(chunkId);
-                    setSelectedTableMemory(null);
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Document Detail Panel */}
-            {selectedDocument && (
-              <div className="w-1/3 pr-5 pb-5">
-                <div className="bg-card border-2 border-primary rounded-lg p-4 sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="text-lg font-bold text-card-foreground">Document Details</h3>
-                      <p className="text-sm text-muted-foreground">View the original document text and metadata</p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelectedDocument(null)}
-                      className="h-8 w-8 p-0"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  {loadingDocument ? (
-                    <div className="flex items-center justify-center py-20">
-                      <div className="text-center">
-                        <div className="text-4xl mb-2">⏳</div>
-                        <div className="text-sm text-muted-foreground">Loading document...</div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="space-y-3">
-                        <div className="p-3 bg-muted rounded-lg">
-                          <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Document ID</div>
-                          <div className="text-sm font-mono break-all">{selectedDocument.id}</div>
-                        </div>
-                        {selectedDocument.created_at && (
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="p-3 bg-muted rounded-lg">
-                              <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Created</div>
-                              <div className="text-sm">{new Date(selectedDocument.created_at).toLocaleString()}</div>
-                            </div>
-                            <div className="p-3 bg-muted rounded-lg">
-                              <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Memory Units</div>
-                              <div className="text-sm">{selectedDocument.memory_unit_count}</div>
-                            </div>
-                          </div>
-                        )}
-                        {selectedDocument.original_text && (
-                          <div className="p-3 bg-muted rounded-lg">
-                            <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Text Length</div>
-                            <div className="text-sm">{selectedDocument.original_text.length.toLocaleString()} characters</div>
-                          </div>
-                        )}
-                      </div>
-
-                      {selectedDocument.original_text && (
-                        <div>
-                          <div className="text-sm font-bold text-foreground mb-2">Original Text</div>
-                          <div className="p-4 bg-muted rounded-lg border border-border">
-                            <pre className="text-sm whitespace-pre-wrap font-mono">{selectedDocument.original_text}</pre>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+              {/* Memory Detail Panel for Table View */}
+              {selectedTableMemory && (
+                <div className="w-1/3 pr-5 pb-5">
+                  <MemoryDetailPanel
+                    memory={selectedTableMemory}
+                    onClose={() => setSelectedTableMemory(null)}
+                  />
                 </div>
-              </div>
-            )}
-
-            {/* Chunk Detail Panel */}
-            {selectedChunk && (
-              <div className="w-1/3 pr-5 pb-5">
-                <div className="bg-card border-2 border-primary rounded-lg p-4 sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="text-lg font-bold text-card-foreground">Chunk Details</h3>
-                      <p className="text-sm text-muted-foreground">View the chunk text and metadata</p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelectedChunk(null)}
-                      className="h-8 w-8 p-0"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  {loadingChunk ? (
-                    <div className="flex items-center justify-center py-20">
-                      <div className="text-center">
-                        <div className="text-4xl mb-2">⏳</div>
-                        <div className="text-sm text-muted-foreground">Loading chunk...</div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="space-y-3">
-                        <div className="p-3 bg-muted rounded-lg">
-                          <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Chunk ID</div>
-                          <div className="text-sm font-mono break-all">{selectedChunk.chunk_id}</div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="p-3 bg-muted rounded-lg">
-                            <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Document ID</div>
-                            <div className="text-sm font-mono break-all">{selectedChunk.document_id}</div>
-                          </div>
-                          <div className="p-3 bg-muted rounded-lg">
-                            <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Chunk Index</div>
-                            <div className="text-sm">{selectedChunk.chunk_index}</div>
-                          </div>
-                        </div>
-                        {selectedChunk.created_at && (
-                          <div className="p-3 bg-muted rounded-lg">
-                            <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Created</div>
-                            <div className="text-sm">{new Date(selectedChunk.created_at).toLocaleString()}</div>
-                          </div>
-                        )}
-                        {selectedChunk.chunk_text && (
-                          <div className="p-3 bg-muted rounded-lg">
-                            <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Text Length</div>
-                            <div className="text-sm">{selectedChunk.chunk_text.length.toLocaleString()} characters</div>
-                          </div>
-                        )}
-                      </div>
-
-                      {selectedChunk.chunk_text && (
-                        <div>
-                          <div className="text-sm font-bold text-foreground mb-2">Chunk Text</div>
-                          <div className="p-4 bg-muted rounded-lg border border-border">
-                            <pre className="text-sm whitespace-pre-wrap font-mono">{selectedChunk.chunk_text}</pre>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
           )}
 
           {viewMode === 'timeline' && (
-            <TimelineView data={data} onViewDocument={viewDocument} />
+            <TimelineView data={data} />
           )}
         </>
       ) : (
@@ -743,7 +523,7 @@ export function DataView({ factType }: DataViewProps) {
 // Timeline View Component - Custom compact timeline with zoom and navigation
 type Granularity = 'year' | 'month' | 'week' | 'day';
 
-function TimelineView({ data, onViewDocument }: { data: any; onViewDocument: (id: string) => void }) {
+function TimelineView({ data }: { data: any }) {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [granularity, setGranularity] = useState<Granularity>('month');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -1085,7 +865,6 @@ function TimelineView({ data, onViewDocument }: { data: any; onViewDocument: (id
           <MemoryDetailPanel
             memory={selectedItem}
             onClose={() => setSelectedItem(null)}
-            onViewDocument={onViewDocument}
             compact
           />
         </div>

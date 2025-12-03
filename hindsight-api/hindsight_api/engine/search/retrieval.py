@@ -295,6 +295,9 @@ async def retrieve_temporal(
                AND (occurred_start IS NOT NULL OR occurred_end IS NOT NULL OR mentioned_at IS NOT NULL)""",
             bank_id, fact_type
         )
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[TEMPORAL] No entry points found for {bank_id}/{fact_type} in range {start_date} to {end_date}. Total facts with dates: {total_with_dates}")
         return []
 
     # Calculate temporal scores for entry points
@@ -456,6 +459,7 @@ async def retrieve_parallel(
     temporal_constraint = extract_temporal_constraint(
         query_text, reference_date=question_date, analyzer=query_analyzer
     )
+    logger.info(f"[TEMPORAL] Query: {query_text[:50]}... -> constraint={temporal_constraint}")
 
     # Wrapper to track timing for each retrieval method
     async def timed_retrieval(name: str, coro):

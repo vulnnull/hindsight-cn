@@ -48,6 +48,10 @@ export class ControlPlaneClient {
     budget?: string;
     max_tokens?: number;
     trace?: boolean;
+    include?: {
+      entities?: { max_tokens: number } | null;
+      chunks?: { max_tokens: number } | null;
+    };
   }) {
     return this.fetchApi('/api/recall', {
       method: 'POST',

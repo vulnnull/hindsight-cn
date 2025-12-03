@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { hindsightClient } from '@/lib/hindsight-client';
+import { lowLevelClient, sdk } from '@/lib/hindsight-client';
 
 export async function POST(request: NextRequest) {
   try {
@@ -8,35 +8,45 @@ export async function POST(request: NextRequest) {
     const { query, types, fact_type, max_tokens, trace, budget, include } = body;
 
     console.log('[Recall API] Request:', { bankId, query, types: types || fact_type, max_tokens, trace, budget });
+    console.log('[Recall API] Include options:', JSON.stringify(include, null, 2));
 
-    const response = await hindsightClient.recallMemories(
-      bankId,
-      {
+    const response = await sdk.recallMemories({
+      client: lowLevelClient,
+      path: { bank_id: bankId },
+      body: {
         query,
         types: types || fact_type,
-        maxTokens: max_tokens,
+        max_tokens,
         trace,
-        budget
-      }
-    );
+        budget: budget || 'mid',
+        include,
+      },
+    });
 
-    console.log('[Recall API] Response type:', typeof response);
-    console.log('[Recall API] Response keys:', Object.keys(response || {}));
+    if (!response.data) {
+      console.error('[Recall API] No data in response', { response, error: response.error });
+      throw new Error(`API returned no data: ${JSON.stringify(response.error || 'Unknown error')}`);
+    }
+
     console.log('[Recall API] Response structure:', {
-      hasResults: !!response?.results,
-      resultsCount: response?.results?.length,
-      hasTrace: !!response?.trace,
-      hasEntities: !!response?.entities,
-      hasChunks: !!response?.chunks,
+      hasResults: !!response.data?.results,
+      resultsCount: response.data?.results?.length,
+      hasTrace: !!response.data?.trace,
+      hasEntities: !!response.data?.entities,
+      entitiesType: typeof response.data?.entities,
+      entitiesKeys: response.data?.entities ? Object.keys(response.data.entities) : null,
+      hasChunks: !!response.data?.chunks,
+      chunksType: typeof response.data?.chunks,
+      chunksKeys: response.data?.chunks ? Object.keys(response.data.chunks) : null,
     });
 
     // Return a clean JSON object by spreading the response
     // This ensures any non-serializable properties are excluded
     const jsonResponse = {
-      results: response.results,
-      trace: response.trace,
-      entities: response.entities,
-      chunks: response.chunks,
+      results: response.data.results,
+      trace: response.data.trace,
+      entities: response.data.entities,
+      chunks: response.data.chunks,
     };
 
     return NextResponse.json(jsonResponse, { status: 200 });

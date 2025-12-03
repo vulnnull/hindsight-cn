@@ -6,8 +6,9 @@ structured information like temporal constraints.
 """
 from abc import ABC, abstractmethod
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
+import re
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,171 @@ class QueryAnalyzer(ABC):
         pass
 
 
+class DateparserQueryAnalyzer(QueryAnalyzer):
+    """
+    Query analyzer using dateparser library.
+
+    Uses dateparser to extract temporal expressions from natural language
+    queries. Supports 200+ languages including English, Spanish, Italian,
+    French, German, etc.
+
+    Performance:
+    - ~10-50ms per query
+    - No model loading required
+    """
+
+    def __init__(self):
+        """Initialize dateparser query analyzer."""
+        self._search_dates = None
+
+    def load(self) -> None:
+        """Load dateparser (lazy import)."""
+        if self._search_dates is None:
+            from dateparser.search import search_dates
+            self._search_dates = search_dates
+
+    def analyze(
+        self, query: str, reference_date: Optional[datetime] = None
+    ) -> QueryAnalysis:
+        """
+        Analyze query using dateparser.
+
+        Extracts temporal expressions from the query text. Supports multiple
+        languages automatically.
+
+        Args:
+            query: Natural language query (any language)
+            reference_date: Reference date for relative terms (defaults to now)
+
+        Returns:
+            QueryAnalysis with temporal_constraint if found
+        """
+        self.load()
+
+        if reference_date is None:
+            reference_date = datetime.now()
+
+        # Check for period expressions first (these need special handling)
+        query_lower = query.lower()
+        period_result = self._extract_period(query_lower, reference_date)
+        if period_result is not None:
+            return QueryAnalysis(temporal_constraint=period_result)
+
+        # Use dateparser's search_dates to find temporal expressions
+        settings = {
+            'RELATIVE_BASE': reference_date,
+            'PREFER_DATES_FROM': 'past',
+            'RETURN_AS_TIMEZONE_AWARE': False,
+        }
+
+        results = self._search_dates(query, settings=settings)
+
+        if not results:
+            return QueryAnalysis(temporal_constraint=None)
+
+        # Filter out false positives (common words parsed as dates)
+        false_positives = {'do', 'may', 'march', 'will', 'can', 'sat', 'sun', 'mon', 'tue', 'wed', 'thu', 'fri'}
+        valid_results = [
+            (text, date) for text, date in results
+            if text.lower() not in false_positives or len(text) > 3
+        ]
+
+        if not valid_results:
+            return QueryAnalysis(temporal_constraint=None)
+
+        # Use the first valid date found
+        _, parsed_date = valid_results[0]
+
+        # Create constraint for single day
+        start_date = parsed_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = parsed_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+        return QueryAnalysis(
+            temporal_constraint=TemporalConstraint(
+                start_date=start_date,
+                end_date=end_date
+            )
+        )
+
+    def _extract_period(
+        self, query: str, reference_date: datetime
+    ) -> Optional[TemporalConstraint]:
+        """
+        Extract period-based temporal expressions (week, month, year, weekend).
+
+        These need special handling as they represent date ranges, not single dates.
+        Supports multiple languages.
+        """
+        def constraint(start: datetime, end: datetime) -> TemporalConstraint:
+            return TemporalConstraint(
+                start_date=start.replace(hour=0, minute=0, second=0, microsecond=0),
+                end_date=end.replace(hour=23, minute=59, second=59, microsecond=999999)
+            )
+
+        # Yesterday patterns (English, Spanish, Italian, French, German)
+        if re.search(r'\b(yesterday|ayer|ieri|hier|gestern)\b', query, re.IGNORECASE):
+            d = reference_date - timedelta(days=1)
+            return constraint(d, d)
+
+        # Today patterns
+        if re.search(r'\b(today|hoy|oggi|aujourd\'?hui|heute)\b', query, re.IGNORECASE):
+            return constraint(reference_date, reference_date)
+
+        # Last week patterns (English, Spanish, Italian, French, German)
+        if re.search(r'\b(last\s+week|la\s+semana\s+pasada|la\s+settimana\s+scorsa|la\s+semaine\s+derni[eè]re|letzte\s+woche)\b', query, re.IGNORECASE):
+            start = reference_date - timedelta(days=reference_date.weekday() + 7)
+            return constraint(start, start + timedelta(days=6))
+
+        # Last month patterns
+        if re.search(r'\b(last\s+month|el\s+mes\s+pasado|il\s+mese\s+scorso|le\s+mois\s+dernier|letzten?\s+monat)\b', query, re.IGNORECASE):
+            first = reference_date.replace(day=1)
+            end = first - timedelta(days=1)
+            start = end.replace(day=1)
+            return constraint(start, end)
+
+        # Last year patterns
+        if re.search(r'\b(last\s+year|el\s+a[ñn]o\s+pasado|l\'anno\s+scorso|l\'ann[ée]e\s+derni[eè]re|letztes?\s+jahr)\b', query, re.IGNORECASE):
+            year = reference_date.year - 1
+            return constraint(datetime(year, 1, 1), datetime(year, 12, 31))
+
+        # Last weekend patterns
+        if re.search(r'\b(last\s+weekend|el\s+fin\s+de\s+semana\s+pasado|lo\s+scorso\s+fine\s+settimana|le\s+week-?end\s+dernier|letztes?\s+wochenende)\b', query, re.IGNORECASE):
+            days_since_sat = (reference_date.weekday() + 2) % 7
+            if days_since_sat == 0:
+                days_since_sat = 7
+            sat = reference_date - timedelta(days=days_since_sat)
+            return constraint(sat, sat + timedelta(days=1))
+
+        # Month + Year patterns (e.g., "June 2024", "junio 2024", "giugno 2024")
+        month_patterns = {
+            'january|enero|gennaio|janvier|januar': 1,
+            'february|febrero|febbraio|f[ée]vrier|februar': 2,
+            'march|marzo|mars|m[äa]rz': 3,
+            'april|abril|aprile|avril': 4,
+            'may|mayo|maggio|mai': 5,
+            'june|junio|giugno|juin|juni': 6,
+            'july|julio|luglio|juillet|juli': 7,
+            'august|agosto|ao[uû]t': 8,
+            'september|septiembre|settembre|septembre': 9,
+            'october|octubre|ottobre|octobre|oktober': 10,
+            'november|noviembre|novembre': 11,
+            'december|diciembre|dicembre|d[ée]cembre|dezember': 12,
+        }
+
+        for pattern, month_num in month_patterns.items():
+            match = re.search(rf'\b({pattern})\s+(\d{{4}})\b', query, re.IGNORECASE)
+            if match:
+                year = int(match.group(2))
+                start = datetime(year, month_num, 1)
+                if month_num == 12:
+                    end = datetime(year, 12, 31)
+                else:
+                    end = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                return constraint(start, end)
+
+        return None
+
+
 class TransformerQueryAnalyzer(QueryAnalyzer):
     """
     Query analyzer using T5-based generative models.
@@ -128,13 +294,89 @@ class TransformerQueryAnalyzer(QueryAnalyzer):
         """Lazy load the T5 model for temporal extraction (calls load())."""
         self.load()
 
+    def _extract_with_rules(
+        self, query: str, reference_date: datetime
+    ) -> Optional[TemporalConstraint]:
+        """
+        Extract temporal expressions using rule-based patterns.
+
+        Handles common patterns reliably and fast. Returns None for
+        patterns that need model-based extraction.
+        """
+        import re
+        query_lower = query.lower()
+
+        def get_last_weekday(weekday: int) -> datetime:
+            days_ago = (reference_date.weekday() - weekday) % 7
+            if days_ago == 0:
+                days_ago = 7
+            return reference_date - timedelta(days=days_ago)
+
+        def constraint(start: datetime, end: datetime) -> TemporalConstraint:
+            return TemporalConstraint(
+                start_date=start.replace(hour=0, minute=0, second=0, microsecond=0),
+                end_date=end.replace(hour=23, minute=59, second=59, microsecond=999999)
+            )
+
+        # Yesterday
+        if re.search(r'\byesterday\b', query_lower):
+            d = reference_date - timedelta(days=1)
+            return constraint(d, d)
+
+        # Last week
+        if re.search(r'\blast\s+week\b', query_lower):
+            start = reference_date - timedelta(days=reference_date.weekday() + 7)
+            return constraint(start, start + timedelta(days=6))
+
+        # Last month
+        if re.search(r'\blast\s+month\b', query_lower):
+            first = reference_date.replace(day=1)
+            end = first - timedelta(days=1)
+            start = end.replace(day=1)
+            return constraint(start, end)
+
+        # Last year
+        if re.search(r'\blast\s+year\b', query_lower):
+            y = reference_date.year - 1
+            return constraint(datetime(y, 1, 1), datetime(y, 12, 31))
+
+        # Last weekend
+        if re.search(r'\blast\s+weekend\b', query_lower):
+            sat = get_last_weekday(5)
+            return constraint(sat, sat + timedelta(days=1))
+
+        # Last <weekday>
+        weekdays = {'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+                    'friday': 4, 'saturday': 5, 'sunday': 6}
+        for name, num in weekdays.items():
+            if re.search(rf'\blast\s+{name}\b', query_lower):
+                d = get_last_weekday(num)
+                return constraint(d, d)
+
+        # Month + Year: "June 2024", "in March 2023"
+        months = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5,
+                  'june': 6, 'july': 7, 'august': 8, 'september': 9, 'october': 10,
+                  'november': 11, 'december': 12}
+        for name, num in months.items():
+            match = re.search(rf'\b{name}\s+(\d{{4}})\b', query_lower)
+            if match:
+                year = int(match.group(1))
+                if num == 12:
+                    last_day = 31
+                else:
+                    last_day = (datetime(year, num + 1, 1) - timedelta(days=1)).day
+                return constraint(datetime(year, num, 1), datetime(year, num, last_day))
+
+        return None
+
     def analyze(
         self, query: str, reference_date: Optional[datetime] = None
     ) -> QueryAnalysis:
         """
-        Analyze query using T5 model.
+        Analyze query for temporal expressions.
 
-        Uses T5 to generate structured temporal output directly.
+        Uses rule-based extraction for common patterns (fast & reliable),
+        falls back to T5 model for complex/unusual patterns.
 
         Args:
             query: Natural language query
@@ -146,17 +388,30 @@ class TransformerQueryAnalyzer(QueryAnalyzer):
         if reference_date is None:
             reference_date = datetime.now()
 
+        # Try rule-based extraction first (handles 90%+ of cases)
+        result = self._extract_with_rules(query, reference_date)
+        if result is not None:
+            return QueryAnalysis(temporal_constraint=result)
+
+        # Fall back to T5 model for unusual patterns
         self._load_model()
 
-        # Build prompt for T5 to generate structured temporal output
-        # Use fill-in-the-blank format which T5 handles better
-        prompt = f"""Today is {reference_date.strftime('%Y-%m-%d')}. Convert temporal expressions to date ranges.
+        # Helper to calculate example dates
+        def get_last_weekday(weekday: int) -> datetime:
+            days_ago = (reference_date.weekday() - weekday) % 7
+            if days_ago == 0:
+                days_ago = 7
+            return reference_date - timedelta(days=days_ago)
+
+        yesterday = reference_date - timedelta(days=1)
+        last_saturday = get_last_weekday(5)
+
+        # Build prompt for T5
+        prompt = f"""Today is {reference_date.strftime('%Y-%m-%d')}. Extract date range or "none".
 
 June 2024 = 2024-06-01 to 2024-06-30
-March 2023 = 2023-03-01 to 2023-03-31
-dogs in June 2023 = 2023-06-01 to 2023-06-30
-last year = {reference_date.year - 1}-01-01 to {reference_date.year - 1}-12-31
-events in January 2020 = 2020-01-01 to 2020-01-31
+yesterday = {yesterday.strftime('%Y-%m-%d')} to {yesterday.strftime('%Y-%m-%d')}
+last Saturday = {last_saturday.strftime('%Y-%m-%d')} to {last_saturday.strftime('%Y-%m-%d')}
 what is the weather = none
 {query} ="""
 
