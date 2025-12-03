@@ -5,9 +5,9 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const bankId = body.bank_id || body.agent_id || 'default';
-    const { query, types, fact_type, max_tokens, trace, budget, include } = body;
+    const { query, types, fact_type, max_tokens, trace, budget, include, query_timestamp } = body;
 
-    console.log('[Recall API] Request:', { bankId, query, types: types || fact_type, max_tokens, trace, budget });
+    console.log('[Recall API] Request:', { bankId, query, types: types || fact_type, max_tokens, trace, budget, query_timestamp });
     console.log('[Recall API] Include options:', JSON.stringify(include, null, 2));
 
     const response = await sdk.recallMemories({
@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
         trace,
         budget: budget || 'mid',
         include,
+        query_timestamp,
       },
     });
 

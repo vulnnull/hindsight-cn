@@ -228,7 +228,7 @@ async def retrieve_temporal(
     start_date: datetime,
     end_date: datetime,
     budget: int,
-    semantic_threshold: float = 0.4
+    semantic_threshold: float = 0.1
 ) -> List[RetrievalResult]:
     """
     Temporal retrieval with spreading activation.
@@ -287,6 +287,9 @@ async def retrieve_temporal(
         query_emb_str, bank_id, fact_type, start_date, end_date, semantic_threshold
     )
 
+    import logging
+    logger = logging.getLogger(__name__)
+
     if not entry_points:
         # Check if there are ANY memories with temporal metadata for this bank
         total_with_dates = await conn.fetchval(
@@ -295,9 +298,28 @@ async def retrieve_temporal(
                AND (occurred_start IS NOT NULL OR occurred_end IS NOT NULL OR mentioned_at IS NOT NULL)""",
             bank_id, fact_type
         )
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"[TEMPORAL] No entry points found for {bank_id}/{fact_type} in range {start_date} to {end_date}. Total facts with dates: {total_with_dates}")
+        # Check how many have mentioned_at in the range
+        in_range = await conn.fetchval(
+            """SELECT COUNT(*) FROM memory_units
+               WHERE bank_id = $1 AND fact_type = $2
+               AND mentioned_at IS NOT NULL AND mentioned_at BETWEEN $3 AND $4""",
+            bank_id, fact_type, start_date, end_date
+        )
+        # Check semantic similarity of those in range
+        sample = await conn.fetch(
+            """SELECT id, text, mentioned_at, 1 - (embedding <=> $1::vector) AS similarity
+               FROM memory_units
+               WHERE bank_id = $2 AND fact_type = $3
+               AND mentioned_at IS NOT NULL AND mentioned_at BETWEEN $4 AND $5
+               AND embedding IS NOT NULL
+               ORDER BY mentioned_at DESC
+               LIMIT 5""",
+            query_emb_str, bank_id, fact_type, start_date, end_date
+        )
+        logger.info(f"[TEMPORAL] No entry points for {bank_id}/{fact_type} in {start_date} to {end_date}.")
+        logger.info(f"[TEMPORAL] Total with dates: {total_with_dates}, In date range: {in_range}")
+        for row in sample:
+            logger.info(f"[TEMPORAL] Sample: {row['text'][:60]}... mentioned_at={row['mentioned_at']} sim={row['similarity']:.3f}")
         return []
 
     # Calculate temporal scores for entry points
@@ -430,7 +452,7 @@ async def retrieve_parallel(
     thinking_budget: int,
     question_date: Optional[datetime] = None,
     query_analyzer: Optional["QueryAnalyzer"] = None
-) -> Tuple[List[RetrievalResult], List[RetrievalResult], List[RetrievalResult], Optional[List[RetrievalResult]], Dict[str, float]]:
+) -> Tuple[List[RetrievalResult], List[RetrievalResult], List[RetrievalResult], Optional[List[RetrievalResult]], Dict[str, float], Optional[Tuple[datetime, datetime]]]:
     """
     Run 3-way or 4-way parallel retrieval (adds temporal if detected).
 
@@ -445,10 +467,11 @@ async def retrieve_parallel(
         query_analyzer: Query analyzer to use (defaults to TransformerQueryAnalyzer)
 
     Returns:
-        Tuple of (semantic_results, bm25_results, graph_results, temporal_results, timings)
+        Tuple of (semantic_results, bm25_results, graph_results, temporal_results, timings, temporal_constraint)
         Each results list contains RetrievalResult objects
         temporal_results is None if no temporal constraint detected
         timings is a dict with per-method latencies in seconds
+        temporal_constraint is the (start_date, end_date) tuple if detected, else None
     """
     # Detect temporal constraint
     from .temporal_extraction import extract_temporal_constraint
@@ -459,7 +482,6 @@ async def retrieve_parallel(
     temporal_constraint = extract_temporal_constraint(
         query_text, reference_date=question_date, analyzer=query_analyzer
     )
-    logger.info(f"[TEMPORAL] Query: {query_text[:50]}... -> constraint={temporal_constraint}")
 
     # Wrapper to track timing for each retrieval method
     async def timed_retrieval(name: str, coro):
@@ -484,7 +506,7 @@ async def retrieve_parallel(
         async with acquire_with_retry(pool) as conn:
             return await retrieve_temporal(
                 conn, query_embedding_str, bank_id, fact_type,
-                start_date, end_date, budget=thinking_budget, semantic_threshold=0.4
+                start_date, end_date, budget=thinking_budget, semantic_threshold=0.1
             )
 
     # Run retrievals in parallel with timing
@@ -512,4 +534,4 @@ async def retrieve_parallel(
         graph_results, _, timings["graph"] = results[2]
         temporal_results = None
 
-    return semantic_results, bm25_results, graph_results, temporal_results, timings
+    return semantic_results, bm25_results, graph_results, temporal_results, timings, temporal_constraint

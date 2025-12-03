@@ -52,6 +52,7 @@ export class ControlPlaneClient {
       entities?: { max_tokens: number } | null;
       chunks?: { max_tokens: number } | null;
     };
+    query_timestamp?: string;
   }) {
     return this.fetchApi('/api/recall', {
       method: 'POST',

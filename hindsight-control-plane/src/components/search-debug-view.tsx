@@ -560,7 +560,7 @@ export function SearchDebugView() {
                 </div>
 
                 {/* Parameters Grid */}
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-5 gap-4">
                   <div>
                     <label className="block text-sm font-bold mb-2 text-accent-foreground">Fact Types:</label>
                     <div className="flex flex-col gap-2">
@@ -613,6 +613,20 @@ export function SearchDebugView() {
                       }
                       className="w-full"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold mb-2 text-accent-foreground">Query Date:</label>
+                    <Input
+                      type="datetime-local"
+                      value={pane.queryDate}
+                      onChange={(e) =>
+                        updatePane(pane.id, { queryDate: e.target.value })
+                      }
+                      className="w-full"
+                      placeholder="Optional"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">When is the query being asked</p>
                   </div>
 
                   <div>
