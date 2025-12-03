@@ -10,12 +10,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class CrossEncoderReranker(ABC):
+class CrossEncoderModel(ABC):
     """
     Abstract base class for cross-encoder reranking.
 
     Cross-encoders take query-document pairs and return relevance scores.
     """
+
+    @abstractmethod
+    def load(self) -> None:
+        """
+        Load the cross-encoder model.
+
+        This should be called during initialization to load the model
+        and avoid cold start latency on first predict() call.
+        """
+        pass
 
     @abstractmethod
     def predict(self, pairs: List[Tuple[str, str]]) -> List[float]:
@@ -31,12 +41,11 @@ class CrossEncoderReranker(ABC):
         pass
 
 
-class SentenceTransformersCrossEncoder(CrossEncoderReranker):
+class SentenceTransformersCrossEncoder(CrossEncoderModel):
     """
     Cross-encoder implementation using SentenceTransformers.
 
-    Uses lazy import so sentence-transformers is not required if another
-    reranking backend is used.
+    Call load() during initialization to load the model and avoid cold starts.
 
     Default model is cross-encoder/ms-marco-MiniLM-L-6-v2:
     - Fast inference (~80ms for 100 pairs on CPU)
@@ -46,13 +55,19 @@ class SentenceTransformersCrossEncoder(CrossEncoderReranker):
 
     def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
         """
-        Initialize SentenceTransformers cross-encoder and load model.
+        Initialize SentenceTransformers cross-encoder.
 
         Args:
             model_name: Name of the CrossEncoder model to use.
                        Default: cross-encoder/ms-marco-MiniLM-L-6-v2
         """
         self.model_name = model_name
+        self._model = None
+
+    def load(self) -> None:
+        """Load the cross-encoder model."""
+        if self._model is not None:
+            return
 
         try:
             from sentence_transformers import CrossEncoder
@@ -76,5 +91,7 @@ class SentenceTransformersCrossEncoder(CrossEncoderReranker):
         Returns:
             List of relevance scores (raw logits from the model)
         """
-        scores = self._model.predict(pairs)
+        if self._model is None:
+            self.load()
+        scores = self._model.predict(pairs, show_progress_bar=False)
         return scores.tolist() if hasattr(scores, 'tolist') else list(scores)

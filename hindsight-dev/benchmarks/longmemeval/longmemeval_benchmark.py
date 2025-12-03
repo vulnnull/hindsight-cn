@@ -551,7 +551,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--fill",
         action="store_true",
-        help="Only process questions where the agent has no indexed data yet (for resuming interrupted runs)"
+        help="Only process questions not already in results file (for resuming interrupted runs)"
     )
     parser.add_argument(
         "--question-id",

@@ -47,6 +47,16 @@ class QueryAnalyzer(ABC):
     """
 
     @abstractmethod
+    def load(self) -> None:
+        """
+        Load the query analyzer model.
+
+        This should be called during initialization to load the model
+        and avoid cold start latency on first analyze() call.
+        """
+        pass
+
+    @abstractmethod
     def analyze(
         self, query: str, reference_date: Optional[datetime] = None
     ) -> QueryAnalysis:
@@ -94,21 +104,29 @@ class TransformerQueryAnalyzer(QueryAnalyzer):
         self._model = None
         self._tokenizer = None
 
-    def _load_model(self):
-        """Lazy load the T5 model for temporal extraction."""
-        if self._model is None:
-            try:
-                from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-            except ImportError:
-                raise ImportError(
-                    "transformers is required for TransformerQueryAnalyzer. "
-                    "Install it with: pip install transformers"
-                )
+    def load(self) -> None:
+        """Load the T5 model for temporal extraction."""
+        if self._model is not None:
+            return
 
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self._model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
-            self._model.to(self.device)
-            self._model.eval()
+        try:
+            from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+        except ImportError:
+            raise ImportError(
+                "transformers is required for TransformerQueryAnalyzer. "
+                "Install it with: pip install transformers"
+            )
+
+        logger.info(f"Loading query analyzer model: {self.model_name}...")
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self._model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+        self._model.to(self.device)
+        self._model.eval()
+        logger.info("Query analyzer model loaded")
+
+    def _load_model(self):
+        """Lazy load the T5 model for temporal extraction (calls load())."""
+        self.load()
 
     def analyze(
         self, query: str, reference_date: Optional[datetime] = None

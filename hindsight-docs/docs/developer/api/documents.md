@@ -30,6 +30,10 @@ Associate retained content with a document:
 <TabItem value="python" label="Python">
 
 ```python
+from hindsight_client import Hindsight
+
+client = Hindsight(base_url="http://localhost:8888")
+
 # Retain with document ID
 client.retain(
     bank_id="my-bank",
@@ -40,7 +44,7 @@ client.retain(
 # Batch retain for a document
 client.retain_batch(
     bank_id="my-bank",
-    contents=[
+    items=[
         {"content": "Item 1: Product launch delayed to Q2"},
         {"content": "Item 2: New hiring targets announced"},
         {"content": "Item 3: Budget approved for ML team"}
@@ -60,24 +64,22 @@ with open("notes.txt") as f:
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
+```typescript
+import { HindsightClient } from '@hindsight/client';
+
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
+
 // Retain with document ID
-await client.retain({
-    bankId: 'my-bank',
-    content: 'Alice presented the Q4 roadmap...',
-    documentId: 'meeting-2024-03-15'
+await client.retain('my-bank', 'Alice presented the Q4 roadmap...', {
+    document_id: 'meeting-2024-03-15'
 });
 
 // Batch retain
-await client.retainBatch({
-    bankId: 'my-bank',
-    contents: [
-        { content: 'Item 1: Product launch delayed to Q2' },
-        { content: 'Item 2: New hiring targets announced' },
-        { content: 'Item 3: Budget approved for ML team' }
-    ],
-    documentId: 'meeting-2024-03-15'
-});
+await client.retainBatch('my-bank', [
+    { content: 'Item 1: Product launch delayed to Q2' },
+    { content: 'Item 2: New hiring targets announced' },
+    { content: 'Item 3: Budget approved for ML team' }
+], { documentId: 'meeting-2024-03-15' });
 ```
 
 </TabItem>
@@ -120,19 +122,15 @@ client.retain(
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
+```typescript
 // Original
-await client.retain({
-    bankId: 'my-bank',
-    content: 'Project deadline: March 31',
-    documentId: 'project-plan'
+await client.retain('my-bank', 'Project deadline: March 31', {
+    document_id: 'project-plan'
 });
 
 // Update
-await client.retain({
-    bankId: 'my-bank',
-    content: 'Project deadline: April 15 (extended)',
-    documentId: 'project-plan'
+await client.retain('my-bank', 'Project deadline: April 15 (extended)', {
+    document_id: 'project-plan'
 });
 ```
 
@@ -158,16 +156,23 @@ View all documents in a memory bank:
 <TabItem value="python" label="Python">
 
 ```python
-# List all documents
-documents = client.list_documents(bank_id="my-bank")
+# Using the low-level API
+from hindsight_client_api import ApiClient, Configuration
+from hindsight_client_api.api import DefaultApi
 
-for doc in documents:
-    print(f"{doc['id']}: {doc['memory_count']} memories")
-    print(f"  Created: {doc['created_at']}")
-    print(f"  Updated: {doc['updated_at']}")
+config = Configuration(host="http://localhost:8888")
+api_client = ApiClient(config)
+api = DefaultApi(api_client)
+
+# List all documents
+response = api.list_documents(bank_id="my-bank")
+
+for doc in response.items:
+    print(f"{doc.id}: {doc.memory_unit_count} memories")
+    print(f"  Created: {doc.created_at}")
 
 # With pagination
-documents = client.list_documents(
+response = api.list_documents(
     bank_id="my-bank",
     limit=50,
     offset=0
@@ -177,17 +182,21 @@ documents = client.list_documents(
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
+```typescript
+import { sdk, createClient, createConfig } from '@hindsight/client';
+
+const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
+
 // List all documents
-const documents = await client.listDocuments({
-    bankId: 'my-bank'
+const response = await sdk.listDocuments({
+    client: apiClient,
+    path: { bank_id: 'my-bank' }
 });
 
-documents.forEach(doc => {
-    console.log(`${doc.id}: ${doc.memoryCount} memories`);
-    console.log(`  Created: ${doc.createdAt}`);
-    console.log(`  Updated: ${doc.updatedAt}`);
-});
+for (const doc of response.data.items) {
+    console.log(`${doc.id}: ${doc.memory_unit_count} memories`);
+    console.log(`  Created: ${doc.created_at}`);
+}
 ```
 
 </TabItem>
@@ -206,52 +215,36 @@ hindsight documents list my-bank --limit 50
 
 ## Get Document Details
 
-Retrieve a specific document with its memories:
+Retrieve a specific document with its content:
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
 # Get document
-doc = client.get_document(
+doc = api.get_document(
     bank_id="my-bank",
     document_id="meeting-2024-03-15"
 )
 
-print(f"Document: {doc['id']}")
-print(f"Original text: {doc['original_text'][:200]}...")
-print(f"Memories: {doc['memory_count']}")
-
-# Get with memories
-doc = client.get_document(
-    bank_id="my-bank",
-    document_id="meeting-2024-03-15",
-    include_memories=True
-)
-
-for memory in doc['memories']:
-    print(f"  - {memory['text']}")
+print(f"Document: {doc.id}")
+print(f"Original text: {doc.original_text[:200]}...")
+print(f"Memories: {doc.memory_unit_count}")
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
+```typescript
 // Get document
-const doc = await client.getDocument({
-    bankId: 'my-bank',
-    documentId: 'meeting-2024-03-15'
+const doc = await sdk.getDocument({
+    client: apiClient,
+    path: { bank_id: 'my-bank', document_id: 'meeting-2024-03-15' }
 });
 
-console.log(`Document: ${doc.id}`);
-console.log(`Memories: ${doc.memoryCount}`);
-
-// Get with memories
-const withMemories = await client.getDocument({
-    bankId: 'my-bank',
-    documentId: 'meeting-2024-03-15',
-    includeMemories: true
-});
+console.log(`Document: ${doc.data.id}`);
+console.log(`Original text: ${doc.data.original_text.substring(0, 200)}...`);
+console.log(`Memories: ${doc.data.memory_unit_count}`);
 ```
 
 </TabItem>
@@ -260,9 +253,6 @@ const withMemories = await client.getDocument({
 ```bash
 # Get document
 hindsight documents get my-bank meeting-2024-03-15
-
-# With memories
-hindsight documents get my-bank meeting-2024-03-15 --include-memories
 ```
 
 </TabItem>
@@ -277,31 +267,31 @@ Remove a document and all its memories:
 
 ```python
 # Delete document (removes all associated memories)
-client.delete_document(
+api.delete_document(
     bank_id="my-bank",
     document_id="old-meeting"
 )
 
 # Bulk delete
 for doc_id in ["old-1", "old-2", "old-3"]:
-    client.delete_document(bank_id="my-bank", document_id=doc_id)
+    api.delete_document(bank_id="my-bank", document_id=doc_id)
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
+```typescript
 // Delete document
-await client.deleteDocument({
-    bankId: 'my-bank',
-    documentId: 'old-meeting'
+await sdk.deleteDocument({
+    client: apiClient,
+    path: { bank_id: 'my-bank', document_id: 'old-meeting' }
 });
 
 // Bulk delete
 for (const docId of ['old-1', 'old-2', 'old-3']) {
-    await client.deleteDocument({
-        bankId: 'my-bank',
-        documentId: docId
+    await sdk.deleteDocument({
+        client: apiClient,
+        path: { bank_id: 'my-bank', document_id: docId }
     });
 }
 ```
@@ -327,11 +317,12 @@ hindsight documents delete my-bank old-meeting --confirm
   "id": "meeting-2024-03-15",
   "bank_id": "my-bank",
   "original_text": "Alice presented the Q4 roadmap...",
-  "content_hash": "sha256:abc123...",
-  "memory_count": 12,
+  "memory_unit_count": 12,
   "created_at": "2024-03-15T14:00:00Z",
-  "updated_at": "2024-03-15T14:00:00Z",
-  "metadata": {}
+  "retain_params": {
+    "context": "team meeting",
+    "event_date": "2024-03-15"
+  }
 }
 ```
 
@@ -339,7 +330,12 @@ hindsight documents delete my-bank old-meeting --confirm
 
 ### Meeting Notes
 
+<Tabs>
+<TabItem value="python" label="Python">
+
 ```python
+from datetime import date
+
 # Store meeting notes with date-based IDs
 client.retain(
     bank_id="team-memory",
@@ -348,10 +344,21 @@ client.retain(
 )
 ```
 
+</TabItem>
+</Tabs>
+
 ### Documentation
 
+<Tabs>
+<TabItem value="python" label="Python">
+
 ```python
+from pathlib import Path
+
 # Store docs with version tracking
+docs_dir = Path("docs")
+version = "1.0"
+
 for file in docs_dir.glob("*.md"):
     client.retain(
         bank_id="docs-memory",
@@ -360,7 +367,13 @@ for file in docs_dir.glob("*.md"):
     )
 ```
 
+</TabItem>
+</Tabs>
+
 ### Conversation History
+
+<Tabs>
+<TabItem value="python" label="Python">
 
 ```python
 # Store chat history with session IDs
@@ -370,6 +383,9 @@ client.retain(
     document_id=f"session-{session_id}"
 )
 ```
+
+</TabItem>
+</Tabs>
 
 ## Next Steps
 

@@ -19,8 +19,8 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-results = client.search(
-    agent_id="my-agent",
+results = client.recall(
+    bank_id="my-bank",
     query="What does Alice do?"
 )
 
@@ -32,16 +32,13 @@ for r in results:
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { OpenAPI, SearchService } from '@hindsight/client';
+import { HindsightClient } from '@hindsight/client';
 
-OpenAPI.BASE = 'http://localhost:8888';
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-const results = await SearchService.searchApiSearchPost({
-    agent_id: 'my-agent',
-    query: 'What does Alice do?'
-});
+const results = await client.recall('my-bank', 'What does Alice do?');
 
-for (const r of results.results) {
+for (const r of results) {
     console.log(`${r.text} (score: ${r.weight})`);
 }
 ```
@@ -50,7 +47,7 @@ for (const r of results.results) {
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory search my-agent "What does Alice do?"
+hindsight memory search my-bank "What does Alice do?"
 ```
 
 </TabItem>
@@ -61,25 +58,83 @@ hindsight memory search my-agent "What does Alice do?"
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | string | required | Natural language query |
-| `top_k` | int | 10 | Maximum results to return |
-| `budget` | Budget | MID | Budget level: LOW (100), MID (300), HIGH (600) nodes |
-| `fact_type` | list | all | Filter: `world`, `agent`, `opinion` |
+| `types` | list | all | Filter: `world`, `agent`, `opinion` |
+| `budget` | string | "mid" | Budget level: "low", "mid", "high" |
 | `max_tokens` | int | 4096 | Token budget for results |
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-from hindsight_api.engine.memory_engine import Budget
-
 results = client.recall(
-    bank_id="my-agent",
+    bank_id="my-bank",
     query="What does Alice do?",
-    top_k=20,
-    budget=Budget.HIGH,
-    fact_type=["world", "agent"],
+    types=["world", "agent"],
+    budget="high",
     max_tokens=8000
 )
+```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+const results = await client.recall('my-bank', 'What does Alice do?', {
+    budget: 'high',
+    maxTokens: 8000
+});
+```
+
+</TabItem>
+</Tabs>
+
+## Full-Featured Search
+
+For more control, use the full-featured recall method:
+
+<Tabs>
+<TabItem value="python" label="Python">
+
+```python
+# Full response with trace info
+response = client.recall_memories(
+    bank_id="my-bank",
+    query="What does Alice do?",
+    types=["world", "agent"],
+    budget="high",
+    max_tokens=8000,
+    trace=True,
+    include_entities=True,
+    max_entity_tokens=500
+)
+
+# Access results
+for r in response["results"]:
+    print(f"{r['text']} (score: {r['weight']:.2f})")
+
+# Access entity observations (if include_entities=True)
+if "entities" in response:
+    for entity in response["entities"]:
+        print(f"Entity: {entity['name']}")
+```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+// Full response with trace info
+const response = await client.recallMemories('my-bank', {
+    query: 'What does Alice do?',
+    types: ['world', 'agent'],
+    budget: 'high',
+    maxTokens: 8000,
+    trace: true
+});
+
+// Access results
+for (const r of response.results) {
+    console.log(`${r.text} (score: ${r.weight})`);
+}
 ```
 
 </TabItem>
@@ -94,17 +149,17 @@ Hindsight automatically detects time expressions and activates temporal search:
 
 ```python
 # These queries activate temporal-graph retrieval
-results = client.search(agent_id="my-agent", query="What did Alice do last spring?")
-results = client.search(agent_id="my-agent", query="What happened in June?")
-results = client.search(agent_id="my-agent", query="Events from last year")
+results = client.recall(bank_id="my-bank", query="What did Alice do last spring?")
+results = client.recall(bank_id="my-bank", query="What happened in June?")
+results = client.recall(bank_id="my-bank", query="Events from last year")
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory search my-agent "What did Alice do last spring?"
-hindsight memory search my-agent "What happened between March and May?"
+hindsight memory search my-bank "What did Alice do last spring?"
+hindsight memory search my-bank "What happened between March and May?"
 ```
 
 </TabItem>
@@ -129,31 +184,31 @@ Search specific memory networks:
 
 ```python
 # Only world facts (objective information)
-world_facts = client.search_memories(
-    agent_id="my-agent",
+world_facts = client.recall(
+    bank_id="my-bank",
     query="Where does Alice work?",
-    fact_type=["world"]
+    types=["world"]
 )
 
 # Only agent facts (memory bank's own experiences)
-agent_facts = client.search_memories(
-    agent_id="my-agent",
+agent_facts = client.recall(
+    bank_id="my-bank",
     query="What have I recommended?",
-    fact_type=["agent"]
+    types=["agent"]
 )
 
 # Only opinions (formed beliefs)
-opinions = client.search_memories(
-    agent_id="my-agent",
+opinions = client.recall(
+    bank_id="my-bank",
     query="What do I think about Python?",
-    fact_type=["opinion"]
+    types=["opinion"]
 )
 
 # World and agent facts (exclude opinions)
-facts = client.search_memories(
-    agent_id="my-agent",
+facts = client.recall(
+    bank_id="my-bank",
     query="What happened?",
-    fact_type=["world", "agent"]
+    types=["world", "agent"]
 )
 ```
 
@@ -161,8 +216,8 @@ facts = client.search_memories(
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory search my-agent "Python" --fact-type opinion
-hindsight memory search my-agent "Alice" --fact-type world,agent
+hindsight memory search my-bank "Python" --fact-type opinion
+hindsight memory search my-bank "Alice" --fact-type world,agent
 ```
 
 </TabItem>
@@ -225,16 +280,31 @@ graph LR
 
 The `budget` parameter controls graph traversal depth:
 
-- **Budget.LOW (100 nodes)**: Fast, shallow search — good for simple lookups
-- **Budget.MID (300 nodes)**: Balanced — default for most queries
-- **Budget.HIGH (600 nodes)**: Deep exploration — finds indirect connections
+- **"low" (100 nodes)**: Fast, shallow search — good for simple lookups
+- **"mid" (300 nodes)**: Balanced — default for most queries
+- **"high" (600 nodes)**: Deep exploration — finds indirect connections
+
+<Tabs>
+<TabItem value="python" label="Python">
 
 ```python
-from hindsight_api.engine.memory_engine import Budget
-
 # Quick lookup
-results = client.recall(bank_id="my-agent", query="Alice's email", budget=Budget.LOW)
+results = client.recall(bank_id="my-bank", query="Alice's email", budget="low")
 
 # Deep exploration
-results = client.recall(bank_id="my-agent", query="How are Alice and Bob connected?", budget=Budget.HIGH)
+results = client.recall(bank_id="my-bank", query="How are Alice and Bob connected?", budget="high")
 ```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+// Quick lookup
+const results = await client.recall('my-bank', "Alice's email", { budget: 'low' });
+
+// Deep exploration
+const deep = await client.recall('my-bank', 'How are Alice and Bob connected?', { budget: 'high' });
+```
+
+</TabItem>
+</Tabs>

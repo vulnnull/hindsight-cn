@@ -29,6 +29,16 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Create a new bank
+   */
+  async createBank(bankId: string) {
+    return this.fetchApi<{ bank_id: string }>('/api/banks', {
+      method: 'POST',
+      body: JSON.stringify({ bank_id: bankId }),
+    });
+  }
+
+  /**
    * Recall memories
    */
   async recall(params: {

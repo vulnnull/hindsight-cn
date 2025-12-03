@@ -23,9 +23,11 @@ class CrossEncoderReranker:
         Args:
             cross_encoder: CrossEncoderReranker instance. If None, uses default
                           SentenceTransformersCrossEncoder with ms-marco-MiniLM-L-6-v2
+                          (loaded lazily for faster startup)
         """
         if cross_encoder is None:
             from hindsight_api.engine.cross_encoder import SentenceTransformersCrossEncoder
+            # Model is loaded lazily - call ensure_loaded() during initialize()
             cross_encoder = SentenceTransformersCrossEncoder()
         self.cross_encoder = cross_encoder
 

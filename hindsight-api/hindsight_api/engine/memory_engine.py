@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union, TypedDict
 import asyncpg
 import asyncio
 from .embeddings import Embeddings, SentenceTransformersEmbeddings
-from .cross_encoder import CrossEncoderReranker as CrossEncoderModel
+from .cross_encoder import CrossEncoderModel
 import time
 import numpy as np
 import uuid
@@ -362,15 +362,53 @@ class MemoryEngine:
             logger.error(f"Failed to mark operation as failed {operation_id}: {e}")
 
     async def initialize(self):
-        """Initialize the connection pool and background workers."""
+        """Initialize the connection pool, models, and background workers.
+
+        Loads models (embeddings, cross-encoder) in parallel with pg0 startup
+        for faster overall initialization.
+        """
         if self._initialized:
             return
 
-        # Start pg0 embedded PostgreSQL if configured
-        if self._use_pg0:
-            self._pg0 = EmbeddedPostgres()
-            self.db_url = await self._pg0.ensure_running()
-        logger.info(f"Connecting to PostGre instance at {self.db_url}")
+        import concurrent.futures
+
+        # Run model loading in thread pool (CPU-bound) in parallel with pg0 startup
+        loop = asyncio.get_event_loop()
+
+        async def start_pg0():
+            """Start pg0 if configured."""
+            if self._use_pg0:
+                self._pg0 = EmbeddedPostgres()
+                self.db_url = await self._pg0.ensure_running()
+
+        def load_embeddings():
+            """Load embedding model (CPU-bound)."""
+            self.embeddings.load()
+
+        def load_cross_encoder():
+            """Load cross-encoder model (CPU-bound)."""
+            self._cross_encoder_reranker.cross_encoder.load()
+
+        def load_query_analyzer():
+            """Load query analyzer model (CPU-bound)."""
+            self.query_analyzer.load()
+
+        # Run pg0 and all model loads in parallel
+        # pg0 is async (IO-bound), models are sync (CPU-bound in thread pool)
+        # Use 3 workers to load all models concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            # Start all tasks
+            pg0_task = asyncio.create_task(start_pg0())
+            embeddings_future = loop.run_in_executor(executor, load_embeddings)
+            cross_encoder_future = loop.run_in_executor(executor, load_cross_encoder)
+            query_analyzer_future = loop.run_in_executor(executor, load_query_analyzer)
+
+            # Wait for all to complete
+            await asyncio.gather(
+                pg0_task, embeddings_future, cross_encoder_future, query_analyzer_future
+            )
+
+        logger.info(f"Connecting to PostgreSQL at {self.db_url}")
 
         # Create connection pool
         # For read-heavy workloads with many parallel think/search operations,
@@ -413,6 +451,24 @@ class MemoryEngine:
             return await pool.acquire()
 
         return await _retry_with_backoff(acquire)
+
+    async def health_check(self) -> dict:
+        """
+        Perform a health check by querying the database.
+
+        Returns:
+            dict with status and optional error message
+        """
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                result = await conn.fetchval("SELECT 1")
+                if result == 1:
+                    return {"status": "healthy", "database": "connected"}
+                else:
+                    return {"status": "unhealthy", "database": "unexpected response"}
+        except Exception as e:
+            return {"status": "unhealthy", "database": "error", "error": str(e)}
 
     async def close(self):
         """Close the connection pool and shutdown background workers."""
@@ -503,8 +559,15 @@ class MemoryEngine:
         if not texts:
             return []
 
-        time_lower = event_date - timedelta(hours=time_window_hours)
-        time_upper = event_date + timedelta(hours=time_window_hours)
+        # Handle edge cases where event_date is at datetime boundaries
+        try:
+            time_lower = event_date - timedelta(hours=time_window_hours)
+        except OverflowError:
+            time_lower = datetime.min
+        try:
+            time_upper = event_date + timedelta(hours=time_window_hours)
+        except OverflowError:
+            time_upper = datetime.max
 
         # Fetch ALL existing facts in time window ONCE (much faster than N queries)
         import time as time_mod

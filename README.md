@@ -2,59 +2,96 @@
 
 **Long-term memory for AI agents.**
 
-AI assistants forget everything between sessions. Hindsight fixes that with a memory system that handles temporal reasoning, entity connections, and personality-aware responses.
-
 ## Why Hindsight?
 
-- **Temporal queries** — "What did Alice do last spring?" requires more than vector search
-- **Entity connections** — Knowing "Alice works at Google" + "Google is in Mountain View" = "Alice works in Mountain View"
-- **Agent opinions** — Agents form and recall beliefs with confidence scores
-- **Personality** — Big Five traits influence how agents process and respond to information
+AI assistants forget everything between sessions. Every conversation starts from zero—no context about who you are, what you've discussed, or what the memory bank has learned. This isn't just inconvenient; it fundamentally limits what AI memory banks can do.
 
-## 60-seconds step
+**The problem is harder than it looks:**
+
+- **Simple vector search isn't enough** — "What did Alice do last spring?" requires temporal reasoning, not just semantic similarity
+- **Facts get disconnected** — Knowing "Alice works at Google" and "Google is in Mountain View" should let you answer "Where does Alice work?" even if you never stored that directly
+- **Memory banks need opinions** — A coding assistant that remembers "the user prefers functional programming" should weigh that when making recommendations
+- **Context matters** — The same information means different things to different memory banks with different personalities
+
+Hindsight solves these problems with a memory system designed specifically for AI memory banks.
 
 
-### 1. Install the Hindsight All package (client + API)
+## Quick Start
+
+### Option 1: Docker (recommended)
+
+Get the full experience with the API and Control Plane UI:
+
+```bash
+export OPENAI_API_KEY=your-key
+docker run -p 8888:8888 -p 9999:9999 \
+  -e HINDSIGHT_API_LLM_PROVIDER=openai \
+  -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
+  -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
+  vectorize/hindsight
+```
+
+- **API**: http://localhost:8888
+- **Control Plane UI**: http://localhost:9999
+
+Then use the Python client:
+
+```bash
+pip install hindsight-client
+```
+
+```python
+from hindsight import HindsightClient
+
+client = HindsightClient(base_url="http://localhost:8888")
+
+# Store memories
+client.retain(bank_id="my-agent", content="Alice works at Google as a software engineer")
+client.retain(bank_id="my-agent", content="Alice mentioned she loves hiking in the mountains")
+
+# Query with temporal reasoning
+results = client.recall(bank_id="my-agent", query="What does Alice do for work?")
+
+# Get a synthesized perspective
+response = client.reflect(bank_id="my-agent", query="Tell me about Alice")
+print(response.text)
+```
+
+### Option 2: Embedded (no docker/server required)
+
+For quick prototyping, run everything in-process:
 
 ```bash
 pip install hindsight-all
+export OPENAI_API_KEY=your-key
 ```
-
-### 2. Import your OpenAI API key
-```bash
-export OPENAI_API_KEY=xx
-```
-
-### 3. Run embedded server and client
 
 ```python
 import os
 from hindsight import HindsightServer, HindsightClient
 
-with HindsightServer(llm_provider="openai", llm_model="gpt-5.1-mini", llm_api_key=os.environ["OPENAI_API_KEY"]) as server:
+with HindsightServer(llm_provider="openai", llm_model="gpt-4o-mini", llm_api_key=os.environ["OPENAI_API_KEY"]) as server:
     client = HindsightClient(base_url=server.url)
 
-    # Retain memories
-    client.retain(bank_id="my-agent", content="Alice works at Google")
-    client.retain(bank_id="my-agent", content="Bob prefers Python over JavaScript")
-
-    # Recall memories
-    client.recall(bank_id="my-agent", query="What does Alice do?")
-
-    # Get memory perspective
-    client.reflect(bank_id="my-agent", query="Tell me about Alice")
+    client.retain(bank_id="my-user", content="User prefers functional programming")
+    response = client.reflect(bank_id="my-user", query="What coding style should I use?")
+    print(response.text)
 ```
 
 
 
 ## Documentation
 
-Full documentation: [hindsight-docs](./hindsight-docs)
+Full documentation: [vectorize-io.github.io/hindsight](https://vectorize-io.github.io/hindsight)
 
-- [Architecture](./hindsight-docs/docs/developer/architecture.md) — How ingestion, storage, and retrieval work
-- [Python Client](./hindsight-docs/docs/sdks/python.md) — Full API reference
-- [API Reference](./hindsight-docs/docs/api-reference/index.md) — REST API endpoints
-- [Personality](./hindsight-docs/docs/developer/personality.md) — Big Five traits and opinion formation
+- [Architecture](https://vectorize-io.github.io/hindsight/developer/architecture) — How ingestion, storage, and retrieval work
+- [Python Client](https://vectorize-io.github.io/hindsight/sdks/python) — Full API reference
+- [API Reference](https://vectorize-io.github.io/hindsight/api-reference) — REST API endpoints
+- [Personality](https://vectorize-io.github.io/hindsight/developer/personality) — Big Five traits and opinion formation
+
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
 
 ## License
 

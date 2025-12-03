@@ -79,7 +79,10 @@ app = create_app(
 if __name__ == "__main__":
     import uvicorn
 
-    logging.basicConfig(level=logging.INFO)
+    # Get log level from environment variable (default: info)
+    env_log_level = os.environ.get("HINDSIGHT_API_LOG_LEVEL", "info").lower()
+    if env_log_level not in ["critical", "error", "warning", "info", "debug", "trace"]:
+        env_log_level = "info"
 
     # Parse CLI arguments
     parser = argparse.ArgumentParser(description="Memory Graph API Server")
@@ -87,8 +90,8 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8888, help="Port to bind to (default: 8888)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
     parser.add_argument("--workers", type=int, default=1, help="Number of worker processes (default: 1)")
-    parser.add_argument("--log-level", default="info", choices=["critical", "error", "warning", "info", "debug", "trace"],
-                        help="Log level (default: info)")
+    parser.add_argument("--log-level", default=env_log_level, choices=["critical", "error", "warning", "info", "debug", "trace"],
+                        help=f"Log level (default: {env_log_level}, from HINDSIGHT_API_LOG_LEVEL)")
     parser.add_argument("--access-log", action="store_true", help="Enable access log")
     parser.add_argument("--no-access-log", dest="access_log", action="store_false", help="Disable access log")
     parser.add_argument("--proxy-headers", action="store_true", help="Enable X-Forwarded-Proto, X-Forwarded-For headers")
@@ -98,6 +101,21 @@ if __name__ == "__main__":
     parser.set_defaults(access_log=False)
 
     args = parser.parse_args()
+
+    # Configure Python logging based on log level
+    log_level_map = {
+        "critical": logging.CRITICAL,
+        "error": logging.ERROR,
+        "warning": logging.WARNING,
+        "info": logging.INFO,
+        "debug": logging.DEBUG,
+        "trace": logging.DEBUG,  # Python doesn't have TRACE, use DEBUG
+    }
+    logging.basicConfig(
+        level=log_level_map.get(args.log_level, logging.INFO),
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+    )
+    logging.info(f"Starting Hindsight API on {args.host}:{args.port}")
 
     app_ref = "hindsight_api.web.server:app"
 

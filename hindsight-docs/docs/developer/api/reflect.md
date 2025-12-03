@@ -2,7 +2,7 @@
 sidebar_position: 3
 ---
 
-# Think
+# Reflect
 
 Generate personality-aware responses using retrieved memories.
 
@@ -19,38 +19,35 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-answer = client.think(
-    agent_id="my-agent",
+response = client.reflect(
+    bank_id="my-bank",
     query="What should I know about Alice?"
 )
 
-print(answer["text"])
+print(response["answer"])
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { OpenAPI, ReasoningService } from '@hindsight/client';
+import { HindsightClient } from '@hindsight/client';
 
-OpenAPI.BASE = 'http://localhost:8888';
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-const response = await ReasoningService.thinkApiThinkPost({
-    agent_id: 'my-agent',
-    query: 'What should I know about Alice?'
-});
+const response = await client.reflect('my-bank', 'What should I know about Alice?');
 
-console.log(response.text);
+console.log(response.answer);
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory think my-agent "What should I know about Alice?"
+hindsight memory think my-bank "What should I know about Alice?"
 
 # Verbose output shows reasoning and sources
-hindsight memory think my-agent "What should I know about Alice?" -v
+hindsight memory think my-bank "What should I know about Alice?" -v
 ```
 
 </TabItem>
@@ -60,26 +57,21 @@ hindsight memory think my-agent "What should I know about Alice?" -v
 
 ```python
 {
-    "text": "Alice is a software engineer at Google who joined last year...",
-    "based_on": {
-        "world": [
-            {"text": "Alice works at Google", "weight": 0.95, "id": "..."}
-        ],
-        "agent": [],
-        "opinion": [
-            {"text": "Alice is very competent", "weight": 0.82, "id": "..."}
-        ]
-    },
+    "answer": "Alice is a software engineer at Google who joined last year...",
+    "facts_used": [
+        {"text": "Alice works at Google", "weight": 0.95, "id": "..."},
+        {"text": "Alice is very competent", "weight": 0.82, "id": "..."}
+    ],
     "new_opinions": [
-        {"text": "Alice would be good for the ML project", "confidence": 0.75}
+        {"text": "Alice would be good for the ML project", "id": "..."}
     ]
 }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `text` | Generated response |
-| `based_on` | Memories used, grouped by type |
+| `answer` | Generated response |
+| `facts_used` | Memories used in generation |
 | `new_opinions` | New opinions formed during reasoning |
 
 ## Parameters
@@ -87,26 +79,35 @@ hindsight memory think my-agent "What should I know about Alice?" -v
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | string | required | Question or prompt |
-| `budget` | Budget | LOW | Budget level: LOW (100), MID (300), HIGH (600) nodes |
-| `top_k` | int | 10 | Max memories to retrieve |
+| `budget` | string | "low" | Budget level: "low", "mid", "high" |
+| `context` | string | None | Additional context for the query |
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-from hindsight_api.engine.memory_engine import Budget
-
-answer = client.reflect(
-    bank_id="my-agent",
+response = client.reflect(
+    bank_id="my-bank",
     query="What do you think about remote work?",
-    budget=Budget.MID
+    budget="mid",
+    context="We're considering a hybrid work policy"
 )
+```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+const response = await client.reflect('my-bank', 'What do you think about remote work?', {
+    budget: 'mid',
+    context: "We're considering a hybrid work policy"
+});
 ```
 
 </TabItem>
 </Tabs>
 
-## What Think Does
+## What Reflect Does
 
 ```mermaid
 sequenceDiagram
@@ -115,10 +116,10 @@ sequenceDiagram
     participant M as Memory Store
     participant L as LLM
 
-    C->>A: think("What about Alice?")
+    C->>A: reflect("What about Alice?")
     A->>M: Search all networks
-    M-->>A: World + Memory bank + Opinion facts
-    A->>A: Load memory bank personality
+    M-->>A: World + Bank + Opinion facts
+    A->>A: Load bank personality
     A->>L: Generate with personality context
     L-->>A: Response + new opinions
     A->>M: Store new opinions
@@ -126,28 +127,28 @@ sequenceDiagram
 ```
 
 1. **Retrieves** relevant memories from all three networks
-2. **Loads** memory bank personality (Big Five traits + background)
+2. **Loads** bank personality (Big Five traits + background)
 3. **Generates** response influenced by personality
 4. **Forms opinions** if the query warrants it
 5. **Returns** response with sources and any new opinions
 
 ## Opinion Formation
 
-Think can form new opinions based on evidence:
+Reflect can form new opinions based on evidence:
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-answer = client.think(
-    agent_id="my-agent",
+response = client.reflect(
+    bank_id="my-bank",
     query="What do you think about Python vs JavaScript for data science?"
 )
 
 # Response might include:
-# text: "Based on what I know about data science workflows..."
+# answer: "Based on what I know about data science workflows..."
 # new_opinions: [
-#     {"text": "Python is better for data science", "confidence": 0.85}
+#     {"text": "Python is better for data science", "id": "..."}
 # ]
 ```
 
@@ -158,9 +159,9 @@ New opinions are automatically stored and influence future responses.
 
 ## Personality Influence
 
-The memory bank's personality affects Think responses:
+The bank's personality affects reflect responses:
 
-| Trait | Effect on Think |
+| Trait | Effect on Reflect |
 |-------|-----------------|
 | High **Openness** | More willing to consider new ideas |
 | High **Conscientiousness** | More structured, methodical responses |
@@ -168,10 +169,13 @@ The memory bank's personality affects Think responses:
 | High **Agreeableness** | More diplomatic, harmony-seeking |
 | High **Neuroticism** | More risk-aware, cautious |
 
+<Tabs>
+<TabItem value="python" label="Python">
+
 ```python
-# Create a memory bank with specific personality
-client.create_agent(
-    agent_id="cautious-advisor",
+# Create a bank with specific personality
+client.create_bank(
+    bank_id="cautious-advisor",
     background="I am a risk-aware financial advisor",
     personality={
         "openness": 0.3,
@@ -181,28 +185,69 @@ client.create_agent(
     }
 )
 
-# Think responses will reflect this personality
-answer = client.think(
-    agent_id="cautious-advisor",
+# Reflect responses will reflect this personality
+response = client.reflect(
+    bank_id="cautious-advisor",
     query="Should I invest in crypto?"
 )
 # Response will likely emphasize risks and caution
 ```
 
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+// Create a bank with specific personality
+await client.createBank('cautious-advisor', {
+    background: 'I am a risk-aware financial advisor',
+    personality: {
+        openness: 0.3,
+        conscientiousness: 0.9,
+        neuroticism: 0.8,
+        bias_strength: 0.7
+    }
+});
+
+// Reflect responses will reflect this personality
+const response = await client.reflect('cautious-advisor', 'Should I invest in crypto?');
+```
+
+</TabItem>
+</Tabs>
+
 ## Using Sources
 
-The `based_on` field shows which memories informed the response:
+The `facts_used` field shows which memories informed the response:
+
+<Tabs>
+<TabItem value="python" label="Python">
 
 ```python
-answer = client.think(agent_id="my-agent", query="Tell me about Alice")
+response = client.reflect(bank_id="my-bank", query="Tell me about Alice")
 
-print("Response:", answer["text"])
+print("Response:", response["answer"])
 print("\nBased on:")
-for fact in answer["based_on"]["world"]:
+for fact in response.get("facts_used", []):
     print(f"  - {fact['text']} (relevance: {fact['weight']:.2f})")
 ```
 
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+const response = await client.reflect('my-bank', 'Tell me about Alice');
+
+console.log('Response:', response.answer);
+console.log('\nBased on:');
+for (const fact of response.facts_used || []) {
+    console.log(`  - ${fact.text} (relevance: ${fact.weight.toFixed(2)})`);
+}
+```
+
+</TabItem>
+</Tabs>
+
 This enables:
-- **Transparency** — users see why the memory bank said something
+- **Transparency** — users see why the bank said something
 - **Verification** — check if the response is grounded in facts
 - **Debugging** — understand retrieval quality

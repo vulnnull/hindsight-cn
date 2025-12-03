@@ -798,6 +798,24 @@ def _register_routes(app: FastAPI):
     """Register all API routes on the given app instance."""
 
     @app.get(
+        "/health",
+        summary="Health check endpoint",
+        description="Checks the health of the API and database connection",
+        tags=["Monitoring"]
+    )
+    async def health_endpoint():
+        """
+        Health check endpoint that verifies database connectivity.
+
+        Returns 200 if healthy, 503 if unhealthy.
+        """
+        from fastapi.responses import JSONResponse
+
+        health = await app.state.memory.health_check()
+        status_code = 200 if health.get("status") == "healthy" else 503
+        return JSONResponse(content=health, status_code=status_code)
+
+    @app.get(
         "/metrics",
         summary="Prometheus metrics endpoint",
         description="Exports metrics in Prometheus format for scraping",

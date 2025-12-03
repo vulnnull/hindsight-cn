@@ -2,11 +2,19 @@
 
 import json
 import logging
+import os
 
 from fastmcp import FastMCP
 from hindsight_api import MemoryEngine
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging from HINDSIGHT_API_LOG_LEVEL environment variable
+_log_level_str = os.environ.get("HINDSIGHT_API_LOG_LEVEL", "info").lower()
+_log_level_map = {"critical": logging.CRITICAL, "error": logging.ERROR, "warning": logging.WARNING,
+                  "info": logging.INFO, "debug": logging.DEBUG, "trace": logging.DEBUG}
+logging.basicConfig(
+    level=_log_level_map.get(_log_level_str, logging.INFO),
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 

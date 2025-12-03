@@ -1,6 +1,25 @@
-# Standalone All-in-One Hindsight Image
-# API with embedded pg0 + Control Plane
-FROM python:3.11-slim AS api-base
+# Hindsight Docker Image
+# Supports building API-only, Control Plane-only, or both
+#
+# Build args:
+#   INCLUDE_API=true/false  - Include API (default: true)
+#   INCLUDE_CP=true/false   - Include Control Plane (default: true)
+#
+# Examples:
+#   docker build -t hindsight .                                    # Both (standalone)
+#   docker build -t hindsight-api --build-arg INCLUDE_CP=false .   # API only
+#   docker build -t hindsight-cp --build-arg INCLUDE_API=false .   # Control Plane only
+
+ARG INCLUDE_API=true
+ARG INCLUDE_CP=true
+
+# =============================================================================
+# Stage: API Builder
+# =============================================================================
+FROM python:3.11-slim AS api-builder
+
+ARG INCLUDE_API
+RUN if [ "$INCLUDE_API" != "true" ]; then echo "Skipping API build" && exit 0; fi
 
 WORKDIR /app
 
@@ -21,11 +40,17 @@ WORKDIR /app/api
 # Sync dependencies (will create lock file if needed)
 RUN uv sync
 
-# Copy source code
+# Copy source code and alembic migrations
 COPY hindsight-api/hindsight_api ./hindsight_api
+COPY hindsight-api/alembic ./alembic
 
-# Build TypeScript SDK
+# =============================================================================
+# Stage: SDK Builder (needed for Control Plane)
+# =============================================================================
 FROM node:20-alpine AS sdk-builder
+
+ARG INCLUDE_CP
+RUN if [ "$INCLUDE_CP" != "true" ]; then echo "Skipping SDK build" && exit 0; fi
 
 WORKDIR /app/sdk
 
@@ -35,8 +60,13 @@ RUN npm ci
 COPY hindsight-clients/typescript/ ./
 RUN npm run build
 
-# Build Control Plane
+# =============================================================================
+# Stage: Control Plane Builder
+# =============================================================================
 FROM node:20-alpine AS cp-builder
+
+ARG INCLUDE_CP
+RUN if [ "$INCLUDE_CP" != "true" ]; then echo "Skipping CP build" && exit 0; fi
 
 WORKDIR /app
 
@@ -59,8 +89,120 @@ RUN npm run build
 # Create public directory if it doesn't exist
 RUN mkdir -p public
 
-# Final standalone image
-FROM python:3.11-slim
+# =============================================================================
+# Stage: Final Image - API Only
+# =============================================================================
+FROM python:3.11-slim AS api-only
+
+WORKDIR /app
+
+# Install pg0 dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    libxml2 \
+    libssl3 \
+    libgssapi-krb5-2 \
+    libossp-uuid16 \
+    && apt-get install -y libicu72 || apt-get install -y libicu74 || apt-get install -y libicu* \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir uv
+
+# Create non-root user (PostgreSQL cannot run as root)
+RUN useradd -m -s /bin/bash hindsight
+
+# Copy API with virtual environment from builder
+COPY --from=api-builder /app/api /app/api
+
+# Copy startup script
+COPY docker/standalone/start-all.sh /app/start-all.sh
+RUN chmod +x /app/start-all.sh
+
+# Create data directory for pg0 and set ownership
+RUN mkdir -p /app/data && chown -R hindsight:hindsight /app
+
+# Switch to non-root user
+USER hindsight
+
+# Set PATH for hindsight user
+ENV PATH="/home/hindsight/.hindsight/bin:/app/api/.venv/bin:${PATH}"
+
+# Install pg0 binary
+RUN mkdir -p /home/hindsight/.hindsight/bin && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
+        PG0_BINARY="pg0-linux-aarch64-gnu"; \
+    elif [ "$ARCH" = "x86_64" ]; then \
+        PG0_BINARY="pg0-linux-x86_64-gnu"; \
+    else \
+        echo "Unsupported architecture: $ARCH" && exit 1; \
+    fi && \
+    echo "Installing pg0 binary: $PG0_BINARY" && \
+    for i in 1 2 3 4 5; do \
+        curl -fsSL -o /home/hindsight/.hindsight/bin/pg0 \
+            "https://github.com/vectorize-io/pg0/releases/latest/download/$PG0_BINARY" && \
+        chmod +x /home/hindsight/.hindsight/bin/pg0 && \
+        break || (echo "Retry $i failed, waiting..." && sleep 10); \
+    done && \
+    /home/hindsight/.hindsight/bin/pg0 --version
+
+# Pre-download PostgreSQL binaries
+ENV PG0_HOME=/home/hindsight/.pg0-cache
+RUN pg0 start --help && \
+    (pg0 start --name hindsight --port 5555 --username hindsight --password hindsight --database hindsight && \
+    sleep 2 && \
+    pg0 stop --name hindsight && \
+    echo "PostgreSQL pre-cached to $PG0_HOME") || echo "Pre-download skipped"
+
+ENV PG0_HOME=/home/hindsight/.pg0
+
+EXPOSE 8888
+
+ENV HINDSIGHT_API_HOST=0.0.0.0
+ENV HINDSIGHT_API_PORT=8888
+ENV HINDSIGHT_API_LOG_LEVEL=info
+ENV HINDSIGHT_ENABLE_API=true
+ENV HINDSIGHT_ENABLE_CP=false
+
+CMD ["/app/start-all.sh"]
+
+# =============================================================================
+# Stage: Final Image - Control Plane Only
+# =============================================================================
+FROM node:20-alpine AS cp-only
+
+WORKDIR /app
+
+# Copy built SDK
+COPY --from=sdk-builder /app/sdk /app/sdk
+
+# Copy Control Plane standalone build
+WORKDIR /app/control-plane
+COPY --from=cp-builder /app/.next/standalone ./
+COPY --from=cp-builder /app/.next/static ./.next/static
+COPY --from=cp-builder /app/public ./public
+
+WORKDIR /app
+
+# Copy startup script
+COPY docker/standalone/start-all.sh /app/start-all.sh
+RUN chmod +x /app/start-all.sh
+
+# Install curl for health checks
+RUN apk add --no-cache curl bash
+
+EXPOSE 9999
+
+ENV NODE_ENV=production
+ENV HINDSIGHT_CP_DATAPLANE_API_URL=http://localhost:8888
+ENV HINDSIGHT_ENABLE_API=false
+ENV HINDSIGHT_ENABLE_CP=true
+
+CMD ["/app/start-all.sh"]
+
+# =============================================================================
+# Stage: Final Image - Standalone (both API and Control Plane)
+# =============================================================================
+FROM python:3.11-slim AS standalone
 
 WORKDIR /app
 
@@ -70,6 +212,7 @@ RUN apt-get update && apt-get install -y \
     libxml2 \
     libssl3 \
     libgssapi-krb5-2 \
+    libossp-uuid16 \
     && apt-get install -y libicu72 || apt-get install -y libicu74 || apt-get install -y libicu* \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
@@ -80,22 +223,16 @@ RUN apt-get update && apt-get install -y \
 RUN useradd -m -s /bin/bash hindsight
 
 # Copy API with virtual environment from builder
-COPY --from=api-base /app/api /app/api
+COPY --from=api-builder /app/api /app/api
 
 # Copy built SDK
 COPY --from=sdk-builder /app/sdk /app/sdk
 
-# Copy Control Plane
+# Copy Control Plane standalone build
 WORKDIR /app/control-plane
-COPY --from=cp-builder /app/package*.json ./
-RUN npm ci --omit=dev
-
-# Link SDK for runtime
-RUN cd /app/sdk && npm link && cd /app/control-plane && npm link @hindsight/client
-
-COPY --from=cp-builder /app/.next ./.next
+COPY --from=cp-builder /app/.next/standalone ./
+COPY --from=cp-builder /app/.next/static ./.next/static
 COPY --from=cp-builder /app/public ./public
-COPY --from=cp-builder /app/next.config.ts ./next.config.ts
 
 WORKDIR /app
 
@@ -109,24 +246,57 @@ RUN mkdir -p /app/data && chown -R hindsight:hindsight /app
 # Switch to non-root user
 USER hindsight
 
-# Install pg0
-RUN curl -fsSL https://raw.githubusercontent.com/vectorize-io/pg0/main/install.sh | bash
+# Set PATH for hindsight user
+ENV PATH="/home/hindsight/.hindsight/bin:/app/api/.venv/bin:${PATH}"
 
-# Start pg0 once to verify it works and pre-download PostgreSQL libraries
-RUN pg0 --help && \
-    pg0 start --wait && \
-    pg0 stop
+# Install pg0 binary
+RUN mkdir -p /home/hindsight/.hindsight/bin && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
+        PG0_BINARY="pg0-linux-aarch64-gnu"; \
+    elif [ "$ARCH" = "x86_64" ]; then \
+        PG0_BINARY="pg0-linux-x86_64-gnu"; \
+    else \
+        echo "Unsupported architecture: $ARCH" && exit 1; \
+    fi && \
+    echo "Installing pg0 binary: $PG0_BINARY" && \
+    for i in 1 2 3 4 5; do \
+        curl -fsSL -o /home/hindsight/.hindsight/bin/pg0 \
+            "https://github.com/vectorize-io/pg0/releases/latest/download/$PG0_BINARY" && \
+        chmod +x /home/hindsight/.hindsight/bin/pg0 && \
+        break || (echo "Retry $i failed, waiting..." && sleep 10); \
+    done && \
+    /home/hindsight/.hindsight/bin/pg0 --version
 
-# Expose ports
-EXPOSE 8888 3000
+# Pre-download PostgreSQL binaries
+ENV PG0_HOME=/home/hindsight/.pg0-cache
+RUN pg0 start --help && \
+    (pg0 start --name hindsight --port 5555 --username hindsight --password hindsight --database hindsight && \
+    sleep 2 && \
+    pg0 stop --name hindsight && \
+    echo "PostgreSQL pre-cached to $PG0_HOME") || echo "Pre-download skipped"
 
-# Environment variables
+ENV PG0_HOME=/home/hindsight/.pg0
+
+EXPOSE 8888 9999
+
 ENV HINDSIGHT_API_HOST=0.0.0.0
 ENV HINDSIGHT_API_PORT=8888
 ENV HINDSIGHT_API_LOG_LEVEL=info
 ENV NODE_ENV=production
 ENV HINDSIGHT_CP_DATAPLANE_API_URL=http://localhost:8888
-ENV PATH="/home/hindsight/.local/bin:/app/api/.venv/bin:${PATH}"
+ENV HINDSIGHT_ENABLE_API=true
+ENV HINDSIGHT_ENABLE_CP=true
 
-# Run startup script
 CMD ["/app/start-all.sh"]
+
+# =============================================================================
+# Default target selection based on build args
+# =============================================================================
+FROM standalone AS default-both
+FROM api-only AS default-api
+FROM cp-only AS default-cp
+
+# This selects the final stage based on INCLUDE_API and INCLUDE_CP
+# Use --target to override: docker build --target api-only .
+FROM standalone

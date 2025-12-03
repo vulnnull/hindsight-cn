@@ -6,8 +6,17 @@ on:
       - 'v*'
 
 jobs:
-  build-python-package:
+  build-python-packages:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: hindsight-all
+            path: hindsight
+          - name: hindsight-api
+            path: hindsight-api
+          - name: hindsight-client
+            path: hindsight-clients/python
 
     steps:
     - uses: actions/checkout@v4
@@ -22,15 +31,46 @@ jobs:
       with:
         python-version-file: ".python-version"
 
-    - name: Build hindsight package
-      working-directory: ./hindsight
+    - name: Build ${{ matrix.name }} package
+      working-directory: ./${{ matrix.path }}
       run: uv build
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: python-hindsight-dist
-        path: hindsight/dist/*
+        name: python-${{ matrix.name }}-dist
+        path: ${{ matrix.path }}/dist/*
+        retention-days: 30
+
+  build-typescript-client:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+
+    - name: Install dependencies
+      working-directory: ./hindsight-clients/typescript
+      run: npm ci
+
+    - name: Build TypeScript client
+      working-directory: ./hindsight-clients/typescript
+      run: npm run build
+
+    - name: Pack npm package
+      working-directory: ./hindsight-clients/typescript
+      run: npm pack
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: typescript-client-dist
+        path: hindsight-clients/typescript/*.tgz
         retention-days: 30
 
   build-rust-cli:
@@ -101,7 +141,14 @@ jobs:
       packages: write
     strategy:
       matrix:
-        component: [api, control-plane]
+        include:
+          # All images use the same Dockerfile with different --target
+          - target: api-only
+            image_name: hindsight-api
+          - target: cp-only
+            image_name: hindsight-control-plane
+          - target: standalone
+            image_name: hindsight
 
     steps:
     - uses: actions/checkout@v4
@@ -116,6 +163,9 @@ jobs:
         large-packages: true
         docker-images: true
         swap-storage: true
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -135,32 +185,21 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ghcr.io/${{ github.repository_owner }}/hindsight-${{ matrix.component }}
+        images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}
         tags: |
           type=semver,pattern={{version}},value=${{ steps.get_version.outputs.VERSION }}
           type=semver,pattern={{major}}.{{minor}},value=${{ steps.get_version.outputs.VERSION }}
           type=semver,pattern={{major}},value=${{ steps.get_version.outputs.VERSION }}
           type=raw,value=latest
 
-    - name: Build and push Docker image (api)
-      if: matrix.component == 'api'
+    - name: Build and push Docker image
       uses: docker/build-push-action@v6
       with:
         context: .
-        file: docker/api.Dockerfile
+        file: docker/standalone/Dockerfile
+        target: ${{ matrix.target }}
         push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    - name: Build and push Docker image (control-plane)
-      if: matrix.component == 'control-plane'
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: docker/control-plane.Dockerfile
-        push: true
+        platforms: linux/amd64,linux/arm64
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
@@ -192,9 +231,63 @@ jobs:
         path: helm-packages/*.tgz
         retention-days: 30
 
+  publish-python-packages:
+    runs-on: ubuntu-latest
+    needs: [build-python-packages]
+    environment: pypi
+    strategy:
+      max-parallel: 1
+      matrix:
+        include:
+          # Order matters: client and api first, then hindsight-all (which depends on them)
+          - name: hindsight-client
+          - name: hindsight-api
+          - name: hindsight-all
+
+    steps:
+    - name: Download ${{ matrix.name }}
+      uses: actions/download-artifact@v4
+      with:
+        name: python-${{ matrix.name }}-dist
+        path: ./dist
+
+    - name: Publish ${{ matrix.name }} to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: ./dist
+        skip-existing: true
+
+  publish-npm-package:
+    runs-on: ubuntu-latest
+    needs: [build-typescript-client]
+    environment: npm
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+
+    - name: Install dependencies
+      working-directory: ./hindsight-clients/typescript
+      run: npm ci
+
+    - name: Build TypeScript client
+      working-directory: ./hindsight-clients/typescript
+      run: npm run build
+
+    - name: Publish to npm
+      working-directory: ./hindsight-clients/typescript
+      run: npm publish --access public
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   create-github-release:
     runs-on: ubuntu-latest
-    needs: [build-python-package, build-rust-cli, build-docker-images, package-helm-chart]
+    needs: [build-python-packages, build-typescript-client, build-rust-cli, build-docker-images, package-helm-chart]
     permissions:
       contents: write
 
@@ -205,11 +298,29 @@ jobs:
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-    - name: Download Python package
+    - name: Download hindsight-all
       uses: actions/download-artifact@v4
       with:
-        name: python-hindsight-dist
-        path: ./artifacts/python-hindsight-dist
+        name: python-hindsight-all-dist
+        path: ./artifacts/python-hindsight-all
+
+    - name: Download hindsight-api
+      uses: actions/download-artifact@v4
+      with:
+        name: python-hindsight-api-dist
+        path: ./artifacts/python-hindsight-api
+
+    - name: Download hindsight-client
+      uses: actions/download-artifact@v4
+      with:
+        name: python-hindsight-client-dist
+        path: ./artifacts/python-hindsight-client
+
+    - name: Download TypeScript Client
+      uses: actions/download-artifact@v4
+      with:
+        name: typescript-client-dist
+        path: ./artifacts/typescript-client
 
     - name: Download Rust CLI (Linux)
       uses: actions/download-artifact@v4
@@ -238,8 +349,12 @@ jobs:
     - name: Prepare release assets
       run: |
         mkdir -p release-assets
-        # Python package
-        cp artifacts/python-hindsight-dist/* release-assets/
+        # Python packages
+        cp artifacts/python-hindsight-all/* release-assets/
+        cp artifacts/python-hindsight-api/* release-assets/
+        cp artifacts/python-hindsight-client/* release-assets/
+        # TypeScript Client
+        cp artifacts/typescript-client/*.tgz release-assets/
         # Rust CLI binaries
         cp artifacts/rust-cli-hindsight-linux-amd64/hindsight-linux-amd64 release-assets/
         cp artifacts/rust-cli-hindsight-darwin-amd64/hindsight-darwin-amd64 release-assets/
@@ -250,37 +365,61 @@ jobs:
     - name: Generate release notes
       id: release_notes
       run: |
-        cat << EOF > release-notes.md
+        cat << 'EOF' > release-notes.md
         # Hindsight v${{ steps.get_version.outputs.VERSION }}
+
+        ## Quick Start
+
+        ```bash
+        docker run -p 8888:8888 -p 9999:9999 \
+          -e HINDSIGHT_API_LLM_PROVIDER=openai \
+          -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
+          -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
+          ghcr.io/${{ github.repository_owner }}/hindsight:${{ steps.get_version.outputs.VERSION }}
+        ```
 
         ## 📦 Release Artifacts
 
-        ### Python Package
-        - \`hindsight-${{ steps.get_version.outputs.VERSION }}-py3-none-any.whl\`
-        - \`hindsight-${{ steps.get_version.outputs.VERSION }}.tar.gz\`
+        ### Docker Images
+        - `ghcr.io/${{ github.repository_owner }}/hindsight:${{ steps.get_version.outputs.VERSION }}` - **Standalone all-in-one** (recommended)
+        - `ghcr.io/${{ github.repository_owner }}/hindsight-api:${{ steps.get_version.outputs.VERSION }}` - API server only
+        - `ghcr.io/${{ github.repository_owner }}/hindsight-control-plane:${{ steps.get_version.outputs.VERSION }}` - Web UI only
+
+        ### Python Packages
+        - `hindsight-all` - All-in-one package (includes API + client)
+        - `hindsight-api` - API server
+        - `hindsight-client` - Client library
+
+        ### TypeScript/JavaScript
+        - `@hindsight/client` - TypeScript SDK
 
         ### CLI Binaries
-        - \`hindsight-linux-amd64\` - Linux x86_64
-        - \`hindsight-darwin-amd64\` - macOS Intel
-        - \`hindsight-darwin-arm64\` - macOS Apple Silicon
+        - `hindsight-linux-amd64` - Linux x86_64
+        - `hindsight-darwin-amd64` - macOS Intel
+        - `hindsight-darwin-arm64` - macOS Apple Silicon
 
         ### Helm Chart
-        - \`hindsight-${{ steps.get_version.outputs.VERSION }}.tgz\`
-
-        ### Docker Images
-        Docker images are published to GitHub Container Registry:
-        - \`ghcr.io/${{ github.repository_owner }}/hindsight-api:${{ steps.get_version.outputs.VERSION }}\`
-        - \`ghcr.io/${{ github.repository_owner }}/hindsight-control-plane:${{ steps.get_version.outputs.VERSION }}\`
+        - `hindsight-${{ steps.get_version.outputs.VERSION }}.tgz`
 
         ## 🚀 Installation
 
-        ### Python Package
-        \`\`\`bash
-        pip install hindsight==${{ steps.get_version.outputs.VERSION }}
-        \`\`\`
+        ### Python
+        ```bash
+        # All-in-one (recommended)
+        pip install hindsight-all==${{ steps.get_version.outputs.VERSION }}
+
+        # Or install components separately
+        pip install hindsight-api==${{ steps.get_version.outputs.VERSION }}
+        pip install hindsight-client==${{ steps.get_version.outputs.VERSION }}
+        ```
+
+        ### TypeScript/JavaScript
+        ```bash
+        npm install @hindsight/client@${{ steps.get_version.outputs.VERSION }}
+        ```
 
         ### CLI
-        \`\`\`bash
+        ```bash
         # macOS (Apple Silicon)
         curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/hindsight-darwin-arm64 -o hindsight
         chmod +x hindsight
@@ -295,25 +434,12 @@ jobs:
         curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/hindsight-linux-amd64 -o hindsight
         chmod +x hindsight
         sudo mv hindsight /usr/local/bin/
-        \`\`\`
+        ```
 
-        ### Helm Chart
-        \`\`\`bash
-        helm install hindsight hindsight-${{ steps.get_version.outputs.VERSION }}.tgz
-        \`\`\`
-
-        ### Docker
-        \`\`\`bash
-        # Pull API image
-        docker pull ghcr.io/${{ github.repository_owner }}/hindsight-api:${{ steps.get_version.outputs.VERSION }}
-
-        # Pull Control Plane image
-        docker pull ghcr.io/${{ github.repository_owner }}/hindsight-control-plane:${{ steps.get_version.outputs.VERSION }}
-
-        # Or use latest
-        docker pull ghcr.io/${{ github.repository_owner }}/hindsight-api:latest
-        docker pull ghcr.io/${{ github.repository_owner }}/hindsight-control-plane:latest
-        \`\`\`
+        ### Helm (Kubernetes)
+        ```bash
+        helm install hindsight oci://ghcr.io/${{ github.repository_owner }}/charts/hindsight --version ${{ steps.get_version.outputs.VERSION }}
+        ```
         EOF
         cat release-notes.md
 
@@ -333,9 +459,10 @@ jobs:
         echo "# Release v${{ steps.get_version.outputs.VERSION }} Published Successfully" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "## 📦 Components" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Python package (hindsight)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Python packages (hindsight-all, hindsight-api, hindsight-client)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ TypeScript Client (@hindsight/client)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Rust CLI (Linux amd64, macOS amd64, macOS arm64)" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ Docker images (API, Control Plane)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Docker images (standalone, API, Control Plane)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Helm chart" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "🎉 Release is now available at: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY

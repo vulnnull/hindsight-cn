@@ -25,6 +25,16 @@ class Embeddings(ABC):
     """
 
     @abstractmethod
+    def load(self) -> None:
+        """
+        Load the embedding model.
+
+        This should be called during initialization to load the model
+        and avoid cold start latency on first encode() call.
+        """
+        pass
+
+    @abstractmethod
     def encode(self, texts: List[str]) -> List[List[float]]:
         """
         Generate 384-dimensional embeddings for a list of texts.
@@ -42,8 +52,7 @@ class SentenceTransformersEmbeddings(Embeddings):
     """
     Embeddings implementation using SentenceTransformers.
 
-    Uses lazy import so sentence-transformers is not required if another
-    embedding backend is used.
+    Call load() during initialization to load the model and avoid cold starts.
 
     Default model is BAAI/bge-small-en-v1.5 which produces 384-dimensional
     embeddings matching the database schema.
@@ -60,32 +69,33 @@ class SentenceTransformersEmbeddings(Embeddings):
         """
         self.model_name = model_name
         self._model = None
-        self._load_model()
 
-    def _load_model(self):
-        """Lazy load and validate the SentenceTransformer model."""
-        if self._model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-            except ImportError:
-                raise ImportError(
-                    "sentence-transformers is required for SentenceTransformersEmbeddings. "
-                    "Install it with: pip install sentence-transformers"
-                )
+    def load(self) -> None:
+        """Load the embedding model."""
+        if self._model is not None:
+            return
 
-            logger.info(f"Loading embedding model: {self.model_name}...")
-            self._model = SentenceTransformer(self.model_name)
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            raise ImportError(
+                "sentence-transformers is required for SentenceTransformersEmbeddings. "
+                "Install it with: pip install sentence-transformers"
+            )
 
-            # Validate dimension matches database schema
-            model_dim = self._model.get_sentence_embedding_dimension()
-            if model_dim != EMBEDDING_DIMENSION:
-                raise ValueError(
-                    f"Model {self.model_name} produces {model_dim}-dimensional embeddings, "
-                    f"but database schema requires {EMBEDDING_DIMENSION} dimensions. "
-                    f"Use a model that produces {EMBEDDING_DIMENSION}-dimensional embeddings."
-                )
+        logger.info(f"Loading embedding model: {self.model_name}...")
+        self._model = SentenceTransformer(self.model_name)
 
-            logger.info(f"Model loaded (embedding dim: {model_dim})")
+        # Validate dimension matches database schema
+        model_dim = self._model.get_sentence_embedding_dimension()
+        if model_dim != EMBEDDING_DIMENSION:
+            raise ValueError(
+                f"Model {self.model_name} produces {model_dim}-dimensional embeddings, "
+                f"but database schema requires {EMBEDDING_DIMENSION} dimensions. "
+                f"Use a model that produces {EMBEDDING_DIMENSION}-dimensional embeddings."
+            )
+
+        logger.info(f"Model loaded (embedding dim: {model_dim})")
 
     def encode(self, texts: List[str]) -> List[List[float]]:
         """
@@ -97,5 +107,7 @@ class SentenceTransformersEmbeddings(Embeddings):
         Returns:
             List of 384-dimensional embedding vectors
         """
+        if self._model is None:
+            self.load()
         embeddings = self._model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
         return [emb.tolist() for emb in embeddings]

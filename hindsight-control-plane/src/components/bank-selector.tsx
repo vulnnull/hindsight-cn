@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useBank } from '@/lib/bank-context';
+import { client } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -18,18 +19,104 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Check, ChevronsUpDown } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Check, ChevronsUpDown, Plus, FileText } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 function BankSelectorInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { currentBank, setCurrentBank, banks } = useBank();
+  const { currentBank, setCurrentBank, banks, loadBanks } = useBank();
   const [open, setOpen] = React.useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+  const [newBankId, setNewBankId] = React.useState('');
+  const [isCreating, setIsCreating] = React.useState(false);
+  const [createError, setCreateError] = React.useState<string | null>(null);
+
+  // Document creation state
+  const [docDialogOpen, setDocDialogOpen] = React.useState(false);
+  const [docContent, setDocContent] = React.useState('');
+  const [docContext, setDocContext] = React.useState('');
+  const [docEventDate, setDocEventDate] = React.useState('');
+  const [docDocumentId, setDocDocumentId] = React.useState('');
+  const [docAsync, setDocAsync] = React.useState(false);
+  const [isCreatingDoc, setIsCreatingDoc] = React.useState(false);
+  const [docError, setDocError] = React.useState<string | null>(null);
 
   const sortedBanks = React.useMemo(() => {
     return [...banks].sort((a, b) => a.localeCompare(b));
   }, [banks]);
+
+  const handleCreateBank = async () => {
+    if (!newBankId.trim()) return;
+
+    setIsCreating(true);
+    setCreateError(null);
+
+    try {
+      await client.createBank(newBankId.trim());
+      await loadBanks();
+      setCreateDialogOpen(false);
+      setNewBankId('');
+      // Navigate to the new bank
+      setCurrentBank(newBankId.trim());
+      router.push(`/banks/${newBankId.trim()}?view=data`);
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Failed to create bank');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleCreateDocument = async () => {
+    if (!currentBank || !docContent.trim()) return;
+
+    setIsCreatingDoc(true);
+    setDocError(null);
+
+    try {
+      const item: any = { content: docContent };
+      if (docContext) item.context = docContext;
+      if (docEventDate) item.event_date = docEventDate;
+
+      const params: any = {
+        bank_id: currentBank,
+        items: [item],
+      };
+
+      if (docDocumentId) params.document_id = docDocumentId;
+
+      if (docAsync) {
+        await client.retain({ ...params, async: true });
+      } else {
+        await client.retain(params);
+      }
+
+      // Reset form and close dialog
+      setDocDialogOpen(false);
+      setDocContent('');
+      setDocContext('');
+      setDocEventDate('');
+      setDocDocumentId('');
+      setDocAsync(false);
+
+      // Navigate to documents view to see the new document
+      router.push(`/banks/${currentBank}?view=documents`);
+    } catch (error) {
+      setDocError(error instanceof Error ? error.message : 'Failed to create document');
+    } finally {
+      setIsCreatingDoc(false);
+    }
+  };
 
   return (
     <div className="bg-card text-card-foreground px-5 py-3 border-b-4 border-primary">
@@ -81,6 +168,163 @@ function BankSelectorInner() {
             </Command>
           </PopoverContent>
         </Popover>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 border-2 border-primary hover:bg-accent gap-1.5"
+          onClick={() => setCreateDialogOpen(true)}
+          title="Create new memory bank"
+        >
+          <Plus className="h-4 w-4" />
+          <span>New Bank</span>
+        </Button>
+
+        {currentBank && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 border-2 border-secondary hover:bg-secondary/20 gap-1.5"
+            onClick={() => setDocDialogOpen(true)}
+            title="Add document to current bank"
+          >
+            <FileText className="h-4 w-4" />
+            <span>New Document</span>
+          </Button>
+        )}
+
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Create New Memory Bank</DialogTitle>
+            </DialogHeader>
+            <div className="py-4">
+              <Input
+                placeholder="Enter bank ID..."
+                value={newBankId}
+                onChange={(e) => setNewBankId(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isCreating) {
+                    handleCreateBank();
+                  }
+                }}
+                autoFocus
+              />
+              {createError && (
+                <p className="text-sm text-destructive mt-2">{createError}</p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCreateDialogOpen(false);
+                  setNewBankId('');
+                  setCreateError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateBank}
+                disabled={isCreating || !newBankId.trim()}
+              >
+                {isCreating ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={docDialogOpen} onOpenChange={setDocDialogOpen}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Add New Document</DialogTitle>
+              <p className="text-sm text-muted-foreground">
+                Add a new document to memory bank: <span className="font-semibold">{currentBank}</span>
+              </p>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+              <div>
+                <label className="font-bold block mb-1 text-sm">Content *</label>
+                <Textarea
+                  value={docContent}
+                  onChange={(e) => setDocContent(e.target.value)}
+                  placeholder="Enter the document content..."
+                  className="min-h-[150px] resize-y"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1 text-sm">Context</label>
+                <Input
+                  type="text"
+                  value={docContext}
+                  onChange={(e) => setDocContext(e.target.value)}
+                  placeholder="Optional context about this document..."
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="font-bold block mb-1 text-sm">Event Date</label>
+                  <Input
+                    type="datetime-local"
+                    value={docEventDate}
+                    onChange={(e) => setDocEventDate(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold block mb-1 text-sm">Document ID</label>
+                  <Input
+                    type="text"
+                    value={docDocumentId}
+                    onChange={(e) => setDocDocumentId(e.target.value)}
+                    placeholder="Optional document identifier..."
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="async-doc"
+                  checked={docAsync}
+                  onCheckedChange={(checked) => setDocAsync(checked as boolean)}
+                />
+                <label htmlFor="async-doc" className="text-sm cursor-pointer">
+                  Process in background (async)
+                </label>
+              </div>
+
+              {docError && (
+                <p className="text-sm text-destructive">{docError}</p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDocDialogOpen(false);
+                  setDocContent('');
+                  setDocContext('');
+                  setDocEventDate('');
+                  setDocDocumentId('');
+                  setDocAsync(false);
+                  setDocError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateDocument}
+                disabled={isCreatingDoc || !docContent.trim()}
+              >
+                {isCreatingDoc ? 'Adding...' : 'Add Document'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

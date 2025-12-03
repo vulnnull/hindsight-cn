@@ -31,84 +31,40 @@ For large content batches, use async mode to avoid timeouts:
 <TabItem value="python" label="Python">
 
 ```python
+from hindsight_client import Hindsight
+
+client = Hindsight(base_url="http://localhost:8888")
+
 # Start async batch retain
-operation = client.retain_batch_async(
+result = client.retain_batch(
     bank_id="my-bank",
-    contents=[
+    items=[
         {"content": doc1_text},
         {"content": doc2_text},
         # ... hundreds or thousands of documents
-    ]
+    ],
+    async_=True  # Enable async mode
 )
 
-print(f"Operation ID: {operation['operation_id']}")
-print(f"Status: {operation['status']}")  # 'pending' or 'running'
-
-# Check status
-status = client.get_operation(
-    bank_id="my-bank",
-    operation_id=operation['operation_id']
-)
-
-print(f"Status: {status['status']}")  # 'pending', 'running', 'completed', 'failed'
-print(f"Progress: {status['progress']}/{status['total']}")
-
-# Wait for completion
-import time
-
-while True:
-    status = client.get_operation(bank_id="my-bank", operation_id=operation['operation_id'])
-    if status['status'] in ['completed', 'failed']:
-        break
-    print(f"Progress: {status['progress']}/{status['total']}")
-    time.sleep(5)
-
-if status['status'] == 'completed':
-    print(f"Created {len(status['result']['memory_ids'])} memories")
+print(f"Operation ID: {result.get('operation_id')}")
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
+```typescript
+import { HindsightClient } from '@hindsight/client';
+
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
+
 // Start async batch retain
-const operation = await client.retainBatchAsync({
-    bankId: 'my-bank',
-    contents: [
-        { content: doc1Text },
-        { content: doc2Text },
-        // ... hundreds or thousands of documents
-    ]
-});
+const result = await client.retainBatch('my-bank', [
+    { content: doc1Text },
+    { content: doc2Text },
+    // ... hundreds or thousands of documents
+], { async: true });
 
-console.log(`Operation ID: ${operation.operationId}`);
-console.log(`Status: ${operation.status}`);
-
-// Check status
-const status = await client.getOperation({
-    bankId: 'my-bank',
-    operationId: operation.operationId
-});
-
-console.log(`Status: ${status.status}`);
-console.log(`Progress: ${status.progress}/${status.total}`);
-
-// Wait for completion
-async function waitForOperation(bankId, operationId) {
-    while (true) {
-        const status = await client.getOperation({ bankId, operationId });
-        if (['completed', 'failed'].includes(status.status)) {
-            return status;
-        }
-        console.log(`Progress: ${status.progress}/${status.total}`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-    }
-}
-
-const finalStatus = await waitForOperation('my-bank', operation.operationId);
-if (finalStatus.status === 'completed') {
-    console.log(`Created ${finalStatus.result.memoryIds.length} memories`);
-}
+console.log(`Operation ID: ${result.operation_id}`);
 ```
 
 </TabItem>
@@ -119,12 +75,6 @@ if (finalStatus.status === 'completed') {
 hindsight retain my-bank --files docs/*.md --async
 
 # Returns operation ID: op-abc123...
-
-# Check status
-hindsight operations get my-bank op-abc123
-
-# Watch progress
-hindsight operations watch my-bank op-abc123
 ```
 
 </TabItem>
@@ -138,54 +88,45 @@ View all operations for a memory bank:
 <TabItem value="python" label="Python">
 
 ```python
+# Using the low-level API
+from hindsight_client_api import ApiClient, Configuration
+from hindsight_client_api.api import DefaultApi
+
+config = Configuration(host="http://localhost:8888")
+api_client = ApiClient(config)
+api = DefaultApi(api_client)
+
 # List all operations
-operations = client.list_operations(bank_id="my-bank")
+response = api.list_operations(bank_id="my-bank")
 
-for op in operations:
-    print(f"{op['operation_id']}: {op['type']} - {op['status']}")
-    if op['status'] == 'running':
-        print(f"  Progress: {op['progress']}/{op['total']}")
-
-# Filter by status
-pending = client.list_operations(
-    bank_id="my-bank",
-    status="pending"
-)
-
-running = client.list_operations(
-    bank_id="my-bank",
-    status="running"
-)
-
-# With pagination
-operations = client.list_operations(
-    bank_id="my-bank",
-    limit=50,
-    offset=0
-)
+for op in response.items:
+    print(f"{op.id}: {op.task_type} - {op.status}")
+    print(f"  Items: {op.items_count}")
+    if op.error_message:
+        print(f"  Error: {op.error_message}")
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
+```typescript
+import { sdk, createClient, createConfig } from '@hindsight/client';
+
+const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
+
 // List all operations
-const operations = await client.listOperations({
-    bankId: 'my-bank'
+const response = await sdk.listOperations({
+    client: apiClient,
+    path: { bank_id: 'my-bank' }
 });
 
-operations.forEach(op => {
-    console.log(`${op.operationId}: ${op.type} - ${op.status}`);
-    if (op.status === 'running') {
-        console.log(`  Progress: ${op.progress}/${op.total}`);
+for (const op of response.data.items) {
+    console.log(`${op.id}: ${op.task_type} - ${op.status}`);
+    console.log(`  Items: ${op.items_count}`);
+    if (op.error_message) {
+        console.log(`  Error: ${op.error_message}`);
     }
-});
-
-// Filter by status
-const pending = await client.listOperations({
-    bankId: 'my-bank',
-    status: 'pending'
-});
+}
 ```
 
 </TabItem>
@@ -214,38 +155,41 @@ Stop a running or pending operation:
 
 ```python
 # Cancel operation
-client.cancel_operation(
+api.cancel_operation(
     bank_id="my-bank",
     operation_id="op-abc123"
 )
 
 # Cancel all pending operations
-operations = client.list_operations(bank_id="my-bank", status="pending")
-for op in operations:
-    client.cancel_operation(bank_id="my-bank", operation_id=op['operation_id'])
+response = api.list_operations(bank_id="my-bank")
+for op in response.items:
+    if op.status == "pending":
+        api.cancel_operation(bank_id="my-bank", operation_id=op.id)
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
+```typescript
 // Cancel operation
-await client.cancelOperation({
-    bankId: 'my-bank',
-    operationId: 'op-abc123'
+await sdk.cancelOperation({
+    client: apiClient,
+    path: { bank_id: 'my-bank', operation_id: 'op-abc123' }
 });
 
 // Cancel all pending
-const pending = await client.listOperations({
-    bankId: 'my-bank',
-    status: 'pending'
+const ops = await sdk.listOperations({
+    client: apiClient,
+    path: { bank_id: 'my-bank' }
 });
 
-for (const op of pending) {
-    await client.cancelOperation({
-        bankId: 'my-bank',
-        operationId: op.operationId
-    });
+for (const op of ops.data.items) {
+    if (op.status === 'pending') {
+        await sdk.cancelOperation({
+            client: apiClient,
+            path: { bank_id: 'my-bank', operation_id: op.id }
+        });
+    }
 }
 ```
 
@@ -285,17 +229,14 @@ hindsight operations cancel my-bank --all-pending
 
 ```json
 {
-  "operation_id": "op-abc123",
+  "id": "op-abc123",
   "bank_id": "my-bank",
-  "type": "batch_retain",
-  "status": "running",
-  "progress": 450,
-  "total": 1000,
+  "task_type": "batch_retain",
+  "status": "completed",
+  "items_count": 1000,
+  "document_id": "batch-001",
   "created_at": "2024-03-15T10:00:00Z",
-  "started_at": "2024-03-15T10:00:05Z",
-  "completed_at": null,
-  "error": null,
-  "result": null
+  "error_message": null
 }
 ```
 
@@ -303,38 +244,69 @@ hindsight operations cancel my-bank --all-pending
 
 ### Polling
 
+<Tabs>
+<TabItem value="python" label="Python">
+
 ```python
 import time
 
-def wait_for_operation(client, bank_id, operation_id, poll_interval=5):
+def wait_for_operations(api, bank_id, poll_interval=5):
+    """Wait for all pending/running operations to complete."""
     while True:
-        status = client.get_operation(bank_id=bank_id, operation_id=operation_id)
+        response = api.list_operations(bank_id=bank_id)
 
-        if status['status'] == 'completed':
-            return status['result']
-        elif status['status'] == 'failed':
-            raise Exception(f"Operation failed: {status['error']}")
-        elif status['status'] == 'cancelled':
-            raise Exception("Operation was cancelled")
+        pending_or_running = [
+            op for op in response.items
+            if op.status in ['pending', 'running']
+        ]
 
-        print(f"Progress: {status['progress']}/{status['total']}")
+        if not pending_or_running:
+            print("All operations completed!")
+            break
+
+        for op in pending_or_running:
+            print(f"  {op.id}: {op.status} ({op.items_count} items)")
+
         time.sleep(poll_interval)
 
 # Use it
-result = wait_for_operation(client, "my-bank", op_id)
-print(f"Created {len(result['memory_ids'])} memories")
+wait_for_operations(api, "my-bank")
 ```
 
-### Webhooks (Coming Soon)
+</TabItem>
+<TabItem value="node" label="Node.js">
 
-```python
-# Configure webhook for operation completion
-client.configure_webhook(
-    bank_id="my-bank",
-    url="https://myapp.com/webhooks/hindsight",
-    events=["operation.completed", "operation.failed"]
-)
+```typescript
+async function waitForOperations(apiClient: any, bankId: string, pollInterval = 5000) {
+    while (true) {
+        const response = await sdk.listOperations({
+            client: apiClient,
+            path: { bank_id: bankId }
+        });
+
+        const pendingOrRunning = response.data.items.filter(
+            (op: any) => ['pending', 'running'].includes(op.status)
+        );
+
+        if (pendingOrRunning.length === 0) {
+            console.log('All operations completed!');
+            break;
+        }
+
+        for (const op of pendingOrRunning) {
+            console.log(`  ${op.id}: ${op.status} (${op.items_count} items)`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+}
+
+// Use it
+await waitForOperations(apiClient, 'my-bank');
 ```
+
+</TabItem>
+</Tabs>
 
 ## Performance Tips
 
@@ -343,11 +315,11 @@ client.configure_webhook(
 - Async: > 100 items or > 100KB
 
 **Monitor progress:**
-- Check `progress` / `total` fields
+- Check `items_count` field
 - Poll every 5-10 seconds
 
 **Handle failures:**
-- Check `error` field for details
+- Check `error_message` field for details
 - Retry with exponential backoff
 - Break large batches into smaller chunks
 

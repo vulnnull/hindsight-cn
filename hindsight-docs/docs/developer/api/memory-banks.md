@@ -2,14 +2,14 @@
 sidebar_position: 6
 ---
 
-# Memory bank Identity
+# Memory Bank Identity
 
 Configure memory bank personality, background, and behavior.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-## Creating an Memory bank
+## Creating a Memory Bank
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -19,8 +19,8 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-client.create_agent(
-    agent_id="my-agent",
+client.create_bank(
+    bank_id="my-bank",
     name="Research Assistant",
     background="I am a research assistant specializing in machine learning",
     personality={
@@ -38,11 +38,11 @@ client.create_agent(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { OpenAPI, ManagementService } from '@hindsight/client';
+import { HindsightClient } from '@hindsight/client';
 
-OpenAPI.BASE = 'http://localhost:8888';
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-await ManagementService.createAgentApiAgentsAgentIdPut('my-agent', {
+await client.createBank('my-bank', {
     name: 'Research Assistant',
     background: 'I am a research assistant specializing in machine learning',
     personality: {
@@ -61,10 +61,10 @@ await ManagementService.createAgentApiAgentsAgentIdPut('my-agent', {
 
 ```bash
 # Set background
-hindsight agent background my-agent "I am a research assistant specializing in ML"
+hindsight agent background my-bank "I am a research assistant specializing in ML"
 
 # Set personality
-hindsight memory bank personality my-agent \
+hindsight agent personality my-bank \
     --openness 0.8 \
     --conscientiousness 0.7 \
     --extraversion 0.5 \
@@ -90,70 +90,81 @@ Each trait is scored 0.0 to 1.0:
 
 ### How Traits Affect Behavior
 
-**Openness** influences how the memory bank weighs new vs. established ideas:
+**Openness** influences how the bank weighs new vs. established ideas:
 
 ```python
-# High openness agent
+# High openness bank
 "Let's try this new framework—it looks promising!"
 
-# Low openness agent
+# Low openness bank
 "Let's stick with the proven solution we know works."
 ```
 
 **Conscientiousness** affects structure and thoroughness:
 
 ```python
-# High conscientiousness agent
+# High conscientiousness bank
 "Here's a detailed, step-by-step analysis..."
 
-# Low conscientiousness agent
+# Low conscientiousness bank
 "Quick take: this should work, let's try it."
 ```
 
 **Extraversion** shapes collaboration preferences:
 
 ```python
-# High extraversion agent
+# High extraversion bank
 "We should get the team together to discuss this."
 
-# Low extraversion agent
+# Low extraversion bank
 "I'll analyze this independently and share my findings."
 ```
 
 **Agreeableness** affects how disagreements are handled:
 
 ```python
-# High agreeableness agent
+# High agreeableness bank
 "That's a valid point. Perhaps we can find a middle ground..."
 
-# Low agreeableness agent
+# Low agreeableness bank
 "Actually, the data doesn't support that conclusion."
 ```
 
 **Neuroticism** influences risk assessment:
 
 ```python
-# High neuroticism agent
+# High neuroticism bank
 "We should consider what could go wrong here..."
 
-# Low neuroticism agent
+# Low neuroticism bank
 "The risks seem manageable, let's proceed."
 ```
 
 ## Background
 
-The background is a first-person narrative providing agent context:
+The background is a first-person narrative providing bank context:
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-client.create_agent(
-    agent_id="financial-advisor",
+client.create_bank(
+    bank_id="financial-advisor",
     background="""I am a conservative financial advisor with 20 years of experience.
     I prioritize capital preservation over aggressive growth.
     I have seen multiple market crashes and believe in diversification."""
 )
+```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+await client.createBank('financial-advisor', {
+    background: `I am a conservative financial advisor with 20 years of experience.
+    I prioritize capital preservation over aggressive growth.
+    I have seen multiple market crashes and believe in diversification.`
+});
 ```
 
 </TabItem>
@@ -164,91 +175,43 @@ Background influences:
 - Perspective in responses
 - Opinion formation context
 
-### Merging Background
-
-New background information is merged intelligently:
+## Getting Bank Profile
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-# Original background
-client.create_agent(
-    agent_id="assistant",
-    background="I am a helpful AI assistant"
-)
+# Using the low-level API
+from hindsight_client_api import ApiClient, Configuration
+from hindsight_client_api.api import DefaultApi
 
-# Add more context (merged, not replaced)
-client.update_background(
-    agent_id="assistant",
-    background="I specialize in Python programming"
-)
+config = Configuration(host="http://localhost:8888")
+api_client = ApiClient(config)
+api = DefaultApi(api_client)
 
-# Result: "I am a helpful AI assistant. I specialize in Python programming."
+profile = api.get_bank_profile("my-bank")
+
+print(f"Name: {profile.name}")
+print(f"Background: {profile.background}")
+print(f"Personality: {profile.personality}")
 ```
 
 </TabItem>
-</Tabs>
+<TabItem value="node" label="Node.js">
 
-Merging rules:
-- **Conflicts**: New overwrites old
-- **Additions**: Non-conflicting info is added
-- **Normalization**: "You are..." → "I am..."
+```typescript
+const profile = await client.getBankProfile('my-bank');
 
-## Getting Memory bank Profile
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-profile = client.get_profile(agent_id="my-agent")
-
-print(f"Background: {profile['background']}")
-print(f"Personality: {profile['personality']}")
+console.log(`Name: ${profile.name}`);
+console.log(`Background: ${profile.background}`);
+console.log(`Personality:`, profile.personality);
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory bank profile my-agent
-```
-
-</TabItem>
-</Tabs>
-
-## Updating Personality
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-client.update_personality(
-    agent_id="my-agent",
-    openness=0.9,
-    conscientiousness=0.8
-)
-```
-
-</TabItem>
-</Tabs>
-
-## Listing Memory banks
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-memory banks = client.list_agents()
-for agent in memory banks:
-    print(agent["agent_id"])
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-hindsight agent list
+hindsight agent profile my-bank
 ```
 
 </TabItem>
@@ -256,7 +219,7 @@ hindsight agent list
 
 ## Default Values
 
-If not specified, memory banks use neutral defaults:
+If not specified, banks use neutral defaults:
 
 ```python
 {
@@ -287,9 +250,9 @@ Common personality configurations:
 <TabItem value="python" label="Python">
 
 ```python
-# Customer support agent
-client.create_agent(
-    agent_id="support",
+# Customer support bank
+client.create_bank(
+    bank_id="support",
     background="I am a friendly customer support agent",
     personality={
         "openness": 0.5,
@@ -301,9 +264,9 @@ client.create_agent(
     }
 )
 
-# Code reviewer agent
-client.create_agent(
-    agent_id="reviewer",
+# Code reviewer bank
+client.create_bank(
+    bank_id="reviewer",
     background="I am a thorough code reviewer focused on quality",
     personality={
         "openness": 0.4,       # Prefers proven patterns
@@ -317,20 +280,69 @@ client.create_agent(
 ```
 
 </TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+// Customer support bank
+await client.createBank('support', {
+    background: 'I am a friendly customer support agent',
+    personality: {
+        openness: 0.5,
+        conscientiousness: 0.7,
+        extraversion: 0.6,
+        agreeableness: 0.9,
+        neuroticism: 0.3,
+        bias_strength: 0.4
+    }
+});
+
+// Code reviewer bank
+await client.createBank('reviewer', {
+    background: 'I am a thorough code reviewer focused on quality',
+    personality: {
+        openness: 0.4,
+        conscientiousness: 0.9,
+        extraversion: 0.3,
+        agreeableness: 0.4,
+        neuroticism: 0.5,
+        bias_strength: 0.6
+    }
+});
+```
+
+</TabItem>
 </Tabs>
 
-## Memory bank Isolation
+## Bank Isolation
 
-Each agent has:
-- **Separate memories** — memory banks don't share memories
-- **Own personality** — traits are per-agent
+Each bank has:
+- **Separate memories** — banks don't share memories
+- **Own personality** — traits are per-bank
 - **Independent opinions** — formed from their own experiences
 
-```python
-# Store to agent A
-client.store(agent_id="agent-a", content="Python is great")
+<Tabs>
+<TabItem value="python" label="Python">
 
-# Memory bank B doesn't see it
-results = client.search(agent_id="agent-b", query="Python")
+```python
+# Store to bank A
+client.retain(bank_id="bank-a", content="Python is great")
+
+# Bank B doesn't see it
+results = client.recall(bank_id="bank-b", query="Python")
 # Returns empty
 ```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+// Store to bank A
+await client.retain('bank-a', 'Python is great');
+
+// Bank B doesn't see it
+const results = await client.recall('bank-b', 'Python');
+// Returns empty
+```
+
+</TabItem>
+</Tabs>

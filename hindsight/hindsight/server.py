@@ -63,7 +63,7 @@ class Server:
         host: str = "127.0.0.1",
         port: Optional[int] = None,
         mcp_enabled: bool = False,
-        log_level: str = "warning",
+        log_level: str = "info",
     ):
         """
         Initialize the Hindsight server.

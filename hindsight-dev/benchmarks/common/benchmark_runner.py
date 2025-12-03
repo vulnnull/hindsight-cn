@@ -913,12 +913,12 @@ class BenchmarkRunner:
                 # Only clear on first item for shared agent_id
                 clear_this_agent = (i == 1)
 
-            # Check if we should skip this item (filln mode)
+            # Check if we should skip this item (fill mode - skip if already in results file)
+            item_id = self.dataset.get_item_id(item)
             if filln:
-                has_data = await self._agent_has_data(item_agent_id)
-                if has_data:
-                    console.print(f"\n[bold blue]Item {i}/{len(items)}[/bold blue] (ID: {self.dataset.get_item_id(item)})")
-                    console.print(f"  [yellow]⊘[/yellow] Skipping - agent '{item_agent_id}' already has indexed data")
+                if item_id in existing_item_ids:
+                    console.print(f"\n[bold blue]Item {i}/{len(items)}[/bold blue] (ID: {item_id})")
+                    console.print(f"  [yellow]⊘[/yellow] Skipping - already has results in output file")
                     continue
 
             result = await self.process_single_item(
@@ -981,12 +981,11 @@ class BenchmarkRunner:
                 item_id = self.dataset.get_item_id(item)
                 item_agent_id = f"{agent_id}_{item_id}"
 
-                # Check if we should skip this item (filln mode)
+                # Check if we should skip this item (fill mode - skip if already in results file)
                 if filln:
-                    has_data = await self._agent_has_data(item_agent_id)
-                    if has_data:
+                    if item_id in existing_item_ids:
                         console.print(f"\n[bold blue]Item {i}/{len(items)}[/bold blue] (ID: {item_id})")
-                        console.print(f"  [yellow]⊘[/yellow] Skipping - agent '{item_agent_id}' already has indexed data")
+                        console.print(f"  [yellow]⊘[/yellow] Skipping - already has results in output file")
                         return None
 
                 # Process the item

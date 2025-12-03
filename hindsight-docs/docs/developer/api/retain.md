@@ -45,8 +45,8 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-client.store(
-    agent_id="my-agent",
+client.retain(
+    bank_id="my-bank",
     content="Alice works at Google as a software engineer"
 )
 ```
@@ -55,21 +55,18 @@ client.store(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { OpenAPI, MemoryStorageService } from '@hindsight/client';
+import { HindsightClient } from '@hindsight/client';
 
-OpenAPI.BASE = 'http://localhost:8888';
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-await MemoryStorageService.putApiPutPost({
-    agent_id: 'my-agent',
-    content: 'Alice works at Google as a software engineer'
-});
+await client.retain('my-bank', 'Alice works at Google as a software engineer');
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory put my-agent "Alice works at Google as a software engineer"
+hindsight memory put my-bank "Alice works at Google as a software engineer"
 ```
 
 </TabItem>
@@ -83,19 +80,29 @@ Add context and event dates for better retrieval:
 <TabItem value="python" label="Python">
 
 ```python
-client.store(
-    agent_id="my-agent",
+client.retain(
+    bank_id="my-bank",
     content="Alice got promoted to senior engineer",
     context="career update",
-    event_date="2024-03-15T10:00:00Z"
+    timestamp="2024-03-15T10:00:00Z"
 )
+```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+await client.retain('my-bank', 'Alice got promoted to senior engineer', {
+    context: 'career update',
+    timestamp: '2024-03-15T10:00:00Z'
+});
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory put my-agent "Alice got promoted" \
+hindsight memory put my-bank "Alice got promoted" \
     --context "career update" \
     --event-date "2024-03-15"
 ```
@@ -103,7 +110,7 @@ hindsight memory put my-agent "Alice got promoted" \
 </TabItem>
 </Tabs>
 
-The `event_date` enables temporal queries like "What happened last spring?"
+The `timestamp` enables temporal queries like "What happened last spring?"
 
 ## Batch Ingestion
 
@@ -113,8 +120,8 @@ Store multiple memories in a single request:
 <TabItem value="python" label="Python">
 
 ```python
-client.store_batch(
-    agent_id="my-agent",
+client.retain_batch(
+    bank_id="my-bank",
     items=[
         {"content": "Alice works at Google", "context": "career"},
         {"content": "Bob is a data scientist at Meta", "context": "career"},
@@ -128,14 +135,11 @@ client.store_batch(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-await MemoryStorageService.batchApiMemoriesBatchPost({
-    agent_id: 'my-agent',
-    items: [
-        { content: 'Alice works at Google', context: 'career' },
-        { content: 'Bob is a data scientist at Meta', context: 'career' }
-    ],
-    document_id: 'conversation_001'
-});
+await client.retainBatch('my-bank', [
+    { content: 'Alice works at Google', context: 'career' },
+    { content: 'Bob is a data scientist at Meta', context: 'career' },
+    { content: 'Alice and Bob are friends', context: 'relationship' }
+], { documentId: 'conversation_001' });
 ```
 
 </TabItem>
@@ -150,13 +154,13 @@ The `document_id` groups related memories for later management.
 
 ```bash
 # Single file
-hindsight memory put-files my-agent document.txt
+hindsight memory put-files my-bank document.txt
 
 # Multiple files
-hindsight memory put-files my-agent doc1.txt doc2.md notes.txt
+hindsight memory put-files my-bank doc1.txt doc2.md notes.txt
 
 # With document ID
-hindsight memory put-files my-agent report.pdf --document-id "q4-report"
+hindsight memory put-files my-bank report.pdf --document-id "q4-report"
 ```
 
 </TabItem>
@@ -191,15 +195,28 @@ For large batches, use async ingestion:
 
 ```python
 # Start async ingestion
-operation = client.store_batch_async(
-    agent_id="my-agent",
+result = client.retain_batch(
+    bank_id="my-bank",
     items=[...large batch...],
-    document_id="large-doc"
+    document_id="large-doc",
+    async_=True
 )
 
-# Check status
-status = client.get_operation(operation["operation_id"])
-print(status["status"])  # "pending", "processing", "completed", "failed"
+# Result contains operation_id for tracking
+print(result["operation_id"])
+```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+// Start async ingestion
+const result = await client.retainBatch('my-bank', largeItems, {
+    documentId: 'large-doc',
+    async: true
+});
+
+console.log(result.operation_id);
 ```
 
 </TabItem>
@@ -211,5 +228,5 @@ print(status["status"])  # "pending", "processing", "completed", "failed"
 |----|-------|
 | Include context for better retrieval | Store raw unstructured dumps |
 | Use document_id to group related content | Mix unrelated content in one batch |
-| Add event_date for temporal queries | Omit dates if time matters |
+| Add timestamp for temporal queries | Omit dates if time matters |
 | Store conversations as they happen | Wait to batch everything |

@@ -3,11 +3,8 @@
 import { useState, useEffect } from 'react';
 import { client } from '@/lib/api';
 import { useBank } from '@/lib/bank-context';
-import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { X } from 'lucide-react';
 
@@ -17,16 +14,6 @@ export function DocumentsView() {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [total, setTotal] = useState(0);
-
-  // Add memory form state
-  const [showAddMemory, setShowAddMemory] = useState(false);
-  const [content, setContent] = useState('');
-  const [context, setContext] = useState('');
-  const [eventDate, setEventDate] = useState('');
-  const [documentId, setDocumentId] = useState('');
-  const [async, setAsync] = useState(false);
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [submitResult, setSubmitResult] = useState<string | null>(null);
 
   // Document view panel state
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
@@ -70,50 +57,6 @@ export function DocumentsView() {
     }
   };
 
-  const submitMemory = async () => {
-    if (!currentBank || !content) {
-      alert('Please enter content');
-      return;
-    }
-
-    setSubmitLoading(true);
-    setSubmitResult(null);
-
-    try {
-      const item: any = { content };
-      if (context) item.context = context;
-      if (eventDate) item.event_date = eventDate;
-
-      const params: any = {
-        bank_id: currentBank,
-        items: [item],
-      };
-
-      if (documentId) params.document_id = documentId;
-
-      let data: any;
-      if (async) {
-        data = await client.retain({ ...params, async: true });
-      } else {
-        data = await client.retain(params);
-      }
-
-      setSubmitResult(data.message as string);
-      setContent('');
-      setContext('');
-      setEventDate('');
-      setDocumentId('');
-
-      // Refresh documents list
-      loadDocuments();
-    } catch (error) {
-      console.error('Error submitting memory:', error);
-      setSubmitResult('Error: ' + (error as Error).message);
-    } finally {
-      setSubmitLoading(false);
-    }
-  };
-
   // Auto-load documents when component mounts
   useEffect(() => {
     if (currentBank) {
@@ -123,94 +66,6 @@ export function DocumentsView() {
 
   return (
     <div>
-      {/* Retain Memory Section */}
-      <div className="mb-6 bg-card rounded-lg border-2 border-primary overflow-hidden">
-        <Button
-          variant="ghost"
-          onClick={() => setShowAddMemory(!showAddMemory)}
-          className="w-full flex items-center justify-between p-4 h-auto"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-semibold text-card-foreground">Retain Memory</span>
-            <span className="text-sm text-muted-foreground">Add new memories to this memory bank</span>
-          </div>
-          {showAddMemory ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-        </Button>
-
-        {showAddMemory && (
-          <div className="p-4 border-t border-border bg-background">
-            <div className="max-w-3xl">
-              <div className="mb-4">
-                <label className="font-bold block mb-1 text-card-foreground">Content *</label>
-                <Textarea
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="Enter the memory content..."
-                  className="min-h-[100px] resize-y"
-                />
-              </div>
-
-              <div className="mb-4">
-                <label className="font-bold block mb-1 text-card-foreground">Context</label>
-                <Input
-                  type="text"
-                  value={context}
-                  onChange={(e) => setContext(e.target.value)}
-                  placeholder="Optional context about this memory..."
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="font-bold block mb-1 text-card-foreground">Event Date</label>
-                  <Input
-                    type="datetime-local"
-                    value={eventDate}
-                    onChange={(e) => setEventDate(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold block mb-1 text-card-foreground">Document ID</label>
-                  <Input
-                    type="text"
-                    value={documentId}
-                    onChange={(e) => setDocumentId(e.target.value)}
-                    placeholder="Optional document identifier..."
-                  />
-                </div>
-              </div>
-
-              <div className="mb-4">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="async-docs"
-                    checked={async}
-                    onCheckedChange={(checked) => setAsync(checked as boolean)}
-                  />
-                  <label htmlFor="async-docs" className="text-sm text-card-foreground cursor-pointer">
-                    Async (process in background)
-                  </label>
-                </div>
-              </div>
-
-              <Button
-                onClick={submitMemory}
-                disabled={submitLoading || !content}
-              >
-                {submitLoading ? 'Retaining...' : 'Retain Memory'}
-              </Button>
-
-              {submitResult && (
-                <div className={`mt-4 p-3 rounded-lg border-2 text-sm ${submitResult.startsWith('Error') ? 'bg-destructive/10 border-destructive text-destructive' : 'bg-primary/10 border-primary text-primary'}`}>
-                  {submitResult}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* Documents List Section */}
       {loading ? (
         <div className="flex items-center justify-center py-20">

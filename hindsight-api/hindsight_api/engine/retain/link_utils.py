@@ -5,9 +5,105 @@ Link creation utilities for temporal, semantic, and entity links.
 import time
 import logging
 from typing import List
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_datetime(dt):
+    """Normalize datetime to be timezone-aware (UTC) for consistent comparison."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        # Naive datetime - assume UTC
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def compute_temporal_links(
+    new_units: dict,
+    candidates: list,
+    time_window_hours: int = 24,
+) -> list:
+    """
+    Compute temporal links between new units and candidate neighbors.
+
+    This is a pure function that takes query results and returns link tuples,
+    making it easy to test without database access.
+
+    Args:
+        new_units: Dict mapping unit_id (str) to event_date (datetime)
+        candidates: List of dicts with 'id' and 'event_date' keys (candidate neighbors)
+        time_window_hours: Time window in hours for temporal links
+
+    Returns:
+        List of tuples: (from_unit_id, to_unit_id, 'temporal', weight, None)
+    """
+    if not new_units:
+        return []
+
+    links = []
+    for unit_id, unit_event_date in new_units.items():
+        # Normalize unit_event_date for consistent comparison
+        unit_event_date_norm = _normalize_datetime(unit_event_date)
+
+        # Calculate time window bounds with overflow protection
+        try:
+            time_lower = unit_event_date_norm - timedelta(hours=time_window_hours)
+        except OverflowError:
+            time_lower = datetime.min.replace(tzinfo=timezone.utc)
+        try:
+            time_upper = unit_event_date_norm + timedelta(hours=time_window_hours)
+        except OverflowError:
+            time_upper = datetime.max.replace(tzinfo=timezone.utc)
+
+        # Filter candidates within this unit's time window
+        matching_neighbors = [
+            (row['id'], row['event_date'])
+            for row in candidates
+            if time_lower <= _normalize_datetime(row['event_date']) <= time_upper
+        ][:10]  # Limit to top 10
+
+        for recent_id, recent_event_date in matching_neighbors:
+            # Calculate temporal proximity weight
+            time_diff_hours = abs((unit_event_date_norm - _normalize_datetime(recent_event_date)).total_seconds() / 3600)
+            weight = max(0.3, 1.0 - (time_diff_hours / time_window_hours))
+            links.append((unit_id, str(recent_id), 'temporal', weight, None))
+
+    return links
+
+
+def compute_temporal_query_bounds(
+    new_units: dict,
+    time_window_hours: int = 24,
+) -> tuple:
+    """
+    Compute the min/max date bounds for querying temporal neighbors.
+
+    Args:
+        new_units: Dict mapping unit_id (str) to event_date (datetime)
+        time_window_hours: Time window in hours
+
+    Returns:
+        Tuple of (min_date, max_date) with overflow protection
+    """
+    if not new_units:
+        return None, None
+
+    # Normalize all dates to be timezone-aware to avoid comparison issues
+    all_dates = [_normalize_datetime(d) for d in new_units.values()]
+
+    try:
+        min_date = min(all_dates) - timedelta(hours=time_window_hours)
+    except OverflowError:
+        min_date = datetime.min.replace(tzinfo=timezone.utc)
+
+    try:
+        max_date = max(all_dates) + timedelta(hours=time_window_hours)
+    except OverflowError:
+        max_date = datetime.max.replace(tzinfo=timezone.utc)
+
+    return min_date, max_date
 
 
 def _log(log_buffer, message, level='info'):
@@ -267,10 +363,8 @@ async def create_temporal_links_batch_per_fact(
         _log(log_buffer, f"      [7.1] Fetch event_dates for {len(unit_ids)} units: {time_mod.time() - fetch_dates_start:.3f}s")
 
         # Fetch ALL potential temporal neighbors in ONE query (much faster!)
-        # Get time range across all units
-        all_dates = list(new_units.values())
-        min_date = min(all_dates) - timedelta(hours=time_window_hours)
-        max_date = max(all_dates) + timedelta(hours=time_window_hours)
+        # Get time range across all units with overflow protection
+        min_date, max_date = compute_temporal_query_bounds(new_units, time_window_hours)
 
         fetch_neighbors_start = time_mod.time()
         all_candidates = await conn.fetch(
@@ -291,24 +385,7 @@ async def create_temporal_links_batch_per_fact(
 
         # Filter and create links in memory (much faster than N queries)
         link_gen_start = time_mod.time()
-        links = []
-        for unit_id, unit_event_date in new_units.items():
-            # Filter candidates within this unit's time window
-            time_lower = unit_event_date - timedelta(hours=time_window_hours)
-            time_upper = unit_event_date + timedelta(hours=time_window_hours)
-
-            matching_neighbors = [
-                (row['id'], row['event_date'])
-                for row in all_candidates
-                if time_lower <= row['event_date'] <= time_upper
-            ][:10]  # Limit to top 10
-
-            for recent_id, recent_event_date in matching_neighbors:
-                # Calculate temporal proximity weight
-                time_diff_hours = abs((unit_event_date - recent_event_date).total_seconds() / 3600)
-                weight = max(0.3, 1.0 - (time_diff_hours / time_window_hours))
-                links.append((unit_id, str(recent_id), 'temporal', weight, None))
-
+        links = compute_temporal_links(new_units, all_candidates, time_window_hours)
         _log(log_buffer, f"      [7.3] Generate {len(links)} temporal links: {time_mod.time() - link_gen_start:.3f}s")
 
         if links:

@@ -7,8 +7,8 @@ import cytoscape from 'cytoscape';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Copy, Check, X, Calendar, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Copy, Check, X, Calendar, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileText, Layers } from 'lucide-react';
+import { MemoryDetailPanel } from './memory-detail-panel';
 
 type FactType = 'world' | 'bank' | 'opinion';
 type ViewMode = 'graph' | 'table' | 'timeline';
@@ -31,6 +31,8 @@ export function DataView({ factType }: DataViewProps) {
   const [selectedChunk, setSelectedChunk] = useState<any>(null);
   const [loadingChunk, setLoadingChunk] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedGraphNode, setSelectedGraphNode] = useState<any>(null);
+  const [selectedTableMemory, setSelectedTableMemory] = useState<any>(null);
   const itemsPerPage = 100;
   const cyRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -195,6 +197,23 @@ export function DataView({ factType }: DataViewProps) {
       ] as any,
       layout: layouts[layout] || layouts.circle,
     });
+
+    // Add click handler for nodes
+    cyRef.current.on('tap', 'node', (evt: any) => {
+      const nodeId = evt.target.id();
+      // Find the corresponding table row data
+      const nodeData = data.table_rows?.find((row: any) => row.id === nodeId);
+      if (nodeData) {
+        setSelectedGraphNode(nodeData);
+      }
+    });
+
+    // Click on background to deselect
+    cyRef.current.on('tap', (evt: any) => {
+      if (evt.target === cyRef.current) {
+        setSelectedGraphNode(null);
+      }
+    });
   };
 
   useEffect(() => {
@@ -265,70 +284,95 @@ export function DataView({ factType }: DataViewProps) {
           </div>
 
           {viewMode === 'graph' && (
-            <div className="relative">
-              <div className="p-4 bg-card border-b-2 border-primary flex gap-4 items-center flex-wrap">
-                <div className="flex items-center gap-2">
-                  <label className="font-semibold text-card-foreground">Limit nodes:</label>
-                  <Input
-                    type="number"
-                    value={nodeLimit}
-                    onChange={(e) => setNodeLimit(parseInt(e.target.value))}
-                    min="10"
-                    max="1000"
-                    step="10"
-                    className="w-20"
+            <div className="flex gap-4">
+              <div className={`relative transition-all ${selectedGraphNode ? 'w-2/3' : 'w-full'}`}>
+                <div className="p-4 bg-card border-b-2 border-primary flex gap-4 items-center flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <label className="font-semibold text-card-foreground">Limit nodes:</label>
+                    <Input
+                      type="number"
+                      value={nodeLimit}
+                      onChange={(e) => setNodeLimit(parseInt(e.target.value))}
+                      min="10"
+                      max="1000"
+                      step="10"
+                      className="w-20"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="font-semibold text-card-foreground">Layout:</label>
+                    <Select value={layout} onValueChange={setLayout}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="circle">Circle (fast)</SelectItem>
+                        <SelectItem value="grid">Grid (fast)</SelectItem>
+                        <SelectItem value="cose">Force-directed (slow)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="text-sm text-muted-foreground ml-auto">
+                    Click on a node to view details
+                  </div>
+                </div>
+                <div ref={containerRef} className="w-full h-[800px] bg-background" />
+                <div className="absolute top-20 left-5 bg-card p-4 border-2 border-primary rounded-lg shadow-lg max-w-[250px]">
+                  <h3 className="font-bold mb-2 border-b-2 border-primary pb-1 text-card-foreground">Legend</h3>
+                  <h4 className="font-bold mt-2 mb-1 text-sm text-card-foreground">Link Types:</h4>
+                  <div className="flex items-center my-2">
+                    <div className="w-8 h-0.5 mr-2.5 bg-cyan-500 border-t border-dashed border-cyan-500" />
+                    <span className="text-sm"><strong>Temporal</strong></span>
+                  </div>
+                  <div className="flex items-center my-2">
+                    <div className="w-8 h-0.5 mr-2.5 bg-pink-500" />
+                    <span className="text-sm"><strong>Semantic</strong></span>
+                  </div>
+                  <div className="flex items-center my-2">
+                    <div className="w-8 h-0.5 mr-2.5 bg-yellow-500" />
+                    <span className="text-sm"><strong>Entity</strong></span>
+                  </div>
+                  <h4 className="font-bold mt-2 mb-1 text-sm">Nodes:</h4>
+                  <div className="flex items-center my-2">
+                    <div className="w-5 h-5 mr-2.5 bg-gray-300 border border-gray-500 rounded" />
+                    <span className="text-sm">No entities</span>
+                  </div>
+                  <div className="flex items-center my-2">
+                    <div className="w-5 h-5 mr-2.5 bg-blue-300 border border-gray-500 rounded" />
+                    <span className="text-sm">1 entity</span>
+                  </div>
+                  <div className="flex items-center my-2">
+                    <div className="w-5 h-5 mr-2.5 bg-blue-500 border border-gray-500 rounded" />
+                    <span className="text-sm">2+ entities</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Memory Detail Panel for Graph View */}
+              {selectedGraphNode && (
+                <div className="w-1/3">
+                  <MemoryDetailPanel
+                    memory={selectedGraphNode}
+                    onClose={() => setSelectedGraphNode(null)}
+                    onViewDocument={(docId) => {
+                      viewDocument(docId);
+                      setSelectedGraphNode(null);
+                      setViewMode('table');
+                    }}
+                    onViewChunk={(chunkId) => {
+                      viewChunk(chunkId);
+                      setSelectedGraphNode(null);
+                      setViewMode('table');
+                    }}
                   />
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="font-semibold text-card-foreground">Layout:</label>
-                  <Select value={layout} onValueChange={setLayout}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="circle">Circle (fast)</SelectItem>
-                      <SelectItem value="grid">Grid (fast)</SelectItem>
-                      <SelectItem value="cose">Force-directed (slow)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div ref={containerRef} className="w-full h-[800px] bg-background" />
-              <div className="absolute top-20 left-5 bg-card p-4 border-2 border-primary rounded-lg shadow-lg max-w-[250px]">
-                <h3 className="font-bold mb-2 border-b-2 border-primary pb-1 text-card-foreground">Legend</h3>
-                <h4 className="font-bold mt-2 mb-1 text-sm text-card-foreground">Link Types:</h4>
-                <div className="flex items-center my-2">
-                  <div className="w-8 h-0.5 mr-2.5 bg-cyan-500 border-t border-dashed border-cyan-500" />
-                  <span className="text-sm"><strong>Temporal</strong></span>
-                </div>
-                <div className="flex items-center my-2">
-                  <div className="w-8 h-0.5 mr-2.5 bg-pink-500" />
-                  <span className="text-sm"><strong>Semantic</strong></span>
-                </div>
-                <div className="flex items-center my-2">
-                  <div className="w-8 h-0.5 mr-2.5 bg-yellow-500" />
-                  <span className="text-sm"><strong>Entity</strong></span>
-                </div>
-                <h4 className="font-bold mt-2 mb-1 text-sm">Nodes:</h4>
-                <div className="flex items-center my-2">
-                  <div className="w-5 h-5 mr-2.5 bg-gray-300 border border-gray-500 rounded" />
-                  <span className="text-sm">No entities</span>
-                </div>
-                <div className="flex items-center my-2">
-                  <div className="w-5 h-5 mr-2.5 bg-blue-300 border border-gray-500 rounded" />
-                  <span className="text-sm">1 entity</span>
-                </div>
-                <div className="flex items-center my-2">
-                  <div className="w-5 h-5 mr-2.5 bg-blue-500 border border-gray-500 rounded" />
-                  <span className="text-sm">2+ entities</span>
-                </div>
-              </div>
+              )}
             </div>
           )}
 
           {viewMode === 'table' && (
             <div className="flex gap-4">
-              <div className={`transition-all ${selectedDocument || selectedChunk ? 'w-1/2' : 'w-full'}`}>
+              <div className={`transition-all ${selectedDocument || selectedChunk || selectedTableMemory ? 'w-2/3' : 'w-full'}`}>
                 <div className="px-5 mb-4">
                   <Input
                     type="text"
@@ -338,173 +382,211 @@ export function DataView({ factType }: DataViewProps) {
                     className="max-w-2xl"
                   />
                 </div>
-                <div className="overflow-x-auto px-5 pb-5">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>ID</TableHead>
-                        <TableHead>Text</TableHead>
-                        <TableHead>Context</TableHead>
-                        <TableHead>Occurred</TableHead>
-                        <TableHead>Mentioned</TableHead>
-                        <TableHead>Entities</TableHead>
-                        <TableHead>Document</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                  <TableBody>
-                    {data.table_rows && data.table_rows.length > 0 ? (
-                      (() => {
-                        const filteredRows = data.table_rows.filter((row: any) => {
-                          if (!searchQuery) return true;
-                          const query = searchQuery.toLowerCase();
-                          return (
-                            row.text?.toLowerCase().includes(query) ||
-                            row.context?.toLowerCase().includes(query)
-                          );
-                        });
+                <div className="px-5 pb-5">
+                  {data.table_rows && data.table_rows.length > 0 ? (
+                    (() => {
+                      const filteredRows = data.table_rows.filter((row: any) => {
+                        if (!searchQuery) return true;
+                        const query = searchQuery.toLowerCase();
+                        return (
+                          row.text?.toLowerCase().includes(query) ||
+                          row.context?.toLowerCase().includes(query)
+                        );
+                      });
 
-                        const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
-                        const startIndex = (currentPage - 1) * itemsPerPage;
-                        const endIndex = startIndex + itemsPerPage;
-                        const paginatedRows = filteredRows.slice(startIndex, endIndex);
+                      const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
+                      const startIndex = (currentPage - 1) * itemsPerPage;
+                      const endIndex = startIndex + itemsPerPage;
+                      const paginatedRows = filteredRows.slice(startIndex, endIndex);
 
-                        return paginatedRows.map((row: any, idx: number) => {
-                          // Format temporal range
-                          let occurredDisplay = 'N/A';
-                          if (row.occurred_start && row.occurred_end) {
-                            const start = new Date(row.occurred_start).toLocaleString();
-                            const end = new Date(row.occurred_end).toLocaleString();
-                            occurredDisplay = start === end ? start : `${start} - ${end}`;
-                          } else if (row.date) {
-                            // Fallback to old date field
-                            occurredDisplay = row.date;
-                          }
+                      return (
+                        <>
+                          <div className="grid gap-3">
+                            {paginatedRows.map((row: any, idx: number) => {
+                              const occurredDisplay = row.occurred_start
+                                ? new Date(row.occurred_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                : null;
 
-                          const mentionedDisplay = row.mentioned_at
-                            ? new Date(row.mentioned_at).toLocaleString()
-                            : 'N/A';
+                              return (
+                                <div
+                                  key={row.id || idx}
+                                  onClick={() => setSelectedTableMemory(row)}
+                                  className={`group p-4 bg-card border rounded-lg cursor-pointer transition-all hover:border-primary hover:shadow-md ${
+                                    selectedTableMemory?.id === row.id ? 'border-primary ring-2 ring-primary/20' : 'border-border'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-4">
+                                    {/* Main content */}
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm text-foreground line-clamp-2 mb-2">
+                                        {row.text}
+                                      </p>
+                                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                        {occurredDisplay && (
+                                          <span className="flex items-center gap-1">
+                                            <Calendar className="h-3 w-3" />
+                                            {occurredDisplay}
+                                          </span>
+                                        )}
+                                        {row.context && (
+                                          <span className="truncate max-w-[200px]" title={row.context}>
+                                            {row.context}
+                                          </span>
+                                        )}
+                                        <span className="font-mono opacity-50" title={row.id}>
+                                          {row.id.substring(0, 8)}...
+                                        </span>
+                                      </div>
+                                      {row.entities && (
+                                        <div className="flex gap-1 mt-2 flex-wrap">
+                                          {row.entities.split(', ').slice(0, 5).map((entity: string, i: number) => (
+                                            <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
+                                              {entity}
+                                            </span>
+                                          ))}
+                                          {row.entities.split(', ').length > 5 && (
+                                            <span className="text-[10px] text-muted-foreground">
+                                              +{row.entities.split(', ').length - 5}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
 
-                          return (
-                            <TableRow
-                              key={idx}
-                              className={selectedDocument?.id === row.document_id ? 'bg-accent' : ''}
-                            >
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <span title={row.id} className="text-muted-foreground">
-                                    {row.id.substring(0, 8)}...
-                                  </span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 w-6 p-0"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      copyToClipboard(row.id);
-                                    }}
-                                  >
-                                    {copiedId === row.id ? (
-                                      <Check className="h-3 w-3 text-green-600" />
-                                    ) : (
-                                      <Copy className="h-3 w-3" />
-                                    )}
-                                  </Button>
+                                    {/* Action buttons */}
+                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      {row.document_id && (
+                                        <Button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            viewDocument(row.document_id);
+                                          }}
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-8 w-8 p-0"
+                                          title="View Document"
+                                        >
+                                          <FileText className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                      {row.chunk_id && (
+                                        <Button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            viewChunk(row.chunk_id);
+                                          }}
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-8 w-8 p-0"
+                                          title="View Chunk"
+                                        >
+                                          <Layers className="h-4 w-4" />
+                                        </Button>
+                                      )}
+                                      <Button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          copyToClipboard(row.id);
+                                        }}
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0"
+                                        title="Copy ID"
+                                      >
+                                        {copiedId === row.id ? (
+                                          <Check className="h-4 w-4 text-green-600" />
+                                        ) : (
+                                          <Copy className="h-4 w-4" />
+                                        )}
+                                      </Button>
+                                    </div>
+                                  </div>
                                 </div>
-                              </TableCell>
-                              <TableCell>{row.text}</TableCell>
-                              <TableCell>{row.context || 'N/A'}</TableCell>
-                              <TableCell>{occurredDisplay}</TableCell>
-                              <TableCell>{mentionedDisplay}</TableCell>
-                              <TableCell>{row.entities || 'None'}</TableCell>
-                              <TableCell>
-                                <div className="flex gap-2">
-                                  {row.document_id ? (
-                                    <Button
-                                      onClick={() => viewDocument(row.document_id)}
-                                      size="sm"
-                                      variant={selectedDocument?.id === row.document_id ? 'default' : 'outline'}
-                                    >
-                                      Doc
-                                    </Button>
-                                  ) : (
-                                    <span className="text-muted-foreground text-sm">-</span>
-                                  )}
-                                  {row.chunk_id ? (
-                                    <Button
-                                      onClick={() => viewChunk(row.chunk_id)}
-                                      size="sm"
-                                      variant={selectedChunk?.chunk_id === row.chunk_id ? 'default' : 'outline'}
-                                    >
-                                      Chunk
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        });
-                      })()
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center">
-                          {data.table_rows ? 'No facts match your search' : 'No facts found for this agent and fact type'}
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                              );
+                            })}
+                          </div>
 
-                {/* Pagination Controls */}
-                {data.table_rows && data.table_rows.length > 0 && (() => {
-                  const filteredRows = data.table_rows.filter((row: any) => {
-                    if (!searchQuery) return true;
-                    const query = searchQuery.toLowerCase();
-                    return (
-                      row.text?.toLowerCase().includes(query) ||
-                      row.context?.toLowerCase().includes(query)
-                    );
-                  });
-                  const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
-
-                  if (totalPages <= 1) return null;
-
-                  return (
-                    <div className="flex items-center justify-between px-5 py-4">
-                      <div className="text-sm text-muted-foreground">
-                        Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredRows.length)} of {filteredRows.length} results
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                          disabled={currentPage === 1}
-                        >
-                          Previous
-                        </Button>
-                        <div className="flex items-center gap-2 px-3">
-                          <span className="text-sm">
-                            Page {currentPage} of {totalPages}
-                          </span>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                          disabled={currentPage === totalPages}
-                        >
-                          Next
-                        </Button>
-                      </div>
+                          {/* Pagination Controls */}
+                          {totalPages > 1 && (
+                            <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                              <div className="text-sm text-muted-foreground">
+                                Showing {startIndex + 1} to {Math.min(endIndex, filteredRows.length)} of {filteredRows.length}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCurrentPage(1)}
+                                  disabled={currentPage === 1}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <ChevronsLeft className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                  disabled={currentPage === 1}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <ChevronLeft className="h-4 w-4" />
+                                </Button>
+                                <span className="text-sm px-3">
+                                  {currentPage} / {totalPages}
+                                </span>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                  disabled={currentPage === totalPages}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <ChevronRight className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCurrentPage(totalPages)}
+                                  disabled={currentPage === totalPages}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <ChevronsRight className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()
+                  ) : (
+                    <div className="text-center py-12 text-muted-foreground">
+                      {data.table_rows ? 'No memories match your search' : 'No memories found'}
                     </div>
-                  );
-                })()}
+                  )}
+                </div>
               </div>
-            </div>
+
+            {/* Memory Detail Panel for Table View */}
+            {selectedTableMemory && !selectedDocument && !selectedChunk && (
+              <div className="w-1/3 pr-5 pb-5">
+                <MemoryDetailPanel
+                  memory={selectedTableMemory}
+                  onClose={() => setSelectedTableMemory(null)}
+                  onViewDocument={(docId) => {
+                    viewDocument(docId);
+                    setSelectedTableMemory(null);
+                  }}
+                  onViewChunk={(chunkId) => {
+                    viewChunk(chunkId);
+                    setSelectedTableMemory(null);
+                  }}
+                />
+              </div>
+            )}
 
             {/* Document Detail Panel */}
             {selectedDocument && (
-              <div className="w-1/2 pr-5 pb-5">
+              <div className="w-1/3 pr-5 pb-5">
                 <div className="bg-card border-2 border-primary rounded-lg p-4 sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto">
                   <div className="flex justify-between items-start mb-4">
                     <div>
@@ -571,7 +653,7 @@ export function DataView({ factType }: DataViewProps) {
 
             {/* Chunk Detail Panel */}
             {selectedChunk && (
-              <div className="w-1/2 pr-5 pb-5">
+              <div className="w-1/3 pr-5 pb-5">
                 <div className="bg-card border-2 border-primary rounded-lg p-4 sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto">
                   <div className="flex justify-between items-start mb-4">
                     <div>
@@ -1000,87 +1082,12 @@ function TimelineView({ data, onViewDocument }: { data: any; onViewDocument: (id
       {/* Detail Panel */}
       {selectedItem && (
         <div className="w-1/3">
-          <div className="bg-card border border-border rounded-lg p-3 sticky top-4 max-h-[600px] overflow-y-auto">
-            <div className="flex justify-between items-start mb-3">
-              <h3 className="text-sm font-semibold text-card-foreground">Details</h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedItem(null)}
-                className="h-6 w-6 p-0"
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
-
-            <div className="space-y-2">
-              <div className="p-2 bg-muted rounded">
-                <div className="text-[10px] font-medium text-muted-foreground uppercase mb-0.5">Text</div>
-                <div className="text-xs whitespace-pre-wrap">{selectedItem.text}</div>
-              </div>
-
-              {selectedItem.context && (
-                <div className="p-2 bg-muted rounded">
-                  <div className="text-[10px] font-medium text-muted-foreground uppercase mb-0.5">Context</div>
-                  <div className="text-xs">{selectedItem.context}</div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="p-2 bg-muted rounded">
-                  <div className="text-[10px] font-medium text-muted-foreground uppercase mb-0.5">Start</div>
-                  <div className="text-xs">
-                    {selectedItem.occurred_start
-                      ? new Date(selectedItem.occurred_start).toLocaleString('en-US', {
-                          month: 'short', day: 'numeric', year: 'numeric',
-                          hour: '2-digit', minute: '2-digit', hour12: false
-                        })
-                      : 'N/A'}
-                  </div>
-                </div>
-                <div className="p-2 bg-muted rounded">
-                  <div className="text-[10px] font-medium text-muted-foreground uppercase mb-0.5">End</div>
-                  <div className="text-xs">
-                    {selectedItem.occurred_end
-                      ? new Date(selectedItem.occurred_end).toLocaleString('en-US', {
-                          month: 'short', day: 'numeric', year: 'numeric',
-                          hour: '2-digit', minute: '2-digit', hour12: false
-                        })
-                      : 'N/A'}
-                  </div>
-                </div>
-              </div>
-
-              {selectedItem.entities && (
-                <div className="p-2 bg-muted rounded">
-                  <div className="text-[10px] font-medium text-muted-foreground uppercase mb-0.5">Entities</div>
-                  <div className="flex gap-1 flex-wrap">
-                    {selectedItem.entities.split(', ').map((entity: string, i: number) => (
-                      <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
-                        {entity}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="p-2 bg-muted rounded">
-                <div className="text-[10px] font-medium text-muted-foreground uppercase mb-0.5">ID</div>
-                <div className="text-[10px] font-mono text-muted-foreground truncate">{selectedItem.id}</div>
-              </div>
-
-              {selectedItem.document_id && (
-                <Button
-                  onClick={() => onViewDocument(selectedItem.document_id)}
-                  className="w-full h-7 text-xs"
-                  variant="outline"
-                  size="sm"
-                >
-                  View Document
-                </Button>
-              )}
-            </div>
-          </div>
+          <MemoryDetailPanel
+            memory={selectedItem}
+            onClose={() => setSelectedItem(null)}
+            onViewDocument={onViewDocument}
+            compact
+          />
         </div>
       )}
     </div>

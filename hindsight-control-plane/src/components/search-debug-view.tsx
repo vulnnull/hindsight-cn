@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Info } from 'lucide-react';
@@ -149,6 +151,7 @@ export function SearchDebugView() {
         trace: data.trace || null,
         loading: false,
         currentRetrievalFactType: defaultFactType,
+        currentPhase: 'final',
       });
     } catch (error) {
       console.error('Error running search:', error);
@@ -651,52 +654,43 @@ export function SearchDebugView() {
 
             {/* Phase Controls */}
             {pane.trace && (
-              <div className="p-2.5 bg-card border-b-2 border-primary flex gap-3">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="radio"
-                    name={`phase-${pane.id}`}
-                    checked={pane.currentPhase === 'retrieval'}
-                    onChange={() => updatePane(pane.id, { currentPhase: 'retrieval' })}
-                  />
-                  <span className="text-xs font-bold">1. Retrieval</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="radio"
-                    name={`phase-${pane.id}`}
-                    checked={pane.currentPhase === 'rrf'}
-                    onChange={() => updatePane(pane.id, { currentPhase: 'rrf' })}
-                  />
-                  <span className="text-xs font-bold">2. RRF Merge</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="radio"
-                    name={`phase-${pane.id}`}
-                    checked={pane.currentPhase === 'rerank'}
-                    onChange={() => updatePane(pane.id, { currentPhase: 'rerank' })}
-                  />
-                  <span className="text-xs font-bold">3. Reranking</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="radio"
-                    name={`phase-${pane.id}`}
-                    checked={pane.currentPhase === 'json'}
-                    onChange={() => updatePane(pane.id, { currentPhase: 'json' })}
-                  />
-                  <span className="text-xs font-bold">4. Raw JSON</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="radio"
-                    name={`phase-${pane.id}`}
-                    checked={pane.currentPhase === 'final'}
-                    onChange={() => updatePane(pane.id, { currentPhase: 'final' })}
-                  />
-                  <span className="text-xs font-bold">5. Final Results</span>
-                </label>
+              <div className="p-2.5 bg-card border-b-2 border-primary">
+                <RadioGroup
+                  value={pane.currentPhase}
+                  onValueChange={(value) => updatePane(pane.id, { currentPhase: value as Phase })}
+                  className="flex gap-3"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="retrieval" id={`phase-retrieval-${pane.id}`} />
+                    <Label htmlFor={`phase-retrieval-${pane.id}`} className="text-xs font-bold cursor-pointer">
+                      1. Retrieval
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="rrf" id={`phase-rrf-${pane.id}`} />
+                    <Label htmlFor={`phase-rrf-${pane.id}`} className="text-xs font-bold cursor-pointer">
+                      2. RRF Merge
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="rerank" id={`phase-rerank-${pane.id}`} />
+                    <Label htmlFor={`phase-rerank-${pane.id}`} className="text-xs font-bold cursor-pointer">
+                      3. Reranking
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="json" id={`phase-json-${pane.id}`} />
+                    <Label htmlFor={`phase-json-${pane.id}`} className="text-xs font-bold cursor-pointer">
+                      4. Raw JSON
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="final" id={`phase-final-${pane.id}`} />
+                    <Label htmlFor={`phase-final-${pane.id}`} className="text-xs font-bold cursor-pointer">
+                      5. Final Results
+                    </Label>
+                  </div>
+                </RadioGroup>
               </div>
             )}
 

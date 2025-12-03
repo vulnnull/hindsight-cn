@@ -17,12 +17,33 @@ Make sure you've [installed Hindsight](./installation) and understand [how retai
 
 When you retain information, Hindsight automatically identifies and tracks entities:
 
+<Tabs>
+<TabItem value="python" label="Python">
+
 ```python
+from hindsight_client import Hindsight
+
+client = Hindsight(base_url="http://localhost:8888")
+
 client.retain(
     bank_id="my-bank",
     content="Alice works at Google in Mountain View. She specializes in TensorFlow."
 )
 ```
+
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+import { HindsightClient } from '@hindsight/client';
+
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
+
+await client.retain('my-bank', 'Alice works at Google in Mountain View. She specializes in TensorFlow.');
+```
+
+</TabItem>
+</Tabs>
 
 **Entities extracted:**
 - **Alice** (person)
@@ -46,14 +67,22 @@ Get all entities tracked in a memory bank:
 <TabItem value="python" label="Python">
 
 ```python
+# Using the low-level API
+from hindsight_client_api import ApiClient, Configuration
+from hindsight_client_api.api import DefaultApi
+
+config = Configuration(host="http://localhost:8888")
+api_client = ApiClient(config)
+api = DefaultApi(api_client)
+
 # List all entities
-entities = client.list_entities(bank_id="my-bank")
+response = api.list_entities(bank_id="my-bank")
 
-for entity in entities:
-    print(f"{entity['name']}: {entity['mention_count']} mentions")
+for entity in response.items:
+    print(f"{entity.canonical_name}: {entity.mention_count} mentions")
 
-# List with filters
-entities = client.list_entities(
+# List with pagination
+response = api.list_entities(
     bank_id="my-bank",
     limit=50,
     offset=0
@@ -63,21 +92,26 @@ entities = client.list_entities(
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
+```typescript
+import { sdk, createClient, createConfig } from '@hindsight/client';
+
+const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
+
 // List all entities
-const entities = await client.listEntities({
-    bankId: 'my-bank'
+const response = await sdk.listEntities({
+    client: apiClient,
+    path: { bank_id: 'my-bank' }
 });
 
-entities.forEach(e => {
-    console.log(`${e.name}: ${e.mentionCount} mentions`);
-});
+for (const entity of response.data.items) {
+    console.log(`${entity.canonical_name}: ${entity.mention_count} mentions`);
+}
 
-// List with filters
-const filtered = await client.listEntities({
-    bankId: 'my-bank',
-    limit: 50,
-    offset: 0
+// List with pagination
+const paginated = await sdk.listEntities({
+    client: apiClient,
+    path: { bank_id: 'my-bank' },
+    query: { limit: 50, offset: 0 }
 });
 ```
 
@@ -103,58 +137,39 @@ Retrieve detailed information about a specific entity:
 <TabItem value="python" label="Python">
 
 ```python
-# Get entity state (observations + related facts)
-entity = client.get_entity(
+# Get entity details with observations
+entity = api.get_entity(
     bank_id="my-bank",
     entity_id="entity-uuid"
 )
 
-print(f"Entity: {entity['name']}")
-print(f"First seen: {entity['first_seen']}")
-print(f"Mentions: {entity['mention_count']}")
+print(f"Entity: {entity.canonical_name}")
+print(f"First seen: {entity.first_seen}")
+print(f"Mentions: {entity.mention_count}")
 
 # Observations (synthesized summaries)
-for obs in entity['observations']:
-    print(f"  - {obs['text']}")
-
-# Include related facts
-entity = client.get_entity(
-    bank_id="my-bank",
-    entity_id="entity-uuid",
-    include_facts=True,
-    max_facts=20
-)
-
-for fact in entity['facts']:
-    print(f"  [{fact['occurred_at']}] {fact['text']}")
+for obs in entity.observations:
+    print(f"  - {obs.text}")
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
-// Get entity state
-const entity = await client.getEntity({
-    bankId: 'my-bank',
-    entityId: 'entity-uuid'
+```typescript
+// Get entity details
+const entity = await sdk.getEntity({
+    client: apiClient,
+    path: { bank_id: 'my-bank', entity_id: 'entity-uuid' }
 });
 
-console.log(`Entity: ${entity.name}`);
-console.log(`First seen: ${entity.firstSeen}`);
-console.log(`Mentions: ${entity.mentionCount}`);
+console.log(`Entity: ${entity.data.canonical_name}`);
+console.log(`First seen: ${entity.data.first_seen}`);
+console.log(`Mentions: ${entity.data.mention_count}`);
 
 // Observations
-entity.observations.forEach(obs => {
+for (const obs of entity.data.observations) {
     console.log(`  - ${obs.text}`);
-});
-
-// Include related facts
-const withFacts = await client.getEntity({
-    bankId: 'my-bank',
-    entityId: 'entity-uuid',
-    includeFacts: true,
-    maxFacts: 20
-});
+}
 ```
 
 </TabItem>
@@ -163,9 +178,6 @@ const withFacts = await client.getEntity({
 ```bash
 # Get entity details
 hindsight entities get my-bank entity-uuid
-
-# With related facts
-hindsight entities get my-bank entity-uuid --include-facts
 ```
 
 </TabItem>
@@ -185,50 +197,30 @@ Observations are high-level summaries automatically synthesized from multiple fa
 
 Observations are generated in the background after retaining information.
 
-## Search Entities
+## Regenerate Observations
 
-Find entities by name or related terms:
+Force regeneration of entity observations:
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-# Search by name
-entities = client.search_entities(
+# Regenerate observations for an entity
+api.regenerate_entity_observations(
     bank_id="my-bank",
-    query="Alice"
-)
-
-# Fuzzy matching handles variations
-entities = client.search_entities(
-    bank_id="my-bank",
-    query="Alic"  # Matches "Alice", "Alicia", etc.
+    entity_id="entity-uuid"
 )
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
-```javascript
-// Search by name
-const entities = await client.searchEntities({
-    bankId: 'my-bank',
-    query: 'Alice'
+```typescript
+// Regenerate observations
+await sdk.regenerateEntityObservations({
+    client: apiClient,
+    path: { bank_id: 'my-bank', entity_id: 'entity-uuid' }
 });
-
-// Fuzzy matching
-const fuzzy = await client.searchEntities({
-    bankId: 'my-bank',
-    query: 'Alic'
-});
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-# Search entities
-hindsight entities search my-bank "Alice"
 ```
 
 </TabItem>
@@ -239,7 +231,6 @@ hindsight entities search my-bank "Alice"
 ```json
 {
   "id": "entity-uuid",
-  "name": "Alice Chen",
   "canonical_name": "Alice Chen",
   "first_seen": "2024-01-15T10:30:00Z",
   "last_seen": "2024-03-20T14:22:00Z",
@@ -247,7 +238,7 @@ hindsight entities search my-bank "Alice"
   "observations": [
     {
       "text": "Alice is a software engineer at Google specializing in ML",
-      "created_at": "2024-03-20T15:00:00Z"
+      "mentioned_at": "2024-03-20T15:00:00Z"
     }
   ]
 }
