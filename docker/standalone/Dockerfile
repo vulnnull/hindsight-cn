@@ -74,11 +74,15 @@ WORKDIR /app
 COPY --from=sdk-builder /app/sdk /app/sdk
 
 # Install Control Plane dependencies
-COPY hindsight-control-plane/package*.json ./
-RUN npm ci
+# Only copy package.json (not package-lock.json) to ensure npm installs
+# correct platform-specific native bindings for lightningcss/tailwindcss
+COPY hindsight-control-plane/package.json ./
+RUN npm install
 
-# Copy Control Plane source
+# Copy Control Plane source (excluding node_modules via .dockerignore)
 COPY hindsight-control-plane/ ./
+# Remove package-lock.json to avoid conflicts with installed native bindings
+RUN rm -f package-lock.json
 
 # Link SDK (temporary for build)
 RUN cd /app/sdk && npm link && cd /app && npm link @vectorize-io/hindsight-client

@@ -309,7 +309,7 @@ Hindsight has been evaluated on the LoComo (Long Context Memory) benchmark:
 - **Average recall latency**: 400-600ms (mid budget)
 - **Average reflect latency**: 1500-2500ms (end-to-end)
 
-See [benchmarks README](../../benchmarks/README.md) for detailed results.
+See the [GitHub repository](https://github.com/vectorize-io/hindsight/tree/main/hindsight-dev/benchmarks) for detailed benchmark results.
 
 ### Performance Metrics
 

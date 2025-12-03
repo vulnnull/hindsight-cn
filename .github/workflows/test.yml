@@ -53,6 +53,25 @@ jobs:
       working-directory: ./hindsight-clients/typescript
       run: npm run build
 
+  build-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      working-directory: ./hindsight-docs
+      run: npm ci
+
+    - name: Build docs
+      working-directory: ./hindsight-docs
+      run: npm run build
+
   build-rust-cli:
     runs-on: ubuntu-latest
 
@@ -129,24 +148,7 @@ jobs:
   test-api:
     runs-on: ubuntu-latest
     needs: [build-python-packages]
-
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: hindsight_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     env:
-      HINDSIGHT_API_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hindsight_test
       HINDSIGHT_API_LLM_PROVIDER: groq
       HINDSIGHT_API_LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
       HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-20b
@@ -170,4 +172,4 @@ jobs:
 
     - name: Run tests
       working-directory: ./hindsight-api
-      run: uv run pytest tests -v --ignore=tests/test_fact_extraction_quality.py
+      run: uv run pytest tests -v

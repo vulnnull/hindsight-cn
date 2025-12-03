@@ -36,4 +36,4 @@ response = client.reflect(
 
 ## Documentation
 
-For full documentation, visit [hindsight.dev](https://hindsight.dev).
+For full documentation, visit [hindsight](https://github.com/vectorize-io/hindsight).

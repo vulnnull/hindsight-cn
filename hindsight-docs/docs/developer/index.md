@@ -121,4 +121,4 @@ The `bias_strength` parameter (0-1) controls how much personality influences opi
 - [**Operations**](/developer/api/operations) — Monitor async tasks
 
 ### Deployment
-- [**Server Setup**](/developer/server) — Deploy with Docker Compose, Helm, or pip
+- [**Server Setup**](/developer/installation) — Deploy with Docker Compose, Helm, or pip

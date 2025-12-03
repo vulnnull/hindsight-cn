@@ -123,4 +123,4 @@ hindsight reflect my-bank "Tell me about Alice"
 - [**Recall**](./recall) — Search and retrieval strategies
 - [**Reflect**](./reflect) — Personality-aware reasoning
 - [**Memory Banks**](./memory-banks) — Configure personality and background
-- [**Server Options**](/developer/server) — Production deployment
+- [**Server Options**](/developer/installation) — Production deployment

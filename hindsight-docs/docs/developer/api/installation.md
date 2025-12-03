@@ -39,7 +39,7 @@ pip install hindsight-client
 npm install @hindsight/client
 ```
 
-**Requires:** A running Hindsight server (see [Server Deployment](/developer/server) for setup).
+**Requires:** A running Hindsight server (see [Server Deployment](/developer/installation) for setup).
 
 </TabItem>
 <TabItem value="cli" label="CLI">
@@ -120,4 +120,4 @@ hindsight --version
 ## Next Steps
 
 - [**Quick Start**](./quickstart) — Get running in 60 seconds
-- [**Server Deployment**](/developer/server) — Production setup options
+- [**Server Deployment**](/developer/installation) — Production setup options

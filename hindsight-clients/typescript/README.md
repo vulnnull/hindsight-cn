@@ -1,57 +1,89 @@
-# @hindsight/client
+# Hindsight TypeScript Client
 
-TypeScript client for Hindsight - Semantic memory system with personality-driven thinking.
-
-**Auto-generated from OpenAPI spec** - provides type-safe access to all Hindsight API endpoints.
+TypeScript client library for the Hindsight API.
 
 ## Installation
 
 ```bash
-npm install @hindsight/client
+npm install @vectorize-io/hindsight-client
 # or
-yarn add @hindsight/client
+yarn add @vectorize-io/hindsight-client
 ```
 
-## Quick Start
+## Usage
 
 ```typescript
-import { OpenAPI, MemoryStorageService, ReasoningService } from '@hindsight/client';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
-// Configure API base URL
-OpenAPI.BASE = 'http://localhost:8888';
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-// Store memory
-await MemoryStorageService.putApiPutPost({
-  agent_id: 'user123',
-  content: 'Alice loves machine learning'
+// Retain information
+await client.retain('my-bank', 'Alice works at Google in Mountain View.');
+
+// Recall memories
+const results = await client.recall('my-bank', 'Where does Alice work?');
+
+// Reflect and get an opinion
+const response = await client.reflect('my-bank', 'What do you think about Alice\'s career?');
+```
+
+## API Reference
+
+### `retain(bankId, content, options?)`
+
+Store a single memory.
+
+```typescript
+await client.retain('my-bank', 'User prefers dark mode', {
+  timestamp: new Date(),
+  context: 'Settings conversation',
+  metadata: { source: 'chat' }
 });
+```
 
-// Think (generate answer with personality)
-const response = await ReasoningService.thinkApiThinkPost({
-  agent_id: 'user123',
-  query: 'What does Alice think about AI?',
-  thinking_budget: 50
+### `retainBatch(bankId, items, options?)`
+
+Store multiple memories in batch.
+
+```typescript
+await client.retainBatch('my-bank', [
+  { content: 'Alice loves hiking' },
+  { content: 'Alice visited Paris last summer' }
+], { async: true });
+```
+
+### `recall(bankId, query, options?)`
+
+Recall memories matching a query.
+
+```typescript
+const results = await client.recall('my-bank', 'What are Alice\'s hobbies?', {
+  budget: 'mid'
 });
+```
 
+### `reflect(bankId, query, options?)`
+
+Generate a contextual answer using the bank's identity and memories.
+
+```typescript
+const response = await client.reflect('my-bank', 'What should I do this weekend?', {
+  budget: 'low'
+});
 console.log(response.text);
 ```
 
-## Available Services
+### `createBank(bankId, options)`
 
-- `MemoryStorageService` - Store and retrieve facts
-- `SearchService` - Semantic and temporal search
-- `ReasoningService` - Personality-driven thinking
-- `VisualizationService` - Memory graphs and statistics
-- `ManagementService` - Agent profiles and configuration
-- `DocumentsService` - Document tracking
+Create or update a memory bank with personality.
 
-All services are fully typed with TypeScript interfaces.
+```typescript
+await client.createBank('my-bank', {
+  name: 'My Assistant',
+  background: 'A helpful assistant that remembers everything.'
+});
+```
 
-## Development
+## Documentation
 
-Auto-generated from `openapi.json`. See [RELEASE.md](../../RELEASE.md) for regeneration instructions.
-
-## Links
-
-- [GitHub Repository](https://github.com/vectorize-io/hindsight)
-- [Full Documentation](https://github.com/vectorize-io/hindsight/blob/main/README.md)
+For full documentation, visit [hindsight](https://github.com/vectorize-io/hindsight).

@@ -16,6 +16,24 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from ..llm_wrapper import OutputTooLongError, LLMConfig
 
 
+def _sanitize_text(text: str) -> str:
+    """
+    Sanitize text by removing invalid Unicode surrogate characters.
+
+    Surrogate characters (U+D800 to U+DFFF) are used in UTF-16 encoding
+    but cannot be encoded in UTF-8. They can appear in Python strings
+    from improperly decoded data (e.g., from JavaScript or broken files).
+
+    This function removes unpaired surrogates to prevent UnicodeEncodeError
+    when the text is sent to the LLM API.
+    """
+    if not text:
+        return text
+    # Remove surrogate characters (U+D800 to U+DFFF) using regex
+    # These are invalid in UTF-8 and cause encoding errors
+    return re.sub(r'[\ud800-\udfff]', '', text)
+
+
 class Entity(BaseModel):
     """An entity extracted from text."""
     text: str = Field(
@@ -470,6 +488,10 @@ WHAT TO EXTRACT vs SKIP
     max_retries = 2
     last_error = None
 
+    # Sanitize input text to prevent Unicode encoding errors (e.g., unpaired surrogates)
+    sanitized_chunk = _sanitize_text(chunk)
+    sanitized_context = _sanitize_text(context) if context else 'none'
+
     # Build user message with metadata and chunk content in a clear format
     # Format event_date with day of week for better temporal reasoning
     event_date_formatted = event_date.strftime('%A, %B %d, %Y')  # e.g., "Monday, June 10, 2024"
@@ -477,10 +499,10 @@ WHAT TO EXTRACT vs SKIP
 
 Chunk: {chunk_index + 1}/{total_chunks}
 Event Date: {event_date_formatted} ({event_date.isoformat()})
-Context: {context if context else 'none'}
+Context: {sanitized_context}
 
 Text:
-{chunk}"""
+{sanitized_chunk}"""
 
     for attempt in range(max_retries):
         try:
