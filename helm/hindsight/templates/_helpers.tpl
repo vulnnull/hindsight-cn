@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "memora.name" -}}
+{{- define "hindsight.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "memora.fullname" -}}
+{{- define "hindsight.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,16 +24,16 @@ Create a default fully qualified app name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "memora.chart" -}}
+{{- define "hindsight.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "memora.labels" -}}
-helm.sh/chart: {{ include "memora.chart" . }}
-{{ include "memora.selectorLabels" . }}
+{{- define "hindsight.labels" -}}
+helm.sh/chart: {{ include "hindsight.chart" . }}
+{{ include "hindsight.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -43,49 +43,49 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "memora.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "memora.name" . }}
+{{- define "hindsight.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "hindsight.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 API labels
 */}}
-{{- define "memora.api.labels" -}}
-{{ include "memora.labels" . }}
+{{- define "hindsight.api.labels" -}}
+{{ include "hindsight.labels" . }}
 app.kubernetes.io/component: api
 {{- end }}
 
 {{/*
 API selector labels
 */}}
-{{- define "memora.api.selectorLabels" -}}
-{{ include "memora.selectorLabels" . }}
+{{- define "hindsight.api.selectorLabels" -}}
+{{ include "hindsight.selectorLabels" . }}
 app.kubernetes.io/component: api
 {{- end }}
 
 {{/*
 Control plane labels
 */}}
-{{- define "memora.controlPlane.labels" -}}
-{{ include "memora.labels" . }}
+{{- define "hindsight.controlPlane.labels" -}}
+{{ include "hindsight.labels" . }}
 app.kubernetes.io/component: control-plane
 {{- end }}
 
 {{/*
 Control plane selector labels
 */}}
-{{- define "memora.controlPlane.selectorLabels" -}}
-{{ include "memora.selectorLabels" . }}
+{{- define "hindsight.controlPlane.selectorLabels" -}}
+{{ include "hindsight.selectorLabels" . }}
 app.kubernetes.io/component: control-plane
 {{- end }}
 
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "memora.serviceAccountName" -}}
+{{- define "hindsight.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "memora.fullname" .) .Values.serviceAccount.name }}
+{{- default (include "hindsight.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
@@ -94,11 +94,11 @@ Create the name of the service account to use
 {{/*
 Generate database URL
 */}}
-{{- define "memora.databaseUrl" -}}
+{{- define "hindsight.databaseUrl" -}}
 {{- if .Values.databaseUrl }}
 {{- .Values.databaseUrl }}
 {{- else if .Values.postgresql.enabled }}
-{{- printf "postgresql://%s:%s@%s-postgresql:%d/%s" .Values.postgresql.auth.username .Values.postgresql.auth.password (include "memora.fullname" .) (.Values.postgresql.primary.service.port | int) .Values.postgresql.auth.database }}
+{{- printf "postgresql://%s:%s@%s-postgresql:%d/%s" .Values.postgresql.auth.username .Values.postgresql.auth.password (include "hindsight.fullname" .) (.Values.postgresql.primary.service.port | int) .Values.postgresql.auth.database }}
 {{- else }}
 {{- printf "postgresql://%s:$(POSTGRES_PASSWORD)@%s:%d/%s" .Values.postgresql.external.username .Values.postgresql.external.host (.Values.postgresql.external.port | int) .Values.postgresql.external.database }}
 {{- end }}
@@ -107,6 +107,6 @@ Generate database URL
 {{/*
 API URL for control plane
 */}}
-{{- define "memora.apiUrl" -}}
-{{- printf "http://%s-api:%d" (include "memora.fullname" .) (.Values.api.service.port | int) }}
+{{- define "hindsight.apiUrl" -}}
+{{- printf "http://%s-api:%d" (include "hindsight.fullname" .) (.Values.api.service.port | int) }}
 {{- end }}
