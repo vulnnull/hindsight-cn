@@ -506,10 +506,11 @@ export function DataView({ factType }: DataViewProps) {
 
               {/* Memory Detail Panel for Table View - Fixed on Right */}
               {selectedTableMemory && (
-                <div className="fixed right-0 top-0 h-screen w-96 bg-background border-l border-border shadow-lg z-50 overflow-y-auto p-4">
+                <div className="fixed right-0 top-0 h-screen w-[420px] bg-card border-l-2 border-primary shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
                   <MemoryDetailPanel
                     memory={selectedTableMemory}
                     onClose={() => setSelectedTableMemory(null)}
+                    inPanel
                   />
                 </div>
               )}

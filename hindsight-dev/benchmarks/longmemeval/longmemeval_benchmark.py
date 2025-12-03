@@ -174,7 +174,7 @@ class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
 
 **How to Answer:**
 1. Start by scanning retrieved context to understand the facts and events that happened and the timeline.
-2. Reason about all the memories and find the right answer, considering the most recent memory as an update of the current facts
+2. Reason about all the memories and find the right answer, considering the most recent memory as an update of the current facts.
 
 In general the answer must be comprehensive and plenty of details from the retrieved context.
 
@@ -184,7 +184,7 @@ For recommendations/suggestions, use the retrieved context to understand the use
 For questions asking for help or instructions, consider the users' latest purchases and previous interactions with the assistant to understand which details to focus your answer on (include these references in your answer).
 For specific number/value questions, use the context to understand what is the most up-to-date number based on recency, but also include the reasoning (in the answer) on previous possible values and why you think are less relevant.
 For open questions, include as much details as possible from different sources that are relevant.
-For questions where a specific entity is mentioned and it's different from your memory, just say the truth, don't make up anything just to fulfill the question. For example, if the question is about a specific sport, you should consider if the memories and the question are about the same sport.
+For questions where a specific entity/role is mentioned and it's different from your memory, just say the truth, don't make up anything just to fulfill the question. For example, if the question is about a specific sport, you should consider if the memories and the question are about the same sport.
 For comparative questions , say you don't know the answer if you don't have information about both sides. (or more sides) 
 For questions related to time/date, carefully review the question date and the memories date to correctly answer the question.
 For questions related to time/date calculation (e.g. How many days passed between X and Y?), carefully review the memories date to correctly answer the question and only provide an answer if you have information about both X and Y, otherwise say it's not possible to calculate and why.
