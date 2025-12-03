@@ -81,7 +81,7 @@ RUN npm ci
 COPY hindsight-control-plane/ ./
 
 # Link SDK (temporary for build)
-RUN cd /app/sdk && npm link && cd /app && npm link @hindsight/client
+RUN cd /app/sdk && npm link && cd /app && npm link @vectorize-io/hindsight-client
 
 # Build Control Plane
 RUN npm run build

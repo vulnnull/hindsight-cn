@@ -28,15 +28,15 @@ jobs:
     # Build all packages
     - name: Build hindsight-client
       working-directory: ./hindsight-clients/python
-      run: uv build
+      run: uv build --out-dir dist
 
     - name: Build hindsight-api
       working-directory: ./hindsight-api
-      run: uv build
+      run: uv build --out-dir dist
 
     - name: Build hindsight-all
       working-directory: ./hindsight
-      run: uv build
+      run: uv build --out-dir dist
 
     # Publish in order (client and api first, then hindsight-all which depends on them)
     - name: Publish hindsight-client to PyPI
