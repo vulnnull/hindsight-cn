@@ -808,38 +808,6 @@ Users may provide background in second person ("You are..."), but internal stora
 
 **Trajectory**: The opinion evolved from strong conviction (0.7 → 0.85) to weaker, more malleable belief (0.55) as evidence accumulated.
 
-## 12. Use Cases and Real-World Deployment
-
-### 12.1 Multi-Persona Sports Commentary (Production Deployment)
-
-**Application**: AI-generated sports analysis and entertainment content with multiple agent personalities
-
-**Real-World System**: A production sports content platform where AI agents with distinct personalities co-host episodic shows discussing team performance, game analysis, and sports debates.
-
-**System Architecture**:
-- **Multiple Banks**: Each bank has unique personality traits and sports background
-- **Continuous Memory**: Banks maintain persistent team/player assessments across episodes spanning months
-- **Opinion Evolution**: As games occur and statistics accumulate, banks automatically update beliefs through reinforcement
-- **Personality-Driven Commentary**: The same game results generate different perspectives based on bank traits
-
-**Key Benefits Observed**:
-1. **Viewer Engagement**: Improved audience retention with "personality diversity" as primary appeal
-2. **Content Consistency**: Banks maintain recognizable voices across episodes without manual tuning
-3. **Scalability**: New banks can be added with distinct personalities without retraining
-4. **Opinion Richness**: Opinion networks capture nuanced, evolving assessments
-
-This deployment validates that personality-driven opinion systems can operate at production scale for content generation requiring consistent yet adaptive perspectives.
-
-### 12.2 Additional Use Cases
-
-**Customer Support**: Multi-agent systems with specialized personas (empathetic, analytical, creative)
-
-**Consistent Character AI**: Conversational AI characters for entertainment or education with stable personality
-
-**Explainable AI**: Systems requiring transparent decision-making where personality traits explain reasoning style
-
----
-
 # Part III: Unified Hindsight Architecture
 
 ## 13. Integration: TEMPR + CARA

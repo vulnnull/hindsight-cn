@@ -9,12 +9,14 @@ interface MemoryDetailPanelProps {
   memory: any;
   onClose: () => void;
   compact?: boolean;
+  inPanel?: boolean;
 }
 
 export function MemoryDetailPanel({
   memory,
   onClose,
   compact = false,
+  inPanel = false,
 }: MemoryDetailPanelProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [modalType, setModalType] = useState<'document' | 'chunk' | null>(null);
@@ -47,10 +49,147 @@ export function MemoryDetailPanel({
 
   if (!memory) return null;
 
-  const padding = compact ? 'p-3' : 'p-4';
-  const titleSize = compact ? 'text-sm' : 'text-lg';
   const labelSize = compact ? 'text-[10px]' : 'text-xs';
   const textSize = compact ? 'text-xs' : 'text-sm';
+
+  // Panel mode: no outer border/bg, larger padding, prominent close button
+  if (inPanel) {
+    return (
+      <>
+        <div className="p-5">
+          {/* Header with close button */}
+          <div className="flex justify-between items-center mb-6 pb-4 border-b border-border">
+            <div>
+              <h3 className="text-xl font-bold text-foreground">Memory Details</h3>
+              <p className="text-sm text-muted-foreground mt-1">Full memory content and metadata</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClose}
+              className="h-9 px-3 gap-2"
+            >
+              <X className="h-4 w-4" />
+              Close
+            </Button>
+          </div>
+
+          <div className="space-y-5">
+            {/* Full Text */}
+            <div>
+              <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Full Text</div>
+              <div className="text-sm whitespace-pre-wrap leading-relaxed">{memory.text}</div>
+            </div>
+
+            {/* Context */}
+            {memory.context && (
+              <div className="p-4 bg-muted/50 rounded-lg">
+                <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Context</div>
+                <div className="text-sm">{memory.context}</div>
+              </div>
+            )}
+
+            {/* Dates */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 bg-muted/50 rounded-lg">
+                <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Occurred</div>
+                <div className="text-sm font-medium">
+                  {memory.occurred_start
+                    ? new Date(memory.occurred_start).toLocaleString()
+                    : 'N/A'}
+                </div>
+              </div>
+              <div className="p-4 bg-muted/50 rounded-lg">
+                <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Mentioned</div>
+                <div className="text-sm font-medium">
+                  {memory.mentioned_at
+                    ? new Date(memory.mentioned_at).toLocaleString()
+                    : 'N/A'}
+                </div>
+              </div>
+            </div>
+
+            {/* Entities */}
+            {memory.entities && (
+              <div>
+                <div className="text-xs font-bold text-muted-foreground uppercase mb-3">Entities</div>
+                <div className="flex flex-wrap gap-2">
+                  {(Array.isArray(memory.entities) ? memory.entities : String(memory.entities).split(', ')).map((entity: any, i: number) => {
+                    const entityText = typeof entity === 'string' ? entity : (entity?.name || JSON.stringify(entity));
+                    return (
+                      <span
+                        key={i}
+                        className="text-sm px-3 py-1.5 rounded-full bg-primary/10 text-primary font-medium"
+                      >
+                        {entityText}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ID */}
+            <div className="p-4 bg-muted/50 rounded-lg">
+              <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Memory ID</div>
+              <div className="flex items-center gap-2">
+                <code className="text-xs font-mono break-all flex-1 text-muted-foreground">{memory.id}</code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 flex-shrink-0"
+                  onClick={() => copyToClipboard(memory.id)}
+                >
+                  {copiedId === memory.id ? (
+                    <Check className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Document/Chunk buttons */}
+            {(memory.document_id || memory.chunk_id) && (
+              <div className="flex gap-3 pt-2">
+                {memory.document_id && (
+                  <Button
+                    onClick={() => openDocumentModal(memory.document_id)}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    View Document
+                  </Button>
+                )}
+                {memory.chunk_id && (
+                  <Button
+                    onClick={() => openChunkModal(memory.chunk_id)}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    View Chunk
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Document/Chunk Modal */}
+        {modalType && modalId && (
+          <DocumentChunkModal
+            type={modalType}
+            id={modalId}
+            onClose={closeModal}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Original compact/default mode
+  const padding = compact ? 'p-3' : 'p-4';
+  const titleSize = compact ? 'text-sm' : 'text-lg';
   const gap = compact ? 'space-y-2' : 'space-y-4';
 
   return (

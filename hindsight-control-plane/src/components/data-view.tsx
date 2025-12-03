@@ -307,12 +307,13 @@ export function DataView({ factType }: DataViewProps) {
                 </div>
               </div>
 
-              {/* Memory Detail Panel for Graph View */}
+              {/* Memory Detail Panel for Graph View - Fixed on Right */}
               {selectedGraphNode && (
-                <div className="w-1/3">
+                <div className="fixed right-0 top-0 h-screen w-[420px] bg-card border-l-2 border-primary shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
                   <MemoryDetailPanel
                     memory={selectedGraphNode}
                     onClose={() => setSelectedGraphNode(null)}
+                    inPanel
                   />
                 </div>
               )}
@@ -872,13 +873,13 @@ function TimelineView({ data }: { data: any }) {
         </div>
       </div>
 
-      {/* Detail Panel */}
+      {/* Detail Panel - Fixed on Right */}
       {selectedItem && (
-        <div className="w-1/3">
+        <div className="fixed right-0 top-0 h-screen w-[420px] bg-card border-l-2 border-primary shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
           <MemoryDetailPanel
             memory={selectedItem}
             onClose={() => setSelectedItem(null)}
-            compact
+            inPanel
           />
         </div>
       )}

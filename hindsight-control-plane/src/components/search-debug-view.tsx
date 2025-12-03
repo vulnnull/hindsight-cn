@@ -508,8 +508,8 @@ export function SearchDebugView() {
   }
 
   return (
-    <div className="flex gap-4">
-      <div className={selectedMemory ? 'flex-1' : 'w-full'}>
+    <div>
+      <div className="w-full">
         <div className="mb-4">
           <Button
             onClick={addPane}
@@ -836,13 +836,13 @@ export function SearchDebugView() {
         </div>
       </div>
 
-      {/* Memory Detail Panel */}
+      {/* Memory Detail Panel - Fixed on Right */}
       {selectedMemory && (
-        <div className="w-80 flex-shrink-0">
+        <div className="fixed right-0 top-0 h-screen w-[420px] bg-card border-l-2 border-primary shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
           <MemoryDetailPanel
             memory={selectedMemory}
             onClose={() => setSelectedMemory(null)}
-            compact
+            inPanel
           />
         </div>
       )}
