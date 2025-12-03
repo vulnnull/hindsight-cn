@@ -47,7 +47,7 @@ COPY hindsight-api/alembic ./alembic
 # =============================================================================
 # Stage: SDK Builder (needed for Control Plane)
 # =============================================================================
-FROM node:20-alpine AS sdk-builder
+FROM node:20-slim AS sdk-builder
 
 ARG INCLUDE_CP
 RUN if [ "$INCLUDE_CP" != "true" ]; then echo "Skipping SDK build" && exit 0; fi
@@ -63,7 +63,7 @@ RUN npm run build
 # =============================================================================
 # Stage: Control Plane Builder
 # =============================================================================
-FROM node:20-alpine AS cp-builder
+FROM node:20-slim AS cp-builder
 
 ARG INCLUDE_CP
 RUN if [ "$INCLUDE_CP" != "true" ]; then echo "Skipping CP build" && exit 0; fi
