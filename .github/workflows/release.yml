@@ -389,7 +389,7 @@ jobs:
         - `hindsight-client` - Client library
 
         ### TypeScript/JavaScript
-        - `@hindsight/client` - TypeScript SDK
+        - `@vectorize-io/hindsight-client` - TypeScript SDK
 
         ### CLI Binaries
         - `hindsight-linux-amd64` - Linux x86_64
@@ -413,7 +413,7 @@ jobs:
 
         ### TypeScript/JavaScript
         ```bash
-        npm install @hindsight/client@${{ steps.get_version.outputs.VERSION }}
+        npm install @vectorize-io/hindsight-client@${{ steps.get_version.outputs.VERSION }}
         ```
 
         ### CLI
@@ -458,7 +458,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "## 📦 Components" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Python packages (hindsight-all, hindsight-api, hindsight-client)" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ TypeScript Client (@hindsight/client)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ TypeScript Client (@vectorize-io/hindsight-client)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Rust CLI (Linux amd64, macOS amd64, macOS arm64)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Docker images (standalone, API, Control Plane)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Helm chart" >> $GITHUB_STEP_SUMMARY
