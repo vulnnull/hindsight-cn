@@ -84,7 +84,7 @@ with HindsightServer(llm_provider="openai", llm_model="gpt-4o-mini", llm_api_key
 
 Full documentation: [vectorize-io.github.io/hindsight](https://vectorize-io.github.io/hindsight)
 
-- [Architecture](https://vectorize-io.github.io/hindsight/developer/architecture) — How ingestion, storage, and retrieval work
+- [Architecture](https://vectorize-io.github.io/hindsight/#what-hindsight-does) — How ingestion, storage, and retrieval work
 - [Python Client](https://vectorize-io.github.io/hindsight/sdks/python) — Full API reference
 - [API Reference](https://vectorize-io.github.io/hindsight/api-reference) — REST API endpoints
 - [Personality](https://vectorize-io.github.io/hindsight/developer/personality) — Big Five traits and opinion formation
