@@ -17,6 +17,7 @@ hindsight_client_api/docs/ChunkResponse.md
 hindsight_client_api/docs/CreateBankRequest.md
 hindsight_client_api/docs/DefaultApi.md
 hindsight_client_api/docs/DeleteResponse.md
+hindsight_client_api/docs/DispositionTraits.md
 hindsight_client_api/docs/DocumentResponse.md
 hindsight_client_api/docs/EntityDetailResponse.md
 hindsight_client_api/docs/EntityIncludeOptions.md
@@ -32,7 +33,6 @@ hindsight_client_api/docs/ListMemoryUnitsResponse.md
 hindsight_client_api/docs/MemoryItem.md
 hindsight_client_api/docs/MetadataFilter.md
 hindsight_client_api/docs/MonitoringApi.md
-hindsight_client_api/docs/PersonalityTraits.md
 hindsight_client_api/docs/RecallRequest.md
 hindsight_client_api/docs/RecallResponse.md
 hindsight_client_api/docs/RecallResult.md
@@ -42,7 +42,7 @@ hindsight_client_api/docs/ReflectRequest.md
 hindsight_client_api/docs/ReflectResponse.md
 hindsight_client_api/docs/RetainRequest.md
 hindsight_client_api/docs/RetainResponse.md
-hindsight_client_api/docs/UpdatePersonalityRequest.md
+hindsight_client_api/docs/UpdateDispositionRequest.md
 hindsight_client_api/docs/ValidationError.md
 hindsight_client_api/docs/ValidationErrorLocInner.md
 hindsight_client_api/exceptions.py
@@ -58,6 +58,7 @@ hindsight_client_api/models/chunk_include_options.py
 hindsight_client_api/models/chunk_response.py
 hindsight_client_api/models/create_bank_request.py
 hindsight_client_api/models/delete_response.py
+hindsight_client_api/models/disposition_traits.py
 hindsight_client_api/models/document_response.py
 hindsight_client_api/models/entity_detail_response.py
 hindsight_client_api/models/entity_include_options.py
@@ -72,7 +73,6 @@ hindsight_client_api/models/list_documents_response.py
 hindsight_client_api/models/list_memory_units_response.py
 hindsight_client_api/models/memory_item.py
 hindsight_client_api/models/metadata_filter.py
-hindsight_client_api/models/personality_traits.py
 hindsight_client_api/models/recall_request.py
 hindsight_client_api/models/recall_response.py
 hindsight_client_api/models/recall_result.py
@@ -82,7 +82,7 @@ hindsight_client_api/models/reflect_request.py
 hindsight_client_api/models/reflect_response.py
 hindsight_client_api/models/retain_request.py
 hindsight_client_api/models/retain_response.py
-hindsight_client_api/models/update_personality_request.py
+hindsight_client_api/models/update_disposition_request.py
 hindsight_client_api/models/validation_error.py
 hindsight_client_api/models/validation_error_loc_inner.py
 hindsight_client_api/rest.py
@@ -99,6 +99,7 @@ hindsight_client_api/test/test_chunk_response.py
 hindsight_client_api/test/test_create_bank_request.py
 hindsight_client_api/test/test_default_api.py
 hindsight_client_api/test/test_delete_response.py
+hindsight_client_api/test/test_disposition_traits.py
 hindsight_client_api/test/test_document_response.py
 hindsight_client_api/test/test_entity_detail_response.py
 hindsight_client_api/test/test_entity_include_options.py
@@ -114,7 +115,6 @@ hindsight_client_api/test/test_list_memory_units_response.py
 hindsight_client_api/test/test_memory_item.py
 hindsight_client_api/test/test_metadata_filter.py
 hindsight_client_api/test/test_monitoring_api.py
-hindsight_client_api/test/test_personality_traits.py
 hindsight_client_api/test/test_recall_request.py
 hindsight_client_api/test/test_recall_response.py
 hindsight_client_api/test/test_recall_result.py
@@ -124,7 +124,7 @@ hindsight_client_api/test/test_reflect_request.py
 hindsight_client_api/test/test_reflect_response.py
 hindsight_client_api/test/test_retain_request.py
 hindsight_client_api/test/test_retain_response.py
-hindsight_client_api/test/test_update_personality_request.py
+hindsight_client_api/test/test_update_disposition_request.py
 hindsight_client_api/test/test_validation_error.py
 hindsight_client_api/test/test_validation_error_loc_inner.py
 hindsight_client_api_README.md

@@ -31,7 +31,7 @@ def upgrade() -> None:
         'banks',
         sa.Column('bank_id', sa.Text(), nullable=False),
         sa.Column('name', sa.Text(), nullable=True),
-        sa.Column('personality', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
+        sa.Column('disposition', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
         sa.Column('background', sa.Text(), nullable=True),
         sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),

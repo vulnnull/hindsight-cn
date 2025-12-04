@@ -25,7 +25,7 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
-          id: 'developer/personality',
+          id: 'developer/reflect',
           label: 'Reflect',
         },
         {

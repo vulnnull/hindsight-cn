@@ -36,7 +36,7 @@ class TestAddBackgroundRequest(unittest.TestCase):
         if include_optional:
             return AddBackgroundRequest(
                 content = '',
-                update_personality = True
+                update_disposition = True
             )
         else:
             return AddBackgroundRequest(

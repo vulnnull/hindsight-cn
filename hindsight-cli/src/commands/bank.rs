@@ -198,11 +198,11 @@ pub fn update_background(
     client: &ApiClient,
     bank_id: &str,
     content: &str,
-    no_update_personality: bool,
+    no_update_disposition: bool,
     verbose: bool,
     output_format: OutputFormat
 ) -> Result<()> {
-    let current_profile = if !no_update_personality {
+    let current_profile = if !no_update_disposition {
         client.get_profile(bank_id, verbose).ok()
     } else {
         None
@@ -214,7 +214,7 @@ pub fn update_background(
         None
     };
 
-    let response = client.add_background(bank_id, content, !no_update_personality, verbose);
+    let response = client.add_background(bank_id, content, !no_update_disposition, verbose);
 
     if let Some(sp) = spinner {
         sp.finish_and_clear();
@@ -226,11 +226,11 @@ pub fn update_background(
                 ui::print_success("Background updated successfully");
                 println!("\n{}", profile.background);
 
-                if !no_update_personality {
+                if !no_update_disposition {
                     if let (Some(old_p), Some(new_p)) =
-                        (current_profile.as_ref().map(|p| p.personality.clone()), &profile.personality)
+                        (current_profile.as_ref().map(|p| p.disposition.clone()), &profile.disposition)
                     {
-                        println!("\nPersonality changes:");
+                        println!("\nDisposition changes:");
                         println!("  Openness:          {:.2} → {:.2}", old_p.openness, new_p.openness);
                         println!("  Conscientiousness: {:.2} → {:.2}", old_p.conscientiousness, new_p.conscientiousness);
                         println!("  Extraversion:      {:.2} → {:.2}", old_p.extraversion, new_p.extraversion);

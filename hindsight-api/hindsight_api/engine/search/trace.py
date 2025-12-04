@@ -100,7 +100,7 @@ class RetrievalResult(BaseModel):
     text: str = Field(description="Memory unit text content")
     context: str = Field(default="", description="Memory unit context")
     event_date: Optional[datetime] = Field(default=None, description="When the memory occurred")
-    fact_type: Optional[str] = Field(default=None, description="Fact type (world, bank, opinion)")
+    fact_type: Optional[str] = Field(default=None, description="Fact type (world, experience, opinion)")
     score: float = Field(description="Score from this retrieval method")
     score_name: str = Field(description="Name of the score (e.g., 'similarity', 'bm25_score', 'activation')")
 

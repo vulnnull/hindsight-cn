@@ -166,10 +166,10 @@ class TestDefaultApi(unittest.IsolatedAsyncioTestCase):
         """
         pass
 
-    async def test_update_bank_personality(self) -> None:
-        """Test case for update_bank_personality
+    async def test_update_bank_disposition(self) -> None:
+        """Test case for update_bank_disposition
 
-        Update memory bank personality
+        Update memory bank disposition
         """
         pass
 

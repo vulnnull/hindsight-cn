@@ -17,18 +17,23 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict
-from typing import Any, ClassVar, Dict, List
-from hindsight_client_api.models.personality_traits import PersonalityTraits
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, ClassVar, Dict, List, Union
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
-class UpdatePersonalityRequest(BaseModel):
+class DispositionTraits(BaseModel):
     """
-    Request model for updating personality traits.
+    Disposition traits based on Big Five model.
     """ # noqa: E501
-    personality: PersonalityTraits
-    __properties: ClassVar[List[str]] = ["personality"]
+    openness: Union[Annotated[float, Field(le=1.0, strict=True, ge=0.0)], Annotated[int, Field(le=1, strict=True, ge=0)]] = Field(description="Openness to experience (0-1)")
+    conscientiousness: Union[Annotated[float, Field(le=1.0, strict=True, ge=0.0)], Annotated[int, Field(le=1, strict=True, ge=0)]] = Field(description="Conscientiousness (0-1)")
+    extraversion: Union[Annotated[float, Field(le=1.0, strict=True, ge=0.0)], Annotated[int, Field(le=1, strict=True, ge=0)]] = Field(description="Extraversion (0-1)")
+    agreeableness: Union[Annotated[float, Field(le=1.0, strict=True, ge=0.0)], Annotated[int, Field(le=1, strict=True, ge=0)]] = Field(description="Agreeableness (0-1)")
+    neuroticism: Union[Annotated[float, Field(le=1.0, strict=True, ge=0.0)], Annotated[int, Field(le=1, strict=True, ge=0)]] = Field(description="Neuroticism (0-1)")
+    bias_strength: Union[Annotated[float, Field(le=1.0, strict=True, ge=0.0)], Annotated[int, Field(le=1, strict=True, ge=0)]] = Field(description="How strongly disposition influences opinions (0-1)")
+    __properties: ClassVar[List[str]] = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism", "bias_strength"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -48,7 +53,7 @@ class UpdatePersonalityRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of UpdatePersonalityRequest from a JSON string"""
+        """Create an instance of DispositionTraits from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -69,14 +74,11 @@ class UpdatePersonalityRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of personality
-        if self.personality:
-            _dict['personality'] = self.personality.to_dict()
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of UpdatePersonalityRequest from a dict"""
+        """Create an instance of DispositionTraits from a dict"""
         if obj is None:
             return None
 
@@ -84,7 +86,12 @@ class UpdatePersonalityRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "personality": PersonalityTraits.from_dict(obj["personality"]) if obj.get("personality") is not None else None
+            "openness": obj.get("openness"),
+            "conscientiousness": obj.get("conscientiousness"),
+            "extraversion": obj.get("extraversion"),
+            "agreeableness": obj.get("agreeableness"),
+            "neuroticism": obj.get("neuroticism"),
+            "bias_strength": obj.get("bias_strength")
         })
         return _obj
 

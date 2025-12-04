@@ -50,7 +50,7 @@ class Fact(BaseModel):
     """
     # Required fields
     fact: str = Field(description="Combined fact text: what | when | where | who | why")
-    fact_type: Literal["world", "interactions", "opinion"] = Field(description="Perspective: world/interactions/opinion")
+    fact_type: Literal["world", "experience", "opinion"] = Field(description="Perspective: world/experience/opinion")
 
     # Optional temporal fields
     occurred_start: Optional[str] = None
@@ -164,7 +164,7 @@ class ExtractedFact(BaseModel):
     # Classification (CRITICAL - required)
     # Note: LLM uses "assistant" but we convert to "bank" for storage
     fact_type: Literal["world", "assistant"] = Field(
-        description="'world' = about the user/others (background, experiences). 'assistant' = interactions with the assistant."
+        description="'world' = about the user/others (background, experiences). 'assistant' = experience with the assistant."
     )
 
     # Entities - extracted from 'who' field
@@ -581,20 +581,20 @@ Text:
                     continue
 
                 # Critical field: fact_type
-                # LLM uses "assistant" but we convert to "interactions" for storage
+                # LLM uses "assistant" but we convert to "experience" for storage
                 fact_type = llm_fact.get('fact_type')
 
-                # Convert "assistant" → "interactions" for storage
+                # Convert "assistant" → "experience" for storage
                 if fact_type == 'assistant':
-                    fact_type = 'interactions'
+                    fact_type = 'experience'
 
                 # Validate fact_type (after conversion)
-                if fact_type not in ['world', 'interactions', 'opinion']:
+                if fact_type not in ['world', 'experience', 'opinion']:
                     # Try to fix common mistakes - check if they swapped fact_type and fact_kind
                     fact_kind = llm_fact.get('fact_kind')
                     if fact_kind == 'assistant':
-                        fact_type = 'interactions'
-                    elif fact_kind in ['world', 'interactions', 'opinion']:
+                        fact_type = 'experience'
+                    elif fact_kind in ['world', 'experience', 'opinion']:
                         fact_type = fact_kind
                     else:
                         # Default to 'world' if we can't determine

@@ -17,11 +17,11 @@ export type AddBackgroundRequest = {
      */
     content: string;
     /**
-     * Update Personality
+     * Update Disposition
      *
-     * If true, infer Big Five personality traits from the merged background (default: true)
+     * If true, infer Big Five disposition traits from the merged background (default: true)
      */
-    update_personality?: boolean;
+    update_disposition?: boolean;
 };
 
 /**
@@ -34,7 +34,7 @@ export type BackgroundResponse = {
      * Background
      */
     background: string;
-    personality?: PersonalityTraits | null;
+    disposition?: DispositionTraits | null;
 };
 
 /**
@@ -51,7 +51,7 @@ export type BankListItem = {
      * Name
      */
     name: string;
-    personality: PersonalityTraits;
+    disposition: DispositionTraits;
     /**
      * Background
      */
@@ -92,7 +92,7 @@ export type BankProfileResponse = {
      * Name
      */
     name: string;
-    personality: PersonalityTraits;
+    disposition: DispositionTraits;
     /**
      * Background
      */
@@ -188,7 +188,7 @@ export type CreateBankRequest = {
      * Name
      */
     name?: string | null;
-    personality?: PersonalityTraits | null;
+    disposition?: DispositionTraits | null;
     /**
      * Background
      */
@@ -205,6 +205,50 @@ export type DeleteResponse = {
      * Success
      */
     success: boolean;
+};
+
+/**
+ * DispositionTraits
+ *
+ * Disposition traits based on Big Five model.
+ */
+export type DispositionTraits = {
+    /**
+     * Openness
+     *
+     * Openness to experience (0-1)
+     */
+    openness: number;
+    /**
+     * Conscientiousness
+     *
+     * Conscientiousness (0-1)
+     */
+    conscientiousness: number;
+    /**
+     * Extraversion
+     *
+     * Extraversion (0-1)
+     */
+    extraversion: number;
+    /**
+     * Agreeableness
+     *
+     * Agreeableness (0-1)
+     */
+    agreeableness: number;
+    /**
+     * Neuroticism
+     *
+     * Neuroticism (0-1)
+     */
+    neuroticism: number;
+    /**
+     * Bias Strength
+     *
+     * How strongly disposition influences opinions (0-1)
+     */
+    bias_strength: number;
 };
 
 /**
@@ -553,50 +597,6 @@ export type MetadataFilter = {
 };
 
 /**
- * PersonalityTraits
- *
- * Personality traits based on Big Five model.
- */
-export type PersonalityTraits = {
-    /**
-     * Openness
-     *
-     * Openness to experience (0-1)
-     */
-    openness: number;
-    /**
-     * Conscientiousness
-     *
-     * Conscientiousness (0-1)
-     */
-    conscientiousness: number;
-    /**
-     * Extraversion
-     *
-     * Extraversion (0-1)
-     */
-    extraversion: number;
-    /**
-     * Agreeableness
-     *
-     * Agreeableness (0-1)
-     */
-    agreeableness: number;
-    /**
-     * Neuroticism
-     *
-     * Neuroticism (0-1)
-     */
-    neuroticism: number;
-    /**
-     * Bias Strength
-     *
-     * How strongly personality influences opinions (0-1)
-     */
-    bias_strength: number;
-};
-
-/**
  * RecallRequest
  *
  * Request model for recall endpoint.
@@ -859,12 +859,12 @@ export type RetainResponse = {
 };
 
 /**
- * UpdatePersonalityRequest
+ * UpdateDispositionRequest
  *
- * Request model for updating personality traits.
+ * Request model for updating disposition traits.
  */
-export type UpdatePersonalityRequest = {
-    personality: PersonalityTraits;
+export type UpdateDispositionRequest = {
+    disposition: DispositionTraits;
 };
 
 /**
@@ -1433,8 +1433,8 @@ export type GetBankProfileResponses = {
 
 export type GetBankProfileResponse = GetBankProfileResponses[keyof GetBankProfileResponses];
 
-export type UpdateBankPersonalityData = {
-    body: UpdatePersonalityRequest;
+export type UpdateBankDispositionData = {
+    body: UpdateDispositionRequest;
     path: {
         /**
          * Bank Id
@@ -1445,23 +1445,23 @@ export type UpdateBankPersonalityData = {
     url: '/v1/default/banks/{bank_id}/profile';
 };
 
-export type UpdateBankPersonalityErrors = {
+export type UpdateBankDispositionErrors = {
     /**
      * Validation Error
      */
     422: HttpValidationError;
 };
 
-export type UpdateBankPersonalityError = UpdateBankPersonalityErrors[keyof UpdateBankPersonalityErrors];
+export type UpdateBankDispositionError = UpdateBankDispositionErrors[keyof UpdateBankDispositionErrors];
 
-export type UpdateBankPersonalityResponses = {
+export type UpdateBankDispositionResponses = {
     /**
      * Successful Response
      */
     200: BankProfileResponse;
 };
 
-export type UpdateBankPersonalityResponse = UpdateBankPersonalityResponses[keyof UpdateBankPersonalityResponses];
+export type UpdateBankDispositionResponse = UpdateBankDispositionResponses[keyof UpdateBankDispositionResponses];
 
 export type AddBankBackgroundData = {
     body: AddBackgroundRequest;
@@ -1535,7 +1535,7 @@ export type ClearBankMemoriesData = {
         /**
          * Type
          *
-         * Optional fact type filter (world, interactions, opinion)
+         * Optional fact type filter (world, experience, opinion)
          */
         type?: string | null;
     };

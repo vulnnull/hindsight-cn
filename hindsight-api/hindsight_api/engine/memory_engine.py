@@ -94,7 +94,7 @@ class MemoryEngine:
     - Embedding generation for semantic search
     - Entity, temporal, and semantic link creation
     - Think operations for formulating answers with opinions
-    - bank profile and personality management
+    - bank profile and disposition management
     """
 
     def __init__(
@@ -676,7 +676,7 @@ class MemoryEngine:
             context: Context about when/why this memory was formed
             event_date: When the event occurred (defaults to now)
             document_id: Optional document ID for tracking (always upserts if document already exists)
-            fact_type_override: Override fact type ('world', 'interactions', 'opinion')
+            fact_type_override: Override fact type ('world', 'experience', 'opinion')
             confidence_score: Confidence score for opinions (0.0 to 1.0)
 
         Returns:
@@ -728,7 +728,7 @@ class MemoryEngine:
                 - "document_id" (optional): Document ID for this specific content item
             document_id: **DEPRECATED** - Use "document_id" key in each content dict instead.
                         Applies the same document_id to ALL content items that don't specify their own.
-            fact_type_override: Override fact type for all facts ('world', 'interactions', 'opinion')
+            fact_type_override: Override fact type for all facts ('world', 'experience', 'opinion')
             confidence_score: Confidence score for opinions (0.0 to 1.0)
 
         Returns:
@@ -896,7 +896,7 @@ class MemoryEngine:
         Args:
             bank_id: bank ID to recall for
             query: Recall query
-            fact_type: Required filter for fact type ('world', 'interactions', or 'opinion')
+            fact_type: Required filter for fact type ('world', 'experience', or 'opinion')
             budget: Budget level for graph traversal (low=100, mid=300, high=600 units)
             max_tokens: Maximum tokens to return (counts only 'text' field, default 4096)
             enable_trace: If True, returns detailed trace object
@@ -936,7 +936,7 @@ class MemoryEngine:
         Args:
             bank_id: bank ID to recall for
             query: Recall query
-            fact_type: List of fact types to recall (e.g., ['world', 'interactions'])
+            fact_type: List of fact types to recall (e.g., ['world', 'experience'])
             budget: Budget level for graph traversal (low=100, mid=300, high=600 units)
             max_tokens: Maximum tokens to return (counts only 'text' field, default 4096)
                        Results are returned until token budget is reached, stopping before
@@ -1682,7 +1682,7 @@ class MemoryEngine:
 
         Args:
             bank_id: bank ID to delete
-            fact_type: Optional fact type filter (world, bank, opinion). If provided, only deletes memories of that type.
+            fact_type: Optional fact type filter (world, experience, opinion). If provided, only deletes memories of that type.
 
         Returns:
             Dictionary with counts of deleted items
@@ -1738,7 +1738,7 @@ class MemoryEngine:
 
         Args:
             bank_id: Filter by bank ID
-            fact_type: Filter by fact type (world, bank, opinion)
+            fact_type: Filter by fact type (world, experience, opinion)
 
         Returns:
             Dict with nodes, edges, and table_rows
@@ -1912,7 +1912,7 @@ class MemoryEngine:
 
         Args:
             bank_id: Filter by bank ID
-            fact_type: Filter by fact type (world, bank, opinion)
+            fact_type: Filter by fact type (world, experience, opinion)
             search_query: Full-text search query (searches text and context fields)
             limit: Maximum number of results to return
             offset: Offset for pagination
@@ -2485,55 +2485,55 @@ Guidelines:
 
     async def get_bank_profile(self, bank_id: str) -> "bank_utils.BankProfile":
         """
-        Get bank profile (name, personality + background).
+        Get bank profile (name, disposition + background).
         Auto-creates agent with default values if not exists.
 
         Args:
             bank_id: bank IDentifier
 
         Returns:
-            BankProfile with name, typed PersonalityTraits, and background
+            BankProfile with name, typed DispositionTraits, and background
         """
         pool = await self._get_pool()
         return await bank_utils.get_bank_profile(pool, bank_id)
 
-    async def update_bank_personality(
+    async def update_bank_disposition(
         self,
         bank_id: str,
-        personality: Dict[str, float]
+        disposition: Dict[str, float]
     ) -> None:
         """
-        Update bank personality traits.
+        Update bank disposition traits.
 
         Args:
             bank_id: bank IDentifier
-            personality: Dict with Big Five traits + bias_strength (all 0-1)
+            disposition: Dict with Big Five traits + bias_strength (all 0-1)
         """
         pool = await self._get_pool()
-        await bank_utils.update_bank_personality(pool, bank_id, personality)
+        await bank_utils.update_bank_disposition(pool, bank_id, disposition)
 
     async def merge_bank_background(
         self,
         bank_id: str,
         new_info: str,
-        update_personality: bool = True
+        update_disposition: bool = True
     ) -> dict:
         """
         Merge new background information with existing background using LLM.
         Normalizes to first person ("I") and resolves conflicts.
-        Optionally infers personality traits from the merged background.
+        Optionally infers disposition traits from the merged background.
 
         Args:
             bank_id: bank IDentifier
             new_info: New background information to add/merge
-            update_personality: If True, infer Big Five traits from background (default: True)
+            update_disposition: If True, infer Big Five traits from background (default: True)
 
         Returns:
-            Dict with 'background' (str) and optionally 'personality' (dict) keys
+            Dict with 'background' (str) and optionally 'disposition' (dict) keys
         """
         pool = await self._get_pool()
         return await bank_utils.merge_bank_background(
-            pool, self._llm_config, bank_id, new_info, update_personality
+            pool, self._llm_config, bank_id, new_info, update_disposition
         )
 
     async def list_banks(self) -> list:
@@ -2541,7 +2541,7 @@ Guidelines:
         List all agents in the system.
 
         Returns:
-            List of dicts with bank_id, name, personality, background, created_at, updated_at
+            List of dicts with bank_id, name, disposition, background, created_at, updated_at
         """
         pool = await self._get_pool()
         return await bank_utils.list_banks(pool)
@@ -2559,7 +2559,7 @@ Guidelines:
         Reflect and formulate an answer using bank identity, world facts, and opinions.
 
         This method:
-        1. Retrieves interactions (conversations and events)
+        1. Retrieves experience (conversations and events)
         2. Retrieves world facts (general knowledge)
         3. Retrieves existing opinions (bank's formed perspectives)
         4. Uses LLM to formulate an answer
@@ -2575,7 +2575,7 @@ Guidelines:
         Returns:
             ReflectResult containing:
                 - text: Plain text answer (no markdown)
-                - based_on: Dict with 'world', 'interactions', and 'opinion' fact lists (MemoryFact objects)
+                - based_on: Dict with 'world', 'experience', and 'opinion' fact lists (MemoryFact objects)
                 - new_opinions: List of newly formed opinions
         """
         # Use cached LLM config
@@ -2589,7 +2589,7 @@ Guidelines:
             budget=budget,
             max_tokens=4096,
             enable_trace=False,
-            fact_type=['interactions', 'world', 'opinion'],
+            fact_type=['experience', 'world', 'opinion'],
             include_entities=True
         )
 
@@ -2597,7 +2597,7 @@ Guidelines:
         logger.info(f"[THINK] Search returned {len(all_results)} results")
 
         # Split results by fact type for structured response
-        agent_results = [r for r in all_results if r.fact_type == 'interactions']
+        agent_results = [r for r in all_results if r.fact_type == 'experience']
         world_results = [r for r in all_results if r.fact_type == 'world']
         opinion_results = [r for r in all_results if r.fact_type == 'opinion']
 
@@ -2610,10 +2610,10 @@ Guidelines:
 
         logger.info(f"[THINK] Formatted facts - agent: {len(agent_facts_text)} chars, world: {len(world_facts_text)} chars, opinion: {len(opinion_facts_text)} chars")
 
-        # Get bank profile (name, personality + background)
+        # Get bank profile (name, disposition + background)
         profile = await self.get_bank_profile(bank_id)
         name = profile["name"]
-        personality = profile["personality"]  # Typed as PersonalityTraits
+        disposition = profile["disposition"]  # Typed as DispositionTraits
         background = profile["background"]
 
         # Build the prompt
@@ -2623,14 +2623,14 @@ Guidelines:
             opinion_facts_text=opinion_facts_text,
             query=query,
             name=name,
-            personality=personality,
+            disposition=disposition,
             background=background,
             context=context,
         )
 
         logger.info(f"[THINK] Full prompt length: {len(prompt)} chars")
 
-        system_message = think_utils.get_system_message(personality)
+        system_message = think_utils.get_system_message(disposition)
 
         answer_text = await self._llm_config.call(
             messages=[
@@ -2657,7 +2657,7 @@ Guidelines:
             text=answer_text,
             based_on={
                 "world": world_results,
-                "interactions": agent_results,
+                "experience": agent_results,
                 "opinion": opinion_results
             },
             new_opinions=[]  # Opinions are being extracted asynchronously
@@ -2871,7 +2871,7 @@ Guidelines:
                 JOIN unit_entities ue ON mu.id = ue.unit_id
                 WHERE mu.bank_id = $1
                   AND ue.entity_id = $2
-                  AND mu.fact_type IN ('world', 'interactions')
+                  AND mu.fact_type IN ('world', 'experience')
                 ORDER BY mu.occurred_start DESC
                 LIMIT 50
                 """,

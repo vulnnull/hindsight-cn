@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any
 from pydantic import BaseModel, Field
 
-from ..response_models import ReflectResult, MemoryFact, PersonalityTraits
+from ..response_models import ReflectResult, MemoryFact, DispositionTraits
 
 logger = logging.getLogger(__name__)
 
@@ -42,16 +42,16 @@ def describe_trait(name: str, value: float) -> str:
         return f"very low {name}"
 
 
-def build_personality_description(personality: PersonalityTraits) -> str:
-    """Build a personality description string from personality traits."""
-    return f"""Your personality traits:
-- {describe_trait('openness to new ideas', personality.openness)}
-- {describe_trait('conscientiousness and organization', personality.conscientiousness)}
-- {describe_trait('extraversion and sociability', personality.extraversion)}
-- {describe_trait('agreeableness and cooperation', personality.agreeableness)}
-- {describe_trait('emotional sensitivity', personality.neuroticism)}
+def build_disposition_description(disposition: DispositionTraits) -> str:
+    """Build a disposition description string from disposition traits."""
+    return f"""Your disposition traits:
+- {describe_trait('openness to new ideas', disposition.openness)}
+- {describe_trait('conscientiousness and organization', disposition.conscientiousness)}
+- {describe_trait('extraversion and sociability', disposition.extraversion)}
+- {describe_trait('agreeableness and cooperation', disposition.agreeableness)}
+- {describe_trait('emotional sensitivity', disposition.neuroticism)}
 
-Personality influence strength: {int(personality.bias_strength * 100)}% (how much your personality shapes your opinions)"""
+Disposition influence strength: {int(disposition.bias_strength * 100)}% (how much your disposition shapes your opinions)"""
 
 
 def format_facts_for_prompt(facts: List[MemoryFact]) -> str:
@@ -93,12 +93,12 @@ def build_think_prompt(
     opinion_facts_text: str,
     query: str,
     name: str,
-    personality: PersonalityTraits,
+    disposition: DispositionTraits,
     background: str,
     context: str = None,
 ) -> str:
     """Build the think prompt for the LLM."""
-    personality_desc = build_personality_description(personality)
+    disposition_desc = build_disposition_description(disposition)
 
     name_section = f"""
 
@@ -132,24 +132,24 @@ WHAT I KNOW ABOUT THE WORLD:
 MY EXISTING OPINIONS & BELIEFS:
 {opinion_facts_text}
 
-{context_section}{name_section}{personality_desc}{background_section}
+{context_section}{name_section}{disposition_desc}{background_section}
 
 QUESTION: {query}
 
-Based on everything I know, believe, and who I am (including my name, personality and background), here's what I genuinely think about this question. I'll draw on my experiences, knowledge, opinions, and personal traits to give you my honest perspective."""
+Based on everything I know, believe, and who I am (including my name, disposition and background), here's what I genuinely think about this question. I'll draw on my experiences, knowledge, opinions, and personal traits to give you my honest perspective."""
 
 
-def get_system_message(personality: PersonalityTraits) -> str:
+def get_system_message(disposition: DispositionTraits) -> str:
     """Get the system message for the think LLM call."""
-    bias_strength = personality.bias_strength
+    bias_strength = disposition.bias_strength
     if bias_strength >= 0.7:
-        personality_instruction = "Your personality strongly influences your thinking. Let your traits guide how you interpret facts and form opinions. Don't be afraid to be biased based on your personality."
+        disposition_instruction = "Your disposition strongly influences your thinking. Let your traits guide how you interpret facts and form opinions. Don't be afraid to be biased based on your disposition."
     elif bias_strength >= 0.4:
-        personality_instruction = "Your personality moderately influences your thinking. Balance your personal traits with objective analysis."
+        disposition_instruction = "Your disposition moderately influences your thinking. Balance your personal traits with objective analysis."
     else:
-        personality_instruction = "Your personality has minimal influence on your thinking. Focus primarily on facts while keeping your traits in mind."
+        disposition_instruction = "Your disposition has minimal influence on your thinking. Focus primarily on facts while keeping your traits in mind."
 
-    return f"You are a person with your own thoughts, experiences, opinions, and personality. When asked a question, respond naturally like a human would - share what you genuinely think based on what you know and have experienced. {personality_instruction} Be direct, express your views confidently, and use 'I think', 'I believe', 'in my view', etc. Respond in plain text without markdown formatting."
+    return f"You are a person with your own thoughts, experiences, opinions, and disposition. When asked a question, respond naturally like a human would - share what you genuinely think based on what you know and have experienced. {disposition_instruction} Be direct, express your views confidently, and use 'I think', 'I believe', 'in my view', etc. Respond in plain text without markdown formatting."
 
 
 async def extract_opinions_from_text(

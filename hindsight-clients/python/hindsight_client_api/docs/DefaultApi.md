@@ -24,7 +24,7 @@ Method | HTTP request | Description
 [**reflect**](DefaultApi.md#reflect) | **POST** /v1/default/banks/{bank_id}/reflect | Reflect and generate answer
 [**regenerate_entity_observations**](DefaultApi.md#regenerate_entity_observations) | **POST** /v1/default/banks/{bank_id}/entities/{entity_id}/regenerate | Regenerate entity observations
 [**retain_memories**](DefaultApi.md#retain_memories) | **POST** /v1/default/banks/{bank_id}/memories | Retain memories
-[**update_bank_personality**](DefaultApi.md#update_bank_personality) | **PUT** /v1/default/banks/{bank_id}/profile | Update memory bank personality
+[**update_bank_disposition**](DefaultApi.md#update_bank_disposition) | **PUT** /v1/default/banks/{bank_id}/profile | Update memory bank disposition
 
 
 # **add_bank_background**
@@ -32,7 +32,7 @@ Method | HTTP request | Description
 
 Add/merge memory bank background
 
-Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.
+Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.
 
 ### Example
 
@@ -174,7 +174,7 @@ No authorization required
 
 Clear memory bank memories
 
-Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
 
 ### Example
 
@@ -197,7 +197,7 @@ async with hindsight_client_api.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = hindsight_client_api.DefaultApi(api_client)
     bank_id = 'bank_id_example' # str | 
-    type = 'type_example' # str | Optional fact type filter (world, interactions, opinion) (optional)
+    type = 'type_example' # str | Optional fact type filter (world, experience, opinion) (optional)
 
     try:
         # Clear memory bank memories
@@ -216,7 +216,7 @@ async with hindsight_client_api.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **bank_id** | **str**|  | 
- **type** | **str**| Optional fact type filter (world, interactions, opinion) | [optional] 
+ **type** | **str**| Optional fact type filter (world, experience, opinion) | [optional] 
 
 ### Return type
 
@@ -245,7 +245,7 @@ No authorization required
 
 Create or update memory bank
 
-Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.
+Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.
 
 ### Example
 
@@ -462,7 +462,7 @@ No authorization required
 
 Get memory bank profile
 
-Get personality traits and background for a memory bank. Auto-creates agent with defaults if not exists.
+Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.
 
 ### Example
 
@@ -742,7 +742,7 @@ No authorization required
 
 Get memory graph data
 
-Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.
+Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.
 
 ### Example
 
@@ -1172,7 +1172,7 @@ Recall memory using semantic similarity and spreading activation.
 
     The type parameter is optional and must be one of:
     - 'world': General knowledge about people, places, events, and things that happen
-    - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed
+    - 'experience': Memories about experience, conversations, actions taken, and tasks performed
     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints
 
     Set include_entities=true to get entity observations alongside recall results.
@@ -1250,7 +1250,7 @@ Reflect and generate answer
 Reflect and formulate an answer using bank identity, world facts, and opinions.
 
     This endpoint:
-    1. Retrieves interactions (conversations and events)
+    1. Retrieves experience (conversations and events)
     2. Retrieves world facts relevant to the query
     3. Retrieves existing opinions (bank's perspectives)
     4. Uses LLM to formulate a contextual answer
@@ -1494,12 +1494,12 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **update_bank_personality**
-> BankProfileResponse update_bank_personality(bank_id, update_personality_request)
+# **update_bank_disposition**
+> BankProfileResponse update_bank_disposition(bank_id, update_disposition_request)
 
-Update memory bank personality
+Update memory bank disposition
 
-Update bank's Big Five personality traits and bias strength
+Update bank's Big Five disposition traits and bias strength
 
 ### Example
 
@@ -1507,7 +1507,7 @@ Update bank's Big Five personality traits and bias strength
 ```python
 import hindsight_client_api
 from hindsight_client_api.models.bank_profile_response import BankProfileResponse
-from hindsight_client_api.models.update_personality_request import UpdatePersonalityRequest
+from hindsight_client_api.models.update_disposition_request import UpdateDispositionRequest
 from hindsight_client_api.rest import ApiException
 from pprint import pprint
 
@@ -1523,15 +1523,15 @@ async with hindsight_client_api.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = hindsight_client_api.DefaultApi(api_client)
     bank_id = 'bank_id_example' # str | 
-    update_personality_request = hindsight_client_api.UpdatePersonalityRequest() # UpdatePersonalityRequest | 
+    update_disposition_request = hindsight_client_api.UpdateDispositionRequest() # UpdateDispositionRequest | 
 
     try:
-        # Update memory bank personality
-        api_response = await api_instance.update_bank_personality(bank_id, update_personality_request)
-        print("The response of DefaultApi->update_bank_personality:\n")
+        # Update memory bank disposition
+        api_response = await api_instance.update_bank_disposition(bank_id, update_disposition_request)
+        print("The response of DefaultApi->update_bank_disposition:\n")
         pprint(api_response)
     except Exception as e:
-        print("Exception when calling DefaultApi->update_bank_personality: %s\n" % e)
+        print("Exception when calling DefaultApi->update_bank_disposition: %s\n" % e)
 ```
 
 
@@ -1542,7 +1542,7 @@ async with hindsight_client_api.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **bank_id** | **str**|  | 
- **update_personality_request** | [**UpdatePersonalityRequest**](UpdatePersonalityRequest.md)|  | 
+ **update_disposition_request** | [**UpdateDispositionRequest**](UpdateDispositionRequest.md)|  | 
 
 ### Return type
 

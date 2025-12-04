@@ -40,6 +40,7 @@ __all__ = [
     "ChunkResponse",
     "CreateBankRequest",
     "DeleteResponse",
+    "DispositionTraits",
     "DocumentResponse",
     "EntityDetailResponse",
     "EntityIncludeOptions",
@@ -54,7 +55,6 @@ __all__ = [
     "ListMemoryUnitsResponse",
     "MemoryItem",
     "MetadataFilter",
-    "PersonalityTraits",
     "RecallRequest",
     "RecallResponse",
     "RecallResult",
@@ -64,7 +64,7 @@ __all__ = [
     "ReflectResponse",
     "RetainRequest",
     "RetainResponse",
-    "UpdatePersonalityRequest",
+    "UpdateDispositionRequest",
     "ValidationError",
     "ValidationErrorLocInner",
 ]
@@ -96,6 +96,7 @@ from hindsight_client_api.models.chunk_include_options import ChunkIncludeOption
 from hindsight_client_api.models.chunk_response import ChunkResponse as ChunkResponse
 from hindsight_client_api.models.create_bank_request import CreateBankRequest as CreateBankRequest
 from hindsight_client_api.models.delete_response import DeleteResponse as DeleteResponse
+from hindsight_client_api.models.disposition_traits import DispositionTraits as DispositionTraits
 from hindsight_client_api.models.document_response import DocumentResponse as DocumentResponse
 from hindsight_client_api.models.entity_detail_response import EntityDetailResponse as EntityDetailResponse
 from hindsight_client_api.models.entity_include_options import EntityIncludeOptions as EntityIncludeOptions
@@ -110,7 +111,6 @@ from hindsight_client_api.models.list_documents_response import ListDocumentsRes
 from hindsight_client_api.models.list_memory_units_response import ListMemoryUnitsResponse as ListMemoryUnitsResponse
 from hindsight_client_api.models.memory_item import MemoryItem as MemoryItem
 from hindsight_client_api.models.metadata_filter import MetadataFilter as MetadataFilter
-from hindsight_client_api.models.personality_traits import PersonalityTraits as PersonalityTraits
 from hindsight_client_api.models.recall_request import RecallRequest as RecallRequest
 from hindsight_client_api.models.recall_response import RecallResponse as RecallResponse
 from hindsight_client_api.models.recall_result import RecallResult as RecallResult
@@ -120,7 +120,7 @@ from hindsight_client_api.models.reflect_request import ReflectRequest as Reflec
 from hindsight_client_api.models.reflect_response import ReflectResponse as ReflectResponse
 from hindsight_client_api.models.retain_request import RetainRequest as RetainRequest
 from hindsight_client_api.models.retain_response import RetainResponse as RetainResponse
-from hindsight_client_api.models.update_personality_request import UpdatePersonalityRequest as UpdatePersonalityRequest
+from hindsight_client_api.models.update_disposition_request import UpdateDispositionRequest as UpdateDispositionRequest
 from hindsight_client_api.models.validation_error import ValidationError as ValidationError
 from hindsight_client_api.models.validation_error_loc_inner import ValidationErrorLocInner as ValidationErrorLocInner
 

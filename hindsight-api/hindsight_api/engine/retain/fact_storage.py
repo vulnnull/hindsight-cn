@@ -112,7 +112,7 @@ async def ensure_bank_exists(conn, bank_id: str) -> None:
     """
     await conn.execute(
         """
-        INSERT INTO banks (bank_id, personality, background)
+        INSERT INTO banks (bank_id, disposition, background)
         VALUES ($1, $2::jsonb, $3)
         ON CONFLICT (bank_id) DO UPDATE
         SET updated_at = NOW()

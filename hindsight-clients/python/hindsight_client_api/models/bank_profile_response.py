@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List
-from hindsight_client_api.models.personality_traits import PersonalityTraits
+from hindsight_client_api.models.disposition_traits import DispositionTraits
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,9 +29,9 @@ class BankProfileResponse(BaseModel):
     """ # noqa: E501
     bank_id: StrictStr
     name: StrictStr
-    personality: PersonalityTraits
+    disposition: DispositionTraits
     background: StrictStr
-    __properties: ClassVar[List[str]] = ["bank_id", "name", "personality", "background"]
+    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "background"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -72,9 +72,9 @@ class BankProfileResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of personality
-        if self.personality:
-            _dict['personality'] = self.personality.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of disposition
+        if self.disposition:
+            _dict['disposition'] = self.disposition.to_dict()
         return _dict
 
     @classmethod
@@ -89,7 +89,7 @@ class BankProfileResponse(BaseModel):
         _obj = cls.model_validate({
             "bank_id": obj.get("bank_id"),
             "name": obj.get("name"),
-            "personality": PersonalityTraits.from_dict(obj["personality"]) if obj.get("personality") is not None else None,
+            "disposition": DispositionTraits.from_dict(obj["disposition"]) if obj.get("disposition") is not None else None,
             "background": obj.get("background")
         })
         return _obj

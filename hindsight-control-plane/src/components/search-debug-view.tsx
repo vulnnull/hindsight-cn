@@ -18,7 +18,7 @@ import { MemoryDetailPanel } from './memory-detail-panel';
 
 type Phase = 'retrieval' | 'rrf' | 'rerank' | 'final' | 'json';
 type RetrievalMethod = 'semantic' | 'bm25' | 'graph' | 'temporal';
-type FactType = 'world' | 'interactions' | 'opinion';
+type FactType = 'world' | 'experience' | 'opinion';
 
 type Budget = 'low' | 'mid' | 'high';
 
@@ -227,7 +227,7 @@ export function SearchDebugView() {
               <TableHead><ColumnHeader label="Rank" tooltip="Position in this retrieval method's results" /></TableHead>
               <TableHead><ColumnHeader label="Text" tooltip="The memory content" /></TableHead>
               {pane.factTypes.length > 1 && (
-                <TableHead><ColumnHeader label="Type" tooltip="Fact type (world, bank, opinion)" /></TableHead>
+                <TableHead><ColumnHeader label="Type" tooltip="Fact type (world, experience, opinion)" /></TableHead>
               )}
               <TableHead><ColumnHeader label="Score" tooltip={scoreTooltip} /></TableHead>
             </TableRow>
@@ -564,7 +564,7 @@ export function SearchDebugView() {
                   <div>
                     <label className="block text-sm font-bold mb-2 text-accent-foreground">Fact Types:</label>
                     <div className="flex flex-col gap-2">
-                      {(['world', 'interactions', 'opinion'] as FactType[]).map((ft) => (
+                      {(['world', 'experience', 'opinion'] as FactType[]).map((ft) => (
                         <div key={ft} className="flex items-center gap-2">
                           <Checkbox
                             id={`${pane.id}-${ft}`}

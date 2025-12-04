@@ -24,6 +24,7 @@ from hindsight_client_api.models.chunk_include_options import ChunkIncludeOption
 from hindsight_client_api.models.chunk_response import ChunkResponse
 from hindsight_client_api.models.create_bank_request import CreateBankRequest
 from hindsight_client_api.models.delete_response import DeleteResponse
+from hindsight_client_api.models.disposition_traits import DispositionTraits
 from hindsight_client_api.models.document_response import DocumentResponse
 from hindsight_client_api.models.entity_detail_response import EntityDetailResponse
 from hindsight_client_api.models.entity_include_options import EntityIncludeOptions
@@ -38,7 +39,6 @@ from hindsight_client_api.models.list_documents_response import ListDocumentsRes
 from hindsight_client_api.models.list_memory_units_response import ListMemoryUnitsResponse
 from hindsight_client_api.models.memory_item import MemoryItem
 from hindsight_client_api.models.metadata_filter import MetadataFilter
-from hindsight_client_api.models.personality_traits import PersonalityTraits
 from hindsight_client_api.models.recall_request import RecallRequest
 from hindsight_client_api.models.recall_response import RecallResponse
 from hindsight_client_api.models.recall_result import RecallResult
@@ -48,7 +48,7 @@ from hindsight_client_api.models.reflect_request import ReflectRequest
 from hindsight_client_api.models.reflect_response import ReflectResponse
 from hindsight_client_api.models.retain_request import RetainRequest
 from hindsight_client_api.models.retain_response import RetainResponse
-from hindsight_client_api.models.update_personality_request import UpdatePersonalityRequest
+from hindsight_client_api.models.update_disposition_request import UpdateDispositionRequest
 from hindsight_client_api.models.validation_error import ValidationError
 from hindsight_client_api.models.validation_error_loc_inner import ValidationErrorLocInner
 

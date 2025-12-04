@@ -104,7 +104,7 @@ class MemoryUnit(Base):
             name="memory_units_document_fkey",
             ondelete="CASCADE",
         ),
-        CheckConstraint("fact_type IN ('world', 'interactions', 'opinion', 'observation')"),
+        CheckConstraint("fact_type IN ('world', 'experience', 'opinion', 'observation')"),
         CheckConstraint("confidence_score IS NULL OR (confidence_score >= 0.0 AND confidence_score <= 1.0)"),
         CheckConstraint(
             "(fact_type = 'opinion' AND confidence_score IS NOT NULL) OR "
@@ -284,11 +284,11 @@ class MemoryLink(Base):
 
 
 class Bank(Base):
-    """Memory bank profiles with personality traits and background."""
+    """Memory bank profiles with disposition traits and background."""
     __tablename__ = "banks"
 
     bank_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    personality: Mapped[dict] = mapped_column(
+    disposition: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,
         server_default=sql_text(

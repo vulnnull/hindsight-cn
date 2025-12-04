@@ -179,7 +179,7 @@ export class ControlPlaneClient {
     return this.fetchApi<{
       bank_id: string;
       name: string;
-      personality: {
+      disposition: {
         openness: number;
         conscientiousness: number;
         extraversion: number;
@@ -196,7 +196,7 @@ export class ControlPlaneClient {
    */
   async updateBankProfile(bankId: string, profile: {
     name?: string;
-    personality?: {
+    disposition?: {
       openness: number;
       conscientiousness: number;
       extraversion: number;

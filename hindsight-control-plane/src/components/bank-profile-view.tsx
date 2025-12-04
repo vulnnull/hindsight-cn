@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { RefreshCw, Save, User, Brain, FileText, Clock, AlertCircle, CheckCircle, Database, Link2, FolderOpen, Activity } from 'lucide-react';
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts';
 
-interface PersonalityTraits {
+interface DispositionTraits {
   openness: number;
   conscientiousness: number;
   extraversion: number;
@@ -23,7 +23,7 @@ interface PersonalityTraits {
 interface BankProfile {
   bank_id: string;
   name: string;
-  personality: PersonalityTraits;
+  disposition: DispositionTraits;
   background: string;
 }
 
@@ -34,7 +34,7 @@ interface BankStats {
   total_documents: number;
   nodes_by_fact_type: {
     world?: number;
-    interactions?: number;
+    experience?: number;
     opinion?: number;
   };
   links_by_link_type: {
@@ -56,7 +56,7 @@ interface Operation {
   error_message?: string;
 }
 
-const TRAIT_LABELS: Record<keyof PersonalityTraits, { label: string; shortLabel: string; description: string; lowLabel: string; highLabel: string }> = {
+const TRAIT_LABELS: Record<keyof DispositionTraits, { label: string; shortLabel: string; description: string; lowLabel: string; highLabel: string }> = {
   openness: {
     label: 'Openness',
     shortLabel: 'O',
@@ -95,19 +95,19 @@ const TRAIT_LABELS: Record<keyof PersonalityTraits, { label: string; shortLabel:
   bias_strength: {
     label: 'Influence',
     shortLabel: 'I',
-    description: 'How strongly personality traits influence opinions and responses',
+    description: 'How strongly disposition traits influence opinions and responses',
     lowLabel: 'Neutral',
     highLabel: 'Strong'
   }
 };
 
-function PersonalityRadarChart({ personality, editMode, editPersonality, onEditChange }: {
-  personality: PersonalityTraits;
+function DispositionRadarChart({ disposition, editMode, editDisposition, onEditChange }: {
+  disposition: DispositionTraits;
   editMode: boolean;
-  editPersonality: PersonalityTraits;
-  onEditChange: (trait: keyof PersonalityTraits, value: number) => void;
+  editDisposition: DispositionTraits;
+  onEditChange: (trait: keyof DispositionTraits, value: number) => void;
 }) {
-  const data = editMode ? editPersonality : personality;
+  const data = editMode ? editDisposition : disposition;
 
   const chartData = [
     { trait: 'Openness', value: Math.round(data.openness * 100), fullMark: 100 },
@@ -134,7 +134,7 @@ function PersonalityRadarChart({ personality, editMode, editPersonality, onEditC
               tickCount={5}
             />
             <Radar
-              name="Personality"
+              name="Disposition"
               dataKey="value"
               stroke="hsl(var(--primary))"
               fill="hsl(var(--primary))"
@@ -156,17 +156,17 @@ function PersonalityRadarChart({ personality, editMode, editPersonality, onEditC
 
       {editMode && (
         <div className="grid grid-cols-2 gap-3">
-          {(Object.keys(TRAIT_LABELS) as Array<keyof PersonalityTraits>).filter(t => t !== 'bias_strength').map((trait) => (
+          {(Object.keys(TRAIT_LABELS) as Array<keyof DispositionTraits>).filter(t => t !== 'bias_strength').map((trait) => (
             <div key={trait} className="space-y-1">
               <div className="flex justify-between items-center">
                 <label className="text-xs font-medium text-muted-foreground">{TRAIT_LABELS[trait].label}</label>
-                <span className="text-xs text-primary font-semibold">{Math.round(editPersonality[trait] * 100)}%</span>
+                <span className="text-xs text-primary font-semibold">{Math.round(editDisposition[trait] * 100)}%</span>
               </div>
               <input
                 type="range"
                 min="0"
                 max="100"
-                value={Math.round(editPersonality[trait] * 100)}
+                value={Math.round(editDisposition[trait] * 100)}
                 onChange={(e) => onEditChange(trait, parseInt(e.target.value) / 100)}
                 className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
               />
@@ -179,7 +179,7 @@ function PersonalityRadarChart({ personality, editMode, editPersonality, onEditC
       <div className="pt-3 border-t border-border">
         <div className="flex justify-between items-center mb-2">
           <div>
-            <label className="text-sm font-medium text-foreground">Personality Influence</label>
+            <label className="text-sm font-medium text-foreground">Disposition Influence</label>
             <p className="text-xs text-muted-foreground">How strongly traits affect responses</p>
           </div>
           <span className="text-sm font-bold text-primary">{Math.round(data.bias_strength * 100)}%</span>
@@ -189,7 +189,7 @@ function PersonalityRadarChart({ personality, editMode, editPersonality, onEditC
             type="range"
             min="0"
             max="100"
-            value={Math.round(editPersonality.bias_strength * 100)}
+            value={Math.round(editDisposition.bias_strength * 100)}
             onChange={(e) => onEditChange('bias_strength', parseInt(e.target.value) / 100)}
             className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
           />
@@ -211,7 +211,7 @@ export function BankProfileView() {
   // Edit state
   const [editName, setEditName] = useState('');
   const [editBackground, setEditBackground] = useState('');
-  const [editPersonality, setEditPersonality] = useState<PersonalityTraits>({
+  const [editDisposition, setEditDisposition] = useState<DispositionTraits>({
     openness: 0.5,
     conscientiousness: 0.5,
     extraversion: 0.5,
@@ -237,7 +237,7 @@ export function BankProfileView() {
       // Initialize edit state
       setEditName(profileData.name);
       setEditBackground(profileData.background);
-      setEditPersonality(profileData.personality);
+      setEditDisposition(profileData.disposition);
     } catch (error) {
       console.error('Error loading bank profile:', error);
       alert('Error loading bank profile: ' + (error as Error).message);
@@ -254,7 +254,7 @@ export function BankProfileView() {
       await client.updateBankProfile(currentBank, {
         name: editName,
         background: editBackground,
-        personality: editPersonality
+        disposition: editDisposition
       });
       await loadData();
       setEditMode(false);
@@ -270,7 +270,7 @@ export function BankProfileView() {
     if (profile) {
       setEditName(profile.name);
       setEditBackground(profile.background);
-      setEditPersonality(profile.personality);
+      setEditDisposition(profile.disposition);
     }
     setEditMode(false);
   };
@@ -417,8 +417,8 @@ export function BankProfileView() {
             <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">{stats.nodes_by_fact_type?.world || 0}</p>
           </div>
           <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4 text-center">
-            <p className="text-xs text-purple-600 dark:text-purple-400 font-semibold uppercase tracking-wide">Interactions</p>
-            <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{stats.nodes_by_fact_type?.interactions || 0}</p>
+            <p className="text-xs text-purple-600 dark:text-purple-400 font-semibold uppercase tracking-wide">Experience</p>
+            <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{stats.nodes_by_fact_type?.experience || 0}</p>
           </div>
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-center">
             <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wide">Opinions</p>
@@ -428,22 +428,22 @@ export function BankProfileView() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Personality Chart */}
+        {/* Disposition Chart */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Brain className="w-5 h-5 text-primary" />
-              Personality Profile
+              Disposition Profile
             </CardTitle>
-            <CardDescription>Big Five personality traits that influence responses</CardDescription>
+            <CardDescription>Big Five disposition traits that influence responses</CardDescription>
           </CardHeader>
           <CardContent>
             {profile && (
-              <PersonalityRadarChart
-                personality={profile.personality}
+              <DispositionRadarChart
+                disposition={profile.disposition}
                 editMode={editMode}
-                editPersonality={editPersonality}
-                onEditChange={(trait, value) => setEditPersonality(prev => ({ ...prev, [trait]: value }))}
+                editDisposition={editDisposition}
+                onEditChange={(trait, value) => setEditDisposition(prev => ({ ...prev, [trait]: value }))}
               />
             )}
           </CardContent>

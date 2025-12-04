@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from hindsight_client_api.models.personality_traits import PersonalityTraits
+from hindsight_client_api.models.disposition_traits import DispositionTraits
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,11 +29,11 @@ class BankListItem(BaseModel):
     """ # noqa: E501
     bank_id: StrictStr
     name: StrictStr
-    personality: PersonalityTraits
+    disposition: DispositionTraits
     background: StrictStr
     created_at: Optional[StrictStr] = None
     updated_at: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["bank_id", "name", "personality", "background", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "background", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -74,9 +74,9 @@ class BankListItem(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of personality
-        if self.personality:
-            _dict['personality'] = self.personality.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of disposition
+        if self.disposition:
+            _dict['disposition'] = self.disposition.to_dict()
         # set to None if created_at (nullable) is None
         # and model_fields_set contains the field
         if self.created_at is None and "created_at" in self.model_fields_set:
@@ -101,7 +101,7 @@ class BankListItem(BaseModel):
         _obj = cls.model_validate({
             "bank_id": obj.get("bank_id"),
             "name": obj.get("name"),
-            "personality": PersonalityTraits.from_dict(obj["personality"]) if obj.get("personality") is not None else None,
+            "disposition": DispositionTraits.from_dict(obj["disposition"]) if obj.get("disposition") is not None else None,
             "background": obj.get("background"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")

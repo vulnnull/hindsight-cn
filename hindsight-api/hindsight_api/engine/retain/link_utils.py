@@ -107,7 +107,18 @@ def compute_temporal_query_bounds(
 
 
 def _log(log_buffer, message, level='info'):
-    """Helper to log to buffer if available, otherwise use logger."""
+    """Helper to log to buffer if available, otherwise use logger.
+
+    Args:
+        log_buffer: Buffer to append messages to (for main output)
+        message: The log message
+        level: 'info', 'debug', 'warning', or 'error'. Debug messages are not added to buffer.
+    """
+    if level == 'debug':
+        # Debug messages only go to logger, not to buffer
+        logger.debug(message)
+        return
+
     if log_buffer is not None:
         log_buffer.append(message)
     else:
@@ -165,7 +176,7 @@ async def extract_entities_batch_optimized(
             all_entities.append(formatted_entities)
 
         total_entities = sum(len(ents) for ents in all_entities)
-        _log(log_buffer, f"  [6.1] Process LLM entities: {total_entities} entities from {len(sentences)} facts in {time.time() - substep_start:.3f}s")
+        _log(log_buffer, f"  [6.1] Process LLM entities: {total_entities} entities from {len(sentences)} facts in {time.time() - substep_start:.3f}s", level='debug')
 
         # Step 2: Resolve entities in BATCH (much faster!)
         substep_start = time.time()
@@ -187,7 +198,7 @@ async def extract_entities_batch_optimized(
                     'nearby_entities': entities,
                 })
                 entity_to_unit.append((unit_id, local_idx, fact_date))
-        _log(log_buffer, f"    [6.2.1] Prepare entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_1_start:.3f}s")
+        _log(log_buffer, f"    [6.2.1] Prepare entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_1_start:.3f}s", level='debug')
 
         # Resolve ALL entities in one batch call
         if all_entities_flat:
@@ -202,47 +213,36 @@ async def extract_entities_batch_optimized(
                     entities_by_date[date_key] = []
                 entities_by_date[date_key].append((idx, all_entities_flat[idx]))
 
-            _log(log_buffer, f"    [6.2.2] Grouped into {len(entities_by_date)} date buckets, resolving in parallel...")
+            _log(log_buffer, f"    [6.2.2] Grouped into {len(entities_by_date)} date buckets, resolving sequentially...", level='debug')
 
-            # Resolve all date groups in PARALLEL using asyncio.gather
+            # Resolve all date groups SEQUENTIALLY using main transaction connection
+            # This prevents race conditions where parallel tasks create duplicate entities
             resolved_entity_ids = [None] * len(all_entities_flat)
 
-            # Prepare all resolution tasks
-            async def resolve_date_bucket(date_idx, date_key, entities_group):
+            for date_idx, (date_key, entities_group) in enumerate(entities_by_date.items(), 1):
                 date_bucket_start = time.time()
                 indices = [idx for idx, _ in entities_group]
                 entities_data = [entity_data for _, entity_data in entities_group]
                 # Use the first fact's date for this bucket (all should be in same hour)
                 fact_date = entity_to_unit[indices[0]][2]
 
-                # Pass conn=None to let each parallel task acquire its own connection
+                # Use main transaction connection to ensure consistency
                 batch_resolved = await entity_resolver.resolve_entities_batch(
                     bank_id=bank_id,
                     entities_data=entities_data,
                     context=context,
                     unit_event_date=fact_date,
-                    conn=None  # Each task gets its own connection from pool
+                    conn=conn  # Use main transaction connection
                 )
 
                 if len(entities_by_date) <= 10:  # Only log individual buckets if there aren't too many
-                    _log(log_buffer, f"      [6.2.2.{date_idx}] Resolved {len(entities_data)} entities in {time.time() - date_bucket_start:.3f}s")
+                    _log(log_buffer, f"      [6.2.2.{date_idx}] Resolved {len(entities_data)} entities in {time.time() - date_bucket_start:.3f}s", level='debug')
 
-                return indices, batch_resolved
-
-            # Execute all resolution tasks in parallel
-            import asyncio
-            tasks = [
-                resolve_date_bucket(date_idx, date_key, entities_group)
-                for date_idx, (date_key, entities_group) in enumerate(entities_by_date.items(), 1)
-            ]
-            results = await asyncio.gather(*tasks)
-
-            # Map results back to resolved_entity_ids
-            for indices, batch_resolved in results:
+                # Map results back to resolved_entity_ids
                 for idx, entity_id in zip(indices, batch_resolved):
                     resolved_entity_ids[idx] = entity_id
 
-            _log(log_buffer, f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities across {len(entities_by_date)} buckets in {time.time() - substep_6_2_2_start:.3f}s")
+            _log(log_buffer, f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities across {len(entities_by_date)} buckets in {time.time() - substep_6_2_2_start:.3f}s", level='debug')
 
             # [6.2.3] Create unit-entity links in BATCH
             substep_6_2_3_start = time.time()
@@ -259,12 +259,12 @@ async def extract_entities_batch_optimized(
 
             # Batch insert all unit-entity links (MUCH faster!)
             await entity_resolver.link_units_to_entities_batch(unit_entity_pairs, conn=conn)
-            _log(log_buffer, f"    [6.2.3] Create unit-entity links (batched): {len(unit_entity_pairs)} links in {time.time() - substep_6_2_3_start:.3f}s")
+            _log(log_buffer, f"    [6.2.3] Create unit-entity links (batched): {len(unit_entity_pairs)} links in {time.time() - substep_6_2_3_start:.3f}s", level='debug')
 
-            _log(log_buffer, f"  [6.2] Entity resolution (batched): {len(all_entities_flat)} entities resolved in {time.time() - step_6_2_start:.3f}s")
+            _log(log_buffer, f"  [6.2] Entity resolution (batched): {len(all_entities_flat)} entities resolved in {time.time() - step_6_2_start:.3f}s", level='debug')
         else:
             unit_to_entity_ids = {}
-            _log(log_buffer, f"  [6.2] Entity resolution (batched): 0 entities in {time.time() - step_6_2_start:.3f}s")
+            _log(log_buffer, f"  [6.2] Entity resolution (batched): 0 entities in {time.time() - step_6_2_start:.3f}s", level='debug')
 
         # Step 3: Create entity links between units that share entities
         substep_start = time.time()
@@ -273,7 +273,7 @@ async def extract_entities_batch_optimized(
         for entity_ids in unit_to_entity_ids.values():
             all_entity_ids.update(entity_ids)
 
-        _log(log_buffer, f"  [6.3] Creating entity links for {len(all_entity_ids)} unique entities...")
+        _log(log_buffer, f"  [6.3] Creating entity links for {len(all_entity_ids)} unique entities...", level='debug')
 
         # Find all units that reference these entities (ONE batched query)
         entity_to_units = {}
@@ -289,7 +289,7 @@ async def extract_entities_batch_optimized(
                 """,
                 entity_id_list
             )
-            _log(log_buffer, f"      [6.3.1] Query unit_entities: {len(rows)} rows in {time.time() - query_start:.3f}s")
+            _log(log_buffer, f"      [6.3.1] Query unit_entities: {len(rows)} rows in {time.time() - query_start:.3f}s", level='debug')
 
             # Group by entity_id
             group_start = time.time()
@@ -298,21 +298,38 @@ async def extract_entities_batch_optimized(
                 if entity_id not in entity_to_units:
                     entity_to_units[entity_id] = []
                 entity_to_units[entity_id].append(row['unit_id'])
-            _log(log_buffer, f"      [6.3.2] Group by entity_id: {time.time() - group_start:.3f}s")
+            _log(log_buffer, f"      [6.3.2] Group by entity_id: {time.time() - group_start:.3f}s", level='debug')
 
         # Create bidirectional links between units that share entities
+        # OPTIMIZATION: Limit links per entity to avoid N² explosion
+        # Only link each new unit to the most recent MAX_LINKS_PER_ENTITY units
+        MAX_LINKS_PER_ENTITY = 50  # Limit to prevent explosion when entity appears in many facts
         link_gen_start = time.time()
         links = []
+        new_unit_set = set(unit_ids)  # Units from this batch
+
         for entity_id, units_with_entity in entity_to_units.items():
-            # For each pair of units with this entity, create bidirectional links
-            for i, unit_id_1 in enumerate(units_with_entity):
-                for unit_id_2 in units_with_entity[i+1:]:
-                    # Bidirectional links
+            # Separate new units (from this batch) and existing units
+            new_units = [u for u in units_with_entity if str(u) in new_unit_set or u in new_unit_set]
+            existing_units = [u for u in units_with_entity if str(u) not in new_unit_set and u not in new_unit_set]
+
+            # Link new units to each other (within batch) - also limited
+            # For very common entities, limit within-batch links too
+            new_units_to_link = new_units[-MAX_LINKS_PER_ENTITY:] if len(new_units) > MAX_LINKS_PER_ENTITY else new_units
+            for i, unit_id_1 in enumerate(new_units_to_link):
+                for unit_id_2 in new_units_to_link[i+1:]:
                     links.append((unit_id_1, unit_id_2, 'entity', 1.0, entity_id))
                     links.append((unit_id_2, unit_id_1, 'entity', 1.0, entity_id))
 
-        _log(log_buffer, f"      [6.3.3] Generate {len(links)} links: {time.time() - link_gen_start:.3f}s")
-        _log(log_buffer, f"  [6.3] Entity link creation: {len(links)} links for {len(all_entity_ids)} unique entities in {time.time() - substep_start:.3f}s")
+            # Link new units to LIMITED existing units (most recent)
+            existing_to_link = existing_units[-MAX_LINKS_PER_ENTITY:]  # Take most recent
+            for new_unit in new_units:
+                for existing_unit in existing_to_link:
+                    links.append((new_unit, existing_unit, 'entity', 1.0, entity_id))
+                    links.append((existing_unit, new_unit, 'entity', 1.0, entity_id))
+
+        _log(log_buffer, f"      [6.3.3] Generate {len(links)} links: {time.time() - link_gen_start:.3f}s", level='debug')
+        _log(log_buffer, f"  [6.3] Entity link creation: {len(links)} links for {len(all_entity_ids)} unique entities in {time.time() - substep_start:.3f}s", level='debug')
 
         return links
 
@@ -546,8 +563,12 @@ async def insert_entity_links_batch(conn, links: List[tuple], chunk_size: int = 
         return
 
     import uuid as uuid_mod
+    import time as time_mod
+
+    total_start = time_mod.time()
 
     # Create temp table for bulk loading
+    create_start = time_mod.time()
     await conn.execute("""
         CREATE TEMP TABLE IF NOT EXISTS _temp_entity_links (
             from_unit_id uuid,
@@ -557,11 +578,15 @@ async def insert_entity_links_batch(conn, links: List[tuple], chunk_size: int = 
             entity_id uuid
         ) ON COMMIT DROP
     """)
+    logger.debug(f"      [9.1] Create temp table: {time_mod.time() - create_start:.3f}s")
 
     # Clear any existing data in temp table
+    truncate_start = time_mod.time()
     await conn.execute("TRUNCATE _temp_entity_links")
+    logger.debug(f"      [9.2] Truncate temp table: {time_mod.time() - truncate_start:.3f}s")
 
     # Convert links to proper format for COPY
+    convert_start = time_mod.time()
     records = []
     for from_id, to_id, link_type, weight, entity_id in links:
         records.append((
@@ -571,21 +596,27 @@ async def insert_entity_links_batch(conn, links: List[tuple], chunk_size: int = 
             weight,
             uuid_mod.UUID(str(entity_id)) if entity_id and not isinstance(entity_id, uuid_mod.UUID) else entity_id
         ))
+    logger.debug(f"      [9.3] Convert {len(records)} records: {time_mod.time() - convert_start:.3f}s")
 
     # Bulk load using COPY (fastest method)
+    copy_start = time_mod.time()
     await conn.copy_records_to_table(
         '_temp_entity_links',
         records=records,
         columns=['from_unit_id', 'to_unit_id', 'link_type', 'weight', 'entity_id']
     )
+    logger.debug(f"      [9.4] COPY {len(records)} records to temp table: {time_mod.time() - copy_start:.3f}s")
 
     # Insert from temp table with ON CONFLICT (single query for all rows)
+    insert_start = time_mod.time()
     await conn.execute("""
         INSERT INTO memory_links (from_unit_id, to_unit_id, link_type, weight, entity_id)
         SELECT from_unit_id, to_unit_id, link_type, weight, entity_id
         FROM _temp_entity_links
         ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
     """)
+    logger.debug(f"      [9.5] INSERT from temp table: {time_mod.time() - insert_start:.3f}s")
+    logger.debug(f"      [9.TOTAL] Entity links batch insert: {time_mod.time() - total_start:.3f}s")
 
 
 async def create_causal_links_batch(

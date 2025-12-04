@@ -7,7 +7,7 @@ Response model for background update.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **background** | **str** |  | 
-**personality** | [**PersonalityTraits**](PersonalityTraits.md) |  | [optional] 
+**disposition** | [**DispositionTraits**](DispositionTraits.md) |  | [optional] 
 
 ## Example
 

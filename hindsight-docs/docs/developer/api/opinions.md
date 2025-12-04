@@ -15,12 +15,12 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 
 ## What Are Opinions?
 
-Opinions are beliefs formed by the memory bank based on evidence and personality. Unlike world facts (objective information received) or interactions (conversations and events), opinions are **judgments** with confidence scores.
+Opinions are beliefs formed by the memory bank based on evidence and personality. Unlike world facts (objective information received) or experience (conversations and events), opinions are **judgments** with confidence scores.
 
 | Type | Example | Confidence |
 |------|---------|------------|
 | World Fact | "Python was created in 1991" | — |
-| Interactions | "I recommended Python to Bob" | — |
+| Experience | "I recommended Python to Bob" | — |
 | Opinion | "Python is the best language for data science" | 0.85 |
 
 ## How Opinions Form

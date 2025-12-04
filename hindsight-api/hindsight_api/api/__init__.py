@@ -87,7 +87,7 @@ from .http import (
     ReflectRequest,
     ReflectResponse,
     CreateBankRequest,
-    PersonalityTraits,
+    DispositionTraits,
 )
 
 __all__ = [
@@ -100,5 +100,5 @@ __all__ = [
     "ReflectRequest",
     "ReflectResponse",
     "CreateBankRequest",
-    "PersonalityTraits",
+    "DispositionTraits",
 ]

@@ -10,9 +10,9 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 
 
-class PersonalityTraits(BaseModel):
+class DispositionTraits(BaseModel):
     """
-    Personality traits for a bank using the Big Five model.
+    Disposition traits for a bank using the Big Five model.
 
     All traits are scored 0.0-1.0 where higher values indicate stronger presence of the trait.
     """
@@ -21,7 +21,7 @@ class PersonalityTraits(BaseModel):
     extraversion: float = Field(description="Extraversion and sociability (0.0-1.0)")
     agreeableness: float = Field(description="Agreeableness and cooperation (0.0-1.0)")
     neuroticism: float = Field(description="Emotional sensitivity and neuroticism (0.0-1.0)")
-    bias_strength: float = Field(description="How strongly personality influences thinking (0.0-1.0)")
+    bias_strength: float = Field(description="How strongly disposition influences thinking (0.0-1.0)")
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -61,7 +61,7 @@ class MemoryFact(BaseModel):
 
     id: str = Field(description="Unique identifier for the memory fact")
     text: str = Field(description="The actual text content of the memory")
-    fact_type: str = Field(description="Type of fact: 'world', 'interactions', 'opinion', or 'observation'")
+    fact_type: str = Field(description="Type of fact: 'world', 'experience', 'opinion', or 'observation'")
     entities: Optional[List[str]] = Field(None, description="Entity names mentioned in this fact")
     context: Optional[str] = Field(None, description="Additional context for the memory")
     occurred_start: Optional[str] = Field(None, description="ISO format date when the event started occurring")
@@ -142,7 +142,7 @@ class ReflectResult(BaseModel):
                         "occurred_end": "2024-01-15T10:30:00Z"
                     }
                 ],
-                "interactions": [],
+                "experience": [],
                 "opinion": []
             },
             "new_opinions": [
@@ -153,7 +153,7 @@ class ReflectResult(BaseModel):
 
     text: str = Field(description="The formulated answer text")
     based_on: Dict[str, List[MemoryFact]] = Field(
-        description="Facts used to formulate the answer, organized by type (world, interactions, opinion)"
+        description="Facts used to formulate the answer, organized by type (world, experience, opinion)"
     )
     new_opinions: List[str] = Field(
         default_factory=list,

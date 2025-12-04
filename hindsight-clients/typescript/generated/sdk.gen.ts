@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddBankBackgroundData, AddBankBackgroundErrors, AddBankBackgroundResponses, CancelOperationData, CancelOperationErrors, CancelOperationResponses, ClearBankMemoriesData, ClearBankMemoriesErrors, ClearBankMemoriesResponses, CreateOrUpdateBankData, CreateOrUpdateBankErrors, CreateOrUpdateBankResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, GetAgentStatsData, GetAgentStatsErrors, GetAgentStatsResponses, GetBankProfileData, GetBankProfileErrors, GetBankProfileResponses, GetChunkData, GetChunkErrors, GetChunkResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetEntityData, GetEntityErrors, GetEntityResponses, GetGraphData, GetGraphErrors, GetGraphResponses, HealthEndpointHealthGetData, HealthEndpointHealthGetResponses, ListBanksData, ListBanksResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListEntitiesData, ListEntitiesErrors, ListEntitiesResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, MetricsEndpointMetricsGetData, MetricsEndpointMetricsGetResponses, RecallMemoriesData, RecallMemoriesErrors, RecallMemoriesResponses, ReflectData, ReflectErrors, ReflectResponses, RegenerateEntityObservationsData, RegenerateEntityObservationsErrors, RegenerateEntityObservationsResponses, RetainMemoriesData, RetainMemoriesErrors, RetainMemoriesResponses, UpdateBankPersonalityData, UpdateBankPersonalityErrors, UpdateBankPersonalityResponses } from './types.gen';
+import type { AddBankBackgroundData, AddBankBackgroundErrors, AddBankBackgroundResponses, CancelOperationData, CancelOperationErrors, CancelOperationResponses, ClearBankMemoriesData, ClearBankMemoriesErrors, ClearBankMemoriesResponses, CreateOrUpdateBankData, CreateOrUpdateBankErrors, CreateOrUpdateBankResponses, DeleteDocumentData, DeleteDocumentErrors, DeleteDocumentResponses, GetAgentStatsData, GetAgentStatsErrors, GetAgentStatsResponses, GetBankProfileData, GetBankProfileErrors, GetBankProfileResponses, GetChunkData, GetChunkErrors, GetChunkResponses, GetDocumentData, GetDocumentErrors, GetDocumentResponses, GetEntityData, GetEntityErrors, GetEntityResponses, GetGraphData, GetGraphErrors, GetGraphResponses, HealthEndpointHealthGetData, HealthEndpointHealthGetResponses, ListBanksData, ListBanksResponses, ListDocumentsData, ListDocumentsErrors, ListDocumentsResponses, ListEntitiesData, ListEntitiesErrors, ListEntitiesResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, MetricsEndpointMetricsGetData, MetricsEndpointMetricsGetResponses, RecallMemoriesData, RecallMemoriesErrors, RecallMemoriesResponses, ReflectData, ReflectErrors, ReflectResponses, RegenerateEntityObservationsData, RegenerateEntityObservationsErrors, RegenerateEntityObservationsResponses, RetainMemoriesData, RetainMemoriesErrors, RetainMemoriesResponses, UpdateBankDispositionData, UpdateBankDispositionErrors, UpdateBankDispositionResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -35,7 +35,7 @@ export const metricsEndpointMetricsGet = <ThrowOnError extends boolean = false>(
 /**
  * Get memory graph data
  *
- * Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.
+ * Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.
  */
 export const getGraph = <ThrowOnError extends boolean = false>(options: Options<GetGraphData, ThrowOnError>) => (options.client ?? client).get<GetGraphResponses, GetGraphErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/graph', ...options });
 
@@ -53,7 +53,7 @@ export const listMemories = <ThrowOnError extends boolean = false>(options: Opti
  *
  * The type parameter is optional and must be one of:
  * - 'world': General knowledge about people, places, events, and things that happen
- * - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed
+ * - 'experience': Memories about experience, conversations, actions taken, and tasks performed
  * - 'opinion': The bank's formed beliefs, perspectives, and viewpoints
  *
  * Set include_entities=true to get entity observations alongside recall results.
@@ -73,7 +73,7 @@ export const recallMemories = <ThrowOnError extends boolean = false>(options: Op
  * Reflect and formulate an answer using bank identity, world facts, and opinions.
  *
  * This endpoint:
- * 1. Retrieves interactions (conversations and events)
+ * 1. Retrieves experience (conversations and events)
  * 2. Retrieves world facts relevant to the query
  * 3. Retrieves existing opinions (bank's perspectives)
  * 4. Uses LLM to formulate a contextual answer
@@ -176,16 +176,16 @@ export const cancelOperation = <ThrowOnError extends boolean = false>(options: O
 /**
  * Get memory bank profile
  *
- * Get personality traits and background for a memory bank. Auto-creates agent with defaults if not exists.
+ * Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.
  */
 export const getBankProfile = <ThrowOnError extends boolean = false>(options: Options<GetBankProfileData, ThrowOnError>) => (options.client ?? client).get<GetBankProfileResponses, GetBankProfileErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/profile', ...options });
 
 /**
- * Update memory bank personality
+ * Update memory bank disposition
  *
- * Update bank's Big Five personality traits and bias strength
+ * Update bank's Big Five disposition traits and bias strength
  */
-export const updateBankPersonality = <ThrowOnError extends boolean = false>(options: Options<UpdateBankPersonalityData, ThrowOnError>) => (options.client ?? client).put<UpdateBankPersonalityResponses, UpdateBankPersonalityErrors, ThrowOnError>({
+export const updateBankDisposition = <ThrowOnError extends boolean = false>(options: Options<UpdateBankDispositionData, ThrowOnError>) => (options.client ?? client).put<UpdateBankDispositionResponses, UpdateBankDispositionErrors, ThrowOnError>({
     url: '/v1/default/banks/{bank_id}/profile',
     ...options,
     headers: {
@@ -197,7 +197,7 @@ export const updateBankPersonality = <ThrowOnError extends boolean = false>(opti
 /**
  * Add/merge memory bank background
  *
- * Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.
+ * Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.
  */
 export const addBankBackground = <ThrowOnError extends boolean = false>(options: Options<AddBankBackgroundData, ThrowOnError>) => (options.client ?? client).post<AddBankBackgroundResponses, AddBankBackgroundErrors, ThrowOnError>({
     url: '/v1/default/banks/{bank_id}/background',
@@ -211,7 +211,7 @@ export const addBankBackground = <ThrowOnError extends boolean = false>(options:
 /**
  * Create or update memory bank
  *
- * Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.
+ * Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.
  */
 export const createOrUpdateBank = <ThrowOnError extends boolean = false>(options: Options<CreateOrUpdateBankData, ThrowOnError>) => (options.client ?? client).put<CreateOrUpdateBankResponses, CreateOrUpdateBankErrors, ThrowOnError>({
     url: '/v1/default/banks/{bank_id}',
@@ -225,7 +225,7 @@ export const createOrUpdateBank = <ThrowOnError extends boolean = false>(options
 /**
  * Clear memory bank memories
  *
- * Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+ * Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
  */
 export const clearBankMemories = <ThrowOnError extends boolean = false>(options: Options<ClearBankMemoriesData, ThrowOnError>) => (options.client ?? client).delete<ClearBankMemoriesResponses, ClearBankMemoriesErrors, ThrowOnError>({ url: '/v1/default/banks/{bank_id}/memories', ...options });
 

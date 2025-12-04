@@ -102,7 +102,7 @@ Hindsight is built for AI agents, not humans. Traditional search systems return 
 **Parameters you control:**
 - `max_tokens`: How much memory content to return (default: 4096 tokens)
 - `budget`: Budget level for graph traversal (low, mid, high)
-- `fact_type`: Filter by world, interactions, opinion, or all
+- `fact_type`: Filter by world, experience, opinion, or all
 
 ### Additional Context: Chunks and Entity Observations
 

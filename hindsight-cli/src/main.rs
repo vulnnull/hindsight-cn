@@ -100,7 +100,7 @@ enum BankCommands {
     /// List all banks
     List,
 
-    /// Get bank profile (personality + background)
+    /// Get bank profile (disposition + background)
     Profile {
         /// Bank ID
         bank_id: String,
@@ -129,9 +129,9 @@ enum BankCommands {
         /// Background content
         content: String,
 
-        /// Skip automatic personality inference
+        /// Skip automatic disposition inference
         #[arg(long)]
-        no_update_personality: bool,
+        no_update_disposition: bool,
     },
 }
 
@@ -145,8 +145,8 @@ enum MemoryCommands {
         /// Search query
         query: String,
 
-        /// Fact types to search (world, interactions, opinion)
-        #[arg(short = 't', long, value_delimiter = ',', default_values = &["world", "interactions", "opinion"])]
+        /// Fact types to search (world, experience, opinion)
+        #[arg(short = 't', long, value_delimiter = ',', default_values = &["world", "experience", "opinion"])]
         fact_type: Vec<String>,
 
         /// Thinking budget (low, mid, high)
@@ -381,8 +381,8 @@ fn run() -> Result<()> {
             BankCommands::Profile { bank_id } => commands::bank::profile(&client, &bank_id, verbose, output_format),
             BankCommands::Stats { bank_id } => commands::bank::stats(&client, &bank_id, verbose, output_format),
             BankCommands::Name { bank_id, name } => commands::bank::update_name(&client, &bank_id, &name, verbose, output_format),
-            BankCommands::Background { bank_id, content, no_update_personality } => {
-                commands::bank::update_background(&client, &bank_id, &content, no_update_personality, verbose, output_format)
+            BankCommands::Background { bank_id, content, no_update_disposition } => {
+                commands::bank::update_background(&client, &bank_id, &content, no_update_disposition, verbose, output_format)
             }
         },
 

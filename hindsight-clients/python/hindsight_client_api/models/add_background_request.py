@@ -27,8 +27,8 @@ class AddBackgroundRequest(BaseModel):
     Request model for adding/merging background information.
     """ # noqa: E501
     content: StrictStr = Field(description="New background information to add or merge")
-    update_personality: Optional[StrictBool] = Field(default=True, description="If true, infer Big Five personality traits from the merged background (default: true)")
-    __properties: ClassVar[List[str]] = ["content", "update_personality"]
+    update_disposition: Optional[StrictBool] = Field(default=True, description="If true, infer Big Five disposition traits from the merged background (default: true)")
+    __properties: ClassVar[List[str]] = ["content", "update_disposition"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -82,7 +82,7 @@ class AddBackgroundRequest(BaseModel):
 
         _obj = cls.model_validate({
             "content": obj.get("content"),
-            "update_personality": obj.get("update_personality") if obj.get("update_personality") is not None else True
+            "update_disposition": obj.get("update_disposition") if obj.get("update_disposition") is not None else True
         })
         return _obj
 

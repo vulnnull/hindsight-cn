@@ -1,5 +1,5 @@
 """
-bank profile utilities for personality and background management.
+bank profile utilities for disposition and background management.
 """
 
 import json
@@ -8,11 +8,11 @@ import re
 from typing import Dict, Optional, TypedDict
 from pydantic import BaseModel, Field
 from ..db_utils import acquire_with_retry
-from ..response_models import PersonalityTraits
+from ..response_models import DispositionTraits
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PERSONALITY = {
+DEFAULT_DISPOSITION = {
     "openness": 0.5,
     "conscientiousness": 0.5,
     "extraversion": 0.5,
@@ -25,19 +25,19 @@ DEFAULT_PERSONALITY = {
 class BankProfile(TypedDict):
     """Type for bank profile data."""
     name: str
-    personality: PersonalityTraits
+    disposition: DispositionTraits
     background: str
 
 
 class BackgroundMergeResponse(BaseModel):
-    """LLM response for background merge with personality inference."""
+    """LLM response for background merge with disposition inference."""
     background: str = Field(description="Merged background in first person perspective")
-    personality: PersonalityTraits = Field(description="Inferred Big Five personality traits")
+    disposition: DispositionTraits = Field(description="Inferred Big Five disposition traits")
 
 
 async def get_bank_profile(pool, bank_id: str) -> BankProfile:
     """
-    Get bank profile (name, personality + background).
+    Get bank profile (name, disposition + background).
     Auto-creates bank with default values if not exists.
 
     Args:
@@ -45,13 +45,13 @@ async def get_bank_profile(pool, bank_id: str) -> BankProfile:
         bank_id: bank IDentifier
 
     Returns:
-        BankProfile with name, typed PersonalityTraits, and background
+        BankProfile with name, typed DispositionTraits, and background
     """
     async with acquire_with_retry(pool) as conn:
         # Try to get existing bank
         row = await conn.fetchrow(
             """
-            SELECT name, personality, background
+            SELECT name, disposition, background
             FROM banks WHERE bank_id = $1
             """,
             bank_id
@@ -59,48 +59,48 @@ async def get_bank_profile(pool, bank_id: str) -> BankProfile:
 
         if row:
             # asyncpg returns JSONB as a string, so parse it
-            personality_data = row["personality"]
-            if isinstance(personality_data, str):
-                personality_data = json.loads(personality_data)
+            disposition_data = row["disposition"]
+            if isinstance(disposition_data, str):
+                disposition_data = json.loads(disposition_data)
 
             return BankProfile(
                 name=row["name"],
-                personality=PersonalityTraits(**personality_data),
+                disposition=DispositionTraits(**disposition_data),
                 background=row["background"]
             )
 
         # Bank doesn't exist, create with defaults
         await conn.execute(
             """
-            INSERT INTO banks (bank_id, name, personality, background)
+            INSERT INTO banks (bank_id, name, disposition, background)
             VALUES ($1, $2, $3::jsonb, $4)
             ON CONFLICT (bank_id) DO NOTHING
             """,
             bank_id,
             bank_id,  # Default name is the bank_id
-            json.dumps(DEFAULT_PERSONALITY),
+            json.dumps(DEFAULT_DISPOSITION),
             ""
         )
 
         return BankProfile(
             name=bank_id,
-            personality=PersonalityTraits(**DEFAULT_PERSONALITY),
+            disposition=DispositionTraits(**DEFAULT_DISPOSITION),
             background=""
         )
 
 
-async def update_bank_personality(
+async def update_bank_disposition(
     pool,
     bank_id: str,
-    personality: Dict[str, float]
+    disposition: Dict[str, float]
 ) -> None:
     """
-    Update bank personality traits.
+    Update bank disposition traits.
 
     Args:
         pool: Database connection pool
         bank_id: bank IDentifier
-        personality: Dict with Big Five traits + bias_strength (all 0-1)
+        disposition: Dict with Big Five traits + bias_strength (all 0-1)
     """
     # Ensure bank exists first
     await get_bank_profile(pool, bank_id)
@@ -109,12 +109,12 @@ async def update_bank_personality(
         await conn.execute(
             """
             UPDATE banks
-            SET personality = $2::jsonb,
+            SET disposition = $2::jsonb,
                 updated_at = NOW()
             WHERE bank_id = $1
             """,
             bank_id,
-            json.dumps(personality)
+            json.dumps(disposition)
         )
 
 
@@ -123,53 +123,53 @@ async def merge_bank_background(
     llm_config,
     bank_id: str,
     new_info: str,
-    update_personality: bool = True
+    update_disposition: bool = True
 ) -> dict:
     """
     Merge new background information with existing background using LLM.
     Normalizes to first person ("I") and resolves conflicts.
-    Optionally infers personality traits from the merged background.
+    Optionally infers disposition traits from the merged background.
 
     Args:
         pool: Database connection pool
         llm_config: LLM configuration for background merging
         bank_id: bank IDentifier
         new_info: New background information to add/merge
-        update_personality: If True, infer Big Five traits from background (default: True)
+        update_disposition: If True, infer Big Five traits from background (default: True)
 
     Returns:
-        Dict with 'background' (str) and optionally 'personality' (dict) keys
+        Dict with 'background' (str) and optionally 'disposition' (dict) keys
     """
     # Get current profile
     profile = await get_bank_profile(pool, bank_id)
     current_background = profile["background"]
 
-    # Use LLM to merge backgrounds and optionally infer personality
+    # Use LLM to merge backgrounds and optionally infer disposition
     result = await _llm_merge_background(
         llm_config,
         current_background,
         new_info,
-        infer_personality=update_personality
+        infer_disposition=update_disposition
     )
 
     merged_background = result["background"]
-    inferred_personality = result.get("personality")
+    inferred_disposition = result.get("disposition")
 
     # Update in database
     async with acquire_with_retry(pool) as conn:
-        if inferred_personality:
-            # Update both background and personality
+        if inferred_disposition:
+            # Update both background and disposition
             await conn.execute(
                 """
                 UPDATE banks
                 SET background = $2,
-                    personality = $3::jsonb,
+                    disposition = $3::jsonb,
                     updated_at = NOW()
                 WHERE bank_id = $1
                 """,
                 bank_id,
                 merged_background,
-                json.dumps(inferred_personality)
+                json.dumps(inferred_disposition)
             )
         else:
             # Update only background
@@ -185,8 +185,8 @@ async def merge_bank_background(
             )
 
     response = {"background": merged_background}
-    if inferred_personality:
-        response["personality"] = inferred_personality
+    if inferred_disposition:
+        response["disposition"] = inferred_disposition
 
     return response
 
@@ -195,23 +195,23 @@ async def _llm_merge_background(
     llm_config,
     current: str,
     new_info: str,
-    infer_personality: bool = False
+    infer_disposition: bool = False
 ) -> dict:
     """
     Use LLM to intelligently merge background information.
-    Optionally infer Big Five personality traits from the merged background.
+    Optionally infer Big Five disposition traits from the merged background.
 
     Args:
         llm_config: LLM configuration to use
         current: Current background text
         new_info: New information to merge
-        infer_personality: If True, also infer personality traits
+        infer_disposition: If True, also infer disposition traits
 
     Returns:
-        Dict with 'background' (str) and optionally 'personality' (dict) keys
+        Dict with 'background' (str) and optionally 'disposition' (dict) keys
     """
-    if infer_personality:
-        prompt = f"""You are helping maintain a memory bank's background/profile and infer their personality. You MUST respond with ONLY valid JSON.
+    if infer_disposition:
+        prompt = f"""You are helping maintain a memory bank's background/profile and infer their disposition. You MUST respond with ONLY valid JSON.
 
 Current background: {current if current else "(empty)"}
 
@@ -223,20 +223,20 @@ Instructions:
 3. Keep additions that don't conflict
 4. Output in FIRST PERSON ("I") perspective
 5. Be concise - keep merged background under 500 characters
-6. Infer Big Five personality traits from the merged background:
+6. Infer Big Five disposition traits from the merged background:
    - Openness: 0.0-1.0 (creativity, curiosity, openness to new ideas)
    - Conscientiousness: 0.0-1.0 (organization, discipline, goal-directed)
    - Extraversion: 0.0-1.0 (sociability, assertiveness, energy from others)
    - Agreeableness: 0.0-1.0 (cooperation, empathy, consideration)
    - Neuroticism: 0.0-1.0 (emotional sensitivity, anxiety, stress response)
-   - Bias Strength: 0.0-1.0 (how much personality influences opinions)
+   - Bias Strength: 0.0-1.0 (how much disposition influences opinions)
 
 CRITICAL: You MUST respond with ONLY a valid JSON object. No markdown, no code blocks, no explanations. Just the JSON.
 
 Format:
 {{
   "background": "the merged background text in first person",
-  "personality": {{
+  "disposition": {{
     "openness": 0.7,
     "conscientiousness": 0.6,
     "extraversion": 0.5,
@@ -274,8 +274,8 @@ Merged background:"""
         # Prepare messages
         messages = [{"role": "user", "content": prompt}]
 
-        if infer_personality:
-            # Use structured output with Pydantic model for personality inference
+        if infer_disposition:
+            # Use structured output with Pydantic model for disposition inference
             try:
                 parsed = await llm_config.call(
                     messages=messages,
@@ -289,13 +289,13 @@ Merged background:"""
                 # Convert Pydantic model to dict format
                 return {
                     "background": parsed.background,
-                    "personality": parsed.personality.model_dump()
+                    "disposition": parsed.disposition.model_dump()
                 }
             except Exception as e:
                 logger.warning(f"Structured output failed, falling back to manual parsing: {e}")
                 # Fall through to manual parsing below
 
-        # Manual parsing fallback or non-personality merge
+        # Manual parsing fallback or non-disposition merge
         content = await llm_config.call(
             messages=messages,
             scope="bank_background",
@@ -305,7 +305,7 @@ Merged background:"""
 
         logger.info(f"LLM response for background merge (first 500 chars): {content[:500]}")
 
-        if infer_personality:
+        if infer_disposition:
             # Parse JSON response - try multiple extraction methods
             result = None
 
@@ -330,7 +330,7 @@ Merged background:"""
             # Method 3: Find nested JSON structure
             if result is None:
                 # Look for JSON object with nested structure
-                json_match = re.search(r'\{[^{}]*"background"[^{}]*"personality"[^{}]*\{[^{}]*\}[^{}]*\}', content, re.DOTALL)
+                json_match = re.search(r'\{[^{}]*"background"[^{}]*"disposition"[^{}]*\{[^{}]*\}[^{}]*\}', content, re.DOTALL)
                 if json_match:
                     try:
                         result = json.loads(json_match.group())
@@ -341,23 +341,23 @@ Merged background:"""
             # All parsing methods failed - use fallback
             if result is None:
                 logger.warning(f"Failed to extract JSON from LLM response. Raw content: {content[:200]}")
-                # Fallback: use new_info as background with default personality
+                # Fallback: use new_info as background with default disposition
                 return {
                     "background": new_info if new_info else current if current else "",
-                    "personality": DEFAULT_PERSONALITY.copy()
+                    "disposition": DEFAULT_DISPOSITION.copy()
                 }
 
-            # Validate personality values
-            personality = result.get("personality", {})
+            # Validate disposition values
+            disposition = result.get("disposition", {})
             for key in ["openness", "conscientiousness", "extraversion",
                        "agreeableness", "neuroticism", "bias_strength"]:
-                if key not in personality:
-                    personality[key] = 0.5  # Default to neutral
+                if key not in disposition:
+                    disposition[key] = 0.5  # Default to neutral
                 else:
                     # Clamp to [0, 1]
-                    personality[key] = max(0.0, min(1.0, float(personality[key])))
+                    disposition[key] = max(0.0, min(1.0, float(disposition[key])))
 
-            result["personality"] = personality
+            result["disposition"] = disposition
 
             # Ensure background exists
             if "background" not in result or not result["background"]:
@@ -380,8 +380,8 @@ Merged background:"""
             merged = new_info
 
         result = {"background": merged}
-        if infer_personality:
-            result["personality"] = DEFAULT_PERSONALITY.copy()
+        if infer_disposition:
+            result["disposition"] = DEFAULT_DISPOSITION.copy()
         return result
 
 
@@ -393,12 +393,12 @@ async def list_banks(pool) -> list:
         pool: Database connection pool
 
     Returns:
-        List of dicts with bank_id, name, personality, background, created_at, updated_at
+        List of dicts with bank_id, name, disposition, background, created_at, updated_at
     """
     async with acquire_with_retry(pool) as conn:
         rows = await conn.fetch(
             """
-            SELECT bank_id, name, personality, background, created_at, updated_at
+            SELECT bank_id, name, disposition, background, created_at, updated_at
             FROM banks
             ORDER BY updated_at DESC
             """
@@ -407,14 +407,14 @@ async def list_banks(pool) -> list:
         result = []
         for row in rows:
             # asyncpg returns JSONB as a string, so parse it
-            personality_data = row["personality"]
-            if isinstance(personality_data, str):
-                personality_data = json.loads(personality_data)
+            disposition_data = row["disposition"]
+            if isinstance(disposition_data, str):
+                disposition_data = json.loads(disposition_data)
 
             result.append({
                 "bank_id": row["bank_id"],
                 "name": row["name"],
-                "personality": personality_data,
+                "disposition": disposition_data,
                 "background": row["background"],
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                 "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,

@@ -98,18 +98,18 @@ impl ApiClient {
             let request = types::CreateBankRequest {
                 name: Some(name.to_string()),
                 background: None,
-                personality: None,
+                disposition: None,
             };
             let response = self.client.create_or_update_bank(agent_id, &request).await?;
             Ok(response.into_inner())
         })
     }
 
-    pub fn add_background(&self, agent_id: &str, content: &str, update_personality: bool, _verbose: bool) -> Result<types::BackgroundResponse> {
+    pub fn add_background(&self, agent_id: &str, content: &str, update_disposition: bool, _verbose: bool) -> Result<types::BackgroundResponse> {
         self.runtime.block_on(async {
             let request = types::AddBackgroundRequest {
                 content: content.to_string(),
-                update_personality,
+                update_disposition,
             };
             let response = self.client.add_bank_background(agent_id, &request).await?;
             Ok(response.into_inner())

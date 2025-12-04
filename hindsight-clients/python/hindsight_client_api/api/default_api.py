@@ -38,7 +38,7 @@ from hindsight_client_api.models.reflect_request import ReflectRequest
 from hindsight_client_api.models.reflect_response import ReflectResponse
 from hindsight_client_api.models.retain_request import RetainRequest
 from hindsight_client_api.models.retain_response import RetainResponse
-from hindsight_client_api.models.update_personality_request import UpdatePersonalityRequest
+from hindsight_client_api.models.update_disposition_request import UpdateDispositionRequest
 
 from hindsight_client_api.api_client import ApiClient, RequestSerialized
 from hindsight_client_api.api_response import ApiResponse
@@ -78,7 +78,7 @@ class DefaultApi:
     ) -> BackgroundResponse:
         """Add/merge memory bank background
 
-        Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.
+        Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -150,7 +150,7 @@ class DefaultApi:
     ) -> ApiResponse[BackgroundResponse]:
         """Add/merge memory bank background
 
-        Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.
+        Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -222,7 +222,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Add/merge memory bank background
 
-        Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.
+        Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -631,7 +631,7 @@ class DefaultApi:
     async def clear_bank_memories(
         self,
         bank_id: StrictStr,
-        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, interactions, opinion)")] = None,
+        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, experience, opinion)")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -647,11 +647,11 @@ class DefaultApi:
     ) -> DeleteResponse:
         """Clear memory bank memories
 
-        Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+        Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
 
         :param bank_id: (required)
         :type bank_id: str
-        :param type: Optional fact type filter (world, interactions, opinion)
+        :param type: Optional fact type filter (world, experience, opinion)
         :type type: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -703,7 +703,7 @@ class DefaultApi:
     async def clear_bank_memories_with_http_info(
         self,
         bank_id: StrictStr,
-        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, interactions, opinion)")] = None,
+        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, experience, opinion)")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -719,11 +719,11 @@ class DefaultApi:
     ) -> ApiResponse[DeleteResponse]:
         """Clear memory bank memories
 
-        Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+        Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
 
         :param bank_id: (required)
         :type bank_id: str
-        :param type: Optional fact type filter (world, interactions, opinion)
+        :param type: Optional fact type filter (world, experience, opinion)
         :type type: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -775,7 +775,7 @@ class DefaultApi:
     async def clear_bank_memories_without_preload_content(
         self,
         bank_id: StrictStr,
-        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, interactions, opinion)")] = None,
+        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, experience, opinion)")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -791,11 +791,11 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Clear memory bank memories
 
-        Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+        Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
 
         :param bank_id: (required)
         :type bank_id: str
-        :param type: Optional fact type filter (world, interactions, opinion)
+        :param type: Optional fact type filter (world, experience, opinion)
         :type type: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -927,7 +927,7 @@ class DefaultApi:
     ) -> BankProfileResponse:
         """Create or update memory bank
 
-        Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.
+        Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -999,7 +999,7 @@ class DefaultApi:
     ) -> ApiResponse[BankProfileResponse]:
         """Create or update memory bank
 
-        Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.
+        Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1071,7 +1071,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Create or update memory bank
 
-        Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.
+        Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1758,7 +1758,7 @@ class DefaultApi:
     ) -> BankProfileResponse:
         """Get memory bank profile
 
-        Get personality traits and background for a memory bank. Auto-creates agent with defaults if not exists.
+        Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1826,7 +1826,7 @@ class DefaultApi:
     ) -> ApiResponse[BankProfileResponse]:
         """Get memory bank profile
 
-        Get personality traits and background for a memory bank. Auto-creates agent with defaults if not exists.
+        Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1894,7 +1894,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Get memory bank profile
 
-        Get personality traits and background for a memory bank. Auto-creates agent with defaults if not exists.
+        Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -2841,7 +2841,7 @@ class DefaultApi:
     ) -> GraphDataResponse:
         """Get memory graph data
 
-        Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.
+        Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -2913,7 +2913,7 @@ class DefaultApi:
     ) -> ApiResponse[GraphDataResponse]:
         """Get memory graph data
 
-        Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.
+        Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -2985,7 +2985,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Get memory graph data
 
-        Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.
+        Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4554,7 +4554,7 @@ class DefaultApi:
     ) -> RecallResponse:
         """Recall memory
 
-        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints      Set include_entities=true to get entity observations alongside recall results.
+        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'experience': Memories about experience, conversations, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints      Set include_entities=true to get entity observations alongside recall results.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4626,7 +4626,7 @@ class DefaultApi:
     ) -> ApiResponse[RecallResponse]:
         """Recall memory
 
-        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints      Set include_entities=true to get entity observations alongside recall results.
+        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'experience': Memories about experience, conversations, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints      Set include_entities=true to get entity observations alongside recall results.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4698,7 +4698,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Recall memory
 
-        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints      Set include_entities=true to get entity observations alongside recall results.
+        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'experience': Memories about experience, conversations, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints      Set include_entities=true to get entity observations alongside recall results.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4845,7 +4845,7 @@ class DefaultApi:
     ) -> ReflectResponse:
         """Reflect and generate answer
 
-        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves interactions (conversations and events)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
+        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves experience (conversations and events)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4917,7 +4917,7 @@ class DefaultApi:
     ) -> ApiResponse[ReflectResponse]:
         """Reflect and generate answer
 
-        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves interactions (conversations and events)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
+        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves experience (conversations and events)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4989,7 +4989,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Reflect and generate answer
 
-        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves interactions (conversations and events)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
+        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves experience (conversations and events)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
 
         :param bank_id: (required)
         :type bank_id: str
@@ -5686,10 +5686,10 @@ class DefaultApi:
 
 
     @validate_call
-    async def update_bank_personality(
+    async def update_bank_disposition(
         self,
         bank_id: StrictStr,
-        update_personality_request: UpdatePersonalityRequest,
+        update_disposition_request: UpdateDispositionRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -5703,14 +5703,14 @@ class DefaultApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> BankProfileResponse:
-        """Update memory bank personality
+        """Update memory bank disposition
 
-        Update bank's Big Five personality traits and bias strength
+        Update bank's Big Five disposition traits and bias strength
 
         :param bank_id: (required)
         :type bank_id: str
-        :param update_personality_request: (required)
-        :type update_personality_request: UpdatePersonalityRequest
+        :param update_disposition_request: (required)
+        :type update_disposition_request: UpdateDispositionRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -5733,9 +5733,9 @@ class DefaultApi:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._update_bank_personality_serialize(
+        _param = self._update_bank_disposition_serialize(
             bank_id=bank_id,
-            update_personality_request=update_personality_request,
+            update_disposition_request=update_disposition_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -5758,10 +5758,10 @@ class DefaultApi:
 
 
     @validate_call
-    async def update_bank_personality_with_http_info(
+    async def update_bank_disposition_with_http_info(
         self,
         bank_id: StrictStr,
-        update_personality_request: UpdatePersonalityRequest,
+        update_disposition_request: UpdateDispositionRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -5775,14 +5775,14 @@ class DefaultApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[BankProfileResponse]:
-        """Update memory bank personality
+        """Update memory bank disposition
 
-        Update bank's Big Five personality traits and bias strength
+        Update bank's Big Five disposition traits and bias strength
 
         :param bank_id: (required)
         :type bank_id: str
-        :param update_personality_request: (required)
-        :type update_personality_request: UpdatePersonalityRequest
+        :param update_disposition_request: (required)
+        :type update_disposition_request: UpdateDispositionRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -5805,9 +5805,9 @@ class DefaultApi:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._update_bank_personality_serialize(
+        _param = self._update_bank_disposition_serialize(
             bank_id=bank_id,
-            update_personality_request=update_personality_request,
+            update_disposition_request=update_disposition_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -5830,10 +5830,10 @@ class DefaultApi:
 
 
     @validate_call
-    async def update_bank_personality_without_preload_content(
+    async def update_bank_disposition_without_preload_content(
         self,
         bank_id: StrictStr,
-        update_personality_request: UpdatePersonalityRequest,
+        update_disposition_request: UpdateDispositionRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -5847,14 +5847,14 @@ class DefaultApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Update memory bank personality
+        """Update memory bank disposition
 
-        Update bank's Big Five personality traits and bias strength
+        Update bank's Big Five disposition traits and bias strength
 
         :param bank_id: (required)
         :type bank_id: str
-        :param update_personality_request: (required)
-        :type update_personality_request: UpdatePersonalityRequest
+        :param update_disposition_request: (required)
+        :type update_disposition_request: UpdateDispositionRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -5877,9 +5877,9 @@ class DefaultApi:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._update_bank_personality_serialize(
+        _param = self._update_bank_disposition_serialize(
             bank_id=bank_id,
-            update_personality_request=update_personality_request,
+            update_disposition_request=update_disposition_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -5897,10 +5897,10 @@ class DefaultApi:
         return response_data.response
 
 
-    def _update_bank_personality_serialize(
+    def _update_bank_disposition_serialize(
         self,
         bank_id,
-        update_personality_request,
+        update_disposition_request,
         _request_auth,
         _content_type,
         _headers,
@@ -5928,8 +5928,8 @@ class DefaultApi:
         # process the header parameters
         # process the form parameters
         # process the body parameter
-        if update_personality_request is not None:
-            _body_params = update_personality_request
+        if update_disposition_request is not None:
+            _body_params = update_disposition_request
 
 
         # set the HTTP header `Accept`

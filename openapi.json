@@ -56,7 +56,7 @@
     "/v1/default/banks/{bank_id}/graph": {
       "get": {
         "summary": "Get memory graph data",
-        "description": "Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.",
+        "description": "Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.",
         "operationId": "get_graph",
         "parameters": [
           {
@@ -204,7 +204,7 @@
     "/v1/default/banks/{bank_id}/memories/recall": {
       "post": {
         "summary": "Recall memory",
-        "description": "Recall memory using semantic similarity and spreading activation.\n\n    The type parameter is optional and must be one of:\n    - 'world': General knowledge about people, places, events, and things that happen\n    - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed\n    - 'opinion': The bank's formed beliefs, perspectives, and viewpoints\n\n    Set include_entities=true to get entity observations alongside recall results.",
+        "description": "Recall memory using semantic similarity and spreading activation.\n\n    The type parameter is optional and must be one of:\n    - 'world': General knowledge about people, places, events, and things that happen\n    - 'experience': Memories about experience, conversations, actions taken, and tasks performed\n    - 'opinion': The bank's formed beliefs, perspectives, and viewpoints\n\n    Set include_entities=true to get entity observations alongside recall results.",
         "operationId": "recall_memories",
         "parameters": [
           {
@@ -254,7 +254,7 @@
     "/v1/default/banks/{bank_id}/reflect": {
       "post": {
         "summary": "Reflect and generate answer",
-        "description": "Reflect and formulate an answer using bank identity, world facts, and opinions.\n\n    This endpoint:\n    1. Retrieves interactions (conversations and events)\n    2. Retrieves world facts relevant to the query\n    3. Retrieves existing opinions (bank's perspectives)\n    4. Uses LLM to formulate a contextual answer\n    5. Extracts and stores any new opinions formed\n    6. Returns plain text answer, the facts used, and new opinions",
+        "description": "Reflect and formulate an answer using bank identity, world facts, and opinions.\n\n    This endpoint:\n    1. Retrieves experience (conversations and events)\n    2. Retrieves world facts relevant to the query\n    3. Retrieves existing opinions (bank's perspectives)\n    4. Uses LLM to formulate a contextual answer\n    5. Extracts and stores any new opinions formed\n    6. Returns plain text answer, the facts used, and new opinions",
         "operationId": "reflect",
         "parameters": [
           {
@@ -806,7 +806,7 @@
     "/v1/default/banks/{bank_id}/profile": {
       "get": {
         "summary": "Get memory bank profile",
-        "description": "Get personality traits and background for a memory bank. Auto-creates agent with defaults if not exists.",
+        "description": "Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.",
         "operationId": "get_bank_profile",
         "parameters": [
           {
@@ -843,9 +843,9 @@
         }
       },
       "put": {
-        "summary": "Update memory bank personality",
-        "description": "Update bank's Big Five personality traits and bias strength",
-        "operationId": "update_bank_personality",
+        "summary": "Update memory bank disposition",
+        "description": "Update bank's Big Five disposition traits and bias strength",
+        "operationId": "update_bank_disposition",
         "parameters": [
           {
             "name": "bank_id",
@@ -862,7 +862,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdatePersonalityRequest"
+                "$ref": "#/components/schemas/UpdateDispositionRequest"
               }
             }
           }
@@ -894,7 +894,7 @@
     "/v1/default/banks/{bank_id}/background": {
       "post": {
         "summary": "Add/merge memory bank background",
-        "description": "Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.",
+        "description": "Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.",
         "operationId": "add_bank_background",
         "parameters": [
           {
@@ -944,7 +944,7 @@
     "/v1/default/banks/{bank_id}": {
       "put": {
         "summary": "Create or update memory bank",
-        "description": "Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.",
+        "description": "Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.",
         "operationId": "create_or_update_bank",
         "parameters": [
           {
@@ -1042,7 +1042,7 @@
       },
       "delete": {
         "summary": "Clear memory bank memories",
-        "description": "Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
+        "description": "Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
         "operationId": "clear_bank_memories",
         "parameters": [
           {
@@ -1067,10 +1067,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Optional fact type filter (world, interactions, opinion)",
+              "description": "Optional fact type filter (world, experience, opinion)",
               "title": "Type"
             },
-            "description": "Optional fact type filter (world, interactions, opinion)"
+            "description": "Optional fact type filter (world, experience, opinion)"
           }
         ],
         "responses": {
@@ -1107,10 +1107,10 @@
             "title": "Content",
             "description": "New background information to add or merge"
           },
-          "update_personality": {
+          "update_disposition": {
             "type": "boolean",
-            "title": "Update Personality",
-            "description": "If true, infer Big Five personality traits from the merged background (default: true)",
+            "title": "Update Disposition",
+            "description": "If true, infer Big Five disposition traits from the merged background (default: true)",
             "default": true
           }
         },
@@ -1122,7 +1122,7 @@
         "description": "Request model for adding/merging background information.",
         "example": {
           "content": "I was born in Texas",
-          "update_personality": true
+          "update_disposition": true
         }
       },
       "BackgroundResponse": {
@@ -1131,10 +1131,10 @@
             "type": "string",
             "title": "Background"
           },
-          "personality": {
+          "disposition": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PersonalityTraits"
+                "$ref": "#/components/schemas/DispositionTraits"
               },
               {
                 "type": "null"
@@ -1150,7 +1150,7 @@
         "description": "Response model for background update.",
         "example": {
           "background": "I was born in Texas. I am a software engineer with 10 years of experience.",
-          "personality": {
+          "disposition": {
             "agreeableness": 0.8,
             "bias_strength": 0.6,
             "conscientiousness": 0.6,
@@ -1170,8 +1170,8 @@
             "type": "string",
             "title": "Name"
           },
-          "personality": {
-            "$ref": "#/components/schemas/PersonalityTraits"
+          "disposition": {
+            "$ref": "#/components/schemas/DispositionTraits"
           },
           "background": {
             "type": "string",
@@ -1204,7 +1204,7 @@
         "required": [
           "bank_id",
           "name",
-          "personality",
+          "disposition",
           "background"
         ],
         "title": "BankListItem",
@@ -1232,8 +1232,7 @@
               "background": "I am a software engineer",
               "bank_id": "user123",
               "created_at": "2024-01-15T10:30:00Z",
-              "name": "Alice",
-              "personality": {
+              "disposition": {
                 "agreeableness": 0.5,
                 "bias_strength": 0.5,
                 "conscientiousness": 0.5,
@@ -1241,6 +1240,7 @@
                 "neuroticism": 0.5,
                 "openness": 0.5
               },
+              "name": "Alice",
               "updated_at": "2024-01-16T14:20:00Z"
             }
           ]
@@ -1256,8 +1256,8 @@
             "type": "string",
             "title": "Name"
           },
-          "personality": {
-            "$ref": "#/components/schemas/PersonalityTraits"
+          "disposition": {
+            "$ref": "#/components/schemas/DispositionTraits"
           },
           "background": {
             "type": "string",
@@ -1268,7 +1268,7 @@
         "required": [
           "bank_id",
           "name",
-          "personality",
+          "disposition",
           "background"
         ],
         "title": "BankProfileResponse",
@@ -1276,15 +1276,15 @@
         "example": {
           "background": "I am a software engineer with 10 years of experience in startups",
           "bank_id": "user123",
-          "name": "Alice",
-          "personality": {
+          "disposition": {
             "agreeableness": 0.7,
             "bias_strength": 0.7,
             "conscientiousness": 0.6,
             "extraversion": 0.5,
             "neuroticism": 0.3,
             "openness": 0.8
-          }
+          },
+          "name": "Alice"
         }
       },
       "Budget": {
@@ -1400,10 +1400,10 @@
             ],
             "title": "Name"
           },
-          "personality": {
+          "disposition": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PersonalityTraits"
+                "$ref": "#/components/schemas/DispositionTraits"
               },
               {
                 "type": "null"
@@ -1427,15 +1427,15 @@
         "description": "Request model for creating/updating a bank.",
         "example": {
           "background": "I am a creative software engineer with 10 years of experience",
-          "name": "Alice",
-          "personality": {
+          "disposition": {
             "agreeableness": 0.7,
             "bias_strength": 0.7,
             "conscientiousness": 0.6,
             "extraversion": 0.5,
             "neuroticism": 0.3,
             "openness": 0.8
-          }
+          },
+          "name": "Alice"
         }
       },
       "DeleteResponse": {
@@ -1453,6 +1453,71 @@
         "description": "Response model for delete operations.",
         "example": {
           "success": true
+        }
+      },
+      "DispositionTraits": {
+        "properties": {
+          "openness": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Openness",
+            "description": "Openness to experience (0-1)"
+          },
+          "conscientiousness": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Conscientiousness",
+            "description": "Conscientiousness (0-1)"
+          },
+          "extraversion": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Extraversion",
+            "description": "Extraversion (0-1)"
+          },
+          "agreeableness": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Agreeableness",
+            "description": "Agreeableness (0-1)"
+          },
+          "neuroticism": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Neuroticism",
+            "description": "Neuroticism (0-1)"
+          },
+          "bias_strength": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Bias Strength",
+            "description": "How strongly disposition influences opinions (0-1)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "openness",
+          "conscientiousness",
+          "extraversion",
+          "agreeableness",
+          "neuroticism",
+          "bias_strength"
+        ],
+        "title": "DispositionTraits",
+        "description": "Disposition traits based on Big Five model.",
+        "example": {
+          "agreeableness": 0.7,
+          "bias_strength": 0.7,
+          "conscientiousness": 0.6,
+          "extraversion": 0.5,
+          "neuroticism": 0.3,
+          "openness": 0.8
         }
       },
       "DocumentResponse": {
@@ -2084,71 +2149,6 @@
           "value": "slack"
         }
       },
-      "PersonalityTraits": {
-        "properties": {
-          "openness": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Openness",
-            "description": "Openness to experience (0-1)"
-          },
-          "conscientiousness": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Conscientiousness",
-            "description": "Conscientiousness (0-1)"
-          },
-          "extraversion": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Extraversion",
-            "description": "Extraversion (0-1)"
-          },
-          "agreeableness": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Agreeableness",
-            "description": "Agreeableness (0-1)"
-          },
-          "neuroticism": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Neuroticism",
-            "description": "Neuroticism (0-1)"
-          },
-          "bias_strength": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Bias Strength",
-            "description": "How strongly personality influences opinions (0-1)"
-          }
-        },
-        "type": "object",
-        "required": [
-          "openness",
-          "conscientiousness",
-          "extraversion",
-          "agreeableness",
-          "neuroticism",
-          "bias_strength"
-        ],
-        "title": "PersonalityTraits",
-        "description": "Personality traits based on Big Five model.",
-        "example": {
-          "agreeableness": 0.7,
-          "bias_strength": 0.7,
-          "conscientiousness": 0.6,
-          "extraversion": 0.5,
-          "neuroticism": 0.3,
-          "openness": 0.8
-        }
-      },
       "RecallRequest": {
         "properties": {
           "query": {
@@ -2242,7 +2242,7 @@
           "trace": true,
           "types": [
             "world",
-            "interactions"
+            "experience"
           ]
         }
       },
@@ -2677,7 +2677,7 @@
             {
               "id": "456",
               "text": "I discussed AI applications last week",
-              "type": "interactions"
+              "type": "experience"
             }
           ],
           "text": "Based on my understanding, AI is a transformative technology..."
@@ -2757,18 +2757,18 @@
           "success": true
         }
       },
-      "UpdatePersonalityRequest": {
+      "UpdateDispositionRequest": {
         "properties": {
-          "personality": {
-            "$ref": "#/components/schemas/PersonalityTraits"
+          "disposition": {
+            "$ref": "#/components/schemas/DispositionTraits"
           }
         },
         "type": "object",
         "required": [
-          "personality"
+          "disposition"
         ],
-        "title": "UpdatePersonalityRequest",
-        "description": "Request model for updating personality traits."
+        "title": "UpdateDispositionRequest",
+        "description": "Request model for updating disposition traits."
       },
       "ValidationError": {
         "properties": {

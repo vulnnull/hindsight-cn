@@ -13,7 +13,7 @@ import { BankProfileView } from '@/components/bank-profile-view';
 import { useBank } from '@/lib/bank-context';
 
 type NavItem = 'recall' | 'reflect' | 'data' | 'documents' | 'entities' | 'profile';
-type DataSubTab = 'world' | 'interactions' | 'opinion';
+type DataSubTab = 'world' | 'experience' | 'opinion';
 
 export default function BankPage() {
   const params = useParams();
@@ -54,7 +54,7 @@ export default function BankPage() {
               <div>
                 <h1 className="text-3xl font-bold mb-2 text-foreground">Bank Profile</h1>
                 <p className="text-muted-foreground mb-6">
-                  View and edit the memory bank profile, personality traits, and background information.
+                  View and edit the memory bank profile, disposition traits, and background information.
                 </p>
                 <BankProfileView />
               </div>
@@ -106,15 +106,15 @@ export default function BankPage() {
                       )}
                     </button>
                     <button
-                      onClick={() => handleDataSubTabChange('interactions')}
+                      onClick={() => handleDataSubTabChange('experience')}
                       className={`px-6 py-3 font-semibold text-sm transition-all relative ${
-                        subTab === 'interactions'
+                        subTab === 'experience'
                           ? 'text-primary'
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
-                      Interactions
-                      {subTab === 'interactions' && (
+                      Experience
+                      {subTab === 'experience' && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
                     </button>
@@ -136,7 +136,7 @@ export default function BankPage() {
 
                 <div>
                   {subTab === 'world' && <DataView key="world" factType="world" />}
-                  {subTab === 'interactions' && <DataView key="interactions" factType="interactions" />}
+                  {subTab === 'experience' && <DataView key="experience" factType="experience" />}
                   {subTab === 'opinion' && <DataView key="opinion" factType="opinion" />}
                 </div>
               </div>

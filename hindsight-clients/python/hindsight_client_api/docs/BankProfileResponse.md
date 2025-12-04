@@ -8,7 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **bank_id** | **str** |  | 
 **name** | **str** |  | 
-**personality** | [**PersonalityTraits**](PersonalityTraits.md) |  | 
+**disposition** | [**DispositionTraits**](DispositionTraits.md) |  | 
 **background** | **str** |  | 
 
 ## Example

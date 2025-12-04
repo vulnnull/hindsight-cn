@@ -11,7 +11,7 @@ import { Copy, Check, Calendar, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Chev
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MemoryDetailPanel } from './memory-detail-panel';
 
-type FactType = 'world' | 'interactions' | 'opinion';
+type FactType = 'world' | 'experience' | 'opinion';
 type ViewMode = 'graph' | 'table' | 'timeline';
 
 interface DataViewProps {

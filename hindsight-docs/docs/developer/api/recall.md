@@ -52,7 +52,7 @@ hindsight memory search my-bank "What does Alice do?"
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | string | required | Natural language query |
-| `types` | list | all | Filter: `world`, `interactions`, `opinion` |
+| `types` | list | all | Filter: `world`, `experience`, `opinion` |
 | `budget` | string | "mid" | Budget level: "low", "mid", "high" |
 | `max_tokens` | int | 4096 | Token budget for results |
 
@@ -63,7 +63,7 @@ hindsight memory search my-bank "What does Alice do?"
 results = client.recall(
     bank_id="my-bank",
     query="What does Alice do?",
-    types=["world", "interactions"],
+    types=["world", "experience"],
     budget="high",
     max_tokens=8000
 )
@@ -94,7 +94,7 @@ For more control, use the full-featured recall method:
 response = client.recall_memories(
     bank_id="my-bank",
     query="What does Alice do?",
-    types=["world", "interactions"],
+    types=["world", "experience"],
     budget="high",
     max_tokens=8000,
     trace=True,
@@ -119,7 +119,7 @@ if "entities" in response:
 // Full response with trace info
 const response = await client.recallMemories('my-bank', {
     query: 'What does Alice do?',
-    types: ['world', 'interactions'],
+    types: ['world', 'experience'],
     budget: 'high',
     maxTokens: 8000,
     trace: true
@@ -184,11 +184,11 @@ world_facts = client.recall(
     types=["world"]
 )
 
-# Only interactions (conversations and events)
-interactions = client.recall(
+# Only experience (conversations and events)
+experience = client.recall(
     bank_id="my-bank",
     query="What have I recommended?",
-    types=["interactions"]
+    types=["experience"]
 )
 
 # Only opinions (formed beliefs)
@@ -198,11 +198,11 @@ opinions = client.recall(
     types=["opinion"]
 )
 
-# World facts and interactions (exclude opinions)
+# World facts and experience (exclude opinions)
 facts = client.recall(
     bank_id="my-bank",
     query="What happened?",
-    types=["world", "interactions"]
+    types=["world", "experience"]
 )
 ```
 
@@ -211,7 +211,7 @@ facts = client.recall(
 
 ```bash
 hindsight memory search my-bank "Python" --fact-type opinion
-hindsight memory search my-bank "Alice" --fact-type world,interactions
+hindsight memory search my-bank "Alice" --fact-type world,experience
 ```
 
 </TabItem>

@@ -7,7 +7,7 @@ Request model for adding/merging background information.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **content** | **str** | New background information to add or merge | 
-**update_personality** | **bool** | If true, infer Big Five personality traits from the merged background (default: true) | [optional] [default to True]
+**update_disposition** | **bool** | If true, infer Big Five disposition traits from the merged background (default: true) | [optional] [default to True]
 
 ## Example
 

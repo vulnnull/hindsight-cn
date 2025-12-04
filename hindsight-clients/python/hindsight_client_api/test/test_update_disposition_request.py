@@ -14,10 +14,10 @@
 
 import unittest
 
-from hindsight_client_api.models.background_response import BackgroundResponse
+from hindsight_client_api.models.update_disposition_request import UpdateDispositionRequest
 
-class TestBackgroundResponse(unittest.TestCase):
-    """BackgroundResponse unit test stubs"""
+class TestUpdateDispositionRequest(unittest.TestCase):
+    """UpdateDispositionRequest unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,27 +25,26 @@ class TestBackgroundResponse(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> BackgroundResponse:
-        """Test BackgroundResponse
+    def make_instance(self, include_optional) -> UpdateDispositionRequest:
+        """Test UpdateDispositionRequest
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `BackgroundResponse`
+        # uncomment below to create an instance of `UpdateDispositionRequest`
         """
-        model = BackgroundResponse()
+        model = UpdateDispositionRequest()
         if include_optional:
-            return BackgroundResponse(
-                background = '',
+            return UpdateDispositionRequest(
                 disposition = {agreeableness=0.7, bias_strength=0.7, conscientiousness=0.6, extraversion=0.5, neuroticism=0.3, openness=0.8}
             )
         else:
-            return BackgroundResponse(
-                background = '',
+            return UpdateDispositionRequest(
+                disposition = {agreeableness=0.7, bias_strength=0.7, conscientiousness=0.6, extraversion=0.5, neuroticism=0.3, openness=0.8},
         )
         """
 
-    def testBackgroundResponse(self):
-        """Test BackgroundResponse"""
+    def testUpdateDispositionRequest(self):
+        """Test UpdateDispositionRequest"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

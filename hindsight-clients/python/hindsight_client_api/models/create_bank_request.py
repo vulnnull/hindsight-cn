@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from hindsight_client_api.models.personality_traits import PersonalityTraits
+from hindsight_client_api.models.disposition_traits import DispositionTraits
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,9 +28,9 @@ class CreateBankRequest(BaseModel):
     Request model for creating/updating a bank.
     """ # noqa: E501
     name: Optional[StrictStr] = None
-    personality: Optional[PersonalityTraits] = None
+    disposition: Optional[DispositionTraits] = None
     background: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["name", "personality", "background"]
+    __properties: ClassVar[List[str]] = ["name", "disposition", "background"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -71,18 +71,18 @@ class CreateBankRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of personality
-        if self.personality:
-            _dict['personality'] = self.personality.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of disposition
+        if self.disposition:
+            _dict['disposition'] = self.disposition.to_dict()
         # set to None if name (nullable) is None
         # and model_fields_set contains the field
         if self.name is None and "name" in self.model_fields_set:
             _dict['name'] = None
 
-        # set to None if personality (nullable) is None
+        # set to None if disposition (nullable) is None
         # and model_fields_set contains the field
-        if self.personality is None and "personality" in self.model_fields_set:
-            _dict['personality'] = None
+        if self.disposition is None and "disposition" in self.model_fields_set:
+            _dict['disposition'] = None
 
         # set to None if background (nullable) is None
         # and model_fields_set contains the field
@@ -102,7 +102,7 @@ class CreateBankRequest(BaseModel):
 
         _obj = cls.model_validate({
             "name": obj.get("name"),
-            "personality": PersonalityTraits.from_dict(obj["personality"]) if obj.get("personality") is not None else None,
+            "disposition": DispositionTraits.from_dict(obj["disposition"]) if obj.get("disposition") is not None else None,
             "background": obj.get("background")
         })
         return _obj

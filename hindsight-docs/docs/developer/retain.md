@@ -59,12 +59,12 @@ This means search results include the full context, not disconnected fragments.
 
 ## Two Types of Facts
 
-Hindsight distinguishes between **world** facts (about others) and **interactions** (conversations and events):
+Hindsight distinguishes between **world** facts (about others) and **experience** (conversations and events):
 
 | Type            | Description                       | Example |
 |-----------------|-----------------------------------|---------|
 | **world**       | Facts about people, places, things | "Alice works at Google" |
-| **interactions** | Conversations and events         | "I recommended Python to Alice" |
+| **experience** | Conversations and events         | "I recommended Python to Alice" |
 
 This separation is important for `reflect()` — the bank can reason about what it knows versus what happened in conversations.
 

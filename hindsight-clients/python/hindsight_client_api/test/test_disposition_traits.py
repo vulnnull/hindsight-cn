@@ -14,10 +14,10 @@
 
 import unittest
 
-from hindsight_client_api.models.personality_traits import PersonalityTraits
+from hindsight_client_api.models.disposition_traits import DispositionTraits
 
-class TestPersonalityTraits(unittest.TestCase):
-    """PersonalityTraits unit test stubs"""
+class TestDispositionTraits(unittest.TestCase):
+    """DispositionTraits unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,16 +25,16 @@ class TestPersonalityTraits(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> PersonalityTraits:
-        """Test PersonalityTraits
+    def make_instance(self, include_optional) -> DispositionTraits:
+        """Test DispositionTraits
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `PersonalityTraits`
+        # uncomment below to create an instance of `DispositionTraits`
         """
-        model = PersonalityTraits()
+        model = DispositionTraits()
         if include_optional:
-            return PersonalityTraits(
+            return DispositionTraits(
                 openness = 0.0,
                 conscientiousness = 0.0,
                 extraversion = 0.0,
@@ -43,7 +43,7 @@ class TestPersonalityTraits(unittest.TestCase):
                 bias_strength = 0.0
             )
         else:
-            return PersonalityTraits(
+            return DispositionTraits(
                 openness = 0.0,
                 conscientiousness = 0.0,
                 extraversion = 0.0,
@@ -53,8 +53,8 @@ class TestPersonalityTraits(unittest.TestCase):
         )
         """
 
-    def testPersonalityTraits(self):
-        """Test PersonalityTraits"""
+    def testDispositionTraits(self):
+        """Test DispositionTraits"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

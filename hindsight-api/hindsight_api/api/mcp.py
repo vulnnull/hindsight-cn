@@ -90,7 +90,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
             search_result = await memory.recall_async(
                 bank_id=bank_id,
                 query=query,
-                fact_type=["world", "interactions", "opinion"],
+                fact_type=["world", "experience", "opinion"],
                 budget=Budget.LOW
             )
 

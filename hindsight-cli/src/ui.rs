@@ -205,16 +205,16 @@ pub fn print_profile(profile: &BankProfileResponse) {
         println!();
     }
 
-    // Print personality traits
-    println!("{}", "─── Personality Traits ───".bright_yellow());
+    // Print disposition traits
+    println!("{}", "─── Disposition Traits ───".bright_yellow());
     println!();
 
     let traits = [
-        ("Openness", profile.personality.openness, "🔓", "green"),
-        ("Conscientiousness", profile.personality.conscientiousness, "📋", "yellow"),
-        ("Extraversion", profile.personality.extraversion, "🗣️", "cyan"),
-        ("Agreeableness", profile.personality.agreeableness, "🤝", "magenta"),
-        ("Neuroticism", profile.personality.neuroticism, "😰", "yellow"),
+        ("Openness", profile.disposition.openness, "🔓", "green"),
+        ("Conscientiousness", profile.disposition.conscientiousness, "📋", "yellow"),
+        ("Extraversion", profile.disposition.extraversion, "🗣️", "cyan"),
+        ("Agreeableness", profile.disposition.agreeableness, "🤝", "magenta"),
+        ("Neuroticism", profile.disposition.neuroticism, "😰", "yellow"),
     ];
 
     for (name, value, emoji, color) in &traits {
@@ -241,17 +241,17 @@ pub fn print_profile(profile: &BankProfileResponse) {
 
     println!();
     println!("{}", "Bias Strength:".bright_yellow());
-    let bias = profile.personality.bias_strength;
+    let bias = profile.disposition.bias_strength;
     let bar_length = 40;
     let filled = (bias * bar_length as f64) as usize;
     let empty = bar_length - filled;
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
 
     println!("  💪 {:<20} [{}] {:.0}%",
-        "Personality Influence",
+        "Disposition Influence",
         bar.bright_green(),
         bias * 100.0
     );
-    println!("  {}", "(how much personality shapes opinions)".bright_black());
+    println!("  {}", "(how much disposition shapes opinions)".bright_black());
     println!();
 }

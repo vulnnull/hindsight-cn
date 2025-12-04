@@ -75,7 +75,7 @@ class ExtractedFact:
     This is the raw output from fact extraction before processing.
     """
     fact_text: str
-    fact_type: str  # "world", "interactions", "opinion", "observation"
+    fact_type: str  # "world", "experience", "opinion", "observation"
     entities: List[str] = field(default_factory=list)
     occurred_start: Optional[datetime] = None
     occurred_end: Optional[datetime] = None

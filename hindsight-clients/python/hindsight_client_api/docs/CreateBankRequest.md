@@ -7,7 +7,7 @@ Request model for creating/updating a bank.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **name** | **str** |  | [optional] 
-**personality** | [**PersonalityTraits**](PersonalityTraits.md) |  | [optional] 
+**disposition** | [**DispositionTraits**](DispositionTraits.md) |  | [optional] 
 **background** | **str** |  | [optional] 
 
 ## Example

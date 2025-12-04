@@ -37,14 +37,14 @@ class TestBankProfileResponse(unittest.TestCase):
             return BankProfileResponse(
                 bank_id = '',
                 name = '',
-                personality = {agreeableness=0.7, bias_strength=0.7, conscientiousness=0.6, extraversion=0.5, neuroticism=0.3, openness=0.8},
+                disposition = {agreeableness=0.7, bias_strength=0.7, conscientiousness=0.6, extraversion=0.5, neuroticism=0.3, openness=0.8},
                 background = ''
             )
         else:
             return BankProfileResponse(
                 bank_id = '',
                 name = '',
-                personality = {agreeableness=0.7, bias_strength=0.7, conscientiousness=0.6, extraversion=0.5, neuroticism=0.3, openness=0.8},
+                disposition = {agreeableness=0.7, bias_strength=0.7, conscientiousness=0.6, extraversion=0.5, neuroticism=0.3, openness=0.8},
                 background = '',
         )
         """

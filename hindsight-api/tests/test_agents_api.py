@@ -4,7 +4,7 @@ Tests for agent management API (profile, personality, background).
 import pytest
 import uuid
 from hindsight_api import MemoryEngine
-from hindsight_api.api import CreateBankRequest, PersonalityTraits
+from hindsight_api.api import CreateBankRequest, DispositionTraits
 from hindsight_api.engine.memory_engine import Budget
 
 
@@ -147,7 +147,7 @@ class TestAgentEndpoint:
         bank_id = unique_agent_id("test_put_create")
 
         request = CreateBankRequest(
-            personality=PersonalityTraits(
+            personality=DispositionTraits(
                 openness=0.8,
                 conscientiousness=0.6,
                 extraversion=0.5,

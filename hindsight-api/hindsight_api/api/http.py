@@ -84,7 +84,7 @@ class RecallRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "query": "What did Alice say about machine learning?",
-            "types": ["world", "interactions"],
+            "types": ["world", "experience"],
             "budget": "mid",
             "max_tokens": 4096,
             "trace": True,
@@ -131,7 +131,7 @@ class RecallResult(BaseModel):
 
     id: str
     text: str
-    type: Optional[str] = None  # fact type: world, interactions, opinion, observation
+    type: Optional[str] = None  # fact type: world, experience, opinion, observation
     entities: Optional[List[str]] = None  # Entity names mentioned in this fact
     context: Optional[str] = None
     occurred_start: Optional[str] = None  # ISO format date when the event started
@@ -397,7 +397,7 @@ class ReflectFact(BaseModel):
 
     id: Optional[str] = None
     text: str
-    type: Optional[str] = None  # fact type: world, interactions, opinion
+    type: Optional[str] = None  # fact type: world, experience, opinion
     context: Optional[str] = None
     occurred_start: Optional[str] = None
     occurred_end: Optional[str] = None
@@ -417,7 +417,7 @@ class ReflectResponse(BaseModel):
                 {
                     "id": "456",
                     "text": "I discussed AI applications last week",
-                    "type": "interactions"
+                    "type": "experience"
                 }
             ]
         }
@@ -438,8 +438,8 @@ class BanksResponse(BaseModel):
     banks: List[str]
 
 
-class PersonalityTraits(BaseModel):
-    """Personality traits based on Big Five model."""
+class DispositionTraits(BaseModel):
+    """Disposition traits based on Big Five model."""
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "openness": 0.8,
@@ -456,7 +456,7 @@ class PersonalityTraits(BaseModel):
     extraversion: float = Field(ge=0.0, le=1.0, description="Extraversion (0-1)")
     agreeableness: float = Field(ge=0.0, le=1.0, description="Agreeableness (0-1)")
     neuroticism: float = Field(ge=0.0, le=1.0, description="Neuroticism (0-1)")
-    bias_strength: float = Field(ge=0.0, le=1.0, description="How strongly personality influences opinions (0-1)")
+    bias_strength: float = Field(ge=0.0, le=1.0, description="How strongly disposition influences opinions (0-1)")
 
 
 class BankProfileResponse(BaseModel):
@@ -465,7 +465,7 @@ class BankProfileResponse(BaseModel):
         "example": {
             "bank_id": "user123",
             "name": "Alice",
-            "personality": {
+            "disposition": {
                 "openness": 0.8,
                 "conscientiousness": 0.6,
                 "extraversion": 0.5,
@@ -479,13 +479,13 @@ class BankProfileResponse(BaseModel):
 
     bank_id: str
     name: str
-    personality: PersonalityTraits
+    disposition: DispositionTraits
     background: str
 
 
-class UpdatePersonalityRequest(BaseModel):
-    """Request model for updating personality traits."""
-    personality: PersonalityTraits
+class UpdateDispositionRequest(BaseModel):
+    """Request model for updating disposition traits."""
+    disposition: DispositionTraits
 
 
 class AddBackgroundRequest(BaseModel):
@@ -493,14 +493,14 @@ class AddBackgroundRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "content": "I was born in Texas",
-            "update_personality": True
+            "update_disposition": True
         }
     })
 
     content: str = Field(description="New background information to add or merge")
-    update_personality: bool = Field(
+    update_disposition: bool = Field(
         default=True,
-        description="If true, infer Big Five personality traits from the merged background (default: true)"
+        description="If true, infer Big Five disposition traits from the merged background (default: true)"
     )
 
 
@@ -509,7 +509,7 @@ class BackgroundResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "background": "I was born in Texas. I am a software engineer with 10 years of experience.",
-            "personality": {
+            "disposition": {
                 "openness": 0.7,
                 "conscientiousness": 0.6,
                 "extraversion": 0.5,
@@ -521,14 +521,14 @@ class BackgroundResponse(BaseModel):
     })
 
     background: str
-    personality: Optional[PersonalityTraits] = None
+    disposition: Optional[DispositionTraits] = None
 
 
 class BankListItem(BaseModel):
     """Bank list item with profile summary."""
     bank_id: str
     name: str
-    personality: PersonalityTraits
+    disposition: DispositionTraits
     background: str
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -542,7 +542,7 @@ class BankListResponse(BaseModel):
                 {
                     "bank_id": "user123",
                     "name": "Alice",
-                    "personality": {
+                    "disposition": {
                         "openness": 0.5,
                         "conscientiousness": 0.5,
                         "extraversion": 0.5,
@@ -566,7 +566,7 @@ class CreateBankRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "name": "Alice",
-            "personality": {
+            "disposition": {
                 "openness": 0.8,
                 "conscientiousness": 0.6,
                 "extraversion": 0.5,
@@ -579,7 +579,7 @@ class CreateBankRequest(BaseModel):
     })
 
     name: Optional[str] = None
-    personality: Optional[PersonalityTraits] = None
+    disposition: Optional[DispositionTraits] = None
     background: Optional[str] = None
 
 
@@ -833,7 +833,7 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/graph",
         response_model=GraphDataResponse,
         summary="Get memory graph data",
-        description="Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.",
+        description="Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.",
         operation_id="get_graph"
     )
     async def api_graph(bank_id: str,
@@ -871,7 +871,7 @@ def _register_routes(app: FastAPI):
 
         Args:
             bank_id: Memory Bank ID (from path)
-            type: Filter by fact type (world, interactions, opinion)
+            type: Filter by fact type (world, experience, opinion)
             q: Search query for full-text search (searches text and context)
             limit: Maximum number of results (default: 100)
             offset: Offset for pagination (default: 0)
@@ -901,7 +901,7 @@ def _register_routes(app: FastAPI):
 
     The type parameter is optional and must be one of:
     - 'world': General knowledge about people, places, events, and things that happen
-    - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed
+    - 'experience': Memories about experience, conversations, actions taken, and tasks performed
     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints
 
     Set include_entities=true to get entity observations alongside recall results.
@@ -914,10 +914,10 @@ def _register_routes(app: FastAPI):
 
         try:
             # Validate types
-            valid_fact_types = ["world", "interactions", "opinion"]
+            valid_fact_types = ["world", "experience", "opinion"]
 
-            # Default to world, interactions, opinion if not specified (exclude observation by default)
-            fact_types = request.types if request.types else ["world", "interactions", "opinion"]
+            # Default to world, experience, opinion if not specified (exclude observation by default)
+            fact_types = request.types if request.types else ["world", "experience", "opinion"]
             for ft in fact_types:
                 if ft not in valid_fact_types:
                     raise HTTPException(
@@ -1026,7 +1026,7 @@ def _register_routes(app: FastAPI):
     Reflect and formulate an answer using bank identity, world facts, and opinions.
 
     This endpoint:
-    1. Retrieves interactions (conversations and events)
+    1. Retrieves experience (conversations and events)
     2. Retrieves world facts relevant to the query
     3. Retrieves existing opinions (bank's perspectives)
     4. Uses LLM to formulate a contextual answer
@@ -1579,19 +1579,19 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}/profile",
         response_model=BankProfileResponse,
         summary="Get memory bank profile",
-        description="Get personality traits and background for a memory bank. Auto-creates agent with defaults if not exists.",
+        description="Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.",
         operation_id="get_bank_profile"
     )
     async def api_get_bank_profile(bank_id: str):
-        """Get memory bank profile (personality + background)."""
+        """Get memory bank profile (disposition + background)."""
         try:
             profile = await app.state.memory.get_bank_profile(bank_id)
-            # Convert PersonalityTraits object to dict for Pydantic
-            personality_dict = profile["personality"].model_dump() if hasattr(profile["personality"], 'model_dump') else dict(profile["personality"])
+            # Convert DispositionTraits object to dict for Pydantic
+            disposition_dict = profile["disposition"].model_dump() if hasattr(profile["disposition"], 'model_dump') else dict(profile["disposition"])
             return BankProfileResponse(
                 bank_id=bank_id,
                 name=profile["name"],
-                personality=PersonalityTraits(**personality_dict),
+                disposition=DispositionTraits(**disposition_dict),
                 background=profile["background"]
             )
         except Exception as e:
@@ -1604,28 +1604,28 @@ This operation cannot be undone.
     @app.put(
         "/v1/default/banks/{bank_id}/profile",
         response_model=BankProfileResponse,
-        summary="Update memory bank personality",
-        description="Update bank's Big Five personality traits and bias strength",
-        operation_id="update_bank_personality"
+        summary="Update memory bank disposition",
+        description="Update bank's Big Five disposition traits and bias strength",
+        operation_id="update_bank_disposition"
     )
-    async def api_update_bank_personality(bank_id: str,
-        request: UpdatePersonalityRequest
+    async def api_update_bank_disposition(bank_id: str,
+        request: UpdateDispositionRequest
     ):
-        """Update bank personality traits."""
+        """Update bank disposition traits."""
         try:
-            # Update personality
-            await app.state.memory.update_bank_personality(
+            # Update disposition
+            await app.state.memory.update_bank_disposition(
                 bank_id,
-                request.personality.model_dump()
+                request.disposition.model_dump()
             )
 
             # Get updated profile
             profile = await app.state.memory.get_bank_profile(bank_id)
-            personality_dict = profile["personality"].model_dump() if hasattr(profile["personality"], 'model_dump') else dict(profile["personality"])
+            disposition_dict = profile["disposition"].model_dump() if hasattr(profile["disposition"], 'model_dump') else dict(profile["disposition"])
             return BankProfileResponse(
                 bank_id=bank_id,
                 name=profile["name"],
-                personality=PersonalityTraits(**personality_dict),
+                disposition=DispositionTraits(**disposition_dict),
                 background=profile["background"]
             )
         except Exception as e:
@@ -1639,23 +1639,23 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}/background",
         response_model=BackgroundResponse,
         summary="Add/merge memory bank background",
-        description="Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers personality traits.",
+        description="Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.",
         operation_id="add_bank_background"
     )
     async def api_add_bank_background(bank_id: str,
         request: AddBackgroundRequest
     ):
-        """Add or merge bank background information. Optionally infer personality traits."""
+        """Add or merge bank background information. Optionally infer disposition traits."""
         try:
             result = await app.state.memory.merge_bank_background(
                 bank_id,
                 request.content,
-                update_personality=request.update_personality
+                update_disposition=request.update_disposition
             )
 
             response = BackgroundResponse(background=result["background"])
-            if "personality" in result:
-                response.personality = PersonalityTraits(**result["personality"])
+            if "disposition" in result:
+                response.disposition = DispositionTraits(**result["disposition"])
 
             return response
         except Exception as e:
@@ -1669,13 +1669,13 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}",
         response_model=BankProfileResponse,
         summary="Create or update memory bank",
-        description="Create a new agent or update existing agent with personality and background. Auto-fills missing fields with defaults.",
+        description="Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.",
         operation_id="create_or_update_bank"
     )
     async def api_create_or_update_bank(bank_id: str,
         request: CreateBankRequest
     ):
-        """Create or update an agent with personality and background."""
+        """Create or update an agent with disposition and background."""
         try:
             # Get existing profile or create with defaults
             profile = await app.state.memory.get_bank_profile(bank_id)
@@ -1696,13 +1696,13 @@ This operation cannot be undone.
                     )
                 profile["name"] = request.name
 
-            # Update personality if provided
-            if request.personality is not None:
-                await app.state.memory.update_bank_personality(
+            # Update disposition if provided
+            if request.disposition is not None:
+                await app.state.memory.update_bank_disposition(
                     bank_id,
-                    request.personality.model_dump()
+                    request.disposition.model_dump()
                 )
-                profile["personality"] = request.personality.model_dump()
+                profile["disposition"] = request.disposition.model_dump()
 
             # Update background if provided (replace, not merge)
             if request.background is not None:
@@ -1722,11 +1722,11 @@ This operation cannot be undone.
 
             # Get final profile
             final_profile = await app.state.memory.get_bank_profile(bank_id)
-            personality_dict = final_profile["personality"].model_dump() if hasattr(final_profile["personality"], 'model_dump') else dict(final_profile["personality"])
+            disposition_dict = final_profile["disposition"].model_dump() if hasattr(final_profile["disposition"], 'model_dump') else dict(final_profile["disposition"])
             return BankProfileResponse(
                 bank_id=bank_id,
                 name=final_profile["name"],
-                personality=PersonalityTraits(**personality_dict),
+                disposition=DispositionTraits(**disposition_dict),
                 background=final_profile["background"]
             )
         except Exception as e:
@@ -1852,11 +1852,11 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}/memories",
         response_model=DeleteResponse,
         summary="Clear memory bank memories",
-        description="Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
+        description="Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
         operation_id="clear_bank_memories"
     )
     async def api_clear_bank_memories(bank_id: str,
-        type: Optional[str] = Query(None, description="Optional fact type filter (world, interactions, opinion)")
+        type: Optional[str] = Query(None, description="Optional fact type filter (world, experience, opinion)")
     ):
         """Clear memories for a memory bank, optionally filtered by type."""
         try:
