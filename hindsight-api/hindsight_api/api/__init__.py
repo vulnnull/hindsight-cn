@@ -62,14 +62,13 @@ def create_app(
     # Mount MCP server if enabled
     if mcp_api_enabled:
         try:
-            from .mcp import create_mcp_server
+            from .mcp import create_mcp_app
 
-            # Create MCP server with shared memory instance
-            mcp_server = create_mcp_server(memory=memory)
-
-            # Mount at specified path using sse_app for compatibility with mcp-remote
-            app.mount(mcp_mount_path, mcp_server.sse_app())
-            logger.info(f"MCP server enabled at {mcp_mount_path}")
+            # Create MCP app with dynamic bank_id support
+            # Supports: /mcp/{bank_id}/sse (bank-specific SSE endpoint)
+            mcp_app = create_mcp_app(memory=memory)
+            app.mount(mcp_mount_path, mcp_app)
+            logger.info(f"MCP server enabled at {mcp_mount_path}/{{bank_id}}/sse")
         except ImportError as e:
             logger.error(f"MCP server requested but dependencies not available: {e}")
             logger.error("Install with: pip install hindsight-api[mcp]")

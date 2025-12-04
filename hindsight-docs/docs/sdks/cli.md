@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # CLI Reference
 
-The Hindsight CLI provides command-line access to memory operations and agent management.
+The Hindsight CLI provides command-line access to memory operations and bank management.
 
 ## Installation
 
@@ -14,228 +14,194 @@ curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/m
 
 ## Configuration
 
-Set environment variables or use command flags:
+Configure the API URL:
 
 ```bash
+# Interactive configuration
+hindsight configure
+
+# Or set directly
+hindsight configure --api-url http://localhost:8888
+
+# Or use environment variable (highest priority)
 export HINDSIGHT_API_URL=http://localhost:8888
-export HINDSIGHT_AGENT_ID=my-agent
 ```
 
-## Commands
+## Core Commands
 
-### Memory Operations
+### Retain (Store Memory)
 
-#### put
-
-Store a memory:
+Store a single memory:
 
 ```bash
-hindsight put <agent_id> "Alice works at Google as a software engineer"
+hindsight memory retain <bank_id> "Alice works at Google as a software engineer"
 
 # With context
-hindsight put <agent_id> "Bob loves hiking" --context "hobby discussion"
+hindsight memory retain <bank_id> "Bob loves hiking" --context "hobby discussion"
 
-# With event date
-hindsight put <agent_id> "Meeting with Carol" --date "2024-01-15"
+# Queue for background processing
+hindsight memory retain <bank_id> "Meeting notes" --async
 ```
 
-#### put-files
+### Retain Files
 
-Store file contents as memories:
+Bulk import from files:
 
 ```bash
-# Store a single file
-hindsight put-files <agent_id> notes.txt
+# Single file
+hindsight memory retain-files <bank_id> notes.txt
 
-# Store multiple files
-hindsight put-files <agent_id> file1.txt file2.md file3.json
+# Directory (recursive by default)
+hindsight memory retain-files <bank_id> ./documents/
 
 # With context
-hindsight put-files <agent_id> meeting-notes.txt --context "team meeting"
+hindsight memory retain-files <bank_id> meeting-notes.txt --context "team meeting"
+
+# Background processing
+hindsight memory retain-files <bank_id> ./data/ --async
 ```
 
-#### search
+### Recall (Search)
 
-Search memories:
+Search memories using semantic similarity:
 
 ```bash
-hindsight search <agent_id> "What does Alice do?"
+hindsight memory recall <bank_id> "What does Alice do?"
 
 # With options
-hindsight search <agent_id> "hiking recommendations" --budget 100 --top-k 5
+hindsight memory recall <bank_id> "hiking recommendations" \
+  --budget high \
+  --max-tokens 8192
 
-# Verbose output
-hindsight search <agent_id> "query" -v
+# Filter by fact type
+hindsight memory recall <bank_id> "query" --fact-type world,opinion
+
+# Show trace information
+hindsight memory recall <bank_id> "query" --trace
 ```
 
-#### think
+### Reflect (Generate Response)
 
-Generate a response using memories and opinions:
+Generate a response using memories and bank personality:
 
 ```bash
-hindsight think <agent_id> "What do you know about Alice?"
+hindsight memory reflect <bank_id> "What do you know about Alice?"
 
-# Verbose mode shows reasoning
-hindsight think <agent_id> "Should I recommend Python or Java?" -v
+# With additional context
+hindsight memory reflect <bank_id> "Should I learn Python?" --context "career advice"
+
+# Higher budget for complex questions
+hindsight memory reflect <bank_id> "Summarize my week" --budget high
 ```
 
-### Memory bank Management
+## Bank Management
 
-#### memory banks
-
-List all memory banks:
+### List Banks
 
 ```bash
-hindsight memory banks
+hindsight bank list
 ```
 
-Output:
-
-```
-Available memory banks:
-  - alice-agent
-  - bob-agent
-  - tech-advisor
-```
-
-#### profile
-
-View memory bank profile:
+### View Profile
 
 ```bash
-hindsight profile <agent_id>
+hindsight bank profile <bank_id>
 ```
 
-Output:
-
-```
-Memory bank: my-agent
-
-Personality:
-  Openness:          0.80
-  Conscientiousness: 0.60
-  Extraversion:      0.50
-  Agreeableness:     0.70
-  Neuroticism:       0.30
-  Bias Strength:     0.70
-
-Background:
-  I am a helpful AI assistant interested in technology.
-```
-
-#### set-personality
-
-Update personality traits:
+### View Statistics
 
 ```bash
-hindsight set-personality <agent_id> \
-  --openness 0.8 \
-  --conscientiousness 0.6 \
-  --extraversion 0.5 \
-  --agreeableness 0.7 \
-  --neuroticism 0.3 \
-  --bias-strength 0.7
+hindsight bank stats <bank_id>
 ```
 
-#### background
-
-Add or merge background:
+### Set Bank Name
 
 ```bash
-# Set/merge background
-hindsight background <agent_id> "I have expertise in distributed systems"
+hindsight bank name <bank_id> "My Assistant"
 ```
 
-### MCP Server
-
-Start the MCP server:
+### Set Background
 
 ```bash
-hindsight mcp-server
+hindsight bank background <bank_id> "I am a helpful AI assistant interested in technology"
 
-# With custom configuration
-HINDSIGHT_API_URL=http://api.example.com hindsight mcp-server
+# Skip automatic personality inference
+hindsight bank background <bank_id> "Background text" --no-update-personality
+```
+
+## Document Management
+
+```bash
+# List documents
+hindsight document list <bank_id>
+
+# Get document details
+hindsight document get <bank_id> <document_id>
+
+# Delete document and its memories
+hindsight document delete <bank_id> <document_id>
+```
+
+## Entity Management
+
+```bash
+# List entities
+hindsight entity list <bank_id>
+
+# Get entity details
+hindsight entity get <bank_id> <entity_id>
+
+# Regenerate entity observations
+hindsight entity regenerate <bank_id> <entity_id>
 ```
 
 ## Output Formats
 
-### Pretty (Default)
-
-Human-readable formatted output:
-
 ```bash
-hindsight search <agent_id> "query"
+# Pretty (default)
+hindsight memory recall <bank_id> "query"
+
+# JSON
+hindsight memory recall <bank_id> "query" -o json
+
+# YAML
+hindsight memory recall <bank_id> "query" -o yaml
 ```
-
-### JSON
-
-Machine-readable JSON output:
-
-```bash
-hindsight search <agent_id> "query" -o json
-```
-
-### YAML
-
-YAML formatted output:
-
-```bash
-hindsight search <agent_id> "query" -o yaml
-```
-
-## Verbose Mode
-
-Add `-v` or `--verbose` for detailed output:
-
-```bash
-hindsight search <agent_id> "query" -v
-```
-
-Shows:
-- Request payload
-- Response details
-- Timing information
 
 ## Global Options
 
 | Flag | Description |
 |------|-------------|
-| `-v, --verbose` | Verbose output |
+| `-v, --verbose` | Show detailed output including request/response |
 | `-o, --output <format>` | Output format: pretty, json, yaml |
-| `--api-url <url>` | Override API URL |
 | `--help` | Show help |
 | `--version` | Show version |
 
-## Examples
+## Interactive Explorer
 
-### Full Workflow
+Launch the TUI explorer for visual navigation:
 
 ```bash
-# Create a memory bank
-curl -X PUT http://localhost:8888/api/memory banks/demo-agent \
-  -H "Content-Type: application/json" \
-  -d '{"background": "Demo agent"}'
+hindsight explore
+```
 
-# Store memories
-hindsight put demo-agent "Alice works at Google"
-hindsight put demo-agent "Bob is a data scientist"
-hindsight put demo-agent "Alice and Bob are colleagues"
+## Example Workflow
 
-# Search
-hindsight search demo-agent "Who works with Alice?"
+```bash
+# Configure API URL
+hindsight configure --api-url http://localhost:8888
 
-# Think (with opinions)
-hindsight think demo-agent "What do you know about the team?"
+# Store some memories
+hindsight memory retain demo "Alice works at Google"
+hindsight memory retain demo "Bob is a data scientist"
+hindsight memory retain demo "Alice and Bob are colleagues"
 
-# Update personality
-hindsight set-personality demo-agent \
-  --openness 0.9 \
-  --conscientiousness 0.7 \
-  --extraversion 0.6 \
-  --agreeableness 0.8 \
-  --neuroticism 0.2 \
-  --bias-strength 0.6
+# Search memories
+hindsight memory recall demo "Who works with Alice?"
 
-# Check profile
-hindsight profile demo-agent
+# Generate a response
+hindsight memory reflect demo "What do you know about the team?"
+
+# Check bank profile
+hindsight bank profile demo
 ```

@@ -159,6 +159,15 @@ RUN pg0 start --help && \
 
 ENV PG0_HOME=/home/hindsight/.pg0
 
+# Pre-download ML models to avoid runtime download
+RUN /app/api/.venv/bin/python -c "\
+from sentence_transformers import SentenceTransformer, CrossEncoder; \
+print('Downloading embedding model...'); \
+SentenceTransformer('BAAI/bge-small-en-v1.5'); \
+print('Downloading cross-encoder model...'); \
+CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
+print('Models cached successfully')"
+
 EXPOSE 8888
 
 ENV HINDSIGHT_API_HOST=0.0.0.0
@@ -281,6 +290,15 @@ RUN pg0 start --help && \
     echo "PostgreSQL pre-cached to $PG0_HOME") || echo "Pre-download skipped"
 
 ENV PG0_HOME=/home/hindsight/.pg0
+
+# Pre-download ML models to avoid runtime download
+RUN /app/api/.venv/bin/python -c "\
+from sentence_transformers import SentenceTransformer, CrossEncoder; \
+print('Downloading embedding model...'); \
+SentenceTransformer('BAAI/bge-small-en-v1.5'); \
+print('Downloading cross-encoder model...'); \
+CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
+print('Models cached successfully')"
 
 EXPOSE 8888 9999
 

@@ -10,49 +10,15 @@ import warnings
 warnings.filterwarnings("ignore", message="websockets.legacy is deprecated")
 warnings.filterwarnings("ignore", message="websockets.server.WebSocketServerProtocol is deprecated")
 
-import asyncio
-import atexit
 import logging
 import os
 import argparse
-import signal
-import sys
 
 from hindsight_api import MemoryEngine
 from hindsight_api.api import create_app
 
 # Disable tokenizers parallelism to avoid warnings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-
-def _cleanup_pg0():
-    """Synchronous cleanup function to stop pg0 on exit."""
-    global _memory
-    if _memory is not None and _memory._pg0 is not None:
-        try:
-            # Run async stop in a new event loop
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(_memory._pg0.stop())
-            loop.close()
-            print("\npg0 stopped.")
-        except Exception as e:
-            print(f"\nError stopping pg0: {e}")
-
-
-# Register cleanup on normal exit
-atexit.register(_cleanup_pg0)
-
-
-def _signal_handler(signum, frame):
-    """Handle SIGINT/SIGTERM to ensure pg0 cleanup."""
-    print(f"\nReceived signal {signum}, shutting down...")
-    _cleanup_pg0()
-    sys.exit(0)
-
-
-# Register signal handlers for graceful shutdown
-signal.signal(signal.SIGINT, _signal_handler)
-signal.signal(signal.SIGTERM, _signal_handler)
 
 
 # Create app at module level (required for uvicorn import string)

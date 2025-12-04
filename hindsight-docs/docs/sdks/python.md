@@ -48,17 +48,17 @@ with HindsightServer(
 ) as server:
     client = HindsightClient(base_url=server.url)
 
-    # Store a memory
-    client.put(agent_id="my-agent", content="Alice works at Google")
+    # Retain a memory
+    client.retain(bank_id="my-agent", content="Alice works at Google")
 
-    # Search memories
-    results = client.search(agent_id="my-agent", query="What does Alice do?")
+    # Recall memories
+    results = client.recall(bank_id="my-agent", query="What does Alice do?")
     for r in results:
-        print(r["text"], r["weight"])
+        print(r.text)
 
-    # Generate response with personality
-    answer = client.think(agent_id="my-agent", query="Tell me about Alice")
-    print(answer["text"])
+    # Reflect - generate response with personality
+    answer = client.reflect(bank_id="my-agent", query="Tell me about Alice")
+    print(answer.text)
 ```
 
 </TabItem>
@@ -69,17 +69,17 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-# Store a memory
-client.put(agent_id="my-agent", content="Alice works at Google")
+# Retain a memory
+client.retain(bank_id="my-agent", content="Alice works at Google")
 
-# Search memories
-results = client.search(agent_id="my-agent", query="What does Alice do?")
+# Recall memories
+results = client.recall(bank_id="my-agent", query="What does Alice do?")
 for r in results:
-    print(r["text"], r["weight"])
+    print(r.text)
 
-# Generate response with personality
-answer = client.think(agent_id="my-agent", query="Tell me about Alice")
-print(answer["text"])
+# Reflect - generate response with personality
+answer = client.reflect(bank_id="my-agent", query="Tell me about Alice")
+print(answer.text)
 ```
 
 </TabItem>
@@ -96,101 +96,112 @@ client = Hindsight(
 )
 ```
 
-## Memory Operations
+## Core Operations
 
-### Store Single Memory
+### Retain (Store Memory)
 
 ```python
-client.store(
-    agent_id="my-agent",
+# Simple
+client.retain(
+    bank_id="my-agent",
     content="Alice works at Google as a software engineer",
-    context="career discussion",           # Optional context
-    event_date="2024-01-15T10:00:00Z",    # Optional event date
+)
+
+# With options
+from datetime import datetime
+
+client.retain(
+    bank_id="my-agent",
+    content="Alice got promoted",
+    context="career update",
+    timestamp=datetime(2024, 1, 15),
+    document_id="conversation_001",
+    metadata={"source": "slack"},
 )
 ```
 
-### Store Batch
+### Retain Batch
 
 ```python
-client.store_batch(
-    agent_id="my-agent",
+client.retain_batch(
+    bank_id="my-agent",
     items=[
         {"content": "Alice works at Google", "context": "career"},
         {"content": "Bob is a data scientist", "context": "career"},
     ],
-    document_id="conversation_001",  # Optional grouping
+    document_id="conversation_001",
+    retain_async=False,  # Set True for background processing
 )
 ```
 
-## Search Operations
-
-### Basic Search
+### Recall (Search)
 
 ```python
-results = client.search(
-    agent_id="my-agent",
+# Simple - returns list of RecallResult
+results = client.recall(
+    bank_id="my-agent",
     query="What does Alice do?",
 )
 
 for r in results:
-    print(f"{r['text']} (weight: {r['weight']})")
-```
+    print(f"{r.text} (type: {r.type})")
 
-### Advanced Search
-
-```python
-results = client.search_memories(
-    agent_id="my-agent",
+# With options
+results = client.recall(
+    bank_id="my-agent",
     query="What does Alice do?",
-    fact_type=["world", "agent"],  # Filter by type
-    max_tokens=4096,               # Token budget for results
-    top_k=10,                      # Max results
+    types=["world", "opinion"],  # Filter by fact type
+    max_tokens=4096,
+    budget="high",  # low, mid, or high
 )
 ```
 
-### Search by Fact Type
+### Recall with Full Response
 
 ```python
-# Search only world facts
-world_facts = client.search_memories(
-    agent_id="my-agent",
-    query="Who works at Google?",
-    fact_type=["world"],
+# Returns RecallResponse with entities and trace info
+response = client.recall_memories(
+    bank_id="my-agent",
+    query="What does Alice do?",
+    types=["world", "bank"],
+    budget="mid",
+    max_tokens=4096,
+    trace=True,
+    include_entities=True,
+    max_entity_tokens=500,
 )
 
-# Search only opinions
-opinions = client.search_memories(
-    agent_id="my-agent",
-    query="What do I think about Python?",
-    fact_type=["opinion"],
-)
+print(f"Found {len(response.results)} memories")
+for r in response.results:
+    print(f"  - {r.text}")
+
+# Access entities
+if response.entities:
+    for entity in response.entities:
+        print(f"Entity: {entity.name}")
 ```
 
-## Think (Generate Response)
-
-Generate personality-aware responses using retrieved memories:
+### Reflect (Generate Response)
 
 ```python
-from hindsight_api.engine.memory_engine import Budget
-
 answer = client.reflect(
     bank_id="my-agent",
     query="What should I know about Alice?",
-    budget=Budget.LOW,  # Budget level for retrieval
+    budget="low",  # low, mid, or high
+    context="preparing for a meeting",
 )
 
-print(answer["text"])           # Generated response
-print(answer["based_on"])       # Memories used
-print(answer["new_opinions"])   # New opinions formed
+print(answer.text)  # Generated response
+print(answer.based_on)  # Memories used
 ```
 
-## Memory bank Management
+## Bank Management
 
-### Create Memory bank
+### Create Bank
 
 ```python
-client.create_agent(
-    agent_id="my-agent",
+client.create_bank(
+    bank_id="my-agent",
     name="Assistant",
     background="I am a helpful AI assistant",
     personality={
@@ -204,69 +215,72 @@ client.create_agent(
 )
 ```
 
-### Get Profile
+### List Memories
 
 ```python
-profile = client.get_profile(agent_id="my-agent")
-print(profile["personality"])
-print(profile["background"])
-```
-
-### List Memory banks
-
-```python
-memory banks = client.list_agents()
-for agent in memory banks:
-    print(agent["agent_id"])
-```
-
-### Update Personality
-
-```python
-client.update_personality(
-    agent_id="my-agent",
-    openness=0.9,
-    conscientiousness=0.7,
+response = client.list_memories(
+    bank_id="my-agent",
+    type="world",  # Optional: filter by type
+    search_query="Alice",  # Optional: text search
+    limit=100,
+    offset=0,
 )
-```
 
-### Update Background
-
-```python
-client.update_background(
-    agent_id="my-agent",
-    background="Additional context to merge with existing background",
-)
-```
-
-## Error Handling
-
-```python
-from hindsight_client import Hindsight, HindsightError
-
-client = Hindsight(base_url="http://localhost:8888")
-
-try:
-    results = client.search(agent_id="unknown", query="test")
-except HindsightError as e:
-    print(f"Error: {e.message}")
-    print(f"Status: {e.status}")
+for memory in response.memories:
+    print(f"{memory.id}: {memory.text}")
 ```
 
 ## Async Support
 
+All methods have async versions prefixed with `a`:
+
 ```python
 import asyncio
-from hindsight_client import AsyncHindsight
+from hindsight_client import Hindsight
 
 async def main():
-    client = AsyncHindsight(base_url="http://localhost:8888")
+    client = Hindsight(base_url="http://localhost:8888")
 
-    # All methods have async versions
-    await client.store(agent_id="my-agent", content="Hello world")
-    results = await client.search(agent_id="my-agent", query="Hello")
+    # Async retain
+    await client.aretain(bank_id="my-agent", content="Hello world")
 
-    print(results)
+    # Async recall
+    results = await client.arecall(bank_id="my-agent", query="Hello")
+    for r in results:
+        print(r.text)
+
+    # Async reflect
+    answer = await client.areflect(bank_id="my-agent", query="What did I say?")
+    print(answer.text)
+
+    client.close()
 
 asyncio.run(main())
+```
+
+## Response Types
+
+The client exports response types for type hints:
+
+```python
+from hindsight_client import (
+    Hindsight,
+    RetainResponse,
+    RecallResponse,
+    RecallResult,
+    ReflectResponse,
+    BankProfileResponse,
+    PersonalityTraits,
+)
+```
+
+## Context Manager
+
+```python
+from hindsight_client import Hindsight
+
+with Hindsight(base_url="http://localhost:8888") as client:
+    client.retain(bank_id="my-agent", content="Hello")
+    results = client.recall(bank_id="my-agent", query="Hello")
+# Client automatically closed
 ```

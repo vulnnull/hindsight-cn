@@ -6,30 +6,35 @@ sidebar_position: 3
 
 Model Context Protocol (MCP) tools exposed by the Hindsight MCP server.
 
+## Endpoint
+
+```
+/mcp/{bank_id}/sse
+```
+
+The `bank_id` is extracted from the URL path and used for all tool operations. The MCP server uses Server-Sent Events (SSE) transport.
+
 ## Available Tools
 
-### hindsight_put
+### retain
 
-Store a new memory for a user.
+Store a new memory.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `bank_id` | string | yes | Unique identifier for the user (e.g., user_id, email) |
 | `content` | string | yes | Memory content to store |
-| `context` | string | yes | Category for the memory (e.g., 'personal_preferences', 'work_history') |
-| `explanation` | string | no | Optional explanation for why this memory is being stored |
+| `context` | string | no | Category for the memory (default: 'general') |
 
 **Example:**
 
 ```json
 {
-  "name": "hindsight_put",
+  "name": "retain",
   "arguments": {
-    "bank_id": "user_12345",
     "content": "User prefers Python for data analysis",
-    "context": "programming_preferences"
+    "context": "preferences"
   }
 }
 ```
@@ -37,31 +42,28 @@ Store a new memory for a user.
 **Response:**
 
 ```
-Fact stored successfully
+Memory stored successfully
 ```
 
 ---
 
-### hindsight_search
+### recall
 
-Search memories for a user.
+Search memories.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `bank_id` | string | yes | Unique identifier for the user (e.g., user_id, email) |
 | `query` | string | yes | Natural language search query |
-| `max_tokens` | integer | no | Maximum tokens for results (default: 4096) |
-| `explanation` | string | no | Optional explanation for why this search is being performed |
+| `max_results` | integer | no | Maximum results to return (default: 10) |
 
 **Example:**
 
 ```json
 {
-  "name": "hindsight_search",
+  "name": "recall",
   "arguments": {
-    "bank_id": "user_12345",
     "query": "What does the user do for work?"
   }
 }
@@ -76,9 +78,8 @@ Search memories for a user.
       "id": "550e8400-e29b-41d4-a716-446655440000",
       "text": "User works at Google as a software engineer",
       "type": "world",
-      "context": "work_history",
-      "event_date": null,
-      "document_id": null
+      "context": "work",
+      "event_date": null
     }
   ]
 }
@@ -88,30 +89,12 @@ Search memories for a user.
 
 ## Usage Guidelines
 
-The MCP tools are designed for **per-user memory**:
-
-- Each user MUST have a unique `bank_id` (user ID, email, session ID, etc.)
-- Memories are isolated by `bank_id` — users cannot access each other's memories
-- Use consistent `bank_id` values across all interactions with the same user
-
-**When to use `hindsight_put`:**
+**When to use `retain`:**
 - User shares personal facts, preferences, or interests
 - Important events or milestones are mentioned
 - Decisions, opinions, or goals are stated
-- Any information the user would want remembered
 
-**When to use `hindsight_search`:**
+**When to use `recall`:**
 - Start of conversation to get user context
 - Before making recommendations
 - To provide continuity across conversations
-- When user asks about something they may have mentioned before
-
----
-
-## Error Responses
-
-MCP tools return errors as strings:
-
-```
-Error: Memory bank 'unknown-bank' not found
-```

@@ -15,133 +15,100 @@ npm install @vectorize-io/hindsight-client
 ## Quick Start
 
 ```typescript
-import { OpenAPI, MemoryStorageService, SearchService } from '@vectorize-io/hindsight-client';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
-// Configure base URL
-OpenAPI.BASE = 'http://localhost:8888';
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-// Store a memory
-await MemoryStorageService.putApiPutPost({
-    agent_id: 'my-agent',
-    content: 'Alice works at Google as a software engineer',
-});
+// Retain a memory
+await client.retain('my-agent', 'Alice works at Google');
 
-// Search memories
-const results = await SearchService.searchApiSearchPost({
-    agent_id: 'my-agent',
-    query: 'What does Alice do?',
-});
-
-console.log(results);
-```
-
-## Configuration
-
-```typescript
-import { OpenAPI } from '@vectorize-io/hindsight-client';
-
-OpenAPI.BASE = 'http://localhost:8888';
-OpenAPI.TOKEN = 'your-api-token';  // If authentication is enabled
-```
-
-## Memory Operations
-
-### Store Memory
-
-```typescript
-import { MemoryStorageService } from '@vectorize-io/hindsight-client';
-
-await MemoryStorageService.putApiPutPost({
-    agent_id: 'my-agent',
-    content: 'Alice works at Google as a software engineer',
-    context: 'career discussion',
-    event_date: '2024-01-15T10:00:00Z',
-});
-```
-
-### Store Batch
-
-```typescript
-await MemoryStorageService.batchApiMemoriesBatchPost({
-    agent_id: 'my-agent',
-    items: [
-        { content: 'Alice works at Google', context: 'career' },
-        { content: 'Bob is a data scientist', context: 'career' },
-    ],
-    document_id: 'conversation_001',
-});
-```
-
-## Search Operations
-
-### Basic Search
-
-```typescript
-import { SearchService } from '@vectorize-io/hindsight-client';
-
-const results = await SearchService.searchApiSearchPost({
-    agent_id: 'my-agent',
-    query: 'What does Alice do?',
-});
-
-for (const r of results.results) {
-    console.log(`${r.text} (weight: ${r.weight})`);
+// Recall memories
+const response = await client.recall('my-agent', 'What does Alice do?');
+for (const r of response.results) {
+    console.log(r.text);
 }
+
+// Reflect - generate response with personality
+const answer = await client.reflect('my-agent', 'Tell me about Alice');
+console.log(answer.text);
 ```
 
-### Advanced Search
+## Client Initialization
 
 ```typescript
-const results = await SearchService.recallApiRecallPost({
-    bank_id: 'my-agent',
-    query: 'What does Alice do?',
+import { HindsightClient } from '@vectorize-io/hindsight-client';
+
+const client = new HindsightClient({
+    baseUrl: 'http://localhost:8888',
+});
+```
+
+## Core Operations
+
+### Retain (Store Memory)
+
+```typescript
+// Simple
+await client.retain('my-agent', 'Alice works at Google');
+
+// With options
+await client.retain('my-agent', 'Alice got promoted', {
+    timestamp: new Date('2024-01-15'),
+    context: 'career update',
+    metadata: { source: 'slack' },
+    async: false,  // Set true for background processing
+});
+```
+
+### Retain Batch
+
+```typescript
+await client.retainBatch('my-agent', [
+    { content: 'Alice works at Google', context: 'career' },
+    { content: 'Bob is a data scientist', context: 'career' },
+], {
+    documentId: 'conversation_001',
+    async: false,
+});
+```
+
+### Recall (Search)
+
+```typescript
+// Simple - returns RecallResponse
+const response = await client.recall('my-agent', 'What does Alice do?');
+
+for (const r of response.results) {
+    console.log(`${r.text} (type: ${r.type})`);
+}
+
+// With options
+const response = await client.recall('my-agent', 'What does Alice do?', {
+    types: ['world', 'opinion'],  // Filter by fact type
+    maxTokens: 4096,
+    budget: 'high',  // 'low', 'mid', or 'high'
+    trace: true,
+});
+```
+
+### Reflect (Generate Response)
+
+```typescript
+const answer = await client.reflect('my-agent', 'What should I know about Alice?', {
     budget: 'low',  // 'low', 'mid', or 'high'
-    top_k: 10,
-});
-```
-
-### Search World Facts
-
-```typescript
-const worldFacts = await SearchService.worldSearchApiWorldSearchPost({
-    agent_id: 'my-agent',
-    query: 'Who works at Google?',
-});
-```
-
-### Search Opinions
-
-```typescript
-const opinions = await SearchService.opinionSearchApiOpinionSearchPost({
-    agent_id: 'my-agent',
-    query: 'What do I think about Python?',
-});
-```
-
-## Reflect (Generate Response)
-
-```typescript
-import { ReasoningService } from '@vectorize-io/hindsight-client';
-
-const response = await ReasoningService.reflectApiReflectPost({
-    bank_id: 'my-agent',
-    query: 'What should I know about Alice?',
-    budget: 'low',  // 'low', 'mid', or 'high'
+    context: 'preparing for a meeting',
 });
 
-console.log(response.text);        // Generated response
-console.log(response.based_on);    // Memories used
-console.log(response.new_opinions); // New opinions formed
+console.log(answer.text);       // Generated response
+console.log(answer.based_on);   // Memories used
 ```
 
-## Memory bank Management
+## Bank Management
 
-### Create Memory bank
+### Create Bank
 
 ```typescript
-import { ManagementService } from '@vectorize-io/hindsight-client';
-
-await ManagementService.createAgentApiAgentsAgentIdPut('my-agent', {
+await client.createBank('my-agent', {
     name: 'Assistant',
     background: 'I am a helpful AI assistant',
     personality: {
@@ -155,55 +122,26 @@ await ManagementService.createAgentApiAgentsAgentIdPut('my-agent', {
 });
 ```
 
-### Get Profile
+### Get Bank Profile
 
 ```typescript
-const profile = await ManagementService.getProfileApiAgentsAgentIdProfileGet('my-agent');
+const profile = await client.getBankProfile('my-agent');
 console.log(profile.personality);
 console.log(profile.background);
 ```
 
-### List Memory banks
+### List Memories
 
 ```typescript
-const memory banks = await ManagementService.listAgentsApiAgentsGet();
-for (const agent of memory banks.memory banks) {
-    console.log(agent.agent_id);
-}
-```
-
-### Update Personality
-
-```typescript
-await ManagementService.updatePersonalityApiAgentsAgentIdProfilePut('my-agent', {
-    openness: 0.9,
-    conscientiousness: 0.7,
+const response = await client.listMemories('my-agent', {
+    type: 'world',  // Optional filter
+    q: 'Alice',     // Optional text search
+    limit: 100,
+    offset: 0,
 });
-```
 
-### Merge Background
-
-```typescript
-await ManagementService.mergeBackgroundApiAgentsAgentIdBackgroundPost('my-agent', {
-    background: 'Additional context to merge',
-});
-```
-
-## Error Handling
-
-```typescript
-import { ApiError } from '@vectorize-io/hindsight-client';
-
-try {
-    await SearchService.searchApiSearchPost({
-        agent_id: 'unknown-agent',
-        query: 'test',
-    });
-} catch (error) {
-    if (error instanceof ApiError) {
-        console.log(`Error: ${error.message}`);
-        console.log(`Status: ${error.status}`);
-    }
+for (const memory of response.memories) {
+    console.log(`${memory.id}: ${memory.text}`);
 }
 ```
 
@@ -213,19 +151,91 @@ The client exports all types for full TypeScript support:
 
 ```typescript
 import type {
-    AgentProfile,
-    SearchResult,
-    ThinkResponse,
-    MemoryItem,
-    PersonalityTraits,
+    RetainResponse,
+    RecallResponse,
+    RecallResult,
+    ReflectResponse,
+    BankProfileResponse,
+    Budget,
 } from '@vectorize-io/hindsight-client';
 
-const personality: PersonalityTraits = {
-    openness: 0.7,
-    conscientiousness: 0.8,
-    extraversion: 0.5,
-    agreeableness: 0.6,
-    neuroticism: 0.3,
-    bias_strength: 0.5,
-};
+// Budget is a union type: 'low' | 'mid' | 'high'
+const budget: Budget = 'mid';
+```
+
+## Advanced: Low-Level SDK
+
+For advanced use cases, access the auto-generated SDK directly:
+
+```typescript
+import { sdk, createClient, createConfig } from '@vectorize-io/hindsight-client';
+
+const client = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
+
+// Use sdk functions directly
+const response = await sdk.recallMemories({
+    client,
+    path: { bank_id: 'my-agent' },
+    body: {
+        query: 'What does Alice do?',
+        budget: 'mid',
+        max_tokens: 4096,
+    },
+});
+```
+
+## Error Handling
+
+```typescript
+import { HindsightClient } from '@vectorize-io/hindsight-client';
+
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
+
+try {
+    const response = await client.recall('unknown-agent', 'test');
+} catch (error) {
+    console.error('Error:', error.message);
+}
+```
+
+## Example: Full Workflow
+
+```typescript
+import { HindsightClient } from '@vectorize-io/hindsight-client';
+
+async function main() {
+    const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
+
+    // Create a bank with personality
+    await client.createBank('demo', {
+        name: 'Demo Agent',
+        background: 'A helpful assistant for demos',
+        personality: {
+            openness: 0.8,
+            conscientiousness: 0.7,
+            extraversion: 0.6,
+            agreeableness: 0.8,
+            neuroticism: 0.2,
+            bias_strength: 0.5,
+        },
+    });
+
+    // Store some memories
+    await client.retain('demo', 'Alice works at Google');
+    await client.retain('demo', 'Bob is a data scientist at Google');
+    await client.retain('demo', 'Alice and Bob collaborate on ML projects');
+
+    // Search for memories
+    const searchResults = await client.recall('demo', 'Who works at Google?');
+    console.log('Search results:');
+    for (const r of searchResults.results) {
+        console.log(`  - ${r.text}`);
+    }
+
+    // Generate a response
+    const answer = await client.reflect('demo', 'What do you know about the team?');
+    console.log('\nReflection:', answer.text);
+}
+
+main().catch(console.error);
 ```

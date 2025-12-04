@@ -8,7 +8,7 @@ Model Context Protocol server for AI assistants like Claude Desktop.
 
 ## Setup
 
-The MCP server is included in the Hindsight API. When running the API with MCP enabled (default), it exposes MCP tools via SSE at `/mcp/sse`.
+The MCP server is included in the Hindsight API. When running the API with MCP enabled, it exposes MCP tools at `/mcp/{bank_id}/sse`.
 
 ### Claude Desktop Configuration
 
@@ -19,42 +19,56 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "hindsight": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8888/mcp/sse"]
+      "args": ["-y", "mcp-remote", "http://localhost:8888/mcp/my-bank-id/sse"]
     }
   }
 }
 ```
 
+Replace `my-bank-id` with your memory bank ID.
+
 ## Available Tools
 
-### hindsight_put
+### retain
 
-Store a memory for a user:
+Store a memory:
 
 ```json
 {
-  "name": "hindsight_put",
+  "name": "retain",
   "arguments": {
-    "bank_id": "user_12345",
     "content": "User prefers Python for data analysis",
-    "context": "programming_preferences"
+    "context": "preferences"
   }
 }
 ```
 
-### hindsight_search
+**Parameters:**
 
-Search memories for a user:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `content` | string | yes | Memory content to store |
+| `context` | string | no | Category (default: 'general') |
+
+### recall
+
+Search memories:
 
 ```json
 {
-  "name": "hindsight_search",
+  "name": "recall",
   "arguments": {
-    "bank_id": "user_12345",
     "query": "What does the user do for work?"
   }
 }
 ```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | yes | Natural language search query |
+| `max_results` | integer | no | Max results (default: 10) |
 
 ## Usage Example
 
@@ -62,7 +76,7 @@ Once configured, Claude can use Hindsight naturally:
 
 **User**: "Remember that I prefer morning meetings"
 
-**Claude**: *Uses hindsight_put*
+**Claude**: *Uses retain*
 
 > "I've noted that you prefer morning meetings."
 
@@ -70,16 +84,6 @@ Once configured, Claude can use Hindsight naturally:
 
 **User**: "What do you know about my preferences?"
 
-**Claude**: *Uses hindsight_search*
+**Claude**: *Uses recall*
 
 > "Based on our conversations, you prefer morning meetings and like Python for data analysis."
-
-## Per-User Memory
-
-The MCP tools require a `bank_id` for each user:
-
-- Each user must have a unique `bank_id` (user ID, email, session ID)
-- Memories are isolated by `bank_id`
-- Use consistent `bank_id` values across interactions
-
-See [MCP API Reference](/api-reference/mcp) for full parameter details.
