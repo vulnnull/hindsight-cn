@@ -34,7 +34,7 @@ interface BankStats {
   total_documents: number;
   nodes_by_fact_type: {
     world?: number;
-    bank?: number;
+    interactions?: number;
     opinion?: number;
   };
   links_by_link_type: {
@@ -417,8 +417,8 @@ export function BankProfileView() {
             <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">{stats.nodes_by_fact_type?.world || 0}</p>
           </div>
           <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4 text-center">
-            <p className="text-xs text-purple-600 dark:text-purple-400 font-semibold uppercase tracking-wide">Bank Facts</p>
-            <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{stats.nodes_by_fact_type?.bank || 0}</p>
+            <p className="text-xs text-purple-600 dark:text-purple-400 font-semibold uppercase tracking-wide">Interactions</p>
+            <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{stats.nodes_by_fact_type?.interactions || 0}</p>
           </div>
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-center">
             <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wide">Opinions</p>

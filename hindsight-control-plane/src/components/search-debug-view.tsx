@@ -18,7 +18,7 @@ import { MemoryDetailPanel } from './memory-detail-panel';
 
 type Phase = 'retrieval' | 'rrf' | 'rerank' | 'final' | 'json';
 type RetrievalMethod = 'semantic' | 'bm25' | 'graph' | 'temporal';
-type FactType = 'world' | 'bank' | 'opinion';
+type FactType = 'world' | 'interactions' | 'opinion';
 
 type Budget = 'low' | 'mid' | 'high';
 
@@ -564,7 +564,7 @@ export function SearchDebugView() {
                   <div>
                     <label className="block text-sm font-bold mb-2 text-accent-foreground">Fact Types:</label>
                     <div className="flex flex-col gap-2">
-                      {(['world', 'bank', 'opinion'] as FactType[]).map((ft) => (
+                      {(['world', 'interactions', 'opinion'] as FactType[]).map((ft) => (
                         <div key={ft} className="flex items-center gap-2">
                           <Checkbox
                             id={`${pane.id}-${ft}`}

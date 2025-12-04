@@ -59,14 +59,14 @@ This means search results include the full context, not disconnected fragments.
 
 ## Two Types of Facts
 
-Hindsight distinguishes between **world** facts (about others) and **memory bank** facts (about the bank itself):
+Hindsight distinguishes between **world** facts (about others) and **interactions** (conversations and events):
 
 | Type            | Description                       | Example |
 |-----------------|-----------------------------------|---------|
 | **world**       | Facts about people, places, things | "Alice works at Google" |
-| **memory bank** | What the bank did or said         | "I recommended Python to Alice" |
+| **interactions** | Conversations and events         | "I recommended Python to Alice" |
 
-This separation is important for `reflect()` — the bank can reason about what it knows versus what it did.
+This separation is important for `reflect()` — the bank can reason about what it knows versus what happened in conversations.
 
 **Note:** Opinions aren't created during `retain()` — only during `reflect()` when the bank forms beliefs.
 

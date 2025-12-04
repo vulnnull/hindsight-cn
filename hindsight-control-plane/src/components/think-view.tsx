@@ -156,7 +156,7 @@ export function ThinkView() {
                   (() => {
                     // Group facts by type
                     const worldFacts = result.based_on.filter((f: any) => f.type === 'world');
-                    const bankFacts = result.based_on.filter((f: any) => f.type === 'bank');
+                    const interactionsFacts = result.based_on.filter((f: any) => f.type === 'interactions');
                     const opinionFacts = result.based_on.filter((f: any) => f.type === 'opinion');
 
                     return (
@@ -184,13 +184,13 @@ export function ThinkView() {
 
                         <Card>
                           <CardHeader className="pb-3">
-                            <CardTitle className="text-base">Bank Facts</CardTitle>
-                            <CardDescription className="text-xs">Identity & Personal Info</CardDescription>
+                            <CardTitle className="text-base">Interactions</CardTitle>
+                            <CardDescription className="text-xs">Conversations & Events</CardDescription>
                           </CardHeader>
                           <CardContent>
-                            {bankFacts.length > 0 ? (
+                            {interactionsFacts.length > 0 ? (
                               <ul className="text-sm space-y-2">
-                                {bankFacts.map((fact: any, i: number) => (
+                                {interactionsFacts.map((fact: any, i: number) => (
                                   <li key={i} className="p-2 bg-muted rounded">
                                     {fact.text}
                                     {fact.context && <div className="text-xs text-muted-foreground mt-1">{fact.context}</div>}

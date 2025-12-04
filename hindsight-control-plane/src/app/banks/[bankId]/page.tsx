@@ -13,7 +13,7 @@ import { BankProfileView } from '@/components/bank-profile-view';
 import { useBank } from '@/lib/bank-context';
 
 type NavItem = 'recall' | 'reflect' | 'data' | 'documents' | 'entities' | 'profile';
-type DataSubTab = 'world' | 'bank' | 'opinion';
+type DataSubTab = 'world' | 'interactions' | 'opinion';
 
 export default function BankPage() {
   const params = useParams();
@@ -106,15 +106,15 @@ export default function BankPage() {
                       )}
                     </button>
                     <button
-                      onClick={() => handleDataSubTabChange('bank')}
+                      onClick={() => handleDataSubTabChange('interactions')}
                       className={`px-6 py-3 font-semibold text-sm transition-all relative ${
-                        subTab === 'bank'
+                        subTab === 'interactions'
                           ? 'text-primary'
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
-                      Bank Facts
-                      {subTab === 'bank' && (
+                      Interactions
+                      {subTab === 'interactions' && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
                     </button>
@@ -136,7 +136,7 @@ export default function BankPage() {
 
                 <div>
                   {subTab === 'world' && <DataView key="world" factType="world" />}
-                  {subTab === 'bank' && <DataView key="bank" factType="bank" />}
+                  {subTab === 'interactions' && <DataView key="interactions" factType="interactions" />}
                   {subTab === 'opinion' && <DataView key="opinion" factType="opinion" />}
                 </div>
               </div>
