@@ -105,6 +105,8 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode with synchronous engine."""
+    from sqlalchemy import event, text
+
     get_database_url()  # Process and set the database URL in config
 
     connectable = engine_from_config(
@@ -113,7 +115,18 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
 
+    # Add event listener to ensure connection is in read-write mode
+    # This is needed for Supabase which may start connections in read-only mode
+    @event.listens_for(connectable, "connect")
+    def set_read_write_mode(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE")
+        cursor.close()
+
     with connectable.connect() as connection:
+        # Also explicitly set read-write mode on this connection
+        connection.execute(text("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE"))
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata
