@@ -27,7 +27,24 @@ You need an LLM API key for fact extraction, entity resolution, and answer gener
 
 **Best for**: Quick start, development, small deployments
 
-Docker Compose bundles all dependencies (PostgreSQL with pgvector, API server, Control Plane) in a single command.
+### Single Container (Quickest)
+
+Run everything in one container with embedded PostgreSQL:
+
+```bash
+docker run -p 8888:8888 -p 9999:9999 \
+  -e HINDSIGHT_API_LLM_PROVIDER=openai \
+  -e HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx \
+  -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
+  ghcr.io/vectorize-io/hindsight
+```
+
+- **API Server**: http://localhost:8888
+- **Control Plane** (Web UI): http://localhost:9999
+
+### Docker Compose
+
+For more control, use Docker Compose which bundles all dependencies separately:
 
 ```bash
 # Clone the repository
@@ -36,19 +53,12 @@ cd hindsight
 
 # Create environment file
 cp .env.example .env
-# Edit .env with your LLM API key:
-# HINDSIGHT_API_LLM_PROVIDER=groq
-# HINDSIGHT_API_LLM_API_KEY=gsk_xxxxxxxxxxxx
+# Edit .env with your LLM API key
 
 # Start all services
 cd docker
 ./start.sh
 ```
-
-**Services started**:
-- **API Server**: http://localhost:8888
-- **Control Plane** (Web UI): http://localhost:3000
-- **Swagger UI**: http://localhost:8888/docs
 
 **Management**:
 ```bash

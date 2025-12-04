@@ -28,7 +28,7 @@ docker run -p 8888:8888 -p 9999:9999 \
   -e HINDSIGHT_API_LLM_PROVIDER=openai \
   -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
   -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
-  vectorize/hindsight
+  ghcr.io/vectorize-io/hindsight
 ```
 
 - **API**: http://localhost:8888

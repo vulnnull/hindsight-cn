@@ -254,10 +254,41 @@ jobs:
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-    - name: Download all artifacts
+    - name: Download Python packages
       uses: actions/download-artifact@v4
       with:
-        path: ./artifacts
+        name: python-packages
+        path: ./artifacts/python-packages
+
+    - name: Download TypeScript client
+      uses: actions/download-artifact@v4
+      with:
+        name: typescript-client
+        path: ./artifacts/typescript-client
+
+    - name: Download Rust CLI (Linux)
+      uses: actions/download-artifact@v4
+      with:
+        name: rust-cli-hindsight-linux-amd64
+        path: ./artifacts/rust-cli-linux
+
+    - name: Download Rust CLI (macOS Intel)
+      uses: actions/download-artifact@v4
+      with:
+        name: rust-cli-hindsight-darwin-amd64
+        path: ./artifacts/rust-cli-darwin-amd64
+
+    - name: Download Rust CLI (macOS ARM)
+      uses: actions/download-artifact@v4
+      with:
+        name: rust-cli-hindsight-darwin-arm64
+        path: ./artifacts/rust-cli-darwin-arm64
+
+    - name: Download Helm chart
+      uses: actions/download-artifact@v4
+      with:
+        name: helm-chart
+        path: ./artifacts/helm-chart
 
     - name: Prepare release assets
       run: |
@@ -269,9 +300,9 @@ jobs:
         # TypeScript client
         cp artifacts/typescript-client/*.tgz release-assets/ || true
         # Rust CLI binaries
-        cp artifacts/rust-cli-hindsight-linux-amd64/hindsight-linux-amd64 release-assets/ || true
-        cp artifacts/rust-cli-hindsight-darwin-amd64/hindsight-darwin-amd64 release-assets/ || true
-        cp artifacts/rust-cli-hindsight-darwin-arm64/hindsight-darwin-arm64 release-assets/ || true
+        cp artifacts/rust-cli-linux/hindsight-linux-amd64 release-assets/ || true
+        cp artifacts/rust-cli-darwin-amd64/hindsight-darwin-amd64 release-assets/ || true
+        cp artifacts/rust-cli-darwin-arm64/hindsight-darwin-arm64 release-assets/ || true
         # Helm chart
         cp artifacts/helm-chart/*.tgz release-assets/ || true
         ls -la release-assets/
