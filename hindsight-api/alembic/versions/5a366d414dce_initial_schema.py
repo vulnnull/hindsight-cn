@@ -24,7 +24,6 @@ def upgrade() -> None:
     """Upgrade schema - create all tables from scratch."""
 
     # Enable required extensions
-    op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
     op.execute('CREATE EXTENSION IF NOT EXISTS vector')
 
     # Create banks table
@@ -57,7 +56,7 @@ def upgrade() -> None:
     # Create async_operations table
     op.create_table(
         'async_operations',
-        sa.Column('operation_id', postgresql.UUID(as_uuid=True), server_default=sa.text('uuid_generate_v4()'), nullable=False),
+        sa.Column('operation_id', postgresql.UUID(as_uuid=True), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('bank_id', sa.Text(), nullable=False),
         sa.Column('operation_type', sa.Text(), nullable=False),
         sa.Column('status', sa.Text(), server_default='pending', nullable=False),
@@ -76,7 +75,7 @@ def upgrade() -> None:
     # Create entities table
     op.create_table(
         'entities',
-        sa.Column('id', postgresql.UUID(as_uuid=True), server_default=sa.text('uuid_generate_v4()'), nullable=False),
+        sa.Column('id', postgresql.UUID(as_uuid=True), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('canonical_name', sa.Text(), nullable=False),
         sa.Column('bank_id', sa.Text(), nullable=False),
         sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
@@ -94,7 +93,7 @@ def upgrade() -> None:
     # Create memory_units table
     op.create_table(
         'memory_units',
-        sa.Column('id', postgresql.UUID(as_uuid=True), server_default=sa.text('uuid_generate_v4()'), nullable=False),
+        sa.Column('id', postgresql.UUID(as_uuid=True), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('bank_id', sa.Text(), nullable=False),
         sa.Column('document_id', sa.Text(), nullable=True),
         sa.Column('text', sa.Text(), nullable=False),

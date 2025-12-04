@@ -59,7 +59,7 @@ class MemoryUnit(Base):
     __tablename__ = "memory_units"
 
     id: Mapped[PyUUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=sql_text("uuid_generate_v4()")
+        UUID(as_uuid=True), primary_key=True, server_default=sql_text("gen_random_uuid()")
     )
     bank_id: Mapped[str] = mapped_column(Text, nullable=False)
     document_id: Mapped[Optional[str]] = mapped_column(Text)
@@ -155,7 +155,7 @@ class Entity(Base):
     __tablename__ = "entities"
 
     id: Mapped[PyUUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=sql_text("uuid_generate_v4()")
+        UUID(as_uuid=True), primary_key=True, server_default=sql_text("gen_random_uuid()")
     )
     canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
     bank_id: Mapped[str] = mapped_column(Text, nullable=False)
