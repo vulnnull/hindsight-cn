@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -20,16 +21,36 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Rename personality column to disposition in banks table (if it exists)."""
-    # Check if 'personality' column exists before renaming
-    # This handles both old databases (with personality) and new databases (with disposition)
     conn = op.get_bind()
+
+    # Check if 'personality' column exists (old database)
     result = conn.execute(sa.text("""
         SELECT column_name
         FROM information_schema.columns
         WHERE table_name = 'banks' AND column_name = 'personality'
     """))
-    if result.fetchone():
+    has_personality = result.fetchone() is not None
+
+    # Check if 'disposition' column exists (new database)
+    result = conn.execute(sa.text("""
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'banks' AND column_name = 'disposition'
+    """))
+    has_disposition = result.fetchone() is not None
+
+    if has_personality and not has_disposition:
+        # Old database: rename personality -> disposition
         op.alter_column('banks', 'personality', new_column_name='disposition')
+    elif not has_personality and not has_disposition:
+        # Neither exists (shouldn't happen, but be safe): add disposition column
+        op.add_column('banks', sa.Column(
+            'disposition',
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'{}'::jsonb"),
+            nullable=False
+        ))
+    # else: disposition already exists, nothing to do
 
 
 def downgrade() -> None:
