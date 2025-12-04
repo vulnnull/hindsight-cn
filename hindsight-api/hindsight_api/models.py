@@ -104,7 +104,7 @@ class MemoryUnit(Base):
             name="memory_units_document_fkey",
             ondelete="CASCADE",
         ),
-        CheckConstraint("fact_type IN ('world', 'bank', 'opinion', 'observation')"),
+        CheckConstraint("fact_type IN ('world', 'interactions', 'opinion', 'observation')"),
         CheckConstraint("confidence_score IS NULL OR (confidence_score >= 0.0 AND confidence_score <= 1.0)"),
         CheckConstraint(
             "(fact_type = 'opinion' AND confidence_score IS NOT NULL) OR "

@@ -529,53 +529,63 @@ async def create_semantic_links_batch(
         raise
 
 
-async def insert_entity_links_batch(conn, links: List[tuple], chunk_size: int = 5000):
+async def insert_entity_links_batch(conn, links: List[tuple], chunk_size: int = 50000):
     """
-    Insert all entity links in bulk using unnest for efficiency.
+    Insert all entity links using COPY to temp table + INSERT for maximum speed.
 
-    Uses PostgreSQL unnest() to insert many rows in a single query,
-    which is much faster than executemany over high-latency connections.
+    Uses PostgreSQL COPY (via copy_records_to_table) for bulk loading,
+    then INSERT ... ON CONFLICT from temp table. This is the fastest
+    method for bulk inserts with conflict handling.
 
     Args:
         conn: Database connection
         links: List of tuples (from_unit_id, to_unit_id, link_type, weight, entity_id)
-        chunk_size: Number of rows per batch (default 5000)
+        chunk_size: Number of rows per batch (default 50000)
     """
     if not links:
         return
 
     import uuid as uuid_mod
 
-    # Process in chunks to avoid query size limits
-    for i in range(0, len(links), chunk_size):
-        chunk = links[i:i + chunk_size]
+    # Create temp table for bulk loading
+    await conn.execute("""
+        CREATE TEMP TABLE IF NOT EXISTS _temp_entity_links (
+            from_unit_id uuid,
+            to_unit_id uuid,
+            link_type text,
+            weight float,
+            entity_id uuid
+        ) ON COMMIT DROP
+    """)
 
-        # Separate into arrays for unnest
-        from_ids = []
-        to_ids = []
-        link_types = []
-        weights = []
-        entity_ids = []
+    # Clear any existing data in temp table
+    await conn.execute("TRUNCATE _temp_entity_links")
 
-        for from_id, to_id, link_type, weight, entity_id in chunk:
-            from_ids.append(uuid_mod.UUID(from_id) if isinstance(from_id, str) else from_id)
-            to_ids.append(uuid_mod.UUID(to_id) if isinstance(to_id, str) else to_id)
-            link_types.append(link_type)
-            weights.append(weight)
-            entity_ids.append(
-                uuid_mod.UUID(str(entity_id)) if entity_id and not isinstance(entity_id, uuid_mod.UUID)
-                else entity_id
-            )
+    # Convert links to proper format for COPY
+    records = []
+    for from_id, to_id, link_type, weight, entity_id in links:
+        records.append((
+            uuid_mod.UUID(from_id) if isinstance(from_id, str) else from_id,
+            uuid_mod.UUID(to_id) if isinstance(to_id, str) else to_id,
+            link_type,
+            weight,
+            uuid_mod.UUID(str(entity_id)) if entity_id and not isinstance(entity_id, uuid_mod.UUID) else entity_id
+        ))
 
-        # Use unnest to insert all rows in one query
-        await conn.execute(
-            """
-            INSERT INTO memory_links (from_unit_id, to_unit_id, link_type, weight, entity_id)
-            SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::float[], $5::uuid[])
-            ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
-            """,
-            from_ids, to_ids, link_types, weights, entity_ids
-        )
+    # Bulk load using COPY (fastest method)
+    await conn.copy_records_to_table(
+        '_temp_entity_links',
+        records=records,
+        columns=['from_unit_id', 'to_unit_id', 'link_type', 'weight', 'entity_id']
+    )
+
+    # Insert from temp table with ON CONFLICT (single query for all rows)
+    await conn.execute("""
+        INSERT INTO memory_links (from_unit_id, to_unit_id, link_type, weight, entity_id)
+        SELECT from_unit_id, to_unit_id, link_type, weight, entity_id
+        FROM _temp_entity_links
+        ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
+    """)
 
 
 async def create_causal_links_batch(

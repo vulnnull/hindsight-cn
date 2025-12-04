@@ -676,7 +676,7 @@ class MemoryEngine:
             context: Context about when/why this memory was formed
             event_date: When the event occurred (defaults to now)
             document_id: Optional document ID for tracking (always upserts if document already exists)
-            fact_type_override: Override fact type ('world', 'bank', 'opinion')
+            fact_type_override: Override fact type ('world', 'interactions', 'opinion')
             confidence_score: Confidence score for opinions (0.0 to 1.0)
 
         Returns:
@@ -728,7 +728,7 @@ class MemoryEngine:
                 - "document_id" (optional): Document ID for this specific content item
             document_id: **DEPRECATED** - Use "document_id" key in each content dict instead.
                         Applies the same document_id to ALL content items that don't specify their own.
-            fact_type_override: Override fact type for all facts ('world', 'bank', 'opinion')
+            fact_type_override: Override fact type for all facts ('world', 'interactions', 'opinion')
             confidence_score: Confidence score for opinions (0.0 to 1.0)
 
         Returns:
@@ -936,7 +936,7 @@ class MemoryEngine:
         Args:
             bank_id: bank ID to recall for
             query: Recall query
-            fact_type: List of fact types to recall (e.g., ['world', 'bank'])
+            fact_type: List of fact types to recall (e.g., ['world', 'interactions'])
             budget: Budget level for graph traversal (low=100, mid=300, high=600 units)
             max_tokens: Maximum tokens to return (counts only 'text' field, default 4096)
                        Results are returned until token budget is reached, stopping before
@@ -2597,7 +2597,7 @@ Guidelines:
         logger.info(f"[THINK] Search returned {len(all_results)} results")
 
         # Split results by fact type for structured response
-        agent_results = [r for r in all_results if r.fact_type == 'bank']
+        agent_results = [r for r in all_results if r.fact_type == 'interactions']
         world_results = [r for r in all_results if r.fact_type == 'world']
         opinion_results = [r for r in all_results if r.fact_type == 'opinion']
 

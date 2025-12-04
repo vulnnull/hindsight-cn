@@ -61,7 +61,7 @@ class MemoryFact(BaseModel):
 
     id: str = Field(description="Unique identifier for the memory fact")
     text: str = Field(description="The actual text content of the memory")
-    fact_type: str = Field(description="Type of fact: 'world', 'bank', 'opinion', or 'observation'")
+    fact_type: str = Field(description="Type of fact: 'world', 'interactions', 'opinion', or 'observation'")
     entities: Optional[List[str]] = Field(None, description="Entity names mentioned in this fact")
     context: Optional[str] = Field(None, description="Additional context for the memory")
     occurred_start: Optional[str] = Field(None, description="ISO format date when the event started occurring")

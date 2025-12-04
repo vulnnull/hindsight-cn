@@ -84,7 +84,7 @@ class RecallRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "query": "What did Alice say about machine learning?",
-            "types": ["world", "bank"],
+            "types": ["world", "interactions"],
             "budget": "mid",
             "max_tokens": 4096,
             "trace": True,
@@ -417,7 +417,7 @@ class ReflectResponse(BaseModel):
                 {
                     "id": "456",
                     "text": "I discussed AI applications last week",
-                    "type": "bank"
+                    "type": "interactions"
                 }
             ]
         }
@@ -901,7 +901,7 @@ def _register_routes(app: FastAPI):
 
     The type parameter is optional and must be one of:
     - 'world': General knowledge about people, places, events, and things that happen
-    - 'bank': Memories about what the AI agent did, actions taken, and tasks performed
+    - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed
     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints
 
     Set include_entities=true to get entity observations alongside recall results.
@@ -914,10 +914,10 @@ def _register_routes(app: FastAPI):
 
         try:
             # Validate types
-            valid_fact_types = ["world", "bank", "opinion"]
+            valid_fact_types = ["world", "interactions", "opinion"]
 
-            # Default to world, agent, opinion if not specified (exclude observation by default)
-            fact_types = request.types if request.types else ["world", "bank", "opinion"]
+            # Default to world, interactions, opinion if not specified (exclude observation by default)
+            fact_types = request.types if request.types else ["world", "interactions", "opinion"]
             for ft in fact_types:
                 if ft not in valid_fact_types:
                     raise HTTPException(

@@ -50,7 +50,7 @@ class Fact(BaseModel):
     """
     # Required fields
     fact: str = Field(description="Combined fact text: what | when | where | who | why")
-    fact_type: Literal["world", "bank", "opinion"] = Field(description="Perspective: world/bank/opinion")
+    fact_type: Literal["world", "interactions", "opinion"] = Field(description="Perspective: world/interactions/opinion")
 
     # Optional temporal fields
     occurred_start: Optional[str] = None
@@ -581,20 +581,20 @@ Text:
                     continue
 
                 # Critical field: fact_type
-                # LLM uses "assistant" but we convert to "bank" for storage
+                # LLM uses "assistant" but we convert to "interactions" for storage
                 fact_type = llm_fact.get('fact_type')
 
-                # Convert "assistant" → "bank" for storage
+                # Convert "assistant" → "interactions" for storage
                 if fact_type == 'assistant':
-                    fact_type = 'bank'
+                    fact_type = 'interactions'
 
                 # Validate fact_type (after conversion)
-                if fact_type not in ['world', 'bank', 'opinion']:
+                if fact_type not in ['world', 'interactions', 'opinion']:
                     # Try to fix common mistakes - check if they swapped fact_type and fact_kind
                     fact_kind = llm_fact.get('fact_kind')
                     if fact_kind == 'assistant':
-                        fact_type = 'bank'
-                    elif fact_kind in ['world', 'bank', 'opinion']:
+                        fact_type = 'interactions'
+                    elif fact_kind in ['world', 'interactions', 'opinion']:
                         fact_type = fact_kind
                     else:
                         # Default to 'world' if we can't determine
