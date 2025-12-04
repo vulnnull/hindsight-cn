@@ -13,7 +13,6 @@
   "license": "ISC",
   "description": "Control plane for Hindsight - Semantic memory system",
   "dependencies": {
-    "@vectorize-io/hindsight-client": "file:../hindsight-clients/typescript",
     "@radix-ui/react-checkbox": "^1.3.3",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-label": "^2.1.8",
@@ -25,6 +24,7 @@
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@vectorize-io/hindsight-client": "file:../hindsight-clients/typescript",
     "autoprefixer": "^10.4.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -40,6 +40,7 @@
     "react-cytoscape": "^1.0.6",
     "react-dom": "^19.2.0",
     "react18-json-view": "^0.2.9",
+    "recharts": "^3.5.1",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.17",
     "tailwindcss-animate": "^1.0.7",

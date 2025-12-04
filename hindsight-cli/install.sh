@@ -4,7 +4,7 @@ set -e
 # Hindsight CLI installer
 # Usage: curl -sSf https://your-domain.com/install.sh | sh
 
-REPO_URL="https://github.com/your-org/hindsight-cli"
+REPO_URL="https://github.com/vectorize-io/hindsight"
 INSTALL_DIR="${HINDSIGHT_INSTALL_DIR:-$HOME/.local/bin}"
 BINARY_NAME="hindsight"
 
@@ -47,9 +47,9 @@ detect_platform() {
     case "$os" in
         Darwin)
             if [[ "$arch" == "arm64" ]] || [[ "$arch" == "aarch64" ]]; then
-                echo "macos-arm64"
+                echo "darwin-arm64"
             elif [[ "$arch" == "x86_64" ]]; then
-                echo "macos-x86_64"
+                echo "darwin-amd64"
             else
                 print_error "Unsupported macOS architecture: $arch"
                 exit 1
@@ -57,7 +57,7 @@ detect_platform() {
             ;;
         Linux)
             if [[ "$arch" == "x86_64" ]]; then
-                echo "linux-x86_64"
+                echo "linux-amd64"
             elif [[ "$arch" == "aarch64" ]] || [[ "$arch" == "arm64" ]]; then
                 echo "linux-arm64"
             else
@@ -78,14 +78,14 @@ download_binary() {
     local download_url="${REPO_URL}/releases/latest/download/hindsight-${platform}"
     local tmp_file="/tmp/hindsight-$$"
 
-    print_info "Downloading Hindsight CLI for $platform..."
+    print_info "Downloading Hindsight CLI for $platform..." >&2
 
     if command -v curl > /dev/null 2>&1; then
         curl -fsSL "$download_url" -o "$tmp_file"
     elif command -v wget > /dev/null 2>&1; then
         wget -q "$download_url" -O "$tmp_file"
     else
-        print_error "Neither curl nor wget found. Please install one of them."
+        print_error "Neither curl nor wget found. Please install one of them." >&2
         exit 1
     fi
 

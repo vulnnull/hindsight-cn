@@ -6,13 +6,11 @@ sidebar_position: 4
 
 Model Context Protocol server for AI assistants like Claude Desktop.
 
-## Installation
+## Setup
 
-```bash
-cd hindsight-cli && cargo build --release
-```
+The MCP server is included in the Hindsight API. When running the API with MCP enabled (default), it exposes MCP tools via SSE at `/mcp/sse`.
 
-## Claude Desktop Setup
+### Claude Desktop Configuration
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -20,75 +18,41 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "hindsight": {
-      "command": "/path/to/hindsight",
-      "args": ["mcp-server"],
-      "env": {
-        "HINDSIGHT_API_URL": "http://localhost:8888",
-        "HINDSIGHT_AGENT_ID": "claude-agent"
-      }
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8888/mcp/sse"]
     }
   }
 }
 ```
 
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `HINDSIGHT_API_URL` | Hindsight API URL | `http://localhost:8888` |
-| `HINDSIGHT_AGENT_ID` | Default bank ID | Required |
-
 ## Available Tools
+
+### hindsight_put
+
+Store a memory for a user:
+
+```json
+{
+  "name": "hindsight_put",
+  "arguments": {
+    "bank_id": "user_12345",
+    "content": "User prefers Python for data analysis",
+    "context": "programming_preferences"
+  }
+}
+```
 
 ### hindsight_search
 
-Search memories:
+Search memories for a user:
 
 ```json
 {
   "name": "hindsight_search",
   "arguments": {
-    "query": "What does Alice do for work?",
-    "top_k": 5
+    "bank_id": "user_12345",
+    "query": "What does the user do for work?"
   }
-}
-```
-
-### hindsight_think
-
-Generate response using memories:
-
-```json
-{
-  "name": "hindsight_think",
-  "arguments": {
-    "query": "What should I recommend to Alice?"
-  }
-}
-```
-
-### hindsight_store
-
-Store new memory:
-
-```json
-{
-  "name": "hindsight_store",
-  "arguments": {
-    "content": "User prefers Python for data analysis",
-    "context": "programming discussion"
-  }
-}
-```
-
-### hindsight_agents
-
-List available memory banks:
-
-```json
-{
-  "name": "hindsight_agents",
-  "arguments": {}
 }
 ```
 
@@ -98,7 +62,7 @@ Once configured, Claude can use Hindsight naturally:
 
 **User**: "Remember that I prefer morning meetings"
 
-**Claude**: *Uses hindsight_store*
+**Claude**: *Uses hindsight_put*
 
 > "I've noted that you prefer morning meetings."
 
@@ -110,16 +74,12 @@ Once configured, Claude can use Hindsight naturally:
 
 > "Based on our conversations, you prefer morning meetings and like Python for data analysis."
 
-## Testing
+## Per-User Memory
 
-Run standalone:
+The MCP tools require a `bank_id` for each user:
 
-```bash
-hindsight mcp-server
-```
+- Each user must have a unique `bank_id` (user ID, email, session ID)
+- Memories are isolated by `bank_id`
+- Use consistent `bank_id` values across interactions
 
-Debug mode:
-
-```bash
-RUST_LOG=debug hindsight mcp-server
-```
+See [MCP API Reference](/api-reference/mcp) for full parameter details.

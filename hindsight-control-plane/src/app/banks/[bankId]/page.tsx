@@ -9,11 +9,10 @@ import { DocumentsView } from '@/components/documents-view';
 import { EntitiesView } from '@/components/entities-view';
 import { ThinkView } from '@/components/think-view';
 import { SearchDebugView } from '@/components/search-debug-view';
-import { StatsView } from '@/components/stats-view';
 import { BankProfileView } from '@/components/bank-profile-view';
 import { useBank } from '@/lib/bank-context';
 
-type NavItem = 'recall' | 'reflect' | 'data' | 'documents' | 'entities' | 'profile' | 'stats';
+type NavItem = 'recall' | 'reflect' | 'data' | 'documents' | 'entities' | 'profile';
 type DataSubTab = 'world' | 'bank' | 'opinion';
 
 export default function BankPage() {
@@ -23,7 +22,7 @@ export default function BankPage() {
   const { currentBank, setCurrentBank } = useBank();
 
   const bankId = params.bankId as string;
-  const view = (searchParams.get('view') || 'data') as NavItem;
+  const view = (searchParams.get('view') || 'profile') as NavItem;
   const subTab = (searchParams.get('subTab') || 'world') as DataSubTab;
 
   // Sync URL bank with context
@@ -162,17 +161,6 @@ export default function BankPage() {
                   Explore entities (people, organizations, places) mentioned in memories.
                 </p>
                 <EntitiesView />
-              </div>
-            )}
-
-            {/* Stats Tab (Stats & Operations) */}
-            {view === 'stats' && (
-              <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">Statistics & Operations</h1>
-                <p className="text-muted-foreground mb-6">
-                  View detailed statistics and async operations for this memory bank.
-                </p>
-                <StatsView />
               </div>
             )}
           </div>

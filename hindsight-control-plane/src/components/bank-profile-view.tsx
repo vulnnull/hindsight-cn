@@ -7,7 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { RefreshCw, Save, User, Brain, FileText, Clock } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { RefreshCw, Save, User, Brain, FileText, Clock, AlertCircle, CheckCircle, Database, Link2, FolderOpen, Activity } from 'lucide-react';
+import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface PersonalityTraits {
   openness: number;
@@ -44,81 +46,155 @@ interface BankStats {
   failed_operations: number;
 }
 
-const TRAIT_LABELS: Record<keyof PersonalityTraits, { label: string; description: string; lowLabel: string; highLabel: string }> = {
+interface Operation {
+  id: string;
+  task_type: string;
+  items_count: number;
+  document_id?: string;
+  created_at: string;
+  status: string;
+  error_message?: string;
+}
+
+const TRAIT_LABELS: Record<keyof PersonalityTraits, { label: string; shortLabel: string; description: string; lowLabel: string; highLabel: string }> = {
   openness: {
     label: 'Openness',
+    shortLabel: 'O',
     description: 'Openness to experience - curiosity, creativity, and willingness to try new things',
     lowLabel: 'Practical',
     highLabel: 'Creative'
   },
   conscientiousness: {
     label: 'Conscientiousness',
+    shortLabel: 'C',
     description: 'Organization, dependability, and self-discipline',
     lowLabel: 'Flexible',
     highLabel: 'Organized'
   },
   extraversion: {
     label: 'Extraversion',
+    shortLabel: 'E',
     description: 'Sociability, assertiveness, and positive emotions',
     lowLabel: 'Reserved',
     highLabel: 'Outgoing'
   },
   agreeableness: {
     label: 'Agreeableness',
+    shortLabel: 'A',
     description: 'Cooperation, trust, and altruism',
     lowLabel: 'Skeptical',
     highLabel: 'Trusting'
   },
   neuroticism: {
     label: 'Neuroticism',
+    shortLabel: 'N',
     description: 'Emotional instability and tendency toward negative emotions',
     lowLabel: 'Calm',
     highLabel: 'Sensitive'
   },
   bias_strength: {
-    label: 'Personality Influence',
+    label: 'Influence',
+    shortLabel: 'I',
     description: 'How strongly personality traits influence opinions and responses',
     lowLabel: 'Neutral',
     highLabel: 'Strong'
   }
 };
 
-function PersonalitySlider({
-  trait,
-  value,
-  onChange,
-  disabled
-}: {
-  trait: keyof PersonalityTraits;
-  value: number;
-  onChange: (value: number) => void;
-  disabled?: boolean;
+function PersonalityRadarChart({ personality, editMode, editPersonality, onEditChange }: {
+  personality: PersonalityTraits;
+  editMode: boolean;
+  editPersonality: PersonalityTraits;
+  onEditChange: (trait: keyof PersonalityTraits, value: number) => void;
 }) {
-  const info = TRAIT_LABELS[trait];
-  const percentage = Math.round(value * 100);
+  const data = editMode ? editPersonality : personality;
+
+  const chartData = [
+    { trait: 'Openness', value: Math.round(data.openness * 100), fullMark: 100 },
+    { trait: 'Conscientiousness', value: Math.round(data.conscientiousness * 100), fullMark: 100 },
+    { trait: 'Extraversion', value: Math.round(data.extraversion * 100), fullMark: 100 },
+    { trait: 'Agreeableness', value: Math.round(data.agreeableness * 100), fullMark: 100 },
+    { trait: 'Neuroticism', value: Math.round(data.neuroticism * 100), fullMark: 100 },
+  ];
 
   return (
-    <div className="space-y-2">
-      <div className="flex justify-between items-center">
-        <label className="text-sm font-medium text-foreground">{info.label}</label>
-        <span className="text-sm text-muted-foreground">{percentage}%</span>
+    <div className="space-y-4">
+      <div className="h-[280px] w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <RadarChart cx="50%" cy="50%" outerRadius="70%" data={chartData}>
+            <PolarGrid stroke="hsl(var(--border))" />
+            <PolarAngleAxis
+              dataKey="trait"
+              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+            />
+            <PolarRadiusAxis
+              angle={90}
+              domain={[0, 100]}
+              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
+              tickCount={5}
+            />
+            <Radar
+              name="Personality"
+              dataKey="value"
+              stroke="hsl(var(--primary))"
+              fill="hsl(var(--primary))"
+              fillOpacity={0.3}
+              strokeWidth={2}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: 'hsl(var(--card))',
+                border: '1px solid hsl(var(--border))',
+                borderRadius: '8px',
+                color: 'hsl(var(--foreground))'
+              }}
+              formatter={(value: number) => [`${value}%`, 'Score']}
+            />
+          </RadarChart>
+        </ResponsiveContainer>
       </div>
-      <div className="relative">
-        <input
-          type="range"
-          min="0"
-          max="100"
-          value={percentage}
-          onChange={(e) => onChange(parseInt(e.target.value) / 100)}
-          disabled={disabled}
-          className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary disabled:opacity-50 disabled:cursor-not-allowed"
-        />
-        <div className="flex justify-between text-xs text-muted-foreground mt-1">
-          <span>{info.lowLabel}</span>
-          <span>{info.highLabel}</span>
+
+      {editMode && (
+        <div className="grid grid-cols-2 gap-3">
+          {(Object.keys(TRAIT_LABELS) as Array<keyof PersonalityTraits>).filter(t => t !== 'bias_strength').map((trait) => (
+            <div key={trait} className="space-y-1">
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-medium text-muted-foreground">{TRAIT_LABELS[trait].label}</label>
+                <span className="text-xs text-primary font-semibold">{Math.round(editPersonality[trait] * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={Math.round(editPersonality[trait] * 100)}
+                onChange={(e) => onEditChange(trait, parseInt(e.target.value) / 100)}
+                className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+              />
+            </div>
+          ))}
         </div>
+      )}
+
+      {/* Influence Strength - always shown */}
+      <div className="pt-3 border-t border-border">
+        <div className="flex justify-between items-center mb-2">
+          <div>
+            <label className="text-sm font-medium text-foreground">Personality Influence</label>
+            <p className="text-xs text-muted-foreground">How strongly traits affect responses</p>
+          </div>
+          <span className="text-sm font-bold text-primary">{Math.round(data.bias_strength * 100)}%</span>
+        </div>
+        {editMode && (
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={Math.round(editPersonality.bias_strength * 100)}
+            onChange={(e) => onEditChange('bias_strength', parseInt(e.target.value) / 100)}
+            className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+          />
+        )}
       </div>
-      <p className="text-xs text-muted-foreground">{info.description}</p>
     </div>
   );
 }
@@ -127,6 +203,7 @@ export function BankProfileView() {
   const { currentBank } = useBank();
   const [profile, setProfile] = useState<BankProfile | null>(null);
   const [stats, setStats] = useState<BankStats | null>(null);
+  const [operations, setOperations] = useState<Operation[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -148,12 +225,14 @@ export function BankProfileView() {
 
     setLoading(true);
     try {
-      const [profileData, statsData] = await Promise.all([
+      const [profileData, statsData, opsData] = await Promise.all([
         client.getBankProfile(currentBank),
-        client.getBankStats(currentBank)
+        client.getBankStats(currentBank),
+        client.listOperations(currentBank)
       ]);
       setProfile(profileData);
       setStats(statsData as BankStats);
+      setOperations((opsData as any)?.operations || []);
 
       // Initialize edit state
       setEditName(profileData.name);
@@ -199,6 +278,9 @@ export function BankProfileView() {
   useEffect(() => {
     if (currentBank) {
       loadData();
+      // Refresh operations every 5 seconds
+      const interval = setInterval(loadData, 5000);
+      return () => clearInterval(interval);
     }
   }, [currentBank]);
 
@@ -230,22 +312,15 @@ export function BankProfileView() {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-foreground">{profile?.name || currentBank}</h2>
-          <p className="text-sm text-muted-foreground">Bank ID: {currentBank}</p>
+          <p className="text-sm text-muted-foreground font-mono">{currentBank}</p>
         </div>
         <div className="flex gap-2">
           {editMode ? (
             <>
-              <Button
-                onClick={handleCancel}
-                variant="outline"
-                disabled={saving}
-              >
+              <Button onClick={handleCancel} variant="outline" disabled={saving}>
                 Cancel
               </Button>
-              <Button
-                onClick={handleSave}
-                disabled={saving}
-              >
+              <Button onClick={handleSave} disabled={saving}>
                 {saving ? (
                   <>
                     <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
@@ -261,18 +336,11 @@ export function BankProfileView() {
             </>
           ) : (
             <>
-              <Button
-                onClick={loadData}
-                variant="outline"
-                size="sm"
-              >
+              <Button onClick={loadData} variant="outline" size="sm">
                 <RefreshCw className="w-4 h-4 mr-2" />
                 Refresh
               </Button>
-              <Button
-                onClick={() => setEditMode(true)}
-                size="sm"
-              >
+              <Button onClick={() => setEditMode(true)} size="sm">
                 Edit Profile
               </Button>
             </>
@@ -280,133 +348,245 @@ export function BankProfileView() {
         </div>
       </div>
 
-      {/* Stats Overview */}
+      {/* Stats Overview - Compact cards */}
       {stats && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Brain className="w-5 h-5" />
-              Memory Overview
-            </CardTitle>
-            <CardDescription>Summary of stored memories and connections</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center">
-                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-1">Total Memories</div>
-                <div className="text-2xl font-bold text-foreground">{stats.total_nodes}</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-blue-500/20">
+                  <Database className="w-5 h-5 text-blue-500" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Memories</p>
+                  <p className="text-2xl font-bold text-foreground">{stats.total_nodes}</p>
+                </div>
               </div>
-              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center">
-                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-1">Total Links</div>
-                <div className="text-2xl font-bold text-foreground">{stats.total_links}</div>
-              </div>
-              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center">
-                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-1">Documents</div>
-                <div className="text-2xl font-bold text-foreground">{stats.total_documents}</div>
-              </div>
-              <div className="bg-muted/50 border border-border rounded-lg p-4 text-center">
-                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-1">Pending Ops</div>
-                <div className="text-2xl font-bold text-foreground">{stats.pending_operations}</div>
-              </div>
-            </div>
+            </CardContent>
+          </Card>
 
-            {/* Memory Type Breakdown */}
-            <div className="mt-4 grid grid-cols-3 gap-4">
-              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-center">
-                <div className="text-xs text-blue-600 dark:text-blue-400 font-semibold uppercase tracking-wide mb-1">World Facts</div>
-                <div className="text-xl font-bold text-blue-700 dark:text-blue-300">{stats.nodes_by_fact_type?.world || 0}</div>
+          <Card className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border-purple-500/20">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-purple-500/20">
+                  <Link2 className="w-5 h-5 text-purple-500" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Links</p>
+                  <p className="text-2xl font-bold text-foreground">{stats.total_links}</p>
+                </div>
               </div>
-              <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg p-3 text-center">
-                <div className="text-xs text-purple-600 dark:text-purple-400 font-semibold uppercase tracking-wide mb-1">Bank Facts</div>
-                <div className="text-xl font-bold text-purple-700 dark:text-purple-300">{stats.nodes_by_fact_type?.bank || 0}</div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border-emerald-500/20">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-emerald-500/20">
+                  <FolderOpen className="w-5 h-5 text-emerald-500" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Documents</p>
+                  <p className="text-2xl font-bold text-foreground">{stats.total_documents}</p>
+                </div>
               </div>
-              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-center">
-                <div className="text-xs text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wide mb-1">Opinions</div>
-                <div className="text-xl font-bold text-amber-700 dark:text-amber-300">{stats.nodes_by_fact_type?.opinion || 0}</div>
+            </CardContent>
+          </Card>
+
+          <Card className={`bg-gradient-to-br ${stats.pending_operations > 0 ? 'from-amber-500/10 to-amber-600/5 border-amber-500/20' : 'from-slate-500/10 to-slate-600/5 border-slate-500/20'}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${stats.pending_operations > 0 ? 'bg-amber-500/20' : 'bg-slate-500/20'}`}>
+                  <Activity className={`w-5 h-5 ${stats.pending_operations > 0 ? 'text-amber-500 animate-pulse' : 'text-slate-500'}`} />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Pending</p>
+                  <p className="text-2xl font-bold text-foreground">{stats.pending_operations}</p>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Memory Type Breakdown */}
+      {stats && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-center">
+            <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold uppercase tracking-wide">World Facts</p>
+            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">{stats.nodes_by_fact_type?.world || 0}</p>
+          </div>
+          <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4 text-center">
+            <p className="text-xs text-purple-600 dark:text-purple-400 font-semibold uppercase tracking-wide">Bank Facts</p>
+            <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{stats.nodes_by_fact_type?.bank || 0}</p>
+          </div>
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-center">
+            <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wide">Opinions</p>
+            <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{stats.nodes_by_fact_type?.opinion || 0}</p>
+          </div>
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Basic Info */}
+        {/* Personality Chart */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="w-5 h-5" />
-              Basic Information
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Brain className="w-5 h-5 text-primary" />
+              Personality Profile
             </CardTitle>
-            <CardDescription>Name and identity for this memory bank</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-foreground">Display Name</label>
-              {editMode ? (
-                <Input
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder="Enter a name for this bank"
-                  className="mt-1"
-                />
-              ) : (
-                <p className="mt-1 text-foreground">{profile?.name || 'Unnamed'}</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Background */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="w-5 h-5" />
-              Background
-            </CardTitle>
-            <CardDescription>Context and background information for this memory bank</CardDescription>
+            <CardDescription>Big Five personality traits that influence responses</CardDescription>
           </CardHeader>
           <CardContent>
-            {editMode ? (
-              <Textarea
-                value={editBackground}
-                onChange={(e) => setEditBackground(e.target.value)}
-                placeholder="Enter background information..."
-                rows={6}
-                className="resize-none"
+            {profile && (
+              <PersonalityRadarChart
+                personality={profile.personality}
+                editMode={editMode}
+                editPersonality={editPersonality}
+                onEditChange={(trait, value) => setEditPersonality(prev => ({ ...prev, [trait]: value }))}
               />
-            ) : (
-              <p className="text-foreground whitespace-pre-wrap">
-                {profile?.background || 'No background information provided.'}
-              </p>
             )}
           </CardContent>
         </Card>
+
+        {/* Basic Info & Background */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <User className="w-5 h-5 text-primary" />
+                Identity
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Display Name</label>
+                {editMode ? (
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Enter a name for this bank"
+                    className="mt-1"
+                  />
+                ) : (
+                  <p className="mt-1 text-lg font-medium text-foreground">{profile?.name || 'Unnamed'}</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <FileText className="w-5 h-5 text-primary" />
+                Background
+              </CardTitle>
+              <CardDescription>Context that shapes how memories are interpreted</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {editMode ? (
+                <Textarea
+                  value={editBackground}
+                  onChange={(e) => setEditBackground(e.target.value)}
+                  placeholder="Enter background information..."
+                  rows={5}
+                  className="resize-none"
+                />
+              ) : (
+                <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+                  {profile?.background || 'No background information provided.'}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      {/* Personality Traits */}
+      {/* Operations Section */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Brain className="w-5 h-5" />
-            Personality Traits (Big Five)
-          </CardTitle>
-          <CardDescription>
-            These traits influence how the memory bank interprets and responds to information.
-            Based on the Big Five personality model.
-          </CardDescription>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Activity className="w-5 h-5 text-primary" />
+                Background Operations
+              </CardTitle>
+              <CardDescription>Async tasks processing memories</CardDescription>
+            </div>
+            {stats && (stats.pending_operations > 0 || stats.failed_operations > 0) && (
+              <div className="flex gap-3">
+                {stats.pending_operations > 0 && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
+                    <Clock className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">{stats.pending_operations} pending</span>
+                  </div>
+                )}
+                {stats.failed_operations > 0 && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/20">
+                    <AlertCircle className="w-3.5 h-3.5 text-red-500" />
+                    <span className="text-xs font-semibold text-red-600 dark:text-red-400">{stats.failed_operations} failed</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {(Object.keys(TRAIT_LABELS) as Array<keyof PersonalityTraits>).map((trait) => (
-              <PersonalitySlider
-                key={trait}
-                trait={trait}
-                value={editMode ? editPersonality[trait] : (profile?.personality[trait] || 0.5)}
-                onChange={(value) => setEditPersonality(prev => ({ ...prev, [trait]: value }))}
-                disabled={!editMode}
-              />
-            ))}
-          </div>
+          {operations.length > 0 ? (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[100px]">ID</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-center">Items</TableHead>
+                    <TableHead>Document</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {operations.slice(0, 10).map((op) => (
+                    <TableRow key={op.id} className={op.status === 'failed' ? 'bg-red-500/5' : ''}>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {op.id.substring(0, 8)}
+                      </TableCell>
+                      <TableCell className="font-medium">{op.task_type}</TableCell>
+                      <TableCell className="text-center">{op.items_count}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {op.document_id ? op.document_id.substring(0, 12) + '...' : '—'}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {new Date(op.created_at).toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        {op.status === 'pending' && (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                            <Clock className="w-3 h-3" />
+                            pending
+                          </span>
+                        )}
+                        {op.status === 'failed' && (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20" title={op.error_message}>
+                            <AlertCircle className="w-3 h-3" />
+                            failed
+                          </span>
+                        )}
+                        {op.status === 'completed' && (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle className="w-3 h-3" />
+                            done
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-center py-8 text-sm">No background operations</p>
+          )}
         </CardContent>
       </Card>
     </div>
