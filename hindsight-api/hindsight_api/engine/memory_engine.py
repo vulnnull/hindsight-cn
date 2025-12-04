@@ -896,7 +896,7 @@ class MemoryEngine:
         Args:
             bank_id: bank ID to recall for
             query: Recall query
-            fact_type: Required filter for fact type ('world', 'agent', or 'opinion')
+            fact_type: Required filter for fact type ('world', 'interactions', or 'opinion')
             budget: Budget level for graph traversal (low=100, mid=300, high=600 units)
             max_tokens: Maximum tokens to return (counts only 'text' field, default 4096)
             enable_trace: If True, returns detailed trace object
@@ -2559,7 +2559,7 @@ Guidelines:
         Reflect and formulate an answer using bank identity, world facts, and opinions.
 
         This method:
-        1. Retrieves agent facts (bank's identity and past actions)
+        1. Retrieves interactions (conversations and events)
         2. Retrieves world facts (general knowledge)
         3. Retrieves existing opinions (bank's formed perspectives)
         4. Uses LLM to formulate an answer
@@ -2575,7 +2575,7 @@ Guidelines:
         Returns:
             ReflectResult containing:
                 - text: Plain text answer (no markdown)
-                - based_on: Dict with 'world', 'agent', and 'opinion' fact lists (MemoryFact objects)
+                - based_on: Dict with 'world', 'interactions', and 'opinion' fact lists (MemoryFact objects)
                 - new_opinions: List of newly formed opinions
         """
         # Use cached LLM config
@@ -2589,7 +2589,7 @@ Guidelines:
             budget=budget,
             max_tokens=4096,
             enable_trace=False,
-            fact_type=['agent', 'world', 'opinion'],
+            fact_type=['interactions', 'world', 'opinion'],
             include_entities=True
         )
 
@@ -2657,7 +2657,7 @@ Guidelines:
             text=answer_text,
             based_on={
                 "world": world_results,
-                "agent": agent_results,
+                "interactions": agent_results,
                 "opinion": opinion_results
             },
             new_opinions=[]  # Opinions are being extracted asynchronously
@@ -2871,7 +2871,7 @@ Guidelines:
                 JOIN unit_entities ue ON mu.id = ue.unit_id
                 WHERE mu.bank_id = $1
                   AND ue.entity_id = $2
-                  AND mu.fact_type IN ('world', 'agent')
+                  AND mu.fact_type IN ('world', 'interactions')
                 ORDER BY mu.occurred_start DESC
                 LIMIT 50
                 """,

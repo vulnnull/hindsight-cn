@@ -174,7 +174,7 @@ No authorization required
 
 Clear memory bank memories
 
-Delete memory units for a memory bank. Optionally filter by type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
 
 ### Example
 
@@ -197,7 +197,7 @@ async with hindsight_client_api.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = hindsight_client_api.DefaultApi(api_client)
     bank_id = 'bank_id_example' # str | 
-    type = 'type_example' # str | Optional fact type filter (world, agent, opinion) (optional)
+    type = 'type_example' # str | Optional fact type filter (world, interactions, opinion) (optional)
 
     try:
         # Clear memory bank memories
@@ -216,7 +216,7 @@ async with hindsight_client_api.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **bank_id** | **str**|  | 
- **type** | **str**| Optional fact type filter (world, agent, opinion) | [optional] 
+ **type** | **str**| Optional fact type filter (world, interactions, opinion) | [optional] 
 
 ### Return type
 
@@ -742,7 +742,7 @@ No authorization required
 
 Get memory graph data
 
-Retrieve graph data for visualization, optionally filtered by type (world/agent/opinion). Limited to 1000 most recent items.
+Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.
 
 ### Example
 
@@ -1172,9 +1172,8 @@ Recall memory using semantic similarity and spreading activation.
 
     The type parameter is optional and must be one of:
     - 'world': General knowledge about people, places, events, and things that happen
-    - 'agent': Memories about what the AI agent did, actions taken, and tasks performed
+    - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed
     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints
-    - 'observation': Synthesized observations about entities (generated automatically)
 
     Set include_entities=true to get entity observations alongside recall results.
 
@@ -1251,7 +1250,7 @@ Reflect and generate answer
 Reflect and formulate an answer using bank identity, world facts, and opinions.
 
     This endpoint:
-    1. Retrieves agent facts (bank's identity)
+    1. Retrieves interactions (conversations and events)
     2. Retrieves world facts relevant to the query
     3. Retrieves existing opinions (bank's perspectives)
     4. Uses LLM to formulate a contextual answer

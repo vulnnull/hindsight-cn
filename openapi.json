@@ -13,6 +13,26 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Health check endpoint",
+        "description": "Checks the health of the API and database connection",
+        "operationId": "health_endpoint_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "tags": [
@@ -36,7 +56,7 @@
     "/v1/default/banks/{bank_id}/graph": {
       "get": {
         "summary": "Get memory graph data",
-        "description": "Retrieve graph data for visualization, optionally filtered by type (world/agent/opinion). Limited to 1000 most recent items.",
+        "description": "Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.",
         "operationId": "get_graph",
         "parameters": [
           {
@@ -184,7 +204,7 @@
     "/v1/default/banks/{bank_id}/memories/recall": {
       "post": {
         "summary": "Recall memory",
-        "description": "Recall memory using semantic similarity and spreading activation.\n\n    The type parameter is optional and must be one of:\n    - 'world': General knowledge about people, places, events, and things that happen\n    - 'agent': Memories about what the AI agent did, actions taken, and tasks performed\n    - 'opinion': The bank's formed beliefs, perspectives, and viewpoints\n    - 'observation': Synthesized observations about entities (generated automatically)\n\n    Set include_entities=true to get entity observations alongside recall results.",
+        "description": "Recall memory using semantic similarity and spreading activation.\n\n    The type parameter is optional and must be one of:\n    - 'world': General knowledge about people, places, events, and things that happen\n    - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed\n    - 'opinion': The bank's formed beliefs, perspectives, and viewpoints\n\n    Set include_entities=true to get entity observations alongside recall results.",
         "operationId": "recall_memories",
         "parameters": [
           {
@@ -234,7 +254,7 @@
     "/v1/default/banks/{bank_id}/reflect": {
       "post": {
         "summary": "Reflect and generate answer",
-        "description": "Reflect and formulate an answer using bank identity, world facts, and opinions.\n\n    This endpoint:\n    1. Retrieves agent facts (bank's identity)\n    2. Retrieves world facts relevant to the query\n    3. Retrieves existing opinions (bank's perspectives)\n    4. Uses LLM to formulate a contextual answer\n    5. Extracts and stores any new opinions formed\n    6. Returns plain text answer, the facts used, and new opinions",
+        "description": "Reflect and formulate an answer using bank identity, world facts, and opinions.\n\n    This endpoint:\n    1. Retrieves interactions (conversations and events)\n    2. Retrieves world facts relevant to the query\n    3. Retrieves existing opinions (bank's perspectives)\n    4. Uses LLM to formulate a contextual answer\n    5. Extracts and stores any new opinions formed\n    6. Returns plain text answer, the facts used, and new opinions",
         "operationId": "reflect",
         "parameters": [
           {
@@ -1022,7 +1042,7 @@
       },
       "delete": {
         "summary": "Clear memory bank memories",
-        "description": "Delete memory units for a memory bank. Optionally filter by type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
+        "description": "Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
         "operationId": "clear_bank_memories",
         "parameters": [
           {
@@ -1047,10 +1067,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Optional fact type filter (world, agent, opinion)",
+              "description": "Optional fact type filter (world, interactions, opinion)",
               "title": "Type"
             },
-            "description": "Optional fact type filter (world, agent, opinion)"
+            "description": "Optional fact type filter (world, interactions, opinion)"
           }
         ],
         "responses": {
@@ -2006,7 +2026,7 @@
               }
             ],
             "title": "Document Id",
-            "description": "Optional document ID for this memory item. Items with the same document_id are grouped together for efficient processing."
+            "description": "Optional document ID for this memory item."
           }
         },
         "type": "object",
@@ -2222,7 +2242,7 @@
           "trace": true,
           "types": [
             "world",
-            "agent"
+            "interactions"
           ]
         }
       },
@@ -2657,7 +2677,7 @@
             {
               "id": "456",
               "text": "I discussed AI applications last week",
-              "type": "agent"
+              "type": "interactions"
             }
           ],
           "text": "Based on my understanding, AI is a transformative technology..."

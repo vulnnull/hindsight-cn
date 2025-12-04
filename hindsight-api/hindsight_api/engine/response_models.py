@@ -142,7 +142,7 @@ class ReflectResult(BaseModel):
                         "occurred_end": "2024-01-15T10:30:00Z"
                     }
                 ],
-                "agent": [],
+                "interactions": [],
                 "opinion": []
             },
             "new_opinions": [
@@ -153,7 +153,7 @@ class ReflectResult(BaseModel):
 
     text: str = Field(description="The formulated answer text")
     based_on: Dict[str, List[MemoryFact]] = Field(
-        description="Facts used to formulate the answer, organized by type (world, agent, opinion)"
+        description="Facts used to formulate the answer, organized by type (world, interactions, opinion)"
     )
     new_opinions: List[str] = Field(
         default_factory=list,

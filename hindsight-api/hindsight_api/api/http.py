@@ -131,7 +131,7 @@ class RecallResult(BaseModel):
 
     id: str
     text: str
-    type: Optional[str] = None  # fact type: world, agent, opinion, observation
+    type: Optional[str] = None  # fact type: world, interactions, opinion, observation
     entities: Optional[List[str]] = None  # Entity names mentioned in this fact
     context: Optional[str] = None
     occurred_start: Optional[str] = None  # ISO format date when the event started
@@ -397,7 +397,7 @@ class ReflectFact(BaseModel):
 
     id: Optional[str] = None
     text: str
-    type: Optional[str] = None  # fact type: world, agent, opinion
+    type: Optional[str] = None  # fact type: world, interactions, opinion
     context: Optional[str] = None
     occurred_start: Optional[str] = None
     occurred_end: Optional[str] = None
@@ -833,7 +833,7 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/graph",
         response_model=GraphDataResponse,
         summary="Get memory graph data",
-        description="Retrieve graph data for visualization, optionally filtered by type (world/agent/opinion). Limited to 1000 most recent items.",
+        description="Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.",
         operation_id="get_graph"
     )
     async def api_graph(bank_id: str,
@@ -871,7 +871,7 @@ def _register_routes(app: FastAPI):
 
         Args:
             bank_id: Memory Bank ID (from path)
-            type: Filter by fact type (world, agent, opinion)
+            type: Filter by fact type (world, interactions, opinion)
             q: Search query for full-text search (searches text and context)
             limit: Maximum number of results (default: 100)
             offset: Offset for pagination (default: 0)
@@ -1026,7 +1026,7 @@ def _register_routes(app: FastAPI):
     Reflect and formulate an answer using bank identity, world facts, and opinions.
 
     This endpoint:
-    1. Retrieves agent facts (bank's identity)
+    1. Retrieves interactions (conversations and events)
     2. Retrieves world facts relevant to the query
     3. Retrieves existing opinions (bank's perspectives)
     4. Uses LLM to formulate a contextual answer
@@ -1852,11 +1852,11 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}/memories",
         response_model=DeleteResponse,
         summary="Clear memory bank memories",
-        description="Delete memory units for a memory bank. Optionally filter by type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
+        description="Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
         operation_id="clear_bank_memories"
     )
     async def api_clear_bank_memories(bank_id: str,
-        type: Optional[str] = Query(None, description="Optional fact type filter (world, agent, opinion)")
+        type: Optional[str] = Query(None, description="Optional fact type filter (world, interactions, opinion)")
     ):
         """Clear memories for a memory bank, optionally filtered by type."""
         try:

@@ -631,7 +631,7 @@ class DefaultApi:
     async def clear_bank_memories(
         self,
         bank_id: StrictStr,
-        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, agent, opinion)")] = None,
+        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, interactions, opinion)")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -647,11 +647,11 @@ class DefaultApi:
     ) -> DeleteResponse:
         """Clear memory bank memories
 
-        Delete memory units for a memory bank. Optionally filter by type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+        Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
 
         :param bank_id: (required)
         :type bank_id: str
-        :param type: Optional fact type filter (world, agent, opinion)
+        :param type: Optional fact type filter (world, interactions, opinion)
         :type type: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -703,7 +703,7 @@ class DefaultApi:
     async def clear_bank_memories_with_http_info(
         self,
         bank_id: StrictStr,
-        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, agent, opinion)")] = None,
+        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, interactions, opinion)")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -719,11 +719,11 @@ class DefaultApi:
     ) -> ApiResponse[DeleteResponse]:
         """Clear memory bank memories
 
-        Delete memory units for a memory bank. Optionally filter by type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+        Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
 
         :param bank_id: (required)
         :type bank_id: str
-        :param type: Optional fact type filter (world, agent, opinion)
+        :param type: Optional fact type filter (world, interactions, opinion)
         :type type: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -775,7 +775,7 @@ class DefaultApi:
     async def clear_bank_memories_without_preload_content(
         self,
         bank_id: StrictStr,
-        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, agent, opinion)")] = None,
+        type: Annotated[Optional[StrictStr], Field(description="Optional fact type filter (world, interactions, opinion)")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -791,11 +791,11 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Clear memory bank memories
 
-        Delete memory units for a memory bank. Optionally filter by type (world, agent, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
+        Delete memory units for a memory bank. Optionally filter by type (world, interactions, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.
 
         :param bank_id: (required)
         :type bank_id: str
-        :param type: Optional fact type filter (world, agent, opinion)
+        :param type: Optional fact type filter (world, interactions, opinion)
         :type type: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -2841,7 +2841,7 @@ class DefaultApi:
     ) -> GraphDataResponse:
         """Get memory graph data
 
-        Retrieve graph data for visualization, optionally filtered by type (world/agent/opinion). Limited to 1000 most recent items.
+        Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -2913,7 +2913,7 @@ class DefaultApi:
     ) -> ApiResponse[GraphDataResponse]:
         """Get memory graph data
 
-        Retrieve graph data for visualization, optionally filtered by type (world/agent/opinion). Limited to 1000 most recent items.
+        Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -2985,7 +2985,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Get memory graph data
 
-        Retrieve graph data for visualization, optionally filtered by type (world/agent/opinion). Limited to 1000 most recent items.
+        Retrieve graph data for visualization, optionally filtered by type (world/interactions/opinion). Limited to 1000 most recent items.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4554,7 +4554,7 @@ class DefaultApi:
     ) -> RecallResponse:
         """Recall memory
 
-        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'agent': Memories about what the AI agent did, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints     - 'observation': Synthesized observations about entities (generated automatically)      Set include_entities=true to get entity observations alongside recall results.
+        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints      Set include_entities=true to get entity observations alongside recall results.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4626,7 +4626,7 @@ class DefaultApi:
     ) -> ApiResponse[RecallResponse]:
         """Recall memory
 
-        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'agent': Memories about what the AI agent did, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints     - 'observation': Synthesized observations about entities (generated automatically)      Set include_entities=true to get entity observations alongside recall results.
+        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints      Set include_entities=true to get entity observations alongside recall results.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4698,7 +4698,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Recall memory
 
-        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'agent': Memories about what the AI agent did, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints     - 'observation': Synthesized observations about entities (generated automatically)      Set include_entities=true to get entity observations alongside recall results.
+        Recall memory using semantic similarity and spreading activation.      The type parameter is optional and must be one of:     - 'world': General knowledge about people, places, events, and things that happen     - 'interactions': Memories about interactions, conversations, actions taken, and tasks performed     - 'opinion': The bank's formed beliefs, perspectives, and viewpoints      Set include_entities=true to get entity observations alongside recall results.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4845,7 +4845,7 @@ class DefaultApi:
     ) -> ReflectResponse:
         """Reflect and generate answer
 
-        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves agent facts (bank's identity)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
+        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves interactions (conversations and events)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4917,7 +4917,7 @@ class DefaultApi:
     ) -> ApiResponse[ReflectResponse]:
         """Reflect and generate answer
 
-        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves agent facts (bank's identity)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
+        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves interactions (conversations and events)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
 
         :param bank_id: (required)
         :type bank_id: str
@@ -4989,7 +4989,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Reflect and generate answer
 
-        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves agent facts (bank's identity)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
+        Reflect and formulate an answer using bank identity, world facts, and opinions.      This endpoint:     1. Retrieves interactions (conversations and events)     2. Retrieves world facts relevant to the query     3. Retrieves existing opinions (bank's perspectives)     4. Uses LLM to formulate a contextual answer     5. Extracts and stores any new opinions formed     6. Returns plain text answer, the facts used, and new opinions
 
         :param bank_id: (required)
         :type bank_id: str

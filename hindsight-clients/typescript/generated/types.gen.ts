@@ -521,7 +521,7 @@ export type MemoryItem = {
     /**
      * Document Id
      *
-     * Optional document ID for this memory item. Items with the same document_id are grouped together for efficient processing.
+     * Optional document ID for this memory item.
      */
     document_id?: string | null;
 };
@@ -883,6 +883,20 @@ export type ValidationError = {
      * Error Type
      */
     type: string;
+};
+
+export type HealthEndpointHealthGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/health';
+};
+
+export type HealthEndpointHealthGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
 };
 
 export type MetricsEndpointMetricsGetData = {
@@ -1521,7 +1535,7 @@ export type ClearBankMemoriesData = {
         /**
          * Type
          *
-         * Optional fact type filter (world, agent, opinion)
+         * Optional fact type filter (world, interactions, opinion)
          */
         type?: string | null;
     };

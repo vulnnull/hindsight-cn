@@ -26,6 +26,13 @@ class TestMonitoringApi(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.api.api_client.close()
 
+    async def test_health_endpoint_health_get(self) -> None:
+        """Test case for health_endpoint_health_get
+
+        Health check endpoint
+        """
+        pass
+
     async def test_metrics_endpoint_metrics_get(self) -> None:
         """Test case for metrics_endpoint_metrics_get
 
