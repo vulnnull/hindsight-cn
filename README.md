@@ -1,6 +1,9 @@
 # Hindsight
 
+[![CI](https://github.com/vectorize-io/hindsight/actions/workflows/test.yml/badge.svg)](https://github.com/vectorize-io/hindsight/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI - hindsight-client](https://img.shields.io/pypi/v/hindsight-client?label=hindsight-client)](https://pypi.org/project/hindsight-client/)
+[![PyPI - hindsight-api](https://img.shields.io/pypi/v/hindsight-api?label=hindsight-api)](https://pypi.org/project/hindsight-api/)
 [![PyPI - hindsight-all](https://img.shields.io/pypi/v/hindsight-all?label=hindsight-all)](https://pypi.org/project/hindsight-all/)
 [![npm](https://img.shields.io/npm/v/@vectorize-io/hindsight-client)](https://www.npmjs.com/package/@vectorize-io/hindsight-client)
 

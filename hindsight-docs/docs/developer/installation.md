@@ -6,20 +6,25 @@ Hindsight can be deployed in three ways depending on your infrastructure and req
 
 ### PostgreSQL with pgvector
 
-Hindsight requires PostgreSQL with the **pgvector** extension for vector similarity search:
+Hindsight requires PostgreSQL with the **pgvector** extension for vector similarity search.
 
-- PostgreSQL 14+ (recommended: 16+)
-- pgvector extension installed
-- ~2GB+ RAM for small deployments
+**By default**, Hindsight uses **pg0** — an embedded PostgreSQL that runs locally on your machine. This is convenient for development but **not recommended for production**.
+
+**For production**, use an external PostgreSQL with pgvector:
+- **Supabase** — Managed PostgreSQL with pgvector built-in
+- **Neon** — Serverless PostgreSQL with pgvector
+- **AWS RDS** / **Cloud SQL** / **Azure** — With pgvector extension enabled
+- **Self-hosted** — PostgreSQL 14+ with pgvector installed
 
 ### LLM Provider
 
 You need an LLM API key for fact extraction, entity resolution, and answer generation:
 
-- **Groq** (recommended): Fast inference, high throughput
-- **OpenAI**: GPT-4, GPT-4o, GPT-4 Mini
-- **Anthropic**: Claude 3.5 Sonnet, Haiku
+- **Groq** (recommended): Fast inference with `gpt-oss-20b`
+- **OpenAI**: GPT-4o, GPT-4o-mini
 - **Ollama**: Run models locally
+
+See [Models](./models) for detailed comparison and configuration.
 
 ---
 
@@ -41,30 +46,6 @@ docker run -p 8888:8888 -p 9999:9999 \
 
 - **API Server**: http://localhost:8888
 - **Control Plane** (Web UI): http://localhost:9999
-
-### Docker Compose
-
-For more control, use Docker Compose which bundles all dependencies separately:
-
-```bash
-# Clone the repository
-git clone https://github.com/vectorize-io/hindsight.git
-cd hindsight
-
-# Create environment file
-cp .env.example .env
-# Edit .env with your LLM API key
-
-# Start all services
-cd docker
-./start.sh
-```
-
-**Management**:
-```bash
-./stop.sh   # Stop services
-./clean.sh  # Delete all data
-```
 
 ---
 

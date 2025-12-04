@@ -8,23 +8,8 @@ The Hindsight CLI provides command-line access to memory operations and agent ma
 
 ## Installation
 
-### Pre-built Binaries
-
-Download from the releases page:
-
 ```bash
-# macOS (Apple Silicon)
-curl -L https://github.com/hindsight/hindsight/releases/latest/download/hindsight-macos-arm64 -o hindsight
-chmod +x hindsight
-sudo mv hindsight /usr/local/bin/
-```
-
-### Build from Source
-
-```bash
-cd hindsight-cli-rust
-cargo build --release
-cp target/release/hindsight /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/main/hindsight-cli/install.sh | bash
 ```
 
 ## Configuration

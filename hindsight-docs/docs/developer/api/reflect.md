@@ -9,6 +9,10 @@ Generate personality-aware responses using retrieved memories.
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
+:::tip Prerequisites
+Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
+:::
+
 ## Basic Usage
 
 <Tabs>
@@ -19,25 +23,18 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-response = client.reflect(
-    bank_id="my-bank",
-    query="What should I know about Alice?"
-)
-
-print(response["answer"])
+client.reflect(bank_id="my-bank", query="What should I know about Alice?")
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { HindsightClient } from '@hindsight/client';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-const response = await client.reflect('my-bank', 'What should I know about Alice?');
-
-console.log(response.answer);
+await client.reflect('my-bank', 'What should I know about Alice?');
 ```
 
 </TabItem>
@@ -45,34 +42,10 @@ console.log(response.answer);
 
 ```bash
 hindsight memory think my-bank "What should I know about Alice?"
-
-# Verbose output shows reasoning and sources
-hindsight memory think my-bank "What should I know about Alice?" -v
 ```
 
 </TabItem>
 </Tabs>
-
-## Response Format
-
-```python
-{
-    "answer": "Alice is a software engineer at Google who joined last year...",
-    "facts_used": [
-        {"text": "Alice works at Google", "weight": 0.95, "id": "..."},
-        {"text": "Alice is very competent", "weight": 0.82, "id": "..."}
-    ],
-    "new_opinions": [
-        {"text": "Alice would be good for the ML project", "id": "..."}
-    ]
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `answer` | Generated response |
-| `facts_used` | Memories used in generation |
-| `new_opinions` | New opinions formed during reasoning |
 
 ## Parameters
 
@@ -107,30 +80,9 @@ const response = await client.reflect('my-bank', 'What do you think about remote
 </TabItem>
 </Tabs>
 
-## What Reflect Does
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant A as Hindsight API
-    participant M as Memory Store
-    participant L as LLM
-
-    C->>A: reflect("What about Alice?")
-    A->>M: Search all networks
-    M-->>A: World + Bank + Opinion facts
-    A->>A: Load bank personality
-    A->>L: Generate with personality context
-    L-->>A: Response + new opinions
-    A->>M: Store new opinions
-    A-->>C: Response + sources + new opinions
-```
-
-1. **Retrieves** relevant memories from all three networks
-2. **Loads** bank personality (Big Five traits + background)
-3. **Generates** response influenced by personality
-4. **Forms opinions** if the query warrants it
-5. **Returns** response with sources and any new opinions
+:::info How Reflect Works
+Learn about personality-driven reasoning and opinion formation in the [Reflect Architecture](/developer/personality) guide.
+:::
 
 ## Opinion Formation
 

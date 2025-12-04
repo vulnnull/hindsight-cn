@@ -43,19 +43,11 @@ With reflect:
 
 ## The Reflect Process
 
-```
-Query
-  ↓
-Recall relevant memories
-  ↓
-Load bank personality
-  ↓
-Reason with personality context
-  ↓
-Form new opinions
-  ↓
-Response + Sources + New Beliefs
-```
+1. **Recall** relevant memories based on the query
+2. **Load** the bank's personality traits and background
+3. **Reason** about the memories through the personality lens
+4. **Form** new opinions with confidence scores
+5. **Return** response, sources, and any new beliefs
 
 ---
 
@@ -125,25 +117,24 @@ Two banks with different personalities, given identical facts about remote work:
 
 ## Opinion Evolution
 
-Opinions aren't static — they evolve as new evidence arrives:
+Opinions aren't static — they evolve as new evidence arrives. Here's a real-world example with a database library:
 
-```
-Day 1: retain("Python is widely used in ML")
-       → Opinion formed: "Python is best for data science" (confidence: 0.70)
+| Event | What the bank learns | Opinion formed |
+|-------|---------------------|----------------|
+| **Day 1** | "Redis is open source under BSD license" | "Redis is excellent for caching — fast, reliable, and OSS-friendly" (confidence: 0.85) |
+| **Day 2** | "Redis has great community support and documentation" | Opinion reinforced (confidence: 0.90) |
+| **Day 30** | "Redis changed license to SSPL, restricting cloud usage" | "Redis is still technically strong, but license concerns for cloud deployments" (confidence: 0.65) |
+| **Day 45** | "Valkey forked Redis under BSD license with Linux Foundation backing" | "Consider Valkey for new projects requiring true OSS; Redis for existing deployments" (confidence: 0.80) |
 
-Day 2: retain("98% of ML engineers use Python")
-       → Opinion reinforced: "Python is best for data science" (confidence: 0.85)
+**Before the license change:**
+> "Should we use Redis for our caching layer?"
+> → "Yes, Redis is the industry standard — fast, battle-tested, and fully open source."
 
-Day 3: retain("Julia is 10x faster for numerical computing")
-       → Opinion revised: "Python is best for data science due to ecosystem,
-                           though Julia excels in performance" (confidence: 0.75)
+**After the license change:**
+> "Should we use Redis for our caching layer?"
+> → "It depends. For cloud deployments, consider Valkey (the BSD-licensed fork). For on-premise, Redis remains excellent technically."
 
-Day 4: retain("Rust ML libraries growing rapidly")
-       → Opinion updated: "Python remains dominant but Rust is gaining ground
-                           for production systems" (confidence: 0.60)
-```
-
-This **continuous learning** ensures opinions stay current.
+This **continuous learning** ensures recommendations stay current with real-world changes.
 
 ---
 
@@ -168,24 +159,21 @@ When you call `reflect()`:
 **Returns:**
 - **Response text** — Personality-influenced answer
 - **Based on** — Which memories were used (with relevance scores)
-- **New opinions** — Any beliefs formed during reasoning (with confidence)
 
 **Example:**
 ```json
 {
-  "text": "Based on Alice's ML expertise and her work at Google,
-           she'd be an excellent fit for the research team lead position...",
+  "text": "Based on Alice's ML expertise and her work at Google, she'd be an excellent fit for the research team lead position...",
   "based_on": {
     "world": [
       {"text": "Alice works at Google...", "weight": 0.95},
       {"text": "Alice specializes in ML...", "weight": 0.88}
     ]
-  },
-  "new_opinions": [
-    {"text": "Alice would excel as research team lead", "confidence": 0.82}
-  ]
+  }
 }
 ```
+
+**Note:** New opinions are formed asynchronously in the background. They'll influence future `reflect()` calls but aren't returned directly.
 
 ---
 

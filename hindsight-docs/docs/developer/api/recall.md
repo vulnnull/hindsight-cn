@@ -9,6 +9,10 @@ Retrieve memories using multi-strategy search.
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
+:::tip Prerequisites
+Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
+:::
+
 ## Basic Search
 
 <Tabs>
@@ -19,28 +23,18 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-results = client.recall(
-    bank_id="my-bank",
-    query="What does Alice do?"
-)
-
-for r in results:
-    print(f"{r['text']} (score: {r['weight']:.2f})")
+client.recall(bank_id="my-bank", query="What does Alice do?")
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { HindsightClient } from '@hindsight/client';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-const results = await client.recall('my-bank', 'What does Alice do?');
-
-for (const r of results) {
-    console.log(`${r.text} (score: ${r.weight})`);
-}
+await client.recall('my-bank', 'What does Alice do?');
 ```
 
 </TabItem>
@@ -223,66 +217,60 @@ hindsight memory search my-bank "Alice" --fact-type world,agent
 </TabItem>
 </Tabs>
 
-## How Search Works
+:::info How Recall Works
+Learn about the four search strategies (semantic, keyword, graph, temporal) and RRF fusion in the [Recall Architecture](/developer/retrieval) guide.
+:::
 
-Search runs four strategies in parallel:
+## Token Budget Management
 
-```mermaid
-graph LR
-    Q[Query] --> S[Semantic<br/>Vector similarity]
-    Q --> K[Keyword<br/>BM25 exact match]
-    Q --> G[Graph<br/>Entity traversal]
-    Q --> T[Temporal<br/>Time-filtered]
+Hindsight is built for AI agents, not humans. Traditional search systems return "top-k" results, but agents don't think in terms of result counts—they think in tokens. An agent's context window is measured in tokens, and that's exactly how Hindsight measures results.
 
-    S --> RRF[RRF Fusion]
-    K --> RRF
-    G --> RRF
-    T --> RRF
-
-    RRF --> CE[Cross-Encoder<br/>Rerank]
-    CE --> R[Results]
-```
-
-| Strategy | When it helps |
-|----------|---------------|
-| **Semantic** | Conceptual matches, paraphrasing |
-| **Keyword** | Names, technical terms, exact phrases |
-| **Graph** | Related entities, indirect connections |
-| **Temporal** | "last spring", "in June", time ranges |
-
-## Response Format
+The `max_tokens` parameter lets you control how much of your agent's context budget to spend on memories:
 
 ```python
-{
-    "results": [
-        {
-            "id": "550e8400-e29b-41d4-a716-446655440000",
-            "text": "Alice works at Google as a software engineer",
-            "context": "career discussion",
-            "event_date": "2024-01-15T10:00:00Z",
-            "weight": 0.95,
-            "fact_type": "world"
-        }
-    ]
-}
+# Fill up to 4K tokens of context with relevant memories
+results = client.recall(bank_id="my-bank", query="What do I know about Alice?", max_tokens=4096)
+
+# Smaller budget for quick lookups
+results = client.recall(bank_id="my-bank", query="Alice's email", max_tokens=500)
 ```
 
-| Field | Description |
-|-------|-------------|
-| `id` | Unique memory ID |
-| `text` | Memory content |
-| `context` | Original context (if provided) |
-| `event_date` | When the event occurred |
-| `weight` | Relevance score (0-1) |
-| `fact_type` | `world`, `agent`, or `opinion` |
+This design means you never have to guess whether 10 results or 50 results will fit your context. Just specify the token budget and Hindsight returns as many relevant memories as will fit.
+
+### Additional Context: Chunks and Entity Observations
+
+For the most relevant memories, you can optionally retrieve additional context—each with its own token budget:
+
+| Option | Parameter | Description |
+|--------|-----------|-------------|
+| **Chunks** | `include_chunks`, `max_chunk_tokens` | Raw text chunks that generated the memories |
+| **Entity Observations** | `include_entities`, `max_entity_tokens` | Related observations about entities mentioned in results |
+
+```python
+response = client.recall_memories(
+    bank_id="my-bank",
+    query="What does Alice do?",
+    max_tokens=4096,              # Budget for memories
+    include_chunks=True,
+    max_chunk_tokens=2000,        # Budget for raw chunks
+    include_entities=True,
+    max_entity_tokens=1000        # Budget for entity observations
+)
+
+# Access the additional context
+chunks = response.get("chunks", {})
+entities = response.get("entities", [])
+```
+
+This gives your agent richer context while maintaining precise control over total token consumption.
 
 ## Budget Levels
 
 The `budget` parameter controls graph traversal depth:
 
-- **"low" (100 nodes)**: Fast, shallow search — good for simple lookups
-- **"mid" (300 nodes)**: Balanced — default for most queries
-- **"high" (600 nodes)**: Deep exploration — finds indirect connections
+- **"low"**: Fast, shallow search — good for simple lookups
+- **"mid"**: Balanced — default for most queries
+- **"high"**: Deep exploration — finds indirect connections
 
 <Tabs>
 <TabItem value="python" label="Python">

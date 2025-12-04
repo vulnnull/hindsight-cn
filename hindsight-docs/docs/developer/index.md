@@ -7,29 +7,29 @@ slug: /
 
 ## Why Hindsight?
 
-AI assistants forget everything between sessions. Every conversation starts from zero—no context about who you are, what you've discussed, or what the memory bank has learned. This isn't just inconvenient; it fundamentally limits what AI memory banks can do.
+AI agents forget everything between sessions. Every conversation starts from zero—no context about who you are, what you've discussed, or what the assistant has learned. This isn't just an implementation detail; it fundamentally limits what AI Agents can do.
 
 **The problem is harder than it looks:**
 
 - **Simple vector search isn't enough** — "What did Alice do last spring?" requires temporal reasoning, not just semantic similarity
 - **Facts get disconnected** — Knowing "Alice works at Google" and "Google is in Mountain View" should let you answer "Where does Alice work?" even if you never stored that directly
-- **Memory banks need opinions** — A coding assistant that remembers "the user prefers functional programming" should weigh that when making recommendations
+- **AI Agents needs to form opinions** — A coding assistant that remembers "the user prefers functional programming" should weigh that when making recommendations
 - **Context matters** — The same information means different things to different memory banks with different personalities
 
-Hindsight solves these problems with a memory system designed specifically for AI memory banks.
+Hindsight solves these problems with a memory system designed specifically for AI agents.
 
 ## What Hindsight Does
 
 ```mermaid
 graph TB
-    subgraph Your Application
+    subgraph app[Your Application]
         Agent[AI Agent]
     end
 
-    subgraph Hindsight
-        API[Hindsight API]
+    subgraph hindsight[Hindsight]
+        API[API Server]
 
-        subgraph Memory Bank
+        subgraph bank[Memory Bank]
             Documents[Documents]
             Memories[Memories]
             Entities[Entities]
@@ -103,8 +103,7 @@ The `bias_strength` parameter (0-1) controls how much personality influences opi
 ## Next Steps
 
 ### Getting Started
-- [**Installation**](/developer/api/installation) — Install Hindsight for Python, Node.js, or CLI
-- [**Quick Start**](/developer/api/quickstart) — Get up and running in 60 seconds
+- [**Quick Start**](/developer/api/quickstart) — Install and get up and running in 60 seconds
 
 ### Core Concepts
 - [**Retain**](/developer/retain) — How memories are stored with multi-dimensional facts

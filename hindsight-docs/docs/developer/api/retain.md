@@ -9,31 +9,9 @@ Store memories, conversations, and documents into Hindsight.
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-## Installation
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```bash
-pip install hindsight-client
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```bash
-npm install @hindsight/client
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-cd hindsight-cli && cargo build --release
-```
-
-</TabItem>
-</Tabs>
+:::tip Prerequisites
+Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
+:::
 
 ## Store a Single Memory
 
@@ -55,7 +33,7 @@ client.retain(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { HindsightClient } from '@hindsight/client';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
@@ -166,25 +144,9 @@ hindsight memory put-files my-bank report.pdf --document-id "q4-report"
 </TabItem>
 </Tabs>
 
-## What Happens During Ingestion
-
-When you store content, Hindsight:
-
-1. **Extracts facts** using an LLM — converts raw text into structured narrative facts
-2. **Identifies entities** — people, places, organizations, concepts
-3. **Resolves entities** — "Alice" and "Alice Chen" become the same entity
-4. **Builds graph links** — connects memories through shared entities
-5. **Generates embeddings** — 384-dim vectors for semantic search
-6. **Stores to PostgreSQL** — with vector and full-text indexes
-
-```mermaid
-graph LR
-    A[Raw Content] --> B[LLM Extraction]
-    B --> C[Entity Resolution]
-    C --> D[Graph Construction]
-    D --> E[Embedding]
-    E --> F[(PostgreSQL)]
-```
+:::info How Retain Works
+Learn about fact extraction, entity resolution, and graph construction in the [Retain Architecture](/developer/retain) guide.
+:::
 
 ## Async Ingestion
 

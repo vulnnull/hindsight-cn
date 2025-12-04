@@ -59,12 +59,12 @@ This means search results include the full context, not disconnected fragments.
 
 ## Two Types of Facts
 
-Hindsight distinguishes between **world** facts (about others) and **agent** facts (about the bank itself):
+Hindsight distinguishes between **world** facts (about others) and **memory bank** facts (about the bank itself):
 
-| Type | Description | Example |
-|------|-------------|---------|
-| **world** | Facts about people, places, things | "Alice works at Google" |
-| **agent** | What the bank did or said | "I recommended Python to Alice" |
+| Type            | Description                       | Example |
+|-----------------|-----------------------------------|---------|
+| **world**       | Facts about people, places, things | "Alice works at Google" |
+| **memory bank** | What the bank did or said         | "I recommended Python to Alice" |
 
 This separation is important for `reflect()` — the bank can reason about what it knows versus what it did.
 
@@ -168,8 +168,6 @@ As facts accumulate about an entity, Hindsight synthesizes **observations** — 
 - "Alice is a software engineer at Google specializing in ML"
 
 **Why it helps:** You can quickly understand an entity without reading through dozens of individual facts.
-
-**Note:** Observations are created in the background after retain completes, so they don't slow down your writes.
 
 ---
 

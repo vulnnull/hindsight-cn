@@ -313,6 +313,10 @@ jobs:
         ## Quick Start
 
         ```bash
+        # Install the CLI
+        curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/main/hindsight-cli/install.sh | bash
+
+        # Start the server
         docker run -p 8888:8888 -p 9999:9999 \
           -e HINDSIGHT_API_LLM_PROVIDER=openai \
           -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
@@ -325,6 +329,11 @@ jobs:
         - `ghcr.io/${{ github.repository_owner }}/hindsight-api:${{ steps.get_version.outputs.VERSION }}` - API only
         - `ghcr.io/${{ github.repository_owner }}/hindsight-control-plane:${{ steps.get_version.outputs.VERSION }}` - Web UI only
 
+        ## CLI
+        ```bash
+        curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/main/hindsight-cli/install.sh | bash
+        ```
+
         ## Python
         ```bash
         pip install hindsight-all  # or hindsight-api, hindsight-client
@@ -334,9 +343,6 @@ jobs:
         ```bash
         npm install @vectorize-io/hindsight-client
         ```
-
-        ## CLI
-        Download the appropriate binary from the release assets below.
 
         ## Helm
         ```bash

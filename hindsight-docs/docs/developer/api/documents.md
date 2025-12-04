@@ -10,7 +10,7 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 :::tip Prerequisites
-Make sure you've [installed Hindsight](./installation) and understand [how retain works](./retain).
+Make sure you've completed the [Quick Start](./quickstart) and understand [how retain works](./retain).
 :::
 
 ## What Are Documents?
@@ -21,6 +21,18 @@ Documents are containers for retained content. They help you:
 - **Update content** — Re-retain a document to update its facts
 - **Delete in bulk** — Remove all memories from a document at once
 - **Organize memories** — Group related facts by source
+
+## Chunks
+
+When you retain content, Hindsight splits it into chunks before extracting facts. These chunks are stored alongside the extracted memories, preserving the original text segments.
+
+**Why chunks matter:**
+- **Context preservation** — Chunks contain the raw text that generated facts, useful when you need the exact wording
+- **Richer recall** — Including chunks in recall provides surrounding context for matched facts
+
+:::tip Include Chunks in Recall
+Use `include_chunks=True` in your recall calls to get the original text chunks alongside fact results. See [Recall](./recall) for details.
+:::
 
 ## Retain with Document ID
 
@@ -65,7 +77,7 @@ with open("notes.txt") as f:
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { HindsightClient } from '@hindsight/client';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
@@ -183,7 +195,7 @@ response = api.list_documents(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { sdk, createClient, createConfig } from '@hindsight/client';
+import { sdk, createClient, createConfig } from '@vectorize-io/hindsight-client';
 
 const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
 

@@ -186,6 +186,30 @@ const config: Config = {
       darkTheme: prismThemes.dracula,
       additionalLanguages: ['bash', 'json', 'python', 'rust'],
     },
+    mermaid: {
+      theme: {
+        light: 'base',
+        dark: 'dark',
+      },
+      options: {
+        themeVariables: {
+          primaryColor: '#6366f1',
+          primaryTextColor: '#ffffff',
+          primaryBorderColor: '#4f46e5',
+          secondaryColor: '#f1f5f9',
+          secondaryTextColor: '#1e293b',
+          secondaryBorderColor: '#cbd5e1',
+          tertiaryColor: '#e0e7ff',
+          lineColor: '#94a3b8',
+          textColor: '#1e293b',
+          mainBkg: '#ffffff',
+          nodeBorder: '#4f46e5',
+          clusterBkg: '#f8fafc',
+          clusterBorder: '#e2e8f0',
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+        },
+      },
+    },
   } satisfies Preset.ThemeConfig,
 };
 

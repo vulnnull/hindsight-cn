@@ -16,8 +16,8 @@ from typing import Optional
 
 import uvicorn
 
-from hindsight_api import MemoryEngine
-from hindsight_api.api import create_app
+from . import MemoryEngine
+from .api import create_app
 
 
 # Disable tokenizers parallelism to avoid warnings
@@ -53,7 +53,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="hindsight-api",
-        description="Hindsight - Semantic memory system for AI agents. Press Ctrl+C to stop.",
+        description="Hindsight API Server",
     )
     parser.add_argument(
         "--host", default="0.0.0.0",
@@ -62,18 +62,6 @@ def main():
     parser.add_argument(
         "--port", type=int, default=8888,
         help="Port to bind to (default: 8888)"
-    )
-    parser.add_argument(
-        "--mcp", action="store_true",
-        help="Enable MCP server at /mcp"
-    )
-    parser.add_argument(
-        "--reload", action="store_true",
-        help="Enable auto-reload on code changes"
-    )
-    parser.add_argument(
-        "--workers", type=int, default=1,
-        help="Number of worker processes (default: 1)"
     )
     parser.add_argument(
         "--log-level", default="info",
@@ -112,7 +100,7 @@ def main():
     app = create_app(
         memory=_memory,
         http_api_enabled=True,
-        mcp_api_enabled=args.mcp,
+        mcp_api_enabled=True,
         mcp_mount_path="/mcp",
         run_migrations=True,
         initialize_memory=True,
@@ -127,16 +115,10 @@ def main():
         "access_log": args.access_log,
     }
 
-    if args.reload:
-        uvicorn_config["reload"] = True
-    if args.workers > 1:
-        uvicorn_config["workers"] = args.workers
-
     print(f"\nStarting Hindsight API...")
     print(f"  URL: http://{args.host}:{args.port}")
     print(f"  Database: {db_url}")
     print(f"  LLM Provider: {llm_provider}")
-    print(f"  MCP: {'enabled' if args.mcp else 'disabled'}")
     print()
 
     uvicorn.run(**uvicorn_config)

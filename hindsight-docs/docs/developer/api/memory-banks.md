@@ -2,12 +2,20 @@
 sidebar_position: 6
 ---
 
-# Memory Bank Identity
+# Memory Bank
 
 Configure memory bank personality, background, and behavior.
+Memory banks have charateristics:
+- Banks are completely isolated from each other.
+- You don't need to pre-create it, Hindsight will create it for you with default settings.
+- Banks have a profile that influences how they form opinions from memories. (optional)
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+
+:::tip Prerequisites
+Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
+:::
 
 ## Creating a Memory Bank
 
@@ -38,7 +46,7 @@ client.create_bank(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { HindsightClient } from '@hindsight/client';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 

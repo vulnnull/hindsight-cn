@@ -10,18 +10,18 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 :::tip Prerequisites
-Make sure you've [installed Hindsight](./installation) and understand [how retain works](./retain).
+Make sure you've completed the [Quick Start](./quickstart) and understand [how retain works](./retain).
 :::
 
 ## What Are Operations?
 
-Some Hindsight tasks run asynchronously in the background:
+When you call `retain_batch` with `async=True`, Hindsight processes the content in the background and returns immediately with an operation ID. Operations let you track and manage these async retain tasks.
 
-- **Batch retain** — Processing large document sets
-- **Entity observations** — Synthesizing entity summaries
-- **Graph updates** — Building connections between memories
+By default, async operations are executed in-process within the API service. This is managed automatically — you don't need to configure anything.
 
-Operations provide a way to track these background tasks.
+:::tip Scaling with Streaming
+For high-throughput workloads, you can extend the task backend to use a streaming platform like Kafka. This enables scale-out processing across multiple workers and handles backpressure on the API.
+:::
 
 ## Async Batch Retain
 
@@ -35,46 +35,35 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-# Start async batch retain
-result = client.retain_batch(
+client.retain_batch(
     bank_id="my-bank",
     items=[
         {"content": doc1_text},
         {"content": doc2_text},
-        # ... hundreds or thousands of documents
     ],
-    async_=True  # Enable async mode
+    retain_async=True
 )
-
-print(f"Operation ID: {result.get('operation_id')}")
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { HindsightClient } from '@hindsight/client';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-// Start async batch retain
-const result = await client.retainBatch('my-bank', [
+await client.retainBatch('my-bank', [
     { content: doc1Text },
     { content: doc2Text },
-    // ... hundreds or thousands of documents
 ], { async: true });
-
-console.log(`Operation ID: ${result.operation_id}`);
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-# Start async batch retain
 hindsight retain my-bank --files docs/*.md --async
-
-# Returns operation ID: op-abc123...
 ```
 
 </TabItem>
@@ -110,7 +99,7 @@ for op in response.items:
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { sdk, createClient, createConfig } from '@hindsight/client';
+import { sdk, createClient, createConfig } from '@vectorize-io/hindsight-client';
 
 const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
 
@@ -216,29 +205,6 @@ hindsight operations cancel my-bank --all-pending
 | **completed** | Successfully finished |
 | **failed** | Encountered an error |
 | **cancelled** | Stopped by user |
-
-## Operation Types
-
-| Type | Description |
-|------|-------------|
-| **batch_retain** | Async batch content ingestion |
-| **regenerate_observations** | Entity observation synthesis |
-| **graph_update** | Link and connection building |
-
-## Operation Response Format
-
-```json
-{
-  "id": "op-abc123",
-  "bank_id": "my-bank",
-  "task_type": "batch_retain",
-  "status": "completed",
-  "items_count": 1000,
-  "document_id": "batch-001",
-  "created_at": "2024-03-15T10:00:00Z",
-  "error_message": null
-}
-```
 
 ## Monitoring Strategies
 

@@ -17,6 +17,12 @@ from hindsight_client_api.models import (
     memory_item,
     reflect_request,
 )
+from hindsight_client_api.models.retain_response import RetainResponse
+from hindsight_client_api.models.recall_response import RecallResponse
+from hindsight_client_api.models.recall_result import RecallResult
+from hindsight_client_api.models.reflect_response import ReflectResponse
+from hindsight_client_api.models.list_memory_units_response import ListMemoryUnitsResponse
+from hindsight_client_api.models.bank_profile_response import BankProfileResponse
 
 
 def _run_async(coro):
@@ -86,7 +92,7 @@ class Hindsight:
         context: Optional[str] = None,
         document_id: Optional[str] = None,
         metadata: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+    ) -> RetainResponse:
         """
         Store a single memory (simplified interface).
 
@@ -99,7 +105,7 @@ class Hindsight:
             metadata: Optional user-defined metadata
 
         Returns:
-            Response with success status
+            RetainResponse with success status
         """
         return self.retain_batch(
             bank_id=bank_id,
@@ -112,8 +118,8 @@ class Hindsight:
         bank_id: str,
         items: List[Dict[str, Any]],
         document_id: Optional[str] = None,
-        async_: bool = False,
-    ) -> Dict[str, Any]:
+        retain_async: bool = False,
+    ) -> RetainResponse:
         """
         Store multiple memories in batch.
 
@@ -121,10 +127,10 @@ class Hindsight:
             bank_id: The memory bank ID
             items: List of memory items with 'content' and optional 'timestamp', 'context', 'metadata'
             document_id: Optional document ID for grouping memories
-            async_: If True, process asynchronously in background (default: False)
+            retain_async: If True, process asynchronously in background (default: False)
 
         Returns:
-            Response with success status and item count
+            RetainResponse with success status and item count
         """
         memory_items = [
             memory_item.MemoryItem(
@@ -139,11 +145,10 @@ class Hindsight:
         request_obj = retain_request.RetainRequest(
             items=memory_items,
             document_id=document_id,
-            async_=async_,
+            async_=retain_async,
         )
 
-        response = _run_async(self._api.retain_memories(bank_id, request_obj))
-        return response.to_dict() if hasattr(response, 'to_dict') else response
+        return _run_async(self._api.retain_memories(bank_id, request_obj))
 
     def recall(
         self,
@@ -152,7 +157,7 @@ class Hindsight:
         types: Optional[List[str]] = None,
         max_tokens: int = 4096,
         budget: str = "mid",
-    ) -> List[Dict[str, Any]]:
+    ) -> List[RecallResult]:
         """
         Recall memories using semantic similarity.
 
@@ -164,7 +169,7 @@ class Hindsight:
             budget: Budget level for recall - "low", "mid", or "high" (default: "mid")
 
         Returns:
-            List of recall results
+            List of RecallResult objects
         """
         request_obj = recall_request.RecallRequest(
             query=query,
@@ -175,10 +180,7 @@ class Hindsight:
         )
 
         response = _run_async(self._api.recall_memories(bank_id, request_obj))
-
-        if hasattr(response, 'results'):
-            return [r.to_dict() if hasattr(r, 'to_dict') else r for r in response.results]
-        return []
+        return response.results if hasattr(response, 'results') else []
 
     def reflect(
         self,
@@ -186,7 +188,7 @@ class Hindsight:
         query: str,
         budget: str = "low",
         context: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> ReflectResponse:
         """
         Generate a contextual answer based on bank identity and memories.
 
@@ -197,7 +199,7 @@ class Hindsight:
             context: Optional additional context
 
         Returns:
-            Response with answer text and optionally facts used
+            ReflectResponse with answer text and optionally facts used
         """
         request_obj = reflect_request.ReflectRequest(
             query=query,
@@ -205,8 +207,7 @@ class Hindsight:
             context=context,
         )
 
-        response = _run_async(self._api.reflect(bank_id, request_obj))
-        return response.to_dict() if hasattr(response, 'to_dict') else response
+        return _run_async(self._api.reflect(bank_id, request_obj))
 
     # Full-featured methods (expose more options)
 
@@ -221,7 +222,7 @@ class Hindsight:
         query_timestamp: Optional[str] = None,
         include_entities: bool = True,
         max_entity_tokens: int = 500,
-    ) -> Dict[str, Any]:
+    ) -> RecallResponse:
         """
         Recall memories with all options (full-featured).
 
@@ -237,7 +238,7 @@ class Hindsight:
             max_entity_tokens: Maximum tokens for entity observations (default: 500)
 
         Returns:
-            Full recall response with results, optional entities, and optional trace
+            RecallResponse with results, optional entities, and optional trace
         """
         from hindsight_client_api.models import include_options, entity_include_options
 
@@ -255,8 +256,7 @@ class Hindsight:
             include=include_opts,
         )
 
-        response = _run_async(self._api.recall_memories(bank_id, request_obj))
-        return response.to_dict() if hasattr(response, 'to_dict') else response
+        return _run_async(self._api.recall_memories(bank_id, request_obj))
 
     def list_memories(
         self,
@@ -265,16 +265,15 @@ class Hindsight:
         search_query: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> ListMemoryUnitsResponse:
         """List memory units with pagination."""
-        response = _run_async(self._api.list_memories(
+        return _run_async(self._api.list_memories(
             bank_id=bank_id,
             type=type,
             q=search_query,
             limit=limit,
             offset=offset,
         ))
-        return response.to_dict() if hasattr(response, 'to_dict') else response
 
     def create_bank(
         self,
@@ -282,7 +281,7 @@ class Hindsight:
         name: Optional[str] = None,
         background: Optional[str] = None,
         personality: Optional[Dict[str, float]] = None,
-    ) -> Dict[str, Any]:
+    ) -> BankProfileResponse:
         """Create or update a memory bank."""
         from hindsight_client_api.models import create_bank_request, personality_traits
 
@@ -296,8 +295,7 @@ class Hindsight:
             personality=personality_obj,
         )
 
-        response = _run_async(self._api.create_or_update_bank(bank_id, request_obj))
-        return response.to_dict() if hasattr(response, 'to_dict') else response
+        return _run_async(self._api.create_or_update_bank(bank_id, request_obj))
 
     # Async methods (native async, no _run_async wrapper)
 
@@ -306,8 +304,8 @@ class Hindsight:
         bank_id: str,
         items: List[Dict[str, Any]],
         document_id: Optional[str] = None,
-        async_: bool = False,
-    ) -> Dict[str, Any]:
+        retain_async: bool = False,
+    ) -> RetainResponse:
         """
         Store multiple memories in batch (async).
 
@@ -315,10 +313,10 @@ class Hindsight:
             bank_id: The memory bank ID
             items: List of memory items with 'content' and optional 'timestamp', 'context', 'metadata'
             document_id: Optional document ID for grouping memories
-            async_: If True, process asynchronously in background (default: False)
+            retain_async: If True, process asynchronously in background (default: False)
 
         Returns:
-            Response with success status and item count
+            RetainResponse with success status and item count
         """
         memory_items = [
             memory_item.MemoryItem(
@@ -333,11 +331,10 @@ class Hindsight:
         request_obj = retain_request.RetainRequest(
             items=memory_items,
             document_id=document_id,
-            async_=async_,
+            async_=retain_async,
         )
 
-        response = await self._api.retain_memories(bank_id, request_obj)
-        return response.to_dict() if hasattr(response, 'to_dict') else response
+        return await self._api.retain_memories(bank_id, request_obj)
 
     async def aretain(
         self,
@@ -347,7 +344,7 @@ class Hindsight:
         context: Optional[str] = None,
         document_id: Optional[str] = None,
         metadata: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+    ) -> RetainResponse:
         """
         Store a single memory (async).
 
@@ -360,7 +357,7 @@ class Hindsight:
             metadata: Optional user-defined metadata
 
         Returns:
-            Response with success status
+            RetainResponse with success status
         """
         return await self.aretain_batch(
             bank_id=bank_id,
@@ -375,7 +372,7 @@ class Hindsight:
         types: Optional[List[str]] = None,
         max_tokens: int = 4096,
         budget: str = "mid",
-    ) -> List[Dict[str, Any]]:
+    ) -> List[RecallResult]:
         """
         Recall memories using semantic similarity (async).
 
@@ -387,7 +384,7 @@ class Hindsight:
             budget: Budget level for recall - "low", "mid", or "high" (default: "mid")
 
         Returns:
-            List of recall results
+            List of RecallResult objects
         """
         request_obj = recall_request.RecallRequest(
             query=query,
@@ -398,10 +395,7 @@ class Hindsight:
         )
 
         response = await self._api.recall_memories(bank_id, request_obj)
-
-        if hasattr(response, 'results'):
-            return [r.to_dict() if hasattr(r, 'to_dict') else r for r in response.results]
-        return []
+        return response.results if hasattr(response, 'results') else []
 
     async def areflect(
         self,
@@ -409,7 +403,7 @@ class Hindsight:
         query: str,
         budget: str = "low",
         context: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> ReflectResponse:
         """
         Generate a contextual answer based on bank identity and memories (async).
 
@@ -420,7 +414,7 @@ class Hindsight:
             context: Optional additional context
 
         Returns:
-            Response with answer text and optionally facts used
+            ReflectResponse with answer text and optionally facts used
         """
         request_obj = reflect_request.ReflectRequest(
             query=query,
@@ -428,5 +422,4 @@ class Hindsight:
             context=context,
         )
 
-        response = await self._api.reflect(bank_id, request_obj)
-        return response.to_dict() if hasattr(response, 'to_dict') else response
+        return await self._api.reflect(bank_id, request_obj)

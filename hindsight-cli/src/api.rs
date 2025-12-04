@@ -116,7 +116,10 @@ impl ApiClient {
         })
     }
 
-    pub fn recall(&self, agent_id: &str, request: &types::RecallRequest, _verbose: bool) -> Result<types::RecallResponse> {
+    pub fn recall(&self, agent_id: &str, request: &types::RecallRequest, verbose: bool) -> Result<types::RecallResponse> {
+        if verbose {
+            eprintln!("Request body: {}", serde_json::to_string_pretty(request).unwrap_or_default());
+        }
         self.runtime.block_on(async {
             let response = self.client.recall_memories(agent_id, request).await?;
             Ok(response.into_inner())

@@ -10,7 +10,19 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 :::tip Prerequisites
-Make sure you've [installed Hindsight](./installation) and understand [how retain works](./retain).
+Make sure you've completed the [Quick Start](./quickstart) and understand [how retain works](./retain).
+:::
+
+## Why Entities Matter
+
+Entities improve recall quality in two ways:
+
+1. **Co-occurrence tracking** — When entities appear together in facts, Hindsight builds a graph of relationships. This enables graph-based recall to find indirect connections.
+
+2. **Observations** — Hindsight synthesizes high-level summaries about each entity from multiple facts. Including entity observations in recall provides richer context.
+
+:::tip Include Entities in Recall
+Use `include_entities=True` in your recall calls to get entity observations alongside fact results. See [Recall](./recall) for details.
 :::
 
 ## What Are Entities?
@@ -35,7 +47,7 @@ client.retain(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { HindsightClient } from '@hindsight/client';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
@@ -93,7 +105,7 @@ response = api.list_entities(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-import { sdk, createClient, createConfig } from '@hindsight/client';
+import { sdk, createClient, createConfig } from '@vectorize-io/hindsight-client';
 
 const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
 

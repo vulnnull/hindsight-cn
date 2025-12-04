@@ -3,7 +3,7 @@
  *
  * Example:
  * ```typescript
- * import { HindsightClient } from '@hindsight/client';
+ * import { HindsightClient } from '@vectorize-io/hindsight-client';
  *
  * const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
  *
@@ -64,7 +64,7 @@ export class HindsightClient {
     async retain(
         bankId: string,
         content: string,
-        options?: { timestamp?: Date | string; context?: string; metadata?: Record<string, string> }
+        options?: { timestamp?: Date | string; context?: string; metadata?: Record<string, string>; async?: boolean }
     ): Promise<RetainResponse> {
         const item: { content: string; timestamp?: string; context?: string; metadata?: Record<string, string> } = { content };
         if (options?.timestamp) {
@@ -83,7 +83,7 @@ export class HindsightClient {
         const response = await sdk.retainMemories({
             client: this.client,
             path: { bank_id: bankId },
-            body: { items: [item] },
+            body: { items: [item], async: options?.async },
         });
 
         return response.data!;
@@ -124,53 +124,25 @@ export class HindsightClient {
 
     /**
      * Recall memories with a natural language query.
-     * Returns a simplified list of recall results.
      */
     async recall(
         bankId: string,
         query: string,
-        options?: { maxTokens?: number; budget?: Budget }
-    ): Promise<RecallResult[]> {
-        const response = await sdk.recallMemories({
-            client: this.client,
-            path: { bank_id: bankId },
-            body: {
-                query,
-                max_tokens: options?.maxTokens,
-                budget: options?.budget || 'mid',
-            },
-        });
-
-        return response.data?.results ?? [];
-    }
-
-    /**
-     * Recall memories with full options and response.
-     */
-    async recallMemories(
-        bankId: string,
-        options: {
-            query: string;
-            types?: string[];
-            maxTokens?: number;
-            trace?: boolean;
-            budget?: Budget;
-        }
+        options?: { types?: string[]; maxTokens?: number; budget?: Budget; trace?: boolean }
     ): Promise<RecallResponse> {
         const response = await sdk.recallMemories({
             client: this.client,
             path: { bank_id: bankId },
             body: {
-                query: options.query,
-                types: options.types,
-                max_tokens: options.maxTokens,
-                trace: options.trace,
-                budget: options.budget || 'mid',
+                query,
+                types: options?.types,
+                max_tokens: options?.maxTokens,
+                budget: options?.budget || 'mid',
+                trace: options?.trace,
             },
         });
 
         if (!response.data) {
-            console.error('recallMemories: No data in response', { response, error: response.error });
             throw new Error(`API returned no data: ${JSON.stringify(response.error || 'Unknown error')}`);
         }
 

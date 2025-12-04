@@ -9,6 +9,10 @@ How memory banks form, store, and evolve beliefs.
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
+:::tip Prerequisites
+Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
+:::
+
 ## What Are Opinions?
 
 Opinions are beliefs formed by the memory bank based on evidence and personality. Unlike world facts (objective information received) or agent facts (actions taken), opinions are **judgments** with confidence scores.

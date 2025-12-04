@@ -85,7 +85,7 @@ if __name__ == "__main__":
         env_log_level = "info"
 
     # Parse CLI arguments
-    parser = argparse.ArgumentParser(description="Memory Graph API Server")
+    parser = argparse.ArgumentParser(description="Hindsight API Server")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8888, help="Port to bind to (default: 8888)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")

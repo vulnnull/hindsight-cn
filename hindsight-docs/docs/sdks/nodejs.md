@@ -9,13 +9,13 @@ Official TypeScript/JavaScript client for the Hindsight API.
 ## Installation
 
 ```bash
-npm install @hindsight/client
+npm install @vectorize-io/hindsight-client
 ```
 
 ## Quick Start
 
 ```typescript
-import { OpenAPI, MemoryStorageService, SearchService } from '@hindsight/client';
+import { OpenAPI, MemoryStorageService, SearchService } from '@vectorize-io/hindsight-client';
 
 // Configure base URL
 OpenAPI.BASE = 'http://localhost:8888';
@@ -38,7 +38,7 @@ console.log(results);
 ## Configuration
 
 ```typescript
-import { OpenAPI } from '@hindsight/client';
+import { OpenAPI } from '@vectorize-io/hindsight-client';
 
 OpenAPI.BASE = 'http://localhost:8888';
 OpenAPI.TOKEN = 'your-api-token';  // If authentication is enabled
@@ -49,7 +49,7 @@ OpenAPI.TOKEN = 'your-api-token';  // If authentication is enabled
 ### Store Memory
 
 ```typescript
-import { MemoryStorageService } from '@hindsight/client';
+import { MemoryStorageService } from '@vectorize-io/hindsight-client';
 
 await MemoryStorageService.putApiPutPost({
     agent_id: 'my-agent',
@@ -77,7 +77,7 @@ await MemoryStorageService.batchApiMemoriesBatchPost({
 ### Basic Search
 
 ```typescript
-import { SearchService } from '@hindsight/client';
+import { SearchService } from '@vectorize-io/hindsight-client';
 
 const results = await SearchService.searchApiSearchPost({
     agent_id: 'my-agent',
@@ -121,7 +121,7 @@ const opinions = await SearchService.opinionSearchApiOpinionSearchPost({
 ## Reflect (Generate Response)
 
 ```typescript
-import { ReasoningService } from '@hindsight/client';
+import { ReasoningService } from '@vectorize-io/hindsight-client';
 
 const response = await ReasoningService.reflectApiReflectPost({
     bank_id: 'my-agent',
@@ -139,7 +139,7 @@ console.log(response.new_opinions); // New opinions formed
 ### Create Memory bank
 
 ```typescript
-import { ManagementService } from '@hindsight/client';
+import { ManagementService } from '@vectorize-io/hindsight-client';
 
 await ManagementService.createAgentApiAgentsAgentIdPut('my-agent', {
     name: 'Assistant',
@@ -192,7 +192,7 @@ await ManagementService.mergeBackgroundApiAgentsAgentIdBackgroundPost('my-agent'
 ## Error Handling
 
 ```typescript
-import { ApiError } from '@hindsight/client';
+import { ApiError } from '@vectorize-io/hindsight-client';
 
 try {
     await SearchService.searchApiSearchPost({
@@ -218,7 +218,7 @@ import type {
     ThinkResponse,
     MemoryItem,
     PersonalityTraits,
-} from '@hindsight/client';
+} from '@vectorize-io/hindsight-client';
 
 const personality: PersonalityTraits = {
     openness: 0.7,

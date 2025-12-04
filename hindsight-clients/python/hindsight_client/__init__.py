@@ -11,16 +11,41 @@ Example:
     client = Hindsight(base_url="http://localhost:8888")
 
     # Store a memory
-    client.put(agent_id="alice", content="Alice loves AI")
+    result = client.retain(bank_id="alice", content="Alice loves AI")
+    print(result.success)
 
     # Search memories
-    results = client.search(agent_id="alice", query="What does Alice like?")
+    results = client.recall(bank_id="alice", query="What does Alice like?")
+    for r in results:
+        print(r.text)
 
     # Generate contextual answer
-    answer = client.think(agent_id="alice", query="What are my interests?")
+    answer = client.reflect(bank_id="alice", query="What are my interests?")
+    print(answer.text)
     ```
 """
 
 from .hindsight_client import Hindsight
 
-__all__ = ["Hindsight"]
+# Re-export response types for convenient access
+from hindsight_client_api.models.retain_response import RetainResponse
+from hindsight_client_api.models.recall_response import RecallResponse
+from hindsight_client_api.models.recall_result import RecallResult
+from hindsight_client_api.models.reflect_response import ReflectResponse
+from hindsight_client_api.models.reflect_fact import ReflectFact
+from hindsight_client_api.models.list_memory_units_response import ListMemoryUnitsResponse
+from hindsight_client_api.models.bank_profile_response import BankProfileResponse
+from hindsight_client_api.models.personality_traits import PersonalityTraits
+
+__all__ = [
+    "Hindsight",
+    # Response types
+    "RetainResponse",
+    "RecallResponse",
+    "RecallResult",
+    "ReflectResponse",
+    "ReflectFact",
+    "ListMemoryUnitsResponse",
+    "BankProfileResponse",
+    "PersonalityTraits",
+]

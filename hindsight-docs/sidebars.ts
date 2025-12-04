@@ -42,11 +42,6 @@ const sidebars: SidebarsConfig = {
       items: [
         {
           type: 'doc',
-          id: 'developer/api/installation',
-          label: 'Installation',
-        },
-        {
-          type: 'doc',
           id: 'developer/api/quickstart',
           label: 'Quick Start',
         },
@@ -118,6 +113,11 @@ const sidebars: SidebarsConfig = {
           type: 'doc',
           id: 'developer/metrics',
           label: 'Metrics',
+        },
+        {
+          type: 'doc',
+          id: 'developer/mcp-server',
+          label: 'MCP Server',
         },
       ],
     },

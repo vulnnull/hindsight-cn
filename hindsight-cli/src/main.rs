@@ -145,8 +145,8 @@ enum MemoryCommands {
         /// Search query
         query: String,
 
-        /// Fact types to search (world, agent, opinion)
-        #[arg(short = 't', long, value_delimiter = ',', default_values = &["world", "agent", "opinion"])]
+        /// Fact types to search (world, bank, opinion)
+        #[arg(short = 't', long, value_delimiter = ',', default_values = &["world", "bank", "opinion"])]
         fact_type: Vec<String>,
 
         /// Thinking budget (low, mid, high)

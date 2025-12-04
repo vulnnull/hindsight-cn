@@ -92,16 +92,28 @@ After the four strategies run, results are **fused together**:
 
 ## Token Budget Management
 
-Results are automatically filtered to fit within your context window:
+Hindsight is built for AI agents, not humans. Traditional search systems return "top-k" results, but agents don't think in terms of result counts—they think in tokens. An agent's context window is measured in tokens, and that's exactly how Hindsight measures results.
 
+**How it works:**
 - Top-ranked memories selected first
 - Stops when token budget is exhausted
-- Ensures you get the most relevant information within constraints
+- You specify context budget, Hindsight fills it with the most relevant memories
 
 **Parameters you control:**
-- `budget`: Budget level for graph traversal (low=100, mid=300, high=600 nodes)
 - `max_tokens`: How much memory content to return (default: 4096 tokens)
+- `budget`: Budget level for graph traversal (low, mid, high)
 - `fact_type`: Filter by world, agent, opinion, or all
+
+### Additional Context: Chunks and Entity Observations
+
+For the most relevant memories, you can optionally retrieve additional context—each with its own token budget:
+
+| Option | Parameters | Description |
+|--------|------------|-------------|
+| **Chunks** | `include_chunks`, `max_chunk_tokens` | Raw text chunks that generated the memories |
+| **Entity Observations** | `include_entities`, `max_entity_tokens` | Related observations about entities mentioned in results |
+
+This gives your agent richer context while maintaining precise control over total token consumption.
 
 ---
 
@@ -146,24 +158,23 @@ Controls how much memory content to return:
 
 **Example:** "Summarize everything about Alice" benefits from higher max_tokens to include more facts.
 
-### Trade-off Diagram
+### Two Independent Dimensions
 
-```
-                Quality (Recall Coverage)
-                        ↑
-                        |
-                  high budget
-                  8192 tokens
-                        |
-            mid budget  |
-            4096 tokens |
-                        |
-      low budget        |
-      2048 tokens       |
-                        |
-        ────────────────┼────────────────→ Latency (Speed)
-        Faster                    Slower
-```
+Budget and max_tokens control different aspects of recall:
+
+| Parameter | What it controls | Latency impact | Example |
+|-----------|------------------|----------------|---------|
+| **Budget** | How deep to explore the graph | Search time | High budget finds Alice → manager → team → projects |
+| **Max Tokens** | How much context to return | LLM processing time | High tokens returns more memories to the agent |
+
+**They're independent.** Common combinations:
+
+| Budget | Max Tokens | Use Case |
+|--------|------------|----------|
+| high | low | Deep search, return only the best results |
+| low | high | Quick search, return everything found |
+| high | high | Comprehensive research queries |
+| low | low | Fast chatbot responses |
 
 ### Recommended Configurations
 

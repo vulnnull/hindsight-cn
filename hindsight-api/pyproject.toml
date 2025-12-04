@@ -47,6 +47,9 @@ test = [
     "testcontainers[postgres]>=4.0.0",
 ]
 
+[project.scripts]
+hindsight-api = "hindsight_api.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["hindsight_api"]
 

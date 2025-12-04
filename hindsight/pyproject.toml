@@ -23,9 +23,6 @@ test = [
     "pytest-asyncio>=0.21.0",
 ]
 
-[project.scripts]
-hindsight-api = "hindsight.cli:main"
-
 [tool.hatch.build.targets.wheel]
 packages = ["hindsight"]
 
