@@ -1689,6 +1689,8 @@ class MemoryEngine:
         """
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
+            # Ensure connection is not in read-only mode (can happen with connection poolers)
+            await conn.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE")
             async with conn.transaction():
                 try:
                     if fact_type:
