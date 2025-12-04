@@ -17,11 +17,11 @@ depends_on = None
 
 
 def upgrade():
+    # Drop old check constraint FIRST (before updating data)
+    op.drop_constraint('memory_units_fact_type_check', 'memory_units', type_='check')
+
     # Update existing 'bank' values to 'interactions'
     op.execute("UPDATE memory_units SET fact_type = 'interactions' WHERE fact_type = 'bank'")
-
-    # Drop old check constraint
-    op.drop_constraint('memory_units_fact_type_check', 'memory_units', type_='check')
 
     # Create new check constraint with 'interactions' instead of 'bank'
     op.create_check_constraint(
@@ -32,11 +32,11 @@ def upgrade():
 
 
 def downgrade():
+    # Drop new check constraint FIRST
+    op.drop_constraint('memory_units_fact_type_check', 'memory_units', type_='check')
+
     # Update 'interactions' back to 'bank'
     op.execute("UPDATE memory_units SET fact_type = 'bank' WHERE fact_type = 'interactions'")
-
-    # Drop new check constraint
-    op.drop_constraint('memory_units_fact_type_check', 'memory_units', type_='check')
 
     # Recreate old check constraint
     op.create_check_constraint(
