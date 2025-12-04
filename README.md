@@ -1,5 +1,9 @@
 # Hindsight
 
+[![PyPI - hindsight-client](https://img.shields.io/pypi/v/hindsight-client?label=hindsight-client)](https://pypi.org/project/hindsight-client/)
+[![PyPI - hindsight-all](https://img.shields.io/pypi/v/hindsight-all?label=hindsight-all)](https://pypi.org/project/hindsight-all/)
+[![npm](https://img.shields.io/npm/v/@vectorize-io/hindsight-client)](https://www.npmjs.com/package/@vectorize-io/hindsight-client)
+
 **Long-term memory for AI agents.**
 
 ## Why Hindsight?
