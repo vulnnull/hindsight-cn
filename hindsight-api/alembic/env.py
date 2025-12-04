@@ -126,6 +126,7 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         # Also explicitly set read-write mode on this connection
         connection.execute(text("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE"))
+        connection.commit()  # Commit the SET command
 
         context.configure(
             connection=connection,
@@ -134,6 +135,9 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             context.run_migrations()
+
+        # Explicit commit to ensure changes are persisted (especially for Supabase)
+        connection.commit()
 
 
 if context.is_offline_mode():
