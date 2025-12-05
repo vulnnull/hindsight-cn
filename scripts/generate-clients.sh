@@ -76,6 +76,14 @@ if [ -f "$WRAPPER_FILE" ]; then
     cp "$WRAPPER_FILE" "$WRAPPER_BACKUP"
 fi
 
+# Backup the README.md
+README_FILE="$PYTHON_CLIENT_DIR/README.md"
+README_BACKUP="/tmp/hindsight_python_readme_backup.md"
+if [ -f "$README_FILE" ]; then
+    echo "📦 Backing up README.md"
+    cp "$README_FILE" "$README_BACKUP"
+fi
+
 # Remove old generated code (but keep config and maintained files)
 if [ -d "$PYTHON_CLIENT_DIR/hindsight_client_api" ]; then
     echo "Removing old generated code..."
@@ -113,6 +121,13 @@ if [ -f "$WRAPPER_BACKUP" ]; then
     echo "📦 Restoring maintained wrapper: hindsight_client.py"
     cp "$WRAPPER_BACKUP" "$WRAPPER_FILE"
     rm "$WRAPPER_BACKUP"
+fi
+
+# Restore the README.md
+if [ -f "$README_BACKUP" ]; then
+    echo "📦 Restoring README.md"
+    cp "$README_BACKUP" "$README_FILE"
+    rm "$README_BACKUP"
 fi
 
 # Keep our custom pyproject.toml (don't let generator overwrite it)
@@ -162,7 +177,7 @@ echo "Rust client:       $RUST_CLIENT_DIR"
 echo "Python client:     $PYTHON_CLIENT_DIR"
 echo "TypeScript client: $TYPESCRIPT_CLIENT_DIR"
 echo ""
-echo "⚠️  Important: The maintained wrapper hindsight_client.py was preserved"
+echo "⚠️  Important: The maintained wrapper hindsight_client.py and README.md were preserved"
 echo ""
 echo "Next steps:"
 echo "  1. Review the generated clients"

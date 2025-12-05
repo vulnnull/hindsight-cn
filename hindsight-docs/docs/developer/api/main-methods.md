@@ -10,7 +10,7 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 :::tip Prerequisites
-Make sure you've [installed Hindsight](./installation) and completed the [Quick Start](./quickstart).
+Make sure you've [installed Hindsight](../installation) and completed the [Quick Start](./quickstart).
 :::
 
 ## Retain: Store Information

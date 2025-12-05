@@ -108,7 +108,7 @@ The `bias_strength` parameter (0-1) controls how much personality influences opi
 ### Core Concepts
 - [**Retain**](/developer/retain) — How memories are stored with multi-dimensional facts
 - [**Recall**](/developer/retrieval) — How TEMPR's 4-way search retrieves memories
-- [**Reflect**](/developer/personality) — How personality influences reasoning and opinion formation
+- [**Reflect**](/developer/reflect) — How personality influences reasoning and opinion formation
 
 ### API Methods
 - [**Retain**](/developer/api/retain) — Store information in memory banks

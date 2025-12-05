@@ -192,11 +192,11 @@ export class HindsightClient {
     }
 
     /**
-     * Create or update a bank with personality and background.
+     * Create or update a bank with disposition and background.
      */
     async createBank(
         bankId: string,
-        options: { name?: string; background?: string; personality?: any }
+        options: { name?: string; background?: string; disposition?: any }
     ): Promise<BankProfileResponse> {
         const response = await sdk.createOrUpdateBank({
             client: this.client,
@@ -204,7 +204,7 @@ export class HindsightClient {
             body: {
                 name: options.name,
                 background: options.background,
-                personality: options.personality,
+                disposition: options.disposition,
             },
         });
 

@@ -81,7 +81,7 @@ const response = await client.reflect('my-bank', 'What do you think about remote
 </Tabs>
 
 :::info How Reflect Works
-Learn about personality-driven reasoning and opinion formation in the [Reflect Architecture](/developer/personality) guide.
+Learn about personality-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
 :::
 
 ## Opinion Formation
