@@ -1,6 +1,6 @@
 [package]
 name = "hindsight-cli"
-version = "0.0.19"
+version = "0.0.20"
 edition = "2021"
 authors = ["Hindsight Team"]
 description = "A beautiful CLI for Hindsight - semantic memory system"

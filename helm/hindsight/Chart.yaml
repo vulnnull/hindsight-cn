@@ -2,8 +2,8 @@ apiVersion: v2
 name: hindsight
 description: A Helm chart for Hindsight - temporal-semantic-entity memory system for AI agents
 type: application
-version: 0.0.19
-appVersion: "0.0.19"
+version: 0.0.20
+appVersion: "0.0.20"
 keywords:
   - ai
   - memory
