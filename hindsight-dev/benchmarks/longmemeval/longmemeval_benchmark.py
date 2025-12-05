@@ -224,8 +224,10 @@ async def run_benchmark(
     question_id: str = None,
     only_failed: bool = False,
     only_invalid: bool = False,
+    only_ingested: bool = False,
     category: str = None,
-    max_concurrent_items: int = 1
+    max_concurrent_items: int = 1,
+    results_filename: str = "benchmark_results.json"
 ):
     """
     Run the LongMemEval benchmark.
@@ -241,8 +243,10 @@ async def run_benchmark(
         question_id: Optional question ID to filter (e.g., 'e47becba'). Useful with --skip-ingestion.
         only_failed: If True, only run questions that were previously marked as incorrect (is_correct=False)
         only_invalid: If True, only run questions that were previously marked as invalid (is_invalid=True)
+        only_ingested: If True, only run questions whose memory bank already exists (has been ingested)
         category: Optional category to filter questions (e.g., 'single-session-user', 'multi-session', 'temporal-reasoning'). Mutually exclusive with max_instances and max_instances_per_category.
         max_concurrent_items: Maximum number of instances to process in parallel (default: 1 for sequential)
+        results_filename: Filename for results (default: benchmark_results.json). Directory is fixed to results/.
     """
     from rich.console import Console
     console = Console()
@@ -252,6 +256,24 @@ async def run_benchmark(
     if sum(exclusive_args) > 1:
         console.print("[red]Error: --max-instances, --max-questions-per-category, and --category are mutually exclusive[/red]")
         return
+
+    # Validate --only-ingested can't be combined with other dataset filters
+    if only_ingested:
+        incompatible_flags = []
+        if only_failed:
+            incompatible_flags.append("--only-failed")
+        if only_invalid:
+            incompatible_flags.append("--only-invalid")
+        if category is not None:
+            incompatible_flags.append("--category")
+        if question_id is not None:
+            incompatible_flags.append("--question-id")
+        if max_instances_per_category is not None:
+            incompatible_flags.append("--max-instances-per-category")
+
+        if incompatible_flags:
+            console.print(f"[red]Error: --only-ingested cannot be combined with: {', '.join(incompatible_flags)}[/red]")
+            return
 
     # Check dataset exists, download if needed
     dataset_path = Path(__file__).parent / "datasets" / "longmemeval_s_cleaned.json"
@@ -373,6 +395,40 @@ async def run_benchmark(
     from benchmarks.common.benchmark_runner import create_memory_engine
     memory = await create_memory_engine()
 
+    # Filter by only_ingested: only run items whose memory bank already exists
+    if only_ingested:
+        console.print("[cyan]Filtering to only items with existing memory banks...[/cyan]")
+
+        # Load all items if not already loaded
+        if original_dataset_items is None:
+            original_dataset_items = dataset.load(dataset_path, max_items=None)
+
+        items_to_check = filtered_items if filtered_items is not None else original_dataset_items
+
+        # Check which items have existing banks
+        ingested_items = []
+        pool = await memory._get_pool()
+
+        for item in items_to_check:
+            item_id = dataset.get_item_id(item)
+            agent_id = f"longmemeval_{item_id}"
+
+            # Check if bank has any memory units
+            async with pool.acquire() as conn:
+                result = await conn.fetchrow(
+                    "SELECT COUNT(*) as count FROM memory_units WHERE bank_id = $1 LIMIT 1",
+                    agent_id
+                )
+                if result['count'] > 0:
+                    ingested_items.append(item)
+
+        filtered_items = ingested_items
+        console.print(f"[green]Found {len(filtered_items)} items with existing memory banks[/green]")
+
+        if not filtered_items:
+            console.print("[yellow]No items found with existing memory banks. Nothing to run.[/yellow]")
+            return
+
     # Create benchmark runner
     runner = BenchmarkRunner(
         dataset=dataset,
@@ -381,7 +437,7 @@ async def run_benchmark(
         memory=memory
     )
 
-    # If filtering by category, failed, invalid, or max_instances_per_category, we need to use a custom dataset that only returns those items
+    # If filtering by category, failed, invalid, only_ingested, or max_instances_per_category, we need to use a custom dataset that only returns those items
     # We'll temporarily replace the dataset's load method
     if filtered_items is not None:
         original_load = dataset.load
@@ -392,12 +448,12 @@ async def run_benchmark(
     # Run benchmark
     # Single-phase approach: each question gets its own isolated agent_id
     # This ensures each question only has access to its own context
-    output_path = Path(__file__).parent / 'results' / 'benchmark_results.json'
+    output_path = Path(__file__).parent / 'results' / results_filename
 
     # Create results directory if it doesn't exist
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    merge_with_existing = (filln or question_id is not None or only_failed or only_invalid or category is not None or max_instances_per_category is not None)
+    merge_with_existing = (filln or question_id is not None or only_failed or only_invalid or only_ingested or category is not None or max_instances_per_category is not None)
 
     results = await runner.run(
         dataset_path=dataset_path,
@@ -406,7 +462,7 @@ async def run_benchmark(
         max_questions_per_item=max_questions_per_instance,
         thinking_budget=thinking_budget,
         max_tokens=max_tokens,
-        skip_ingestion=skip_ingestion,
+        skip_ingestion=skip_ingestion or only_ingested,  # Auto-skip ingestion when using --only-ingested
         max_concurrent_questions=8,
         eval_semaphore_size=8,
         separate_ingestion_phase=False,  # Process each question independently
@@ -577,6 +633,11 @@ if __name__ == "__main__":
         help="Only run questions that were previously marked as invalid (is_invalid=True). Requires existing results file."
     )
     parser.add_argument(
+        "--only-ingested",
+        action="store_true",
+        help="Only run questions whose memory bank already exists (has been ingested). Automatically skips ingestion. Cannot be combined with --only-failed, --only-invalid, --category, --question-id, or --max-instances-per-category."
+    )
+    parser.add_argument(
         "--category",
         type=str,
         default=None,
@@ -587,6 +648,12 @@ if __name__ == "__main__":
         type=int,
         default=1,
         help="Number of instances to process in parallel (default: 1 for sequential). Higher values speed up evaluation but use more memory."
+    )
+    parser.add_argument(
+        "--results-filename",
+        type=str,
+        default="benchmark_results.json",
+        help="Filename for results output (default: benchmark_results.json). Saved in results/ directory."
     )
 
     args = parser.parse_args()
@@ -615,6 +682,8 @@ if __name__ == "__main__":
         question_id=args.question_id,
         only_failed=args.only_failed,
         only_invalid=args.only_invalid,
+        only_ingested=args.only_ingested,
         category=args.category,
-        max_concurrent_items=args.parallel
+        max_concurrent_items=args.parallel,
+        results_filename=args.results_filename
     ))

@@ -35,6 +35,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "opentelemetry-exporter-prometheus>=0.41b0",
     "dateparser>=1.2.2",
+    "google-genai>=1.0.0",
 ]
 
 [project.optional-dependencies]

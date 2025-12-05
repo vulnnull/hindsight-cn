@@ -65,7 +65,7 @@ fi
 print_info "Updating version in all components..."
 
 # Update Python packages
-PYTHON_PACKAGES=("hindsight-api" "hindsight-dev" "hindsight-dev/benchmarks")
+PYTHON_PACKAGES=("hindsight-api" "hindsight-dev" "hindsight-dev/benchmarks" "hindsight")
 for package in "${PYTHON_PACKAGES[@]}"; do
     PYPROJECT_FILE="$package/pyproject.toml"
     if [ -f "$PYPROJECT_FILE" ]; then
@@ -148,7 +148,7 @@ git add -A
 git commit -m "Release v$VERSION
 
 - Update version to $VERSION in all components
-- Python packages: hindsight-api, hindsight-dev, hindsight-dev/benchmarks
+- Python packages: hindsight-api, hindsight-dev, hindsight-dev/benchmarks, hindsight-all
 - Python client: hindsight-clients/python
 - TypeScript client: hindsight-clients/typescript
 - Rust CLI: hindsight-cli
