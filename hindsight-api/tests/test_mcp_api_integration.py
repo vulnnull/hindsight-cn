@@ -21,8 +21,7 @@ async def mcp_server(memory):
         memory,
         run_migrations=False,
         initialize_memory=False,
-        mcp_enabled=True,
-        default_agent_id="test_mcp_agent"
+        mcp_api_enabled=True
     )
 
     # Use httpx to create a test server

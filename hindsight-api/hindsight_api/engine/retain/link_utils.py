@@ -205,47 +205,24 @@ async def extract_entities_batch_optimized(
 
         # Resolve ALL entities in one batch call
         if all_entities_flat:
-            # [6.2.2] Batch resolve entities
+            # [6.2.2] Batch resolve entities - single call with per-entity dates
             substep_6_2_2_start = time.time()
-            # Group by date for batch resolution (round to hour to reduce buckets)
-            entities_by_date = {}
+
+            # Add per-entity dates to entity data for batch resolution
             for idx, (unit_id, local_idx, fact_date) in enumerate(entity_to_unit):
-                # Round to hour to group facts from same time period
-                date_key = fact_date.replace(minute=0, second=0, microsecond=0)
-                if date_key not in entities_by_date:
-                    entities_by_date[date_key] = []
-                entities_by_date[date_key].append((idx, all_entities_flat[idx]))
+                all_entities_flat[idx]['event_date'] = fact_date
 
-            _log(log_buffer, f"    [6.2.2] Grouped into {len(entities_by_date)} date buckets, resolving sequentially...", level='debug')
+            # Resolve ALL entities in ONE batch call (much faster than sequential buckets)
+            # INSERT ... ON CONFLICT handles any race conditions at the DB level
+            resolved_entity_ids = await entity_resolver.resolve_entities_batch(
+                bank_id=bank_id,
+                entities_data=all_entities_flat,
+                context=context,
+                unit_event_date=None,  # Not used when per-entity dates provided
+                conn=conn  # Use main transaction connection
+            )
 
-            # Resolve all date groups SEQUENTIALLY using main transaction connection
-            # This prevents race conditions where parallel tasks create duplicate entities
-            resolved_entity_ids = [None] * len(all_entities_flat)
-
-            for date_idx, (date_key, entities_group) in enumerate(entities_by_date.items(), 1):
-                date_bucket_start = time.time()
-                indices = [idx for idx, _ in entities_group]
-                entities_data = [entity_data for _, entity_data in entities_group]
-                # Use the first fact's date for this bucket (all should be in same hour)
-                fact_date = entity_to_unit[indices[0]][2]
-
-                # Use main transaction connection to ensure consistency
-                batch_resolved = await entity_resolver.resolve_entities_batch(
-                    bank_id=bank_id,
-                    entities_data=entities_data,
-                    context=context,
-                    unit_event_date=fact_date,
-                    conn=conn  # Use main transaction connection
-                )
-
-                if len(entities_by_date) <= 10:  # Only log individual buckets if there aren't too many
-                    _log(log_buffer, f"      [6.2.2.{date_idx}] Resolved {len(entities_data)} entities in {time.time() - date_bucket_start:.3f}s", level='debug')
-
-                # Map results back to resolved_entity_ids
-                for idx, entity_id in zip(indices, batch_resolved):
-                    resolved_entity_ids[idx] = entity_id
-
-            _log(log_buffer, f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities across {len(entities_by_date)} buckets in {time.time() - substep_6_2_2_start:.3f}s", level='debug')
+            _log(log_buffer, f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities in single batch in {time.time() - substep_6_2_2_start:.3f}s", level='debug')
 
             # [6.2.3] Create unit-entity links in BATCH
             substep_6_2_3_start = time.time()
@@ -353,7 +330,7 @@ async def create_temporal_links_batch_per_fact(
     unit_ids: List[str],
     time_window_hours: int = 24,
     log_buffer: List[str] = None,
-):
+) -> int:
     """
     Create temporal links for multiple units, each with their own event_date.
 
@@ -366,9 +343,12 @@ async def create_temporal_links_batch_per_fact(
         unit_ids: List of unit IDs
         time_window_hours: Time window in hours for temporal links
         log_buffer: Optional buffer for logging
+
+    Returns:
+        Number of temporal links created
     """
     if not unit_ids:
-        return
+        return 0
 
     try:
         import time as time_mod
@@ -424,6 +404,8 @@ async def create_temporal_links_batch_per_fact(
             )
             _log(log_buffer, f"      [7.4] Insert {len(links)} temporal links: {time_mod.time() - insert_start:.3f}s")
 
+        return len(links)
+
     except Exception as e:
         logger.error(f"Failed to create temporal links: {str(e)}")
         import traceback
@@ -439,7 +421,7 @@ async def create_semantic_links_batch(
     top_k: int = 5,
     threshold: float = 0.7,
     log_buffer: List[str] = None,
-):
+) -> int:
     """
     Create semantic links for multiple units efficiently.
 
@@ -453,9 +435,12 @@ async def create_semantic_links_batch(
         top_k: Number of top similar units to link
         threshold: Minimum similarity threshold
         log_buffer: Optional buffer for logging
+
+    Returns:
+        Number of semantic links created
     """
     if not unit_ids or not embeddings:
-        return
+        return 0
 
     try:
         import time as time_mod
@@ -545,6 +530,8 @@ async def create_semantic_links_batch(
                 all_links
             )
             _log(log_buffer, f"      [8.3] Insert {len(all_links)} semantic links: {time_mod.time() - insert_start:.3f}s")
+
+        return len(all_links)
 
     except Exception as e:
         logger.error(f"Failed to create semantic links: {str(e)}")

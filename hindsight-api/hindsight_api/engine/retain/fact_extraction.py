@@ -325,7 +325,7 @@ async def _extract_facts_from_chunk(
     Note: event_date parameter is kept for backward compatibility but not used in prompt.
     The LLM extracts temporal information from the context string instead.
     """
-    agent_context = f"\n- Your name: {agent_name}" if agent_name else ""
+    memory_bank_context = f"\n- Your name: {agent_name}" if agent_name and extract_opinions else ""
 
     # Determine which fact types to extract based on the flag
     # Note: We use "assistant" in the prompt but convert to "bank" for storage
@@ -339,7 +339,7 @@ async def _extract_facts_from_chunk(
 
 {fact_types_instruction}
 
-Context: {context if context else 'none'}{agent_context}
+
 
 ══════════════════════════════════════════════════════════════════════════
 FACT FORMAT - ALL FIVE DIMENSIONS REQUIRED - MAXIMUM VERBOSITY
@@ -523,6 +523,7 @@ WHAT TO EXTRACT vs SKIP
     # Format event_date with day of week for better temporal reasoning
     event_date_formatted = event_date.strftime('%A, %B %d, %Y')  # e.g., "Monday, June 10, 2024"
     user_message = f"""Extract facts from the following text chunk.
+{memory_bank_context}
 
 Chunk: {chunk_index + 1}/{total_chunks}
 Event Date: {event_date_formatted} ({event_date.isoformat()})

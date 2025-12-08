@@ -481,7 +481,6 @@ class BenchmarkRunner:
             num_results = len(search_result.results) if search_result.results else 0
             num_chunks = len(search_result.chunks) if search_result.chunks else 0
             num_entities = len(search_result.entities) if search_result.entities else 0
-            logging.info(f"Recall stats: {num_results} facts, {num_chunks} chunks, {num_entities} entities in {recall_time:.2f}s")
 
             # Convert entire RecallResult to dictionary for answer generation
             recall_result_dict = search_result.model_dump()

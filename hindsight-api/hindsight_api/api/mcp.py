@@ -8,6 +8,7 @@ from typing import Optional
 
 from fastmcp import FastMCP
 from hindsight_api import MemoryEngine
+from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES
 
 # Configure logging from HINDSIGHT_API_LOG_LEVEL environment variable
 _log_level_str = os.environ.get("HINDSIGHT_API_LOG_LEVEL", "info").lower()
@@ -90,7 +91,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
             search_result = await memory.recall_async(
                 bank_id=bank_id,
                 query=query,
-                fact_type=["world", "experience", "opinion"],
+                fact_type=list(VALID_RECALL_FACT_TYPES),
                 budget=Budget.LOW
             )
 

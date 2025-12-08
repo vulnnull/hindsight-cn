@@ -48,7 +48,7 @@ from .entity_resolver import EntityResolver
 from .retain import embedding_utils, bank_utils
 from .search import think_utils, observation_utils
 from .llm_wrapper import LLMConfig
-from .response_models import RecallResult as RecallResultModel, ReflectResult, MemoryFact, EntityState, EntityObservation
+from .response_models import RecallResult as RecallResultModel, ReflectResult, MemoryFact, EntityState, EntityObservation, VALID_RECALL_FACT_TYPES
 from .task_backend import TaskBackend, AsyncIOQueueBackend
 from .search.reranking import CrossEncoderReranker
 from ..pg0 import EmbeddedPostgres
@@ -869,7 +869,6 @@ class MemoryEngine:
                 task_backend=self._task_backend,
                 format_date_fn=self._format_readable_date,
                 duplicate_checker_fn=self._find_duplicate_facts_batch,
-                regenerate_observations_fn=self._regenerate_observations_sync,
                 bank_id=bank_id,
                 contents_dicts=contents,
                 document_id=document_id,
@@ -955,6 +954,14 @@ class MemoryEngine:
             - entities: Optional dict of entity states (if include_entities=True)
             - chunks: Optional dict of chunks (if include_chunks=True)
         """
+        # Validate fact types early
+        invalid_types = set(fact_type) - VALID_RECALL_FACT_TYPES
+        if invalid_types:
+            raise ValueError(
+                f"Invalid fact type(s): {', '.join(sorted(invalid_types))}. "
+                f"Must be one of: {', '.join(sorted(VALID_RECALL_FACT_TYPES))}"
+            )
+
         # Map budget enum to thinking_budget number
         budget_mapping = {
             Budget.LOW: 100,
@@ -1040,12 +1047,12 @@ class MemoryEngine:
             tracer.start()
 
         pool = await self._get_pool()
-        search_start = time.time()
+        recall_start = time.time()
 
         # Buffer logs for clean output in concurrent scenarios
-        search_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
+        recall_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
         log_buffer = []
-        log_buffer.append(f"[SEARCH {search_id}] Query: '{query[:50]}...' (budget={thinking_budget}, max_tokens={max_tokens})")
+        log_buffer.append(f"[RECALL {recall_id}] Query: '{query[:50]}...' (budget={thinking_budget}, max_tokens={max_tokens})")
 
         try:
             # Step 1: Generate query embedding (for semantic search)
@@ -1088,7 +1095,7 @@ class MemoryEngine:
             for idx, (ft_semantic, ft_bm25, ft_graph, ft_temporal, ft_timings, ft_temporal_constraint) in enumerate(all_retrievals):
                 # Log fact types in this retrieval batch
                 ft_name = fact_type[idx] if idx < len(fact_type) else "unknown"
-                logger.debug(f"[SEARCH {search_id}] Fact type '{ft_name}': semantic={len(ft_semantic)}, bm25={len(ft_bm25)}, graph={len(ft_graph)}, temporal={len(ft_temporal) if ft_temporal else 0}")
+                logger.debug(f"[RECALL {recall_id}] Fact type '{ft_name}': semantic={len(ft_semantic)}, bm25={len(ft_bm25)}, graph={len(ft_graph)}, temporal={len(ft_temporal) if ft_temporal else 0}")
 
                 semantic_results.extend(ft_semantic)
                 bm25_results.extend(ft_bm25)
@@ -1209,7 +1216,6 @@ class MemoryEngine:
             # Step 4: Rerank using cross-encoder (MergedCandidate -> ScoredResult)
             step_start = time.time()
             reranker_instance = self._cross_encoder_reranker
-            log_buffer.append(f"  [4] Using cross-encoder reranker")
 
             # Rerank using cross-encoder
             scored_results = reranker_instance.rerank(query, merged_candidates)
@@ -1334,12 +1340,7 @@ class MemoryEngine:
                 ft = sr.retrieval.fact_type
                 fact_type_counts[ft] = fact_type_counts.get(ft, 0) + 1
 
-            total_time = time.time() - search_start
             fact_type_summary = ", ".join([f"{ft}={count}" for ft, count in sorted(fact_type_counts.items())])
-            log_buffer.append(f"[SEARCH {search_id}] Complete: {len(top_scored)} results ({fact_type_summary}) ({total_tokens} tokens) in {total_time:.3f}s")
-
-            # Log all buffered logs at once
-            logger.info("\n" + "\n".join(log_buffer))
 
             # Convert ScoredResult to dicts with ISO datetime strings
             top_results_dicts = []
@@ -1406,6 +1407,8 @@ class MemoryEngine:
 
             # Fetch entity observations if requested
             entities_dict = None
+            total_entity_tokens = 0
+            total_chunk_tokens = 0
             if include_entities and fact_entity_map:
                 # Collect unique entities in order of fact relevance (preserving order from top_scored)
                 # Use a list to maintain order, but track seen entities to avoid duplicates
@@ -1425,7 +1428,6 @@ class MemoryEngine:
 
                 # Fetch observations for each entity (respect token budget, in order)
                 entities_dict = {}
-                total_entity_tokens = 0
                 encoding = _get_tiktoken_encoding()
 
                 for entity_id, entity_name in entities_ordered:
@@ -1485,7 +1487,6 @@ class MemoryEngine:
 
                     # Apply token limit and build chunks_dict in the order of chunk_ids_ordered
                     chunks_dict = {}
-                    total_chunk_tokens = 0
                     encoding = _get_tiktoken_encoding()
 
                     for chunk_id in chunk_ids_ordered:
@@ -1525,10 +1526,17 @@ class MemoryEngine:
                 trace = tracer.finalize(top_results_dicts)
                 trace_dict = trace.to_dict() if trace else None
 
+            # Log final recall stats
+            total_time = time.time() - recall_start
+            num_chunks = len(chunks_dict) if chunks_dict else 0
+            num_entities = len(entities_dict) if entities_dict else 0
+            log_buffer.append(f"[RECALL {recall_id}] Complete: {len(top_scored)} facts ({total_tokens} tok), {num_chunks} chunks ({total_chunk_tokens} tok), {num_entities} entities ({total_entity_tokens} tok) | {fact_type_summary} | {total_time:.3f}s")
+            logger.info("\n" + "\n".join(log_buffer))
+
             return RecallResultModel(results=memory_facts, trace=trace_dict, entities=entities_dict, chunks=chunks_dict)
 
         except Exception as e:
-            log_buffer.append(f"[SEARCH {search_id}] ERROR after {time.time() - search_start:.3f}s: {str(e)}")
+            log_buffer.append(f"[RECALL {recall_id}] ERROR after {time.time() - recall_start:.3f}s: {str(e)}")
             logger.error("\n" + "\n".join(log_buffer))
             raise Exception(f"Failed to search memories: {str(e)}")
 
@@ -2828,7 +2836,8 @@ Guidelines:
         bank_id: str,
         entity_id: str,
         entity_name: str,
-        version: str | None = None
+        version: str | None = None,
+        conn=None
     ) -> List[str]:
         """
         Regenerate observations for an entity by:
@@ -2843,42 +2852,57 @@ Guidelines:
             entity_id: Entity UUID
             entity_name: Canonical name of the entity
             version: Entity's last_seen timestamp when task was created (for deduplication)
+            conn: Optional database connection (for transactional atomicity with caller)
 
         Returns:
             List of created observation IDs
         """
         pool = await self._get_pool()
+        entity_uuid = uuid.UUID(entity_id)
+
+        # Helper to run a query with provided conn or acquire one
+        async def fetch_with_conn(query, *args):
+            if conn is not None:
+                return await conn.fetch(query, *args)
+            else:
+                async with acquire_with_retry(pool) as acquired_conn:
+                    return await acquired_conn.fetch(query, *args)
+
+        async def fetchval_with_conn(query, *args):
+            if conn is not None:
+                return await conn.fetchval(query, *args)
+            else:
+                async with acquire_with_retry(pool) as acquired_conn:
+                    return await acquired_conn.fetchval(query, *args)
 
         # Step 1: Check version for deduplication
         if version:
-            async with acquire_with_retry(pool) as conn:
-                current_last_seen = await conn.fetchval(
-                    """
-                    SELECT last_seen
-                    FROM entities
-                    WHERE id = $1 AND bank_id = $2
-                    """,
-                    uuid.UUID(entity_id), bank_id
-                )
+            current_last_seen = await fetchval_with_conn(
+                """
+                SELECT last_seen
+                FROM entities
+                WHERE id = $1 AND bank_id = $2
+                """,
+                entity_uuid, bank_id
+            )
 
-                if current_last_seen and current_last_seen.isoformat() != version:
-                    return []
+            if current_last_seen and current_last_seen.isoformat() != version:
+                return []
 
         # Step 2: Get all facts mentioning this entity (exclude observations themselves)
-        async with acquire_with_retry(pool) as conn:
-            rows = await conn.fetch(
-                """
-                SELECT mu.id, mu.text, mu.context, mu.occurred_start, mu.fact_type
-                FROM memory_units mu
-                JOIN unit_entities ue ON mu.id = ue.unit_id
-                WHERE mu.bank_id = $1
-                  AND ue.entity_id = $2
-                  AND mu.fact_type IN ('world', 'experience')
-                ORDER BY mu.occurred_start DESC
-                LIMIT 50
-                """,
-                bank_id, uuid.UUID(entity_id)
-            )
+        rows = await fetch_with_conn(
+            """
+            SELECT mu.id, mu.text, mu.context, mu.occurred_start, mu.fact_type
+            FROM memory_units mu
+            JOIN unit_entities ue ON mu.id = ue.unit_id
+            WHERE mu.bank_id = $1
+              AND ue.entity_id = $2
+              AND mu.fact_type IN ('world', 'experience')
+            ORDER BY mu.occurred_start DESC
+            LIMIT 50
+            """,
+            bank_id, entity_uuid
+        )
 
         if not rows:
             return []
@@ -2905,119 +2929,173 @@ Guidelines:
         if not observations:
             return []
 
-        # Step 4: Delete old observations and insert new ones in a transaction
-        async with acquire_with_retry(pool) as conn:
-            async with conn.transaction():
-                # Delete old observations for this entity
-                await conn.execute(
+        # Step 4: Delete old observations and insert new ones
+        # If conn provided, we're already in a transaction - don't start another
+        # If conn is None, acquire one and start a transaction
+        async def do_db_operations(db_conn):
+            # Delete old observations for this entity
+            await db_conn.execute(
+                """
+                DELETE FROM memory_units
+                WHERE id IN (
+                    SELECT mu.id
+                    FROM memory_units mu
+                    JOIN unit_entities ue ON mu.id = ue.unit_id
+                    WHERE mu.bank_id = $1
+                      AND mu.fact_type = 'observation'
+                      AND ue.entity_id = $2
+                )
+                """,
+                bank_id, entity_uuid
+            )
+
+            # Generate embeddings for new observations
+            embeddings = await embedding_utils.generate_embeddings_batch(
+                self.embeddings, observations
+            )
+
+            # Insert new observations
+            current_time = utcnow()
+            created_ids = []
+
+            for obs_text, embedding in zip(observations, embeddings):
+                result = await db_conn.fetchrow(
                     """
-                    DELETE FROM memory_units
-                    WHERE id IN (
-                        SELECT mu.id
-                        FROM memory_units mu
-                        JOIN unit_entities ue ON mu.id = ue.unit_id
-                        WHERE mu.bank_id = $1
-                          AND mu.fact_type = 'observation'
-                          AND ue.entity_id = $2
+                    INSERT INTO memory_units (
+                        bank_id, text, embedding, context, event_date,
+                        occurred_start, occurred_end, mentioned_at,
+                        fact_type, access_count
                     )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'observation', 0)
+                    RETURNING id
                     """,
-                    bank_id, uuid.UUID(entity_id)
+                    bank_id,
+                    obs_text,
+                    str(embedding),
+                    f"observation about {entity_name}",
+                    current_time,
+                    current_time,
+                    current_time,
+                    current_time
+                )
+                obs_id = str(result['id'])
+                created_ids.append(obs_id)
+
+                # Link observation to entity
+                await db_conn.execute(
+                    """
+                    INSERT INTO unit_entities (unit_id, entity_id)
+                    VALUES ($1, $2)
+                    """,
+                    uuid.UUID(obs_id), entity_uuid
                 )
 
-                # Generate embeddings for new observations
-                embeddings = await embedding_utils.generate_embeddings_batch(
-                    self.embeddings, observations
-                )
+            return created_ids
 
-                # Insert new observations
-                current_time = utcnow()
-                created_ids = []
-
-                for obs_text, embedding in zip(observations, embeddings):
-                    result = await conn.fetchrow(
-                        """
-                        INSERT INTO memory_units (
-                            bank_id, text, embedding, context, event_date,
-                            occurred_start, occurred_end, mentioned_at,
-                            fact_type, access_count
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'observation', 0)
-                        RETURNING id
-                        """,
-                        bank_id,
-                        obs_text,
-                        str(embedding),
-                        f"observation about {entity_name}",
-                        current_time,
-                        current_time,
-                        current_time,
-                        current_time
-                    )
-                    obs_id = str(result['id'])
-                    created_ids.append(obs_id)
-
-                    # Link observation to entity
-                    await conn.execute(
-                        """
-                        INSERT INTO unit_entities (unit_id, entity_id)
-                        VALUES ($1, $2)
-                        """,
-                        uuid.UUID(obs_id), uuid.UUID(entity_id)
-                    )
-
-        return created_ids
+        if conn is not None:
+            # Use provided connection (already in a transaction)
+            return await do_db_operations(conn)
+        else:
+            # Acquire connection and start our own transaction
+            async with acquire_with_retry(pool) as acquired_conn:
+                async with acquired_conn.transaction():
+                    return await do_db_operations(acquired_conn)
 
     async def _regenerate_observations_sync(
         self,
         bank_id: str,
         entity_ids: List[str],
-        min_facts: int = 5
+        min_facts: int = 5,
+        conn=None
     ) -> None:
         """
         Regenerate observations for entities synchronously (called during retain).
+
+        Processes entities in PARALLEL for faster execution.
 
         Args:
             bank_id: Bank identifier
             entity_ids: List of entity IDs to process
             min_facts: Minimum facts required to regenerate observations
+            conn: Optional database connection (for transactional atomicity)
         """
         if not bank_id or not entity_ids:
             return
 
-        pool = await self._get_pool()
-        async with pool.acquire() as conn:
-            for entity_id in entity_ids:
-                try:
-                    entity_uuid = uuid.UUID(entity_id) if isinstance(entity_id, str) else entity_id
+        # Convert to UUIDs
+        entity_uuids = [uuid.UUID(eid) if isinstance(eid, str) else eid for eid in entity_ids]
 
-                    # Check if entity exists
-                    entity_exists = await conn.fetchrow(
-                        "SELECT canonical_name FROM entities WHERE id = $1 AND bank_id = $2",
-                        entity_uuid, bank_id
-                    )
+        # Use provided connection or acquire a new one
+        if conn is not None:
+            # Use the provided connection (transactional with caller)
+            entity_rows = await conn.fetch(
+                """
+                SELECT id, canonical_name FROM entities
+                WHERE id = ANY($1) AND bank_id = $2
+                """,
+                entity_uuids, bank_id
+            )
+            entity_names = {row['id']: row['canonical_name'] for row in entity_rows}
 
-                    if not entity_exists:
-                        continue
+            fact_counts = await conn.fetch(
+                """
+                SELECT ue.entity_id, COUNT(*) as cnt
+                FROM unit_entities ue
+                JOIN memory_units mu ON ue.unit_id = mu.id
+                WHERE ue.entity_id = ANY($1) AND mu.bank_id = $2
+                GROUP BY ue.entity_id
+                """,
+                entity_uuids, bank_id
+            )
+            entity_fact_counts = {row['entity_id']: row['cnt'] for row in fact_counts}
+        else:
+            # Acquire a new connection (standalone call)
+            pool = await self._get_pool()
+            async with pool.acquire() as acquired_conn:
+                entity_rows = await acquired_conn.fetch(
+                    """
+                    SELECT id, canonical_name FROM entities
+                    WHERE id = ANY($1) AND bank_id = $2
+                    """,
+                    entity_uuids, bank_id
+                )
+                entity_names = {row['id']: row['canonical_name'] for row in entity_rows}
 
-                    entity_name = entity_exists['canonical_name']
+                fact_counts = await acquired_conn.fetch(
+                    """
+                    SELECT ue.entity_id, COUNT(*) as cnt
+                    FROM unit_entities ue
+                    JOIN memory_units mu ON ue.unit_id = mu.id
+                    WHERE ue.entity_id = ANY($1) AND mu.bank_id = $2
+                    GROUP BY ue.entity_id
+                    """,
+                    entity_uuids, bank_id
+                )
+                entity_fact_counts = {row['entity_id']: row['cnt'] for row in fact_counts}
 
-                    # Count facts linked to this entity (in this bank)
-                    fact_count = await conn.fetchval(
-                        """
-                        SELECT COUNT(*) FROM unit_entities ue
-                        JOIN memory_units mu ON ue.unit_id = mu.id
-                        WHERE ue.entity_id = $1 AND mu.bank_id = $2
-                        """,
-                        entity_uuid, bank_id
-                    ) or 0
+        # Filter entities that meet the threshold
+        entities_to_process = []
+        for entity_id in entity_ids:
+            entity_uuid = uuid.UUID(entity_id) if isinstance(entity_id, str) else entity_id
+            if entity_uuid not in entity_names:
+                continue
+            fact_count = entity_fact_counts.get(entity_uuid, 0)
+            if fact_count >= min_facts:
+                entities_to_process.append((entity_id, entity_names[entity_uuid]))
 
-                    # Only regenerate if entity has enough facts
-                    if fact_count >= min_facts:
-                        await self.regenerate_entity_observations(bank_id, entity_id, entity_name, version=None)
+        if not entities_to_process:
+            return
 
-                except Exception as e:
-                    logger.error(f"[OBSERVATIONS] Error processing entity {entity_id}: {e}")
-                    continue
+        # Process all entities in PARALLEL (LLM calls are the bottleneck)
+        async def process_entity(entity_id: str, entity_name: str):
+            try:
+                await self.regenerate_entity_observations(bank_id, entity_id, entity_name, version=None, conn=conn)
+            except Exception as e:
+                logger.error(f"[OBSERVATIONS] Error processing entity {entity_id}: {e}")
+
+        await asyncio.gather(*[
+            process_entity(eid, name) for eid, name in entities_to_process
+        ])
 
     async def _handle_regenerate_observations(self, task_dict: Dict[str, Any]):
         """

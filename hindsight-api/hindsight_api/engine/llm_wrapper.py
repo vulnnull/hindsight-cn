@@ -196,10 +196,15 @@ class LLMConfig:
                     usage = response.usage
                     if duration > 10.0:
                         ratio = max(1, usage.completion_tokens) / usage.prompt_tokens
+                        # Check for cached tokens (OpenAI/Groq may include this)
+                        cached_tokens = 0
+                        if hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
+                            cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
+                        cache_info = f", cached_tokens={cached_tokens}" if cached_tokens > 0 else ""
                         logger.info(
                             f"slow llm call: model={self.provider}/{self.model}, "
                             f"input_tokens={usage.prompt_tokens}, output_tokens={usage.completion_tokens}, "
-                            f"total_tokens={usage.total_tokens}, time={duration:.3f}s, ratio out/in={ratio:.2f}"
+                            f"total_tokens={usage.total_tokens}{cache_info}, time={duration:.3f}s, ratio out/in={ratio:.2f}"
                         )
 
                     return result
@@ -358,9 +363,12 @@ class LLMConfig:
                 duration = time.time() - start_time
                 if duration > 10.0 and hasattr(response, 'usage_metadata') and response.usage_metadata:
                     usage = response.usage_metadata
+                    # Check for cached tokens (Gemini uses cached_content_token_count)
+                    cached_tokens = getattr(usage, 'cached_content_token_count', 0) or 0
+                    cache_info = f", cached_tokens={cached_tokens}" if cached_tokens > 0 else ""
                     logger.info(
                         f"slow llm call: model={self.provider}/{self.model}, "
-                        f"input_tokens={usage.prompt_token_count}, output_tokens={usage.candidates_token_count}, "
+                        f"input_tokens={usage.prompt_token_count}, output_tokens={usage.candidates_token_count}{cache_info}, "
                         f"time={duration:.3f}s"
                     )
 

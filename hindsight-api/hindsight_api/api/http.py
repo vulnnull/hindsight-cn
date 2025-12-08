@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from hindsight_api import MemoryEngine
 from hindsight_api.engine.memory_engine import Budget
 from hindsight_api.engine.db_utils import acquire_with_retry
+from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES
 from hindsight_api.metrics import get_metrics_collector, initialize_metrics, create_metrics_collector
 
 
@@ -895,17 +896,8 @@ def _register_routes(app: FastAPI):
         metrics = get_metrics_collector()
 
         try:
-            # Validate types
-            valid_fact_types = ["world", "experience", "opinion"]
-
             # Default to world, experience, opinion if not specified (exclude observation by default)
-            fact_types = request.types if request.types else ["world", "experience", "opinion"]
-            for ft in fact_types:
-                if ft not in valid_fact_types:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid type '{ft}'. Must be one of: {', '.join(valid_fact_types)}"
-                    )
+            fact_types = request.types if request.types else list(VALID_RECALL_FACT_TYPES)
 
             # Parse query_timestamp if provided
             question_date = None

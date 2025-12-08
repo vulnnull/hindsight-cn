@@ -10,6 +10,10 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 
 
+# Valid fact types for recall operations (excludes 'observation' which is internal)
+VALID_RECALL_FACT_TYPES = frozenset(["world", "experience", "opinion"])
+
+
 class DispositionTraits(BaseModel):
     """
     Disposition traits for a memory bank.
