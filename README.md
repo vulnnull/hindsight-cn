@@ -90,7 +90,7 @@ with HindsightServer(llm_provider="openai", llm_model="gpt-4o-mini", llm_api_key
 
 ## Documentation
 
-Full documentation: [vectorize-io.github.io/hindsight](https://vectorize-io.github.io/hindsight)
+Full documentation: [hindsight.vectorize.io](https://hindsight.vectorize.io)
 
 ## Contributing
 
