@@ -170,9 +170,9 @@ async def retrieve_graph(
                 batch_activations[unit_id] = activation
 
         # Batch fetch neighbors for all nodes in this batch
-        # Fetch top weighted neighbors (batch_size * 10 = ~200 for good distribution)
+        # Fetch top weighted neighbors (batch_size * 20 = ~400 for good distribution)
         if batch_nodes and budget_remaining > 0:
-            max_neighbors = len(batch_nodes) * 10
+            max_neighbors = len(batch_nodes) * 20
             neighbors = await conn.fetch(
                 """
                 SELECT mu.id, mu.text, mu.context, mu.occurred_start, mu.occurred_end, mu.mentioned_at,

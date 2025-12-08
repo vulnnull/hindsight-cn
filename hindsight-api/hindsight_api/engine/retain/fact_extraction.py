@@ -167,10 +167,10 @@ class ExtractedFact(BaseModel):
         description="'world' = about the user/others (background, experiences). 'assistant' = experience with the assistant."
     )
 
-    # Entities - extracted from 'who' field
+    # Entities - extracted from fact content
     entities: Optional[List[Entity]] = Field(
         default=None,
-        description="Named entities from 'who': people names, organizations, places. NOT generic relations."
+        description="Named entities, objects, AND abstract concepts from the fact. Include: people names, organizations, places, significant objects (e.g., 'coffee maker', 'car'), AND abstract concepts/themes (e.g., 'friendship', 'career growth', 'loss', 'celebration'). Extract anything that could help link related facts together."
     )
     causal_relations: Optional[List[CausalRelation]] = Field(
         default=None,
@@ -415,14 +415,26 @@ Example: "I love Italian food and prefer outdoor dining"
 → Fact 2: what="User prefers outdoor dining", who="user", why="This is a dining preference", entities=["user"]
 
 ══════════════════════════════════════════════════════════════════════════
-ENTITIES - INCLUDE "user" (CRITICAL)
+ENTITIES - INCLUDE PEOPLE, PLACES, OBJECTS, AND CONCEPTS (CRITICAL)
 ══════════════════════════════════════════════════════════════════════════
 
-When a fact is ABOUT the user (their preferences, plans, experiences), ALWAYS include "user" in entities!
+Extract entities that help link related facts together. Include:
+1. "user" - when the fact is about the user
+2. People names - Emily, Dr. Smith, etc.
+3. Organizations/Places - IKEA, Goodwill, New York, etc.
+4. Specific objects - coffee maker, toaster, car, laptop, kitchen, etc.
+5. Abstract concepts - themes, values, emotions, or ideas that capture the essence of the fact:
+   - "friendship" for facts about friends helping each other, bonding, loyalty
+   - "career growth" for facts about promotions, learning new skills, job changes
+   - "loss" or "grief" for facts about death, endings, saying goodbye
+   - "celebration" for facts about parties, achievements, milestones
+   - "trust" or "betrayal" for facts involving those themes
 
-✅ CORRECT: entities=["user"] for "User loves coffee"
-✅ CORRECT: entities=["user", "Emily"] for "User attended Emily's wedding"
-❌ WRONG: entities=[] for facts about the user
+✅ CORRECT: entities=["user", "coffee maker", "Goodwill", "kitchen"] for "User donated their coffee maker to Goodwill"
+✅ CORRECT: entities=["user", "Emily", "friendship"] for "Emily helped user move to a new apartment"
+✅ CORRECT: entities=["user", "promotion", "career growth"] for "User got promoted to senior engineer"
+✅ CORRECT: entities=["user", "grandmother", "loss", "grief"] for "User's grandmother passed away last week"
+❌ WRONG: entities=["user", "Emily"] only - missing the "friendship" concept that links to other friendship facts!
 
 ══════════════════════════════════════════════════════════════════════════
 EXAMPLES
@@ -438,14 +450,14 @@ Output facts:
    - who: "user"
    - why: "User prefers intimate outdoor settings"
    - fact_type: "world", fact_kind: "conversation"
-   - entities: ["user"]
+   - entities: ["user", "wedding", "outdoor ceremony"]
 
 2. User planning wedding
    - what: "User is planning their own wedding"
    - who: "user"
    - why: "Inspired by Emily's ceremony"
    - fact_type: "world", fact_kind: "conversation"
-   - entities: ["user"]
+   - entities: ["user", "wedding"]
 
 3. Emily's wedding (THE EVENT)
    - what: "Emily got married to Sarah at a rooftop garden ceremony in the city"
@@ -453,7 +465,7 @@ Output facts:
    - why: "User found it romantic and beautiful"
    - fact_type: "world", fact_kind: "event"
    - occurred_start: "2024-06-09T00:00:00Z" (recently, user "just got back")
-   - entities: ["user", "Emily", "Sarah"]
+   - entities: ["user", "Emily", "Sarah", "wedding", "rooftop garden"]
 
 Example 2 - Assistant Facts (Context: March 5, 2024):
 Input: "User: My API is really slow when we have 1000+ concurrent users. What can I do?
@@ -465,7 +477,22 @@ Output fact:
    - who: "user, assistant"
    - why: "User asked how to fix slow API performance with 1000+ concurrent users, expected 70-80% reduction in database load"
    - fact_type: "assistant", fact_kind: "conversation"
-   - entities: ["user"]
+   - entities: ["user", "API", "Redis"]
+
+Example 3 - Kitchen Items with Concept Inference (Context: May 30, 2024):
+Input: "I finally donated my old coffee maker to Goodwill. I upgraded to that new espresso machine last month and the old one was just taking up counter space."
+
+Output fact:
+   - what: "User donated their old coffee maker to Goodwill after upgrading to a new espresso machine"
+   - when: "May 30, 2024"
+   - who: "user"
+   - why: "The old coffee maker was taking up counter space after the upgrade"
+   - fact_type: "world", fact_kind: "event"
+   - occurred_start: "2024-05-30T00:00:00Z"
+   - entities: ["user", "coffee maker", "Goodwill", "espresso machine", "kitchen"]
+
+Note: "kitchen" is inferred as a concept because coffee makers and espresso machines are kitchen appliances.
+This links the fact to other kitchen-related facts (toaster, faucet, kitchen mat, etc.) via the shared "kitchen" entity.
 
 Note how the "why" field captures the FULL STORY: what the user asked AND what outcome was expected!
 

@@ -5,11 +5,14 @@ import os
 import time
 import asyncio
 from typing import Optional, Any, Dict, List
-from openai import AsyncOpenAI, RateLimitError, APIError, APIStatusError, LengthFinishReasonError
+from openai import AsyncOpenAI, RateLimitError, APIError, APIStatusError, APIConnectionError, LengthFinishReasonError
 from google import genai
 from google.genai import types as genai_types
 from google.genai import errors as genai_errors
 import logging
+
+# Seed applied to every Groq request for deterministic behavior.
+DEFAULT_LLM_SEED = 4242
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ class LLMConfig:
         api_key: str,
         base_url: str,
         model: str,
+            reasoning_effort: str = "low",
     ):
         """
         Initialize LLM configuration.
@@ -54,6 +58,7 @@ class LLMConfig:
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
+        self.reasoning_effort = reasoning_effort
 
         # Validate provider
         if self.provider not in ["openai", "groq", "ollama", "gemini"]:
@@ -136,10 +141,14 @@ class LLMConfig:
                 "messages": messages,
                 **kwargs
             }
+
+            if self.provider == "groq":
+                call_params["seed"] = DEFAULT_LLM_SEED
+            
             if self.provider == "groq":
                 call_params["extra_body"] = {
                     "service_tier": "auto",
-                    "reasoning_effort": "low",  # Reduce reasoning overhead
+                    "reasoning_effort": self.reasoning_effort,
                     "include_reasoning": False,  # Disable hidden reasoning tokens
                 }
 
@@ -202,6 +211,18 @@ class LLMConfig:
                         f"LLM output exceeded token limits. Input may need to be split into smaller chunks."
                     ) from e
 
+                except APIConnectionError as e:
+                    # Handle connection errors (server disconnected, network issues) with retry
+                    last_exception = e
+                    if attempt < max_retries:
+                        logger.warning(f"Connection error, retrying... (attempt {attempt + 1}/{max_retries + 1})")
+                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                        await asyncio.sleep(backoff)
+                        continue
+                    else:
+                        logger.error(f"Connection error after {max_retries + 1} attempts: {str(e)}")
+                        raise
+
                 except APIStatusError as e:
                     last_exception = e
                     if attempt < max_retries:
@@ -238,7 +259,7 @@ class LLMConfig:
         skip_validation: bool,
         start_time: float,
         **kwargs
-    ) -> Any:
+) -> Any:
         """Handle Gemini-specific API calls using google-genai SDK."""
         import json
 
@@ -287,6 +308,8 @@ class LLMConfig:
             config_kwargs['max_output_tokens'] = kwargs['max_tokens']
         if response_format is not None:
             config_kwargs['response_mime_type'] = 'application/json'
+            # Pass the Pydantic model directly as response_schema for structured output
+            config_kwargs['response_schema'] = response_format
 
         generation_config = genai_types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
@@ -301,6 +324,23 @@ class LLMConfig:
                 )
 
                 content = response.text
+
+                # Handle empty/None response (can happen with content filtering or timeouts)
+                if content is None:
+                    # Check if there's a block reason
+                    block_reason = None
+                    if hasattr(response, 'candidates') and response.candidates:
+                        candidate = response.candidates[0]
+                        if hasattr(candidate, 'finish_reason'):
+                            block_reason = candidate.finish_reason
+
+                    if attempt < max_retries:
+                        logger.warning(f"Gemini returned empty response (reason: {block_reason}), retrying... (attempt {attempt + 1}/{max_retries + 1})")
+                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                        await asyncio.sleep(backoff)
+                        continue
+                    else:
+                        raise RuntimeError(f"Gemini returned empty response after {max_retries + 1} attempts (reason: {block_reason})")
 
                 if response_format is not None:
                     # Parse the JSON response
@@ -325,6 +365,18 @@ class LLMConfig:
                     )
 
                 return result
+
+            except json.JSONDecodeError as e:
+                # Handle truncated JSON responses (often from MAX_TOKENS) with retry
+                last_exception = e
+                if attempt < max_retries:
+                    logger.warning(f"Gemini returned invalid JSON (truncated response?), retrying... (attempt {attempt + 1}/{max_retries + 1})")
+                    backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                    await asyncio.sleep(backoff)
+                    continue
+                else:
+                    logger.error(f"Gemini returned invalid JSON after {max_retries + 1} attempts: {str(e)}")
+                    raise
 
             except genai_errors.APIError as e:
                 # Handle rate limits and server errors with retry
@@ -372,6 +424,37 @@ class LLMConfig:
             api_key=api_key,
             base_url=base_url,
             model=model,
+            reasoning_effort="low"
+        )
+
+    @classmethod
+    def for_answer_generation(cls) -> "LLMConfig":
+        """
+        Create configuration for answer generation operations from environment variables.
+
+        Falls back to memory LLM config if answer-specific config not set.
+        """
+        # Check if answer-specific config exists, otherwise fall back to memory config
+        provider = os.getenv("HINDSIGHT_API_ANSWER_LLM_PROVIDER", os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq"))
+        api_key = os.getenv("HINDSIGHT_API_ANSWER_LLM_API_KEY", os.getenv("HINDSIGHT_API_LLM_API_KEY"))
+        base_url = os.getenv("HINDSIGHT_API_ANSWER_LLM_BASE_URL", os.getenv("HINDSIGHT_API_LLM_BASE_URL"))
+        model = os.getenv("HINDSIGHT_API_ANSWER_LLM_MODEL", os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"))
+
+        # Set default base URL if not provided
+        if not base_url:
+            if provider == "groq":
+                base_url = "https://api.groq.com/openai/v1"
+            elif provider == "ollama":
+                base_url = "http://localhost:11434/v1"
+            else:
+                base_url = ""
+
+        return cls(
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            reasoning_effort="high"
         )
 
     @classmethod
@@ -401,4 +484,5 @@ class LLMConfig:
             api_key=api_key,
             base_url=base_url,
             model=model,
+            reasoning_effort="high"
         )

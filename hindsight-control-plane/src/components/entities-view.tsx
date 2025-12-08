@@ -164,6 +164,7 @@ export function EntitiesView() {
           </div>
 
           <div className="text-sm text-muted-foreground mb-4">
+            <div className="font-mono text-xs mb-1" title={selectedEntity.id}>ID: {selectedEntity.id}</div>
             <div>Mentions: {selectedEntity.mention_count}</div>
             <div>First seen: {formatDate(selectedEntity.first_seen)}</div>
             <div>Last seen: {formatDate(selectedEntity.last_seen)}</div>

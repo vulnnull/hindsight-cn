@@ -313,15 +313,6 @@ async def retain_batch(
                 contents, extracted_facts, is_duplicate_flags, unit_ids
             )
 
-            total_time = time.time() - start_time
-            log_buffer.append(f"{'='*60}")
-            log_buffer.append(f"RETAIN_BATCH COMPLETE: {len(unit_ids)} units in {total_time:.3f}s")
-            if document_ids_added:
-                log_buffer.append(f"Documents: {', '.join(document_ids_added)}")
-            log_buffer.append(f"{'='*60}")
-
-            logger.info("\n" + "\n".join(log_buffer) + "\n")
-
         # Trigger background tasks AFTER transaction commits
         await _trigger_background_tasks(
             task_backend,
@@ -329,8 +320,19 @@ async def retain_batch(
             bank_id,
             unit_ids,
             non_duplicate_facts,
-            entity_links
+            entity_links,
+            log_buffer
         )
+
+        # Log final summary
+        total_time = time.time() - start_time
+        log_buffer.append(f"{'='*60}")
+        log_buffer.append(f"RETAIN_BATCH COMPLETE: {len(unit_ids)} units in {total_time:.3f}s")
+        if document_ids_added:
+            log_buffer.append(f"Documents: {', '.join(document_ids_added)}")
+        log_buffer.append(f"{'='*60}")
+
+        logger.info("\n" + "\n".join(log_buffer) + "\n")
 
         return result_unit_ids
 
@@ -371,7 +373,8 @@ async def _trigger_background_tasks(
     bank_id: str,
     unit_ids: List[str],
     facts: List[ProcessedFact],
-    entity_links: List
+    entity_links: List,
+    log_buffer: List[str] = None
 ) -> None:
     """Trigger opinion reinforcement and observation regeneration (sync)."""
     # Trigger opinion reinforcement if there are entities
@@ -392,14 +395,19 @@ async def _trigger_background_tasks(
     if entity_links and regenerate_observations_fn:
         unique_entity_ids = set()
         for link in entity_links:
-            # links are tuples: (unit_id, entity_id, confidence)
-            if len(link) >= 2 and link[1]:
-                unique_entity_ids.add(str(link[1]))
+            # links are tuples: (from_unit_id, to_unit_id, link_type, weight, entity_id)
+            if len(link) >= 5 and link[4]:
+                unique_entity_ids.add(str(link[4]))
 
         if unique_entity_ids:
+            entities_to_process = list(unique_entity_ids)[:TOP_N_ENTITIES]
+            obs_start = time.time()
             # Run observation regeneration synchronously
             await regenerate_observations_fn(
                 bank_id=bank_id,
-                entity_ids=list(unique_entity_ids)[:TOP_N_ENTITIES],
+                entity_ids=entities_to_process,
                 min_facts=MIN_FACTS_THRESHOLD
             )
+            obs_time = time.time() - obs_start
+            if log_buffer is not None:
+                log_buffer.append(f"[11] Observations: {len(entities_to_process)} entities in {obs_time:.3f}s")

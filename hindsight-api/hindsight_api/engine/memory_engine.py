@@ -2965,8 +2965,6 @@ Guidelines:
                         uuid.UUID(obs_id), uuid.UUID(entity_id)
                     )
 
-        # Single consolidated log line
-        logger.info(f"[OBSERVATIONS] {entity_name}: {len(facts)} facts -> {len(created_ids)} observations")
         return created_ids
 
     async def _regenerate_observations_sync(
