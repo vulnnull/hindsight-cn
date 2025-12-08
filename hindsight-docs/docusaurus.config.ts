@@ -16,8 +16,8 @@ const config: Config = {
     mermaid: true,
   },
 
-  url: 'https://vectorize-io.github.io',
-  baseUrl: '/hindsight/',
+  url: 'https://hindsight.vectorize.io',
+  baseUrl: '/',
 
   organizationName: 'vectorize-io',
   projectName: 'hindsight',
