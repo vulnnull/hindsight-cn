@@ -231,11 +231,9 @@ pub fn update_background(
                         (current_profile.as_ref().map(|p| p.disposition.clone()), &profile.disposition)
                     {
                         println!("\nDisposition changes:");
-                        println!("  Openness:          {:.2} → {:.2}", old_p.openness, new_p.openness);
-                        println!("  Conscientiousness: {:.2} → {:.2}", old_p.conscientiousness, new_p.conscientiousness);
-                        println!("  Extraversion:      {:.2} → {:.2}", old_p.extraversion, new_p.extraversion);
-                        println!("  Agreeableness:     {:.2} → {:.2}", old_p.agreeableness, new_p.agreeableness);
-                        println!("  Neuroticism:       {:.2} → {:.2}", old_p.neuroticism, new_p.neuroticism);
+                        println!("  Skepticism:  {} → {}", old_p.skepticism, new_p.skepticism);
+                        println!("  Literalism:  {} → {}", old_p.literalism, new_p.literalism);
+                        println!("  Empathy:     {} → {}", old_p.empathy, new_p.empathy);
                     }
                 }
             } else {

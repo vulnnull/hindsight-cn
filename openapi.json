@@ -844,7 +844,7 @@
       },
       "put": {
         "summary": "Update memory bank disposition",
-        "description": "Update bank's Big Five disposition traits and bias strength",
+        "description": "Update bank's disposition traits (skepticism, literalism, empathy)",
         "operationId": "update_bank_disposition",
         "parameters": [
           {
@@ -1110,7 +1110,7 @@
           "update_disposition": {
             "type": "boolean",
             "title": "Update Disposition",
-            "description": "If true, infer Big Five disposition traits from the merged background (default: true)",
+            "description": "If true, infer disposition traits from the merged background (default: true)",
             "default": true
           }
         },
@@ -1151,12 +1151,9 @@
         "example": {
           "background": "I was born in Texas. I am a software engineer with 10 years of experience.",
           "disposition": {
-            "agreeableness": 0.8,
-            "bias_strength": 0.6,
-            "conscientiousness": 0.6,
-            "extraversion": 0.5,
-            "neuroticism": 0.4,
-            "openness": 0.7
+            "empathy": 3,
+            "literalism": 3,
+            "skepticism": 3
           }
         }
       },
@@ -1233,12 +1230,9 @@
               "bank_id": "user123",
               "created_at": "2024-01-15T10:30:00Z",
               "disposition": {
-                "agreeableness": 0.5,
-                "bias_strength": 0.5,
-                "conscientiousness": 0.5,
-                "extraversion": 0.5,
-                "neuroticism": 0.5,
-                "openness": 0.5
+                "empathy": 3,
+                "literalism": 3,
+                "skepticism": 3
               },
               "name": "Alice",
               "updated_at": "2024-01-16T14:20:00Z"
@@ -1277,12 +1271,9 @@
           "background": "I am a software engineer with 10 years of experience in startups",
           "bank_id": "user123",
           "disposition": {
-            "agreeableness": 0.7,
-            "bias_strength": 0.7,
-            "conscientiousness": 0.6,
-            "extraversion": 0.5,
-            "neuroticism": 0.3,
-            "openness": 0.8
+            "empathy": 3,
+            "literalism": 3,
+            "skepticism": 3
           },
           "name": "Alice"
         }
@@ -1428,12 +1419,9 @@
         "example": {
           "background": "I am a creative software engineer with 10 years of experience",
           "disposition": {
-            "agreeableness": 0.7,
-            "bias_strength": 0.7,
-            "conscientiousness": 0.6,
-            "extraversion": 0.5,
-            "neuroticism": 0.3,
-            "openness": 0.8
+            "empathy": 3,
+            "literalism": 3,
+            "skepticism": 3
           },
           "name": "Alice"
         }
@@ -1457,67 +1445,40 @@
       },
       "DispositionTraits": {
         "properties": {
-          "openness": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Openness",
-            "description": "Openness to experience (0-1)"
+          "skepticism": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Skepticism",
+            "description": "How skeptical vs trusting (1=trusting, 5=skeptical)"
           },
-          "conscientiousness": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Conscientiousness",
-            "description": "Conscientiousness (0-1)"
+          "literalism": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Literalism",
+            "description": "How literally to interpret information (1=flexible, 5=literal)"
           },
-          "extraversion": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Extraversion",
-            "description": "Extraversion (0-1)"
-          },
-          "agreeableness": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Agreeableness",
-            "description": "Agreeableness (0-1)"
-          },
-          "neuroticism": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Neuroticism",
-            "description": "Neuroticism (0-1)"
-          },
-          "bias_strength": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Bias Strength",
-            "description": "How strongly disposition influences opinions (0-1)"
+          "empathy": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Empathy",
+            "description": "How much to consider emotional context (1=detached, 5=empathetic)"
           }
         },
         "type": "object",
         "required": [
-          "openness",
-          "conscientiousness",
-          "extraversion",
-          "agreeableness",
-          "neuroticism",
-          "bias_strength"
+          "skepticism",
+          "literalism",
+          "empathy"
         ],
         "title": "DispositionTraits",
-        "description": "Disposition traits based on Big Five model.",
+        "description": "Disposition traits that influence how memories are formed and interpreted.",
         "example": {
-          "agreeableness": 0.7,
-          "bias_strength": 0.7,
-          "conscientiousness": 0.6,
-          "extraversion": 0.5,
-          "neuroticism": 0.3,
-          "openness": 0.8
+          "empathy": 3,
+          "literalism": 3,
+          "skepticism": 3
         }
       },
       "DocumentResponse": {

@@ -959,7 +959,7 @@ class MemoryEngine:
         budget_mapping = {
             Budget.LOW: 100,
             Budget.MID: 300,
-            Budget.HIGH: 600
+            Budget.HIGH: 1000
         }
         thinking_budget = budget_mapping[budget]
 
@@ -2502,14 +2502,14 @@ Guidelines:
     async def update_bank_disposition(
         self,
         bank_id: str,
-        disposition: Dict[str, float]
+        disposition: Dict[str, int]
     ) -> None:
         """
         Update bank disposition traits.
 
         Args:
             bank_id: bank IDentifier
-            disposition: Dict with Big Five traits + bias_strength (all 0-1)
+            disposition: Dict with skepticism, literalism, empathy (all 1-5)
         """
         pool = await self._get_pool()
         await bank_utils.update_bank_disposition(pool, bank_id, disposition)
@@ -2997,22 +2997,23 @@ Guidelines:
                     )
 
                     if not entity_exists:
-                        logger.debug(f"[OBSERVATIONS] Entity {entity_id} not yet in bank {bank_id}, skipping")
                         continue
 
                     entity_name = entity_exists['canonical_name']
 
-                    # Count facts linked to this entity
+                    # Count facts linked to this entity (in this bank)
                     fact_count = await conn.fetchval(
-                        "SELECT COUNT(*) FROM unit_entities WHERE entity_id = $1",
-                        entity_uuid
+                        """
+                        SELECT COUNT(*) FROM unit_entities ue
+                        JOIN memory_units mu ON ue.unit_id = mu.id
+                        WHERE ue.entity_id = $1 AND mu.bank_id = $2
+                        """,
+                        entity_uuid, bank_id
                     ) or 0
 
                     # Only regenerate if entity has enough facts
                     if fact_count >= min_facts:
                         await self.regenerate_entity_observations(bank_id, entity_id, entity_name, version=None)
-                    else:
-                        logger.debug(f"[OBSERVATIONS] Skipping {entity_name} ({fact_count} facts < {min_facts} threshold)")
 
                 except Exception as e:
                     logger.error(f"[OBSERVATIONS] Error processing entity {entity_id}: {e}")

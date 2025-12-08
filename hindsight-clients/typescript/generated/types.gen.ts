@@ -19,7 +19,7 @@ export type AddBackgroundRequest = {
     /**
      * Update Disposition
      *
-     * If true, infer Big Five disposition traits from the merged background (default: true)
+     * If true, infer disposition traits from the merged background (default: true)
      */
     update_disposition?: boolean;
 };
@@ -210,45 +210,27 @@ export type DeleteResponse = {
 /**
  * DispositionTraits
  *
- * Disposition traits based on Big Five model.
+ * Disposition traits that influence how memories are formed and interpreted.
  */
 export type DispositionTraits = {
     /**
-     * Openness
+     * Skepticism
      *
-     * Openness to experience (0-1)
+     * How skeptical vs trusting (1=trusting, 5=skeptical)
      */
-    openness: number;
+    skepticism: number;
     /**
-     * Conscientiousness
+     * Literalism
      *
-     * Conscientiousness (0-1)
+     * How literally to interpret information (1=flexible, 5=literal)
      */
-    conscientiousness: number;
+    literalism: number;
     /**
-     * Extraversion
+     * Empathy
      *
-     * Extraversion (0-1)
+     * How much to consider emotional context (1=detached, 5=empathetic)
      */
-    extraversion: number;
-    /**
-     * Agreeableness
-     *
-     * Agreeableness (0-1)
-     */
-    agreeableness: number;
-    /**
-     * Neuroticism
-     *
-     * Neuroticism (0-1)
-     */
-    neuroticism: number;
-    /**
-     * Bias Strength
-     *
-     * How strongly disposition influences opinions (0-1)
-     */
-    bias_strength: number;
+    empathy: number;
 };
 
 /**

@@ -1009,160 +1009,162 @@ so the algorithm learns to box out. See you next week!
 
 
 # =============================================================================
-# PERSONALITY INFERENCE TESTS
+# DISPOSITION INFERENCE TESTS
 # =============================================================================
 
-class TestPersonalityInference:
-    """Tests for LLM-based personality trait inference from background."""
+class TestDispositionInference:
+    """Tests for LLM-based disposition trait inference from background."""
 
     @pytest.mark.asyncio
-    async def test_background_merge_with_personality_inference(self, memory):
-        """Test that background merge infers personality traits by default."""
+    async def test_background_merge_with_disposition_inference(self, memory):
+        """Test that background merge infers disposition traits by default."""
         import uuid
         bank_id = f"test_infer_{uuid.uuid4().hex[:8]}"
 
         result = await memory.merge_bank_background(
             bank_id,
             "I am a creative software engineer who loves innovation and trying new technologies",
-            update_personality=True
+            update_disposition=True
         )
 
         assert "background" in result
-        assert "personality" in result
+        assert "disposition" in result
 
         background = result["background"]
-        personality = result["personality"]
+        disposition = result["disposition"]
 
         assert "creative" in background.lower() or "innovation" in background.lower()
 
-        assert "openness" in personality
-        assert personality["openness"] > 0.5
-        assert 0.0 <= personality["openness"] <= 1.0
-
-        required_traits = ["openness", "conscientiousness", "extraversion",
-                          "agreeableness", "neuroticism", "bias_strength"]
+        # Check that new traits are present with valid values (1-5)
+        required_traits = ["skepticism", "literalism", "empathy"]
         for trait in required_traits:
-            assert trait in personality
-            assert 0.0 <= personality[trait] <= 1.0
+            assert trait in disposition
+            assert 1 <= disposition[trait] <= 5
 
     @pytest.mark.asyncio
-    async def test_background_merge_without_personality_inference(self, memory):
-        """Test that background merge skips personality inference when disabled."""
+    async def test_background_merge_without_disposition_inference(self, memory):
+        """Test that background merge skips disposition inference when disabled."""
         import uuid
         bank_id = f"test_no_infer_{uuid.uuid4().hex[:8]}"
 
         initial_profile = await memory.get_bank_profile(bank_id)
-        initial_personality = initial_profile["personality"]
+        initial_disposition = initial_profile["disposition"]
 
         result = await memory.merge_bank_background(
             bank_id,
             "I am a data scientist",
-            update_personality=False
+            update_disposition=False
         )
 
         assert "background" in result
-        assert "personality" not in result
+        assert "disposition" not in result
 
         final_profile = await memory.get_bank_profile(bank_id)
-        final_personality = final_profile["personality"]
+        final_disposition = final_profile["disposition"]
 
-        assert initial_personality == final_personality
+        assert initial_disposition == final_disposition
 
     @pytest.mark.asyncio
-    async def test_personality_inference_for_organized_engineer(self, memory):
-        """Test personality inference for organized/conscientious profile."""
+    async def test_disposition_inference_for_lawyer(self, memory):
+        """Test disposition inference for lawyer profile (high skepticism, high literalism)."""
         import uuid
-        bank_id = f"test_organized_{uuid.uuid4().hex[:8]}"
+        bank_id = f"test_lawyer_{uuid.uuid4().hex[:8]}"
 
         result = await memory.merge_bank_background(
             bank_id,
-            "I am a methodical engineer who values organization and systematic planning",
-            update_personality=True
+            "I am a lawyer who focuses on contract details and never takes claims at face value",
+            update_disposition=True
         )
 
-        personality = result["personality"]
+        disposition = result["disposition"]
 
-        assert personality["conscientiousness"] > 0.5
+        # Lawyers should have higher skepticism and literalism
+        assert disposition["skepticism"] >= 3
+        assert disposition["literalism"] >= 3
 
     @pytest.mark.asyncio
-    async def test_personality_inference_for_startup_founder(self, memory):
-        """Test personality inference for entrepreneurial profile."""
+    async def test_disposition_inference_for_therapist(self, memory):
+        """Test disposition inference for therapist profile (high empathy)."""
         import uuid
-        bank_id = f"test_founder_{uuid.uuid4().hex[:8]}"
+        bank_id = f"test_therapist_{uuid.uuid4().hex[:8]}"
 
         result = await memory.merge_bank_background(
             bank_id,
-            "I am a startup founder who thrives on risk and social interaction",
-            update_personality=True
+            "I am a therapist who deeply understands and connects with people's emotional struggles",
+            update_disposition=True
         )
 
-        personality = result["personality"]
+        disposition = result["disposition"]
 
-        assert personality["openness"] > 0.5
-        assert personality["extraversion"] > 0.5
+        # Therapists should have higher empathy
+        assert disposition["empathy"] >= 3
 
     @pytest.mark.asyncio
-    async def test_personality_updates_in_database(self, memory):
-        """Test that inferred personality is actually stored in database."""
+    async def test_disposition_updates_in_database(self, memory):
+        """Test that inferred disposition is actually stored in database."""
         import uuid
         bank_id = f"test_db_update_{uuid.uuid4().hex[:8]}"
 
         result = await memory.merge_bank_background(
             bank_id,
             "I am an innovative designer",
-            update_personality=True
+            update_disposition=True
         )
 
-        inferred_personality = result["personality"]
+        inferred_disposition = result["disposition"]
 
         profile = await memory.get_bank_profile(bank_id)
-        db_personality = profile["personality"]
+        db_disposition = profile["disposition"]
 
-        assert db_personality == inferred_personality
+        # Compare values (db_disposition is a Pydantic model)
+        assert db_disposition.skepticism == inferred_disposition["skepticism"]
+        assert db_disposition.literalism == inferred_disposition["literalism"]
+        assert db_disposition.empathy == inferred_disposition["empathy"]
 
     @pytest.mark.asyncio
-    async def test_multiple_background_merges_update_personality(self, memory):
-        """Test that each background merge can update personality."""
+    async def test_multiple_background_merges_update_disposition(self, memory):
+        """Test that each background merge can update disposition."""
         import uuid
         bank_id = f"test_multi_merge_{uuid.uuid4().hex[:8]}"
 
         result1 = await memory.merge_bank_background(
             bank_id,
             "I am a software engineer",
-            update_personality=True
+            update_disposition=True
         )
-        personality1 = result1["personality"]
+        disposition1 = result1["disposition"]
 
         result2 = await memory.merge_bank_background(
             bank_id,
             "I love creative problem solving and innovation",
-            update_personality=True
+            update_disposition=True
         )
-        personality2 = result2["personality"]
+        disposition2 = result2["disposition"]
 
         assert "engineer" in result2["background"].lower() or "software" in result2["background"].lower()
         assert "creative" in result2["background"].lower() or "innovation" in result2["background"].lower()
 
     @pytest.mark.asyncio
-    async def test_background_merge_conflict_resolution_with_personality(self, memory):
-        """Test that conflicts are resolved and personality reflects final background."""
+    async def test_background_merge_conflict_resolution_with_disposition(self, memory):
+        """Test that conflicts are resolved and disposition reflects final background."""
         import uuid
         bank_id = f"test_conflict_{uuid.uuid4().hex[:8]}"
 
         await memory.merge_bank_background(
             bank_id,
             "I was born in Colorado and prefer stability",
-            update_personality=True
+            update_disposition=True
         )
 
         result = await memory.merge_bank_background(
             bank_id,
-            "You were born in Texas and love taking risks",
-            update_personality=True
+            "You were born in Texas and are very skeptical of people",
+            update_disposition=True
         )
 
         background = result["background"]
-        personality = result["personality"]
+        disposition = result["disposition"]
 
         assert "texas" in background.lower()
-        assert personality["openness"] > 0.5
+        # Higher skepticism expected from "very skeptical of people"
+        assert disposition["skepticism"] >= 3

@@ -1499,7 +1499,7 @@ No authorization required
 
 Update memory bank disposition
 
-Update bank's Big Five disposition traits and bias strength
+Update bank's disposition traits (skepticism, literalism, empathy)
 
 ### Example
 

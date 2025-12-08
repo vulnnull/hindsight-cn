@@ -6,6 +6,9 @@ import time
 import logging
 from typing import List
 from datetime import timedelta, datetime, timezone
+from uuid import UUID
+
+from .types import EntityLink
 
 logger = logging.getLogger(__name__)
 
@@ -305,10 +308,14 @@ async def extract_entities_batch_optimized(
         # Only link each new unit to the most recent MAX_LINKS_PER_ENTITY units
         MAX_LINKS_PER_ENTITY = 50  # Limit to prevent explosion when entity appears in many facts
         link_gen_start = time.time()
-        links = []
+        links: List[EntityLink] = []
         new_unit_set = set(unit_ids)  # Units from this batch
 
+        def to_uuid(val) -> UUID:
+            return UUID(val) if isinstance(val, str) else val
+
         for entity_id, units_with_entity in entity_to_units.items():
+            entity_uuid = to_uuid(entity_id)
             # Separate new units (from this batch) and existing units
             new_units = [u for u in units_with_entity if str(u) in new_unit_set or u in new_unit_set]
             existing_units = [u for u in units_with_entity if str(u) not in new_unit_set and u not in new_unit_set]
@@ -318,15 +325,15 @@ async def extract_entities_batch_optimized(
             new_units_to_link = new_units[-MAX_LINKS_PER_ENTITY:] if len(new_units) > MAX_LINKS_PER_ENTITY else new_units
             for i, unit_id_1 in enumerate(new_units_to_link):
                 for unit_id_2 in new_units_to_link[i+1:]:
-                    links.append((unit_id_1, unit_id_2, 'entity', 1.0, entity_id))
-                    links.append((unit_id_2, unit_id_1, 'entity', 1.0, entity_id))
+                    links.append(EntityLink(from_unit_id=to_uuid(unit_id_1), to_unit_id=to_uuid(unit_id_2), entity_id=entity_uuid))
+                    links.append(EntityLink(from_unit_id=to_uuid(unit_id_2), to_unit_id=to_uuid(unit_id_1), entity_id=entity_uuid))
 
             # Link new units to LIMITED existing units (most recent)
             existing_to_link = existing_units[-MAX_LINKS_PER_ENTITY:]  # Take most recent
             for new_unit in new_units:
                 for existing_unit in existing_to_link:
-                    links.append((new_unit, existing_unit, 'entity', 1.0, entity_id))
-                    links.append((existing_unit, new_unit, 'entity', 1.0, entity_id))
+                    links.append(EntityLink(from_unit_id=to_uuid(new_unit), to_unit_id=to_uuid(existing_unit), entity_id=entity_uuid))
+                    links.append(EntityLink(from_unit_id=to_uuid(existing_unit), to_unit_id=to_uuid(new_unit), entity_id=entity_uuid))
 
         _log(log_buffer, f"      [6.3.3] Generate {len(links)} links: {time.time() - link_gen_start:.3f}s", level='debug')
         _log(log_buffer, f"  [6.3] Entity link creation: {len(links)} links for {len(all_entity_ids)} unique entities in {time.time() - substep_start:.3f}s", level='debug')
@@ -546,7 +553,7 @@ async def create_semantic_links_batch(
         raise
 
 
-async def insert_entity_links_batch(conn, links: List[tuple], chunk_size: int = 50000):
+async def insert_entity_links_batch(conn, links: List[EntityLink], chunk_size: int = 50000):
     """
     Insert all entity links using COPY to temp table + INSERT for maximum speed.
 
@@ -556,7 +563,7 @@ async def insert_entity_links_batch(conn, links: List[tuple], chunk_size: int = 
 
     Args:
         conn: Database connection
-        links: List of tuples (from_unit_id, to_unit_id, link_type, weight, entity_id)
+        links: List of EntityLink objects
         chunk_size: Number of rows per batch (default 50000)
     """
     if not links:
@@ -585,16 +592,16 @@ async def insert_entity_links_batch(conn, links: List[tuple], chunk_size: int = 
     await conn.execute("TRUNCATE _temp_entity_links")
     logger.debug(f"      [9.2] Truncate temp table: {time_mod.time() - truncate_start:.3f}s")
 
-    # Convert links to proper format for COPY
+    # Convert EntityLink objects to tuples for COPY
     convert_start = time_mod.time()
     records = []
-    for from_id, to_id, link_type, weight, entity_id in links:
+    for link in links:
         records.append((
-            uuid_mod.UUID(from_id) if isinstance(from_id, str) else from_id,
-            uuid_mod.UUID(to_id) if isinstance(to_id, str) else to_id,
-            link_type,
-            weight,
-            uuid_mod.UUID(str(entity_id)) if entity_id and not isinstance(entity_id, uuid_mod.UUID) else entity_id
+            link.from_unit_id,
+            link.to_unit_id,
+            link.link_type,
+            link.weight,
+            link.entity_id
         ))
     logger.debug(f"      [9.3] Convert {len(records)} records: {time_mod.time() - convert_start:.3f}s")
 

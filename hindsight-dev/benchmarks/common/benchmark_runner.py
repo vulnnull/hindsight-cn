@@ -471,7 +471,9 @@ class BenchmarkRunner:
                 fact_type=["world", "experience"],
                 question_date=question_date,
                 include_entities=True,
-                include_chunks=True
+                max_entity_tokens=2048,
+                include_chunks=True,
+
             )
             recall_time = time.time() - recall_start_time
 

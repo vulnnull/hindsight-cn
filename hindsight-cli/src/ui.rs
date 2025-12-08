@@ -209,17 +209,17 @@ pub fn print_profile(profile: &BankProfileResponse) {
     println!("{}", "─── Disposition Traits ───".bright_yellow());
     println!();
 
-    let traits = [
-        ("Openness", profile.disposition.openness, "🔓", "green"),
-        ("Conscientiousness", profile.disposition.conscientiousness, "📋", "yellow"),
-        ("Extraversion", profile.disposition.extraversion, "🗣️", "cyan"),
-        ("Agreeableness", profile.disposition.agreeableness, "🤝", "magenta"),
-        ("Neuroticism", profile.disposition.neuroticism, "😰", "yellow"),
+    // New 3-trait disposition system (values 1-5)
+    let traits: [(_, i64, _, _, _); 3] = [
+        ("Skepticism", profile.disposition.skepticism, "🔍", "cyan", "1=trusting, 5=skeptical"),
+        ("Literalism", profile.disposition.literalism, "📋", "yellow", "1=flexible, 5=literal"),
+        ("Empathy", profile.disposition.empathy, "💚", "green", "1=detached, 5=empathetic"),
     ];
 
-    for (name, value, emoji, color) in &traits {
+    for (name, value, emoji, color, desc) in &traits {
+        // Scale 1-5 to bar visualization (each point = 8 chars, total 40)
         let bar_length = 40;
-        let filled = (*value * bar_length as f64) as usize;
+        let filled = ((*value - 1) * 10) as usize; // 1->0, 2->10, 3->20, 4->30, 5->40
         let empty = bar_length - filled;
 
         let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
@@ -231,27 +231,14 @@ pub fn print_profile(profile: &BankProfileResponse) {
             _ => bar.bright_white(),
         };
 
-        println!("  {} {:<20} [{}] {:.0}%",
+        println!("  {} {:<12} [{}] {}/5",
             emoji,
             name,
             colored_bar,
-            value * 100.0
+            value
         );
+        println!("    {}", desc.bright_black());
     }
 
-    println!();
-    println!("{}", "Bias Strength:".bright_yellow());
-    let bias = profile.disposition.bias_strength;
-    let bar_length = 40;
-    let filled = (bias * bar_length as f64) as usize;
-    let empty = bar_length - filled;
-    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
-
-    println!("  💪 {:<20} [{}] {:.0}%",
-        "Disposition Influence",
-        bar.bright_green(),
-        bias * 100.0
-    );
-    println!("  {}", "(how much disposition shapes opinions)".bright_black());
     println!();
 }

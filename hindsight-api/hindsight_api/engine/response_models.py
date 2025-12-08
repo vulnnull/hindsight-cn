@@ -12,25 +12,22 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class DispositionTraits(BaseModel):
     """
-    Disposition traits for a bank using the Big Five model.
+    Disposition traits for a memory bank.
 
-    All traits are scored 0.0-1.0 where higher values indicate stronger presence of the trait.
+    All traits are scored 1-5 where:
+    - skepticism: 1=trusting, 5=skeptical (how much to doubt or question information)
+    - literalism: 1=flexible interpretation, 5=literal interpretation (how strictly to interpret information)
+    - empathy: 1=detached, 5=empathetic (how much to consider emotional context)
     """
-    openness: float = Field(description="Openness to experience (0.0-1.0)")
-    conscientiousness: float = Field(description="Conscientiousness and organization (0.0-1.0)")
-    extraversion: float = Field(description="Extraversion and sociability (0.0-1.0)")
-    agreeableness: float = Field(description="Agreeableness and cooperation (0.0-1.0)")
-    neuroticism: float = Field(description="Emotional sensitivity and neuroticism (0.0-1.0)")
-    bias_strength: float = Field(description="How strongly disposition influences thinking (0.0-1.0)")
+    skepticism: int = Field(ge=1, le=5, description="How skeptical vs trusting (1=trusting, 5=skeptical)")
+    literalism: int = Field(ge=1, le=5, description="How literally to interpret information (1=flexible, 5=literal)")
+    empathy: int = Field(ge=1, le=5, description="How much to consider emotional context (1=detached, 5=empathetic)")
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
-            "openness": 0.8,
-            "conscientiousness": 0.6,
-            "extraversion": 0.4,
-            "agreeableness": 0.7,
-            "neuroticism": 0.3,
-            "bias_strength": 0.5
+            "skepticism": 3,
+            "literalism": 3,
+            "empathy": 3
         }
     })
 

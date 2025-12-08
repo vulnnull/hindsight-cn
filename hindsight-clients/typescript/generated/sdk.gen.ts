@@ -183,7 +183,7 @@ export const getBankProfile = <ThrowOnError extends boolean = false>(options: Op
 /**
  * Update memory bank disposition
  *
- * Update bank's Big Five disposition traits and bias strength
+ * Update bank's disposition traits (skepticism, literalism, empathy)
  */
 export const updateBankDisposition = <ThrowOnError extends boolean = false>(options: Options<UpdateBankDispositionData, ThrowOnError>) => (options.client ?? client).put<UpdateBankDispositionResponses, UpdateBankDispositionErrors, ThrowOnError>({
     url: '/v1/default/banks/{bank_id}/profile',

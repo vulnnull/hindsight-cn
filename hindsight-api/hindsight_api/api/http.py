@@ -439,24 +439,18 @@ class BanksResponse(BaseModel):
 
 
 class DispositionTraits(BaseModel):
-    """Disposition traits based on Big Five model."""
+    """Disposition traits that influence how memories are formed and interpreted."""
     model_config = ConfigDict(json_schema_extra={
         "example": {
-            "openness": 0.8,
-            "conscientiousness": 0.6,
-            "extraversion": 0.5,
-            "agreeableness": 0.7,
-            "neuroticism": 0.3,
-            "bias_strength": 0.7
+            "skepticism": 3,
+            "literalism": 3,
+            "empathy": 3
         }
     })
 
-    openness: float = Field(ge=0.0, le=1.0, description="Openness to experience (0-1)")
-    conscientiousness: float = Field(ge=0.0, le=1.0, description="Conscientiousness (0-1)")
-    extraversion: float = Field(ge=0.0, le=1.0, description="Extraversion (0-1)")
-    agreeableness: float = Field(ge=0.0, le=1.0, description="Agreeableness (0-1)")
-    neuroticism: float = Field(ge=0.0, le=1.0, description="Neuroticism (0-1)")
-    bias_strength: float = Field(ge=0.0, le=1.0, description="How strongly disposition influences opinions (0-1)")
+    skepticism: int = Field(ge=1, le=5, description="How skeptical vs trusting (1=trusting, 5=skeptical)")
+    literalism: int = Field(ge=1, le=5, description="How literally to interpret information (1=flexible, 5=literal)")
+    empathy: int = Field(ge=1, le=5, description="How much to consider emotional context (1=detached, 5=empathetic)")
 
 
 class BankProfileResponse(BaseModel):
@@ -466,12 +460,9 @@ class BankProfileResponse(BaseModel):
             "bank_id": "user123",
             "name": "Alice",
             "disposition": {
-                "openness": 0.8,
-                "conscientiousness": 0.6,
-                "extraversion": 0.5,
-                "agreeableness": 0.7,
-                "neuroticism": 0.3,
-                "bias_strength": 0.7
+                "skepticism": 3,
+                "literalism": 3,
+                "empathy": 3
             },
             "background": "I am a software engineer with 10 years of experience in startups"
         }
@@ -500,7 +491,7 @@ class AddBackgroundRequest(BaseModel):
     content: str = Field(description="New background information to add or merge")
     update_disposition: bool = Field(
         default=True,
-        description="If true, infer Big Five disposition traits from the merged background (default: true)"
+        description="If true, infer disposition traits from the merged background (default: true)"
     )
 
 
@@ -510,12 +501,9 @@ class BackgroundResponse(BaseModel):
         "example": {
             "background": "I was born in Texas. I am a software engineer with 10 years of experience.",
             "disposition": {
-                "openness": 0.7,
-                "conscientiousness": 0.6,
-                "extraversion": 0.5,
-                "agreeableness": 0.8,
-                "neuroticism": 0.4,
-                "bias_strength": 0.6
+                "skepticism": 3,
+                "literalism": 3,
+                "empathy": 3
             }
         }
     })
@@ -543,12 +531,9 @@ class BankListResponse(BaseModel):
                     "bank_id": "user123",
                     "name": "Alice",
                     "disposition": {
-                        "openness": 0.5,
-                        "conscientiousness": 0.5,
-                        "extraversion": 0.5,
-                        "agreeableness": 0.5,
-                        "neuroticism": 0.5,
-                        "bias_strength": 0.5
+                        "skepticism": 3,
+                        "literalism": 3,
+                        "empathy": 3
                     },
                     "background": "I am a software engineer",
                     "created_at": "2024-01-15T10:30:00Z",
@@ -567,12 +552,9 @@ class CreateBankRequest(BaseModel):
         "example": {
             "name": "Alice",
             "disposition": {
-                "openness": 0.8,
-                "conscientiousness": 0.6,
-                "extraversion": 0.5,
-                "agreeableness": 0.7,
-                "neuroticism": 0.3,
-                "bias_strength": 0.7
+                "skepticism": 3,
+                "literalism": 3,
+                "empathy": 3
             },
             "background": "I am a creative software engineer with 10 years of experience"
         }
@@ -1605,7 +1587,7 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}/profile",
         response_model=BankProfileResponse,
         summary="Update memory bank disposition",
-        description="Update bank's Big Five disposition traits and bias strength",
+        description="Update bank's disposition traits (skepticism, literalism, empathy)",
         operation_id="update_bank_disposition"
     )
     async def api_update_bank_disposition(bank_id: str,
@@ -1852,7 +1834,7 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}/memories",
         response_model=DeleteResponse,
         summary="Clear memory bank memories",
-        description="Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
+        description="Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (disposition and background) will be preserved.",
         operation_id="clear_bank_memories"
     )
     async def api_clear_bank_memories(bank_id: str,

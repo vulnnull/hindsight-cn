@@ -5705,7 +5705,7 @@ class DefaultApi:
     ) -> BankProfileResponse:
         """Update memory bank disposition
 
-        Update bank's Big Five disposition traits and bias strength
+        Update bank's disposition traits (skepticism, literalism, empathy)
 
         :param bank_id: (required)
         :type bank_id: str
@@ -5777,7 +5777,7 @@ class DefaultApi:
     ) -> ApiResponse[BankProfileResponse]:
         """Update memory bank disposition
 
-        Update bank's Big Five disposition traits and bias strength
+        Update bank's disposition traits (skepticism, literalism, empathy)
 
         :param bank_id: (required)
         :type bank_id: str
@@ -5849,7 +5849,7 @@ class DefaultApi:
     ) -> RESTResponseType:
         """Update memory bank disposition
 
-        Update bank's Big Five disposition traits and bias strength
+        Update bank's disposition traits (skepticism, literalism, empathy)
 
         :param bank_id: (required)
         :type bank_id: str

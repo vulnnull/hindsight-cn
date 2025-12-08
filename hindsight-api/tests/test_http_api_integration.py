@@ -60,9 +60,9 @@ async def test_full_api_workflow(api_client, test_bank_id):
     response = await api_client.get(f"/v1/default/banks/{test_bank_id}/profile")
     assert response.status_code == 200
     profile = response.json()
-    assert "personality" in profile
+    assert "disposition" in profile
     assert "background" in profile
-    print(f"Bank profile created with personality: {profile['personality']}")
+    print(f"Bank profile created with disposition: {profile['disposition']}")
 
     # Add background
     response = await api_client.post(
@@ -237,27 +237,24 @@ async def test_full_api_workflow(api_client, test_bank_id):
     # Note: Document deletion is tested separately in test_document_deletion
 
     # ================================================================
-    # 7. Update and Verify Bank Personality
+    # 7. Update and Verify Bank Disposition
     # ================================================================
 
-    # Update personality traits
+    # Update disposition traits
     response = await api_client.put(
         f"/v1/default/banks/{test_bank_id}/profile",
         json={
-            "personality": {
-                "openness": 0.8,
-                "conscientiousness": 0.7,
-                "extraversion": 0.6,
-                "agreeableness": 0.9,
-                "neuroticism": 0.3,
-                "bias_strength": 0.5
+            "disposition": {
+                "skepticism": 4,
+                "literalism": 3,
+                "empathy": 4
             }
         }
     )
     assert response.status_code == 200
-    print("Personality updated")
+    print("Disposition updated")
 
-    # Check profile again (should have updated personality)
+    # Check profile again (should have updated disposition)
     response = await api_client.get(f"/v1/default/banks/{test_bank_id}/profile")
     assert response.status_code == 200
     updated_profile = response.json()

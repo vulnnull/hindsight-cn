@@ -19,14 +19,11 @@ async def test_fact_ordering_within_conversation(memory):
     # Get/create agent (auto-creates with defaults)
     await memory.get_bank_profile(bank_id)
 
-    # Update personality to match Marcus
-    await memory.update_bank_personality(bank_id, {
-        "openness": 0.7,
-        "conscientiousness": 0.6,
-        "extraversion": 0.8,
-        "agreeableness": 0.5,
-        "neuroticism": 0.3,
-        "bias_strength": 0.5
+    # Update disposition to match Marcus
+    await memory.update_bank_disposition(bank_id, {
+        "skepticism": 3,
+        "literalism": 3,
+        "empathy": 3
     })
 
     # A conversation where Marcus changes his position

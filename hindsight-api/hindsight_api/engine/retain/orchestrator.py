@@ -17,7 +17,7 @@ def utcnow():
     """Get current UTC time."""
     return datetime.now(timezone.utc)
 
-from .types import RetainContent, ExtractedFact, ProcessedFact
+from .types import RetainContent, ExtractedFact, ProcessedFact, EntityLink
 from . import (
     fact_extraction,
     embedding_processing,
@@ -373,7 +373,7 @@ async def _trigger_background_tasks(
     bank_id: str,
     unit_ids: List[str],
     facts: List[ProcessedFact],
-    entity_links: List,
+    entity_links: List[EntityLink],
     log_buffer: List[str] = None
 ) -> None:
     """Trigger opinion reinforcement and observation regeneration (sync)."""
@@ -388,19 +388,27 @@ async def _trigger_background_tasks(
             'unit_entities': fact_entities
         })
 
-    # Regenerate observations synchronously for top entities
+    # Regenerate observations synchronously for top entities by fact count
     TOP_N_ENTITIES = 5
     MIN_FACTS_THRESHOLD = 5
 
     if entity_links and regenerate_observations_fn:
-        unique_entity_ids = set()
+        # Count mentions per entity in this batch
+        entity_mention_counts: Dict[str, int] = {}
         for link in entity_links:
-            # links are tuples: (from_unit_id, to_unit_id, link_type, weight, entity_id)
-            if len(link) >= 5 and link[4]:
-                unique_entity_ids.add(str(link[4]))
+            if link.entity_id:
+                entity_id = str(link.entity_id)
+                entity_mention_counts[entity_id] = entity_mention_counts.get(entity_id, 0) + 1
 
-        if unique_entity_ids:
-            entities_to_process = list(unique_entity_ids)[:TOP_N_ENTITIES]
+        if entity_mention_counts:
+            # Sort by mention count descending and take top N
+            sorted_entities = sorted(
+                entity_mention_counts.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            entities_to_process = [e[0] for e in sorted_entities[:TOP_N_ENTITIES]]
+
             obs_start = time.time()
             # Run observation regeneration synchronously
             await regenerate_observations_fn(
