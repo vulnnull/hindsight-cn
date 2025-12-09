@@ -212,24 +212,9 @@ client.reflect(bank_id="my-bank", query="What should I know about Alice?")
 
 ## Integrations
 
-### OpenAI Drop-in Replacement
-
-```python
-from hindsight_openai import configure, OpenAI
-
-configure(hindsight_api_url="http://localhost:8888", agent_id="my-assistant")
-
-client = OpenAI(api_key="sk-...")
-response = client.chat.completions.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": "What did we discuss?"}]
-)
-# Memory automatically recalled and stored
-```
-
 ### Examples
 
-[Examples directory](./examples) includes:
+[Examples Repo]([./examples](https://github.com/vectorize-io/hindsight-cookbook)) includes:
 
 - Basic usage
 - Multi-session conversations
