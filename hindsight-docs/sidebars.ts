@@ -33,17 +33,10 @@ const sidebars: SidebarsConfig = {
           id: 'developer/performance',
           label: 'Performance',
         },
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Getting Started',
-      collapsible: false,
-      items: [
         {
           type: 'doc',
-          id: 'developer/api/quickstart',
-          label: 'Quick Start',
+          id: 'developer/rag-vs-hindsight',
+          label: 'RAG vs Memory',
         },
       ],
     },
@@ -52,6 +45,11 @@ const sidebars: SidebarsConfig = {
       label: 'API',
       collapsible: false,
       items: [
+        {
+          type: 'doc',
+          id: 'developer/api/quickstart',
+          label: 'Quick Start',
+        },
         {
           type: 'doc',
           id: 'developer/api/retain',
