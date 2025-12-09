@@ -102,7 +102,6 @@ def main():
         http_api_enabled=True,
         mcp_api_enabled=True,
         mcp_mount_path="/mcp",
-        run_migrations=True,
         initialize_memory=True,
     )
 

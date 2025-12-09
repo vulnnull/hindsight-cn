@@ -235,15 +235,7 @@ impl ApiClient {
 
 // Re-export types from the generated client for use in commands
 pub use types::{
-    AddBackgroundRequest,
-    BackgroundResponse,
-    BankListItem,
     BankProfileResponse,
-    CreateBankRequest,
-    DeleteResponse,
-    DispositionTraits,
-    DocumentResponse,
-    ListDocumentsResponse,
     MemoryItem,
     RecallRequest,
     RecallResponse,
@@ -251,5 +243,4 @@ pub use types::{
     ReflectRequest,
     ReflectResponse,
     RetainRequest,
-    RetainResponse,
 };

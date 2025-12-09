@@ -43,21 +43,6 @@ from hindsight_api.metrics import get_metrics_collector, initialize_metrics, cre
 logger = logging.getLogger(__name__)
 
 
-class MetadataFilter(BaseModel):
-    """Filter for metadata fields. Matches records where (key=value) OR (key not set) when match_unset=True."""
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "key": "source",
-            "value": "slack",
-            "match_unset": True
-        }
-    })
-
-    key: str = Field(description="Metadata key to filter on")
-    value: Optional[str] = Field(default=None, description="Value to match. If None with match_unset=True, matches any record where key is not set.")
-    match_unset: bool = Field(default=True, description="If True, also match records where this metadata key is not set")
-
-
 class EntityIncludeOptions(BaseModel):
     """Options for including entity observations in recall results."""
     max_tokens: int = Field(default=500, description="Maximum tokens for entity observations")
@@ -90,7 +75,6 @@ class RecallRequest(BaseModel):
             "max_tokens": 4096,
             "trace": True,
             "query_timestamp": "2023-05-30T23:40:00",
-            "filters": [{"key": "source", "value": "slack", "match_unset": True}],
             "include": {
                 "entities": {
                     "max_tokens": 500
@@ -105,7 +89,6 @@ class RecallRequest(BaseModel):
     max_tokens: int = 4096
     trace: bool = False
     query_timestamp: Optional[str] = Field(default=None, description="ISO format date string (e.g., '2023-05-30T23:40:00')")
-    filters: Optional[List[MetadataFilter]] = Field(default=None, description="Filter by metadata. Multiple filters are ANDed together.")
     include: IncludeOptions = Field(default_factory=IncludeOptions, description="Options for including additional data (entities are included by default)")
 
 
@@ -363,7 +346,6 @@ class ReflectRequest(BaseModel):
             "query": "What do you think about artificial intelligence?",
             "budget": "low",
             "context": "This is for a research paper on AI ethics",
-            "filters": [{"key": "source", "value": "slack", "match_unset": True}],
             "include": {
                 "facts": {}
             }
@@ -373,7 +355,6 @@ class ReflectRequest(BaseModel):
     query: str
     budget: Budget = Budget.LOW
     context: Optional[str] = None
-    filters: Optional[List[MetadataFilter]] = Field(default=None, description="Filter by metadata. Multiple filters are ANDed together.")
     include: ReflectIncludeOptions = Field(default_factory=ReflectIncludeOptions, description="Options for including additional data (disabled by default)")
 
 
@@ -698,13 +679,13 @@ class DeleteResponse(BaseModel):
     success: bool
 
 
-def create_app(memory: MemoryEngine, run_migrations: bool = True, initialize_memory: bool = True) -> FastAPI:
+def create_app(memory: MemoryEngine, initialize_memory: bool = True) -> FastAPI:
     """
     Create and configure the FastAPI application.
 
     Args:
-        memory: MemoryEngine instance (already initialized with required parameters)
-        run_migrations: Whether to run database migrations on startup (default: True)
+        memory: MemoryEngine instance (already initialized with required parameters).
+                Migrations are controlled by the MemoryEngine's run_migrations parameter.
         initialize_memory: Whether to initialize memory system on startup (default: True)
 
     Returns:
@@ -735,15 +716,10 @@ def create_app(memory: MemoryEngine, run_migrations: bool = True, initialize_mem
             app.state.prometheus_reader = None
             # Metrics collector is already initialized as no-op by default
 
-        # Startup: Initialize database and memory system
+        # Startup: Initialize database and memory system (migrations run inside initialize if enabled)
         if initialize_memory:
             await memory.initialize()
             logging.info("Memory system initialized")
-
-        if run_migrations:
-            from hindsight_api.migrations import run_migrations as do_migrations
-            do_migrations(memory.db_url)
-            logging.info("Database migrations applied")
 
 
 

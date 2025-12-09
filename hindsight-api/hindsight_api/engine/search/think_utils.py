@@ -96,10 +96,6 @@ def format_facts_for_prompt(facts: List[MemoryFact]) -> str:
             elif isinstance(occurred_start, datetime):
                 fact_obj["occurred_start"] = occurred_start.strftime('%Y-%m-%d %H:%M:%S')
 
-        # Add activation if available
-        if fact.activation is not None:
-            fact_obj["score"] = fact.activation
-
         formatted.append(fact_obj)
 
     return json.dumps(formatted, indent=2)

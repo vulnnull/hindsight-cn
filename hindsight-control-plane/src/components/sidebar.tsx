@@ -22,12 +22,12 @@ export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
   }
 
   const navItems = [
-    { id: 'profile' as NavItem, label: 'Memory Bank', icon: Box },
     { id: 'recall' as NavItem, label: 'Recall', icon: Search },
     { id: 'reflect' as NavItem, label: 'Reflect', icon: Sparkles },
     { id: 'data' as NavItem, label: 'Memories', icon: Database },
     { id: 'documents' as NavItem, label: 'Documents', icon: FileText },
     { id: 'entities' as NavItem, label: 'Entities', icon: Users },
+    { id: 'profile' as NavItem, label: 'Memory Bank', icon: Box },
   ];
 
   return (

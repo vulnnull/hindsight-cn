@@ -13,8 +13,8 @@ from hindsight_api.api import create_app
 @pytest_asyncio.fixture
 async def api_client(memory):
     """Create an async test client for the FastAPI app."""
-    # Memory is already initialized by the conftest fixture
-    app = create_app(memory, run_migrations=False, initialize_memory=False)
+    # Memory is already initialized by the conftest fixture (with migrations)
+    app = create_app(memory, initialize_memory=False)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -197,10 +197,10 @@ async def test_full_api_workflow(api_client, test_bank_id):
             "items": [
                 {
                     "content": "Project timeline: MVP launch in Q1, Beta in Q2.",
-                    "context": "product roadmap"
+                    "context": "product roadmap",
+                    "document_id": "roadmap-2024-q1"
                 }
-            ],
-            "document_id": "roadmap-2024-q1"
+            ]
         }
     )
     assert response.status_code == 200
@@ -380,10 +380,10 @@ async def test_document_deletion(api_client):
             "items": [
                 {
                     "content": "The quarterly sales report shows a 25% increase in revenue.",
-                    "context": "Q1 financial review"
+                    "context": "Q1 financial review",
+                    "document_id": "sales-report-q1-2024"
                 }
-            ],
-            "document_id": "sales-report-q1-2024"
+            ]
         }
     )
     assert response.status_code == 200

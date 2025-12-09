@@ -382,13 +382,42 @@ WRONG output:
 - where: (missing) ← WRONG - include the location!
 
 ══════════════════════════════════════════════════════════════════════════
-TEMPORAL HANDLING
+FACT_KIND CLASSIFICATION (CRITICAL FOR TEMPORAL HANDLING)
 ══════════════════════════════════════════════════════════════════════════
 
-For EVENTS (fact_kind="event"):
-- Convert relative dates → absolute WITH DAY OF WEEK: "yesterday" on Saturday March 15 → "Friday, March 14, 2024"
+⚠️ MUST set fact_kind correctly - this determines whether occurred_start/end are set!
+
+fact_kind="event" - USE FOR:
+- Actions that happened at a specific time: "went to", "attended", "visited", "bought", "made"
+- Past events: "yesterday I...", "last week...", "in March 2020..."
+- Future plans with dates: "will go to", "scheduled for"
+- Examples: "I went to a pottery workshop" → event
+           "Alice visited Paris in February" → event
+           "I bought a new car yesterday" → event
+           "The user graduated from MIT in March 2020" → event
+
+fact_kind="conversation" - USE FOR:
+- Ongoing states: "works as", "lives in", "is married to"
+- Preferences: "loves", "prefers", "enjoys"
+- Traits/abilities: "speaks fluent French", "knows Python"
+- Examples: "I love Italian food" → conversation
+           "Alice works at Google" → conversation
+           "I prefer outdoor dining" → conversation
+
+══════════════════════════════════════════════════════════════════════════
+TEMPORAL HANDLING (CRITICAL - USE EVENT DATE AS REFERENCE)
+══════════════════════════════════════════════════════════════════════════
+
+⚠️ IMPORTANT: Use the "Event Date" provided in the input as your reference point!
+All relative dates ("yesterday", "last week", "recently") must be resolved relative to the Event Date, NOT today's date.
+
+For EVENTS (fact_kind="event") - MUST SET BOTH occurred_start AND occurred_end:
+- Convert relative dates → absolute using Event Date as reference
+- If Event Date is "Saturday, March 15, 2020", then "yesterday" = Friday, March 14, 2020
+- Dates mentioned in text (e.g., "in March 2020") should use THAT year, not current year
 - Always include the day name (Monday, Tuesday, etc.) in the 'when' field
-- Set occurred_start/occurred_end to WHEN IT HAPPENED (not when mentioned)
+- Set occurred_start AND occurred_end to WHEN IT HAPPENED (not when mentioned)
+- For single-day/point events: set occurred_end = occurred_start (same timestamp)
 
 For CONVERSATIONS (fact_kind="conversation"):
 - General info, preferences, ongoing states → NO occurred dates
@@ -440,7 +469,7 @@ Extract entities that help link related facts together. Include:
 EXAMPLES
 ══════════════════════════════════════════════════════════════════════════
 
-Example 1 - World Facts (Context: June 10, 2024):
+Example 1 - World Facts (Event Date: Tuesday, June 10, 2024):
 Input: "I'm planning my wedding and want a small outdoor ceremony. I just got back from my college roommate Emily's wedding - she married Sarah at a rooftop garden, it was so romantic!"
 
 Output facts:
@@ -459,12 +488,13 @@ Output facts:
    - fact_type: "world", fact_kind: "conversation"
    - entities: ["user", "wedding"]
 
-3. Emily's wedding (THE EVENT)
+3. Emily's wedding (THE EVENT - note occurred_start AND occurred_end both set)
    - what: "Emily got married to Sarah at a rooftop garden ceremony in the city"
    - who: "Emily (user's college roommate), Sarah (Emily's partner)"
    - why: "User found it romantic and beautiful"
    - fact_type: "world", fact_kind: "event"
-   - occurred_start: "2024-06-09T00:00:00Z" (recently, user "just got back")
+   - occurred_start: "2024-06-09T00:00:00Z" (recently, user "just got back" - relative to Event Date June 10, 2024)
+   - occurred_end: "2024-06-09T23:59:59Z" (same day - point event)
    - entities: ["user", "Emily", "Sarah", "wedding", "rooftop garden"]
 
 Example 2 - Assistant Facts (Context: March 5, 2024):
@@ -479,16 +509,17 @@ Output fact:
    - fact_type: "assistant", fact_kind: "conversation"
    - entities: ["user", "API", "Redis"]
 
-Example 3 - Kitchen Items with Concept Inference (Context: May 30, 2024):
+Example 3 - Kitchen Items with Concept Inference (Event Date: Thursday, May 30, 2024):
 Input: "I finally donated my old coffee maker to Goodwill. I upgraded to that new espresso machine last month and the old one was just taking up counter space."
 
 Output fact:
    - what: "User donated their old coffee maker to Goodwill after upgrading to a new espresso machine"
-   - when: "May 30, 2024"
+   - when: "Thursday, May 30, 2024"
    - who: "user"
    - why: "The old coffee maker was taking up counter space after the upgrade"
    - fact_type: "world", fact_kind: "event"
-   - occurred_start: "2024-05-30T00:00:00Z"
+   - occurred_start: "2024-05-30T00:00:00Z" (uses Event Date year)
+   - occurred_end: "2024-05-30T23:59:59Z" (same day - point event)
    - entities: ["user", "coffee maker", "Goodwill", "espresso machine", "kitchen"]
 
 Note: "kitchen" is inferred as a concept because coffee makers and espresso machines are kitchen appliances.
@@ -656,8 +687,11 @@ Text:
                     occurred_end = get_value('occurred_end')
                     if occurred_start:
                         fact_data['occurred_start'] = occurred_start
-                    if occurred_end:
-                        fact_data['occurred_end'] = occurred_end
+                        # For point events: if occurred_end not set, default to occurred_start
+                        if occurred_end:
+                            fact_data['occurred_end'] = occurred_end
+                        else:
+                            fact_data['occurred_end'] = occurred_start
 
                 # Add entities if present (validate as Entity objects)
                 # LLM sometimes returns strings instead of {"text": "..."} format

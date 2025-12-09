@@ -110,12 +110,14 @@ class MemoryEngine:
         pool_min_size: int = 5,
         pool_max_size: int = 100,
         task_backend: Optional[TaskBackend] = None,
+        run_migrations: bool = True,
     ):
         """
         Initialize the temporal + semantic memory system.
 
         Args:
             db_url: PostgreSQL connection URL (postgresql://user:pass@host:port/dbname). Required.
+                    Also supports pg0 URLs: "pg0" or "pg0://instance-name" or "pg0://instance-name:port"
             memory_llm_provider: LLM provider for memory operations: "openai", "groq", or "ollama". Required.
             memory_llm_api_key: API key for the LLM provider. Required.
             memory_llm_model: Model name to use for all memory operations (put/think/opinions). Required.
@@ -129,16 +131,38 @@ class MemoryEngine:
             pool_max_size: Maximum number of connections in the pool (default: 100)
                           Increase for parallel think/search operations (e.g., 200-300 for 100+ parallel thinks)
             task_backend: Custom task backend for async task execution. If not provided, uses AsyncIOQueueBackend
+            run_migrations: Whether to run database migrations during initialize(). Default: True
         """
         if not db_url:
             raise ValueError("Database url is required")
         # Track pg0 instance (if used)
         self._pg0: Optional[EmbeddedPostgres] = None
+        self._pg0_instance_name: Optional[str] = None
 
         # Initialize PostgreSQL connection URL
         # The actual URL will be set during initialize() after starting the server
-        self._use_pg0 = db_url == "pg0"
-        self.db_url = db_url if not self._use_pg0 else None
+        # Supports: "pg0" (default instance), "pg0://instance-name" (named instance), or regular postgresql:// URL
+        if db_url == "pg0":
+            self._use_pg0 = True
+            self._pg0_instance_name = "hindsight"
+            self._pg0_port = None  # Use default port
+            self.db_url = None
+        elif db_url.startswith("pg0://"):
+            self._use_pg0 = True
+            # Parse instance name and optional port: pg0://instance-name or pg0://instance-name:port
+            url_part = db_url[6:]  # Remove "pg0://"
+            if ":" in url_part:
+                self._pg0_instance_name, port_str = url_part.rsplit(":", 1)
+                self._pg0_port = int(port_str)
+            else:
+                self._pg0_instance_name = url_part or "hindsight"
+                self._pg0_port = None  # Use default port
+            self.db_url = None
+        else:
+            self._use_pg0 = False
+            self._pg0_instance_name = None
+            self._pg0_port = None
+            self.db_url = db_url
 
 
         # Set default base URL if not provided
@@ -155,6 +179,7 @@ class MemoryEngine:
         self._initialized = False
         self._pool_min_size = pool_min_size
         self._pool_max_size = pool_max_size
+        self._run_migrations = run_migrations
 
         # Initialize entity resolver (will be created in initialize())
         self.entity_resolver = None
@@ -378,8 +403,16 @@ class MemoryEngine:
         async def start_pg0():
             """Start pg0 if configured."""
             if self._use_pg0:
-                self._pg0 = EmbeddedPostgres()
-                self.db_url = await self._pg0.ensure_running()
+                kwargs = {"name": self._pg0_instance_name}
+                if self._pg0_port is not None:
+                    kwargs["port"] = self._pg0_port
+                pg0 = EmbeddedPostgres(**kwargs)
+                # Check if pg0 is already running before we start it
+                was_already_running = await pg0.is_running()
+                self.db_url = await pg0.ensure_running()
+                # Only track pg0 (to stop later) if WE started it
+                if not was_already_running:
+                    self._pg0 = pg0
 
         def load_embeddings():
             """Load embedding model (CPU-bound)."""
@@ -407,6 +440,12 @@ class MemoryEngine:
             await asyncio.gather(
                 pg0_task, embeddings_future, cross_encoder_future, query_analyzer_future
             )
+
+        # Run database migrations if enabled
+        if self._run_migrations:
+            from ..migrations import run_migrations
+            logger.info("Running database migrations...")
+            run_migrations(self.db_url)
 
         logger.info(f"Connecting to PostgreSQL at {self.db_url}")
 
@@ -1402,7 +1441,6 @@ class MemoryEngine:
                     mentioned_at=result_dict.get("mentioned_at"),
                     document_id=result_dict.get("document_id"),
                     chunk_id=result_dict.get("chunk_id"),
-                    activation=result_dict.get("weight")  # Use final weight as activation
                 ))
 
             # Fetch entity observations if requested
@@ -2592,7 +2630,13 @@ Guidelines:
         if self._llm_config is None:
             raise ValueError("Memory LLM API key not set. Set HINDSIGHT_API_LLM_API_KEY environment variable.")
 
+        reflect_start = time.time()
+        reflect_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
+        log_buffer = []
+        log_buffer.append(f"[REFLECT {reflect_id}] Query: '{query[:50]}...'")
+
         # Steps 1-3: Run multi-fact-type search (12-way retrieval: 4 methods × 3 fact types)
+        recall_start = time.time()
         search_result = await self.recall_async(
             bank_id=bank_id,
             query=query,
@@ -2602,23 +2646,21 @@ Guidelines:
             fact_type=['experience', 'world', 'opinion'],
             include_entities=True
         )
+        recall_time = time.time() - recall_start
 
         all_results = search_result.results
-        logger.info(f"[THINK] Search returned {len(all_results)} results")
 
         # Split results by fact type for structured response
         agent_results = [r for r in all_results if r.fact_type == 'experience']
         world_results = [r for r in all_results if r.fact_type == 'world']
         opinion_results = [r for r in all_results if r.fact_type == 'opinion']
 
-        logger.info(f"[THINK] Split results - agent: {len(agent_results)}, world: {len(world_results)}, opinion: {len(opinion_results)}")
+        log_buffer.append(f"[REFLECT {reflect_id}] Recall: {len(all_results)} facts (experience={len(agent_results)}, world={len(world_results)}, opinion={len(opinion_results)}) in {recall_time:.3f}s")
 
         # Format facts for LLM
         agent_facts_text = think_utils.format_facts_for_prompt(agent_results)
         world_facts_text = think_utils.format_facts_for_prompt(world_results)
         opinion_facts_text = think_utils.format_facts_for_prompt(opinion_results)
-
-        logger.info(f"[THINK] Formatted facts - agent: {len(agent_facts_text)} chars, world: {len(world_facts_text)} chars, opinion: {len(opinion_facts_text)} chars")
 
         # Get bank profile (name, disposition + background)
         profile = await self.get_bank_profile(bank_id)
@@ -2638,10 +2680,11 @@ Guidelines:
             context=context,
         )
 
-        logger.info(f"[THINK] Full prompt length: {len(prompt)} chars")
+        log_buffer.append(f"[REFLECT {reflect_id}] Prompt: {len(prompt)} chars")
 
         system_message = think_utils.get_system_message(disposition)
 
+        llm_start = time.time()
         answer_text = await self._llm_config.call(
             messages=[
                 {"role": "system", "content": system_message},
@@ -2651,6 +2694,7 @@ Guidelines:
             temperature=0.9,
             max_tokens=1000
         )
+        llm_time = time.time() - llm_start
 
         answer_text = answer_text.strip()
 
@@ -2661,6 +2705,10 @@ Guidelines:
             'answer_text': answer_text,
             'query': query
         })
+
+        total_time = time.time() - reflect_start
+        log_buffer.append(f"[REFLECT {reflect_id}] Complete: {len(answer_text)} chars response, LLM {llm_time:.3f}s, total {total_time:.3f}s")
+        logger.info("\n" + "\n".join(log_buffer))
 
         # Return response with facts split by type
         return ReflectResult(
@@ -2710,7 +2758,7 @@ Guidelines:
                     )
 
         except Exception as e:
-            logger.warning(f"[THINK] Failed to extract/store opinions: {str(e)}")
+            logger.warning(f"[REFLECT] Failed to extract/store opinions: {str(e)}")
 
     async def get_entity_observations(
         self,

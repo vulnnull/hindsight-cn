@@ -72,9 +72,6 @@ class MemoryFact(BaseModel):
     metadata: Optional[Dict[str, str]] = Field(None, description="User-defined metadata")
     chunk_id: Optional[str] = Field(None, description="ID of the chunk this fact was extracted from (format: bank_id_document_id_chunk_index)")
 
-    # Internal metrics (used by system but may not be exposed in API)
-    activation: Optional[float] = Field(None, description="Internal activation score")
-
 
 class ChunkInfo(BaseModel):
     """Information about a chunk."""

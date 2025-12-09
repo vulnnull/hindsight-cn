@@ -307,7 +307,6 @@ impl App {
                         max_tokens: self.query_max_tokens,
                         trace: false,
                         query_timestamp: None,
-                        filters: None,
                         include: None,
                     };
 
@@ -326,7 +325,6 @@ impl App {
                         query: self.query_text.clone(),
                         budget: Some(self.query_budget.clone()),
                         context: None,
-                        filters: None,
                         include: None,
                     };
 
@@ -595,7 +593,6 @@ impl App {
                     }
                 }
             }
-            _ => {}
         }
         Ok(())
     }

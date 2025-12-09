@@ -35,7 +35,7 @@ from hindsight_client_api.models.reflect_response import ReflectResponse
 from hindsight_client_api.models.reflect_fact import ReflectFact
 from hindsight_client_api.models.list_memory_units_response import ListMemoryUnitsResponse
 from hindsight_client_api.models.bank_profile_response import BankProfileResponse
-from hindsight_client_api.models.personality_traits import PersonalityTraits
+from hindsight_client_api.models.disposition_traits import DispositionTraits
 
 __all__ = [
     "Hindsight",
@@ -47,5 +47,5 @@ __all__ = [
     "ReflectFact",
     "ListMemoryUnitsResponse",
     "BankProfileResponse",
-    "PersonalityTraits",
+    "DispositionTraits",
 ]

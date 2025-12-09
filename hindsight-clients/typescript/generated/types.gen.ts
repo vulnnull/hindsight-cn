@@ -553,32 +553,6 @@ export type MemoryItem = {
 };
 
 /**
- * MetadataFilter
- *
- * Filter for metadata fields. Matches records where (key=value) OR (key not set) when match_unset=True.
- */
-export type MetadataFilter = {
-    /**
-     * Key
-     *
-     * Metadata key to filter on
-     */
-    key: string;
-    /**
-     * Value
-     *
-     * Value to match. If None with match_unset=True, matches any record where key is not set.
-     */
-    value?: string | null;
-    /**
-     * Match Unset
-     *
-     * If True, also match records where this metadata key is not set
-     */
-    match_unset?: boolean;
-};
-
-/**
  * RecallRequest
  *
  * Request model for recall endpoint.
@@ -609,12 +583,6 @@ export type RecallRequest = {
      * ISO format date string (e.g., '2023-05-30T23:40:00')
      */
     query_timestamp?: string | null;
-    /**
-     * Filters
-     *
-     * Filter by metadata. Multiple filters are ANDed together.
-     */
-    filters?: Array<MetadataFilter> | null;
     /**
      * Options for including additional data (entities are included by default)
      */
@@ -768,12 +736,6 @@ export type ReflectRequest = {
      * Context
      */
     context?: string | null;
-    /**
-     * Filters
-     *
-     * Filter by metadata. Multiple filters are ANDed together.
-     */
-    filters?: Array<MetadataFilter> | null;
     /**
      * Options for including additional data (disabled by default)
      */

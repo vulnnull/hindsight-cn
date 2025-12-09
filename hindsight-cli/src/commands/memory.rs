@@ -58,7 +58,6 @@ pub fn recall(
         max_tokens,
         trace,
         query_timestamp: None,
-        filters: None,
         include,
     };
 
@@ -100,7 +99,6 @@ pub fn reflect(
         query,
         budget: Some(parse_budget(&budget)),
         context,
-        filters: None,
         include: None,
     };
 

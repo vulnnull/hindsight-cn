@@ -280,19 +280,19 @@ class Hindsight:
         bank_id: str,
         name: Optional[str] = None,
         background: Optional[str] = None,
-        personality: Optional[Dict[str, float]] = None,
+        disposition: Optional[Dict[str, float]] = None,
     ) -> BankProfileResponse:
         """Create or update a memory bank."""
-        from hindsight_client_api.models import create_bank_request, personality_traits
+        from hindsight_client_api.models import create_bank_request, disposition_traits
 
-        personality_obj = None
-        if personality:
-            personality_obj = personality_traits.PersonalityTraits(**personality)
+        disposition_obj = None
+        if disposition:
+            disposition_obj = disposition_traits.DispositionTraits(**disposition)
 
         request_obj = create_bank_request.CreateBankRequest(
             name=name,
             background=background,
-            personality=personality_obj,
+            disposition=disposition_obj,
         )
 
         return _run_async(self._api.create_or_update_bank(bank_id, request_obj))

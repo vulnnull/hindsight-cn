@@ -2072,44 +2072,6 @@
           "timestamp": "2024-01-15T10:30:00Z"
         }
       },
-      "MetadataFilter": {
-        "properties": {
-          "key": {
-            "type": "string",
-            "title": "Key",
-            "description": "Metadata key to filter on"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value",
-            "description": "Value to match. If None with match_unset=True, matches any record where key is not set."
-          },
-          "match_unset": {
-            "type": "boolean",
-            "title": "Match Unset",
-            "description": "If True, also match records where this metadata key is not set",
-            "default": true
-          }
-        },
-        "type": "object",
-        "required": [
-          "key"
-        ],
-        "title": "MetadataFilter",
-        "description": "Filter for metadata fields. Matches records where (key=value) OR (key not set) when match_unset=True.",
-        "example": {
-          "key": "source",
-          "match_unset": true,
-          "value": "slack"
-        }
-      },
       "RecallRequest": {
         "properties": {
           "query": {
@@ -2157,21 +2119,6 @@
             "title": "Query Timestamp",
             "description": "ISO format date string (e.g., '2023-05-30T23:40:00')"
           },
-          "filters": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/MetadataFilter"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Filters",
-            "description": "Filter by metadata. Multiple filters are ANDed together."
-          },
           "include": {
             "$ref": "#/components/schemas/IncludeOptions",
             "description": "Options for including additional data (entities are included by default)"
@@ -2185,13 +2132,6 @@
         "description": "Request model for recall endpoint.",
         "example": {
           "budget": "mid",
-          "filters": [
-            {
-              "key": "source",
-              "match_unset": true,
-              "value": "slack"
-            }
-          ],
           "include": {
             "entities": {
               "max_tokens": 500
@@ -2565,21 +2505,6 @@
             ],
             "title": "Context"
           },
-          "filters": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/MetadataFilter"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Filters",
-            "description": "Filter by metadata. Multiple filters are ANDed together."
-          },
           "include": {
             "$ref": "#/components/schemas/ReflectIncludeOptions",
             "description": "Options for including additional data (disabled by default)"
@@ -2594,13 +2519,6 @@
         "example": {
           "budget": "low",
           "context": "This is for a research paper on AI ethics",
-          "filters": [
-            {
-              "key": "source",
-              "match_unset": true,
-              "value": "slack"
-            }
-          ],
           "include": {
             "facts": {}
           },

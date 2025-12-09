@@ -153,46 +153,18 @@ class EmbeddedPostgres:
         """
         Ensure pg0 is available.
 
-        First checks PATH, then default location, then downloads if needed.
+        Checks PATH and default location. If not found, raises an error
+        instructing the user to install pg0 manually.
         """
         if self.is_installed():
             logger.debug(f"pg0 found at {self._binary_path}")
             return
 
-        logger.info("pg0 not found, downloading...")
-
-        # Log platform information
-        binary_name = get_platform_binary_name()
-        logger.info(f"Detected platform: system={platform.system()}, machine={platform.machine()}")
-
-        # Install to default location
-        install_dir = Path.home() / ".hindsight" / "bin"
-        install_dir.mkdir(parents=True, exist_ok=True)
-        install_path = install_dir / "pg0"
-
-        # Download the binary
-        download_url = get_download_url(self.version)
-        logger.info(f"Downloading from {download_url}")
-
-        try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=300.0) as client:
-                response = await client.get(download_url)
-                response.raise_for_status()
-
-                # Write binary to disk
-                with open(install_path, "wb") as f:
-                    f.write(response.content)
-
-                # Make executable on Unix
-                if platform.system() != "Windows":
-                    st = os.stat(install_path)
-                    os.chmod(install_path, st.st_mode | stat.S_IEXEC)
-
-                self._binary_path = install_path
-                logger.info(f"Installed pg0 to {install_path}")
-
-        except httpx.HTTPError as e:
-            raise RuntimeError(f"Failed to download pg0: {e}") from e
+        raise RuntimeError(
+            "pg0 is not installed. Please install it manually:\n"
+            "  curl -fsSL https://github.com/vectorize-io/pg0/releases/latest/download/pg0-linux-amd64 -o ~/.local/bin/pg0 && chmod +x ~/.local/bin/pg0\n"
+            "Or visit: https://github.com/vectorize-io/pg0/releases"
+        )
 
     def _run_command(self, *args: str, capture_output: bool = True) -> subprocess.CompletedProcess:
         """Run a pg0 command synchronously."""
@@ -227,6 +199,13 @@ class EmbeddedPostgres:
             return match.group(1)
         return None
 
+    async def _get_version(self) -> str:
+        """Get the pg0 version."""
+        returncode, stdout, stderr = await self._run_command_async("--version", timeout=10)
+        if returncode == 0 and stdout:
+            return stdout.strip()
+        return "unknown"
+
     async def start(self, max_retries: int = 3, retry_delay: float = 2.0) -> str:
         """
         Start the PostgreSQL server with retry logic.
@@ -244,7 +223,9 @@ class EmbeddedPostgres:
         if not self.is_installed():
             raise RuntimeError("pg0 is not installed. Call ensure_installed() first.")
 
-        logger.info(f"Starting embedded PostgreSQL (name: {self.name}, port: {self.port})...")
+        # Log pg0 version
+        version = await self._get_version()
+        logger.info(f"Starting embedded PostgreSQL with pg0 {version} (name: {self.name}, port: {self.port})...")
 
         last_error = None
         for attempt in range(1, max_retries + 1):

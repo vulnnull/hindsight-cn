@@ -48,5 +48,10 @@
   },
   "engines": {
     "node": ">=20.0"
+  },
+  "overrides": {
+    "openapi-to-postmanv2": {
+      "js-yaml": "4.1.1"
+    }
   }
 }

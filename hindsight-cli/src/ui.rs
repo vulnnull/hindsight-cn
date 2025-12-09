@@ -211,9 +211,9 @@ pub fn print_profile(profile: &BankProfileResponse) {
 
     // New 3-trait disposition system (values 1-5)
     let traits: [(_, i64, _, _, _); 3] = [
-        ("Skepticism", profile.disposition.skepticism, "🔍", "cyan", "1=trusting, 5=skeptical"),
-        ("Literalism", profile.disposition.literalism, "📋", "yellow", "1=flexible, 5=literal"),
-        ("Empathy", profile.disposition.empathy, "💚", "green", "1=detached, 5=empathetic"),
+        ("Skepticism", profile.disposition.skepticism.get() as i64, "🔍", "cyan", "1=trusting, 5=skeptical"),
+        ("Literalism", profile.disposition.literalism.get() as i64, "📋", "yellow", "1=flexible, 5=literal"),
+        ("Empathy", profile.disposition.empathy.get() as i64, "💚", "green", "1=detached, 5=empathetic"),
     ];
 
     for (name, value, emoji, color, desc) in &traits {
