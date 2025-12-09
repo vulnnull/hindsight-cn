@@ -1,0 +1,71 @@
+---
+id: get-entity
+title: "Get entity details"
+description: "Get detailed information about an entity including observations (mental model)."
+sidebar_label: "Get entity details"
+hide_title: true
+hide_table_of_contents: true
+api: eJy9Vl1v2zYU/SvEfWoB2ZIcJ930lmVZlqFpgsbbwwLDoKVrmw1FqiTl1BD034tLSbFsz+7QffjFNnl57tc5l6wgQ5saUTihFSRwg45l6LiQmDGhFtrknLYYn+vSMa4YKifchgmVyjITasn03KJZeyvL3uSoHJcs1xnKt0MIQBdo/OZtBgks0c0aBAig4Ibn6NBYSJ4qUDxHSGDO1fNMZBCAoIgK7lYQgMHPpTCYQeJMiQHYdIU5h6QCtynomHVGqCUE4ISTtPATV8/sNoO6Dl6xG9f/Bvp1UwaPPyUAW2hl0dKZURTR125lH8s0RWsXpWQfW2MIINXKoXJkzotCitSXKvxk6UzVi6MwVEgnGg8iOxUbBRVAypVWIuVy1iR/3P6qs2QfyLIOgLootJqlumyCa48K5XCJpnf2rrFkV96yDmAhjHUzi+gT4Gpzv/Dd3XVOPWlXVCklUA07yF8IgT0SQh2A5P8Q7j3voeXoeMYd3wXjWSYoCy4femVuqNDC6vknTN1JR3cddh1AXxS+YQ5ze9hHh1/cqc5MaH/bD8xm3H1vHe46DHbpSBR7mfVF8NQENt2n+/02qx6Hd3l+qfoTYX9uDGHrmBvDN71k7/s1+1aAXsJ7FN/n7V4bDtL52Q+6o5l0G80wYwttuuHXTEiGKiu0UI7GHH7heSG9zPaFB7/plYJdZcAoGo0HUTyIzydxlJxFSRT9SUOJhmQ8OsPx+cW7Af7w43wQj7KzAR+fXwzGo4uLeBy/G0dRBDvKaOFGgyiexOMk6uD2dByf7zPzqdrj1rHAGqb6VNiLNs+WccdutF5KhHpa0yeA8Wh0OPj+4FJkDRmujdHm+6deU/YTcpI63dn9GzLpJlo9PU7M97oJ0CvRLk8J9g6t5UvcsvzEDULFYBPa/RbZKa/GdWvXo/K2vE11j6fR0P0vnXUmv04mDweATW9zdCvdXuH+7nYrSCBcx2GGC15KF9LFbcOqvb/r0ItFoA2r12u39vfuQvu6dD6FyqxYrhwj7+zy4fZAid2G1+CrfUsknnoitVq7w1ybDXvcWIe5vz9EiqTurcllwdMVstGQRFQaCQmsnCtsEoYvLy9D7reH2izD9qwN399eXX94vB6MhtFw5XJJwGs0tgkvHkbDiJYKbV3OVc8Xvad2hobdT67aquE/eH21jSb1hoXkwnPY51y1LXyCdexj8k2EwL+/KMpk+xDrOkmr2yfUNICVto4gqmrOLf5uZF3T8ucSzQaSp2kAa24En1OjnyrIhKXfGSQLLi2eqMSbjy3937JjWXQsV8TxNZcl/YMAnnHTe0WS1P9Ht9vq+IGyQp6h8bk3+5dpioXrnTyYf3Rlv2rt5noCdf0V9qXxZA==
+sidebar_class_name: "get api-method"
+info_path: docs/api-reference/endpoints/hindsight-http-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Get entity details"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/v1/default/banks/{bank_id}/entities/{entity_id}"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Get detailed information about an entity including observations (mental model).
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+  children={"Request"}
+>
+</Heading>
+
+<ParamsDetails
+  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"entity_id","in":"path","required":true,"schema":{"type":"string","title":"Entity Id"}}]}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  title={"Body"}
+  body={undefined}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  id={undefined}
+  label={undefined}
+  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"id":{"type":"string","title":"Id"},"canonical_name":{"type":"string","title":"Canonical Name"},"mention_count":{"type":"integer","title":"Mention Count"},"first_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"First Seen"},"last_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Last Seen"},"metadata":{"anyOf":[{"additionalProperties":true,"type":"object"},{"type":"null"}],"title":"Metadata"},"observations":{"items":{"properties":{"text":{"type":"string","title":"Text"},"mentioned_at":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Mentioned At"}},"type":"object","required":["text"],"title":"EntityObservationResponse","description":"An observation about an entity."},"type":"array","title":"Observations"}},"type":"object","required":["id","canonical_name","mention_count","observations"],"title":"EntityDetailResponse","description":"Response model for entity detail endpoint.","example":{"canonical_name":"John","first_seen":"2024-01-15T10:30:00Z","id":"123e4567-e89b-12d3-a456-426614174000","last_seen":"2024-02-01T14:00:00Z","mention_count":15,"observations":[{"mentioned_at":"2024-01-15T10:30:00Z","text":"John works at Google"}]}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
+>
+  
+</StatusCodes>
+
+
+      

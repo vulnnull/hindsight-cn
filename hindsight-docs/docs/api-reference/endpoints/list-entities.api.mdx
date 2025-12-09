@@ -1,0 +1,71 @@
+---
+id: list-entities
+title: "List entities"
+description: "List all entities (people, organizations, etc.) known by the bank, ordered by mention count."
+sidebar_label: "List entities"
+hide_title: true
+hide_table_of_contents: true
+api: eJzNVttu4zYQ/RVinnYB2bqsk231lqZpm8LZBhu3Dw2CgJbGFjcUqSWpJKqhfy+GkmLZibPbLQo0Lw7E4ZnbOcPZQI42M6JyQitIYS6sY1xKhsoJJ9CyNxXqSmLAtFlzJf7iZGkDhi6bvmV3Sj8otmyYK5AtubojuxwN5vSxJBStWKZr5aYQgK7QeIDzHFKQwrrbwREEUHHDS3RoLKTXG1C8REiBUG9FDgEIirDiroAADH6uhcEcUmdqDMBmBZYc0g24pqJr1hmh1hCAE07Shx+4umPnObRt8IQtRSncgPy5RtPsQK+4tC9hC+VwjQaCvepd8EdR1iVTdblEw/RqW0anmUFXG+UvrXgtHaRxFG3jm/tY2m/CbG8obFtpZdFSoEkU0c8u1FWdZWjtqpbsY28MAWRaOVSOzHlVSZH5BoWfLN3ZjJKvDLXP9yrdgHBY7v6zd56/1gzqQwAZV1qJjMvbrh+H7U8HS/aBLNsAem7dem692Jvh7kXPwlNv2QawEsa6W4voE+Sq+W3lCbfrnGjSf1G1lL7GA+RPhMCuCKENQPJ/CTfnI7QSHc+547tgPM8FZcHl5ajMHfd7WL38hJl71dHFgN22+9fGvL8Gr7e99uzXfIR7RpRsaHicOyyf6aI7ZqR3RnRhD8IVzNZlyU1DcwEfeVlJz4B9TsCvuiDRjJsGSZTMJlE8iY8WcZS+i9Io+pNkTFMlTt7h7Oj4/QS/+345iZP83YTPjo4ns+T4OJ7F72dRFMFO03q4ZBLFi3iWRgPcHsXio1HVuDG8GRPaq+CLZfVWLxZupMjd4g0HrNQ5SrbSppsAfT1R5ZUW3XgdlbFX5fX/vKA3Lf0FMEuS5/PqDy5F7qcROzNGm28fVjk6LuQr00rqbOf0K1Q8DJr25jAr5roL0Ovarl+bcBdoLV/70daZHDb1xWALOv0S4SivznVvN+LetrxddQ+n8WNXvpecDSa/LBaXzwC73pboCk1EWqPzr7wrIIXwPg77hzCkJ96Gm/6lb8PRTiDUSvtaDH6Eyq1YF46RR3Zyef5MMMOBl8qTfU8ennny9FK4wFKbhl01lsYWjXKRIYlwa3JS8axAlkyJ47WRkELhXGXTMHx4eJhyfzzVZh32d204Pz89+3B1Nkmm0bRwpSTgezS2Cy+eRtOIPlXaupKrka95J+in5Hfy2mzJ/1+vaX2THT66sJJceP763Dd9+67hPh5tMoHf0ijkdLuuPSVyE0ChraNbm82SW/zdyLalz93KRTLLheVLOVq6Dub+lUvWizncYTPa+u65rMnGP5H33AiK4B9G8+Zjr7a37JDTQVSqGfscghnq5cdIgTxH40PoTk+yDKtxrM+mHsX+pLCfzxbQtn8D36n4VA==
+sidebar_class_name: "get api-method"
+info_path: docs/api-reference/endpoints/hindsight-http-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"List entities"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"get"}
+  path={"/v1/default/banks/{bank_id}/entities"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+List all entities (people, organizations, etc.) known by the bank, ordered by mention count.
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+  children={"Request"}
+>
+</Heading>
+
+<ParamsDetails
+  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"limit","in":"query","required":false,"schema":{"type":"integer","description":"Maximum number of entities to return","default":100,"title":"Limit"},"description":"Maximum number of entities to return"}]}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  title={"Body"}
+  body={undefined}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  id={undefined}
+  label={undefined}
+  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"items":{"items":{"properties":{"id":{"type":"string","title":"Id"},"canonical_name":{"type":"string","title":"Canonical Name"},"mention_count":{"type":"integer","title":"Mention Count"},"first_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"First Seen"},"last_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Last Seen"},"metadata":{"anyOf":[{"additionalProperties":true,"type":"object"},{"type":"null"}],"title":"Metadata"}},"type":"object","required":["id","canonical_name","mention_count"],"title":"EntityListItem","description":"Entity list item with summary.","example":{"canonical_name":"John","first_seen":"2024-01-15T10:30:00Z","id":"123e4567-e89b-12d3-a456-426614174000","last_seen":"2024-02-01T14:00:00Z","mention_count":15}},"type":"array","title":"Items"}},"type":"object","required":["items"],"title":"EntityListResponse","description":"Response model for entity list endpoint.","example":{"items":[{"canonical_name":"John","first_seen":"2024-01-15T10:30:00Z","id":"123e4567-e89b-12d3-a456-426614174000","last_seen":"2024-02-01T14:00:00Z","mention_count":15}]}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
+>
+  
+</StatusCodes>
+
+
+      

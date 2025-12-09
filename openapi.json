@@ -1042,7 +1042,7 @@
       },
       "delete": {
         "summary": "Clear memory bank memories",
-        "description": "Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (personality and background) will be preserved.",
+        "description": "Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (disposition and background) will be preserved.",
         "operationId": "clear_bank_memories",
         "parameters": [
           {

@@ -1,11 +1,11 @@
 ---
-id: list-operations
-title: "List async operations"
-description: "Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations"
-sidebar_label: "List async operations"
+id: get-agent-stats
+title: "Get statistics for memory bank"
+description: "Get statistics about nodes and links for a specific agent"
+sidebar_label: "Get statistics for memory bank"
 hide_title: true
 hide_table_of_contents: true
-api: eJzFVE1v2zAM/SsCTyugxWmwk2/dFnQB2q1ou12CoGBk2lYry6okpzMM//dBsvPVrAV22sky+fihp0d2kJETVhovaw0pXJJnyJR0ntU5Q6UYulYLVhuyGDCOfTCkM6kLhjpjOUpF2RnLa8uQOUNC5lIwLEh7zqQWqolYsra2rCLnsCAX4UPoQWbgsPtZZJBCaOPhyG/QYkWerIN02YHGiiCFNeqnB5kBBxnuYNCXwMHScyMtZZB62xAHJ0qqENIOfGtCmPNW6gI4eOlVMHxG/cQWGfT9KoQ7U2tHLkTMptPwOebqrhGCnMsbxW5HMHAQtfakfYCjMUqK2Hzy6EJMt++i7/uew6fZ7DTxL1Qyi2FsHnj7h6xgbCDMy6HvjDxKFU7SU+VOAaoWR17U7Y88cntMUs93Fqk9FWShX/V8a0NrsT1g8qoeGoSeQ+WK90i/HjQBu2RvQyMZ7D54+33tev1Iwh89+DLeayg94lb7NHt6B3bfvsbXgb6/FdtCvt3f35wkHN62Il/WQccF+ahdX0IKyeY8ySjHRvkkCNcl3ajfPjnSutR5HdnYVpI6c7IoPQs12cXNAvgr4Wwdcb52+FE+KKJ8xpm5pqq2LbtrnacqUKCkoKDgPeTCoCiJzSZT4NBYBSmU3huXJsnLy8sEo3tS2yIZY11ytfgy/343/zibTCelr1RIvCHrhvbOJ9PJNJhM7XyF+qDWVdg4r1fN6/t1+zH434tqlIOn3z4xCmVUeuSoGx96CZvzeIH41MDjlgqh6X5dHaRccShr50Nc163R0U+r+j6YnxuyLaTLFYcNWonroIZlB5l04ZxBmqNy9A5XH27HyThjb7W+HQAd5L9B1YQ/4PBE7cGCjSNfEmZkYwuD90IIMv4g7mRDhX26m4bL+T30/R+xTzbt
+api: eJylVE1v2zAM/SsCTxugxWmwk2/dFnQB2q1Yu12CoGBsxlZjS65EpwsM/fdBsvPVrAWGneLw8/HxiR3k5DKrGlZGQwpXxMIxsnKsMidwaVoW2uTkBOpcVEqvnVgZK1C4hjK1UpnAgjSDBNOQxVBnlkMKBfFD9DyEeg4kNGixJibrIJ13oLEmSGGJev2gcpCgAoAGuQQJlp5aZSmHlG1LElxWUo2QdsDbJqQ5tkoXIIEVV8HwCfVazHLwfhHSXWO0IxcyJuNx+Dkd9K7NMnJu1VbixxAMEjKjOQyTdoBNU6kszpM8upDTHVB4772Ej5PJeeFfWKk8pomptcb+Q1VobOCQVY87J0ZVhS/FVLvzgMpkJ17U2++ryO0pSV7uLUozFWTBL7zc2dBa3B4xeW16gOAl1K54i/Qbcg4Lgn2x10MjGeI+eP2ht1k+UsYnC5/HufrWQ9ziUOZAb8/u62N86en7W7NdyNf7+9uzgv1ua+LSDDqO2uUSUkg2F0lOK2wrToJwXdIN+vXJTuZKr0wkYtdE6dypomQR2onL2xnIF5rZOeLL2scPysEsKmd4LjdUG7sVd1vHVIfpK5VREO8h5LLBrCQxGY1BQmsrSKFkblyaJM/PzyOM7pGxRTLkuuR69nn67W76YTIaj0quq1B4Q9b18C5G49E4mBrjuEZ91OvFvQj46x5h4OXloN3hKfzXpRn2yfSbk6ZCFaUaJ+2GTc1hcxG7x12BjGcmbCc93Jt+YQsJpXEcUrpuiY5+2sr7YH5qyW4hnS8kbNAqXIZ1zjvIlQvfOaQrrBy9MeO7H4Oq34vXUO/Eq4N0N1i14R9IWNP26DjG51oS5mQjhN57mWXU8FHe2XUJt3Cv5KvpPXj/B5zBBYM=
 sidebar_class_name: "get api-method"
 info_path: docs/api-reference/endpoints/hindsight-http-api
 custom_edit_url: null
@@ -22,13 +22,13 @@ import Heading from "@theme/Heading";
 <Heading
   as={"h1"}
   className={"openapi__heading"}
-  children={"List async operations"}
+  children={"Get statistics for memory bank"}
 >
 </Heading>
 
 <MethodEndpoint
   method={"get"}
-  path={"/v1/default/banks/{bank_id}/operations"}
+  path={"/v1/default/banks/{bank_id}/stats"}
   context={"endpoint"}
 >
   
@@ -36,7 +36,7 @@ import Heading from "@theme/Heading";
 
 
 
-Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations
+Get statistics about nodes and links for a specific agent
 
 <Heading
   id={"request"}

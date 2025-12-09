@@ -1,0 +1,71 @@
+---
+id: regenerate-entity-observations
+title: "Regenerate entity observations"
+description: "Regenerate observations for an entity based on all facts mentioning it."
+sidebar_label: "Regenerate entity observations"
+hide_title: true
+hide_table_of_contents: true
+api: eJy9Vl1z4jYU/Sua+9TOGGwTkm39lqZpm85mk0loH8owjLAvoI0seSVBlvH4v3eubMcGCtvZ7pQXQLo69+ucK5WQoU2NKJzQChJ4whUqNNwh0wuLZstpw7KlNowrhsoJt2MLbjFjWjEuJVvy1FmW05ZWQq2YcEMIQBcEI7S6yyAB84Y7rzHmfXgIoOCG5+jQWEimJSieIySw4OplLjIIQFB0BXdrCMDgp40wmEHizAYDsOkacw5JCW5X0DHrjFArCMAJJ2nhJ65e2F0GVRW8YTdxfAP027oqHn9GALbQyqKlM6Mooq/9Kj9v0hStXW4ke2qMIYBUK4fKkTkvCilSX5zwo6UzZS+OwlBxnag9iOxcbBRUAClXWomUy3md/Gn7m9aSfSDLKoCms/NUb+rgmqNCOVyh6Z29ry3ZjbesAlgKY93cIvoEuNo9LH13951TT5oVtZESqIYt5C+EwJ4JoQpA8v8I95730HJ0POOO74PxLBOUBZePvTLXVGhg9eIjpu6so/sWuwpgj+nUMIe5Pe6jw8/uXGcmtN/1A7M5d19bh/sWg107EsVBZn0RTOvAZod0f+iy6nF4n+fXqj9FGF/ojevGyBA6x9wYvusl+9Cv2ZcC9BI+oPghbw/acJTOz+i4kCczaTdYrjOUfhw2szDzBxmqrNBC+dGHn3leSC+zQ+HB73qtYF8ZMIpG40EUD+LLSRwlF1ESRX/RUKLBGY8ucHx59W6AP/y4GMSj7GLAx5dXg/Ho6ioex+/GURTBnjIauNEgiifxOIlauAMdx5eHzJyWB9w6FVjNVJ8Ke9XmxTLu2K9aryRCNavoE8B4NDoefH9yKbKaDLfGaPP1U68u+xk5SZ3u7f4LmbQTrZqdJuZ7XQfolWhX5wR7j9byFXYsP3ODUDHYhHa/RHbKq3bd2PWo3JW3ru7pNGq6/6Oz1uS3yeTxCLDubY5urYmdhbbOX95uDQmE2zjMcMk30oV0c9uwbC7wKvRqEWjD8u3ercLuVeDv4KX2NWr9C5VZsVo7RpGw68e7I1W2G16Pb/YNqXjqSdXo7h5zbXbseWcd5v4uESmS0juT64Kna2SjIQlqYyQksHausEkYvr6+DrnfHmqzCpuzNnx/d3P74fl2MBpGw7XLJQFv0dg6vHgYDSNaojLlXPV89d5ZzRw5eA/tJVp2KvmGL7Sm8aTmsJBceE77vMumo1PYxj4W31MI/HuMoku6h1nbWFrtP6l6vZ0FsCaiJFMoS4rsDyOripY/bdDsIJnOAthyI/iCOj8tIROWfmeQLLm0eKYc3z012vienUqplYAiAWy53NA/COAFd70nJs2B/9FtVyo/bdbIMzQ+93r/Ok2xcL2TR8OR7vM3IT4+PE+gqv4GTRYCiw==
+sidebar_class_name: "post api-method"
+info_path: docs/api-reference/endpoints/hindsight-http-api
+custom_edit_url: null
+---
+
+import MethodEndpoint from "@theme/ApiExplorer/MethodEndpoint";
+import ParamsDetails from "@theme/ParamsDetails";
+import RequestSchema from "@theme/RequestSchema";
+import StatusCodes from "@theme/StatusCodes";
+import OperationTabs from "@theme/OperationTabs";
+import TabItem from "@theme/TabItem";
+import Heading from "@theme/Heading";
+
+<Heading
+  as={"h1"}
+  className={"openapi__heading"}
+  children={"Regenerate entity observations"}
+>
+</Heading>
+
+<MethodEndpoint
+  method={"post"}
+  path={"/v1/default/banks/{bank_id}/entities/{entity_id}/regenerate"}
+  context={"endpoint"}
+>
+  
+</MethodEndpoint>
+
+
+
+Regenerate observations for an entity based on all facts mentioning it.
+
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+  children={"Request"}
+>
+</Heading>
+
+<ParamsDetails
+  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"entity_id","in":"path","required":true,"schema":{"type":"string","title":"Entity Id"}}]}
+>
+  
+</ParamsDetails>
+
+<RequestSchema
+  title={"Body"}
+  body={undefined}
+>
+  
+</RequestSchema>
+
+<StatusCodes
+  id={undefined}
+  label={undefined}
+  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"id":{"type":"string","title":"Id"},"canonical_name":{"type":"string","title":"Canonical Name"},"mention_count":{"type":"integer","title":"Mention Count"},"first_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"First Seen"},"last_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Last Seen"},"metadata":{"anyOf":[{"additionalProperties":true,"type":"object"},{"type":"null"}],"title":"Metadata"},"observations":{"items":{"properties":{"text":{"type":"string","title":"Text"},"mentioned_at":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Mentioned At"}},"type":"object","required":["text"],"title":"EntityObservationResponse","description":"An observation about an entity."},"type":"array","title":"Observations"}},"type":"object","required":["id","canonical_name","mention_count","observations"],"title":"EntityDetailResponse","description":"Response model for entity detail endpoint.","example":{"canonical_name":"John","first_seen":"2024-01-15T10:30:00Z","id":"123e4567-e89b-12d3-a456-426614174000","last_seen":"2024-02-01T14:00:00Z","mention_count":15,"observations":[{"mentioned_at":"2024-01-15T10:30:00Z","text":"John works at Google"}]}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
+>
+  
+</StatusCodes>
+
+
+      

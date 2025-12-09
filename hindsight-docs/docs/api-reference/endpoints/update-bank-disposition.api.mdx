@@ -1,12 +1,12 @@
 ---
-id: get-bank-profile
-title: "Get memory bank profile"
-description: "Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists."
-sidebar_label: "Get memory bank profile"
+id: update-bank-disposition
+title: "Update memory bank disposition"
+description: "Update bank's disposition traits (skepticism, literalism, empathy)"
+sidebar_label: "Update memory bank disposition"
 hide_title: true
 hide_table_of_contents: true
-api: eJy9Vk1v2zgQ/SvEnBpA9Ve2FwE9ZJugDZB2gya7l8AoaGlsseGHSo78AUP/fTGUbEl1khY5NJfI4gznzeObR+0hx5B5VZJyFlL4iCRyFUoXFL8R5KWiIKTNxUJmjyvvKpuLpfNCCoPG+Z1YSPs4EhcVubeZR0kYhFyhJbFRVIgcl7LSFIRaCutI4FYFCiNIwJXoJRe5ziGFFdI33ulb6d1SaYQESumlQUIfIH3Yg5UGIYUYpHJIQDHgUlIBCXj8USmPOaTkK0wgZAUaCekeaFdyWiCv7AoSIEWaX/wt7aO4zqGu55weSmcDBs6YTSb8b0jMXZVlGMKy0uJrGwwJZM4SWuJwWZZaZbGh8ffAOfseitJzu6SaCocefgde0jb+fOgXXq8T6J3bacnwiCWpTAXT20pZwhV6SMDIrTKVgfRdAkbZ5nna1bjr0pOfmPnkNqLdXWqxDoJ8FUjZlXgzfX94TsS798egM0arFaGX+rWAbrr0pwC1u+udICd4V196JKHs0nkTD4nRLTVu1UIjo2szIjY0LKvdq4BdtblPoTJVVjCgzNmgcvQCjeNlqUVU0pYYVY4kswJzRtUgQVLZGdR1coDjFt8xo4HuH/pHPKC362fewbzsxHIfZ/wE8OWpDVAhI4e6QpuhKLglNgHFM++RfcFgHt3iyDnmPOy4labUUcZHcs+HIjhPBiI953Y7z3l5Vo5Rv+Koc484VcOhGdSbD2fxtrGl3uwP2TosCONy1NEhuZZo7ewnDvp9wbWQRkgR3JI2zCLalbKIvjHQ6UTsUPog3FLgtkSvIvfKikDSU1WGiLs1FKgC+unsHE7s4LdpPxgOXGiVIdT8l8Bfs9mpKf4ntcqbabry3vnXOyJrXml+UoQmnAZolw1Wpd39s4z3wlAVdXIys/W8E4X0Xu560rlxDUCeehNWL6nsM4YgV9Fpm5DnQyMZ4p5XfyVI7qsp3cb1dNfR27D7fBuXDX1PFTuEfLq/vz3ZsDlbg1S49hKO9y4VkMJ4PR23t/eY9RXG+1Zm9bi7pNlRIxWHMsrmQa0KElxQXNxenzphuxCH5BjfakdmUTutBD83nxh3u0BomlsjQx6/LuSiZLMUs9EEEqi8hhQKojKk4/FmsxnJuDxyfjVuc8P45vrD1Ze7q7ez0WRUkNG88Rp9aOBNR5PRhF+VLpCRtleLv456Xz2io2HQ4b6bgj/5QdWePF8j41JLFUUdGdm3Z/oA62kEG7dofYP9I+188dDTPIHCBeKk/X4hA/7rdV3z6x8V+h2kD/ME1tIrueCDf9iz4fBzDulS6oAvkPLmazsBZ+I53AehW5b5WuqKf0ECj7jrfQTG0S5Q5ugjhGb1IsuwpF7eiRPxN99R9R+v7qGu/wfoX8zO
-sidebar_class_name: "get api-method"
+api: eJztV8tu2zoQ/RViNjcBWL9yuxHQRdoEaIC0DfK4m8AoaGlssaFIlaTsGIb+vRhSjqQojyK4q6JeyeLM8MzwnCNpBxm61MrSS6MhgZsyEx7ZQui7fxzLpCuNk7TGvBXSO3bg7rD0MpWu4ExJj1aocI1FKXy+PQQOpkQrKOksgwSqUPI7lfzeKQgcSmFFgR6tg+R2B1oUCAmEQJkBB0mIqCpwsPizkhYzSLytkINLcywEJDvw25LSnLdSr4CDl17RjY9C37GzDOp6HtPR+Y8m21LO42qp0R61pyVRlkqmAf74h6Oh7DqblZaa8xId/eu2M1hsB9VBKbXHFVrgUIh7WVQFJO85FFLH62kL/6pN548O6bPZsKa6UGztmLeV81Kv2MH0w/6as/cfHoIOoebQntabAJ236U8BaqqrLfOGUVVbWvRM6qWxRRgnoVsqvJcLhYSuyQjYGva8Cdhpk/sUqqJKcwKUGu1khpZhYWhZKBbO/N4Tqgy9SHPMCFVEgl6mh1DXfA/HLH5g6ntEvO0ecW+8bT/zFuZJS5broKUB4JOh3HwuwgxVhTpFllNLWBgr0TFhkdFwMWNCZ+3MMRsRgntRlLTxrh3uUZ8ER7xH0qP6tX67fO90Fk2jg/4yqm3QYHOfFSZDRdhZMAdi7tBqRlAHQBZdabSLoppNJkF4vbJXVZqic8tKscsmGN6s6b39/I6z8Mazng/9Sus1/+sUf53iz3IKDguR3q2sqfQrWnmIem1G7YM/qKovmt5+874WL6xZSoUd7T+2nbjQ8R3ai5Ux79EMun3BGRMFE8yZpd/QFFGvpEa0bCN9zqYTtkVhHTNLhvclWhlmLzVzXlhflS7gbgwFKod2OjuCgR389tj3hgPHSqYYDLLm8O9sNjTF/4SSWVTTqbXGvt0RifNS0ZX0WLhhgDJpb1Xo7bdleKXrs6LmA83W85YUwlqx7VDn3ESApPrCrV5i2Rd0TqyC08aQ50PDMNg1rb5GSOorbt3EdXjXjjdO9/k2TuL4ntpsH/L5+vpiUDCebYE+N0SesvLhldnnkMB4PR1nuBSV8mPilxvvGprV44bVwIEO9rJ98T1tOf5W/tX0Ur40Yb577FJnTq5yz6gLdnxxNrTXZiEo7yG+IaRIAyEbXn8hy9qyq63zWMRHUYqk6TbkuCQHZrPRBDhUVkECufelS8bjzWYzEmF5ZOxq3OS68fnZp9OvV6fvZqPJKPeFosJrtC7Cm44mowndKo3zhdCdvZrPoSKiCqbRN6Veo7tWYf/Ph1TDF3r4jEslZJBCaHnXMOEW1tMAI3ChcRtynaR10z0h5hxy4zwl7XYL4fDGqrqm2z8rtFtIbucc1sJKsaCTvQ00oesMkqVQDl9o9+Cy0c0hew73Xh6axLEWqqJ/wOEOt52vvmAIOYoMbYAQVz/Fjd4F2bbZAxcjh4kZx2mKpX8xdt5R18XNNQ2v+Tyk5wQkYMWGHEFsIlAT+g4OF+7tQAm9qsh3Eogl6fcLCGZRRA==
+sidebar_class_name: "put api-method"
 info_path: docs/api-reference/endpoints/hindsight-http-api
 custom_edit_url: null
 ---
@@ -22,12 +22,12 @@ import Heading from "@theme/Heading";
 <Heading
   as={"h1"}
   className={"openapi__heading"}
-  children={"Get memory bank profile"}
+  children={"Update memory bank disposition"}
 >
 </Heading>
 
 <MethodEndpoint
-  method={"get"}
+  method={"put"}
   path={"/v1/default/banks/{bank_id}/profile"}
   context={"endpoint"}
 >
@@ -36,7 +36,7 @@ import Heading from "@theme/Heading";
 
 
 
-Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.
+Update bank's disposition traits (skepticism, literalism, empathy)
 
 <Heading
   id={"request"}
@@ -54,7 +54,7 @@ Get disposition traits and background for a memory bank. Auto-creates agent with
 
 <RequestSchema
   title={"Body"}
-  body={undefined}
+  body={{"required":true,"content":{"application/json":{"schema":{"properties":{"disposition":{"properties":{"skepticism":{"type":"integer","maximum":5,"minimum":1,"title":"Skepticism","description":"How skeptical vs trusting (1=trusting, 5=skeptical)"},"literalism":{"type":"integer","maximum":5,"minimum":1,"title":"Literalism","description":"How literally to interpret information (1=flexible, 5=literal)"},"empathy":{"type":"integer","maximum":5,"minimum":1,"title":"Empathy","description":"How much to consider emotional context (1=detached, 5=empathetic)"}},"type":"object","required":["skepticism","literalism","empathy"],"title":"DispositionTraits","description":"Disposition traits that influence how memories are formed and interpreted.","example":{"empathy":3,"literalism":3,"skepticism":3}}},"type":"object","required":["disposition"],"title":"UpdateDispositionRequest","description":"Request model for updating disposition traits."}}}}}
 >
   
 </RequestSchema>
