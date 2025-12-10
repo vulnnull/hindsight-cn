@@ -368,7 +368,7 @@ class SearchTracer:
 
             # Extract score components (only include non-None values)
             score_components = {}
-            for key in ["semantic_similarity", "bm25_score", "rrf_score", "recency_normalized", "frequency_normalized"]:
+            for key in ["semantic_similarity", "bm25_score", "rrf_score", "recency_normalized", "frequency_normalized", "cross_encoder_score", "cross_encoder_score_normalized"]:
                 if key in result and result[key] is not None:
                     score_components[key] = result[key]
 

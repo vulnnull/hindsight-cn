@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "docusaurus": "docusaurus",
-    "start": "docusaurus start",
-    "build": "docusaurus build",
+    "generate-llms": "node scripts/generate-llms-full.js",
+    "start": "npm run generate-llms && docusaurus start",
+    "build": "npm run generate-llms && docusaurus build",
     "swizzle": "docusaurus swizzle",
     "deploy": "docusaurus deploy",
     "clear": "docusaurus clear",
