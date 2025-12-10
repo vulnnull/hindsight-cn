@@ -43,6 +43,9 @@ RUN uv sync
 # Copy source code (alembic migrations are inside hindsight_api/)
 COPY hindsight-api/hindsight_api ./hindsight_api
 
+# Install the local package (uv sync only installed dependencies, not the package itself)
+RUN uv pip install -e .
+
 # =============================================================================
 # Stage: SDK Builder (needed for Control Plane)
 # =============================================================================

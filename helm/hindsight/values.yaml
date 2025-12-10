@@ -1,7 +1,7 @@
 # Default values for hindsight
 
 # Chart version - use this to set a consistent image tag across all components
-version: "0.1.0"
+version: "0.1.1"
 
 # Global settings
 replicaCount: 1
@@ -32,7 +32,7 @@ api:
   # Liveness and readiness probes
   livenessProbe:
     httpGet:
-      path: /
+      path: /health
       port: 8888
     initialDelaySeconds: 30
     periodSeconds: 10
@@ -41,7 +41,7 @@ api:
 
   readinessProbe:
     httpGet:
-      path: /
+      path: /health
       port: 8888
     initialDelaySeconds: 10
     periodSeconds: 5
@@ -81,10 +81,9 @@ controlPlane:
       cpu: 250m
       memory: 512Mi
 
-  # Liveness and readiness probes
+  # Liveness and readiness probes (TCP check)
   livenessProbe:
-    httpGet:
-      path: /
+    tcpSocket:
       port: 3000
     initialDelaySeconds: 30
     periodSeconds: 10
@@ -92,8 +91,7 @@ controlPlane:
     failureThreshold: 3
 
   readinessProbe:
-    httpGet:
-      path: /
+    tcpSocket:
       port: 3000
     initialDelaySeconds: 10
     periodSeconds: 5
