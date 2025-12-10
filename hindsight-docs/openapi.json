@@ -55,6 +55,9 @@
     },
     "/v1/default/banks/{bank_id}/graph": {
       "get": {
+        "tags": [
+          "Memory"
+        ],
         "summary": "Get memory graph data",
         "description": "Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.",
         "operationId": "get_graph",
@@ -111,6 +114,9 @@
     },
     "/v1/default/banks/{bank_id}/memories/list": {
       "get": {
+        "tags": [
+          "Memory"
+        ],
         "summary": "List memory units",
         "description": "List memory units with pagination and optional full-text search. Supports filtering by type. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).",
         "operationId": "list_memories",
@@ -203,6 +209,9 @@
     },
     "/v1/default/banks/{bank_id}/memories/recall": {
       "post": {
+        "tags": [
+          "Memory"
+        ],
         "summary": "Recall memory",
         "description": "Recall memory using semantic similarity and spreading activation.\n\n    The type parameter is optional and must be one of:\n    - 'world': General knowledge about people, places, events, and things that happen\n    - 'experience': Memories about experience, conversations, actions taken, and tasks performed\n    - 'opinion': The bank's formed beliefs, perspectives, and viewpoints\n\n    Set include_entities=true to get entity observations alongside recall results.",
         "operationId": "recall_memories",
@@ -253,6 +262,9 @@
     },
     "/v1/default/banks/{bank_id}/reflect": {
       "post": {
+        "tags": [
+          "Memory"
+        ],
         "summary": "Reflect and generate answer",
         "description": "Reflect and formulate an answer using bank identity, world facts, and opinions.\n\n    This endpoint:\n    1. Retrieves experience (conversations and events)\n    2. Retrieves world facts relevant to the query\n    3. Retrieves existing opinions (bank's perspectives)\n    4. Uses LLM to formulate a contextual answer\n    5. Extracts and stores any new opinions formed\n    6. Returns plain text answer, the facts used, and new opinions",
         "operationId": "reflect",
@@ -303,6 +315,9 @@
     },
     "/v1/default/banks": {
       "get": {
+        "tags": [
+          "Banks"
+        ],
         "summary": "List all memory banks",
         "description": "Get a list of all agents with their profiles",
         "operationId": "list_banks",
@@ -322,6 +337,9 @@
     },
     "/v1/default/banks/{bank_id}/stats": {
       "get": {
+        "tags": [
+          "Banks"
+        ],
         "summary": "Get statistics for memory bank",
         "description": "Get statistics about nodes and links for a specific agent",
         "operationId": "get_agent_stats",
@@ -360,6 +378,9 @@
     },
     "/v1/default/banks/{bank_id}/entities": {
       "get": {
+        "tags": [
+          "Entities"
+        ],
         "summary": "List entities",
         "description": "List all entities (people, organizations, etc.) known by the bank, ordered by mention count.",
         "operationId": "list_entities",
@@ -412,6 +433,9 @@
     },
     "/v1/default/banks/{bank_id}/entities/{entity_id}": {
       "get": {
+        "tags": [
+          "Entities"
+        ],
         "summary": "Get entity details",
         "description": "Get detailed information about an entity including observations (mental model).",
         "operationId": "get_entity",
@@ -461,6 +485,9 @@
     },
     "/v1/default/banks/{bank_id}/entities/{entity_id}/regenerate": {
       "post": {
+        "tags": [
+          "Entities"
+        ],
         "summary": "Regenerate entity observations",
         "description": "Regenerate observations for an entity based on all facts mentioning it.",
         "operationId": "regenerate_entity_observations",
@@ -510,6 +537,9 @@
     },
     "/v1/default/banks/{bank_id}/documents": {
       "get": {
+        "tags": [
+          "Documents"
+        ],
         "summary": "List documents",
         "description": "List documents with pagination and optional search. Documents are the source content from which memory units are extracted.",
         "operationId": "list_documents",
@@ -586,6 +616,9 @@
     },
     "/v1/default/banks/{bank_id}/documents/{document_id}": {
       "get": {
+        "tags": [
+          "Documents"
+        ],
         "summary": "Get document details",
         "description": "Get a specific document including its original text",
         "operationId": "get_document",
@@ -633,6 +666,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "Documents"
+        ],
         "summary": "Delete a document",
         "description": "Delete a document and all its associated memory units and links.\n\nThis will cascade delete:\n- The document itself\n- All memory units extracted from this document\n- All links (temporal, semantic, entity) associated with those memory units\n\nThis operation cannot be undone.",
         "operationId": "delete_document",
@@ -680,6 +716,9 @@
     },
     "/v1/default/chunks/{chunk_id}": {
       "get": {
+        "tags": [
+          "Documents"
+        ],
         "summary": "Get chunk details",
         "description": "Get a specific chunk by its ID",
         "operationId": "get_chunk",
@@ -720,6 +759,9 @@
     },
     "/v1/default/banks/{bank_id}/operations": {
       "get": {
+        "tags": [
+          "Operations"
+        ],
         "summary": "List async operations",
         "description": "Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations",
         "operationId": "list_operations",
@@ -758,6 +800,9 @@
     },
     "/v1/default/banks/{bank_id}/operations/{operation_id}": {
       "delete": {
+        "tags": [
+          "Operations"
+        ],
         "summary": "Cancel a pending async operation",
         "description": "Cancel a pending async operation by removing it from the queue",
         "operationId": "cancel_operation",
@@ -805,6 +850,9 @@
     },
     "/v1/default/banks/{bank_id}/profile": {
       "get": {
+        "tags": [
+          "Banks"
+        ],
         "summary": "Get memory bank profile",
         "description": "Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.",
         "operationId": "get_bank_profile",
@@ -843,6 +891,9 @@
         }
       },
       "put": {
+        "tags": [
+          "Banks"
+        ],
         "summary": "Update memory bank disposition",
         "description": "Update bank's disposition traits (skepticism, literalism, empathy)",
         "operationId": "update_bank_disposition",
@@ -893,6 +944,9 @@
     },
     "/v1/default/banks/{bank_id}/background": {
       "post": {
+        "tags": [
+          "Banks"
+        ],
         "summary": "Add/merge memory bank background",
         "description": "Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.",
         "operationId": "add_bank_background",
@@ -943,6 +997,9 @@
     },
     "/v1/default/banks/{bank_id}": {
       "put": {
+        "tags": [
+          "Banks"
+        ],
         "summary": "Create or update memory bank",
         "description": "Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.",
         "operationId": "create_or_update_bank",
@@ -993,6 +1050,9 @@
     },
     "/v1/default/banks/{bank_id}/memories": {
       "post": {
+        "tags": [
+          "Memory"
+        ],
         "summary": "Retain memories",
         "description": "Retain memory items with automatic fact extraction.\n\n    This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing\n    via the async parameter.\n\n    Features:\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with automatic upsert (when document_id is provided on items)\n    - Temporal and semantic linking\n    - Optional asynchronous processing\n\n    The system automatically:\n    1. Extracts semantic facts from the content\n    2. Generates embeddings\n    3. Deduplicates similar facts\n    4. Creates temporal, semantic, and entity links\n    5. Tracks document metadata\n\n    When async=true:\n    - Returns immediately after queuing the task\n    - Processing happens in the background\n    - Use the operations endpoint to monitor progress\n\n    When async=false (default):\n    - Waits for processing to complete\n    - Returns after all memories are stored\n\n    Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.",
         "operationId": "retain_memories",
@@ -1041,6 +1101,9 @@
         }
       },
       "delete": {
+        "tags": [
+          "Memory"
+        ],
         "summary": "Clear memory bank memories",
         "description": "Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (disposition and background) will be preserved.",
         "operationId": "clear_bank_memories",

@@ -26,7 +26,7 @@ const sidebar: SidebarsConfig = {
     },
     {
       type: "category",
-      label: "UNTAGGED",
+      label: "Memory",
       items: [
         {
           type: "doc",
@@ -54,6 +54,24 @@ const sidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api-reference/endpoints/retain-memories",
+          label: "Retain memories",
+          className: "api-method post",
+        },
+        {
+          type: "doc",
+          id: "api-reference/endpoints/clear-bank-memories",
+          label: "Clear memory bank memories",
+          className: "api-method delete",
+        },
+      ],
+    },
+    {
+      type: "category",
+      label: "Banks",
+      items: [
+        {
+          type: "doc",
           id: "api-reference/endpoints/list-banks",
           label: "List all memory banks",
           className: "api-method get",
@@ -63,60 +81,6 @@ const sidebar: SidebarsConfig = {
           id: "api-reference/endpoints/get-agent-stats",
           label: "Get statistics for memory bank",
           className: "api-method get",
-        },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/list-entities",
-          label: "List entities",
-          className: "api-method get",
-        },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/get-entity",
-          label: "Get entity details",
-          className: "api-method get",
-        },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/regenerate-entity-observations",
-          label: "Regenerate entity observations",
-          className: "api-method post",
-        },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/list-documents",
-          label: "List documents",
-          className: "api-method get",
-        },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/get-document",
-          label: "Get document details",
-          className: "api-method get",
-        },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/delete-document",
-          label: "Delete a document",
-          className: "api-method delete",
-        },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/get-chunk",
-          label: "Get chunk details",
-          className: "api-method get",
-        },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/list-operations",
-          label: "List async operations",
-          className: "api-method get",
-        },
-        {
-          type: "doc",
-          id: "api-reference/endpoints/cancel-operation",
-          label: "Cancel a pending async operation",
-          className: "api-method delete",
         },
         {
           type: "doc",
@@ -142,16 +106,76 @@ const sidebar: SidebarsConfig = {
           label: "Create or update memory bank",
           className: "api-method put",
         },
+      ],
+    },
+    {
+      type: "category",
+      label: "Entities",
+      items: [
         {
           type: "doc",
-          id: "api-reference/endpoints/retain-memories",
-          label: "Retain memories",
-          className: "api-method post",
+          id: "api-reference/endpoints/list-entities",
+          label: "List entities",
+          className: "api-method get",
         },
         {
           type: "doc",
-          id: "api-reference/endpoints/clear-bank-memories",
-          label: "Clear memory bank memories",
+          id: "api-reference/endpoints/get-entity",
+          label: "Get entity details",
+          className: "api-method get",
+        },
+        {
+          type: "doc",
+          id: "api-reference/endpoints/regenerate-entity-observations",
+          label: "Regenerate entity observations",
+          className: "api-method post",
+        },
+      ],
+    },
+    {
+      type: "category",
+      label: "Documents",
+      items: [
+        {
+          type: "doc",
+          id: "api-reference/endpoints/list-documents",
+          label: "List documents",
+          className: "api-method get",
+        },
+        {
+          type: "doc",
+          id: "api-reference/endpoints/get-document",
+          label: "Get document details",
+          className: "api-method get",
+        },
+        {
+          type: "doc",
+          id: "api-reference/endpoints/delete-document",
+          label: "Delete a document",
+          className: "api-method delete",
+        },
+        {
+          type: "doc",
+          id: "api-reference/endpoints/get-chunk",
+          label: "Get chunk details",
+          className: "api-method get",
+        },
+      ],
+    },
+    {
+      type: "category",
+      label: "Operations",
+      items: [
+        {
+          type: "doc",
+          id: "api-reference/endpoints/list-operations",
+          label: "List async operations",
+          className: "api-method get",
+        },
+        {
+          type: "doc",
+          id: "api-reference/endpoints/cancel-operation",
+          label: "Cancel a pending async operation",
           className: "api-method delete",
         },
       ],

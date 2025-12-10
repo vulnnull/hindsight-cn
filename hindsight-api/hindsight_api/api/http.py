@@ -793,7 +793,8 @@ def _register_routes(app: FastAPI):
         response_model=GraphDataResponse,
         summary="Get memory graph data",
         description="Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.",
-        operation_id="get_graph"
+        operation_id="get_graph",
+        tags=["Memory"]
     )
     async def api_graph(bank_id: str,
         type: Optional[str] = None
@@ -814,7 +815,8 @@ def _register_routes(app: FastAPI):
         response_model=ListMemoryUnitsResponse,
         summary="List memory units",
         description="List memory units with pagination and optional full-text search. Supports filtering by type. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).",
-        operation_id="list_memories"
+        operation_id="list_memories",
+        tags=["Memory"]
     )
     async def api_list(bank_id: str,
         type: Optional[str] = None,
@@ -865,7 +867,8 @@ def _register_routes(app: FastAPI):
 
     Set include_entities=true to get entity observations alongside recall results.
         """,
-        operation_id="recall_memories"
+        operation_id="recall_memories",
+        tags=["Memory"]
     )
     async def api_recall(bank_id: str, request: RecallRequest):
         """Run a recall and return results with trace."""
@@ -983,7 +986,8 @@ def _register_routes(app: FastAPI):
     5. Extracts and stores any new opinions formed
     6. Returns plain text answer, the facts used, and new opinions
         """,
-        operation_id="reflect"
+        operation_id="reflect",
+        tags=["Memory"]
     )
     async def api_reflect(bank_id: str, request: ReflectRequest):
         metrics = get_metrics_collector()
@@ -1029,7 +1033,8 @@ def _register_routes(app: FastAPI):
         response_model=BankListResponse,
         summary="List all memory banks",
         description="Get a list of all agents with their profiles",
-        operation_id="list_banks"
+        operation_id="list_banks",
+        tags=["Banks"]
     )
     async def api_list_banks():
         """Get list of all banks with their profiles."""
@@ -1046,7 +1051,8 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/stats",
         summary="Get statistics for memory bank",
         description="Get statistics about nodes and links for a specific agent",
-        operation_id="get_agent_stats"
+        operation_id="get_agent_stats",
+        tags=["Banks"]
     )
     async def api_stats(bank_id: str):
         """Get statistics about memory nodes and links for a memory bank."""
@@ -1167,7 +1173,8 @@ def _register_routes(app: FastAPI):
         response_model=EntityListResponse,
         summary="List entities",
         description="List all entities (people, organizations, etc.) known by the bank, ordered by mention count.",
-        operation_id="list_entities"
+        operation_id="list_entities",
+        tags=["Entities"]
     )
     async def api_list_entities(bank_id: str,
         limit: int = Query(default=100, description="Maximum number of entities to return")
@@ -1189,7 +1196,8 @@ def _register_routes(app: FastAPI):
         response_model=EntityDetailResponse,
         summary="Get entity details",
         description="Get detailed information about an entity including observations (mental model).",
-        operation_id="get_entity"
+        operation_id="get_entity",
+        tags=["Entities"]
     )
     async def api_get_entity(bank_id: str, entity_id: str):
         """Get entity details with observations."""
@@ -1239,7 +1247,8 @@ def _register_routes(app: FastAPI):
         response_model=EntityDetailResponse,
         summary="Regenerate entity observations",
         description="Regenerate observations for an entity based on all facts mentioning it.",
-        operation_id="regenerate_entity_observations"
+        operation_id="regenerate_entity_observations",
+        tags=["Entities"]
     )
     async def api_regenerate_entity_observations(bank_id: str, entity_id: str):
         """Regenerate observations for an entity."""
@@ -1296,7 +1305,8 @@ def _register_routes(app: FastAPI):
         response_model=ListDocumentsResponse,
         summary="List documents",
         description="List documents with pagination and optional search. Documents are the source content from which memory units are extracted.",
-        operation_id="list_documents"
+        operation_id="list_documents",
+        tags=["Documents"]
     )
     async def api_list_documents(bank_id: str,
         q: Optional[str] = None,
@@ -1332,7 +1342,8 @@ def _register_routes(app: FastAPI):
         response_model=DocumentResponse,
         summary="Get document details",
         description="Get a specific document including its original text",
-        operation_id="get_document"
+        operation_id="get_document",
+        tags=["Documents"]
     )
     async def api_get_document(bank_id: str,
         document_id: str
@@ -1363,7 +1374,8 @@ def _register_routes(app: FastAPI):
         response_model=ChunkResponse,
         summary="Get chunk details",
         description="Get a specific chunk by its ID",
-        operation_id="get_chunk"
+        operation_id="get_chunk",
+        tags=["Documents"]
     )
     async def api_get_chunk(chunk_id: str):
         """
@@ -1399,7 +1411,8 @@ This will cascade delete:
 
 This operation cannot be undone.
         """,
-        operation_id="delete_document"
+        operation_id="delete_document",
+        tags=["Documents"]
     )
     async def api_delete_document(bank_id: str,
         document_id: str
@@ -1436,7 +1449,8 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}/operations",
         summary="List async operations",
         description="Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations",
-        operation_id="list_operations"
+        operation_id="list_operations",
+        tags=["Operations"]
     )
     async def api_list_operations(bank_id: str):
         """List all async operations (pending and failed) for a memory bank."""
@@ -1480,7 +1494,8 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}/operations/{operation_id}",
         summary="Cancel a pending async operation",
         description="Cancel a pending async operation by removing it from the queue",
-        operation_id="cancel_operation"
+        operation_id="cancel_operation",
+        tags=["Operations"]
     )
     async def api_cancel_operation(bank_id: str, operation_id: str):
         """Cancel a pending async operation."""
@@ -1530,7 +1545,8 @@ This operation cannot be undone.
         response_model=BankProfileResponse,
         summary="Get memory bank profile",
         description="Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.",
-        operation_id="get_bank_profile"
+        operation_id="get_bank_profile",
+        tags=["Banks"]
     )
     async def api_get_bank_profile(bank_id: str):
         """Get memory bank profile (disposition + background)."""
@@ -1556,7 +1572,8 @@ This operation cannot be undone.
         response_model=BankProfileResponse,
         summary="Update memory bank disposition",
         description="Update bank's disposition traits (skepticism, literalism, empathy)",
-        operation_id="update_bank_disposition"
+        operation_id="update_bank_disposition",
+        tags=["Banks"]
     )
     async def api_update_bank_disposition(bank_id: str,
         request: UpdateDispositionRequest
@@ -1590,7 +1607,8 @@ This operation cannot be undone.
         response_model=BackgroundResponse,
         summary="Add/merge memory bank background",
         description="Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.",
-        operation_id="add_bank_background"
+        operation_id="add_bank_background",
+        tags=["Banks"]
     )
     async def api_add_bank_background(bank_id: str,
         request: AddBackgroundRequest
@@ -1620,7 +1638,8 @@ This operation cannot be undone.
         response_model=BankProfileResponse,
         summary="Create or update memory bank",
         description="Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.",
-        operation_id="create_or_update_bank"
+        operation_id="create_or_update_bank",
+        tags=["Banks"]
     )
     async def api_create_or_update_bank(bank_id: str,
         request: CreateBankRequest
@@ -1722,7 +1741,8 @@ This operation cannot be undone.
 
     Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.
         """,
-        operation_id="retain_memories"
+        operation_id="retain_memories",
+        tags=["Memory"]
     )
     async def api_retain(bank_id: str, request: RetainRequest):
         """Retain memories with optional async processing."""
@@ -1803,7 +1823,8 @@ This operation cannot be undone.
         response_model=DeleteResponse,
         summary="Clear memory bank memories",
         description="Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (disposition and background) will be preserved.",
-        operation_id="clear_bank_memories"
+        operation_id="clear_bank_memories",
+        tags=["Memory"]
     )
     async def api_clear_bank_memories(bank_id: str,
         type: Optional[str] = Query(None, description="Optional fact type filter (world, experience, opinion)")
