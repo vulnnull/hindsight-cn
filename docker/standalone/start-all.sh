@@ -26,7 +26,7 @@ PIDS=()
 # Start API if enabled
 if [ "$ENABLE_API" = "true" ]; then
     cd /app/api
-    hindsight-api 2>&1 | sed -u 's/^/[api] /' &
+    hindsight-api 2>&1 | sed 's/^/[api] /' &
     API_PID=$!
     PIDS+=($API_PID)
 
@@ -47,7 +47,7 @@ fi
 if [ "$ENABLE_CP" = "true" ]; then
     echo "🎛️  Starting Control Plane..."
     cd /app/control-plane
-    PORT=9999 node server.js 2>&1 | grep -v -E "^[[:space:]]*(▲|✓|-|$)" | sed -u 's/^/[control-plane] /' &
+    PORT=9999 node server.js 2>&1 | grep -v -E "^[[:space:]]*(▲|✓|-|$)" | sed 's/^/[control-plane] /' &
     CP_PID=$!
     PIDS+=($CP_PID)
 else

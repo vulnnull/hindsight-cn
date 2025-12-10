@@ -1,5 +1,8 @@
 # Default values for hindsight
 
+# Chart version - use this to set a consistent image tag across all components
+version: "0.1.0"
+
 # Global settings
 replicaCount: 1
 
@@ -8,9 +11,9 @@ api:
   enabled: true
   replicaCount: 1
   image:
-    repository: hindsight/api
+    repository: ghcr.io/vectorize-io/hindsight-api
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # tag defaults to .Values.version if not specified
 
   service:
     type: ClusterIP
@@ -47,7 +50,7 @@ api:
 
   # Environment variables
   env:
-    HINDSIGHT_API_LLM_PROVIDER: "groq"
+    #HINDSIGHT_API_LLM_PROVIDER: "groq"
     HINDSIGHT_API_LLM_MODEL: "openai/gpt-oss-120b"
 
   # Secret environment variables
@@ -60,9 +63,9 @@ controlPlane:
   enabled: true
   replicaCount: 1
   image:
-    repository: hindsight/hindsight-control-plane
+    repository: ghcr.io/vectorize-io/hindsight-control-plane
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # tag defaults to .Values.version if not specified
 
   service:
     type: ClusterIP
@@ -106,20 +109,42 @@ controlPlane:
 # PostgreSQL configuration
 postgresql:
   # Set to true to deploy PostgreSQL as part of this chart
-  enabled: false
+  enabled: true
+
+  image:
+    repository: ankane/pgvector
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  auth:
+    username: "hindsight"
+    password: "hindsight"
+    database: "hindsight"
+
+  service:
+    port: 5432
+
+  persistence:
+    enabled: true
+    size: 8Gi
+    # storageClass: ""
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
 
   # External PostgreSQL connection details
-  # If postgresql.enabled is false, provide external database details
+  # Only used if postgresql.enabled is false
   external:
     host: "postgresql"
     port: 5432
     database: "hindsight"
     username: "hindsight"
-    # Password should be provided via secret
     # password: ""
-
-# Database URL (auto-generated from postgresql config if not provided)
-# databaseUrl: "postgresql://user:pass@host:5432/database"
 
 # Ingress configuration
 ingress:
