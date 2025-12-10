@@ -10,7 +10,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "1.0.0"
+    "version": "0.1.0"
   },
   "paths": {
     "/health": {
@@ -213,7 +213,7 @@
           "Memory"
         ],
         "summary": "Recall memory",
-        "description": "Recall memory using semantic similarity and spreading activation.\n\n    The type parameter is optional and must be one of:\n    - 'world': General knowledge about people, places, events, and things that happen\n    - 'experience': Memories about experience, conversations, actions taken, and tasks performed\n    - 'opinion': The bank's formed beliefs, perspectives, and viewpoints\n\n    Set include_entities=true to get entity observations alongside recall results.",
+        "description": "Recall memory using semantic similarity and spreading activation.\n\nThe type parameter is optional and must be one of:\n- `world`: General knowledge about people, places, events, and things that happen\n- `experience`: Memories about experience, conversations, actions taken, and tasks performed\n- `opinion`: The bank's formed beliefs, perspectives, and viewpoints\n\nSet `include_entities=true` to get entity observations alongside recall results.",
         "operationId": "recall_memories",
         "parameters": [
           {
@@ -266,7 +266,7 @@
           "Memory"
         ],
         "summary": "Reflect and generate answer",
-        "description": "Reflect and formulate an answer using bank identity, world facts, and opinions.\n\n    This endpoint:\n    1. Retrieves experience (conversations and events)\n    2. Retrieves world facts relevant to the query\n    3. Retrieves existing opinions (bank's perspectives)\n    4. Uses LLM to formulate a contextual answer\n    5. Extracts and stores any new opinions formed\n    6. Returns plain text answer, the facts used, and new opinions",
+        "description": "Reflect and formulate an answer using bank identity, world facts, and opinions.\n\nThis endpoint:\n1. Retrieves experience (conversations and events)\n2. Retrieves world facts relevant to the query\n3. Retrieves existing opinions (bank's perspectives)\n4. Uses LLM to formulate a contextual answer\n5. Extracts and stores any new opinions formed\n6. Returns plain text answer, the facts used, and new opinions",
         "operationId": "reflect",
         "parameters": [
           {
@@ -1054,7 +1054,7 @@
           "Memory"
         ],
         "summary": "Retain memories",
-        "description": "Retain memory items with automatic fact extraction.\n\n    This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing\n    via the async parameter.\n\n    Features:\n    - Efficient batch processing\n    - Automatic fact extraction from natural language\n    - Entity recognition and linking\n    - Document tracking with automatic upsert (when document_id is provided on items)\n    - Temporal and semantic linking\n    - Optional asynchronous processing\n\n    The system automatically:\n    1. Extracts semantic facts from the content\n    2. Generates embeddings\n    3. Deduplicates similar facts\n    4. Creates temporal, semantic, and entity links\n    5. Tracks document metadata\n\n    When async=true:\n    - Returns immediately after queuing the task\n    - Processing happens in the background\n    - Use the operations endpoint to monitor progress\n\n    When async=false (default):\n    - Waits for processing to complete\n    - Returns after all memories are stored\n\n    Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.",
+        "description": "Retain memory items with automatic fact extraction.\n\nThis is the main endpoint for storing memories. It supports both synchronous and asynchronous processing via the `async` parameter.\n\n**Features:**\n- Efficient batch processing\n- Automatic fact extraction from natural language\n- Entity recognition and linking\n- Document tracking with automatic upsert (when document_id is provided)\n- Temporal and semantic linking\n- Optional asynchronous processing\n\n**The system automatically:**\n1. Extracts semantic facts from the content\n2. Generates embeddings\n3. Deduplicates similar facts\n4. Creates temporal, semantic, and entity links\n5. Tracks document metadata\n\n**When `async=true`:** Returns immediately after queuing. Use the operations endpoint to monitor progress.\n\n**When `async=false` (default):** Waits for processing to complete.\n\n**Note:** If a memory item has a `document_id` that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).",
         "operationId": "retain_memories",
         "parameters": [
           {

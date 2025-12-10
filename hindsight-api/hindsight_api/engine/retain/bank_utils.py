@@ -273,7 +273,7 @@ Merged background:"""
                     response_format=BackgroundMergeResponse,
                     scope="bank_background",
                     temperature=0.3,
-                    max_tokens=8192
+                    max_completion_tokens=8192
                 )
                 logger.info(f"Successfully got structured response: background={parsed.background[:100]}")
 
@@ -291,7 +291,7 @@ Merged background:"""
             messages=messages,
             scope="bank_background",
             temperature=0.3,
-            max_tokens=8192
+            max_completion_tokens=8192
         )
 
         logger.info(f"LLM response for background merge (first 500 chars): {content[:500]}")

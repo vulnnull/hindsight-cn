@@ -6,9 +6,6 @@ import time
 import asyncio
 from typing import Optional, Any, Dict, List
 from openai import AsyncOpenAI, RateLimitError, APIError, APIStatusError, APIConnectionError, LengthFinishReasonError
-from google import genai
-from google.genai import types as genai_types
-from google.genai import errors as genai_errors
 import logging
 
 # Seed applied to every Groq request for deterministic behavior.
@@ -34,8 +31,12 @@ class OutputTooLongError(Exception):
     pass
 
 
-class LLMConfig:
-    """Configuration for an LLM provider."""
+class LLMProvider:
+    """
+    Unified LLM provider using OpenAI-compatible API.
+
+    Supports OpenAI, Groq, and Ollama (any OpenAI-compatible endpoint).
+    """
 
     def __init__(
         self,
@@ -43,16 +44,17 @@ class LLMConfig:
         api_key: str,
         base_url: str,
         model: str,
-            reasoning_effort: str = "low",
+        reasoning_effort: str = "low",
     ):
         """
-        Initialize LLM configuration.
+        Initialize LLM provider.
 
         Args:
-            provider: Provider name ("openai", "groq", "ollama"). Required.
-            api_key: API key. Required.
-            base_url: Base URL. Required.
-            model: Model name. Required.
+            provider: Provider name ("openai", "groq", "ollama").
+            api_key: API key.
+            base_url: Base URL for the API.
+            model: Model name.
+            reasoning_effort: Reasoning effort level for supported providers.
         """
         self.provider = provider.lower()
         self.api_key = api_key
@@ -61,9 +63,10 @@ class LLMConfig:
         self.reasoning_effort = reasoning_effort
 
         # Validate provider
-        if self.provider not in ["openai", "groq", "ollama", "gemini"]:
+        valid_providers = ["openai", "groq", "ollama"]
+        if self.provider not in valid_providers:
             raise ValueError(
-                f"Invalid LLM provider: {self.provider}. Must be 'openai', 'groq', 'ollama', or 'gemini'."
+                f"Invalid LLM provider: {self.provider}. Must be one of: {', '.join(valid_providers)}"
             )
 
         # Set default base URLs
@@ -74,25 +77,14 @@ class LLMConfig:
                 self.base_url = "http://localhost:11434/v1"
 
         # Validate API key (not needed for ollama)
-        if self.provider not in ["ollama"] and not self.api_key:
-            raise ValueError(
-                f"API key not found for {self.provider}"
-            )
+        if self.provider != "ollama" and not self.api_key:
+            raise ValueError(f"API key not found for {self.provider}")
 
-        # Create client (private - use .call() method instead)
-        # Disable automatic retries - we handle retries in the call() method
-        if self.provider == "gemini":
-            self._gemini_client = genai.Client(api_key=self.api_key)
-            self._client = None  # Not used for Gemini
-        elif self.provider == "ollama":
+        # Create OpenAI-compatible client for all providers
+        if self.provider == "ollama":
             self._client = AsyncOpenAI(api_key="ollama", base_url=self.base_url, max_retries=0)
-            self._gemini_client = None
-        elif self.base_url:
-            self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url, max_retries=0)
-            self._gemini_client = None
         else:
-            self._client = AsyncOpenAI(api_key=self.api_key, max_retries=0)
-            self._gemini_client = None
+            self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url, max_retries=0)
 
         logger.info(
             f"Initialized LLM: provider={self.provider}, model={self.model}, base_url={self.base_url}"
@@ -102,101 +94,92 @@ class LLMConfig:
         self,
         messages: List[Dict[str, str]],
         response_format: Optional[Any] = None,
+        max_completion_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
         scope: str = "memory",
         max_retries: int = 10,
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
         skip_validation: bool = False,
-        **kwargs
     ) -> Any:
         """
-        Make an LLM API call with consistent configuration and retry logic.
+        Make an LLM API call with retry logic.
 
         Args:
-            messages: List of message dicts with 'role' and 'content'
-            response_format: Optional Pydantic model for structured output
-            scope: Scope identifier (e.g., 'memory', 'judge') for future tracking
-            max_retries: Maximum number of retry attempts (default: 5)
-            initial_backoff: Initial backoff time in seconds (default: 1.0)
-            max_backoff: Maximum backoff time in seconds (default: 60.0)
-            **kwargs: Additional parameters to pass to the API (temperature, max_tokens, etc.)
+            messages: List of message dicts with 'role' and 'content'.
+            response_format: Optional Pydantic model for structured output.
+            max_completion_tokens: Maximum tokens in response.
+            temperature: Sampling temperature (0.0-2.0).
+            scope: Scope identifier for tracking.
+            max_retries: Maximum retry attempts.
+            initial_backoff: Initial backoff time in seconds.
+            max_backoff: Maximum backoff time in seconds.
+            skip_validation: Return raw JSON without Pydantic validation.
 
         Returns:
-            Parsed response if response_format is provided, otherwise the text content
+            Parsed response if response_format is provided, otherwise text content.
 
         Raises:
-            Exception: Re-raises any API errors after all retries are exhausted
+            OutputTooLongError: If output exceeds token limits.
+            Exception: Re-raises API errors after retries exhausted.
         """
-        # Use global semaphore to limit concurrent requests
         async with _global_llm_semaphore:
             start_time = time.time()
             import json
 
-            # Handle Gemini provider separately
-            if self.provider == "gemini":
-                return await self._call_gemini(messages, response_format, max_retries, initial_backoff, max_backoff, skip_validation, start_time, **kwargs)
-
             call_params = {
                 "model": self.model,
                 "messages": messages,
-                **kwargs
             }
 
+            if max_completion_tokens is not None:
+                call_params["max_completion_tokens"] = max_completion_tokens
+            if temperature is not None:
+                call_params["temperature"] = temperature
+
+            # Provider-specific parameters
             if self.provider == "groq":
                 call_params["seed"] = DEFAULT_LLM_SEED
-            
-            if self.provider == "groq":
                 call_params["extra_body"] = {
                     "service_tier": "auto",
                     "reasoning_effort": self.reasoning_effort,
-                    "include_reasoning": False,  # Disable hidden reasoning tokens
+                    "include_reasoning": False,
                 }
 
             last_exception = None
 
             for attempt in range(max_retries + 1):
                 try:
-                    # Use the appropriate response format
                     if response_format is not None:
-                        # Use JSON mode instead of strict parse for flexibility with optional fields
-                        # This allows the LLM to omit optional fields without validation errors
-
-                        # Add schema to the system message
+                        # Add schema to system message for JSON mode
                         if hasattr(response_format, 'model_json_schema'):
                             schema = response_format.model_json_schema()
                             schema_msg = f"\n\nYou must respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
 
-                            # Add schema to the system message if present, otherwise prepend as user message
                             if call_params['messages'] and call_params['messages'][0].get('role') == 'system':
                                 call_params['messages'][0]['content'] += schema_msg
-                            else:
-                                # No system message, add schema instruction to first user message
-                                if call_params['messages']:
-                                    call_params['messages'][0]['content'] = schema_msg + "\n\n" + call_params['messages'][0]['content']
+                            elif call_params['messages']:
+                                call_params['messages'][0]['content'] = schema_msg + "\n\n" + call_params['messages'][0]['content']
 
                         call_params['response_format'] = {"type": "json_object"}
                         response = await self._client.chat.completions.create(**call_params)
 
-                        # Parse the JSON response
                         content = response.choices[0].message.content
                         json_data = json.loads(content)
 
-                        # Return raw JSON if skip_validation is True, otherwise validate with Pydantic
                         if skip_validation:
                             result = json_data
                         else:
                             result = response_format.model_validate(json_data)
                     else:
-                        # Standard completion and return text content
                         response = await self._client.chat.completions.create(**call_params)
                         result = response.choices[0].message.content
 
-                    # Log call details only if it takes more than 5 seconds
+                    # Log slow calls
                     duration = time.time() - start_time
                     usage = response.usage
                     if duration > 10.0:
                         ratio = max(1, usage.completion_tokens) / usage.prompt_tokens
-                        # Check for cached tokens (OpenAI/Groq may include this)
                         cached_tokens = 0
                         if hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
                             cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
@@ -210,14 +193,12 @@ class LLMConfig:
                     return result
 
                 except LengthFinishReasonError as e:
-                    # Output exceeded token limits - raise bridge exception for caller to handle
                     logger.warning(f"LLM output exceeded token limits: {str(e)}")
                     raise OutputTooLongError(
                         f"LLM output exceeded token limits. Input may need to be split into smaller chunks."
                     ) from e
 
                 except APIConnectionError as e:
-                    # Handle connection errors (server disconnected, network issues) with retry
                     last_exception = e
                     if attempt < max_retries:
                         logger.warning(f"Connection error, retrying... (attempt {attempt + 1}/{max_retries + 1})")
@@ -229,19 +210,18 @@ class LLMConfig:
                         raise
 
                 except APIStatusError as e:
+                    # Fast fail on 4xx client errors (except 429 rate limit and 498 which is treated as server error)
+                    if 400 <= e.status_code < 500 and e.status_code not in (429, 498):
+                        logger.error(f"Client error (HTTP {e.status_code}), not retrying: {str(e)}")
+                        raise
+
                     last_exception = e
                     if attempt < max_retries:
-                        # Calculate exponential backoff with jitter
                         backoff = min(initial_backoff * (2 ** attempt), max_backoff)
-                        # Add jitter (±20%)
                         jitter = backoff * 0.2 * (2 * (time.time() % 1) - 1)
                         sleep_time = backoff + jitter
-
-                        # Only log if it's a non-retryable error or final attempt
-                        # Silent retry for common transient errors like capacity exceeded
                         await asyncio.sleep(sleep_time)
                     else:
-                        # Log only on final failed attempt
                         logger.error(f"API error after {max_retries + 1} attempts: {str(e)}")
                         raise
 
@@ -249,183 +229,17 @@ class LLMConfig:
                     logger.error(f"Unexpected error during LLM call: {type(e).__name__}: {str(e)}")
                     raise
 
-            # This should never be reached, but just in case
             if last_exception:
                 raise last_exception
             raise RuntimeError(f"LLM call failed after all retries with no exception captured")
 
-    async def _call_gemini(
-        self,
-        messages: List[Dict[str, str]],
-        response_format: Optional[Any],
-        max_retries: int,
-        initial_backoff: float,
-        max_backoff: float,
-        skip_validation: bool,
-        start_time: float,
-        **kwargs
-) -> Any:
-        """Handle Gemini-specific API calls using google-genai SDK."""
-        import json
-
-        # Convert OpenAI-style messages to Gemini format
-        # Gemini uses 'user' and 'model' roles, and system instructions are separate
-        system_instruction = None
-        gemini_contents = []
-
-        for msg in messages:
-            role = msg.get('role', 'user')
-            content = msg.get('content', '')
-
-            if role == 'system':
-                # Accumulate system messages as system instruction
-                if system_instruction:
-                    system_instruction += "\n\n" + content
-                else:
-                    system_instruction = content
-            elif role == 'assistant':
-                gemini_contents.append(genai_types.Content(
-                    role="model",
-                    parts=[genai_types.Part(text=content)]
-                ))
-            else:  # user or any other role
-                gemini_contents.append(genai_types.Content(
-                    role="user",
-                    parts=[genai_types.Part(text=content)]
-                ))
-
-        # Add JSON schema instruction if response_format is provided
-        if response_format is not None and hasattr(response_format, 'model_json_schema'):
-            schema = response_format.model_json_schema()
-            schema_msg = f"\n\nYou must respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
-            if system_instruction:
-                system_instruction += schema_msg
-            else:
-                system_instruction = schema_msg
-
-        # Build generation config
-        config_kwargs = {}
-        if system_instruction:
-            config_kwargs['system_instruction'] = system_instruction
-        if 'temperature' in kwargs:
-            config_kwargs['temperature'] = kwargs['temperature']
-        if 'max_tokens' in kwargs:
-            config_kwargs['max_output_tokens'] = kwargs['max_tokens']
-        if response_format is not None:
-            config_kwargs['response_mime_type'] = 'application/json'
-            # Pass the Pydantic model directly as response_schema for structured output
-            config_kwargs['response_schema'] = response_format
-
-        generation_config = genai_types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
-
-        last_exception = None
-
-        for attempt in range(max_retries + 1):
-            try:
-                response = await self._gemini_client.aio.models.generate_content(
-                    model=self.model,
-                    contents=gemini_contents,
-                    config=generation_config,
-                )
-
-                content = response.text
-
-                # Handle empty/None response (can happen with content filtering or timeouts)
-                if content is None:
-                    # Check if there's a block reason
-                    block_reason = None
-                    if hasattr(response, 'candidates') and response.candidates:
-                        candidate = response.candidates[0]
-                        if hasattr(candidate, 'finish_reason'):
-                            block_reason = candidate.finish_reason
-
-                    if attempt < max_retries:
-                        logger.warning(f"Gemini returned empty response (reason: {block_reason}), retrying... (attempt {attempt + 1}/{max_retries + 1})")
-                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
-                        await asyncio.sleep(backoff)
-                        continue
-                    else:
-                        raise RuntimeError(f"Gemini returned empty response after {max_retries + 1} attempts (reason: {block_reason})")
-
-                if response_format is not None:
-                    # Parse the JSON response
-                    json_data = json.loads(content)
-
-                    # Return raw JSON if skip_validation is True, otherwise validate with Pydantic
-                    if skip_validation:
-                        result = json_data
-                    else:
-                        result = response_format.model_validate(json_data)
-                else:
-                    result = content
-
-                # Log call details only if it takes more than 10 seconds
-                duration = time.time() - start_time
-                if duration > 10.0 and hasattr(response, 'usage_metadata') and response.usage_metadata:
-                    usage = response.usage_metadata
-                    # Check for cached tokens (Gemini uses cached_content_token_count)
-                    cached_tokens = getattr(usage, 'cached_content_token_count', 0) or 0
-                    cache_info = f", cached_tokens={cached_tokens}" if cached_tokens > 0 else ""
-                    logger.info(
-                        f"slow llm call: model={self.provider}/{self.model}, "
-                        f"input_tokens={usage.prompt_token_count}, output_tokens={usage.candidates_token_count}{cache_info}, "
-                        f"time={duration:.3f}s"
-                    )
-
-                return result
-
-            except json.JSONDecodeError as e:
-                # Handle truncated JSON responses (often from MAX_TOKENS) with retry
-                last_exception = e
-                if attempt < max_retries:
-                    logger.warning(f"Gemini returned invalid JSON (truncated response?), retrying... (attempt {attempt + 1}/{max_retries + 1})")
-                    backoff = min(initial_backoff * (2 ** attempt), max_backoff)
-                    await asyncio.sleep(backoff)
-                    continue
-                else:
-                    logger.error(f"Gemini returned invalid JSON after {max_retries + 1} attempts: {str(e)}")
-                    raise
-
-            except genai_errors.APIError as e:
-                # Handle rate limits and server errors with retry
-                if e.code in (429, 503, 500):
-                    last_exception = e
-                    if attempt < max_retries:
-                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
-                        jitter = backoff * 0.2 * (2 * (time.time() % 1) - 1)
-                        sleep_time = backoff + jitter
-                        await asyncio.sleep(sleep_time)
-                    else:
-                        logger.error(f"Gemini API error after {max_retries + 1} attempts: {str(e)}")
-                        raise
-                else:
-                    logger.error(f"Gemini API error: {type(e).__name__}: {str(e)}")
-                    raise
-
-            except Exception as e:
-                logger.error(f"Unexpected error during Gemini call: {type(e).__name__}: {str(e)}")
-                raise
-
-        if last_exception:
-            raise last_exception
-        raise RuntimeError(f"Gemini call failed after all retries with no exception captured")
-
     @classmethod
-    def for_memory(cls) -> "LLMConfig":
-        """Create configuration for memory operations from environment variables."""
+    def for_memory(cls) -> "LLMProvider":
+        """Create provider for memory operations from environment variables."""
         provider = os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq")
         api_key = os.getenv("HINDSIGHT_API_LLM_API_KEY")
-        base_url = os.getenv("HINDSIGHT_API_LLM_BASE_URL")
+        base_url = os.getenv("HINDSIGHT_API_LLM_BASE_URL", "")
         model = os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b")
-
-        # Set default base URL if not provided
-        if not base_url:
-            if provider == "groq":
-                base_url = "https://api.groq.com/openai/v1"
-            elif provider == "ollama":
-                base_url = "http://localhost:11434/v1"
-            else:
-                base_url = ""
 
         return cls(
             provider=provider,
@@ -436,26 +250,12 @@ class LLMConfig:
         )
 
     @classmethod
-    def for_answer_generation(cls) -> "LLMConfig":
-        """
-        Create configuration for answer generation operations from environment variables.
-
-        Falls back to memory LLM config if answer-specific config not set.
-        """
-        # Check if answer-specific config exists, otherwise fall back to memory config
+    def for_answer_generation(cls) -> "LLMProvider":
+        """Create provider for answer generation. Falls back to memory config if not set."""
         provider = os.getenv("HINDSIGHT_API_ANSWER_LLM_PROVIDER", os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq"))
         api_key = os.getenv("HINDSIGHT_API_ANSWER_LLM_API_KEY", os.getenv("HINDSIGHT_API_LLM_API_KEY"))
-        base_url = os.getenv("HINDSIGHT_API_ANSWER_LLM_BASE_URL", os.getenv("HINDSIGHT_API_LLM_BASE_URL"))
+        base_url = os.getenv("HINDSIGHT_API_ANSWER_LLM_BASE_URL", os.getenv("HINDSIGHT_API_LLM_BASE_URL", ""))
         model = os.getenv("HINDSIGHT_API_ANSWER_LLM_MODEL", os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"))
-
-        # Set default base URL if not provided
-        if not base_url:
-            if provider == "groq":
-                base_url = "https://api.groq.com/openai/v1"
-            elif provider == "ollama":
-                base_url = "http://localhost:11434/v1"
-            else:
-                base_url = ""
 
         return cls(
             provider=provider,
@@ -466,26 +266,12 @@ class LLMConfig:
         )
 
     @classmethod
-    def for_judge(cls) -> "LLMConfig":
-        """
-        Create configuration for judge/evaluator operations from environment variables.
-
-        Falls back to memory LLM config if judge-specific config not set.
-        """
-        # Check if judge-specific config exists, otherwise fall back to memory config
+    def for_judge(cls) -> "LLMProvider":
+        """Create provider for judge/evaluator operations. Falls back to memory config if not set."""
         provider = os.getenv("HINDSIGHT_API_JUDGE_LLM_PROVIDER", os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq"))
         api_key = os.getenv("HINDSIGHT_API_JUDGE_LLM_API_KEY", os.getenv("HINDSIGHT_API_LLM_API_KEY"))
-        base_url = os.getenv("HINDSIGHT_API_JUDGE_LLM_BASE_URL", os.getenv("HINDSIGHT_API_LLM_BASE_URL"))
+        base_url = os.getenv("HINDSIGHT_API_JUDGE_LLM_BASE_URL", os.getenv("HINDSIGHT_API_LLM_BASE_URL", ""))
         model = os.getenv("HINDSIGHT_API_JUDGE_LLM_MODEL", os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"))
-
-        # Set default base URL if not provided
-        if not base_url:
-            if provider == "groq":
-                base_url = "https://api.groq.com/openai/v1"
-            elif provider == "ollama":
-                base_url = "http://localhost:11434/v1"
-            else:
-                base_url = ""
 
         return cls(
             provider=provider,
@@ -494,3 +280,7 @@ class LLMConfig:
             model=model,
             reasoning_effort="high"
         )
+
+
+# Backwards compatibility alias
+LLMConfig = LLMProvider

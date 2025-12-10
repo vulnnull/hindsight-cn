@@ -6,14 +6,7 @@ Provides an interface for generating embeddings with different backends.
 IMPORTANT: All embeddings must produce 384-dimensional vectors to match
 the database schema (pgvector column defined as vector(384)).
 
-Configuration via environment variables:
-- HINDSIGHT_API_EMBEDDINGS_PROVIDER: "local" (default) or "tei"
-
-For local provider:
-- HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL: Model name (default: BAAI/bge-small-en-v1.5)
-
-For TEI provider:
-- HINDSIGHT_API_EMBEDDINGS_TEI_URL: TEI server URL (required)
+Configuration via environment variables - see hindsight_api.config for all env var names.
 """
 from abc import ABC, abstractmethod
 from typing import List, Optional
@@ -22,13 +15,16 @@ import os
 
 import httpx
 
+from ..config import (
+    ENV_EMBEDDINGS_PROVIDER,
+    ENV_EMBEDDINGS_LOCAL_MODEL,
+    ENV_EMBEDDINGS_TEI_URL,
+    DEFAULT_EMBEDDINGS_PROVIDER,
+    DEFAULT_EMBEDDINGS_LOCAL_MODEL,
+    EMBEDDING_DIMENSION,
+)
+
 logger = logging.getLogger(__name__)
-
-# Fixed embedding dimension required by database schema
-EMBEDDING_DIMENSION = 384
-
-# Default model for local embeddings
-DEFAULT_EMBEDDINGS_MODEL = "BAAI/bge-small-en-v1.5"
 
 
 class Embeddings(ABC):
@@ -88,7 +84,7 @@ class LocalSTEmbeddings(Embeddings):
                        Must produce 384-dimensional embeddings.
                        Default: BAAI/bge-small-en-v1.5
         """
-        self.model_name = model_name or DEFAULT_EMBEDDINGS_MODEL
+        self.model_name = model_name or DEFAULT_EMBEDDINGS_LOCAL_MODEL
         self._model = None
 
     @property
@@ -272,30 +268,23 @@ def create_embeddings_from_env() -> Embeddings:
     """
     Create an Embeddings instance based on environment variables.
 
-    Environment variables:
-    - HINDSIGHT_API_EMBEDDINGS_PROVIDER: "local" (default) or "tei"
-
-    For local provider:
-    - HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL: Model name (default: BAAI/bge-small-en-v1.5)
-
-    For TEI provider:
-    - HINDSIGHT_API_EMBEDDINGS_TEI_URL: TEI server URL (required)
+    See hindsight_api.config for environment variable names and defaults.
 
     Returns:
         Configured Embeddings instance
     """
-    provider = os.environ.get("HINDSIGHT_API_EMBEDDINGS_PROVIDER", "local").lower()
+    provider = os.environ.get(ENV_EMBEDDINGS_PROVIDER, DEFAULT_EMBEDDINGS_PROVIDER).lower()
 
     if provider == "tei":
-        url = os.environ.get("HINDSIGHT_API_EMBEDDINGS_TEI_URL")
+        url = os.environ.get(ENV_EMBEDDINGS_TEI_URL)
         if not url:
             raise ValueError(
-                "HINDSIGHT_API_EMBEDDINGS_TEI_URL is required when HINDSIGHT_API_EMBEDDINGS_PROVIDER is 'tei'"
+                f"{ENV_EMBEDDINGS_TEI_URL} is required when {ENV_EMBEDDINGS_PROVIDER} is 'tei'"
             )
         return RemoteTEIEmbeddings(base_url=url)
     elif provider == "local":
-        model = os.environ.get("HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL")
-        model_name = model or DEFAULT_EMBEDDINGS_MODEL
+        model = os.environ.get(ENV_EMBEDDINGS_LOCAL_MODEL)
+        model_name = model or DEFAULT_EMBEDDINGS_LOCAL_MODEL
         return LocalSTEmbeddings(model_name=model_name)
     else:
         raise ValueError(

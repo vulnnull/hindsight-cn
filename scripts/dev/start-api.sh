@@ -72,4 +72,4 @@ if [[ ${#SERVER_ARGS[@]} -eq 0 ]]; then
   SERVER_ARGS=(--host 0.0.0.0 --port 8888)
 fi
 
-uv run python -m hindsight_api.web.server "${SERVER_ARGS[@]}"
+uv run hindsight-api "${SERVER_ARGS[@]}"

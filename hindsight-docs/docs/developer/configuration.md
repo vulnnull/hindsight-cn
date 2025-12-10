@@ -6,6 +6,16 @@ Complete reference for configuring Hindsight server through environment variable
 
 Hindsight is configured entirely through environment variables, making it easy to deploy across different environments and container orchestration platforms.
 
+All environment variable names and defaults are defined in `hindsight_api.config`. You can use `MemoryEngine.from_env()` to create a MemoryEngine instance configured from environment variables:
+
+```python
+from hindsight_api import MemoryEngine
+
+# Create from environment variables
+memory = MemoryEngine.from_env()
+await memory.initialize()
+```
+
 ### LLM Provider Configuration
 
 Configure the LLM provider used for fact extraction, entity resolution, and reasoning operations.

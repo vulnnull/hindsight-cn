@@ -3,7 +3,7 @@
 > Agent Memory that Works Like Human Memory
 
 This file contains the complete Hindsight documentation for LLM consumption.
-Generated: 2025-12-10T12:49:48.043Z
+Generated: 2025-12-10T14:42:08.055Z
 
 ---
 
@@ -93,19 +93,17 @@ graph LR
 | **Graph** | Related entities, indirect connections |
 | **Temporal** | "last spring", "in June", time ranges |
 
-### Personality Framework (CARA)
+### Disposition Traits
 
-Memory banks have Big Five personality traits that influence opinion formation:
+Memory banks have disposition traits that influence how opinions are formed during Reflect:
 
-| Trait | Low | High |
-|-------|-----|------|
-| **Openness** | Prefers proven methods | Embraces new ideas |
-| **Conscientiousness** | Flexible, spontaneous | Systematic, organized |
-| **Extraversion** | Independent | Collaborative |
-| **Agreeableness** | Direct, analytical | Diplomatic, harmonious |
-| **Neuroticism** | Calm, optimistic | Risk-aware, cautious |
+| Trait | Scale | Low (1) | High (5) |
+|-------|-------|---------|----------|
+| **Skepticism** | 1-5 | Trusting | Skeptical |
+| **Literalism** | 1-5 | Flexible interpretation | Literal interpretation |
+| **Empathy** | 1-5 | Detached | Empathetic |
 
-The `bias_strength` parameter (0-1) controls how much personality influences opinions.
+These traits only affect the `reflect` operation, not `recall`.
 
 ## Next Steps
 
@@ -116,13 +114,13 @@ The `bias_strength` parameter (0-1) controls how much personality influences opi
 ### Core Concepts
 - [**Retain**](/developer/retain) — How memories are stored with multi-dimensional facts
 - [**Recall**](/developer/retrieval) — How TEMPR's 4-way search retrieves memories
-- [**Reflect**](/developer/reflect) — How personality influences reasoning and opinion formation
+- [**Reflect**](/developer/reflect) — How disposition influences reasoning and opinion formation
 
 ### API Methods
 - [**Retain**](/developer/api/retain) — Store information in memory banks
 - [**Recall**](/developer/api/recall) — Search and retrieve memories
-- [**Reflect**](/developer/api/reflect) — Reason with personality
-- [**Memory Banks**](/developer/api/memory-banks) — Configure personality and background
+- [**Reflect**](/developer/api/reflect) — Reason with disposition
+- [**Memory Banks**](/developer/api/memory-banks) — Configure disposition and background
 - [**Entities**](/developer/api/entities) — Track people, places, and concepts
 - [**Documents**](/developer/api/documents) — Manage document sources
 - [**Operations**](/developer/api/operations) — Monitor async tasks
@@ -143,15 +141,15 @@ Get up and running with Hindsight in 60 seconds.
 
 
 
-## Start the Server
+## Start the API Server
 
 <Tabs>
 <TabItem value="pip" label="pip (API only)">
 
 ```bash
-pip install hindsight-all
-export HINDSIGHT_API_LLM_PROVIDER=groq
-export HINDSIGHT_API_LLM_API_KEY=gsk_xxxxxxxxxxxx
+pip install hindsight-api
+export OPENAI_API_KEY=sk-xxx
+export HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY
 
 hindsight-api
 ```
@@ -162,9 +160,12 @@ API available at http://localhost:8888
 <TabItem value="docker" label="Docker (Full Experience)">
 
 ```bash
-docker run -p 8888:8888 -p 9999:9999 \
-  -e HINDSIGHT_API_LLM_PROVIDER=groq \
-  -e HINDSIGHT_API_LLM_API_KEY=gsk_xxxxxxxxxxxx \
+
+export OPENAI_API_KEY=sk-xxx
+
+docker run -it -p 8888:8888 -p 9999:9999 \
+  -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
+  -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
   ghcr.io/vectorize-io/hindsight
 ```
 
@@ -175,7 +176,8 @@ docker run -p 8888:8888 -p 9999:9999 \
 </Tabs>
 
 :::tip LLM Provider
-Hindsight requires an LLM with structured output support. Recommended: **Groq** with `gpt-oss-20b` for fast, cost-effective inference. Also supports OpenAI and Ollama.
+Hindsight requires an LLM with structured output support. Recommended: **Groq** with `gpt-oss-20b` for fast, cost-effective inference.
+See [LLM Providers](/developer/models#llm) for more details.
 :::
 
 ---
@@ -200,7 +202,7 @@ client.retain(bank_id="my-bank", content="Alice works at Google as a software en
 # Recall: Search memories
 client.recall(bank_id="my-bank", query="What does Alice do?")
 
-# Reflect: Generate personality-aware response
+# Reflect: Generate disposition-aware response
 client.reflect(bank_id="my-bank", query="Tell me about Alice")
 ```
 
@@ -255,7 +257,7 @@ hindsight memory reflect my-bank "Tell me about Alice"
 |-----------|--------------|
 | **Retain** | Content is processed, facts are extracted, entities are identified and linked in a knowledge graph |
 | **Recall** | Four search strategies (semantic, keyword, graph, temporal) run in parallel to find relevant memories |
-| **Reflect** | Retrieved memories are used to generate a personality-aware response |
+| **Reflect** | Retrieved memories are used to generate a disposition-aware response |
 
 ---
 
@@ -263,8 +265,8 @@ hindsight memory reflect my-bank "Tell me about Alice"
 
 - [**Retain**](./retain) — Advanced options for storing memories
 - [**Recall**](./recall) — Search and retrieval strategies
-- [**Reflect**](./reflect) — Personality-aware reasoning
-- [**Memory Banks**](./memory-banks) — Configure personality and background
+- [**Reflect**](./reflect) — Disposition-aware reasoning
+- [**Memory Banks**](./memory-banks) — Configure disposition and background
 - [**Server Deployment**](/developer/installation) — Docker Compose, Helm, and production setup
 
 
@@ -477,9 +479,9 @@ hindsight recall my-bank "Tell me about Alice" -v
 
 ---
 
-## Reflect: Reason with Personality
+## Reflect: Reason with Disposition
 
-Generate personality-aware responses that form opinions based on evidence.
+Generate disposition-aware responses that form opinions based on evidence.
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -559,9 +561,9 @@ hindsight reflect my-bank "Analyze our tech stack" --budget high
 </TabItem>
 </Tabs>
 
-**What happens:** Memories are recalled, bank personality is loaded, LLM reasons through evidence, new opinions are formed and stored.
+**What happens:** Memories are recalled, bank disposition is loaded, LLM reasons through evidence, new opinions are formed and stored.
 
-**See:** [Reflect Details](./reflect) for personality configuration.
+**See:** [Reflect Details](./reflect) for disposition configuration.
 
 ---
 
@@ -574,7 +576,7 @@ hindsight reflect my-bank "Analyze our tech stack" --budget high
 | **Output** | Memory IDs | Ranked facts | Reasoned response + opinions |
 | **Uses LLM** | Yes (extraction) | No | Yes (generation) |
 | **Forms opinions** | No | No | Yes |
-| **Personality** | No | No | Yes |
+| **Disposition** | No | No | Yes |
 
 ---
 
@@ -582,8 +584,8 @@ hindsight reflect my-bank "Analyze our tech stack" --budget high
 
 - [**Retain**](./retain) — Advanced options for storing memories
 - [**Recall**](./recall) — Tuning search quality and performance
-- [**Reflect**](./reflect) — Configuring personality and opinions
-- [**Memory Banks**](./memory-banks) — Managing memory bank personality
+- [**Reflect**](./reflect) — Configuring disposition and opinions
+- [**Memory Banks**](./memory-banks) — Managing memory bank disposition
 
 
 ---
@@ -777,7 +779,7 @@ All stored in your isolated **memory bank**, ready for `recall()` and `reflect()
 ## Next Steps
 
 - [**Recall**](./retrieval) — How multi-strategy search retrieves relevant memories
-- [**Reflect**](./reflect) — How personality influences reasoning and opinion formation
+- [**Reflect**](./reflect) — How disposition influences reasoning and opinion formation
 - [API Reference](./api/retain) — Code examples for retaining memories
 
 
@@ -987,7 +989,7 @@ The **fusion** of all four gives you exactly what you're looking for, even thoug
 ## Next Steps
 
 - [**Retain**](./retain) — How memories are stored with rich context
-- [**Reflect**](./reflect) — How personality influences reasoning
+- [**Reflect**](./reflect) — How disposition influences reasoning
 
 
 ---
@@ -1044,19 +1046,15 @@ With reflect:
 
 ---
 
-## Disposition Framework (CARA)
+## Disposition Traits
 
-When you create a memory bank, you can configure its disposition using **Big Five traits**. These traits influence how the bank interprets information and forms opinions:
+When you create a memory bank, you can configure its disposition using three traits. These traits influence how the bank interprets information and forms opinions during `reflect()`:
 
-You can also provide a natural language **background** that describes the bank's identity and perspective, which shapes how these traits are applied.
-
-| Trait | Low | High |
-|-------|-----|------|
-| **Openness** | Prefers proven methods | Embraces new ideas |
-| **Conscientiousness** | Flexible, spontaneous | Systematic, organized |
-| **Extraversion** | Independent | Collaborative |
-| **Agreeableness** | Direct, analytical | Diplomatic, harmonious |
-| **Neuroticism** | Calm, optimistic | Risk-aware, cautious |
+| Trait | Scale | Low (1) | High (5) |
+|-------|-------|---------|----------|
+| **Skepticism** | 1-5 | Trusting, accepts information at face value | Skeptical, questions and doubts claims |
+| **Literalism** | 1-5 | Flexible interpretation, reads between the lines | Literal interpretation, takes things at face value |
+| **Empathy** | 1-5 | Detached, focuses on facts | Empathetic, considers emotional context |
 
 ### Background: Natural Language Identity
 
@@ -1068,25 +1066,17 @@ client.create_bank(
     background="I am a senior software architect with 15 years of distributed "
                "systems experience. I prefer simplicity over cutting-edge technology.",
     disposition={
-        "openness": 0.3,  # Prefers proven methods
-        "conscientiousness": 0.9,  # Highly organized
-        # ... other traits
+        "skepticism": 4,   # Questions new technologies
+        "literalism": 4,   # Focuses on concrete specs
+        "empathy": 2       # Prioritizes technical facts
     }
 )
 ```
 
 The background provides context that shapes how disposition traits are applied:
-- "I prefer simplicity" + low openness → consistently favors established solutions
+- "I prefer simplicity" + high skepticism → questions complex solutions
 - "15 years experience" → responses reference this expertise
 - First-person perspective → creates consistent voice
-
-### Bias Strength
-
-The `bias_strength` parameter (0-1) controls how much disposition influences reasoning:
-
-- **0.0**: Purely evidence-based
-- **0.5**: Balanced disposition and evidence
-- **1.0**: Strongly disposition-driven
 
 ---
 
@@ -1098,11 +1088,11 @@ When `reflect()` encounters a question that warrants forming an opinion, disposi
 
 Two banks with different dispositions, given identical facts about remote work:
 
-**Bank A** (high openness, low conscientiousness):
-> "Remote work unlocks creative flexibility and spontaneous innovation. The freedom to work from anywhere enables breakthrough thinking."
+**Bank A** (low skepticism, high empathy):
+> "Remote work enables flexibility and work-life balance. The team seems happier and more productive when they can choose their environment."
 
-**Bank B** (low openness, high conscientiousness):
-> "Remote work lacks the structure and accountability needed for consistent performance. In-person collaboration is more reliable."
+**Bank B** (high skepticism, low empathy):
+> "Remote work claims need verification. What are the actual productivity metrics? The anecdotal benefits may not translate to measurable outcomes."
 
 **Same facts → Different conclusions** because disposition shapes interpretation.
 
@@ -1137,11 +1127,11 @@ Different use cases benefit from different disposition configurations:
 
 | Use Case | Recommended Traits | Why |
 |----------|-------------------|-----|
-| **Customer Support** | High agreeableness<br/>Low neuroticism | Diplomatic, calm under pressure |
-| **Code Review** | High conscientiousness<br/>Low agreeableness | Detail-oriented, direct feedback |
-| **Creative Writing** | High openness<br/>High extraversion | Embraces novelty, expressive |
-| **Risk Analysis** | High neuroticism<br/>High conscientiousness | Risk-aware, methodical |
-| **Research Assistant** | High openness<br/>High conscientiousness | Curious, thorough |
+| **Customer Support** | skepticism: 2, literalism: 2, empathy: 5 | Trusting, flexible, understanding |
+| **Code Review** | skepticism: 4, literalism: 5, empathy: 2 | Questions assumptions, precise, direct |
+| **Legal Analysis** | skepticism: 5, literalism: 5, empathy: 2 | Highly skeptical, exact interpretation |
+| **Therapist/Coach** | skepticism: 2, literalism: 2, empathy: 5 | Supportive, reads between lines |
+| **Research Assistant** | skepticism: 4, literalism: 3, empathy: 3 | Questions claims, balanced interpretation |
 
 ---
 
@@ -1695,7 +1685,7 @@ const deep = await client.recall('my-bank', 'How are Alice and Bob connected?', 
 
 # Reflect
 
-Generate personality-aware responses using retrieved memories.
+Generate disposition-aware responses using retrieved memories.
 
 
 
@@ -1772,7 +1762,7 @@ const response = await client.reflect('my-bank', 'What do you think about remote
 </Tabs>
 
 :::info How Reflect Works
-Learn about personality-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
+Learn about disposition-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
 :::
 
 ## Opinion Formation
@@ -1800,35 +1790,32 @@ response = client.reflect(
 
 New opinions are automatically stored and influence future responses.
 
-## Personality Influence
+## Disposition Influence
 
-The bank's personality affects reflect responses:
+The bank's disposition affects reflect responses:
 
-| Trait | Effect on Reflect |
-|-------|-----------------|
-| High **Openness** | More willing to consider new ideas |
-| High **Conscientiousness** | More structured, methodical responses |
-| High **Extraversion** | More collaborative suggestions |
-| High **Agreeableness** | More diplomatic, harmony-seeking |
-| High **Neuroticism** | More risk-aware, cautious |
+| Trait | Low (1) | High (5) |
+|-------|---------|----------|
+| **Skepticism** | Trusting, accepts claims | Questions and doubts claims |
+| **Literalism** | Flexible interpretation | Exact, literal interpretation |
+| **Empathy** | Detached, fact-focused | Considers emotional context |
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-# Create a bank with specific personality
+# Create a bank with specific disposition
 client.create_bank(
     bank_id="cautious-advisor",
     background="I am a risk-aware financial advisor",
-    personality={
-        "openness": 0.3,
-        "conscientiousness": 0.9,
-        "neuroticism": 0.8,
-        "bias_strength": 0.7
+    disposition={
+        "skepticism": 5,   # Very skeptical of claims
+        "literalism": 4,   # Focuses on exact requirements
+        "empathy": 2       # Prioritizes facts over feelings
     }
 )
 
-# Reflect responses will reflect this personality
+# Reflect responses will reflect this disposition
 response = client.reflect(
     bank_id="cautious-advisor",
     query="Should I invest in crypto?"
@@ -1840,18 +1827,17 @@ response = client.reflect(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-// Create a bank with specific personality
+// Create a bank with specific disposition
 await client.createBank('cautious-advisor', {
     background: 'I am a risk-aware financial advisor',
-    personality: {
-        openness: 0.3,
-        conscientiousness: 0.9,
-        neuroticism: 0.8,
-        bias_strength: 0.7
+    disposition: {
+        skepticism: 5,
+        literalism: 4,
+        empathy: 2
     }
 });
 
-// Reflect responses will reflect this personality
+// Reflect responses will reflect this disposition
 const response = await client.reflect('cautious-advisor', 'Should I invest in crypto?');
 ```
 
@@ -1903,8 +1889,8 @@ This enables:
 
 # Memory Bank
 
-Configure memory bank personality, background, and behavior.
-Memory banks have charateristics:
+Configure memory bank disposition, background, and behavior.
+Memory banks have characteristics:
 - Banks are completely isolated from each other.
 - You don't need to pre-create it, Hindsight will create it for you with default settings.
 - Banks have a profile that influences how they form opinions from memories. (optional)
@@ -1930,13 +1916,10 @@ client.create_bank(
     bank_id="my-bank",
     name="Research Assistant",
     background="I am a research assistant specializing in machine learning",
-    personality={
-        "openness": 0.8,
-        "conscientiousness": 0.7,
-        "extraversion": 0.5,
-        "agreeableness": 0.6,
-        "neuroticism": 0.3,
-        "bias_strength": 0.5
+    disposition={
+        "skepticism": 4,   # Questions claims, wants evidence
+        "literalism": 3,   # Balanced interpretation
+        "empathy": 3       # Balanced emotional consideration
     }
 )
 ```
@@ -1952,13 +1935,10 @@ const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 await client.createBank('my-bank', {
     name: 'Research Assistant',
     background: 'I am a research assistant specializing in machine learning',
-    personality: {
-        openness: 0.8,
-        conscientiousness: 0.7,
-        extraversion: 0.5,
-        agreeableness: 0.6,
-        neuroticism: 0.3,
-        bias_strength: 0.5
+    disposition: {
+        skepticism: 4,
+        literalism: 3,
+        empathy: 3
     }
 });
 ```
@@ -1968,83 +1948,58 @@ await client.createBank('my-bank', {
 
 ```bash
 # Set background
-hindsight agent background my-bank "I am a research assistant specializing in ML"
+hindsight bank background my-bank "I am a research assistant specializing in ML"
 
-# Set personality
-hindsight agent personality my-bank \
-    --openness 0.8 \
-    --conscientiousness 0.7 \
-    --extraversion 0.5 \
-    --agreeableness 0.6 \
-    --neuroticism 0.3 \
-    --bias-strength 0.5
+# Set disposition
+hindsight bank disposition my-bank \
+    --skepticism 4 \
+    --literalism 3 \
+    --empathy 3
 ```
 
 </TabItem>
 </Tabs>
 
-## Personality Traits (Big Five)
+## Disposition Traits
 
-Each trait is scored 0.0 to 1.0:
+Each trait is scored 1 to 5:
 
-| Trait | Low (0.0) | High (1.0) |
-|-------|-----------|------------|
-| **Openness** | Conventional, prefers proven methods | Curious, embraces new ideas |
-| **Conscientiousness** | Flexible, spontaneous | Organized, systematic |
-| **Extraversion** | Reserved, independent | Outgoing, collaborative |
-| **Agreeableness** | Direct, analytical | Cooperative, diplomatic |
-| **Neuroticism** | Calm, optimistic | Risk-aware, cautious |
+| Trait | Low (1) | High (5) |
+|-------|---------|----------|
+| **Skepticism** | Trusting, accepts information at face value | Skeptical, questions and doubts claims |
+| **Literalism** | Flexible interpretation, reads between the lines | Literal interpretation, takes things exactly as stated |
+| **Empathy** | Detached, focuses on facts and logic | Empathetic, considers emotional context |
 
 ### How Traits Affect Behavior
 
-**Openness** influences how the bank weighs new vs. established ideas:
+**Skepticism** influences how the bank evaluates claims:
 
 ```python
-# High openness bank
-"Let's try this new framework—it looks promising!"
+# High skepticism (5)
+"What's the source for this? Have these results been replicated?"
 
-# Low openness bank
-"Let's stick with the proven solution we know works."
+# Low skepticism (1)
+"That sounds reasonable, let's proceed with that assumption."
 ```
 
-**Conscientiousness** affects structure and thoroughness:
+**Literalism** affects interpretation:
 
 ```python
-# High conscientiousness bank
-"Here's a detailed, step-by-step analysis..."
+# High literalism (5)
+"The requirement says 'users' - that means all users, no exceptions."
 
-# Low conscientiousness bank
-"Quick take: this should work, let's try it."
+# Low literalism (1)
+"When they say 'users', they probably mean active users in this context."
 ```
 
-**Extraversion** shapes collaboration preferences:
+**Empathy** shapes how emotional context is considered:
 
 ```python
-# High extraversion bank
-"We should get the team together to discuss this."
+# High empathy (5)
+"I understand this is frustrating. Let's find a solution that works for you."
 
-# Low extraversion bank
-"I'll analyze this independently and share my findings."
-```
-
-**Agreeableness** affects how disagreements are handled:
-
-```python
-# High agreeableness bank
-"That's a valid point. Perhaps we can find a middle ground..."
-
-# Low agreeableness bank
-"Actually, the data doesn't support that conclusion."
-```
-
-**Neuroticism** influences risk assessment:
-
-```python
-# High neuroticism bank
-"We should consider what could go wrong here..."
-
-# Low neuroticism bank
-"The risks seem manageable, let's proceed."
+# Low empathy (1)
+"Here are the facts: Option A has 20% better performance than Option B."
 ```
 
 ## Background
@@ -2100,7 +2055,7 @@ profile = api.get_bank_profile("my-bank")
 
 print(f"Name: {profile.name}")
 print(f"Background: {profile.background}")
-print(f"Personality: {profile.personality}")
+print(f"Disposition: {profile.disposition}")
 ```
 
 </TabItem>
@@ -2111,14 +2066,14 @@ const profile = await client.getBankProfile('my-bank');
 
 console.log(`Name: ${profile.name}`);
 console.log(`Background: ${profile.background}`);
-console.log(`Personality:`, profile.personality);
+console.log(`Disposition:`, profile.disposition);
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight agent profile my-bank
+hindsight bank profile my-bank
 ```
 
 </TabItem>
@@ -2130,28 +2085,25 @@ If not specified, banks use neutral defaults:
 
 ```python
 {
-    "openness": 0.5,
-    "conscientiousness": 0.5,
-    "extraversion": 0.5,
-    "agreeableness": 0.5,
-    "neuroticism": 0.5,
-    "bias_strength": 0.5,
+    "skepticism": 3,
+    "literalism": 3,
+    "empathy": 3,
     "background": ""
 }
 ```
 
-## Personality Templates
+## Disposition Templates
 
-Common personality configurations:
+Common disposition configurations:
 
-| Use Case | O | C | E | A | N | Bias |
-|----------|---|---|---|---|---|------|
-| **Customer Support** | 0.5 | 0.7 | 0.6 | 0.9 | 0.3 | 0.4 |
-| **Code Reviewer** | 0.4 | 0.9 | 0.3 | 0.4 | 0.5 | 0.6 |
-| **Creative Writer** | 0.9 | 0.4 | 0.7 | 0.6 | 0.5 | 0.7 |
-| **Risk Analyst** | 0.3 | 0.9 | 0.3 | 0.4 | 0.8 | 0.6 |
-| **Research Assistant** | 0.8 | 0.8 | 0.4 | 0.5 | 0.4 | 0.5 |
-| **Neutral (default)** | 0.5 | 0.5 | 0.5 | 0.5 | 0.5 | 0.5 |
+| Use Case | Skepticism | Literalism | Empathy |
+|----------|------------|------------|---------|
+| **Customer Support** | 2 | 2 | 5 |
+| **Code Reviewer** | 4 | 5 | 2 |
+| **Legal Analyst** | 5 | 5 | 2 |
+| **Therapist/Coach** | 2 | 2 | 5 |
+| **Research Assistant** | 4 | 3 | 3 |
+| **Neutral (default)** | 3 | 3 | 3 |
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -2161,13 +2113,10 @@ Common personality configurations:
 client.create_bank(
     bank_id="support",
     background="I am a friendly customer support agent",
-    personality={
-        "openness": 0.5,
-        "conscientiousness": 0.7,
-        "extraversion": 0.6,
-        "agreeableness": 0.9,  # Very diplomatic
-        "neuroticism": 0.3,    # Calm under pressure
-        "bias_strength": 0.4
+    disposition={
+        "skepticism": 2,   # Trusting
+        "literalism": 2,   # Flexible interpretation
+        "empathy": 5       # Very empathetic
     }
 )
 
@@ -2175,13 +2124,10 @@ client.create_bank(
 client.create_bank(
     bank_id="reviewer",
     background="I am a thorough code reviewer focused on quality",
-    personality={
-        "openness": 0.4,       # Prefers proven patterns
-        "conscientiousness": 0.9,  # Very thorough
-        "extraversion": 0.3,
-        "agreeableness": 0.4,  # Direct feedback
-        "neuroticism": 0.5,
-        "bias_strength": 0.6
+    disposition={
+        "skepticism": 4,   # Questions assumptions
+        "literalism": 5,   # Exact interpretation
+        "empathy": 2       # Direct, fact-focused
     }
 )
 ```
@@ -2193,26 +2139,20 @@ client.create_bank(
 // Customer support bank
 await client.createBank('support', {
     background: 'I am a friendly customer support agent',
-    personality: {
-        openness: 0.5,
-        conscientiousness: 0.7,
-        extraversion: 0.6,
-        agreeableness: 0.9,
-        neuroticism: 0.3,
-        bias_strength: 0.4
+    disposition: {
+        skepticism: 2,
+        literalism: 2,
+        empathy: 5
     }
 });
 
 // Code reviewer bank
 await client.createBank('reviewer', {
     background: 'I am a thorough code reviewer focused on quality',
-    personality: {
-        openness: 0.4,
-        conscientiousness: 0.9,
-        extraversion: 0.3,
-        agreeableness: 0.4,
-        neuroticism: 0.5,
-        bias_strength: 0.6
+    disposition: {
+        skepticism: 4,
+        literalism: 5,
+        empathy: 2
     }
 });
 ```
@@ -2224,7 +2164,7 @@ await client.createBank('reviewer', {
 
 Each bank has:
 - **Separate memories** — banks don't share memories
-- **Own personality** — traits are per-bank
+- **Own disposition** — traits are per-bank
 - **Independent opinions** — formed from their own experiences
 
 <Tabs>
@@ -2516,7 +2456,7 @@ await sdk.regenerateEntityObservations({
 
 ## Next Steps
 
-- [**Memory Banks**](./memory-banks) — Configure bank personality
+- [**Memory Banks**](./memory-banks) — Configure bank disposition
 - [**Documents**](./documents) — Track document sources
 - [**Operations**](./operations) — Monitor background tasks
 
@@ -3385,6 +3325,16 @@ Complete reference for configuring Hindsight server through environment variable
 
 Hindsight is configured entirely through environment variables, making it easy to deploy across different environments and container orchestration platforms.
 
+All environment variable names and defaults are defined in `hindsight_api.config`. You can use `MemoryEngine.from_env()` to create a MemoryEngine instance configured from environment variables:
+
+```python
+from hindsight_api import MemoryEngine
+
+# Create from environment variables
+memory = MemoryEngine.from_env()
+await memory.initialize()
+```
+
 ### LLM Provider Configuration
 
 Configure the LLM provider used for fact extraction, entity resolution, and reasoning operations.
@@ -3626,14 +3576,14 @@ export HINDSIGHT_API_RERANK_ENABLED=true  # Set to false to disable
 
 Used for fact extraction, entity resolution, opinion generation, and answer synthesis.
 
-**Supported providers:** Groq, OpenAI, Ollama
+**Supported providers:** Groq, OpenAI, Ollama, Gemini
 
 | Provider | Recommended Model | Best For |
-|----------|-------------------|----------|
-| **Groq** | `gpt-oss-20b` | Fast inference, high throughput (recommended) |
-| **OpenAI** | `gpt-4o-mini` | Good quality, cost-effective |
-| **OpenAI** | `gpt-4o` | Best quality |
-| **Ollama** | `llama3.1` | Local deployment, privacy |
+|----------|------------------|----------|
+| **Groq** | `openai/gpt-oss-20b`    | Fast inference, high throughput (recommended) |
+| **OpenAI** | `gpt-5-mini`     | Good quality |
+| **Gemini** | `gemini-2.5-flash` | Good quality | 
+| **Ollama** | `gpt-oss-20b`       | Local deployment, privacy |
 
 **Configuration:**
 
@@ -3646,12 +3596,17 @@ export HINDSIGHT_API_LLM_MODEL=openai/gpt-oss-20b
 # OpenAI
 export HINDSIGHT_API_LLM_PROVIDER=openai
 export HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx
-export HINDSIGHT_API_LLM_MODEL=gpt-4o-mini
+export HINDSIGHT_API_LLM_MODEL=gpt-5-mini
+
+# Gemini
+export HINDSIGHT_API_LLM_PROVIDER=gemini
+export HINDSIGHT_API_LLM_API_KEY=xxxxxxxxxxxx
+export HINDSIGHT_API_LLM_MODEL=gemini-2.5-flash
 
 # Ollama (local)
 export HINDSIGHT_API_LLM_PROVIDER=ollama
 export HINDSIGHT_API_LLM_BASE_URL=http://localhost:11434/v1
-export HINDSIGHT_API_LLM_MODEL=llama3.1
+export HINDSIGHT_API_LLM_MODEL=gpt-oss-20b
 ```
 
 **Note:** The LLM is the primary bottleneck for write operations. See [Performance](./performance) for optimization strategies.
@@ -3686,7 +3641,7 @@ Traditional RAG (Retrieval-Augmented Generation) retrieves documents similar to 
 | **Temporal queries** | Keyword matching ("spring") | Date parsing and range filtering |
 | **Entity understanding** | None | Entity resolution, observations, co-occurrence |
 | **Belief formation** | Stateless | Opinions with confidence scores that evolve |
-| **Personality** | None | Big Five traits influence interpretation |
+| **Disposition** | None | 3 traits (skepticism, literalism, empathy) influence interpretation |
 
 ## Architecture Comparison
 
@@ -3709,7 +3664,7 @@ Single retrieval strategy. No state between queries.
 | 2 | Execute 4 parallel retrievals: semantic, BM25, graph, temporal |
 | 3 | Fuse results with RRF |
 | 4 | Rerank with cross-encoder |
-| 5 | Apply personality traits |
+| 5 | Apply disposition traits |
 | 6 | Generate response |
 
 Multiple retrieval strategies. Persistent state across sessions.
@@ -3777,7 +3732,7 @@ Multiple retrieval strategies. Persistent state across sessions.
 | Search with no temporal requirements | RAG |
 | AI assistants with persistent memory | Hindsight |
 | Applications requiring entity tracking | Hindsight |
-| Systems needing consistent personality | Hindsight |
+| Systems needing consistent disposition | Hindsight |
 | Temporal queries ("last month", "in 2023") | Hindsight |
 
 
@@ -3840,7 +3795,7 @@ with HindsightServer(
     for r in results:
         print(r.text)
 
-    # Reflect - generate response with personality
+    # Reflect - generate response with disposition
     answer = client.reflect(bank_id="my-agent", query="Tell me about Alice")
     print(answer.text)
 ```
@@ -3861,7 +3816,7 @@ results = client.recall(bank_id="my-agent", query="What does Alice do?")
 for r in results:
     print(r.text)
 
-# Reflect - generate response with personality
+# Reflect - generate response with disposition
 answer = client.reflect(bank_id="my-agent", query="Tell me about Alice")
 print(answer.text)
 ```
@@ -3988,13 +3943,10 @@ client.create_bank(
     bank_id="my-agent",
     name="Assistant",
     background="I am a helpful AI assistant",
-    personality={
-        "openness": 0.7,
-        "conscientiousness": 0.8,
-        "extraversion": 0.5,
-        "agreeableness": 0.6,
-        "neuroticism": 0.3,
-        "bias_strength": 0.5,
+    disposition={
+        "skepticism": 3,    # 1-5: trusting to skeptical
+        "literalism": 3,    # 1-5: flexible to literal
+        "empathy": 3,       # 1-5: detached to empathetic
     },
 )
 ```
@@ -4054,7 +4006,7 @@ from hindsight_client import (
     RecallResult,
     ReflectResponse,
     BankProfileResponse,
-    PersonalityTraits,
+    DispositionTraits,
 )
 ```
 
@@ -4101,7 +4053,7 @@ for (const r of response.results) {
     console.log(r.text);
 }
 
-// Reflect - generate response with personality
+// Reflect - generate response with disposition
 const answer = await client.reflect('my-agent', 'Tell me about Alice');
 console.log(answer.text);
 ```
@@ -4184,13 +4136,10 @@ console.log(answer.based_on);   // Memories used
 await client.createBank('my-agent', {
     name: 'Assistant',
     background: 'I am a helpful AI assistant',
-    personality: {
-        openness: 0.7,
-        conscientiousness: 0.8,
-        extraversion: 0.5,
-        agreeableness: 0.6,
-        neuroticism: 0.3,
-        bias_strength: 0.5,
+    disposition: {
+        skepticism: 3,   // 1-5: trusting to skeptical
+        literalism: 3,   // 1-5: flexible to literal
+        empathy: 3,      // 1-5: detached to empathetic
     },
 });
 ```
@@ -4199,7 +4148,7 @@ await client.createBank('my-agent', {
 
 ```typescript
 const profile = await client.getBankProfile('my-agent');
-console.log(profile.personality);
+console.log(profile.disposition);
 console.log(profile.background);
 ```
 
@@ -4279,17 +4228,14 @@ try {
 async function main() {
     const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-    // Create a bank with personality
+    // Create a bank with disposition
     await client.createBank('demo', {
         name: 'Demo Agent',
         background: 'A helpful assistant for demos',
-        personality: {
-            openness: 0.8,
-            conscientiousness: 0.7,
-            extraversion: 0.6,
-            agreeableness: 0.8,
-            neuroticism: 0.2,
-            bias_strength: 0.5,
+        disposition: {
+            skepticism: 2,   // Trusting
+            literalism: 3,   // Balanced
+            empathy: 4,      // Empathetic
         },
     });
 
@@ -4399,7 +4345,7 @@ hindsight memory recall <bank_id> "query" --trace
 
 ### Reflect (Generate Response)
 
-Generate a response using memories and bank personality:
+Generate a response using memories and bank disposition:
 
 ```bash
 hindsight memory reflect <bank_id> "What do you know about Alice?"
@@ -4442,8 +4388,8 @@ hindsight bank name <bank_id> "My Assistant"
 ```bash
 hindsight bank background <bank_id> "I am a helpful AI assistant interested in technology"
 
-# Skip automatic personality inference
-hindsight bank background <bank_id> "Background text" --no-update-personality
+# Skip automatic disposition inference
+hindsight bank background <bank_id> "Background text" --no-update-disposition
 ```
 
 ## Document Management
@@ -5081,1515 +5027,6 @@ Known Solutions:
 ---
 
 
-## File: api-reference/endpoints/add-bank-background.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Add/merge memory bank background"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"post"}
-  path={"/v1/default/banks/{bank_id}/background"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={{"required":true,"content":{"application/json":{"schema":{"properties":{"content":{"type":"string","title":"Content","description":"New background information to add or merge"},"update_disposition":{"type":"boolean","title":"Update Disposition","description":"If true, infer disposition traits from the merged background (default: true)","default":true}},"type":"object","required":["content"],"title":"AddBackgroundRequest","description":"Request model for adding/merging background information.","example":{"content":"I was born in Texas","update_disposition":true}}}}}}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"background":{"type":"string","title":"Background"},"disposition":{"anyOf":[{"properties":{"skepticism":{"type":"integer","maximum":5,"minimum":1,"title":"Skepticism","description":"How skeptical vs trusting (1=trusting, 5=skeptical)"},"literalism":{"type":"integer","maximum":5,"minimum":1,"title":"Literalism","description":"How literally to interpret information (1=flexible, 5=literal)"},"empathy":{"type":"integer","maximum":5,"minimum":1,"title":"Empathy","description":"How much to consider emotional context (1=detached, 5=empathetic)"}},"type":"object","required":["skepticism","literalism","empathy"],"title":"DispositionTraits","description":"Disposition traits that influence how memories are formed and interpreted.","example":{"empathy":3,"literalism":3,"skepticism":3}},{"type":"null"}]}},"type":"object","required":["background"],"title":"BackgroundResponse","description":"Response model for background update.","example":{"background":"I was born in Texas. I am a software engineer with 10 years of experience.","disposition":{"empathy":3,"literalism":3,"skepticism":3}}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/cancel-operation.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Cancel a pending async operation"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"delete"}
-  path={"/v1/default/banks/{bank_id}/operations/{operation_id}"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Cancel a pending async operation by removing it from the queue
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"operation_id","in":"path","required":true,"schema":{"type":"string","title":"Operation Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/clear-bank-memories.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Clear memory bank memories"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"delete"}
-  path={"/v1/default/banks/{bank_id}/memories"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (disposition and background) will be preserved.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"type","in":"query","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Optional fact type filter (world, experience, opinion)","title":"Type"},"description":"Optional fact type filter (world, experience, opinion)"}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"success":{"type":"boolean","title":"Success"}},"type":"object","required":["success"],"title":"DeleteResponse","description":"Response model for delete operations.","example":{"success":true}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/create-or-update-bank.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Create or update memory bank"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"put"}
-  path={"/v1/default/banks/{bank_id}"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={{"required":true,"content":{"application/json":{"schema":{"properties":{"name":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Name"},"disposition":{"anyOf":[{"properties":{"skepticism":{"type":"integer","maximum":5,"minimum":1,"title":"Skepticism","description":"How skeptical vs trusting (1=trusting, 5=skeptical)"},"literalism":{"type":"integer","maximum":5,"minimum":1,"title":"Literalism","description":"How literally to interpret information (1=flexible, 5=literal)"},"empathy":{"type":"integer","maximum":5,"minimum":1,"title":"Empathy","description":"How much to consider emotional context (1=detached, 5=empathetic)"}},"type":"object","required":["skepticism","literalism","empathy"],"title":"DispositionTraits","description":"Disposition traits that influence how memories are formed and interpreted.","example":{"empathy":3,"literalism":3,"skepticism":3}},{"type":"null"}]},"background":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Background"}},"type":"object","title":"CreateBankRequest","description":"Request model for creating/updating a bank.","example":{"background":"I am a creative software engineer with 10 years of experience","disposition":{"empathy":3,"literalism":3,"skepticism":3},"name":"Alice"}}}}}}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"bank_id":{"type":"string","title":"Bank Id"},"name":{"type":"string","title":"Name"},"disposition":{"properties":{"skepticism":{"type":"integer","maximum":5,"minimum":1,"title":"Skepticism","description":"How skeptical vs trusting (1=trusting, 5=skeptical)"},"literalism":{"type":"integer","maximum":5,"minimum":1,"title":"Literalism","description":"How literally to interpret information (1=flexible, 5=literal)"},"empathy":{"type":"integer","maximum":5,"minimum":1,"title":"Empathy","description":"How much to consider emotional context (1=detached, 5=empathetic)"}},"type":"object","required":["skepticism","literalism","empathy"],"title":"DispositionTraits","description":"Disposition traits that influence how memories are formed and interpreted.","example":{"empathy":3,"literalism":3,"skepticism":3}},"background":{"type":"string","title":"Background"}},"type":"object","required":["bank_id","name","disposition","background"],"title":"BankProfileResponse","description":"Response model for bank profile.","example":{"background":"I am a software engineer with 10 years of experience in startups","bank_id":"user123","disposition":{"empathy":3,"literalism":3,"skepticism":3},"name":"Alice"}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/delete-document.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Delete a document"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"delete"}
-  path={"/v1/default/banks/{bank_id}/documents/{document_id}"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Delete a document and all its associated memory units and links.
-
-This will cascade delete:
-- The document itself
-- All memory units extracted from this document
-- All links (temporal, semantic, entity) associated with those memory units
-
-This operation cannot be undone.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"document_id","in":"path","required":true,"schema":{"type":"string","title":"Document Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/get-agent-stats.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Get statistics for memory bank"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks/{bank_id}/stats"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Get statistics about nodes and links for a specific agent
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/get-bank-profile.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Get memory bank profile"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks/{bank_id}/profile"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"bank_id":{"type":"string","title":"Bank Id"},"name":{"type":"string","title":"Name"},"disposition":{"properties":{"skepticism":{"type":"integer","maximum":5,"minimum":1,"title":"Skepticism","description":"How skeptical vs trusting (1=trusting, 5=skeptical)"},"literalism":{"type":"integer","maximum":5,"minimum":1,"title":"Literalism","description":"How literally to interpret information (1=flexible, 5=literal)"},"empathy":{"type":"integer","maximum":5,"minimum":1,"title":"Empathy","description":"How much to consider emotional context (1=detached, 5=empathetic)"}},"type":"object","required":["skepticism","literalism","empathy"],"title":"DispositionTraits","description":"Disposition traits that influence how memories are formed and interpreted.","example":{"empathy":3,"literalism":3,"skepticism":3}},"background":{"type":"string","title":"Background"}},"type":"object","required":["bank_id","name","disposition","background"],"title":"BankProfileResponse","description":"Response model for bank profile.","example":{"background":"I am a software engineer with 10 years of experience in startups","bank_id":"user123","disposition":{"empathy":3,"literalism":3,"skepticism":3},"name":"Alice"}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/get-chunk.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Get chunk details"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/chunks/{chunk_id}"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Get a specific chunk by its ID
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"chunk_id","in":"path","required":true,"schema":{"type":"string","title":"Chunk Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"chunk_id":{"type":"string","title":"Chunk Id"},"document_id":{"type":"string","title":"Document Id"},"bank_id":{"type":"string","title":"Bank Id"},"chunk_index":{"type":"integer","title":"Chunk Index"},"chunk_text":{"type":"string","title":"Chunk Text"},"created_at":{"type":"string","title":"Created At"}},"type":"object","required":["chunk_id","document_id","bank_id","chunk_index","chunk_text","created_at"],"title":"ChunkResponse","description":"Response model for get chunk endpoint.","example":{"bank_id":"user123","chunk_id":"user123_session_1_0","chunk_index":0,"chunk_text":"This is the first chunk of the document...","created_at":"2024-01-15T10:30:00Z","document_id":"session_1"}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/get-document.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Get document details"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks/{bank_id}/documents/{document_id}"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Get a specific document including its original text
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"document_id","in":"path","required":true,"schema":{"type":"string","title":"Document Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"id":{"type":"string","title":"Id"},"bank_id":{"type":"string","title":"Bank Id"},"original_text":{"type":"string","title":"Original Text"},"content_hash":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Content Hash"},"created_at":{"type":"string","title":"Created At"},"updated_at":{"type":"string","title":"Updated At"},"memory_unit_count":{"type":"integer","title":"Memory Unit Count"}},"type":"object","required":["id","bank_id","original_text","content_hash","created_at","updated_at","memory_unit_count"],"title":"DocumentResponse","description":"Response model for get document endpoint.","example":{"bank_id":"user123","content_hash":"abc123","created_at":"2024-01-15T10:30:00Z","id":"session_1","memory_unit_count":15,"original_text":"Full document text here...","updated_at":"2024-01-15T10:30:00Z"}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/get-entity.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Get entity details"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks/{bank_id}/entities/{entity_id}"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Get detailed information about an entity including observations (mental model).
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"entity_id","in":"path","required":true,"schema":{"type":"string","title":"Entity Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"id":{"type":"string","title":"Id"},"canonical_name":{"type":"string","title":"Canonical Name"},"mention_count":{"type":"integer","title":"Mention Count"},"first_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"First Seen"},"last_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Last Seen"},"metadata":{"anyOf":[{"additionalProperties":true,"type":"object"},{"type":"null"}],"title":"Metadata"},"observations":{"items":{"properties":{"text":{"type":"string","title":"Text"},"mentioned_at":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Mentioned At"}},"type":"object","required":["text"],"title":"EntityObservationResponse","description":"An observation about an entity."},"type":"array","title":"Observations"}},"type":"object","required":["id","canonical_name","mention_count","observations"],"title":"EntityDetailResponse","description":"Response model for entity detail endpoint.","example":{"canonical_name":"John","first_seen":"2024-01-15T10:30:00Z","id":"123e4567-e89b-12d3-a456-426614174000","last_seen":"2024-02-01T14:00:00Z","mention_count":15,"observations":[{"mentioned_at":"2024-01-15T10:30:00Z","text":"John works at Google"}]}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/get-graph.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Get memory graph data"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks/{bank_id}/graph"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"type","in":"query","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Type"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"nodes":{"items":{"additionalProperties":true,"type":"object"},"type":"array","title":"Nodes"},"edges":{"items":{"additionalProperties":true,"type":"object"},"type":"array","title":"Edges"},"table_rows":{"items":{"additionalProperties":true,"type":"object"},"type":"array","title":"Table Rows"},"total_units":{"type":"integer","title":"Total Units"}},"type":"object","required":["nodes","edges","table_rows","total_units"],"title":"GraphDataResponse","description":"Response model for graph data endpoint.","example":{"edges":[{"from":"1","to":"2","type":"semantic","weight":0.8}],"nodes":[{"id":"1","label":"Alice works at Google","type":"world"},{"id":"2","label":"Bob went hiking","type":"world"}],"table_rows":[{"context":"Work info","date":"2024-01-15 10:30","entities":"Alice (PERSON), Google (ORGANIZATION)","id":"abc12345...","text":"Alice works at Google"}],"total_units":2}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/health-endpoint-health-get.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Health check endpoint"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/health"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Checks the health of the API and database connection
-
-<ParamsDetails
-  parameters={undefined}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/hindsight-http-api.info.mdx
-
-<span
-  className={"theme-doc-version-badge badge badge--secondary"}
-  children={"Version: 1.0.0"}
->
-</span>
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Hindsight HTTP API"}
->
-</Heading>
-
-
-
-HTTP API for Hindsight
-
-<div
-  style={{"display":"flex","flexDirection":"column","marginBottom":"var(--ifm-paragraph-margin-bottom)"}}
->
-  <h3
-    style={{"marginBottom":"0.25rem"}}
-  >
-    Contact
-  </h3><span>
-    Memory System: 
-  </span>
-</div><div
-  style={{"marginBottom":"var(--ifm-paragraph-margin-bottom)"}}
->
-  <h3
-    style={{"marginBottom":"0.25rem"}}
-  >
-    License
-  </h3><a
-    href={"https://www.apache.org/licenses/LICENSE-2.0.html"}
-  >
-    Apache 2.0
-  </a>
-</div>
-      
-
----
-
-
-## File: api-reference/endpoints/list-banks.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"List all memory banks"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Get a list of all agents with their profiles
-
-<ParamsDetails
-  parameters={undefined}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"banks":{"items":{"properties":{"bank_id":{"type":"string","title":"Bank Id"},"name":{"type":"string","title":"Name"},"disposition":{"properties":{"skepticism":{"type":"integer","maximum":5,"minimum":1,"title":"Skepticism","description":"How skeptical vs trusting (1=trusting, 5=skeptical)"},"literalism":{"type":"integer","maximum":5,"minimum":1,"title":"Literalism","description":"How literally to interpret information (1=flexible, 5=literal)"},"empathy":{"type":"integer","maximum":5,"minimum":1,"title":"Empathy","description":"How much to consider emotional context (1=detached, 5=empathetic)"}},"type":"object","required":["skepticism","literalism","empathy"],"title":"DispositionTraits","description":"Disposition traits that influence how memories are formed and interpreted.","example":{"empathy":3,"literalism":3,"skepticism":3}},"background":{"type":"string","title":"Background"},"created_at":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Created At"},"updated_at":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Updated At"}},"type":"object","required":["bank_id","name","disposition","background"],"title":"BankListItem","description":"Bank list item with profile summary."},"type":"array","title":"Banks"}},"type":"object","required":["banks"],"title":"BankListResponse","description":"Response model for listing all banks.","example":{"banks":[{"background":"I am a software engineer","bank_id":"user123","created_at":"2024-01-15T10:30:00Z","disposition":{"empathy":3,"literalism":3,"skepticism":3},"name":"Alice","updated_at":"2024-01-16T14:20:00Z"}]}}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/list-documents.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"List documents"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks/{bank_id}/documents"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-List documents with pagination and optional search. Documents are the source content from which memory units are extracted.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"q","in":"query","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Q"}},{"name":"limit","in":"query","required":false,"schema":{"type":"integer","default":100,"title":"Limit"}},{"name":"offset","in":"query","required":false,"schema":{"type":"integer","default":0,"title":"Offset"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"items":{"items":{"additionalProperties":true,"type":"object"},"type":"array","title":"Items"},"total":{"type":"integer","title":"Total"},"limit":{"type":"integer","title":"Limit"},"offset":{"type":"integer","title":"Offset"}},"type":"object","required":["items","total","limit","offset"],"title":"ListDocumentsResponse","description":"Response model for list documents endpoint.","example":{"items":[{"bank_id":"user123","content_hash":"abc123","created_at":"2024-01-15T10:30:00Z","id":"session_1","memory_unit_count":15,"text_length":5420,"updated_at":"2024-01-15T10:30:00Z"}],"limit":100,"offset":0,"total":50}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/list-entities.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"List entities"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks/{bank_id}/entities"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-List all entities (people, organizations, etc.) known by the bank, ordered by mention count.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"limit","in":"query","required":false,"schema":{"type":"integer","description":"Maximum number of entities to return","default":100,"title":"Limit"},"description":"Maximum number of entities to return"}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"items":{"items":{"properties":{"id":{"type":"string","title":"Id"},"canonical_name":{"type":"string","title":"Canonical Name"},"mention_count":{"type":"integer","title":"Mention Count"},"first_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"First Seen"},"last_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Last Seen"},"metadata":{"anyOf":[{"additionalProperties":true,"type":"object"},{"type":"null"}],"title":"Metadata"}},"type":"object","required":["id","canonical_name","mention_count"],"title":"EntityListItem","description":"Entity list item with summary.","example":{"canonical_name":"John","first_seen":"2024-01-15T10:30:00Z","id":"123e4567-e89b-12d3-a456-426614174000","last_seen":"2024-02-01T14:00:00Z","mention_count":15}},"type":"array","title":"Items"}},"type":"object","required":["items"],"title":"EntityListResponse","description":"Response model for entity list endpoint.","example":{"items":[{"canonical_name":"John","first_seen":"2024-01-15T10:30:00Z","id":"123e4567-e89b-12d3-a456-426614174000","last_seen":"2024-02-01T14:00:00Z","mention_count":15}]}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/list-memories.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"List memory units"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks/{bank_id}/memories/list"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-List memory units with pagination and optional full-text search. Supports filtering by type. Results are sorted by most recent first (mentioned_at DESC, then created_at DESC).
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"type","in":"query","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Type"}},{"name":"q","in":"query","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Q"}},{"name":"limit","in":"query","required":false,"schema":{"type":"integer","default":100,"title":"Limit"}},{"name":"offset","in":"query","required":false,"schema":{"type":"integer","default":0,"title":"Offset"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"items":{"items":{"additionalProperties":true,"type":"object"},"type":"array","title":"Items"},"total":{"type":"integer","title":"Total"},"limit":{"type":"integer","title":"Limit"},"offset":{"type":"integer","title":"Offset"}},"type":"object","required":["items","total","limit","offset"],"title":"ListMemoryUnitsResponse","description":"Response model for list memory units endpoint.","example":{"items":[{"context":"Work conversation","date":"2024-01-15T10:30:00Z","entities":"Alice (PERSON), Google (ORGANIZATION)","id":"550e8400-e29b-41d4-a716-446655440000","text":"Alice works at Google on the AI team","type":"world"}],"limit":100,"offset":0,"total":150}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/list-operations.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"List async operations"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/v1/default/banks/{bank_id}/operations"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/metrics-endpoint-metrics-get.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Prometheus metrics endpoint"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"get"}
-  path={"/metrics"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Exports metrics in Prometheus format for scraping
-
-<ParamsDetails
-  parameters={undefined}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/recall-memories.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Recall memory"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"post"}
-  path={"/v1/default/banks/{bank_id}/memories/recall"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Recall memory using semantic similarity and spreading activation.
-
-    The type parameter is optional and must be one of:
-    - 'world': General knowledge about people, places, events, and things that happen
-    - 'experience': Memories about experience, conversations, actions taken, and tasks performed
-    - 'opinion': The bank's formed beliefs, perspectives, and viewpoints
-
-    Set include_entities=true to get entity observations alongside recall results.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={{"required":true,"content":{"application/json":{"schema":{"properties":{"query":{"type":"string","title":"Query"},"types":{"anyOf":[{"items":{"type":"string"},"type":"array"},{"type":"null"}],"title":"Types","description":"List of fact types to recall (defaults to all if not specified)"},"budget":{"default":"mid","type":"string","enum":["low","mid","high"],"title":"Budget","description":"Budget levels for recall/reflect operations."},"max_tokens":{"type":"integer","title":"Max Tokens","default":4096},"trace":{"type":"boolean","title":"Trace","default":false},"query_timestamp":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Query Timestamp","description":"ISO format date string (e.g., '2023-05-30T23:40:00')"},"include":{"description":"Options for including additional data (entities are included by default)","properties":{"entities":{"anyOf":[{"properties":{"max_tokens":{"type":"integer","title":"Max Tokens","description":"Maximum tokens for entity observations","default":500}},"type":"object","title":"EntityIncludeOptions","description":"Options for including entity observations in recall results."},{"type":"null"}],"description":"Include entity observations. Set to null to disable entity inclusion.","default":{"max_tokens":500}},"chunks":{"anyOf":[{"properties":{"max_tokens":{"type":"integer","title":"Max Tokens","description":"Maximum tokens for chunks (chunks may be truncated)","default":8192}},"type":"object","title":"ChunkIncludeOptions","description":"Options for including chunks in recall results."},{"type":"null"}],"description":"Include raw chunks. Set to {} to enable, null to disable (default: disabled)."}},"type":"object","title":"IncludeOptions"}},"type":"object","required":["query"],"title":"RecallRequest","description":"Request model for recall endpoint.","example":{"budget":"mid","include":{"entities":{"max_tokens":500}},"max_tokens":4096,"query":"What did Alice say about machine learning?","query_timestamp":"2023-05-30T23:40:00","trace":true,"types":["world","experience"]}}}}}}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"results":{"items":{"properties":{"id":{"type":"string","title":"Id"},"text":{"type":"string","title":"Text"},"type":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Type"},"entities":{"anyOf":[{"items":{"type":"string"},"type":"array"},{"type":"null"}],"title":"Entities"},"context":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Context"},"occurred_start":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Occurred Start"},"occurred_end":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Occurred End"},"mentioned_at":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Mentioned At"},"document_id":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Document Id"},"metadata":{"anyOf":[{"additionalProperties":{"type":"string"},"type":"object"},{"type":"null"}],"title":"Metadata"},"chunk_id":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Chunk Id"}},"type":"object","required":["id","text"],"title":"RecallResult","description":"Single recall result item.","example":{"chunk_id":"456e7890-e12b-34d5-a678-901234567890","context":"work info","document_id":"session_abc123","entities":["Alice","Google"],"id":"123e4567-e89b-12d3-a456-426614174000","mentioned_at":"2024-01-15T10:30:00Z","metadata":{"source":"slack"},"occurred_end":"2024-01-15T10:30:00Z","occurred_start":"2024-01-15T10:30:00Z","text":"Alice works at Google on the AI team","type":"world"}},"type":"array","title":"Results"},"trace":{"anyOf":[{"additionalProperties":true,"type":"object"},{"type":"null"}],"title":"Trace"},"entities":{"anyOf":[{"additionalProperties":{"properties":{"entity_id":{"type":"string","title":"Entity Id"},"canonical_name":{"type":"string","title":"Canonical Name"},"observations":{"items":{"properties":{"text":{"type":"string","title":"Text"},"mentioned_at":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Mentioned At"}},"type":"object","required":["text"],"title":"EntityObservationResponse","description":"An observation about an entity."},"type":"array","title":"Observations"}},"type":"object","required":["entity_id","canonical_name","observations"],"title":"EntityStateResponse","description":"Current mental model of an entity."},"type":"object"},{"type":"null"}],"title":"Entities","description":"Entity states for entities mentioned in results"},"chunks":{"anyOf":[{"additionalProperties":{"properties":{"id":{"type":"string","title":"Id"},"text":{"type":"string","title":"Text"},"chunk_index":{"type":"integer","title":"Chunk Index"},"truncated":{"type":"boolean","title":"Truncated","description":"Whether the chunk text was truncated due to token limits","default":false}},"type":"object","required":["id","text","chunk_index"],"title":"ChunkData","description":"Chunk data for a single chunk."},"type":"object"},{"type":"null"}],"title":"Chunks","description":"Chunks for facts, keyed by chunk_id"}},"type":"object","required":["results"],"title":"RecallResponse","description":"Response model for recall endpoints.","example":{"chunks":{"456e7890-e12b-34d5-a678-901234567890":{"chunk_index":0,"id":"456e7890-e12b-34d5-a678-901234567890","text":"Alice works at Google on the AI team. She's been there for 3 years..."}},"entities":{"Alice":{"canonical_name":"Alice","entity_id":"123e4567-e89b-12d3-a456-426614174001","observations":[{"mentioned_at":"2024-01-15T10:30:00Z","text":"Alice works at Google on the AI team"}]}},"results":[{"chunk_id":"456e7890-e12b-34d5-a678-901234567890","context":"work info","entities":["Alice","Google"],"id":"123e4567-e89b-12d3-a456-426614174000","occurred_end":"2024-01-15T10:30:00Z","occurred_start":"2024-01-15T10:30:00Z","text":"Alice works at Google on the AI team","type":"world"}],"trace":{"num_results":1,"query":"What did Alice say about machine learning?","time_seconds":0.123}}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/reflect.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Reflect and generate answer"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"post"}
-  path={"/v1/default/banks/{bank_id}/reflect"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Reflect and formulate an answer using bank identity, world facts, and opinions.
-
-    This endpoint:
-    1. Retrieves experience (conversations and events)
-    2. Retrieves world facts relevant to the query
-    3. Retrieves existing opinions (bank's perspectives)
-    4. Uses LLM to formulate a contextual answer
-    5. Extracts and stores any new opinions formed
-    6. Returns plain text answer, the facts used, and new opinions
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={{"required":true,"content":{"application/json":{"schema":{"properties":{"query":{"type":"string","title":"Query"},"budget":{"default":"low","type":"string","enum":["low","mid","high"],"title":"Budget","description":"Budget levels for recall/reflect operations."},"context":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Context"},"include":{"description":"Options for including additional data (disabled by default)","properties":{"facts":{"anyOf":[{"properties":{},"type":"object","title":"FactsIncludeOptions","description":"Options for including facts (based_on) in reflect results."},{"type":"null"}],"description":"Include facts that the answer is based on. Set to {} to enable, null to disable (default: disabled)."}},"type":"object","title":"ReflectIncludeOptions"}},"type":"object","required":["query"],"title":"ReflectRequest","description":"Request model for reflect endpoint.","example":{"budget":"low","context":"This is for a research paper on AI ethics","include":{"facts":{}},"query":"What do you think about artificial intelligence?"}}}}}}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"text":{"type":"string","title":"Text"},"based_on":{"items":{"properties":{"id":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Id"},"text":{"type":"string","title":"Text"},"type":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Type"},"context":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Context"},"occurred_start":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Occurred Start"},"occurred_end":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Occurred End"}},"type":"object","required":["text"],"title":"ReflectFact","description":"A fact used in think response.","example":{"context":"healthcare discussion","id":"123e4567-e89b-12d3-a456-426614174000","occurred_end":"2024-01-15T10:30:00Z","occurred_start":"2024-01-15T10:30:00Z","text":"AI is used in healthcare","type":"world"}},"type":"array","title":"Based On","default":[]}},"type":"object","required":["text"],"title":"ReflectResponse","description":"Response model for think endpoint.","example":{"based_on":[{"id":"123","text":"AI is used in healthcare","type":"world"},{"id":"456","text":"I discussed AI applications last week","type":"experience"}],"text":"Based on my understanding, AI is a transformative technology..."}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/regenerate-entity-observations.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Regenerate entity observations"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"post"}
-  path={"/v1/default/banks/{bank_id}/entities/{entity_id}/regenerate"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Regenerate observations for an entity based on all facts mentioning it.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}},{"name":"entity_id","in":"path","required":true,"schema":{"type":"string","title":"Entity Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={undefined}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"id":{"type":"string","title":"Id"},"canonical_name":{"type":"string","title":"Canonical Name"},"mention_count":{"type":"integer","title":"Mention Count"},"first_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"First Seen"},"last_seen":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Last Seen"},"metadata":{"anyOf":[{"additionalProperties":true,"type":"object"},{"type":"null"}],"title":"Metadata"},"observations":{"items":{"properties":{"text":{"type":"string","title":"Text"},"mentioned_at":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Mentioned At"}},"type":"object","required":["text"],"title":"EntityObservationResponse","description":"An observation about an entity."},"type":"array","title":"Observations"}},"type":"object","required":["id","canonical_name","mention_count","observations"],"title":"EntityDetailResponse","description":"Response model for entity detail endpoint.","example":{"canonical_name":"John","first_seen":"2024-01-15T10:30:00Z","id":"123e4567-e89b-12d3-a456-426614174000","last_seen":"2024-02-01T14:00:00Z","mention_count":15,"observations":[{"mentioned_at":"2024-01-15T10:30:00Z","text":"John works at Google"}]}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/retain-memories.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Retain memories"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"post"}
-  path={"/v1/default/banks/{bank_id}/memories"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Retain memory items with automatic fact extraction.
-
-    This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing
-    via the async parameter.
-
-    Features:
-    - Efficient batch processing
-    - Automatic fact extraction from natural language
-    - Entity recognition and linking
-    - Document tracking with automatic upsert (when document_id is provided on items)
-    - Temporal and semantic linking
-    - Optional asynchronous processing
-
-    The system automatically:
-    1. Extracts semantic facts from the content
-    2. Generates embeddings
-    3. Deduplicates similar facts
-    4. Creates temporal, semantic, and entity links
-    5. Tracks document metadata
-
-    When async=true:
-    - Returns immediately after queuing the task
-    - Processing happens in the background
-    - Use the operations endpoint to monitor progress
-
-    When async=false (default):
-    - Waits for processing to complete
-    - Returns after all memories are stored
-
-    Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={{"required":true,"content":{"application/json":{"schema":{"properties":{"items":{"items":{"properties":{"content":{"type":"string","title":"Content"},"timestamp":{"anyOf":[{"type":"string","format":"date-time"},{"type":"null"}],"title":"Timestamp"},"context":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Context"},"metadata":{"anyOf":[{"additionalProperties":{"type":"string"},"type":"object"},{"type":"null"}],"title":"Metadata"},"document_id":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Document Id","description":"Optional document ID for this memory item."}},"type":"object","required":["content"],"title":"MemoryItem","description":"Single memory item for retain.","example":{"content":"Alice mentioned she's working on a new ML model","context":"team meeting","document_id":"meeting_notes_2024_01_15","metadata":{"channel":"engineering","source":"slack"},"timestamp":"2024-01-15T10:30:00Z"}},"type":"array","title":"Items"},"async":{"type":"boolean","title":"Async","description":"If true, process asynchronously in background. If false, wait for completion (default: false)","default":false}},"type":"object","required":["items"],"title":"RetainRequest","description":"Request model for retain endpoint.","example":{"async":false,"items":[{"content":"Alice works at Google","context":"work","document_id":"conversation_123"},{"content":"Bob went hiking yesterday","document_id":"conversation_123","timestamp":"2024-01-15T10:00:00Z"}]}}}}}}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"success":{"type":"boolean","title":"Success"},"bank_id":{"type":"string","title":"Bank Id"},"items_count":{"type":"integer","title":"Items Count"},"async":{"type":"boolean","title":"Async","description":"Whether the operation was processed asynchronously"}},"type":"object","required":["success","bank_id","items_count","async"],"title":"RetainResponse","description":"Response model for retain endpoint.","example":{"async":false,"bank_id":"user123","items_count":2,"success":true}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/endpoints/update-bank-disposition.api.mdx
-
-<Heading
-  as={"h1"}
-  className={"openapi__heading"}
-  children={"Update memory bank disposition"}
->
-</Heading>
-
-<MethodEndpoint
-  method={"put"}
-  path={"/v1/default/banks/{bank_id}/profile"}
-  context={"endpoint"}
->
-  
-</MethodEndpoint>
-
-
-
-Update bank's disposition traits (skepticism, literalism, empathy)
-
-<Heading
-  id={"request"}
-  as={"h2"}
-  className={"openapi-tabs__heading"}
-  children={"Request"}
->
-</Heading>
-
-<ParamsDetails
-  parameters={[{"name":"bank_id","in":"path","required":true,"schema":{"type":"string","title":"Bank Id"}}]}
->
-  
-</ParamsDetails>
-
-<RequestSchema
-  title={"Body"}
-  body={{"required":true,"content":{"application/json":{"schema":{"properties":{"disposition":{"properties":{"skepticism":{"type":"integer","maximum":5,"minimum":1,"title":"Skepticism","description":"How skeptical vs trusting (1=trusting, 5=skeptical)"},"literalism":{"type":"integer","maximum":5,"minimum":1,"title":"Literalism","description":"How literally to interpret information (1=flexible, 5=literal)"},"empathy":{"type":"integer","maximum":5,"minimum":1,"title":"Empathy","description":"How much to consider emotional context (1=detached, 5=empathetic)"}},"type":"object","required":["skepticism","literalism","empathy"],"title":"DispositionTraits","description":"Disposition traits that influence how memories are formed and interpreted.","example":{"empathy":3,"literalism":3,"skepticism":3}}},"type":"object","required":["disposition"],"title":"UpdateDispositionRequest","description":"Request model for updating disposition traits."}}}}}
->
-  
-</RequestSchema>
-
-<StatusCodes
-  id={undefined}
-  label={undefined}
-  responses={{"200":{"description":"Successful Response","content":{"application/json":{"schema":{"properties":{"bank_id":{"type":"string","title":"Bank Id"},"name":{"type":"string","title":"Name"},"disposition":{"properties":{"skepticism":{"type":"integer","maximum":5,"minimum":1,"title":"Skepticism","description":"How skeptical vs trusting (1=trusting, 5=skeptical)"},"literalism":{"type":"integer","maximum":5,"minimum":1,"title":"Literalism","description":"How literally to interpret information (1=flexible, 5=literal)"},"empathy":{"type":"integer","maximum":5,"minimum":1,"title":"Empathy","description":"How much to consider emotional context (1=detached, 5=empathetic)"}},"type":"object","required":["skepticism","literalism","empathy"],"title":"DispositionTraits","description":"Disposition traits that influence how memories are formed and interpreted.","example":{"empathy":3,"literalism":3,"skepticism":3}},"background":{"type":"string","title":"Background"}},"type":"object","required":["bank_id","name","disposition","background"],"title":"BankProfileResponse","description":"Response model for bank profile.","example":{"background":"I am a software engineer with 10 years of experience in startups","bank_id":"user123","disposition":{"empathy":3,"literalism":3,"skepticism":3},"name":"Alice"}}}}},"422":{"description":"Validation Error","content":{"application/json":{"schema":{"properties":{"detail":{"items":{"properties":{"loc":{"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array","title":"Location"},"msg":{"type":"string","title":"Message"},"type":{"type":"string","title":"Error Type"}},"type":"object","required":["loc","msg","type"],"title":"ValidationError"},"type":"array","title":"Detail"}},"type":"object","title":"HTTPValidationError"}}}}}}
->
-  
-</StatusCodes>
-
-
-      
-
----
-
-
-## File: api-reference/index.md
-
-# API Reference
-
-Complete reference for Hindsight's HTTP and MCP APIs.
-
-## HTTP API
-
-The HTTP API reference is automatically generated from our OpenAPI specification. Browse the endpoints in the sidebar to see request/response details, parameters, and examples.
-
-**Base URL:** `http://localhost:8888`
-
-| Category | Endpoints |
-|----------|-----------|
-| **Memory Operations** | Store, search, list, delete memories |
-| **Reasoning** | Think and generate personality-aware responses |
-| **Memory bank Management** | Create, update, list memory banks and profiles |
-| **Documents** | Manage document groupings |
-| **Visualization** | Get entity graph data |
-
-## MCP API
-
-The MCP (Model Context Protocol) API exposes Hindsight tools for AI assistants like Claude Desktop.
-
-| Tool | Description |
-|------|-------------|
-| `hindsight_search` | Search memories |
-| `hindsight_think` | Generate personality-aware response |
-| `hindsight_store` | Store new memory |
-| `hindsight_agents` | List available memory banks |
-
-[MCP Tools Reference →](/api-reference/mcp)
-
-## OpenAPI / Swagger
-
-Interactive API documentation available when the server is running:
-
-- **Swagger UI:** [http://localhost:8888/docs](http://localhost:8888/docs)
-- **OpenAPI JSON:** [http://localhost:8888/openapi.json](http://localhost:8888/openapi.json)
-
-
----
-
-
-## File: api-reference/mcp.md
-
-# MCP API
-
-Model Context Protocol (MCP) tools exposed by the Hindsight MCP server.
-
-## Endpoint
-
-```
-/mcp/{bank_id}/sse
-```
-
-The `bank_id` is extracted from the URL path and used for all tool operations. The MCP server uses Server-Sent Events (SSE) transport.
-
-## Available Tools
-
-### retain
-
-Store a new memory.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `content` | string | yes | Memory content to store |
-| `context` | string | no | Category for the memory (default: 'general') |
-
-**Example:**
-
-```json
-{
-  "name": "retain",
-  "arguments": {
-    "content": "User prefers Python for data analysis",
-    "context": "preferences"
-  }
-}
-```
-
-**Response:**
-
-```
-Memory stored successfully
-```
-
----
-
-### recall
-
-Search memories.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | yes | Natural language search query |
-| `max_results` | integer | no | Maximum results to return (default: 10) |
-
-**Example:**
-
-```json
-{
-  "name": "recall",
-  "arguments": {
-    "query": "What does the user do for work?"
-  }
-}
-```
-
-**Response:**
-
-```json
-{
-  "results": [
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
-      "text": "User works at Google as a software engineer",
-      "type": "world",
-      "context": "work",
-      "event_date": null
-    }
-  ]
-}
-```
-
----
-
-## Usage Guidelines
-
-**When to use `retain`:**
-- User shares personal facts, preferences, or interests
-- Important events or milestones are mentioned
-- Decisions, opinions, or goals are stated
-
-**When to use `recall`:**
-- Start of conversation to get user context
-- Before making recommendations
-- To provide continuity across conversations
-
-
----
-
-
 ## File: changelog/index.md
 
 # Changelog
@@ -6615,7 +5052,7 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 
 ## What Are Opinions?
 
-Opinions are beliefs formed by the memory bank based on evidence and personality. Unlike world facts (objective information received) or experience (conversations and events), opinions are **judgments** with confidence scores.
+Opinions are beliefs formed by the memory bank based on evidence and disposition. Unlike world facts (objective information received) or experience (conversations and events), opinions are **judgments** with confidence scores.
 
 | Type | Example | Confidence |
 |------|---------|------------|
@@ -6625,16 +5062,16 @@ Opinions are beliefs formed by the memory bank based on evidence and personality
 
 ## How Opinions Form
 
-Opinions are created during `think` operations when the memory bank:
+Opinions are created during `reflect` operations when the memory bank:
 1. Retrieves relevant facts
-2. Applies personality traits
+2. Applies disposition traits
 3. Forms a judgment
 4. Assigns a confidence score
 
 ```mermaid
 graph LR
-    F[Facts] --> P[Personality Filter]
-    P --> J[Judgment]
+    F[Facts] --> D[Disposition Filter]
+    D --> J[Judgment]
     J --> O[Opinion + Confidence]
     O --> S[(Store)]
 ```
@@ -6644,13 +5081,13 @@ graph LR
 
 ```python
 # Ask a question that might form an opinion
-answer = client.think(
-    agent_id="my-agent",
+answer = client.reflect(
+    bank_id="my-bank",
     query="What do you think about functional programming?"
 )
 
 # Check if new opinions were formed
-for opinion in answer["new_opinions"]:
+for opinion in answer.get("new_opinions", []):
     print(f"New opinion: {opinion['text']}")
     print(f"Confidence: {opinion['confidence']}")
 ```
@@ -6665,10 +5102,10 @@ for opinion in answer["new_opinions"]:
 
 ```python
 # Search only opinions
-opinions = client.search_memories(
-    agent_id="my-agent",
+opinions = client.recall(
+    bank_id="my-bank",
     query="programming languages",
-    fact_type=["opinion"]
+    types=["opinion"]
 )
 
 for op in opinions:
@@ -6679,7 +5116,7 @@ for op in opinions:
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory search my-agent "programming" --fact-type opinion
+hindsight recall my-bank "programming" --types opinion
 ```
 
 </TabItem>
@@ -6707,23 +5144,23 @@ t=2: "Python is best for data science, though Julia is faster" (0.75)
 t=3: "Python is best for data science" (0.82)
 ```
 
-## Personality Influence
+## Disposition Influence
 
-Different personalities form different opinions from the same facts:
+Different dispositions form different opinions from the same facts:
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-# Create two memory banks with different personalities
-client.create_agent(
-    agent_id="open-minded",
-    personality={"openness": 0.9, "conscientiousness": 0.3, "bias_strength": 0.7}
+# Create two memory banks with different dispositions
+client.create_bank(
+    bank_id="open-minded",
+    disposition={"skepticism": 2, "literalism": 2, "empathy": 4}
 )
 
-client.create_agent(
-    agent_id="conservative",
-    personality={"openness": 0.2, "conscientiousness": 0.9, "bias_strength": 0.7}
+client.create_bank(
+    bank_id="conservative",
+    disposition={"skepticism": 5, "literalism": 5, "empathy": 2}
 )
 
 # Store the same facts to both
@@ -6733,59 +5170,35 @@ facts = [
     "Rust compile times are longer than C++"
 ]
 for fact in facts:
-    client.store(agent_id="open-minded", content=fact)
-    client.store(agent_id="conservative", content=fact)
+    client.retain(bank_id="open-minded", content=fact)
+    client.retain(bank_id="conservative", content=fact)
 
 # Ask both the same question
 q = "Should we rewrite our C++ codebase in Rust?"
 
-answer1 = client.think(agent_id="open-minded", query=q)
+answer1 = client.reflect(bank_id="open-minded", query=q)
 # Likely: "Yes, Rust's safety benefits outweigh migration costs"
 
-answer2 = client.think(agent_id="conservative", query=q)
+answer2 = client.reflect(bank_id="conservative", query=q)
 # Likely: "No, C++'s ecosystem and our team's expertise make it the safer choice"
 ```
 
 </TabItem>
 </Tabs>
 
-## Bias Strength
+## Opinions in Reflect Responses
 
-The `bias_strength` parameter (0-1) controls how much personality influences opinions:
-
-| Value | Behavior |
-|-------|----------|
-| 0.0 | Pure evidence-based reasoning |
-| 0.5 | Balanced personality + evidence |
-| 1.0 | Strongly personality-driven |
+When `reflect` uses opinions, they appear in `based_on`:
 
 ```python
-# Evidence-focused agent
-client.create_agent(
-    agent_id="analyst",
-    personality={"bias_strength": 0.2}  # Low bias
-)
-
-# Personality-driven agent
-client.create_agent(
-    agent_id="advisor",
-    personality={"bias_strength": 0.8}  # High bias
-)
-```
-
-## Opinions in Think Responses
-
-When `think` uses opinions, they appear in `based_on`:
-
-```python
-answer = client.think(agent_id="my-agent", query="What language should I learn?")
+answer = client.reflect(bank_id="my-bank", query="What language should I learn?")
 
 print("World facts used:")
-for f in answer["based_on"]["world"]:
+for f in answer.based_on.get("world", []):
     print(f"  {f['text']}")
 
 print("\nOpinions used:")
-for o in answer["based_on"]["opinion"]:
+for o in answer.based_on.get("opinion", []):
     print(f"  {o['text']} (confidence: {o['confidence_score']})")
 ```
 
@@ -6823,7 +5236,7 @@ When to use `search` vs `think`.
 | **LLM calls** | 0 (retrieval only) | 1+ (generation) |
 | **Speed** | Fast (~100-200ms) | Slower (~500-2000ms) |
 | **Opinions** | Returns existing | Can form new ones |
-| **Personality** | Not applied | Applied to response |
+| **Disposition** | Not applied | Applied to response |
 
 ## When to Use Search
 
@@ -6862,13 +5275,13 @@ results = client.search(agent_id="my-agent", query="What do I know about Bob?")
 **Use Think when you need:**
 
 - A natural language response
-- Personality-aware answers
+- Disposition-aware answers
 - Opinion formation
 - Reasoning over multiple facts
 - Source attribution
 
 ```python
-# Get a complete answer with personality
+# Get a complete answer with disposition
 answer = client.think(agent_id="my-agent", query="What should I recommend to Alice?")
 print(answer["text"])  # Natural language response
 print(answer["based_on"])  # Sources used
@@ -6886,7 +5299,7 @@ answer = client.think(agent_id="my-agent", query="How are Alice and Bob connecte
 # Opinion — agent forms a view
 answer = client.think(agent_id="my-agent", query="What do you think about Python?")
 
-# Recommendation — personality-influenced
+# Recommendation — disposition-influenced
 answer = client.think(agent_id="my-agent", query="What book should I read next?")
 ```
 
@@ -6903,7 +5316,7 @@ graph LR
     subgraph Think
         T1[Query] --> T2[4-way Retrieval]
         T2 --> T3[RRF + Rerank]
-        T3 --> T4[Load Personality]
+        T3 --> T4[Load Disposition]
         T4 --> T5[LLM Generation]
         T5 --> T6[Store Opinions]
         T6 --> T7[Response]
@@ -6939,7 +5352,7 @@ else:
 graph TD
     A[Need memory access] --> B{Need natural language response?}
     B -->|No| C[Use Search]
-    B -->|Yes| D{Need personality/opinions?}
+    B -->|Yes| D{Need disposition/opinions?}
     D -->|No| E{Building context for another LLM?}
     E -->|Yes| C
     E -->|No| F[Use Think]
@@ -7311,7 +5724,7 @@ Hindsight's performance is optimized across three key operations:
 
 - **Retain (Ingestion)**: Batch processing with async operations for large-scale memory storage
 - **Recall (Search)**: Sub-second semantic search with configurable thinking budgets
-- **Reflect (Reasoning)**: Personality-aware answer generation with controllable compute
+- **Reflect (Reasoning)**: Disposition-aware answer generation with controllable compute
 
 ## Design Philosophy: Optimized for Fast Reads
 

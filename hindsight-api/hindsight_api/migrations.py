@@ -88,11 +88,11 @@ def run_migrations(database_url: str, script_location: Optional[str] = None) -> 
     try:
         # Determine script location
         if script_location is None:
-            # Default: use the alembic directory in the hindsight_api package
-            # This file is in: hindsight-api/hindsight_api/migrations.py
-            # Default location is: hindsight-api/alembic
-            package_root = Path(__file__).parent.parent
-            script_location = str(package_root / "alembic")
+            # Default: use the alembic directory inside the hindsight_api package
+            # This file is in: hindsight_api/migrations.py
+            # Alembic is in: hindsight_api/alembic/
+            package_dir = Path(__file__).parent
+            script_location = str(package_dir / "alembic")
 
         script_path = Path(script_location)
         if not script_path.exists():
@@ -162,8 +162,8 @@ def check_migration_status(database_url: Optional[str] = None, script_location: 
 
         # Get head revision from migration scripts
         if script_location is None:
-            package_root = Path(__file__).parent.parent
-            script_location = str(package_root / "alembic")
+            package_dir = Path(__file__).parent
+            script_location = str(package_dir / "alembic")
 
         script_path = Path(script_location)
         if not script_path.exists():

@@ -4,8 +4,8 @@ sidebar_position: 6
 
 # Memory Bank
 
-Configure memory bank personality, background, and behavior.
-Memory banks have charateristics:
+Configure memory bank disposition, background, and behavior.
+Memory banks have characteristics:
 - Banks are completely isolated from each other.
 - You don't need to pre-create it, Hindsight will create it for you with default settings.
 - Banks have a profile that influences how they form opinions from memories. (optional)
@@ -31,13 +31,10 @@ client.create_bank(
     bank_id="my-bank",
     name="Research Assistant",
     background="I am a research assistant specializing in machine learning",
-    personality={
-        "openness": 0.8,
-        "conscientiousness": 0.7,
-        "extraversion": 0.5,
-        "agreeableness": 0.6,
-        "neuroticism": 0.3,
-        "bias_strength": 0.5
+    disposition={
+        "skepticism": 4,   # Questions claims, wants evidence
+        "literalism": 3,   # Balanced interpretation
+        "empathy": 3       # Balanced emotional consideration
     }
 )
 ```
@@ -53,13 +50,10 @@ const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 await client.createBank('my-bank', {
     name: 'Research Assistant',
     background: 'I am a research assistant specializing in machine learning',
-    personality: {
-        openness: 0.8,
-        conscientiousness: 0.7,
-        extraversion: 0.5,
-        agreeableness: 0.6,
-        neuroticism: 0.3,
-        bias_strength: 0.5
+    disposition: {
+        skepticism: 4,
+        literalism: 3,
+        empathy: 3
     }
 });
 ```
@@ -69,83 +63,58 @@ await client.createBank('my-bank', {
 
 ```bash
 # Set background
-hindsight agent background my-bank "I am a research assistant specializing in ML"
+hindsight bank background my-bank "I am a research assistant specializing in ML"
 
-# Set personality
-hindsight agent personality my-bank \
-    --openness 0.8 \
-    --conscientiousness 0.7 \
-    --extraversion 0.5 \
-    --agreeableness 0.6 \
-    --neuroticism 0.3 \
-    --bias-strength 0.5
+# Set disposition
+hindsight bank disposition my-bank \
+    --skepticism 4 \
+    --literalism 3 \
+    --empathy 3
 ```
 
 </TabItem>
 </Tabs>
 
-## Personality Traits (Big Five)
+## Disposition Traits
 
-Each trait is scored 0.0 to 1.0:
+Each trait is scored 1 to 5:
 
-| Trait | Low (0.0) | High (1.0) |
-|-------|-----------|------------|
-| **Openness** | Conventional, prefers proven methods | Curious, embraces new ideas |
-| **Conscientiousness** | Flexible, spontaneous | Organized, systematic |
-| **Extraversion** | Reserved, independent | Outgoing, collaborative |
-| **Agreeableness** | Direct, analytical | Cooperative, diplomatic |
-| **Neuroticism** | Calm, optimistic | Risk-aware, cautious |
+| Trait | Low (1) | High (5) |
+|-------|---------|----------|
+| **Skepticism** | Trusting, accepts information at face value | Skeptical, questions and doubts claims |
+| **Literalism** | Flexible interpretation, reads between the lines | Literal interpretation, takes things exactly as stated |
+| **Empathy** | Detached, focuses on facts and logic | Empathetic, considers emotional context |
 
 ### How Traits Affect Behavior
 
-**Openness** influences how the bank weighs new vs. established ideas:
+**Skepticism** influences how the bank evaluates claims:
 
 ```python
-# High openness bank
-"Let's try this new framework—it looks promising!"
+# High skepticism (5)
+"What's the source for this? Have these results been replicated?"
 
-# Low openness bank
-"Let's stick with the proven solution we know works."
+# Low skepticism (1)
+"That sounds reasonable, let's proceed with that assumption."
 ```
 
-**Conscientiousness** affects structure and thoroughness:
+**Literalism** affects interpretation:
 
 ```python
-# High conscientiousness bank
-"Here's a detailed, step-by-step analysis..."
+# High literalism (5)
+"The requirement says 'users' - that means all users, no exceptions."
 
-# Low conscientiousness bank
-"Quick take: this should work, let's try it."
+# Low literalism (1)
+"When they say 'users', they probably mean active users in this context."
 ```
 
-**Extraversion** shapes collaboration preferences:
+**Empathy** shapes how emotional context is considered:
 
 ```python
-# High extraversion bank
-"We should get the team together to discuss this."
+# High empathy (5)
+"I understand this is frustrating. Let's find a solution that works for you."
 
-# Low extraversion bank
-"I'll analyze this independently and share my findings."
-```
-
-**Agreeableness** affects how disagreements are handled:
-
-```python
-# High agreeableness bank
-"That's a valid point. Perhaps we can find a middle ground..."
-
-# Low agreeableness bank
-"Actually, the data doesn't support that conclusion."
-```
-
-**Neuroticism** influences risk assessment:
-
-```python
-# High neuroticism bank
-"We should consider what could go wrong here..."
-
-# Low neuroticism bank
-"The risks seem manageable, let's proceed."
+# Low empathy (1)
+"Here are the facts: Option A has 20% better performance than Option B."
 ```
 
 ## Background
@@ -201,7 +170,7 @@ profile = api.get_bank_profile("my-bank")
 
 print(f"Name: {profile.name}")
 print(f"Background: {profile.background}")
-print(f"Personality: {profile.personality}")
+print(f"Disposition: {profile.disposition}")
 ```
 
 </TabItem>
@@ -212,14 +181,14 @@ const profile = await client.getBankProfile('my-bank');
 
 console.log(`Name: ${profile.name}`);
 console.log(`Background: ${profile.background}`);
-console.log(`Personality:`, profile.personality);
+console.log(`Disposition:`, profile.disposition);
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight agent profile my-bank
+hindsight bank profile my-bank
 ```
 
 </TabItem>
@@ -231,28 +200,25 @@ If not specified, banks use neutral defaults:
 
 ```python
 {
-    "openness": 0.5,
-    "conscientiousness": 0.5,
-    "extraversion": 0.5,
-    "agreeableness": 0.5,
-    "neuroticism": 0.5,
-    "bias_strength": 0.5,
+    "skepticism": 3,
+    "literalism": 3,
+    "empathy": 3,
     "background": ""
 }
 ```
 
-## Personality Templates
+## Disposition Templates
 
-Common personality configurations:
+Common disposition configurations:
 
-| Use Case | O | C | E | A | N | Bias |
-|----------|---|---|---|---|---|------|
-| **Customer Support** | 0.5 | 0.7 | 0.6 | 0.9 | 0.3 | 0.4 |
-| **Code Reviewer** | 0.4 | 0.9 | 0.3 | 0.4 | 0.5 | 0.6 |
-| **Creative Writer** | 0.9 | 0.4 | 0.7 | 0.6 | 0.5 | 0.7 |
-| **Risk Analyst** | 0.3 | 0.9 | 0.3 | 0.4 | 0.8 | 0.6 |
-| **Research Assistant** | 0.8 | 0.8 | 0.4 | 0.5 | 0.4 | 0.5 |
-| **Neutral (default)** | 0.5 | 0.5 | 0.5 | 0.5 | 0.5 | 0.5 |
+| Use Case | Skepticism | Literalism | Empathy |
+|----------|------------|------------|---------|
+| **Customer Support** | 2 | 2 | 5 |
+| **Code Reviewer** | 4 | 5 | 2 |
+| **Legal Analyst** | 5 | 5 | 2 |
+| **Therapist/Coach** | 2 | 2 | 5 |
+| **Research Assistant** | 4 | 3 | 3 |
+| **Neutral (default)** | 3 | 3 | 3 |
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -262,13 +228,10 @@ Common personality configurations:
 client.create_bank(
     bank_id="support",
     background="I am a friendly customer support agent",
-    personality={
-        "openness": 0.5,
-        "conscientiousness": 0.7,
-        "extraversion": 0.6,
-        "agreeableness": 0.9,  # Very diplomatic
-        "neuroticism": 0.3,    # Calm under pressure
-        "bias_strength": 0.4
+    disposition={
+        "skepticism": 2,   # Trusting
+        "literalism": 2,   # Flexible interpretation
+        "empathy": 5       # Very empathetic
     }
 )
 
@@ -276,13 +239,10 @@ client.create_bank(
 client.create_bank(
     bank_id="reviewer",
     background="I am a thorough code reviewer focused on quality",
-    personality={
-        "openness": 0.4,       # Prefers proven patterns
-        "conscientiousness": 0.9,  # Very thorough
-        "extraversion": 0.3,
-        "agreeableness": 0.4,  # Direct feedback
-        "neuroticism": 0.5,
-        "bias_strength": 0.6
+    disposition={
+        "skepticism": 4,   # Questions assumptions
+        "literalism": 5,   # Exact interpretation
+        "empathy": 2       # Direct, fact-focused
     }
 )
 ```
@@ -294,26 +254,20 @@ client.create_bank(
 // Customer support bank
 await client.createBank('support', {
     background: 'I am a friendly customer support agent',
-    personality: {
-        openness: 0.5,
-        conscientiousness: 0.7,
-        extraversion: 0.6,
-        agreeableness: 0.9,
-        neuroticism: 0.3,
-        bias_strength: 0.4
+    disposition: {
+        skepticism: 2,
+        literalism: 2,
+        empathy: 5
     }
 });
 
 // Code reviewer bank
 await client.createBank('reviewer', {
     background: 'I am a thorough code reviewer focused on quality',
-    personality: {
-        openness: 0.4,
-        conscientiousness: 0.9,
-        extraversion: 0.3,
-        agreeableness: 0.4,
-        neuroticism: 0.5,
-        bias_strength: 0.6
+    disposition: {
+        skepticism: 4,
+        literalism: 5,
+        empathy: 2
     }
 });
 ```
@@ -325,7 +279,7 @@ await client.createBank('reviewer', {
 
 Each bank has:
 - **Separate memories** — banks don't share memories
-- **Own personality** — traits are per-bank
+- **Own disposition** — traits are per-bank
 - **Independent opinions** — formed from their own experiences
 
 <Tabs>

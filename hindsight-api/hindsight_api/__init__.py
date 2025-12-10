@@ -19,9 +19,12 @@ from .engine.search.tracer import SearchTracer
 from .engine.embeddings import Embeddings, LocalSTEmbeddings, RemoteTEIEmbeddings
 from .engine.cross_encoder import CrossEncoderModel, LocalSTCrossEncoder, RemoteTEICrossEncoder
 from .engine.llm_wrapper import LLMConfig
+from .config import HindsightConfig, get_config
 
 __all__ = [
     "MemoryEngine",
+    "HindsightConfig",
+    "get_config",
     "SearchTrace",
     "SearchTracer",
     "QueryInfo",

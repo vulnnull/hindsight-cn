@@ -258,6 +258,6 @@ await sdk.regenerateEntityObservations({
 
 ## Next Steps
 
-- [**Memory Banks**](./memory-banks) — Configure bank personality
+- [**Memory Banks**](./memory-banks) — Configure bank disposition
 - [**Documents**](./documents) — Track document sources
 - [**Operations**](./operations) — Monitor background tasks

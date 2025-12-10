@@ -188,5 +188,5 @@ All stored in your isolated **memory bank**, ready for `recall()` and `reflect()
 ## Next Steps
 
 - [**Recall**](./retrieval) — How multi-strategy search retrieves relevant memories
-- [**Reflect**](./reflect) — How personality influences reasoning and opinion formation
+- [**Reflect**](./reflect) — How disposition influences reasoning and opinion formation
 - [API Reference](./api/retain) — Code examples for retaining memories

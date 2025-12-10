@@ -28,7 +28,7 @@ for (const r of response.results) {
     console.log(r.text);
 }
 
-// Reflect - generate response with personality
+// Reflect - generate response with disposition
 const answer = await client.reflect('my-agent', 'Tell me about Alice');
 console.log(answer.text);
 ```
@@ -111,13 +111,10 @@ console.log(answer.based_on);   // Memories used
 await client.createBank('my-agent', {
     name: 'Assistant',
     background: 'I am a helpful AI assistant',
-    personality: {
-        openness: 0.7,
-        conscientiousness: 0.8,
-        extraversion: 0.5,
-        agreeableness: 0.6,
-        neuroticism: 0.3,
-        bias_strength: 0.5,
+    disposition: {
+        skepticism: 3,   // 1-5: trusting to skeptical
+        literalism: 3,   // 1-5: flexible to literal
+        empathy: 3,      // 1-5: detached to empathetic
     },
 });
 ```
@@ -126,7 +123,7 @@ await client.createBank('my-agent', {
 
 ```typescript
 const profile = await client.getBankProfile('my-agent');
-console.log(profile.personality);
+console.log(profile.disposition);
 console.log(profile.background);
 ```
 
@@ -206,17 +203,14 @@ import { HindsightClient } from '@vectorize-io/hindsight-client';
 async function main() {
     const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-    // Create a bank with personality
+    // Create a bank with disposition
     await client.createBank('demo', {
         name: 'Demo Agent',
         background: 'A helpful assistant for demos',
-        personality: {
-            openness: 0.8,
-            conscientiousness: 0.7,
-            extraversion: 0.6,
-            agreeableness: 0.8,
-            neuroticism: 0.2,
-            bias_strength: 0.5,
+        disposition: {
+            skepticism: 2,   // Trusting
+            literalism: 3,   // Balanced
+            empathy: 4,      // Empathetic
         },
     });
 

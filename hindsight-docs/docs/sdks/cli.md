@@ -82,7 +82,7 @@ hindsight memory recall <bank_id> "query" --trace
 
 ### Reflect (Generate Response)
 
-Generate a response using memories and bank personality:
+Generate a response using memories and bank disposition:
 
 ```bash
 hindsight memory reflect <bank_id> "What do you know about Alice?"
@@ -125,8 +125,8 @@ hindsight bank name <bank_id> "My Assistant"
 ```bash
 hindsight bank background <bank_id> "I am a helpful AI assistant interested in technology"
 
-# Skip automatic personality inference
-hindsight bank background <bank_id> "Background text" --no-update-personality
+# Skip automatic disposition inference
+hindsight bank background <bank_id> "Background text" --no-update-disposition
 ```
 
 ## Document Management

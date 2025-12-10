@@ -1,5 +1,4 @@
 import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
-import apiSidebar from './docs/api-reference/endpoints/sidebar';
 
 const sidebars: SidebarsConfig = {
   developerSidebar: [
@@ -167,31 +166,6 @@ const sidebars: SidebarsConfig = {
           type: 'doc',
           id: 'sdks/mcp',
           label: 'MCP Server',
-        },
-      ],
-    },
-  ],
-  apiReferenceSidebar: [
-    {
-      type: 'doc',
-      id: 'api-reference/index',
-      label: 'Overview',
-    },
-    {
-      type: 'category',
-      label: 'HTTP API',
-      collapsible: false,
-      items: apiSidebar,
-    },
-    {
-      type: 'category',
-      label: 'MCP API',
-      collapsible: false,
-      items: [
-        {
-          type: 'doc',
-          id: 'api-reference/mcp',
-          label: 'Tools Reference',
         },
       ],
     },

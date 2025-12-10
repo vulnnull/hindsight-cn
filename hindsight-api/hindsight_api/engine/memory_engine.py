@@ -11,7 +11,7 @@ This implements a sophisticated memory architecture that combines:
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union, TypedDict
+from typing import Any, Dict, List, Optional, Tuple, Union, TypedDict, TYPE_CHECKING
 import asyncpg
 import asyncio
 from .embeddings import Embeddings, create_embeddings_from_env
@@ -21,6 +21,9 @@ import numpy as np
 import uuid
 import logging
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from ..config import HindsightConfig
 
 
 class RetainContentDict(TypedDict, total=False):
@@ -99,10 +102,10 @@ class MemoryEngine:
 
     def __init__(
         self,
-        db_url: str,
-        memory_llm_provider: str,
-        memory_llm_api_key: str,
-        memory_llm_model: str,
+        db_url: Optional[str] = None,
+        memory_llm_provider: Optional[str] = None,
+        memory_llm_api_key: Optional[str] = None,
+        memory_llm_model: Optional[str] = None,
         memory_llm_base_url: Optional[str] = None,
         embeddings: Optional[Embeddings] = None,
         cross_encoder: Optional[CrossEncoderModel] = None,
@@ -115,26 +118,34 @@ class MemoryEngine:
         """
         Initialize the temporal + semantic memory system.
 
+        All parameters are optional and will be read from environment variables if not provided.
+        See hindsight_api.config for environment variable names and defaults.
+
         Args:
-            db_url: PostgreSQL connection URL (postgresql://user:pass@host:port/dbname). Required.
+            db_url: PostgreSQL connection URL. Defaults to HINDSIGHT_API_DATABASE_URL env var or "pg0".
                     Also supports pg0 URLs: "pg0" or "pg0://instance-name" or "pg0://instance-name:port"
-            memory_llm_provider: LLM provider for memory operations: "openai", "groq", or "ollama". Required.
-            memory_llm_api_key: API key for the LLM provider. Required.
-            memory_llm_model: Model name to use for all memory operations (put/think/opinions). Required.
-            memory_llm_base_url: Base URL for the LLM API. Optional. Defaults based on provider:
-                                - groq: https://api.groq.com/openai/v1
-                                - ollama: http://localhost:11434/v1
-            embeddings: Embeddings implementation to use. If not provided, uses LocalSTEmbeddings
-            cross_encoder: Cross-encoder model for reranking. If not provided, uses default when cross-encoder reranker is selected
-            query_analyzer: Query analyzer implementation to use. If not provided, uses TransformerQueryAnalyzer
+            memory_llm_provider: LLM provider. Defaults to HINDSIGHT_API_LLM_PROVIDER env var or "groq".
+            memory_llm_api_key: API key for the LLM provider. Defaults to HINDSIGHT_API_LLM_API_KEY env var.
+            memory_llm_model: Model name. Defaults to HINDSIGHT_API_LLM_MODEL env var.
+            memory_llm_base_url: Base URL for the LLM API. Defaults based on provider.
+            embeddings: Embeddings implementation. If not provided, created from env vars.
+            cross_encoder: Cross-encoder model. If not provided, created from env vars.
+            query_analyzer: Query analyzer implementation. If not provided, uses DateparserQueryAnalyzer.
             pool_min_size: Minimum number of connections in the pool (default: 5)
             pool_max_size: Maximum number of connections in the pool (default: 100)
-                          Increase for parallel think/search operations (e.g., 200-300 for 100+ parallel thinks)
-            task_backend: Custom task backend for async task execution. If not provided, uses AsyncIOQueueBackend
+            task_backend: Custom task backend. If not provided, uses AsyncIOQueueBackend.
             run_migrations: Whether to run database migrations during initialize(). Default: True
         """
-        if not db_url:
-            raise ValueError("Database url is required")
+        # Load config from environment for any missing parameters
+        from ..config import get_config
+        config = get_config()
+
+        # Apply defaults from config
+        db_url = db_url or config.database_url
+        memory_llm_provider = memory_llm_provider or config.llm_provider
+        memory_llm_api_key = memory_llm_api_key or config.llm_api_key
+        memory_llm_model = memory_llm_model or config.llm_model
+        memory_llm_base_url = memory_llm_base_url or config.get_llm_base_url() or None
         # Track pg0 instance (if used)
         self._pg0: Optional[EmbeddedPostgres] = None
         self._pg0_instance_name: Optional[str] = None
@@ -2701,7 +2712,7 @@ Guidelines:
             ],
             scope="memory_think",
             temperature=0.9,
-            max_tokens=1000
+            max_completion_tokens=1000
         )
         llm_time = time.time() - llm_start
 

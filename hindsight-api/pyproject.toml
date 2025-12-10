@@ -48,10 +48,24 @@ test = [
 ]
 
 [project.scripts]
-hindsight-api = "hindsight_api.cli:main"
+hindsight-api = "hindsight_api.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["hindsight_api"]
+
+[tool.hatch.build.targets.wheel.sources]
+"hindsight_api" = "hindsight_api"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "hindsight_api/**/*",
+]
+
+[tool.hatch.build]
+include = [
+    "hindsight_api/**/*.py",
+    "hindsight_api/alembic/**/*",
+]
 
 [tool.pytest.ini_options]
 log_cli = true

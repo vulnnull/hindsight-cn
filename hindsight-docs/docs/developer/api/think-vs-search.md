@@ -15,7 +15,7 @@ When to use `search` vs `think`.
 | **LLM calls** | 0 (retrieval only) | 1+ (generation) |
 | **Speed** | Fast (~100-200ms) | Slower (~500-2000ms) |
 | **Opinions** | Returns existing | Can form new ones |
-| **Personality** | Not applied | Applied to response |
+| **Disposition** | Not applied | Applied to response |
 
 ## When to Use Search
 
@@ -54,13 +54,13 @@ results = client.search(agent_id="my-agent", query="What do I know about Bob?")
 **Use Think when you need:**
 
 - A natural language response
-- Personality-aware answers
+- Disposition-aware answers
 - Opinion formation
 - Reasoning over multiple facts
 - Source attribution
 
 ```python
-# Get a complete answer with personality
+# Get a complete answer with disposition
 answer = client.think(agent_id="my-agent", query="What should I recommend to Alice?")
 print(answer["text"])  # Natural language response
 print(answer["based_on"])  # Sources used
@@ -78,7 +78,7 @@ answer = client.think(agent_id="my-agent", query="How are Alice and Bob connecte
 # Opinion — agent forms a view
 answer = client.think(agent_id="my-agent", query="What do you think about Python?")
 
-# Recommendation — personality-influenced
+# Recommendation — disposition-influenced
 answer = client.think(agent_id="my-agent", query="What book should I read next?")
 ```
 
@@ -95,7 +95,7 @@ graph LR
     subgraph Think
         T1[Query] --> T2[4-way Retrieval]
         T2 --> T3[RRF + Rerank]
-        T3 --> T4[Load Personality]
+        T3 --> T4[Load Disposition]
         T4 --> T5[LLM Generation]
         T5 --> T6[Store Opinions]
         T6 --> T7[Response]
@@ -131,7 +131,7 @@ else:
 graph TD
     A[Need memory access] --> B{Need natural language response?}
     B -->|No| C[Use Search]
-    B -->|Yes| D{Need personality/opinions?}
+    B -->|Yes| D{Need disposition/opinions?}
     D -->|No| E{Building context for another LLM?}
     E -->|Yes| C
     E -->|No| F[Use Think]

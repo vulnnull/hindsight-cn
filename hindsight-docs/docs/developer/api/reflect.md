@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Reflect
 
-Generate personality-aware responses using retrieved memories.
+Generate disposition-aware responses using retrieved memories.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -81,7 +81,7 @@ const response = await client.reflect('my-bank', 'What do you think about remote
 </Tabs>
 
 :::info How Reflect Works
-Learn about personality-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
+Learn about disposition-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
 :::
 
 ## Opinion Formation
@@ -109,35 +109,32 @@ response = client.reflect(
 
 New opinions are automatically stored and influence future responses.
 
-## Personality Influence
+## Disposition Influence
 
-The bank's personality affects reflect responses:
+The bank's disposition affects reflect responses:
 
-| Trait | Effect on Reflect |
-|-------|-----------------|
-| High **Openness** | More willing to consider new ideas |
-| High **Conscientiousness** | More structured, methodical responses |
-| High **Extraversion** | More collaborative suggestions |
-| High **Agreeableness** | More diplomatic, harmony-seeking |
-| High **Neuroticism** | More risk-aware, cautious |
+| Trait | Low (1) | High (5) |
+|-------|---------|----------|
+| **Skepticism** | Trusting, accepts claims | Questions and doubts claims |
+| **Literalism** | Flexible interpretation | Exact, literal interpretation |
+| **Empathy** | Detached, fact-focused | Considers emotional context |
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-# Create a bank with specific personality
+# Create a bank with specific disposition
 client.create_bank(
     bank_id="cautious-advisor",
     background="I am a risk-aware financial advisor",
-    personality={
-        "openness": 0.3,
-        "conscientiousness": 0.9,
-        "neuroticism": 0.8,
-        "bias_strength": 0.7
+    disposition={
+        "skepticism": 5,   # Very skeptical of claims
+        "literalism": 4,   # Focuses on exact requirements
+        "empathy": 2       # Prioritizes facts over feelings
     }
 )
 
-# Reflect responses will reflect this personality
+# Reflect responses will reflect this disposition
 response = client.reflect(
     bank_id="cautious-advisor",
     query="Should I invest in crypto?"
@@ -149,18 +146,17 @@ response = client.reflect(
 <TabItem value="node" label="Node.js">
 
 ```typescript
-// Create a bank with specific personality
+// Create a bank with specific disposition
 await client.createBank('cautious-advisor', {
     background: 'I am a risk-aware financial advisor',
-    personality: {
-        openness: 0.3,
-        conscientiousness: 0.9,
-        neuroticism: 0.8,
-        bias_strength: 0.7
+    disposition: {
+        skepticism: 5,
+        literalism: 4,
+        empathy: 2
     }
 });
 
-// Reflect responses will reflect this personality
+// Reflect responses will reflect this disposition
 const response = await client.reflect('cautious-advisor', 'Should I invest in crypto?');
 ```
 

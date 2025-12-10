@@ -203,4 +203,4 @@ The **fusion** of all four gives you exactly what you're looking for, even thoug
 ## Next Steps
 
 - [**Retain**](./retain) — How memories are stored with rich context
-- [**Reflect**](./reflect) — How personality influences reasoning
+- [**Reflect**](./reflect) — How disposition influences reasoning

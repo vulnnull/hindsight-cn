@@ -3,14 +3,7 @@ Cross-encoder abstraction for reranking.
 
 Provides an interface for reranking with different backends.
 
-Configuration via environment variables:
-- HINDSIGHT_API_RERANKER_PROVIDER: "local" (default) or "tei"
-
-For local provider:
-- HINDSIGHT_API_RERANKER_LOCAL_MODEL: Model name (default: cross-encoder/ms-marco-MiniLM-L-6-v2)
-
-For TEI provider:
-- HINDSIGHT_API_RERANKER_TEI_URL: TEI server URL (required)
+Configuration via environment variables - see hindsight_api.config for all env var names.
 """
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional
@@ -19,10 +12,15 @@ import os
 
 import httpx
 
-logger = logging.getLogger(__name__)
+from ..config import (
+    ENV_RERANKER_PROVIDER,
+    ENV_RERANKER_LOCAL_MODEL,
+    ENV_RERANKER_TEI_URL,
+    DEFAULT_RERANKER_PROVIDER,
+    DEFAULT_RERANKER_LOCAL_MODEL,
+)
 
-# Default model for local cross-encoder
-DEFAULT_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+logger = logging.getLogger(__name__)
 
 
 class CrossEncoderModel(ABC):
@@ -82,7 +80,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             model_name: Name of the CrossEncoder model to use.
                        Default: cross-encoder/ms-marco-MiniLM-L-6-v2
         """
-        self.model_name = model_name or DEFAULT_RERANKER_MODEL
+        self.model_name = model_name or DEFAULT_RERANKER_LOCAL_MODEL
         self._model = None
 
     @property
@@ -284,30 +282,23 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
     """
     Create a CrossEncoderModel instance based on environment variables.
 
-    Environment variables:
-    - HINDSIGHT_API_RERANKER_PROVIDER: "local" (default) or "tei"
-
-    For local provider:
-    - HINDSIGHT_API_RERANKER_LOCAL_MODEL: Model name (default: cross-encoder/ms-marco-MiniLM-L-6-v2)
-
-    For TEI provider:
-    - HINDSIGHT_API_RERANKER_TEI_URL: TEI server URL (required)
+    See hindsight_api.config for environment variable names and defaults.
 
     Returns:
         Configured CrossEncoderModel instance
     """
-    provider = os.environ.get("HINDSIGHT_API_RERANKER_PROVIDER", "local").lower()
+    provider = os.environ.get(ENV_RERANKER_PROVIDER, DEFAULT_RERANKER_PROVIDER).lower()
 
     if provider == "tei":
-        url = os.environ.get("HINDSIGHT_API_RERANKER_TEI_URL")
+        url = os.environ.get(ENV_RERANKER_TEI_URL)
         if not url:
             raise ValueError(
-                "HINDSIGHT_API_RERANKER_TEI_URL is required when HINDSIGHT_API_RERANKER_PROVIDER is 'tei'"
+                f"{ENV_RERANKER_TEI_URL} is required when {ENV_RERANKER_PROVIDER} is 'tei'"
             )
         return RemoteTEICrossEncoder(base_url=url)
     elif provider == "local":
-        model = os.environ.get("HINDSIGHT_API_RERANKER_LOCAL_MODEL")
-        model_name = model or DEFAULT_RERANKER_MODEL
+        model = os.environ.get(ENV_RERANKER_LOCAL_MODEL)
+        model_name = model or DEFAULT_RERANKER_LOCAL_MODEL
         return LocalSTCrossEncoder(model_name=model_name)
     else:
         raise ValueError(

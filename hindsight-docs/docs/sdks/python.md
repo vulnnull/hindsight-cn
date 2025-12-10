@@ -56,7 +56,7 @@ with HindsightServer(
     for r in results:
         print(r.text)
 
-    # Reflect - generate response with personality
+    # Reflect - generate response with disposition
     answer = client.reflect(bank_id="my-agent", query="Tell me about Alice")
     print(answer.text)
 ```
@@ -77,7 +77,7 @@ results = client.recall(bank_id="my-agent", query="What does Alice do?")
 for r in results:
     print(r.text)
 
-# Reflect - generate response with personality
+# Reflect - generate response with disposition
 answer = client.reflect(bank_id="my-agent", query="Tell me about Alice")
 print(answer.text)
 ```
@@ -204,13 +204,10 @@ client.create_bank(
     bank_id="my-agent",
     name="Assistant",
     background="I am a helpful AI assistant",
-    personality={
-        "openness": 0.7,
-        "conscientiousness": 0.8,
-        "extraversion": 0.5,
-        "agreeableness": 0.6,
-        "neuroticism": 0.3,
-        "bias_strength": 0.5,
+    disposition={
+        "skepticism": 3,    # 1-5: trusting to skeptical
+        "literalism": 3,    # 1-5: flexible to literal
+        "empathy": 3,       # 1-5: detached to empathetic
     },
 )
 ```
@@ -270,7 +267,7 @@ from hindsight_client import (
     RecallResult,
     ReflectResponse,
     BankProfileResponse,
-    PersonalityTraits,
+    DispositionTraits,
 )
 ```
 

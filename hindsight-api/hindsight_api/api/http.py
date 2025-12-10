@@ -729,9 +729,11 @@ def create_app(memory: MemoryEngine, initialize_memory: bool = True) -> FastAPI:
         await memory.close()
         logging.info("Memory system closed")
 
+    from hindsight_api import __version__
+
     app = FastAPI(
         title="Hindsight HTTP API",
-        version="1.0.0",
+        version=__version__,
         description="HTTP API for Hindsight",
         contact={
             "name": "Memory System",
@@ -857,16 +859,12 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/memories/recall",
         response_model=RecallResponse,
         summary="Recall memory",
-        description="""
-    Recall memory using semantic similarity and spreading activation.
-
-    The type parameter is optional and must be one of:
-    - 'world': General knowledge about people, places, events, and things that happen
-    - 'experience': Memories about experience, conversations, actions taken, and tasks performed
-    - 'opinion': The bank's formed beliefs, perspectives, and viewpoints
-
-    Set include_entities=true to get entity observations alongside recall results.
-        """,
+        description="Recall memory using semantic similarity and spreading activation.\n\n"
+        "The type parameter is optional and must be one of:\n"
+        "- `world`: General knowledge about people, places, events, and things that happen\n"
+        "- `experience`: Memories about experience, conversations, actions taken, and tasks performed\n"
+        "- `opinion`: The bank's formed beliefs, perspectives, and viewpoints\n\n"
+        "Set `include_entities=true` to get entity observations alongside recall results.",
         operation_id="recall_memories",
         tags=["Memory"]
     )
@@ -975,17 +973,14 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/reflect",
         response_model=ReflectResponse,
         summary="Reflect and generate answer",
-        description="""
-    Reflect and formulate an answer using bank identity, world facts, and opinions.
-
-    This endpoint:
-    1. Retrieves experience (conversations and events)
-    2. Retrieves world facts relevant to the query
-    3. Retrieves existing opinions (bank's perspectives)
-    4. Uses LLM to formulate a contextual answer
-    5. Extracts and stores any new opinions formed
-    6. Returns plain text answer, the facts used, and new opinions
-        """,
+        description="Reflect and formulate an answer using bank identity, world facts, and opinions.\n\n"
+        "This endpoint:\n"
+        "1. Retrieves experience (conversations and events)\n"
+        "2. Retrieves world facts relevant to the query\n"
+        "3. Retrieves existing opinions (bank's perspectives)\n"
+        "4. Uses LLM to formulate a contextual answer\n"
+        "5. Extracts and stores any new opinions formed\n"
+        "6. Returns plain text answer, the facts used, and new opinions",
         operation_id="reflect",
         tags=["Memory"]
     )
@@ -1401,16 +1396,12 @@ def _register_routes(app: FastAPI):
     @app.delete(
         "/v1/default/banks/{bank_id}/documents/{document_id}",
         summary="Delete a document",
-        description="""
-Delete a document and all its associated memory units and links.
-
-This will cascade delete:
-- The document itself
-- All memory units extracted from this document
-- All links (temporal, semantic, entity) associated with those memory units
-
-This operation cannot be undone.
-        """,
+        description="Delete a document and all its associated memory units and links.\n\n"
+        "This will cascade delete:\n"
+        "- The document itself\n"
+        "- All memory units extracted from this document\n"
+        "- All links (temporal, semantic, entity) associated with those memory units\n\n"
+        "This operation cannot be undone.",
         operation_id="delete_document",
         tags=["Documents"]
     )
@@ -1709,38 +1700,24 @@ This operation cannot be undone.
         "/v1/default/banks/{bank_id}/memories",
         response_model=RetainResponse,
         summary="Retain memories",
-        description="""
-    Retain memory items with automatic fact extraction.
-
-    This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing
-    via the async parameter.
-
-    Features:
-    - Efficient batch processing
-    - Automatic fact extraction from natural language
-    - Entity recognition and linking
-    - Document tracking with automatic upsert (when document_id is provided on items)
-    - Temporal and semantic linking
-    - Optional asynchronous processing
-
-    The system automatically:
-    1. Extracts semantic facts from the content
-    2. Generates embeddings
-    3. Deduplicates similar facts
-    4. Creates temporal, semantic, and entity links
-    5. Tracks document metadata
-
-    When async=true:
-    - Returns immediately after queuing the task
-    - Processing happens in the background
-    - Use the operations endpoint to monitor progress
-
-    When async=false (default):
-    - Waits for processing to complete
-    - Returns after all memories are stored
-
-    Note: If a memory item has a document_id that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior). Items with the same document_id are grouped together for efficient processing.
-        """,
+        description="Retain memory items with automatic fact extraction.\n\n"
+        "This is the main endpoint for storing memories. It supports both synchronous and asynchronous processing via the `async` parameter.\n\n"
+        "**Features:**\n"
+        "- Efficient batch processing\n"
+        "- Automatic fact extraction from natural language\n"
+        "- Entity recognition and linking\n"
+        "- Document tracking with automatic upsert (when document_id is provided)\n"
+        "- Temporal and semantic linking\n"
+        "- Optional asynchronous processing\n\n"
+        "**The system automatically:**\n"
+        "1. Extracts semantic facts from the content\n"
+        "2. Generates embeddings\n"
+        "3. Deduplicates similar facts\n"
+        "4. Creates temporal, semantic, and entity links\n"
+        "5. Tracks document metadata\n\n"
+        "**When `async=true`:** Returns immediately after queuing. Use the operations endpoint to monitor progress.\n\n"
+        "**When `async=false` (default):** Waits for processing to complete.\n\n"
+        "**Note:** If a memory item has a `document_id` that already exists, the old document and its memory units will be deleted before creating new ones (upsert behavior).",
         operation_id="retain_memories",
         tags=["Memory"]
     )

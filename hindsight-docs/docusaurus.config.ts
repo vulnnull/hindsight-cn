@@ -1,7 +1,6 @@
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
-import type * as OpenApiPlugin from 'docusaurus-plugin-openapi-docs';
 
 const config: Config = {
   title: 'Hindsight',
@@ -51,6 +50,8 @@ const config: Config = {
       attributes: {
         rel: 'stylesheet',
         href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Nunito+Sans:wght@400;500;600;700;800&display=swap',
+        media: 'print',
+        onload: "this.media='all'",
       },
     },
   ],
@@ -63,7 +64,6 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           editUrl: 'https://github.com/vectorize-io/hindsight/tree/main/hindsight-docs/',
           routeBasePath: '/',
-          docItemComponent: '@theme/ApiItem',
         },
         blog: false,
         theme: {
@@ -71,28 +71,48 @@ const config: Config = {
         },
       } satisfies Preset.Options,
     ],
-  ],
-
-  plugins: [
     [
-      'docusaurus-plugin-openapi-docs',
+      'redocusaurus',
       {
-        id: 'api',
-        docsPluginId: 'default',
-        config: {
-          hindsight: {
-            specPath: 'openapi.json',
-            outputDir: 'docs/api-reference/endpoints',
-            sidebarOptions: {
-              groupPathsBy: 'tag',
+        specs: [
+          {
+            id: 'hindsight-api',
+            spec: 'openapi.json',
+            route: '/api-reference',
+            url: '/openapi.json',
+          },
+        ],
+        theme: {
+          primaryColor: '#0d9488',
+          sidebar: {
+            backgroundColor: '#09090b',
+          },
+          rightPanel: {
+            backgroundColor: '#18181b',
+          },
+          typography: {
+            fontSize: '15px',
+            fontFamily: "'Avenir Book', 'Avenir', 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            headings: {
+              fontFamily: "'Avenir', 'Avenir Book', 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
             },
-          } satisfies OpenApiPlugin.Options,
+            code: {
+              fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, Consolas, monospace",
+              fontSize: '13px',
+            },
+          },
+        },
+        config: {
+          scrollYOffset: 60,
+          nativeScrollbars: true,
+          expandSingleSchemaField: true,
+          expandResponses: '200,201',
         },
       },
     ],
   ],
 
-  themes: ['docusaurus-theme-openapi-docs', '@docusaurus/theme-mermaid'],
+  themes: ['@docusaurus/theme-mermaid'],
 
   themeConfig: {
     image: 'img/hindsight-social-card.jpg',
@@ -165,7 +185,7 @@ const config: Config = {
             },
             {
               label: 'API Reference',
-              to: '/api-reference',
+              to: '/api-reference/',
             },
           ],
         },

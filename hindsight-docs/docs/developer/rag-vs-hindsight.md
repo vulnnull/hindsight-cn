@@ -15,7 +15,7 @@ Traditional RAG (Retrieval-Augmented Generation) retrieves documents similar to 
 | **Temporal queries** | Keyword matching ("spring") | Date parsing and range filtering |
 | **Entity understanding** | None | Entity resolution, observations, co-occurrence |
 | **Belief formation** | Stateless | Opinions with confidence scores that evolve |
-| **Personality** | None | Big Five traits influence interpretation |
+| **Disposition** | None | 3 traits (skepticism, literalism, empathy) influence interpretation |
 
 ## Architecture Comparison
 
@@ -38,7 +38,7 @@ Single retrieval strategy. No state between queries.
 | 2 | Execute 4 parallel retrievals: semantic, BM25, graph, temporal |
 | 3 | Fuse results with RRF |
 | 4 | Rerank with cross-encoder |
-| 5 | Apply personality traits |
+| 5 | Apply disposition traits |
 | 6 | Generate response |
 
 Multiple retrieval strategies. Persistent state across sessions.
@@ -106,5 +106,5 @@ Multiple retrieval strategies. Persistent state across sessions.
 | Search with no temporal requirements | RAG |
 | AI assistants with persistent memory | Hindsight |
 | Applications requiring entity tracking | Hindsight |
-| Systems needing consistent personality | Hindsight |
+| Systems needing consistent disposition | Hindsight |
 | Temporal queries ("last month", "in 2023") | Hindsight |

@@ -26,7 +26,7 @@ PIDS=()
 # Start API if enabled
 if [ "$ENABLE_API" = "true" ]; then
     cd /app/api
-    python -m hindsight_api.web.server 2>&1 | sed -u 's/^/[api] /' &
+    hindsight-api 2>&1 | sed -u 's/^/[api] /' &
     API_PID=$!
     PIDS+=($API_PID)
 
