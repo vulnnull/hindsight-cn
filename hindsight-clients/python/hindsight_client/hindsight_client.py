@@ -157,7 +157,11 @@ class Hindsight:
         types: Optional[List[str]] = None,
         max_tokens: int = 4096,
         budget: str = "mid",
-    ) -> List[RecallResult]:
+        trace: bool = False,
+        query_timestamp: Optional[str] = None,
+        include_entities: bool = False,
+        max_entity_tokens: int = 500,
+    ) -> RecallResponse:
         """
         Recall memories using semantic similarity.
 
@@ -167,20 +171,31 @@ class Hindsight:
             types: Optional list of fact types to filter (world, experience, opinion, observation)
             max_tokens: Maximum tokens in results (default: 4096)
             budget: Budget level for recall - "low", "mid", or "high" (default: "mid")
+            trace: Enable trace output (default: False)
+            query_timestamp: Optional ISO format date string (e.g., '2023-05-30T23:40:00')
+            include_entities: Include entity observations in results (default: False)
+            max_entity_tokens: Maximum tokens for entity observations (default: 500)
 
         Returns:
-            List of RecallResult objects
+            RecallResponse with results, optional entities, and optional trace
         """
+        from hindsight_client_api.models import include_options, entity_include_options
+
+        include_opts = include_options.IncludeOptions(
+            entities=entity_include_options.EntityIncludeOptions(max_tokens=max_entity_tokens) if include_entities else None
+        )
+
         request_obj = recall_request.RecallRequest(
             query=query,
             types=types,
             budget=budget,
             max_tokens=max_tokens,
-            trace=False,
+            trace=trace,
+            query_timestamp=query_timestamp,
+            include=include_opts,
         )
 
-        response = _run_async(self._api.recall_memories(bank_id, request_obj))
-        return response.results if hasattr(response, 'results') else []
+        return _run_async(self._api.recall_memories(bank_id, request_obj))
 
     def reflect(
         self,
@@ -208,55 +223,6 @@ class Hindsight:
         )
 
         return _run_async(self._api.reflect(bank_id, request_obj))
-
-    # Full-featured methods (expose more options)
-
-    def recall_memories(
-        self,
-        bank_id: str,
-        query: str,
-        types: Optional[List[str]] = None,
-        budget: str = "mid",
-        max_tokens: int = 4096,
-        trace: bool = False,
-        query_timestamp: Optional[str] = None,
-        include_entities: bool = True,
-        max_entity_tokens: int = 500,
-    ) -> RecallResponse:
-        """
-        Recall memories with all options (full-featured).
-
-        Args:
-            bank_id: The memory bank ID
-            query: Search query
-            types: Optional list of fact types to filter (world, experience, opinion, observation)
-            budget: Budget level - "low", "mid", or "high"
-            max_tokens: Maximum tokens in results
-            trace: Enable trace output
-            query_timestamp: Optional ISO format date string (e.g., '2023-05-30T23:40:00')
-            include_entities: Include entity observations in results (default: True)
-            max_entity_tokens: Maximum tokens for entity observations (default: 500)
-
-        Returns:
-            RecallResponse with results, optional entities, and optional trace
-        """
-        from hindsight_client_api.models import include_options, entity_include_options
-
-        include_opts = include_options.IncludeOptions(
-            entities=entity_include_options.EntityIncludeOptions(max_tokens=max_entity_tokens) if include_entities else None
-        )
-
-        request_obj = recall_request.RecallRequest(
-            query=query,
-            types=types,
-            budget=budget,
-            max_tokens=max_tokens,
-            trace=trace,
-            query_timestamp=query_timestamp,
-            include=include_opts,
-        )
-
-        return _run_async(self._api.recall_memories(bank_id, request_obj))
 
     def list_memories(
         self,

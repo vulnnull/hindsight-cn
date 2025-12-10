@@ -24,7 +24,7 @@ Configure the LLM provider used for fact extraction, entity resolution, and reas
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `HINDSIGHT_API_LLM_PROVIDER` | LLM provider: `groq`, `openai`, `ollama` | `groq` | Yes |
+| `HINDSIGHT_API_LLM_PROVIDER` | LLM provider: `groq`, `openai`, `gemini`, `ollama` | `groq` | Yes |
 | `HINDSIGHT_API_LLM_API_KEY` | API key for LLM provider | - | Yes (except ollama) |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | Provider-specific | No |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default | No |
@@ -45,6 +45,14 @@ export HINDSIGHT_API_LLM_MODEL=openai/gpt-oss-20b
 export HINDSIGHT_API_LLM_PROVIDER=openai
 export HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx
 export HINDSIGHT_API_LLM_MODEL=gpt-4o
+```
+
+**Gemini**
+
+```bash
+export HINDSIGHT_API_LLM_PROVIDER=gemini
+export HINDSIGHT_API_LLM_API_KEY=xxxxxxxxxxxx
+export HINDSIGHT_API_LLM_MODEL=gemini-2.0-flash
 ```
 
 **Ollama (Local, No API Key)**

@@ -1760,7 +1760,7 @@ def _register_routes(app: FastAPI):
 
                 # Submit task to background queue
                 await app.state.memory._task_backend.submit_task({
-                    'type': 'batch_put',
+                    'type': 'batch_retain',
                     'operation_id': str(operation_id),
                     'bank_id': bank_id,
                     'contents': contents

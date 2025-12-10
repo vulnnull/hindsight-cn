@@ -92,32 +92,33 @@ class TestRecall:
 
     def test_recall_basic(self, client, bank_id):
         """Test basic memory search."""
-        results = client.recall(
+        response = client.recall(
             bank_id=bank_id,
             query="What does Alice like?",
         )
 
-        assert results is not None
-        assert len(results) > 0
+        assert response is not None
+        assert response.results is not None
+        assert len(response.results) > 0
 
         # Check that at least one result contains relevant information
-        result_texts = [r.text for r in results]
+        result_texts = [r.text for r in response.results]
         assert any("Alice" in text or "Python" in text or "programming" in text for text in result_texts)
 
     def test_recall_with_max_tokens(self, client, bank_id):
         """Test search with token limit."""
-        results = client.recall(
+        response = client.recall(
             bank_id=bank_id,
             query="outdoor activities",
             max_tokens=1024,
         )
 
-        assert results is not None
-        assert isinstance(results, list)
+        assert response is not None
+        assert response.results is not None
 
-    def test_recall_memories_full_featured(self, client, bank_id):
-        """Test recall_memories with all features."""
-        response = client.recall_memories(
+    def test_recall_full_featured(self, client, bank_id):
+        """Test recall with all features."""
+        response = client.recall(
             bank_id=bank_id,
             query="What are people's hobbies?",
             types=["world"],

@@ -330,7 +330,7 @@ class MemoryEngine:
                 await self._handle_reinforce_opinion(task_dict)
             elif task_type == 'form_opinion':
                 await self._handle_form_opinion(task_dict)
-            elif task_type == 'batch_put':
+            elif task_type == 'batch_retain':
                 await self._handle_batch_retain(task_dict)
             elif task_type == 'regenerate_observations':
                 await self._handle_regenerate_observations(task_dict)
