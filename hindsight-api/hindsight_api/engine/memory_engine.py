@@ -14,8 +14,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union, TypedDict
 import asyncpg
 import asyncio
-from .embeddings import Embeddings, SentenceTransformersEmbeddings
-from .cross_encoder import CrossEncoderModel
+from .embeddings import Embeddings, create_embeddings_from_env
+from .cross_encoder import CrossEncoderModel, create_cross_encoder_from_env
 import time
 import numpy as np
 import uuid
@@ -124,7 +124,7 @@ class MemoryEngine:
             memory_llm_base_url: Base URL for the LLM API. Optional. Defaults based on provider:
                                 - groq: https://api.groq.com/openai/v1
                                 - ollama: http://localhost:11434/v1
-            embeddings: Embeddings implementation to use. If not provided, uses SentenceTransformersEmbeddings
+            embeddings: Embeddings implementation to use. If not provided, uses LocalSTEmbeddings
             cross_encoder: Cross-encoder model for reranking. If not provided, uses default when cross-encoder reranker is selected
             query_analyzer: Query analyzer implementation to use. If not provided, uses TransformerQueryAnalyzer
             pool_min_size: Minimum number of connections in the pool (default: 5)
@@ -184,11 +184,11 @@ class MemoryEngine:
         # Initialize entity resolver (will be created in initialize())
         self.entity_resolver = None
 
-        # Initialize embeddings
+        # Initialize embeddings (from env vars if not provided)
         if embeddings is not None:
             self.embeddings = embeddings
         else:
-            self.embeddings = SentenceTransformersEmbeddings("BAAI/bge-small-en-v1.5")
+            self.embeddings = create_embeddings_from_env()
 
         # Initialize query analyzer
         if query_analyzer is not None:
@@ -414,32 +414,41 @@ class MemoryEngine:
                 if not was_already_running:
                     self._pg0 = pg0
 
-        def load_embeddings():
-            """Load embedding model (CPU-bound)."""
-            self.embeddings.load()
+        async def init_embeddings():
+            """Initialize embedding model."""
+            # For local providers, run in thread pool to avoid blocking event loop
+            if self.embeddings.provider_name == "local":
+                await loop.run_in_executor(
+                    None,
+                    lambda: asyncio.run(self.embeddings.initialize())
+                )
+            else:
+                await self.embeddings.initialize()
 
-        def load_cross_encoder():
-            """Load cross-encoder model (CPU-bound)."""
-            self._cross_encoder_reranker.cross_encoder.load()
+        async def init_cross_encoder():
+            """Initialize cross-encoder model."""
+            cross_encoder = self._cross_encoder_reranker.cross_encoder
+            # For local providers, run in thread pool to avoid blocking event loop
+            if cross_encoder.provider_name == "local":
+                await loop.run_in_executor(
+                    None,
+                    lambda: asyncio.run(cross_encoder.initialize())
+                )
+            else:
+                await cross_encoder.initialize()
 
-        def load_query_analyzer():
-            """Load query analyzer model (CPU-bound)."""
-            self.query_analyzer.load()
+        async def init_query_analyzer():
+            """Initialize query analyzer model."""
+            # Query analyzer load is sync and CPU-bound
+            await loop.run_in_executor(None, self.query_analyzer.load)
 
-        # Run pg0 and all model loads in parallel
-        # pg0 is async (IO-bound), models are sync (CPU-bound in thread pool)
-        # Use 3 workers to load all models concurrently
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            # Start all tasks
-            pg0_task = asyncio.create_task(start_pg0())
-            embeddings_future = loop.run_in_executor(executor, load_embeddings)
-            cross_encoder_future = loop.run_in_executor(executor, load_cross_encoder)
-            query_analyzer_future = loop.run_in_executor(executor, load_query_analyzer)
-
-            # Wait for all to complete
-            await asyncio.gather(
-                pg0_task, embeddings_future, cross_encoder_future, query_analyzer_future
-            )
+        # Run pg0 and all model initializations in parallel
+        await asyncio.gather(
+            start_pg0(),
+            init_embeddings(),
+            init_cross_encoder(),
+            init_query_analyzer(),
+        )
 
         # Run database migrations if enabled
         if self._run_migrations:

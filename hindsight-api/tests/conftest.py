@@ -8,9 +8,9 @@ import os
 import filelock
 from pathlib import Path
 from dotenv import load_dotenv
-from hindsight_api import MemoryEngine, LLMConfig, SentenceTransformersEmbeddings
+from hindsight_api import MemoryEngine, LLMConfig, LocalSTEmbeddings
 
-from hindsight_api.engine.cross_encoder import SentenceTransformersCrossEncoder
+from hindsight_api.engine.cross_encoder import LocalSTCrossEncoder
 from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer
 from hindsight_api.pg0 import EmbeddedPostgres
 
@@ -111,14 +111,14 @@ def llm_config():
 @pytest.fixture(scope="session")
 def embeddings():
 
-    return SentenceTransformersEmbeddings("BAAI/bge-small-en-v1.5")
+    return LocalSTEmbeddings()
 
 
 
 @pytest.fixture(scope="session")
 def cross_encoder():
 
-    return SentenceTransformersCrossEncoder()
+    return LocalSTCrossEncoder()
 
 @pytest.fixture(scope="session")
 def query_analyzer():
