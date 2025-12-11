@@ -101,12 +101,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             )
 
         logger.info(f"Reranker: initializing local provider with model {self.model_name}")
-        # Disable lazy loading (meta tensors) which causes issues with newer transformers/accelerate
-        # Setting low_cpu_mem_usage=False and device_map=None ensures tensors are fully materialized
-        self._model = CrossEncoder(
-            self.model_name,
-            model_kwargs={"low_cpu_mem_usage": False, "device_map": None},
-        )
+        self._model = CrossEncoder(self.model_name)
         logger.info("Reranker: local provider initialized")
 
     def predict(self, pairs: List[Tuple[str, str]]) -> List[float]:

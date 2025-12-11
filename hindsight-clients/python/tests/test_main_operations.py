@@ -239,7 +239,7 @@ class TestEndToEndWorkflow:
             bank_id=workflow_bank_id,
             query="What programming technologies do I use?",
         )
-        assert len(search_results) > 0
+        assert len(search_results.results) > 0
 
         # 4. Generate contextual answer
         reflect_response = client.reflect(

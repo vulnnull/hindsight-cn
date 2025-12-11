@@ -147,9 +147,13 @@ RUN mkdir -p /home/hindsight/.hindsight/bin && \
         curl -fsSL -o /home/hindsight/.hindsight/bin/pg0 \
             "https://github.com/vectorize-io/pg0/releases/latest/download/$PG0_BINARY" && \
         chmod +x /home/hindsight/.hindsight/bin/pg0 && \
+        ls -lh /home/hindsight/.hindsight/bin/pg0 && \
+        file /home/hindsight/.hindsight/bin/pg0 && \
+        ldd /home/hindsight/.hindsight/bin/pg0 2>&1 || true && \
         break || (echo "Retry $i failed, waiting..." && sleep 10); \
     done && \
-    /home/hindsight/.hindsight/bin/pg0 --version
+    echo "Testing pg0 binary..." && \
+    /home/hindsight/.hindsight/bin/pg0 --version || (echo "pg0 --version failed with exit code $?"; ldd /home/hindsight/.hindsight/bin/pg0; exit 1)
 
 # Pre-download PostgreSQL binaries
 ENV PG0_HOME=/home/hindsight/.pg0-cache
@@ -280,9 +284,13 @@ RUN mkdir -p /home/hindsight/.hindsight/bin && \
         curl -fsSL -o /home/hindsight/.hindsight/bin/pg0 \
             "https://github.com/vectorize-io/pg0/releases/latest/download/$PG0_BINARY" && \
         chmod +x /home/hindsight/.hindsight/bin/pg0 && \
+        ls -lh /home/hindsight/.hindsight/bin/pg0 && \
+        file /home/hindsight/.hindsight/bin/pg0 && \
+        ldd /home/hindsight/.hindsight/bin/pg0 2>&1 || true && \
         break || (echo "Retry $i failed, waiting..." && sleep 10); \
     done && \
-    /home/hindsight/.hindsight/bin/pg0 --version
+    echo "Testing pg0 binary..." && \
+    /home/hindsight/.hindsight/bin/pg0 --version || (echo "pg0 --version failed with exit code $?"; ldd /home/hindsight/.hindsight/bin/pg0; exit 1)
 
 # Pre-download PostgreSQL binaries
 ENV PG0_HOME=/home/hindsight/.pg0-cache

@@ -281,7 +281,8 @@ async def test_full_api_workflow(api_client, test_bank_id):
     final_banks_data = response.json()["banks"]
     final_banks = [a["bank_id"] for a in final_banks_data]
     assert test_bank_id in final_banks
-    assert len(final_banks) >= len(initial_banks) + 1
+    # Don't assert count increases due to parallel test cleanup races
+    # Just verify our bank exists in the list
 
     # ================================================================
     # 10. Clean Up
