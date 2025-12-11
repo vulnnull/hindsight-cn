@@ -1,8 +1,8 @@
 <div align="center">
 
-# Hindsight
+![Hindsight Banner](./hindsight-docs/static/img/banner.webp)
 
-**Agent Memory that Works Like Human Memory**
+[Documentation](https://vectorize-io.github.io/hindsight) • [Paper](#coming-soon) • [Examples](https://github.com/vectorize-io/hindsight-cookbook)
 
 [![CI](https://github.com/vectorize-io/hindsight/actions/workflows/test.yml/badge.svg)](https://github.com/vectorize-io/hindsight/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -10,7 +10,6 @@
 [![npm](https://img.shields.io/npm/v/@vectorize-io/hindsight-client)](https://www.npmjs.com/package/@vectorize-io/hindsight-client)
 [![Slack Community](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/hindsight-space/shared_invite/zt-3klo21kua-VUCC_zHP5rIcXFB1_5yw6A)
 
-[Documentation](https://vectorize-io.github.io/hindsight) • [Paper](#coming-soon) • [Examples](https://github.com/vectorize-io/hindsight-cookbook)
 
 </div>
 
@@ -76,19 +75,18 @@ npm install @vectorize-io/hindsight-client
 Python example:
 
 ```python
-from hindsight import HindsightClient
+from hindsight_client import Hindsight
 
-client = HindsightClient(base_url="http://localhost:8888")
+client = Hindsight(base_url="http://localhost:8888")
 
-# Store
-client.retain(bank_id="my-agent", content="Alice works at Google as a software engineer")
+# Retain: Store information
+client.retain(bank_id="my-bank", content="Alice works at Google as a software engineer")
 
-# Query
-results = client.recall(bank_id="my-agent", query="What does Alice do?")
+# Recall: Search memories
+client.recall(bank_id="my-bank", query="What does Alice do?")
 
-# Reflect
-response = client.reflect(bank_id="my-agent", query="Tell me about Alice")
-print(response.text)
+# Reflect: Generate disposition-aware response
+client.reflect(bank_id="my-bank", query="Tell me about Alice")
 ```
 
 ### Python (embedded, no Docker)
