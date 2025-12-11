@@ -3,7 +3,7 @@
 > Agent Memory that Works Like Human Memory
 
 This file contains the complete Hindsight documentation for LLM consumption.
-Generated: 2025-12-10T14:42:08.055Z
+Generated: 2025-12-11T08:22:46.057Z
 
 ---
 
@@ -232,7 +232,7 @@ await client.reflect('my-bank', 'Tell me about Alice');
 <TabItem value="cli" label="CLI">
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/main/hindsight-cli/install.sh | bash
+curl -fsSL https://hindsight.vectorize.io/get-cli | bash
 ```
 
 ```bash
@@ -1187,10 +1187,16 @@ Disposition creates **consistent character** across conversations while allowing
 
 # Ingest Data
 
-Store memories, conversations, and documents into Hindsight.
+Store documents, conversations, and raw content into Hindsight to automatically extract and create memories.
+
+When you **retain** content, Hindsight doesn't just store the raw text—it intelligently analyzes the content to extract meaningful facts, identify entities, and build a connected knowledge graph. This process transforms unstructured information into structured, queryable memories.
 
 
 
+
+:::info How Retain Works
+Learn about fact extraction, entity resolution, and graph construction in the [Retain Architecture](/developer/retain) guide.
+:::
 
 :::tip Prerequisites
 Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
@@ -1233,9 +1239,18 @@ hindsight memory put my-bank "Alice works at Google as a software engineer"
 </TabItem>
 </Tabs>
 
+## The Importance of Context
+
+The `context` parameter is crucial for guiding how Hindsight extracts memories from your content. Think of it as providing a lens through which the system interprets the information.
+
+**Why context matters:**
+- **Steers memory extraction**: Context tells the memory bank what type of information to focus on and how to interpret ambiguous content
+- **Improves relevance**: Memories extracted with proper context are more accurately categorized and easier to retrieve
+- **Disambiguates meaning**: The same sentence can have different implications depending on context (e.g., "the project was terminated" means different things in a career vs. product context)
+
 ## Store with Context and Date
 
-Add context and event dates for better retrieval:
+Always provide context and event dates for optimal memory extraction:
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -1271,11 +1286,11 @@ hindsight memory put my-bank "Alice got promoted" \
 </TabItem>
 </Tabs>
 
-The `timestamp` enables temporal queries like "What happened last spring?"
+The `timestamp` defaults to the current time if not specified. Providing explicit timestamps enables temporal queries like "What happened last spring?"
 
 ## Batch Ingestion
 
-Store multiple memories in a single request:
+Store multiple items in a single request. **Batch ingestion is the recommended approach** as it significantly improves performance by reducing network overhead and allowing Hindsight to optimize the memory extraction process across related content.
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -1327,54 +1342,43 @@ hindsight memory put-files my-bank report.pdf --document-id "q4-report"
 </TabItem>
 </Tabs>
 
-:::info How Retain Works
-Learn about fact extraction, entity resolution, and graph construction in the [Retain Architecture](/developer/retain) guide.
-:::
 
 ## Async Ingestion
 
-For large batches, use async ingestion:
+For large batches, use async ingestion to avoid blocking:
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-# Start async ingestion
+# Start async ingestion (returns immediately)
 result = client.retain_batch(
     bank_id="my-bank",
     items=[...large batch...],
     document_id="large-doc",
-    async_=True
+    retain_async=True
 )
 
-# Result contains operation_id for tracking
-print(result["operation_id"])
+# Check if it was processed asynchronously
+print(result.var_async)  # True
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
 ```typescript
-// Start async ingestion
+// Start async ingestion (returns immediately)
 const result = await client.retainBatch('my-bank', largeItems, {
     documentId: 'large-doc',
     async: true
 });
 
-console.log(result.operation_id);
+console.log(result.async);  // true
 ```
 
 </TabItem>
 </Tabs>
 
-## Best Practices
-
-| Do | Don't |
-|----|-------|
-| Include context for better retrieval | Store raw unstructured dumps |
-| Use document_id to group related content | Mix unrelated content in one batch |
-| Add timestamp for temporal queries | Omit dates if time matters |
-| Store conversations as they happen | Wait to batch everything |
 
 
 ---
@@ -1382,18 +1386,22 @@ console.log(result.operation_id);
 
 ## File: developer/api/recall.md
 
-# Search Facts
+# Recall Memories
 
-Retrieve memories using multi-strategy search.
+Retrieve memories using multi-strategy recall.
 
 
 
+
+:::info How Recall Works
+Learn about the four retrieval strategies (semantic, keyword, graph, temporal) and RRF fusion in the [Recall Architecture](/developer/retrieval) guide.
+:::
 
 :::tip Prerequisites
 Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
 :::
 
-## Basic Search
+## Basic Recall
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -1403,7 +1411,9 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-client.recall(bank_id="my-bank", query="What does Alice do?")
+response = client.recall(bank_id="my-bank", query="What does Alice do?")
+for r in response.results:
+    print(f"{r.text} (score: {r.weight:.2f})")
 ```
 
 </TabItem>
@@ -1414,20 +1424,23 @@ client.recall(bank_id="my-bank", query="What does Alice do?")
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-await client.recall('my-bank', 'What does Alice do?');
+const response = await client.recall('my-bank', 'What does Alice do?');
+for (const r of response.results) {
+    console.log(`${r.text} (score: ${r.weight})`);
+}
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory search my-bank "What does Alice do?"
+hindsight recall my-bank "What does Alice do?"
 ```
 
 </TabItem>
 </Tabs>
 
-## Search Parameters
+## Recall Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -1435,43 +1448,15 @@ hindsight memory search my-bank "What does Alice do?"
 | `types` | list | all | Filter: `world`, `experience`, `opinion` |
 | `budget` | string | "mid" | Budget level: "low", "mid", "high" |
 | `max_tokens` | int | 4096 | Token budget for results |
+| `trace` | bool | false | Enable trace output for debugging |
+| `include_entities` | bool | false | Include entity observations |
+| `max_entity_tokens` | int | 500 | Token budget for entity observations |
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-results = client.recall(
-    bank_id="my-bank",
-    query="What does Alice do?",
-    types=["world", "experience"],
-    budget="high",
-    max_tokens=8000
-)
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-const results = await client.recall('my-bank', 'What does Alice do?', {
-    budget: 'high',
-    maxTokens: 8000
-});
-```
-
-</TabItem>
-</Tabs>
-
-## Full-Featured Search
-
-For more control, use the full-featured recall method:
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Full response with trace info
-response = client.recall_memories(
+response = client.recall(
     bank_id="my-bank",
     query="What does Alice do?",
     types=["world", "experience"],
@@ -1483,22 +1468,20 @@ response = client.recall_memories(
 )
 
 # Access results
-for r in response["results"]:
-    print(f"{r['text']} (score: {r['weight']:.2f})")
+for r in response.results:
+    print(f"{r.text} (score: {r.weight:.2f})")
 
 # Access entity observations (if include_entities=True)
-if "entities" in response:
-    for entity in response["entities"]:
-        print(f"Entity: {entity['name']}")
+if response.entities:
+    for entity in response.entities:
+        print(f"Entity: {entity.name}")
 ```
 
 </TabItem>
 <TabItem value="node" label="Node.js">
 
 ```typescript
-// Full response with trace info
-const response = await client.recallMemories('my-bank', {
-    query: 'What does Alice do?',
+const response = await client.recall('my-bank', 'What does Alice do?', {
     types: ['world', 'experience'],
     budget: 'high',
     maxTokens: 8000,
@@ -1514,44 +1497,9 @@ for (const r of response.results) {
 </TabItem>
 </Tabs>
 
-## Temporal Queries
-
-Hindsight automatically detects time expressions and activates temporal search:
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# These queries activate temporal-graph retrieval
-results = client.recall(bank_id="my-bank", query="What did Alice do last spring?")
-results = client.recall(bank_id="my-bank", query="What happened in June?")
-results = client.recall(bank_id="my-bank", query="Events from last year")
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-hindsight memory search my-bank "What did Alice do last spring?"
-hindsight memory search my-bank "What happened between March and May?"
-```
-
-</TabItem>
-</Tabs>
-
-Supported temporal expressions:
-
-| Expression | Parsed As |
-|------------|-----------|
-| "last spring" | March 1 - May 31 (previous year) |
-| "in June" | June 1-30 (current/nearest year) |
-| "last year" | Jan 1 - Dec 31 (previous year) |
-| "last week" | 7 days ago - today |
-| "between March and May" | March 1 - May 31 |
-
 ## Filter by Fact Type
 
-Search specific memory networks:
+Recall specific memory types:
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -1590,20 +1538,23 @@ facts = client.recall(
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight memory search my-bank "Python" --fact-type opinion
-hindsight memory search my-bank "Alice" --fact-type world,experience
+hindsight recall my-bank "Python" --fact-type opinion
+hindsight recall my-bank "Alice" --fact-type world,experience
 ```
 
 </TabItem>
 </Tabs>
 
-:::info How Recall Works
-Learn about the four search strategies (semantic, keyword, graph, temporal) and RRF fusion in the [Recall Architecture](/developer/retrieval) guide.
+:::warning About Opinions
+Opinions are beliefs formed during [reflect](/developer/api/reflect) operations. Unlike world facts and experience, opinions are subjective interpretations and may not represent objective truth. Depending on your use case:
+- **Exclude opinions** (`types=["world", "experience"]`) when you need factual, verifiable information
+- **Include opinions** when you want the agent's perspective or formed beliefs
+- **Use opinions alone** (`types=["opinion"]`) only when specifically asking about the agent's views
 :::
 
 ## Token Budget Management
 
-Hindsight is built for AI agents, not humans. Traditional search systems return "top-k" results, but agents don't think in terms of result counts—they think in tokens. An agent's context window is measured in tokens, and that's exactly how Hindsight measures results.
+Hindsight is built for AI agents, not humans. Traditional retrieval systems return "top-k" results, but agents don't think in terms of result counts—they think in tokens. An agent's context window is measured in tokens, and that's exactly how Hindsight measures results.
 
 The `max_tokens` parameter lets you control how much of your agent's context budget to spend on memories:
 
@@ -1617,9 +1568,9 @@ results = client.recall(bank_id="my-bank", query="Alice's email", max_tokens=500
 
 This design means you never have to guess whether 10 results or 50 results will fit your context. Just specify the token budget and Hindsight returns as many relevant memories as will fit.
 
-### Additional Context: Chunks and Entity Observations
+## Include Related Context
 
-For the most relevant memories, you can optionally retrieve additional context—each with its own token budget:
+Beyond the core memory results, you can optionally retrieve additional context—each with its own token budget:
 
 | Option | Parameter | Description |
 |--------|-----------|-------------|
@@ -1627,19 +1578,16 @@ For the most relevant memories, you can optionally retrieve additional context�
 | **Entity Observations** | `include_entities`, `max_entity_tokens` | Related observations about entities mentioned in results |
 
 ```python
-response = client.recall_memories(
+response = client.recall(
     bank_id="my-bank",
     query="What does Alice do?",
     max_tokens=4096,              # Budget for memories
-    include_chunks=True,
-    max_chunk_tokens=2000,        # Budget for raw chunks
     include_entities=True,
     max_entity_tokens=1000        # Budget for entity observations
 )
 
 # Access the additional context
-chunks = response.get("chunks", {})
-entities = response.get("entities", [])
+entities = response.entities or []
 ```
 
 This gives your agent richer context while maintaining precise control over total token consumption.
@@ -1648,7 +1596,7 @@ This gives your agent richer context while maintaining precise control over tota
 
 The `budget` parameter controls graph traversal depth:
 
-- **"low"**: Fast, shallow search — good for simple lookups
+- **"low"**: Fast, shallow retrieval — good for simple lookups
 - **"mid"**: Balanced — default for most queries
 - **"high"**: Deep exploration — finds indirect connections
 
@@ -1687,8 +1635,20 @@ const deep = await client.recall('my-bank', 'How are Alice and Bob connected?', 
 
 Generate disposition-aware responses using retrieved memories.
 
+When you call **reflect**, Hindsight performs a multi-step reasoning process:
+1. **Recalls** relevant memories from the bank based on your query
+2. **Applies** the bank's disposition traits to shape the reasoning style
+3. **Generates** a contextual answer grounded in the retrieved facts
+4. **Forms opinions** in the background based on the reasoning (available in subsequent calls)
+
+The response includes the generated answer along with the facts that were used, providing full transparency into how the answer was derived.
 
 
+
+
+:::info How Reflect Works
+Learn about disposition-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
+:::
 
 :::tip Prerequisites
 Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
@@ -1761,34 +1721,50 @@ const response = await client.reflect('my-bank', 'What do you think about remote
 </TabItem>
 </Tabs>
 
-:::info How Reflect Works
-Learn about disposition-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
-:::
+## The Role of Context
 
-## Opinion Formation
+The `context` parameter steers how the reflection is performed without impacting the memory recall. It provides situational information that helps shape the reasoning and response.
 
-Reflect can form new opinions based on evidence:
+**How context is used:**
+- **Shapes reasoning**: Helps understand the situation when formulating an answer
+- **Disambiguates intent**: Clarifies what aspect of the query matters most
+- **Does not affect recall**: The same memories are retrieved regardless of context
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
+# Context is passed to the LLM to help it understand the situation
 response = client.reflect(
     bank_id="my-bank",
-    query="What do you think about Python vs JavaScript for data science?"
+    query="What do you think about the proposal?",
+    context="We're in a budget review meeting discussing Q4 spending"
 )
+```
 
-# Response might include:
-# answer: "Based on what I know about data science workflows..."
-# new_opinions: [
-#     {"text": "Python is better for data science", "id": "..."}
-# ]
+</TabItem>
+<TabItem value="node" label="Node.js">
+
+```typescript
+// Context helps the LLM understand the current situation
+const response = await client.reflect('my-bank', 'What do you think about the proposal?', {
+    context: "We're in a budget review meeting discussing Q4 spending"
+});
 ```
 
 </TabItem>
 </Tabs>
 
-New opinions are automatically stored and influence future responses.
+## Opinion Formation
+
+When reflect reasons about a question, it may form new **opinions** based on the evidence in the memory bank. These opinions are created in the background and become available in subsequent `reflect` and `recall` calls.
+
+**Why opinions matter:**
+- **Consistent thinking**: Opinions ensure the memory bank maintains a coherent perspective over time
+- **Evolving viewpoints**: As more information is retained, opinions can be refined or updated
+- **Grounded reasoning**: Opinions are always derived from factual evidence in the memory bank
+
+Opinions are stored as a special memory type and are automatically retrieved when relevant to future queries. This creates a natural evolution of the bank's perspective, similar to how humans form and refine their views based on accumulated experience.
 
 ## Disposition Influence
 
@@ -1846,7 +1822,7 @@ const response = await client.reflect('cautious-advisor', 'Should I invest in cr
 
 ## Using Sources
 
-The `facts_used` field shows which memories informed the response:
+The `based_on` field shows which memories informed the response:
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -1854,10 +1830,10 @@ The `facts_used` field shows which memories informed the response:
 ```python
 response = client.reflect(bank_id="my-bank", query="Tell me about Alice")
 
-print("Response:", response["answer"])
+print("Response:", response.text)
 print("\nBased on:")
-for fact in response.get("facts_used", []):
-    print(f"  - {fact['text']} (relevance: {fact['weight']:.2f})")
+for fact in response.based_on or []:
+    print(f"  - [{fact.type}] {fact.text}")
 ```
 
 </TabItem>
@@ -1866,10 +1842,10 @@ for fact in response.get("facts_used", []):
 ```typescript
 const response = await client.reflect('my-bank', 'Tell me about Alice');
 
-console.log('Response:', response.answer);
+console.log('Response:', response.text);
 console.log('\nBased on:');
-for (const fact of response.facts_used || []) {
-    console.log(`  - ${fact.text} (relevance: ${fact.weight.toFixed(2)})`);
+for (const fact of response.based_on || []) {
+    console.log(`  - [${fact.type}] ${fact.text}`);
 }
 ```
 
@@ -1887,16 +1863,25 @@ This enables:
 
 ## File: developer/api/memory-banks.md
 
-# Memory Bank
+# Memory Banks
 
-Configure memory bank disposition, background, and behavior.
-Memory banks have characteristics:
-- Banks are completely isolated from each other.
-- You don't need to pre-create it, Hindsight will create it for you with default settings.
-- Banks have a profile that influences how they form opinions from memories. (optional)
+Memory banks are isolated containers that store all memory-related data for a specific context or use case.
 
 
 
+
+## What is a Memory Bank?
+
+A memory bank is a complete, isolated storage unit containing:
+
+- **Memories** — Facts and information retained from conversations
+- **Documents** — Files and content indexed for retrieval
+- **Entities** — People, places, concepts extracted from memories
+- **Relationships** — Connections between entities in the knowledge graph
+
+Banks are completely isolated from each other — memories stored in one bank are not visible to another.
+
+You don't need to pre-create a bank. Hindsight will automatically create it with default settings when you first use it.
 
 :::tip Prerequisites
 Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
@@ -1917,9 +1902,9 @@ client.create_bank(
     name="Research Assistant",
     background="I am a research assistant specializing in machine learning",
     disposition={
-        "skepticism": 4,   # Questions claims, wants evidence
-        "literalism": 3,   # Balanced interpretation
-        "empathy": 3       # Balanced emotional consideration
+        "skepticism": 4,
+        "literalism": 3,
+        "empathy": 3
     }
 )
 ```
@@ -1960,51 +1945,17 @@ hindsight bank disposition my-bank \
 </TabItem>
 </Tabs>
 
-## Disposition Traits
+## Background and Disposition
 
-Each trait is scored 1 to 5:
+Background and disposition are optional settings that influence how the bank forms opinions during [reflect](./reflect) operations.
 
-| Trait | Low (1) | High (5) |
-|-------|---------|----------|
-| **Skepticism** | Trusting, accepts information at face value | Skeptical, questions and doubts claims |
-| **Literalism** | Flexible interpretation, reads between the lines | Literal interpretation, takes things exactly as stated |
-| **Empathy** | Detached, focuses on facts and logic | Empathetic, considers emotional context |
+:::info
+Background and disposition only affect the `reflect` operation (opinion formation). They do not impact `retain`, `recall`, or other memory operations.
+:::
 
-### How Traits Affect Behavior
+### Background
 
-**Skepticism** influences how the bank evaluates claims:
-
-```python
-# High skepticism (5)
-"What's the source for this? Have these results been replicated?"
-
-# Low skepticism (1)
-"That sounds reasonable, let's proceed with that assumption."
-```
-
-**Literalism** affects interpretation:
-
-```python
-# High literalism (5)
-"The requirement says 'users' - that means all users, no exceptions."
-
-# Low literalism (1)
-"When they say 'users', they probably mean active users in this context."
-```
-
-**Empathy** shapes how emotional context is considered:
-
-```python
-# High empathy (5)
-"I understand this is frustrating. Let's find a solution that works for you."
-
-# Low empathy (1)
-"Here are the facts: Option A has 20% better performance than Option B."
-```
-
-## Background
-
-The background is a first-person narrative providing bank context:
+The background is a first-person narrative providing context for opinion formation:
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -2032,167 +1983,15 @@ await client.createBank('financial-advisor', {
 </TabItem>
 </Tabs>
 
-Background influences:
-- How questions are interpreted
-- Perspective in responses
-- Opinion formation context
+### Disposition Traits
 
-## Getting Bank Profile
+Disposition traits influence how opinions are formed during reflection. Each trait is scored 1 to 5:
 
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Using the low-level API
-from hindsight_client_api import ApiClient, Configuration
-from hindsight_client_api.api import DefaultApi
-
-config = Configuration(host="http://localhost:8888")
-api_client = ApiClient(config)
-api = DefaultApi(api_client)
-
-profile = api.get_bank_profile("my-bank")
-
-print(f"Name: {profile.name}")
-print(f"Background: {profile.background}")
-print(f"Disposition: {profile.disposition}")
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-const profile = await client.getBankProfile('my-bank');
-
-console.log(`Name: ${profile.name}`);
-console.log(`Background: ${profile.background}`);
-console.log(`Disposition:`, profile.disposition);
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-hindsight bank profile my-bank
-```
-
-</TabItem>
-</Tabs>
-
-## Default Values
-
-If not specified, banks use neutral defaults:
-
-```python
-{
-    "skepticism": 3,
-    "literalism": 3,
-    "empathy": 3,
-    "background": ""
-}
-```
-
-## Disposition Templates
-
-Common disposition configurations:
-
-| Use Case | Skepticism | Literalism | Empathy |
-|----------|------------|------------|---------|
-| **Customer Support** | 2 | 2 | 5 |
-| **Code Reviewer** | 4 | 5 | 2 |
-| **Legal Analyst** | 5 | 5 | 2 |
-| **Therapist/Coach** | 2 | 2 | 5 |
-| **Research Assistant** | 4 | 3 | 3 |
-| **Neutral (default)** | 3 | 3 | 3 |
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Customer support bank
-client.create_bank(
-    bank_id="support",
-    background="I am a friendly customer support agent",
-    disposition={
-        "skepticism": 2,   # Trusting
-        "literalism": 2,   # Flexible interpretation
-        "empathy": 5       # Very empathetic
-    }
-)
-
-# Code reviewer bank
-client.create_bank(
-    bank_id="reviewer",
-    background="I am a thorough code reviewer focused on quality",
-    disposition={
-        "skepticism": 4,   # Questions assumptions
-        "literalism": 5,   # Exact interpretation
-        "empathy": 2       # Direct, fact-focused
-    }
-)
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-// Customer support bank
-await client.createBank('support', {
-    background: 'I am a friendly customer support agent',
-    disposition: {
-        skepticism: 2,
-        literalism: 2,
-        empathy: 5
-    }
-});
-
-// Code reviewer bank
-await client.createBank('reviewer', {
-    background: 'I am a thorough code reviewer focused on quality',
-    disposition: {
-        skepticism: 4,
-        literalism: 5,
-        empathy: 2
-    }
-});
-```
-
-</TabItem>
-</Tabs>
-
-## Bank Isolation
-
-Each bank has:
-- **Separate memories** — banks don't share memories
-- **Own disposition** — traits are per-bank
-- **Independent opinions** — formed from their own experiences
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Store to bank A
-client.retain(bank_id="bank-a", content="Python is great")
-
-# Bank B doesn't see it
-results = client.recall(bank_id="bank-b", query="Python")
-# Returns empty
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-// Store to bank A
-await client.retain('bank-a', 'Python is great');
-
-// Bank B doesn't see it
-const results = await client.recall('bank-b', 'Python');
-// Returns empty
-```
-
-</TabItem>
-</Tabs>
+| Trait | Low (1) | High (5) |
+|-------|---------|----------|
+| **Skepticism** | Trusting, accepts information at face value | Skeptical, questions and doubts claims |
+| **Literalism** | Flexible interpretation, reads between the lines | Literal interpretation, takes things exactly as stated |
+| **Empathy** | Detached, focuses on facts and logic | Empathetic, considers emotional context |
 
 
 ---
@@ -2202,13 +2001,10 @@ const results = await client.recall('bank-b', 'Python');
 
 # Entities
 
-Entities are the people, organizations, places, and concepts that Hindsight automatically tracks across your memory bank.
+Entities are the people, organizations, places, and concepts that Hindsight automatically extracts and tracks across your memory bank.
 
-
-
-
-:::tip Prerequisites
-Make sure you've completed the [Quick Start](./quickstart) and understand [how retain works](./retain).
+:::info Automatic Feature
+You don't need to do anything to use entities—Hindsight extracts them automatically when you call `retain`. However, understanding how entities work is important because they power key features in [recall](./recall) and [reflect](./reflect).
 :::
 
 ## Why Entities Matter
@@ -2219,246 +2015,98 @@ Entities improve recall quality in two ways:
 
 2. **Observations** — Hindsight synthesizes high-level summaries about each entity from multiple facts. Including entity observations in recall provides richer context.
 
-:::tip Include Entities in Recall
-Use `include_entities=True` in your recall calls to get entity observations alongside fact results. See [Recall](./recall) for details.
-:::
+## What Gets Extracted?
 
-## What Are Entities?
+When you retain information, the LLM extracts named entities from each fact:
 
-When you retain information, Hindsight automatically identifies and tracks entities:
+- **People** — Names like "Alice", "Dr. Smith", "CEO John"
+- **Organizations** — Companies, teams, institutions
+- **Places** — Cities, countries, specific locations
+- **Products/Objects** — Software, tools, significant items
+- **Concepts** — Abstract themes like "career growth", "friendship"
 
-<Tabs>
-<TabItem value="python" label="Python">
+**Example:**
 
-```python
-from hindsight_client import Hindsight
-
-client = Hindsight(base_url="http://localhost:8888")
-
-client.retain(
-    bank_id="my-bank",
-    content="Alice works at Google in Mountain View. She specializes in TensorFlow."
-)
 ```
+Content: "Alice works at Google in Mountain View. She specializes in TensorFlow."
 
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-
-
-const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
-
-await client.retain('my-bank', 'Alice works at Google in Mountain View. She specializes in TensorFlow.');
+Entities extracted:
+- Alice (person)
+- Google (organization)
+- Mountain View (location)
+- TensorFlow (product)
 ```
-
-</TabItem>
-</Tabs>
-
-**Entities extracted:**
-- **Alice** (person)
-- **Google** (organization)
-- **Mountain View** (location)
-- **TensorFlow** (product)
 
 ## Entity Resolution
 
-Multiple mentions are unified into a single entity:
+When the same entity is mentioned multiple times (possibly with different names), Hindsight resolves them to a single canonical entity using a scoring algorithm:
 
-- "Alice" + "Alice Chen" + "Alice C." → one person
-- "Bob" + "Robert Chen" → one person (nickname)
-- Context-aware: "Apple (company)" vs "apple (fruit)"
+### Resolution Factors
 
-## List Entities
+1. **Name similarity (50%)** — How closely the text matches existing entity names. Handles variations like "Alice" vs "Alice Chen" or partial matches.
 
-Get all entities tracked in a memory bank:
+2. **Co-occurrence (30%)** — Entities that frequently appear together are more likely to be the same. If "Alice" always appears with "Google" and "TensorFlow", a new mention of "Alice" near those entities scores higher for matching.
 
-<Tabs>
-<TabItem value="python" label="Python">
+3. **Temporal proximity (20%)** — Recent mentions are weighted more heavily. If an entity was seen in the last 7 days, new similar mentions are more likely to match.
 
-```python
-# Using the low-level API
-from hindsight_client_api import ApiClient, Configuration
-from hindsight_client_api.api import DefaultApi
+### Resolution Threshold
 
-config = Configuration(host="http://localhost:8888")
-api_client = ApiClient(config)
-api = DefaultApi(api_client)
+A match requires a combined score above **0.6** (60%). Below this threshold, Hindsight creates a new entity rather than risk merging distinct entities.
 
-# List all entities
-response = api.list_entities(bank_id="my-bank")
-
-for entity in response.items:
-    print(f"{entity.canonical_name}: {entity.mention_count} mentions")
-
-# List with pagination
-response = api.list_entities(
-    bank_id="my-bank",
-    limit=50,
-    offset=0
-)
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-
-
-const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
-
-// List all entities
-const response = await sdk.listEntities({
-    client: apiClient,
-    path: { bank_id: 'my-bank' }
-});
-
-for (const entity of response.data.items) {
-    console.log(`${entity.canonical_name}: ${entity.mention_count} mentions`);
-}
-
-// List with pagination
-const paginated = await sdk.listEntities({
-    client: apiClient,
-    path: { bank_id: 'my-bank' },
-    query: { limit: 50, offset: 0 }
-});
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-# List all entities
-hindsight entities list my-bank
-
-# With limit
-hindsight entities list my-bank --limit 50
-```
-
-</TabItem>
-</Tabs>
-
-## Get Entity Details
-
-Retrieve detailed information about a specific entity:
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Get entity details with observations
-entity = api.get_entity(
-    bank_id="my-bank",
-    entity_id="entity-uuid"
-)
-
-print(f"Entity: {entity.canonical_name}")
-print(f"First seen: {entity.first_seen}")
-print(f"Mentions: {entity.mention_count}")
-
-# Observations (synthesized summaries)
-for obs in entity.observations:
-    print(f"  - {obs.text}")
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-// Get entity details
-const entity = await sdk.getEntity({
-    client: apiClient,
-    path: { bank_id: 'my-bank', entity_id: 'entity-uuid' }
-});
-
-console.log(`Entity: ${entity.data.canonical_name}`);
-console.log(`First seen: ${entity.data.first_seen}`);
-console.log(`Mentions: ${entity.data.mention_count}`);
-
-// Observations
-for (const obs of entity.data.observations) {
-    console.log(`  - ${obs.text}`);
-}
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-# Get entity details
-hindsight entities get my-bank entity-uuid
-```
-
-</TabItem>
-</Tabs>
+This means:
+- Exact name matches with recent co-occurring entities → strong match
+- Partial name matches without context → likely creates new entity
+- Same name in completely different contexts → may create separate entities
 
 ## Entity Observations
 
-Observations are high-level summaries automatically synthesized from multiple facts:
+Observations are **derived state**—high-level summaries that Hindsight automatically synthesizes from the facts associated with an entity. They provide a condensed view of what the system knows about important entities.
 
-**Facts about Alice:**
+**Example:**
+
+Facts about Alice:
 - "Alice works at Google"
 - "Alice is a software engineer"
 - "Alice specializes in ML"
+- "Alice joined Google in 2020"
+- "Alice leads the search team"
 
-**Observation created:**
-- "Alice is a software engineer at Google specializing in ML"
+Observation created:
+- "Alice is a software engineer at Google who joined in 2020, specializes in ML, and leads the search team"
 
-Observations are generated in the background after retaining information.
+### How Observations Work
 
-## Regenerate Observations
+Observations are **not generated for every entity**. When you retain new documents:
 
-Force regeneration of entity observations:
+1. **Top entities selected** — Hindsight identifies the top 5 most-mentioned entities in the batch
+2. **Threshold check** — Only entities with at least 5 facts get observations
+3. **Regeneration** — Observations are regenerated using the entity's most recent 50 facts
+4. **Old observations replaced** — Previous observations are deleted and new ones created
 
-<Tabs>
-<TabItem value="python" label="Python">
+This means:
+- Frequently mentioned entities get observations; rarely mentioned ones don't
+- Observations stay up-to-date as new information is retained
+- The system prioritizes entities that matter most to your memory bank
 
-```python
-# Regenerate observations for an entity
-api.regenerate_entity_observations(
-    bank_id="my-bank",
-    entity_id="entity-uuid"
-)
-```
+### Observations vs Opinions
 
-</TabItem>
-<TabItem value="node" label="Node.js">
+Observations are **objective summaries**—they synthesize facts without any bias or perspective. This is different from [opinions](./opinions), which are influenced by the memory bank's disposition.
 
-```typescript
-// Regenerate observations
-await sdk.regenerateEntityObservations({
-    client: apiClient,
-    path: { bank_id: 'my-bank', entity_id: 'entity-uuid' }
-});
-```
+| | Observations | Opinions |
+|---|---|---|
+| **Purpose** | Summarize what's known about an entity | Express the bank's perspective on a topic |
+| **Disposition influence** | No | Yes |
+| **Scope** | Per-entity | Any topic |
+| **Generation** | Automatic (top entities) | On-demand via reflect |
 
-</TabItem>
-</Tabs>
+### Using Observations
 
-## Entity Response Format
-
-```json
-{
-  "id": "entity-uuid",
-  "canonical_name": "Alice Chen",
-  "first_seen": "2024-01-15T10:30:00Z",
-  "last_seen": "2024-03-20T14:22:00Z",
-  "mention_count": 47,
-  "observations": [
-    {
-      "text": "Alice is a software engineer at Google specializing in ML",
-      "mentioned_at": "2024-03-20T15:00:00Z"
-    }
-  ]
-}
-```
+Observations are included in recall results when you set `include_entities=True`. They provide quick context about key entities without retrieving all underlying facts.
 
 ## Next Steps
 
-- [**Memory Banks**](./memory-banks) — Configure bank disposition
-- [**Documents**](./documents) — Track document sources
-- [**Operations**](./operations) — Monitor background tasks
+- [**Recall**](./recall) — Use entities in memory retrieval
+- [**Reflect**](./reflect) — Get entity-aware responses
 
 
 ---
@@ -2624,15 +2272,14 @@ hindsight retain my-bank "Project deadline: April 15 (extended)" --document-id p
 </TabItem>
 </Tabs>
 
-## List Documents
+## Get Document
 
-View all documents in a memory bank:
+Retrieve a document's original text and metadata. This is useful for expanding document context after a recall operation returns memories with document references.
 
 <Tabs>
 <TabItem value="python" label="Python">
 
 ```python
-# Using the low-level API
 from hindsight_client_api import ApiClient, Configuration
 from hindsight_client_api.api import DefaultApi
 
@@ -2640,19 +2287,16 @@ config = Configuration(host="http://localhost:8888")
 api_client = ApiClient(config)
 api = DefaultApi(api_client)
 
-# List all documents
-response = api.list_documents(bank_id="my-bank")
-
-for doc in response.items:
-    print(f"{doc.id}: {doc.memory_unit_count} memories")
-    print(f"  Created: {doc.created_at}")
-
-# With pagination
-response = api.list_documents(
+# Get document to expand context from recall results
+doc = api.get_document(
     bank_id="my-bank",
-    limit=50,
-    offset=0
+    document_id="meeting-2024-03-15"
 )
+
+print(f"Document: {doc.id}")
+print(f"Original text: {doc.original_text}")
+print(f"Memory count: {doc.memory_unit_count}")
+print(f"Created: {doc.created_at}")
 ```
 
 </TabItem>
@@ -2663,124 +2307,23 @@ response = api.list_documents(
 
 const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
 
-// List all documents
-const response = await sdk.listDocuments({
-    client: apiClient,
-    path: { bank_id: 'my-bank' }
-});
-
-for (const doc of response.data.items) {
-    console.log(`${doc.id}: ${doc.memory_unit_count} memories`);
-    console.log(`  Created: ${doc.created_at}`);
-}
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-# List documents
-hindsight documents list my-bank
-
-# With limit
-hindsight documents list my-bank --limit 50
-```
-
-</TabItem>
-</Tabs>
-
-## Get Document Details
-
-Retrieve a specific document with its content:
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Get document
-doc = api.get_document(
-    bank_id="my-bank",
-    document_id="meeting-2024-03-15"
-)
-
-print(f"Document: {doc.id}")
-print(f"Original text: {doc.original_text[:200]}...")
-print(f"Memories: {doc.memory_unit_count}")
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-// Get document
-const doc = await sdk.getDocument({
+// Get document to expand context from recall results
+const { data: doc } = await sdk.getDocument({
     client: apiClient,
     path: { bank_id: 'my-bank', document_id: 'meeting-2024-03-15' }
 });
 
-console.log(`Document: ${doc.data.id}`);
-console.log(`Original text: ${doc.data.original_text.substring(0, 200)}...`);
-console.log(`Memories: ${doc.data.memory_unit_count}`);
+console.log(`Document: ${doc.id}`);
+console.log(`Original text: ${doc.original_text}`);
+console.log(`Memory count: ${doc.memory_unit_count}`);
+console.log(`Created: ${doc.created_at}`);
 ```
 
 </TabItem>
 <TabItem value="cli" label="CLI">
 
 ```bash
-# Get document
 hindsight documents get my-bank meeting-2024-03-15
-```
-
-</TabItem>
-</Tabs>
-
-## Delete Documents
-
-Remove a document and all its memories:
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Delete document (removes all associated memories)
-api.delete_document(
-    bank_id="my-bank",
-    document_id="old-meeting"
-)
-
-# Bulk delete
-for doc_id in ["old-1", "old-2", "old-3"]:
-    api.delete_document(bank_id="my-bank", document_id=doc_id)
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-// Delete document
-await sdk.deleteDocument({
-    client: apiClient,
-    path: { bank_id: 'my-bank', document_id: 'old-meeting' }
-});
-
-// Bulk delete
-for (const docId of ['old-1', 'old-2', 'old-3']) {
-    await sdk.deleteDocument({
-        client: apiClient,
-        path: { bank_id: 'my-bank', document_id: docId }
-    });
-}
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-# Delete document
-hindsight documents delete my-bank old-meeting
-
-# Confirm deletion
-hindsight documents delete my-bank old-meeting --confirm
 ```
 
 </TabItem>
@@ -2793,75 +2336,12 @@ hindsight documents delete my-bank old-meeting --confirm
   "id": "meeting-2024-03-15",
   "bank_id": "my-bank",
   "original_text": "Alice presented the Q4 roadmap...",
+  "content_hash": "abc123def456",
   "memory_unit_count": 12,
   "created_at": "2024-03-15T14:00:00Z",
-  "retain_params": {
-    "context": "team meeting",
-    "event_date": "2024-03-15"
-  }
+  "updated_at": "2024-03-15T14:00:00Z"
 }
 ```
-
-## Use Cases
-
-### Meeting Notes
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-from datetime import date
-
-# Store meeting notes with date-based IDs
-client.retain(
-    bank_id="team-memory",
-    content=meeting_transcript,
-    document_id=f"meeting-{date.today()}"
-)
-```
-
-</TabItem>
-</Tabs>
-
-### Documentation
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-from pathlib import Path
-
-# Store docs with version tracking
-docs_dir = Path("docs")
-version = "1.0"
-
-for file in docs_dir.glob("*.md"):
-    client.retain(
-        bank_id="docs-memory",
-        content=file.read_text(),
-        document_id=f"docs-{file.stem}-v{version}"
-    )
-```
-
-</TabItem>
-</Tabs>
-
-### Conversation History
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Store chat history with session IDs
-client.retain(
-    bank_id="chat-memory",
-    content=conversation,
-    document_id=f"session-{session_id}"
-)
-```
-
-</TabItem>
-</Tabs>
 
 ## Next Steps
 
@@ -2877,290 +2357,31 @@ client.retain(
 
 # Operations
 
-Monitor and manage long-running background tasks in Hindsight.
-
-
-
+Background tasks that Hindsight executes asynchronously.
 
 :::tip Prerequisites
 Make sure you've completed the [Quick Start](./quickstart) and understand [how retain works](./retain).
 :::
 
-## What Are Operations?
+## How Operations Work
 
-When you call `retain_batch` with `async=True`, Hindsight processes the content in the background and returns immediately with an operation ID. Operations let you track and manage these async retain tasks.
+Hindsight processes several types of tasks in the background to maintain memory quality and consistency. These operations run automatically—you don't need to trigger them manually.
 
-By default, async operations are executed in-process within the API service. This is managed automatically — you don't need to configure anything.
+By default, all background operations are executed in-process within the API service.
 
-:::tip Scaling with Streaming
-For high-throughput workloads, you can extend the task backend to use a streaming platform like Kafka. This enables scale-out processing across multiple workers and handles backpressure on the API.
+:::note Kafka Integration
+Support for external streaming platforms like Kafka for scale-out processing is planned but **not available out of the box** in the current release.
 :::
 
-## Async Batch Retain
-
-For large content batches, use async mode to avoid timeouts:
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-from hindsight_client import Hindsight
-
-client = Hindsight(base_url="http://localhost:8888")
-
-client.retain_batch(
-    bank_id="my-bank",
-    items=[
-        {"content": doc1_text},
-        {"content": doc2_text},
-    ],
-    retain_async=True
-)
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-
-
-const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
-
-await client.retainBatch('my-bank', [
-    { content: doc1Text },
-    { content: doc2Text },
-], { async: true });
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-hindsight retain my-bank --files docs/*.md --async
-```
-
-</TabItem>
-</Tabs>
-
-## List Operations
-
-View all operations for a memory bank:
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Using the low-level API
-from hindsight_client_api import ApiClient, Configuration
-from hindsight_client_api.api import DefaultApi
-
-config = Configuration(host="http://localhost:8888")
-api_client = ApiClient(config)
-api = DefaultApi(api_client)
-
-# List all operations
-response = api.list_operations(bank_id="my-bank")
-
-for op in response.items:
-    print(f"{op.id}: {op.task_type} - {op.status}")
-    print(f"  Items: {op.items_count}")
-    if op.error_message:
-        print(f"  Error: {op.error_message}")
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-
-
-const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
-
-// List all operations
-const response = await sdk.listOperations({
-    client: apiClient,
-    path: { bank_id: 'my-bank' }
-});
-
-for (const op of response.data.items) {
-    console.log(`${op.id}: ${op.task_type} - ${op.status}`);
-    console.log(`  Items: ${op.items_count}`);
-    if (op.error_message) {
-        console.log(`  Error: ${op.error_message}`);
-    }
-}
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-# List all operations
-hindsight operations list my-bank
-
-# Filter by status
-hindsight operations list my-bank --status running
-
-# Watch all running operations
-hindsight operations watch my-bank --all
-```
-
-</TabItem>
-</Tabs>
-
-## Cancel Operations
-
-Stop a running or pending operation:
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-# Cancel operation
-api.cancel_operation(
-    bank_id="my-bank",
-    operation_id="op-abc123"
-)
-
-# Cancel all pending operations
-response = api.list_operations(bank_id="my-bank")
-for op in response.items:
-    if op.status == "pending":
-        api.cancel_operation(bank_id="my-bank", operation_id=op.id)
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-// Cancel operation
-await sdk.cancelOperation({
-    client: apiClient,
-    path: { bank_id: 'my-bank', operation_id: 'op-abc123' }
-});
-
-// Cancel all pending
-const ops = await sdk.listOperations({
-    client: apiClient,
-    path: { bank_id: 'my-bank' }
-});
-
-for (const op of ops.data.items) {
-    if (op.status === 'pending') {
-        await sdk.cancelOperation({
-            client: apiClient,
-            path: { bank_id: 'my-bank', operation_id: op.id }
-        });
-    }
-}
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-```bash
-# Cancel operation
-hindsight operations cancel my-bank op-abc123
-
-# Cancel all pending
-hindsight operations cancel my-bank --all-pending
-```
-
-</TabItem>
-</Tabs>
-
-## Operation States
-
-| State | Description |
-|-------|-------------|
-| **pending** | Queued, waiting to start |
-| **running** | Currently processing |
-| **completed** | Successfully finished |
-| **failed** | Encountered an error |
-| **cancelled** | Stopped by user |
-
-## Monitoring Strategies
-
-### Polling
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-
-
-def wait_for_operations(api, bank_id, poll_interval=5):
-    """Wait for all pending/running operations to complete."""
-    while True:
-        response = api.list_operations(bank_id=bank_id)
-
-        pending_or_running = [
-            op for op in response.items
-            if op.status in ['pending', 'running']
-        ]
-
-        if not pending_or_running:
-            print("All operations completed!")
-            break
-
-        for op in pending_or_running:
-            print(f"  {op.id}: {op.status} ({op.items_count} items)")
-
-        time.sleep(poll_interval)
-
-# Use it
-wait_for_operations(api, "my-bank")
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```typescript
-async function waitForOperations(apiClient: any, bankId: string, pollInterval = 5000) {
-    while (true) {
-        const response = await sdk.listOperations({
-            client: apiClient,
-            path: { bank_id: bankId }
-        });
-
-        const pendingOrRunning = response.data.items.filter(
-            (op: any) => ['pending', 'running'].includes(op.status)
-        );
-
-        if (pendingOrRunning.length === 0) {
-            console.log('All operations completed!');
-            break;
-        }
-
-        for (const op of pendingOrRunning) {
-            console.log(`  ${op.id}: ${op.status} (${op.items_count} items)`);
-        }
-
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-    }
-}
-
-// Use it
-await waitForOperations(apiClient, 'my-bank');
-```
-
-</TabItem>
-</Tabs>
-
-## Performance Tips
-
-**Use async for large batches:**
-- Sync: < 100 items or < 100KB
-- Async: > 100 items or > 100KB
-
-**Monitor progress:**
-- Check `items_count` field
-- Poll every 5-10 seconds
-
-**Handle failures:**
-- Check `error_message` field for details
-- Retry with exponential backoff
-- Break large batches into smaller chunks
+## Operation Types
+
+| Operation | Trigger | Description |
+|-----------|---------|-------------|
+| **batch_retain** | `retain_batch` with `async=True` | Processes large content batches in the background |
+| **form_opinion** | After each `reflect` call | Extracts and stores new opinions formed during reflection |
+| **reinforce_opinion** | After `retain` | Updates opinion confidence based on new supporting evidence |
+| **access_count_update** | After `recall` | Tracks which memories are accessed for relevance scoring |
+| **regenerate_observations** | Bank profile update | Regenerates entity observations when disposition changes |
 
 ## Next Steps
 
@@ -3343,7 +2564,7 @@ Configure the LLM provider used for fact extraction, entity resolution, and reas
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `HINDSIGHT_API_LLM_PROVIDER` | LLM provider: `groq`, `openai`, `ollama` | `groq` | Yes |
+| `HINDSIGHT_API_LLM_PROVIDER` | LLM provider: `groq`, `openai`, `gemini`, `ollama` | `groq` | Yes |
 | `HINDSIGHT_API_LLM_API_KEY` | API key for LLM provider | - | Yes (except ollama) |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | Provider-specific | No |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default | No |
@@ -3364,6 +2585,14 @@ export HINDSIGHT_API_LLM_MODEL=openai/gpt-oss-20b
 export HINDSIGHT_API_LLM_PROVIDER=openai
 export HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx
 export HINDSIGHT_API_LLM_MODEL=gpt-4o
+```
+
+**Gemini**
+
+```bash
+export HINDSIGHT_API_LLM_PROVIDER=gemini
+export HINDSIGHT_API_LLM_API_KEY=xxxxxxxxxxxx
+export HINDSIGHT_API_LLM_MODEL=gemini-2.0-flash
 ```
 
 **Ollama (Local, No API Key)**
@@ -3517,7 +2746,7 @@ Hindsight uses several machine learning models for different tasks.
 | Model Type | Purpose | Default | Configurable |
 |------------|---------|---------|--------------|
 | **Embedding** | Vector representations for semantic search | `BAAI/bge-small-en-v1.5` | Yes |
-| **Cross-Encoder** | Reranking search results | `ms-marco-MiniLM-L-6-v2` | Yes |
+| **Cross-Encoder** | Reranking search results | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Yes |
 | **LLM** | Fact extraction, reasoning, generation | Provider-specific | Yes |
 
 All local models (embedding, cross-encoder) are automatically downloaded from HuggingFace on first run.
@@ -3538,12 +2767,20 @@ Converts text into dense vector representations for semantic similarity search.
 | `BAAI/bge-base-en-v1.5` | 768 | Higher accuracy, slower |
 | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | 384 | Multilingual (50+ languages) |
 
+:::warning
+All embedding models must produce 384-dimensional vectors to match the database schema.
+:::
+
 **Configuration:**
 
 ```bash
-export HINDSIGHT_API_EMBEDDING_MODEL=BAAI/bge-base-en-v1.5
-export HINDSIGHT_API_EMBEDDING_DEVICE=cuda  # or mps for Apple Silicon
-export HINDSIGHT_API_EMBEDDING_BATCH_SIZE=64
+# Local provider (default)
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
+export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-small-en-v1.5
+
+# TEI provider (remote)
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=tei
+export HINDSIGHT_API_EMBEDDINGS_TEI_URL=http://localhost:8080
 ```
 
 ---
@@ -3558,16 +2795,20 @@ Reranks initial search results to improve precision.
 
 | Model | Use Case |
 |-------|----------|
-| `ms-marco-MiniLM-L-6-v2` | Default, fast |
-| `ms-marco-MiniLM-L-12-v2` | Higher accuracy |
-| `mmarco-mMiniLMv2-L12-H384-v1` | Multilingual |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` | Default, fast |
+| `cross-encoder/ms-marco-MiniLM-L-12-v2` | Higher accuracy |
+| `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | Multilingual |
 
 **Configuration:**
 
 ```bash
-export HINDSIGHT_API_RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-12-v2
-export HINDSIGHT_API_RERANK_TOP_K=50      # How many results to rerank
-export HINDSIGHT_API_RERANK_ENABLED=true  # Set to false to disable
+# Local provider (default)
+export HINDSIGHT_API_RERANKER_PROVIDER=local
+export HINDSIGHT_API_RERANKER_LOCAL_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+
+# TEI provider (remote)
+export HINDSIGHT_API_RERANKER_PROVIDER=tei
+export HINDSIGHT_API_RERANKER_TEI_URL=http://localhost:8081
 ```
 
 ---
@@ -3576,14 +2817,14 @@ export HINDSIGHT_API_RERANK_ENABLED=true  # Set to false to disable
 
 Used for fact extraction, entity resolution, opinion generation, and answer synthesis.
 
-**Supported providers:** Groq, OpenAI, Ollama, Gemini
+**Supported providers:** Groq, OpenAI, Gemini, Ollama
 
 | Provider | Recommended Model | Best For |
 |----------|------------------|----------|
-| **Groq** | `openai/gpt-oss-20b`    | Fast inference, high throughput (recommended) |
-| **OpenAI** | `gpt-5-mini`     | Good quality |
-| **Gemini** | `gemini-2.5-flash` | Good quality | 
-| **Ollama** | `gpt-oss-20b`       | Local deployment, privacy |
+| **Groq** | `openai/gpt-oss-20b` | Fast inference, high throughput (recommended) |
+| **OpenAI** | `gpt-4o` | Good quality |
+| **Gemini** | `gemini-2.0-flash` | Good quality, cost effective |
+| **Ollama** | `llama3.1` | Local deployment, privacy |
 
 **Configuration:**
 
@@ -3596,31 +2837,20 @@ export HINDSIGHT_API_LLM_MODEL=openai/gpt-oss-20b
 # OpenAI
 export HINDSIGHT_API_LLM_PROVIDER=openai
 export HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx
-export HINDSIGHT_API_LLM_MODEL=gpt-5-mini
+export HINDSIGHT_API_LLM_MODEL=gpt-4o
 
 # Gemini
 export HINDSIGHT_API_LLM_PROVIDER=gemini
 export HINDSIGHT_API_LLM_API_KEY=xxxxxxxxxxxx
-export HINDSIGHT_API_LLM_MODEL=gemini-2.5-flash
+export HINDSIGHT_API_LLM_MODEL=gemini-2.0-flash
 
 # Ollama (local)
 export HINDSIGHT_API_LLM_PROVIDER=ollama
 export HINDSIGHT_API_LLM_BASE_URL=http://localhost:11434/v1
-export HINDSIGHT_API_LLM_MODEL=gpt-oss-20b
+export HINDSIGHT_API_LLM_MODEL=llama3.1
 ```
 
-**Note:** The LLM is the primary bottleneck for write operations. See [Performance](./performance) for optimization strategies.
-
----
-
-## Model Comparison
-
-| Provider | Model | Speed | Quality | Cost |
-|----------|-------|-------|---------|------|
-| Groq | gpt-oss-20b | Fast | Good | Free tier |
-| OpenAI | gpt-4o-mini | Medium | Good | $0.15 / $0.60 per 1M tokens |
-| OpenAI | gpt-4o | Slower | Best | $2.50 / $10.00 per 1M tokens |
-| Ollama | llama3.1 | Varies | Good | Free (local) |
+**Note:** The LLM is the primary bottleneck for retain operations. See [Performance](./performance) for optimization strategies.
 
 
 ---
@@ -4272,7 +3502,7 @@ The Hindsight CLI provides command-line access to memory operations and bank man
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/main/hindsight-cli/install.sh | bash
+curl -fsSL https://hindsight.vectorize.io/get-cli | bash
 ```
 
 ## Configuration
@@ -5537,37 +4767,50 @@ Hindsight includes a built-in [Model Context Protocol (MCP)](https://modelcontex
 
 ## Access
 
-The MCP server is **enabled by default** and mounted at `/mcp` on the API server:
+The MCP server is **enabled by default** and mounted at `/mcp` on the API server. Each memory bank has its own MCP endpoint:
 
 ```
-http://localhost:8888/mcp
+http://localhost:8888/mcp/{bank_id}/
 ```
 
-To disable it, set the environment variable:
+For example, to connect to the memory bank `alice`:
+```
+http://localhost:8888/mcp/alice/
+```
+
+To disable the MCP server, set the environment variable:
 
 ```bash
 export HINDSIGHT_API_MCP_ENABLED=false
 ```
 
+## Per-Bank Endpoints
+
+Unlike traditional MCP servers where tools require explicit identifiers, Hindsight uses **per-bank endpoints**. The `bank_id` is part of the URL path, so tools don't need to specify which bank to use—it's implicit from the connection.
+
+This design:
+- **Simplifies tool usage** — no need to pass `bank_id` with every call
+- **Enforces isolation** — each MCP connection is scoped to a single bank
+- **Enables multi-tenant setups** — connect different users to different endpoints
+
+---
+
 ## Available Tools
 
-### hindsight_put
+### retain
 
-Store information to a user's memory bank.
+Store information to long-term memory.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `bank_id` | string | Yes | Unique identifier for the user (e.g., `user_12345`, `alice@example.com`) |
 | `content` | string | Yes | The fact or memory to store |
-| `context` | string | Yes | Category for the memory (e.g., `personal_preferences`, `work_history`) |
-| `explanation` | string | No | Why this memory is being stored |
+| `context` | string | No | Category for the memory (default: `general`) |
 
 **Example:**
 ```json
 {
-  "name": "hindsight_put",
+  "name": "retain",
   "arguments": {
-    "bank_id": "user_12345",
     "content": "User prefers Python over JavaScript for backend development",
     "context": "programming_preferences"
   }
@@ -5582,23 +4825,20 @@ Store information to a user's memory bank.
 
 ---
 
-### hindsight_search
+### recall
 
-Search a user's memory bank to provide personalized responses.
+Search memories to provide personalized responses.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `bank_id` | string | Yes | Unique identifier for the user |
 | `query` | string | Yes | Natural language search query |
-| `max_tokens` | integer | No | Maximum tokens for results (default: 4096) |
-| `explanation` | string | No | Why this search is being performed |
+| `max_results` | integer | No | Maximum results to return (default: 10) |
 
 **Example:**
 ```json
 {
-  "name": "hindsight_search",
+  "name": "recall",
   "arguments": {
-    "bank_id": "user_12345",
     "query": "What are the user's programming language preferences?"
   }
 }
@@ -5613,8 +4853,7 @@ Search a user's memory bank to provide personalized responses.
       "text": "User prefers Python over JavaScript for backend development",
       "type": "world",
       "context": "programming_preferences",
-      "event_date": null,
-      "document_id": null
+      "event_date": null
     }
   ]
 }
@@ -5628,20 +4867,25 @@ Search a user's memory bank to provide personalized responses.
 
 ---
 
-## Per-User Isolation
-
-Both tools require a `bank_id` that uniquely identifies the user. Memories are strictly isolated per bank — one user cannot access another user's memories.
-
-**Best practices:**
-- Use consistent identifiers (user ID, email, session ID)
-- Don't share `bank_id` between different users
-- Only call these tools when you can identify the specific user
-
----
-
 ## Integration with AI Assistants
 
 The MCP server can be used with any MCP-compatible AI assistant. For Claude Desktop integration using the CLI, see [MCP Server (CLI)](/sdks/mcp).
+
+### Example: Claude Desktop Configuration
+
+To connect Claude Desktop to a specific memory bank:
+
+```json
+{
+  "mcpServers": {
+    "hindsight-alice": {
+      "url": "http://localhost:8888/mcp/alice/"
+    }
+  }
+}
+```
+
+Each user can have their own MCP server configuration pointing to their personal memory bank.
 
 
 ---
@@ -5659,45 +4903,21 @@ curl http://localhost:8888/metrics
 
 ## Available Metrics
 
-### Request Metrics
+### Operation Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `hindsight_http_requests_total` | Counter | Total HTTP requests (labels: method, endpoint, status_code) |
-| `hindsight_http_request_duration_seconds` | Histogram | Request latency (labels: method, endpoint) |
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `hindsight.operation.duration` | Histogram | operation, bank_id, budget, max_tokens, success | Duration of operations in seconds |
+| `hindsight.operation.total` | Counter | operation, bank_id, budget, max_tokens, success | Total number of operations executed |
 
-### Memory Operations
+The `operation` label values are: `retain`, `recall`, `reflect`.
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `hindsight_retain_duration_seconds` | Histogram | Retain operation latency |
-| `hindsight_retain_items_total` | Counter | Total items retained |
-| `hindsight_recall_duration_seconds` | Histogram | Recall operation latency |
-| `hindsight_recall_results_count` | Histogram | Number of results per recall |
-| `hindsight_reflect_duration_seconds` | Histogram | Reflect operation latency |
+### Token Metrics
 
-### LLM Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `hindsight_llm_requests_total` | Counter | LLM API requests (labels: provider, model, status) |
-| `hindsight_llm_request_duration_seconds` | Histogram | LLM request latency |
-| `hindsight_llm_tokens_total` | Counter | Tokens consumed (labels: provider, token_type) |
-
-### Database Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `hindsight_db_connections_active` | Gauge | Active database connections |
-| `hindsight_db_connections_idle` | Gauge | Idle connections in pool |
-| `hindsight_db_query_duration_seconds` | Histogram | Query latency (labels: query_type) |
-
-### Memory Bank Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `hindsight_bank_memory_units_total` | Gauge | Total memories per bank |
-| `hindsight_bank_entities_total` | Gauge | Total entities per bank |
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `hindsight.tokens.input` | Counter | operation, bank_id, budget, max_tokens | Input tokens consumed |
+| `hindsight.tokens.output` | Counter | operation, bank_id, budget, max_tokens | Output tokens generated |
 
 ## Prometheus Configuration
 

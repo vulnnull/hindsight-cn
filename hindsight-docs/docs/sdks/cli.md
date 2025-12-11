@@ -9,7 +9,7 @@ The Hindsight CLI provides command-line access to memory operations and bank man
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/main/hindsight-cli/install.sh | bash
+curl -fsSL https://hindsight.vectorize.io/get-cli | bash
 ```
 
 ## Configuration
@@ -179,11 +179,31 @@ hindsight memory recall <bank_id> "query" -o yaml
 
 ## Interactive Explorer
 
-Launch the TUI explorer for visual navigation:
+Launch the TUI explorer for visual navigation of your memory banks:
 
 ```bash
 hindsight explore
 ```
+
+The explorer provides an interactive terminal interface to:
+
+- **Browse memory banks** — View all banks and their statistics
+- **Search memories** — Run recall queries with real-time results
+- **Inspect entities** — Explore the knowledge graph and entity relationships
+- **View facts** — Browse world facts, experiences, and opinions
+- **Navigate documents** — See source documents and their extracted memories
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate items |
+| `Enter` | Select / Expand |
+| `Tab` | Switch panels |
+| `/` | Search |
+| `q` | Quit |
+
+<!-- Screenshot placeholder: explore command TUI -->
 
 ## Example Workflow
 

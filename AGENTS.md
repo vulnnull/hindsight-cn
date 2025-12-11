@@ -145,3 +145,7 @@ Note: The maintained wrapper `hindsight_client.py` and `README.md` are preserved
 - PostgreSQL with pgvector extension
 - Schema managed via Alembic migrations in `hindsight-api/alembic/`, db migrations happen during api startup, no manual commands
 - Key tables: `banks`, `memory_units`, `documents`, `entities`, `entity_links`
+
+# Branding
+## Colors
+- Primary: gradient from #0074d9 to #009296  

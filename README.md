@@ -4,10 +4,11 @@
 
 [Documentation](https://vectorize-io.github.io/hindsight) • [Paper](#coming-soon) • [Examples](https://github.com/vectorize-io/hindsight-cookbook)
 
-[![CI](https://github.com/vectorize-io/hindsight/actions/workflows/test.yml/badge.svg)](https://github.com/vectorize-io/hindsight/actions/workflows/test.yml)
+[![CI](https://github.com/vectorize-io/hindsight/actions/workflows/release.yml/badge.svg)](https://github.com/vectorize-io/hindsight/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PyPI - hindsight-api](https://img.shields.io/pypi/v/hindsight-api?label=hindsight-api)](https://pypi.org/project/hindsight-api/)
 [![PyPI - hindsight-client](https://img.shields.io/pypi/v/hindsight-client?label=hindsight-client)](https://pypi.org/project/hindsight-client/)
-[![npm](https://img.shields.io/npm/v/@vectorize-io/hindsight-client)](https://www.npmjs.com/package/@vectorize-io/hindsight-client)
+[![npm - @vectorize-io/hindsight-client](https://img.shields.io/npm/v/@vectorize-io/hindsight-client)](https://www.npmjs.com/package/@vectorize-io/hindsight-client)
 [![Slack Community](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/hindsight-space/shared_invite/zt-3klo21kua-VUCC_zHP5rIcXFB1_5yw6A)
 
 
@@ -53,12 +54,10 @@ Memories in Hindsight are stored in banks (e.g. memory banks). When memories are
 ```bash
 export OPENAI_API_KEY=your-key
 
-docker run -p 8888:8888 -p 9999:9999 \
-  -e HINDSIGHT_API_LLM_PROVIDER=openai \
+docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
   -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
-  -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
   -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
-  ghcr.io/vectorize-io/hindsight
+  ghcr.io/vectorize-io/hindsight:latest
 ```
 
 API: http://localhost:8888  
@@ -208,29 +207,18 @@ client.reflect(bank_id="my-bank", query="What should I know about Alice?")
 
 ![Retain Operation](hindsight-docs/static/img/reflect-operation.webp)
 
-## Integrations
-
-### Examples
-
-[Examples Repo]([./examples](https://github.com/vectorize-io/hindsight-cookbook)) includes:
-
-- Basic usage
-- Multi-session conversations
-- Temporal queries
-- Entity reasoning
-- Opinion tracking
-- Production setup (Docker Compose + monitoring)
-
 ---
 
 ## Resources
 
-**Documentation:** [vectorize-io.github.io/hindsight](https://vectorize-io.github.io/hindsight)
+**Documentation:** 
+- [https://hindsight.vectorize.io](https://hindsight.vectorize.io)
 
 **Clients:**
 - [Python](http://hindsight.vectorize.io/sdks/python)
 - [Node.js](http://hindsight.vectorize.io/sdks/nodejs)
-- [REST API](http://hindsight.vectorize.io/api-reference)
+- [REST API](https://hindsight.vectorize.io/api-reference)
+- [CLI](https://hindsight.vectorize.io/sdks/cli)
 
 **Community:**
 - [Slack](https://join.slack.com/t/hindsight-space/shared_invite/zt-3klo21kua-VUCC_zHP5rIcXFB1_5yw6A)

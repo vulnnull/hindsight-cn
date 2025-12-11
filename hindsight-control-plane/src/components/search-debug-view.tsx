@@ -7,838 +7,407 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Info } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Search, Clock, Zap, ChevronRight, Database, FileText, Users } from 'lucide-react';
 import JsonView from 'react18-json-view';
 import 'react18-json-view/src/style.css';
 import { MemoryDetailPanel } from './memory-detail-panel';
 
-type Phase = 'retrieval' | 'rrf' | 'rerank' | 'final' | 'json';
-type RetrievalMethod = 'semantic' | 'bm25' | 'graph' | 'temporal';
 type FactType = 'world' | 'experience' | 'opinion';
-
 type Budget = 'low' | 'mid' | 'high';
-
-// Helper component for column headers with tooltips
-const ColumnHeader = ({ label, tooltip }: { label: string; tooltip: string }) => (
-  <div className="flex items-center gap-1">
-    <span>{label}</span>
-    <Popover>
-      <PopoverTrigger asChild>
-        <button className="inline-flex cursor-help hover:text-foreground">
-          <Info className="w-3 h-3 text-muted-foreground" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="text-xs max-w-xs" side="top">
-        {tooltip}
-      </PopoverContent>
-    </Popover>
-  </div>
-);
-
-interface SearchPane {
-  id: number;
-  query: string;
-  factTypes: FactType[];
-  budget: Budget;
-  maxTokens: number;
-  queryDate: string;
-  includeChunks: boolean;
-  includeEntities: boolean;
-  results: any[] | null;
-  entities: any[] | null;
-  chunks: any[] | null;
-  trace: any | null;
-  loading: boolean;
-  currentPhase: Phase;
-  currentRetrievalMethod: RetrievalMethod;
-  currentRetrievalFactType: FactType | null;
-  showRawJson: boolean;
-}
+type ViewMode = 'results' | 'trace' | 'json';
 
 export function SearchDebugView() {
   const { currentBank } = useBank();
-  const [panes, setPanes] = useState<SearchPane[]>([
-    {
-      id: 1,
-      query: '',
-      factTypes: ['world'],
-      budget: 'mid',
-      maxTokens: 4096,
-      queryDate: '',
-      includeChunks: false,
-      includeEntities: false,
-      results: null,
-      entities: null,
-      chunks: null,
-      trace: null,
-      loading: false,
-      currentPhase: 'retrieval',
-      currentRetrievalMethod: 'semantic',
-      currentRetrievalFactType: null,
-      showRawJson: false,
-    },
-  ]);
-  const [nextPaneId, setNextPaneId] = useState(2);
+
+  // Query state
+  const [query, setQuery] = useState('');
+  const [factTypes, setFactTypes] = useState<FactType[]>(['world']);
+  const [budget, setBudget] = useState<Budget>('mid');
+  const [maxTokens, setMaxTokens] = useState(4096);
+  const [queryDate, setQueryDate] = useState('');
+  const [includeChunks, setIncludeChunks] = useState(false);
+  const [includeEntities, setIncludeEntities] = useState(false);
+
+  // Results state
+  const [results, setResults] = useState<any[] | null>(null);
+  const [entities, setEntities] = useState<any[] | null>(null);
+  const [chunks, setChunks] = useState<any[] | null>(null);
+  const [trace, setTrace] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('results');
   const [selectedMemory, setSelectedMemory] = useState<any | null>(null);
 
-  const addPane = () => {
-    setPanes([
-      ...panes,
-      {
-        id: nextPaneId,
-        query: '',
-        factTypes: ['world'],
-        budget: 'mid',
-        maxTokens: 4096,
-        queryDate: '',
-        includeChunks: false,
-        includeEntities: false,
-        results: null,
-        entities: null,
-        chunks: null,
-        trace: null,
-        loading: false,
-        currentPhase: 'retrieval',
-        currentRetrievalMethod: 'semantic',
-        currentRetrievalFactType: null,
-        showRawJson: false,
-      },
-    ]);
-    setNextPaneId(nextPaneId + 1);
-  };
-
-  const removePane = (id: number) => {
-    if (panes.length > 1) {
-      setPanes(panes.filter((p) => p.id !== id));
-    }
-  };
-
-  const updatePane = (id: number, updates: Partial<SearchPane>) => {
-    setPanes(panes.map((p) => (p.id === id ? { ...p, ...updates } : p)));
-  };
-
-  const runSearch = async (paneId: number) => {
+  const runSearch = async () => {
     if (!currentBank) {
       alert('Please select a memory bank first');
       return;
     }
 
-    const pane = panes.find((p) => p.id === paneId);
-    if (!pane || !pane.query || pane.factTypes.length === 0) {
-      if (pane?.factTypes.length === 0) {
+    if (!query || factTypes.length === 0) {
+      if (factTypes.length === 0) {
         alert('Please select at least one fact type');
       }
       return;
     }
 
-    updatePane(paneId, { loading: true });
+    setLoading(true);
 
     try {
-      // Always pass fact types as array for consistent behavior
       const requestBody: any = {
         bank_id: currentBank,
-        query: pane.query,
-        types: pane.factTypes,
-        budget: pane.budget,
-        max_tokens: pane.maxTokens,
+        query: query,
+        types: factTypes,
+        budget: budget,
+        max_tokens: maxTokens,
         trace: true,
         include: {
-          entities: pane.includeEntities ? { max_tokens: 500 } : null,
-          chunks: pane.includeChunks ? { max_tokens: 8192 } : null
+          entities: includeEntities ? { max_tokens: 500 } : null,
+          chunks: includeChunks ? { max_tokens: 8192 } : null
         },
-        ...(pane.queryDate && { query_timestamp: pane.queryDate })
+        ...(queryDate && { query_timestamp: queryDate })
       };
 
       const data: any = await client.recall(requestBody);
 
-      // Set default fact type for retrieval view (first selected fact type)
-      const defaultFactType = pane.currentRetrievalFactType || pane.factTypes[0];
-
-      updatePane(paneId, {
-        results: data.results || [],
-        entities: data.entities || null,
-        chunks: data.chunks || null,
-        trace: data.trace || null,
-        loading: false,
-        currentRetrievalFactType: defaultFactType,
-        currentPhase: 'final',
-      });
+      setResults(data.results || []);
+      setEntities(data.entities || null);
+      setChunks(data.chunks || null);
+      setTrace(data.trace || null);
+      setViewMode('results');
     } catch (error) {
       console.error('Error running search:', error);
       alert('Error running search: ' + (error as Error).message);
-      updatePane(paneId, { loading: false });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const renderRetrievalResults = (pane: SearchPane) => {
-    if (!pane.trace || !pane.trace.retrieval_results) {
-      return <div className="p-5 text-center text-muted-foreground">No retrieval data available</div>;
-    }
-
-    // Filter by retrieval method
-    const methodData = pane.trace.retrieval_results.find(
-      (m: any) => m.method_name === pane.currentRetrievalMethod
-    );
-
-    if (!methodData || !methodData.results || methodData.results.length === 0) {
-      return (
-        <div className="p-5 text-center text-muted-foreground">
-          No results from this retrieval method
-        </div>
-      );
-    }
-
-    // Filter by fact type if multiple fact types are selected
-    let filteredResults = methodData.results;
-    if (pane.factTypes.length > 1 && pane.currentRetrievalFactType) {
-      filteredResults = methodData.results.filter(
-        (result: any) => result.fact_type === pane.currentRetrievalFactType
-      );
-    }
-
-    // Get method-specific score description
-    const scoreTooltips: Record<string, string> = {
-      semantic: "Vector similarity score - measures conceptual similarity and paraphrasing (higher = more relevant)",
-      bm25: "BM25 exact match score - measures keyword/phrase overlap for names, technical terms (higher = more exact matches)",
-      graph: "Entity traversal score - measures connection strength through related entities and indirect relationships (higher = stronger connection)",
-      temporal: "Time-filtered relevance score - combines temporal proximity with semantic relevance for time-based queries (higher = better match in timeframe)"
-    };
-
-    const scoreTooltip = scoreTooltips[pane.currentRetrievalMethod] || "Relevance score from this retrieval method (higher = more relevant)";
-
-    return (
-      <div className="p-4 overflow-auto">
-        <h3 className="text-base font-bold mb-2 text-foreground">
-          {methodData.method_name.toUpperCase()} Retrieval
-          {pane.currentRetrievalFactType && pane.factTypes.length > 1 && (
-            <span className="ml-2 text-sm font-normal bg-primary/20 px-2 py-0.5 rounded">
-              {pane.currentRetrievalFactType} facts only
-            </span>
-          )}
-          {' '}({filteredResults.length} results{pane.factTypes.length > 1 && ` of ${methodData.results.length}`}, {methodData.duration_seconds?.toFixed(3)}s)
-        </h3>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-card border-2 border-primary">
-              <TableHead><ColumnHeader label="Rank" tooltip="Position in this retrieval method's results" /></TableHead>
-              <TableHead><ColumnHeader label="Text" tooltip="The memory content" /></TableHead>
-              {pane.factTypes.length > 1 && (
-                <TableHead><ColumnHeader label="Type" tooltip="Fact type (world, experience, opinion)" /></TableHead>
-              )}
-              <TableHead><ColumnHeader label="Score" tooltip={scoreTooltip} /></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredResults.map((result: any, idx: number) => (
-              <TableRow
-                key={idx}
-                className="cursor-pointer hover:bg-muted/50"
-                onClick={() => setSelectedMemory(result)}
-              >
-                <TableCell className="font-bold">#{result.rank}</TableCell>
-                <TableCell className="max-w-md">{result.text}</TableCell>
-                {pane.factTypes.length > 1 && (
-                  <TableCell>
-                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-primary/20">
-                      {result.fact_type || 'unknown'}
-                    </span>
-                  </TableCell>
-                )}
-                <TableCell>{result.score?.toFixed(4)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    );
-  };
-
-  const renderRRFMerge = (pane: SearchPane) => {
-    if (!pane.trace || !pane.trace.rrf_merged || pane.trace.rrf_merged.length === 0) {
-      return <div className="p-5 text-center text-muted-foreground">No RRF merge data available</div>;
-    }
-
-    return (
-      <div className="p-4 overflow-auto">
-        <h3 className="text-base font-bold mb-2 text-foreground">
-          RRF Merge Results ({pane.trace.rrf_merged.length} candidates)
-          {pane.factTypes.length > 1 && (
-            <span className="ml-2 text-sm font-normal bg-primary/20 px-2 py-0.5 rounded">
-              Unified across all fact types
-            </span>
-          )}
-        </h3>
-        <p className="text-xs text-muted-foreground mb-3">
-          Reciprocal Rank Fusion combines rankings from different retrieval methods
-          {pane.factTypes.length > 1 ? ' and fact types' : ''}.
-        </p>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-card border-2 border-primary">
-              <TableHead><ColumnHeader label="RRF Rank" tooltip="Final rank after combining all retrieval methods using Reciprocal Rank Fusion" /></TableHead>
-              <TableHead><ColumnHeader label="Text" tooltip="The memory content" /></TableHead>
-              <TableHead><ColumnHeader label="RRF Score" tooltip="Combined score from all retrieval methods (higher = found by more methods and ranked higher)" /></TableHead>
-              <TableHead><ColumnHeader label="Source Ranks" tooltip="Original rank from each retrieval method (e.g., semantic: #3, bm25: #1)" /></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {pane.trace.rrf_merged.map((result: any, idx: number) => {
-              // Try multiple possible field names for source ranks
-              const sourceRanksData = result.source_ranks || result.sourceRanks || result.ranks || {};
-              const sourceRanks = Object.entries(sourceRanksData).length > 0
-                ? Object.entries(sourceRanksData)
-                    .map(([method, rank]) => `${method}: #${rank}`)
-                    .join(', ')
-                : 'N/A';
-
-              return (
-                <TableRow
-                  key={idx}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => setSelectedMemory(result)}
-                >
-                  <TableCell className="font-bold">
-                    #{result.final_rrf_rank || result.finalRrfRank || result.rank}
-                  </TableCell>
-                  <TableCell className="max-w-md">{result.text}</TableCell>
-                  <TableCell>{(result.rrf_score || result.rrfScore || result.score)?.toFixed(4)}</TableCell>
-                  <TableCell className="text-xs">{sourceRanks}</TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-    );
-  };
-
-  const renderReranking = (pane: SearchPane) => {
-    if (!pane.trace || !pane.trace.reranked || pane.trace.reranked.length === 0) {
-      return <div className="p-5 text-center text-muted-foreground">No reranking data available</div>;
-    }
-
-    return (
-      <div className="p-4 overflow-auto">
-        <h3 className="text-base font-bold mb-2 text-foreground">
-          Reranking Results ({pane.trace.reranked.length} results)
-          {pane.factTypes.length > 1 && (
-            <span className="ml-2 text-sm font-normal bg-primary/20 px-2 py-0.5 rounded">
-              Unified across all fact types
-            </span>
-          )}
-        </h3>
-        <p className="text-xs text-muted-foreground mb-3">
-          Cross-encoder reranker adjusts scores based on semantic relevance.{' '}
-          <span className="bg-secondary/30 px-2 py-0.5 rounded">Highlight</span> = rank improved
-          vs RRF
-        </p>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-card border-2 border-primary">
-              <TableHead><ColumnHeader label="Rerank" tooltip="Final position after cross-encoder reranking" /></TableHead>
-              <TableHead><ColumnHeader label="RRF Rank" tooltip="Position before reranking (from RRF merge)" /></TableHead>
-              <TableHead><ColumnHeader label="Change" tooltip="How many positions this result moved (↑ = improved, ↓ = dropped)" /></TableHead>
-              <TableHead><ColumnHeader label="Text" tooltip="The memory content" /></TableHead>
-              <TableHead><ColumnHeader label="Final Score" tooltip="Combined score: cross-encoder + heuristics" /></TableHead>
-              <TableHead><ColumnHeader label="Score Breakdown" tooltip="Individual components: cross_encoder (semantic), heuristic scores (recency, frequency, etc.)" /></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {pane.trace.reranked.map((result: any, idx: number) => {
-              const improved = result.rank_change > 0;
-              const rowBg = improved ? 'bg-secondary/20' : '';
-              const changeDisplay =
-                result.rank_change > 0
-                  ? `↑${result.rank_change}`
-                  : result.rank_change < 0
-                  ? `↓${Math.abs(result.rank_change)}`
-                  : '=';
-              const changeColor =
-                result.rank_change > 0
-                  ? 'text-green-700'
-                  : result.rank_change < 0
-                  ? 'text-red-700'
-                  : 'text-gray-600';
-
-              // Format score components with better structure
-              const components = result.score_components || {};
-              const crossEncoder = components.cross_encoder || components.crossEncoder || 0;
-              const heuristics = Object.entries(components)
-                .filter(([key]) => key !== 'cross_encoder' && key !== 'crossEncoder')
-                .map(([key, val]: [string, any]) => `${key}: ${val.toFixed(3)}`)
-                .join(', ');
-
-              const componentDisplay = (
-                <div className="space-y-1">
-                  <div className="font-semibold">Cross-Encoder: {crossEncoder.toFixed(4)}</div>
-                  {heuristics && <div className="text-xs">Heuristics: {heuristics}</div>}
-                </div>
-              );
-
-              return (
-                <TableRow
-                  key={idx}
-                  className={`cursor-pointer hover:bg-muted/50 ${rowBg}`}
-                  onClick={() => setSelectedMemory(result)}
-                >
-                  <TableCell className="font-bold">#{result.rerank_rank}</TableCell>
-                  <TableCell>#{result.rrf_rank}</TableCell>
-                  <TableCell className={`font-bold ${changeColor}`}>
-                    {changeDisplay}
-                  </TableCell>
-                  <TableCell className="max-w-sm">{result.text}</TableCell>
-                  <TableCell className="font-bold">
-                    {result.rerank_score?.toFixed(4)}
-                  </TableCell>
-                  <TableCell className="text-xs">{componentDisplay}</TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-    );
-  };
-
-  const renderFinalResults = (pane: SearchPane) => {
-    if (!pane.results || pane.results.length === 0) {
-      return <div className="p-5 text-center text-muted-foreground">No final results</div>;
-    }
-
-    const calculateRanks = (values: number[]) => {
-      const indexed = values.map((val, idx) => ({ idx, val }));
-      indexed.sort((a, b) => b.val - a.val);
-      const ranks = new Map();
-      indexed.forEach((item, rank) => {
-        ranks.set(item.idx, rank + 1);
-      });
-      return ranks;
-    };
-
-    const frequencies = pane.results.map((result: any) => {
-      const visit = pane.trace?.visits?.find((v: any) => v.node_id === result.id);
-      return visit ? visit.weights.frequency || 0 : 0;
-    });
-
-    const frequencyRanks = calculateRanks(frequencies);
-
-    return (
-      <div className="p-4 overflow-auto">
-        <h3 className="text-base font-bold mb-2 text-foreground">
-          Final Results ({pane.results.length} memories)
-        </h3>
-        <p className="text-xs text-muted-foreground mb-3">
-          Query: &quot;{pane.trace?.query?.query_text || pane.query}&quot;
-        </p>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-card border-2 border-primary">
-              <TableHead><ColumnHeader label="Rank" tooltip="Final ranking position in the results" /></TableHead>
-              <TableHead><ColumnHeader label="Text" tooltip="The memory content" /></TableHead>
-              <TableHead><ColumnHeader label="Context" tooltip="Additional context about when/how this was mentioned" /></TableHead>
-              <TableHead><ColumnHeader label="Occurred" tooltip="When this event happened (temporal range: start - end)" /></TableHead>
-              <TableHead><ColumnHeader label="Mentioned" tooltip="When this memory was added to the system" /></TableHead>
-              <TableHead><ColumnHeader label="Final Score" tooltip="Combined weighted score after all reranking and graph traversal" /></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {pane.results.map((result: any, idx: number) => {
-              const visit = pane.trace?.visits?.find((v: any) => v.node_id === result.id);
-              const finalScore = visit ? visit.weights.final_weight : result.score || 0;
-
-              // Format temporal range with clearer display
-              let occurredDisplay: React.ReactNode = 'N/A';
-              if (result.occurred_start && result.occurred_end) {
-                const start = new Date(result.occurred_start).toLocaleDateString();
-                const end = new Date(result.occurred_end).toLocaleDateString();
-                occurredDisplay = start === end ? start : (
-                  <div className="text-xs">
-                    <div>Start: {start}</div>
-                    <div>End: {end}</div>
-                  </div>
-                );
-              } else if (result.event_date) {
-                occurredDisplay = new Date(result.event_date).toLocaleDateString();
-              }
-
-              const mentionedDisplay = result.mentioned_at
-                ? new Date(result.mentioned_at).toLocaleDateString()
-                : 'N/A';
-
-              return (
-                <TableRow
-                  key={idx}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => setSelectedMemory(result)}
-                >
-                  <TableCell className="font-bold">#{idx + 1}</TableCell>
-                  <TableCell className="max-w-xs">{result.text}</TableCell>
-                  <TableCell className="max-w-32">
-                    {result.context || 'N/A'}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    {occurredDisplay}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    {mentionedDisplay}
-                  </TableCell>
-                  <TableCell className="font-bold">
-                    {finalScore.toFixed(4)}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+  const toggleFactType = (ft: FactType) => {
+    setFactTypes(prev =>
+      prev.includes(ft)
+        ? prev.filter(t => t !== ft)
+        : [...prev, ft]
     );
   };
 
   if (!currentBank) {
     return (
-      <div className="p-10 text-center text-muted-foreground bg-muted rounded-lg">
-        <h3 className="text-xl font-semibold mb-2">No Bank Selected</h3>
-        <p>Please select a memory bank from the dropdown above to use recall debug.</p>
-      </div>
+      <Card className="border-dashed">
+        <CardContent className="flex flex-col items-center justify-center py-16">
+          <Database className="h-12 w-12 text-muted-foreground mb-4" />
+          <h3 className="text-xl font-semibold mb-2">No Bank Selected</h3>
+          <p className="text-muted-foreground">Select a memory bank to start recalling.</p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div>
-      <div className="w-full">
-        <div className="mb-4">
-          <Button
-            onClick={addPane}
-            variant="secondary"
-          >
-            + Add Recall Pane
-          </Button>
-        </div>
+    <div className="space-y-6">
+      {/* Search Input */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex gap-3">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="What would you like to recall?"
+                className="pl-10 h-12 text-lg"
+                onKeyDown={(e) => e.key === 'Enter' && runSearch()}
+              />
+            </div>
+            <Button
+              onClick={runSearch}
+              disabled={loading || !query}
+              className="h-12 px-8"
+            >
+              {loading ? 'Searching...' : 'Recall'}
+            </Button>
+          </div>
 
-        <div className="grid grid-cols-1 gap-5">
-        {panes.map((pane) => (
-          <div key={pane.id} className="border-2 border-primary rounded-lg overflow-hidden flex flex-col shadow-md">
-            {/* Header */}
-            <div className="bg-card p-2.5 border-b-2 border-primary font-bold flex justify-between items-center">
-              <span className="text-card-foreground">Recall Trace #{pane.id}</span>
-              {panes.length > 1 && (
-                <Button
-                  onClick={() => removePane(pane.id)}
-                  variant="destructive"
-                  size="sm"
-                >
-                  Remove
-                </Button>
-              )}
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-6 mt-4 pt-4 border-t">
+            {/* Fact Types */}
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Types:</span>
+              <div className="flex gap-3">
+                {(['world', 'experience', 'opinion'] as FactType[]).map((ft) => (
+                  <label key={ft} className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={factTypes.includes(ft)}
+                      onCheckedChange={() => toggleFactType(ft)}
+                    />
+                    <span className="text-sm capitalize">{ft}</span>
+                  </label>
+                ))}
+              </div>
             </div>
 
-            {/* Recall Controls */}
-            <div className="p-4 bg-accent border-b-2 border-primary">
-              <div className="space-y-4">
-                {/* Query */}
-                <div className="flex gap-4 items-end">
-                  <div className="flex-1">
-                    <label className="block text-sm font-bold mb-2 text-accent-foreground">Query:</label>
-                    <Input
-                      type="text"
-                      value={pane.query}
-                      onChange={(e) => updatePane(pane.id, { query: e.target.value })}
-                      placeholder="Enter recall query..."
-                      onKeyDown={(e) => e.key === 'Enter' && runSearch(pane.id)}
-                    />
-                  </div>
-                  <Button
-                    onClick={() => runSearch(pane.id)}
-                    disabled={pane.loading || !pane.query}
-                  >
-                    {pane.loading ? 'Recalling...' : '🔍 Recall'}
-                  </Button>
-                </div>
+            <div className="h-6 w-px bg-border" />
 
-                {/* Parameters Grid */}
-                <div className="grid grid-cols-5 gap-4">
+            {/* Budget */}
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-muted-foreground" />
+              <Select value={budget} onValueChange={(v) => setBudget(v as Budget)}>
+                <SelectTrigger className="w-24 h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="mid">Mid</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Max Tokens */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Tokens:</span>
+              <Input
+                type="number"
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(parseInt(e.target.value))}
+                className="w-24 h-8"
+              />
+            </div>
+
+            {/* Query Date */}
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <Input
+                type="datetime-local"
+                value={queryDate}
+                onChange={(e) => setQueryDate(e.target.value)}
+                className="h-8"
+                placeholder="Query date"
+              />
+            </div>
+
+            <div className="h-6 w-px bg-border" />
+
+            {/* Include options */}
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  checked={includeChunks}
+                  onCheckedChange={(c) => setIncludeChunks(c as boolean)}
+                />
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">Chunks</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  checked={includeEntities}
+                  onCheckedChange={(c) => setIncludeEntities(c as boolean)}
+                />
+                <Users className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">Entities</span>
+              </label>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Results */}
+      {loading && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4" />
+            <p className="text-muted-foreground">Searching memories...</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && results && (
+        <div className="space-y-4">
+          {/* Summary Stats */}
+          {trace?.summary && (
+            <div className="flex items-center gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Results:</span>
+                <span className="font-semibold">{results.length}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Duration:</span>
+                <span className="font-semibold">{trace.summary.total_duration_seconds?.toFixed(2)}s</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Nodes visited:</span>
+                <span className="font-semibold">{trace.summary.total_nodes_visited}</span>
+              </div>
+
+              <div className="flex-1" />
+
+              {/* View Mode Tabs */}
+              <div className="flex gap-1 bg-muted p-1 rounded-lg">
+                {(['results', 'trace', 'json'] as ViewMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setViewMode(mode)}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                      viewMode === mode
+                        ? 'bg-background shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {mode === 'results' ? 'Results' : mode === 'trace' ? 'Trace' : 'JSON'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Results View */}
+          {viewMode === 'results' && (
+            <div className="space-y-3">
+              {results.length === 0 ? (
+                <Card>
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <Search className="h-12 w-12 text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">No memories found for this query.</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                results.map((result: any, idx: number) => {
+                  const visit = trace?.visits?.find((v: any) => v.node_id === result.id);
+                  const score = visit ? visit.weights.final_weight : result.score || 0;
+
+                  return (
+                    <Card
+                      key={idx}
+                      className="cursor-pointer hover:border-primary/50 transition-colors"
+                      onClick={() => setSelectedMemory(result)}
+                    >
+                      <CardContent className="py-4">
+                        <div className="flex items-start gap-4">
+                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                            <span className="text-sm font-semibold text-primary">{idx + 1}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-foreground">{result.text}</p>
+                            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                              <span className="px-2 py-0.5 rounded bg-muted capitalize">{result.type || 'world'}</span>
+                              {result.context && (
+                                <span className="truncate max-w-xs">{result.context}</span>
+                              )}
+                              {result.occurred_start && (
+                                <span>{new Date(result.occurred_start).toLocaleDateString()}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex-shrink-0 text-right">
+                            <div className="text-sm font-semibold">{score.toFixed(3)}</div>
+                            <div className="text-xs text-muted-foreground">score</div>
+                          </div>
+                          <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* Trace View */}
+          {viewMode === 'trace' && trace && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Recall Trace</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Retrieval Methods */}
+                {trace.retrieval_results && (
                   <div>
-                    <label className="block text-sm font-bold mb-2 text-accent-foreground">Fact Types:</label>
-                    <div className="flex flex-col gap-2">
-                      {(['world', 'experience', 'opinion'] as FactType[]).map((ft) => (
-                        <div key={ft} className="flex items-center gap-2">
-                          <Checkbox
-                            id={`${pane.id}-${ft}`}
-                            checked={pane.factTypes.includes(ft)}
-                            onCheckedChange={(checked) => {
-                              const newFactTypes = checked
-                                ? [...pane.factTypes, ft]
-                                : pane.factTypes.filter((t) => t !== ft);
-                              updatePane(pane.id, { factTypes: newFactTypes });
-                            }}
-                          />
-                          <label htmlFor={`${pane.id}-${ft}`} className="text-sm cursor-pointer">
-                            {ft.charAt(0).toUpperCase() + ft.slice(1)}
-                          </label>
+                    <h4 className="font-semibold mb-3">Retrieval Methods</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      {trace.retrieval_results.map((method: any, idx: number) => (
+                        <div key={idx} className="p-4 rounded-lg bg-muted/50">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium capitalize">{method.method_name}</span>
+                            <span className="text-sm text-muted-foreground">
+                              {method.duration_seconds?.toFixed(3)}s
+                            </span>
+                          </div>
+                          <div className="text-2xl font-bold">{method.results?.length || 0}</div>
+                          <div className="text-xs text-muted-foreground">results</div>
                         </div>
                       ))}
                     </div>
                   </div>
+                )}
 
+                {/* RRF Merge */}
+                {trace.rrf_merged && (
                   <div>
-                    <label className="block text-sm font-bold mb-2 text-accent-foreground">Budget:</label>
-                    <Select
-                      value={pane.budget}
-                      onValueChange={(value) =>
-                        updatePane(pane.id, { budget: value as Budget })
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="low">Low</SelectItem>
-                        <SelectItem value="mid">Mid</SelectItem>
-                        <SelectItem value="high">High</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold mb-2 text-accent-foreground">Max Tokens:</label>
-                    <Input
-                      type="number"
-                      value={pane.maxTokens}
-                      onChange={(e) =>
-                        updatePane(pane.id, { maxTokens: parseInt(e.target.value) })
-                      }
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold mb-2 text-accent-foreground">Query Date:</label>
-                    <Input
-                      type="datetime-local"
-                      value={pane.queryDate}
-                      onChange={(e) =>
-                        updatePane(pane.id, { queryDate: e.target.value })
-                      }
-                      className="w-full"
-                      placeholder="Optional"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">When is the query being asked</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold mb-2 text-accent-foreground">Include:</label>
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={`${pane.id}-chunks`}
-                          checked={pane.includeChunks}
-                          onCheckedChange={(checked) =>
-                            updatePane(pane.id, { includeChunks: checked as boolean })
-                          }
-                        />
-                        <label htmlFor={`${pane.id}-chunks`} className="text-sm cursor-pointer">
-                          Chunks
-                        </label>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={`${pane.id}-entities`}
-                          checked={pane.includeEntities}
-                          onCheckedChange={(checked) =>
-                            updatePane(pane.id, { includeEntities: checked as boolean })
-                          }
-                        />
-                        <label htmlFor={`${pane.id}-entities`} className="text-sm cursor-pointer">
-                          Entities
-                        </label>
-                      </div>
+                    <h4 className="font-semibold mb-3">RRF Merge</h4>
+                    <div className="p-4 rounded-lg bg-muted/50">
+                      <div className="text-2xl font-bold">{trace.rrf_merged.length}</div>
+                      <div className="text-xs text-muted-foreground">candidates after fusion</div>
                     </div>
                   </div>
-                </div>
-              </div>
-            </div>
+                )}
 
-            {/* Status Bar */}
-            {pane.trace?.summary && (
-              <div className="px-4 py-2 bg-secondary/20 border-b-2 border-primary text-xs flex gap-4 flex-wrap">
-                <span className="text-secondary-foreground font-bold">✓ Search complete</span>
-                <span className="text-muted-foreground">|</span>
-                <span>
-                  <strong>Nodes visited:</strong> {pane.trace.summary.total_nodes_visited}
-                </span>
-                <span className="text-muted-foreground">|</span>
-                <span>
-                  <strong>Entry points:</strong> {pane.trace.summary.entry_points_found}
-                </span>
-                <span className="text-muted-foreground">|</span>
-                <span>
-                  <strong>Results:</strong> {pane.trace.summary.results_returned}
-                </span>
-                <span className="text-muted-foreground">|</span>
-                <span>
-                  <strong>Duration:</strong> {pane.trace.summary.total_duration_seconds?.toFixed(2)}
-                  s
-                </span>
-              </div>
-            )}
-
-            {!pane.trace?.summary && !pane.loading && (
-              <div className="px-4 py-2 bg-muted border-b-2 border-primary text-xs text-muted-foreground">
-                Ready to search
-              </div>
-            )}
-
-            {/* Phase Controls */}
-            {pane.trace && (
-              <div className="p-2.5 bg-card border-b-2 border-primary">
-                <RadioGroup
-                  value={pane.currentPhase}
-                  onValueChange={(value) => updatePane(pane.id, { currentPhase: value as Phase })}
-                  className="flex gap-3"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <RadioGroupItem value="retrieval" id={`phase-retrieval-${pane.id}`} />
-                    <Label htmlFor={`phase-retrieval-${pane.id}`} className="text-xs font-bold cursor-pointer">
-                      1. Retrieval
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <RadioGroupItem value="rrf" id={`phase-rrf-${pane.id}`} />
-                    <Label htmlFor={`phase-rrf-${pane.id}`} className="text-xs font-bold cursor-pointer">
-                      2. RRF Merge
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <RadioGroupItem value="rerank" id={`phase-rerank-${pane.id}`} />
-                    <Label htmlFor={`phase-rerank-${pane.id}`} className="text-xs font-bold cursor-pointer">
-                      3. Reranking
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <RadioGroupItem value="json" id={`phase-json-${pane.id}`} />
-                    <Label htmlFor={`phase-json-${pane.id}`} className="text-xs font-bold cursor-pointer">
-                      4. Raw JSON
-                    </Label>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <RadioGroupItem value="final" id={`phase-final-${pane.id}`} />
-                    <Label htmlFor={`phase-final-${pane.id}`} className="text-xs font-bold cursor-pointer">
-                      5. Final Results
-                    </Label>
-                  </div>
-                </RadioGroup>
-              </div>
-            )}
-
-            {/* Content */}
-            <div className="bg-white overflow-auto" style={{ minHeight: '400px', maxHeight: '600px' }}>
-              {pane.loading && (
-                <div className="flex items-center justify-center h-96 text-gray-600">
+                {/* Reranking */}
+                {trace.reranked && (
                   <div>
-                    <div className="text-4xl mb-2 text-center">🔄</div>
-                    <div className="text-sm">Recalling...</div>
-                  </div>
-                </div>
-              )}
-
-              {!pane.loading && !pane.trace && (
-                <div className="flex items-center justify-center h-96 text-gray-400">
-                  <div className="text-center">
-                    <div className="text-4xl mb-2">🔍</div>
-                    <div className="text-sm">Enter a query and click Search</div>
-                  </div>
-                </div>
-              )}
-
-              {!pane.loading && pane.trace && (
-                <>
-                  {/* Retrieval Phase */}
-                  {pane.currentPhase === 'retrieval' && (
-                    <div>
-                      {/* Fact Type Tabs (only show if multiple fact types) */}
-                      {pane.factTypes.length > 1 && (
-                        <div className="flex gap-0 border-b-2 border-primary bg-accent">
-                          {pane.factTypes.map((ft) => (
-                            <Button
-                              key={ft}
-                              variant={pane.currentRetrievalFactType === ft ? 'secondary' : 'ghost'}
-                              onClick={() =>
-                                updatePane(pane.id, {
-                                  currentRetrievalFactType: ft,
-                                })
-                              }
-                              className="px-4 py-2 text-xs font-bold border-r border-border rounded-none"
-                            >
-                              {ft.charAt(0).toUpperCase() + ft.slice(1)} Facts
-                            </Button>
-                          ))}
-                        </div>
-                      )}
-                      {/* Retrieval Method Tabs */}
-                      <div className="flex gap-0 border-b-2 border-primary bg-muted">
-                        {['semantic', 'bm25', 'graph', 'temporal'].map((method) => (
-                          <Button
-                            key={method}
-                            variant={pane.currentRetrievalMethod === method ? 'default' : 'ghost'}
-                            onClick={() =>
-                              updatePane(pane.id, {
-                                currentRetrievalMethod: method as RetrievalMethod,
-                              })
-                            }
-                            className="px-4 py-2 text-xs font-bold border-r border-border rounded-none"
-                          >
-                            {method.charAt(0).toUpperCase() + method.slice(1)}
-                          </Button>
-                        ))}
-                      </div>
-                      {renderRetrievalResults(pane)}
+                    <h4 className="font-semibold mb-3">Reranking</h4>
+                    <div className="p-4 rounded-lg bg-muted/50">
+                      <div className="text-2xl font-bold">{trace.reranked.length}</div>
+                      <div className="text-xs text-muted-foreground">results after cross-encoder</div>
                     </div>
-                  )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-                  {/* RRF Merge Phase */}
-                  {pane.currentPhase === 'rrf' && renderRRFMerge(pane)}
-
-                  {/* Reranking Phase */}
-                  {pane.currentPhase === 'rerank' && renderReranking(pane)}
-
-                  {/* Final Results Phase */}
-                  {pane.currentPhase === 'final' && renderFinalResults(pane)}
-
-                  {/* Raw JSON Phase */}
-                  {pane.currentPhase === 'json' && (
-                    <div className="p-4 overflow-auto">
-                      <h3 className="text-base font-bold mb-2 text-foreground">Raw JSON Response</h3>
-                      <p className="text-xs text-muted-foreground mb-3">
-                        Results from the API (trace data excluded)
-                      </p>
-                      <div className="bg-muted p-4 rounded border border-border overflow-auto max-h-[800px]">
-                        <JsonView
-                          src={{
-                            results: pane.results,
-                            ...(pane.entities && { entities: pane.entities }),
-                            ...(pane.chunks && { chunks: pane.chunks }),
-                          }}
-                          collapsed={1}
-                          theme="default"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        ))}
+          {/* JSON View */}
+          {viewMode === 'json' && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Raw Response</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-muted p-4 rounded-lg overflow-auto max-h-[600px]">
+                  <JsonView
+                    src={{
+                      results,
+                      ...(entities && { entities }),
+                      ...(chunks && { chunks }),
+                      trace
+                    }}
+                    collapsed={2}
+                    theme="default"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* Memory Detail Panel - Fixed on Right */}
+      {/* Empty State */}
+      {!loading && !results && (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <Search className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-semibold mb-2">Ready to Recall</h3>
+            <p className="text-muted-foreground text-center max-w-md">
+              Enter a query above to search through your memories. Use filters to narrow down by fact type, budget, and more.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Memory Detail Panel */}
       {selectedMemory && (
-        <div className="fixed right-0 top-0 h-screen w-[420px] bg-card border-l-2 border-primary shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
+        <div className="fixed right-0 top-0 h-screen w-[420px] bg-card border-l shadow-2xl z-50 overflow-y-auto">
           <MemoryDetailPanel
             memory={selectedMemory}
             onClose={() => setSelectedMemory(null)}

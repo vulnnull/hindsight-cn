@@ -2,49 +2,63 @@
  * Hindsight custom theme - Modern, clean style
  */
 
-/* Primary colors - Teal/Cyan theme */
+/* Primary colors - Blue to Teal gradient theme */
 :root {
-  --ifm-color-primary: #0d9488;
-  --ifm-color-primary-dark: #0f766e;
-  --ifm-color-primary-darker: #115e59;
-  --ifm-color-primary-darkest: #134e4a;
-  --ifm-color-primary-light: #14b8a6;
-  --ifm-color-primary-lighter: #2dd4bf;
-  --ifm-color-primary-lightest: #5eead4;
+  /* Primary gradient */
+  --hindsight-gradient: linear-gradient(135deg, #0074d9 0%, #009296 100%);
+  --hindsight-gradient-start: #0074d9;
+  --hindsight-gradient-end: #009296;
+
+  /* Fallback solid colors (midpoint of gradient) */
+  --ifm-color-primary: #0074d9;
+  --ifm-color-primary-dark: #0068c3;
+  --ifm-color-primary-darker: #005db0;
+  --ifm-color-primary-darkest: #004d91;
+  --ifm-color-primary-light: #1a85e0;
+  --ifm-color-primary-lighter: #3396e8;
+  --ifm-color-primary-lightest: #e6f3ff;
 
   --ifm-code-font-size: 90%;
-  --docusaurus-highlighted-code-line-bg: rgba(13, 148, 136, 0.1);
+  --docusaurus-highlighted-code-line-bg: rgba(0, 116, 217, 0.1);
 
-  /* Typography - Avenir Book */
-  --ifm-font-family-base: 'Avenir Book', 'Avenir', 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --ifm-heading-font-family: 'Avenir', 'Avenir Book', 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* Typography */
+  --ifm-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ifm-heading-font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace;
   --ifm-font-weight-semibold: 600;
   --ifm-font-size-base: 96%;
 
   /* Spacing */
   --ifm-spacing-horizontal: 1.5rem;
-  --ifm-navbar-height: 3.5rem;
+  --ifm-navbar-height: 4.5rem;
 
   /* Borders */
   --ifm-global-radius: 0.5rem;
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: #2dd4bf;
-  --ifm-color-primary-dark: #14b8a6;
-  --ifm-color-primary-darker: #0d9488;
-  --ifm-color-primary-darkest: #0f766e;
-  --ifm-color-primary-light: #5eead4;
-  --ifm-color-primary-lighter: #99f6e4;
-  --ifm-color-primary-lightest: #ccfbf1;
-  --docusaurus-highlighted-code-line-bg: rgba(45, 212, 191, 0.15);
+  --ifm-color-primary: #3396e8;
+  --ifm-color-primary-dark: #1a85e0;
+  --ifm-color-primary-darker: #0074d9;
+  --ifm-color-primary-darkest: #0068c3;
+  --ifm-color-primary-light: #66b3f0;
+  --ifm-color-primary-lighter: #99cff5;
+  --ifm-color-primary-lightest: rgba(51, 150, 232, 0.15);
+  --docusaurus-highlighted-code-line-bg: rgba(51, 150, 232, 0.15);
 
   --ifm-background-color: #09090b;
   --ifm-background-surface-color: #18181b;
   --ifm-navbar-background-color: #09090b;
   --ifm-footer-background-color: #09090b;
   --ifm-toc-border-color: #27272a;
+}
+
+/* Gradient text utility */
+.gradient-text {
+  background: var(--hindsight-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* Navbar styling */
@@ -54,9 +68,17 @@
   padding: 0 1rem;
 }
 
+.navbar__logo {
+  margin-bottom: 0.5rem;
+}
+
 .navbar__title {
   font-weight: 700;
   font-size: 1.125rem;
+  background: var(--hindsight-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .navbar__items {
@@ -64,11 +86,29 @@
 }
 
 .navbar__link {
-  font-weight: 500;
-  font-size: 0.8125rem;
-  padding: 0.5rem 0.75rem;
+  font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 0.625rem 1rem;
   border-radius: 0.375rem;
   transition: background-color 0.15s ease;
+}
+
+/* GitHub icon link */
+.header-github-link::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: flex;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%23666' d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E") no-repeat;
+}
+
+[data-theme='dark'] .header-github-link::before {
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%23fff' d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E") no-repeat;
+}
+
+.header-github-link:hover {
+  opacity: 0.7;
 }
 
 .navbar__link:hover {
@@ -76,7 +116,10 @@
 }
 
 .navbar__link--active {
-  color: var(--ifm-color-primary);
+  background: var(--hindsight-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 [data-theme='dark'] .navbar__link:hover {
@@ -89,7 +132,7 @@
 }
 
 .hero--primary {
-  background: linear-gradient(135deg, var(--ifm-color-primary-darkest) 0%, var(--ifm-color-primary-dark) 100%);
+  background: linear-gradient(135deg, var(--hindsight-gradient-start) 0%, var(--hindsight-gradient-end) 100%);
 }
 
 [data-theme='dark'] .hero--primary {
@@ -115,18 +158,26 @@
 }
 
 .button--primary {
-  background: var(--ifm-color-primary);
-  border-color: var(--ifm-color-primary);
+  background: var(--hindsight-gradient);
+  border: none;
+  color: white;
 }
 
 .button--primary:hover {
-  background: var(--ifm-color-primary-dark);
-  border-color: var(--ifm-color-primary-dark);
+  background: linear-gradient(135deg, #005db0 0%, #007a7d 100%);
+  color: white;
 }
 
 .button--secondary {
   background: transparent;
-  border: 2px solid currentColor;
+  border: 2px solid var(--hindsight-gradient-start);
+  color: var(--ifm-color-primary);
+}
+
+.button--secondary:hover {
+  background: var(--hindsight-gradient);
+  border-color: transparent;
+  color: white;
 }
 
 /* Sidebar */
@@ -137,13 +188,18 @@
 }
 
 .menu__link--active {
-  background: var(--ifm-color-primary-lightest);
-  color: var(--ifm-color-primary-darkest);
+  background: linear-gradient(135deg, rgba(0, 116, 217, 0.1) 0%, rgba(0, 146, 150, 0.1) 100%);
+}
+
+.menu__link--active .menu__link {
+  background: var(--hindsight-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 [data-theme='dark'] .menu__link--active {
-  background: rgba(45, 212, 191, 0.12);
-  color: var(--ifm-color-primary-light);
+  background: linear-gradient(135deg, rgba(0, 116, 217, 0.15) 0%, rgba(0, 146, 150, 0.15) 100%);
 }
 
 /* Non-collapsible category styling */
@@ -174,11 +230,16 @@
 }
 
 /* Code blocks */
+pre,
+pre code,
+.prism-code {
+  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace) !important;
+}
+
 .prism-code {
   border-radius: 0.5rem;
   font-size: 0.875rem;
   line-height: 1.6;
-  font-family: var(--ifm-font-family-monospace);
   padding: 1rem !important;
 }
 
@@ -187,7 +248,7 @@ code {
   border-radius: 0.375rem;
   padding: 0.2rem 0.45rem;
   font-size: 0.875em;
-  font-family: var(--ifm-font-family-monospace);
+  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace) !important;
   background-color: #f1f5f9;
   color: #0f172a;
   font-weight: 500;
@@ -200,7 +261,7 @@ code {
 
 /* Don't apply inline styles to code inside pre blocks */
 pre code {
-  background-color: transparent;
+  background-color: transparent !important;
   border: none;
   padding: 0;
   font-size: inherit;
@@ -208,32 +269,36 @@ pre code {
   font-weight: normal;
 }
 
-/* Code block container */
+/* Code block container - single background source */
 div[class*="codeBlockContainer"] {
   border-radius: 0.5rem;
   border: 1px solid var(--ifm-toc-border-color);
   overflow: hidden;
-  background: #f8fafc;
+  background: #f8fafc !important;
 }
 
 [data-theme='dark'] div[class*="codeBlockContainer"] {
-  background: #0f172a;
+  background: #0f172a !important;
 }
 
 div[class*="codeBlockTitle"] {
   font-size: 0.75rem;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--ifm-toc-border-color);
-  font-family: var(--ifm-font-family-monospace);
+  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace);
+  background: transparent !important;
 }
 
-/* Code block content area */
-div[class*="codeBlockContent"] {
-  background: #f8fafc;
+/* Code block content area - transparent to show container bg */
+div[class*="codeBlockContent"],
+div[class*="codeBlockContent"] pre,
+div[class*="codeBlockContent"] .prism-code {
+  background: transparent !important;
 }
 
-[data-theme='dark'] div[class*="codeBlockContent"] {
-  background: #0f172a;
+/* Prism token backgrounds */
+.prism-code span {
+  background: transparent !important;
 }
 
 /* Cards/Features */
@@ -246,10 +311,21 @@ div[class*="codeBlockContent"] {
   max-width: 100%;
 }
 
-article h1 {
+/* Page title with gradient */
+article h1,
+.markdown h1,
+header h1,
+h1[class*="title"] {
   font-size: 2.25rem;
   font-weight: 800;
   margin-bottom: 1.25rem;
+  background-image: linear-gradient(90deg, #0074d9, #009296) !important;
+  background-size: 100% !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+  display: inline-block;
 }
 
 article h2 {
@@ -258,7 +334,9 @@ article h2 {
   margin-top: 2rem;
   margin-bottom: 0.75rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--ifm-toc-border-color);
+  border-bottom: 2px solid transparent;
+  border-image: var(--hindsight-gradient);
+  border-image-slice: 1;
 }
 
 article h3 {
@@ -272,10 +350,93 @@ article p {
   line-height: 1.7;
 }
 
-/* Admonitions */
-.admonition {
-  border-radius: 0.5rem;
-  border-left-width: 4px;
+/* Links with gradient */
+article a:not(.button):not([class*="hash-link"]) {
+  background: var(--hindsight-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+article a:not(.button):not([class*="hash-link"]):hover {
+  text-decoration: underline;
+  text-decoration-color: var(--hindsight-gradient-start);
+}
+
+/* Admonitions - gradient themed */
+.theme-admonition,
+[class*="admonition_"] {
+  border-radius: 0.5rem !important;
+  border-left: none !important;
+  border: none !important;
+  background: rgba(0, 116, 217, 0.05) !important;
+  position: relative !important;
+  overflow: hidden !important;
+  padding-left: 1.25rem !important;
+}
+
+/* Gradient left border using pseudo-element */
+.theme-admonition::before,
+[class*="admonition_"]::before {
+  content: '' !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 4px !important;
+  background: linear-gradient(180deg, #0074d9, #009296) !important;
+  border-radius: 0.5rem 0 0 0.5rem !important;
+}
+
+/* Admonition heading text - gradient */
+[class*="admonitionHeading_"] {
+  background-image: linear-gradient(90deg, #0074d9, #009296) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+  display: inline-flex !important;
+  align-items: center !important;
+}
+
+/* Admonition icon - gradient start color */
+[class*="admonitionIcon_"] svg,
+[class*="admonitionIcon_"] svg path {
+  fill: #0074d9 !important;
+}
+
+/* Different admonition types */
+.alert--info[class*="admonition_"],
+.theme-admonition-info {
+  background: rgba(0, 116, 217, 0.05) !important;
+}
+
+.alert--success[class*="admonition_"],
+.theme-admonition-tip {
+  background: rgba(0, 146, 150, 0.05) !important;
+}
+
+.alert--warning[class*="admonition_"],
+.theme-admonition-warning {
+  background: rgba(0, 116, 217, 0.08) !important;
+}
+
+.alert--secondary[class*="admonition_"],
+.theme-admonition-note {
+  background: rgba(0, 131, 154, 0.05) !important;
+}
+
+/* Dark mode admonitions */
+[data-theme='dark'] .theme-admonition,
+[data-theme='dark'] [class*="admonition_"] {
+  background: rgba(0, 131, 154, 0.1) !important;
+}
+
+[data-theme='dark'] .theme-admonition::before,
+[data-theme='dark'] [class*="admonition_"]::before {
+  background: linear-gradient(180deg, #3396e8, #00b4b8) !important;
 }
 
 /* Tables - Compact styling */
@@ -318,6 +479,14 @@ th {
   padding: 0.5rem 1rem;
 }
 
+.tabs__item--active {
+  border-bottom-color: var(--hindsight-gradient-start);
+  background: var(--hindsight-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
 
 /* Redoc sidebar - expand all tags by default */
 [class*="redoc-wrap"] [class*="menu-content"] ul {
@@ -327,6 +496,153 @@ th {
 /* Hide Redoc footer/branding */
 [class*="redoc-wrap"] a[href*="redocly.com"] {
   display: none !important;
+}
+
+/* Mermaid diagram styling - using high specificity selectors */
+.mermaid svg[id^="mermaid"] {
+  background: transparent !important;
+}
+
+/* Node shapes - gradient start color (#0074d9 blue) */
+.mermaid svg[id^="mermaid"] .node rect,
+.mermaid svg[id^="mermaid"] .node circle,
+.mermaid svg[id^="mermaid"] .node ellipse,
+.mermaid svg[id^="mermaid"] .node polygon,
+.mermaid svg[id^="mermaid"] .node path,
+svg[id^="mermaid"] .node rect,
+svg[id^="mermaid"] .node circle,
+svg[id^="mermaid"] .node ellipse,
+svg[id^="mermaid"] .node polygon,
+svg[id^="mermaid"] .node path {
+  fill: #0074d9 !important;
+  stroke: #005db0 !important;
+}
+
+/* Node text - white on colored background, Inter font */
+.mermaid svg[id^="mermaid"] .node .label,
+.mermaid svg[id^="mermaid"] .nodeLabel,
+.mermaid svg[id^="mermaid"] .node text,
+.mermaid svg[id^="mermaid"] .node foreignObject div,
+.mermaid svg[id^="mermaid"] .node foreignObject span,
+.mermaid svg[id^="mermaid"] .node foreignObject p,
+svg[id^="mermaid"] .node .label,
+svg[id^="mermaid"] .nodeLabel,
+svg[id^="mermaid"] .node text,
+svg[id^="mermaid"] .node foreignObject div,
+svg[id^="mermaid"] .node foreignObject span,
+svg[id^="mermaid"] .node foreignObject p {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  font-size: 0.9375rem !important;
+}
+
+/* Edge/arrow lines - gradient end color (#009296 teal) */
+.mermaid svg[id^="mermaid"] .edgePath .path,
+.mermaid svg[id^="mermaid"] .flowchart-link,
+svg[id^="mermaid"] .edgePath .path,
+svg[id^="mermaid"] .flowchart-link {
+  stroke: #009296 !important;
+}
+
+/* Arrow heads - gradient end color */
+.mermaid svg[id^="mermaid"] .marker path,
+.mermaid svg[id^="mermaid"] .arrowheadPath,
+.mermaid svg[id^="mermaid"] marker path,
+svg[id^="mermaid"] .marker path,
+svg[id^="mermaid"] .arrowheadPath,
+svg[id^="mermaid"] marker path {
+  fill: #009296 !important;
+  stroke: #009296 !important;
+}
+
+/* Edge labels - transparent background, Inter font */
+.mermaid svg[id^="mermaid"] .edgeLabel,
+.mermaid svg[id^="mermaid"] .edgeLabel rect,
+.mermaid svg[id^="mermaid"] .edgeLabel span,
+.mermaid svg[id^="mermaid"] .labelBkg,
+svg[id^="mermaid"] .edgeLabel,
+svg[id^="mermaid"] .edgeLabel rect,
+svg[id^="mermaid"] .edgeLabel span,
+svg[id^="mermaid"] .labelBkg {
+  background: transparent !important;
+  background-color: transparent !important;
+  fill: transparent !important;
+}
+
+.mermaid svg[id^="mermaid"] .edgeLabel text,
+.mermaid svg[id^="mermaid"] .edgeLabel span,
+.mermaid svg[id^="mermaid"] .edgeLabel p,
+svg[id^="mermaid"] .edgeLabel text,
+svg[id^="mermaid"] .edgeLabel span,
+svg[id^="mermaid"] .edgeLabel p {
+  color: var(--ifm-font-color-base) !important;
+  fill: var(--ifm-font-color-base) !important;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  font-size: 0.875rem !important;
+}
+
+/* Cluster/subgraph boxes - gradient end color border (#009296) */
+.mermaid svg[id^="mermaid"] .cluster rect,
+svg[id^="mermaid"] .cluster rect {
+  fill: rgba(0, 146, 150, 0.08) !important;
+  stroke: #009296 !important;
+  stroke-width: 2px !important;
+}
+
+/* Cluster labels - Inter font */
+.mermaid svg[id^="mermaid"] .cluster text,
+.mermaid svg[id^="mermaid"] .cluster .nodeLabel,
+.mermaid svg[id^="mermaid"] .cluster-label text,
+.mermaid svg[id^="mermaid"] .cluster-label span,
+.mermaid svg[id^="mermaid"] .cluster-label p,
+svg[id^="mermaid"] .cluster text,
+svg[id^="mermaid"] .cluster .nodeLabel,
+svg[id^="mermaid"] .cluster-label text,
+svg[id^="mermaid"] .cluster-label span,
+svg[id^="mermaid"] .cluster-label p {
+  color: var(--ifm-font-color-base) !important;
+  fill: var(--ifm-font-color-base) !important;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  font-size: 0.9375rem !important;
+}
+
+/* All mermaid text should use Inter */
+.mermaid svg[id^="mermaid"] text,
+.mermaid svg[id^="mermaid"] span,
+.mermaid svg[id^="mermaid"] p,
+svg[id^="mermaid"] text,
+svg[id^="mermaid"] span,
+svg[id^="mermaid"] p {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+/* Dark mode adjustments */
+[data-theme='dark'] .mermaid svg[id^="mermaid"] .edgeLabel text,
+[data-theme='dark'] .mermaid svg[id^="mermaid"] .edgeLabel span,
+[data-theme='dark'] .mermaid svg[id^="mermaid"] .edgeLabel p,
+[data-theme='dark'] svg[id^="mermaid"] .edgeLabel text,
+[data-theme='dark'] svg[id^="mermaid"] .edgeLabel span,
+[data-theme='dark'] svg[id^="mermaid"] .edgeLabel p {
+  color: #e2e8f0 !important;
+  fill: #e2e8f0 !important;
+}
+
+[data-theme='dark'] .mermaid svg[id^="mermaid"] .cluster text,
+[data-theme='dark'] .mermaid svg[id^="mermaid"] .cluster-label text,
+[data-theme='dark'] .mermaid svg[id^="mermaid"] .cluster-label span,
+[data-theme='dark'] .mermaid svg[id^="mermaid"] .cluster-label p,
+[data-theme='dark'] svg[id^="mermaid"] .cluster text,
+[data-theme='dark'] svg[id^="mermaid"] .cluster-label text,
+[data-theme='dark'] svg[id^="mermaid"] .cluster-label span,
+[data-theme='dark'] svg[id^="mermaid"] .cluster-label p {
+  color: #e2e8f0 !important;
+  fill: #e2e8f0 !important;
+}
+
+[data-theme='dark'] .mermaid svg[id^="mermaid"] .cluster rect,
+[data-theme='dark'] svg[id^="mermaid"] .cluster rect {
+  fill: rgba(0, 146, 150, 0.15) !important;
 }
 
 /* List styling */

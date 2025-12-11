@@ -257,16 +257,17 @@ class EmbeddedPostgres:
             last_error = stderr or f"pg0 start returned exit code {returncode}"
             if attempt < max_retries:
                 delay = retry_delay * (2 ** (attempt - 1))
-                logger.warning(f"pg0 start attempt {attempt}/{max_retries} failed: {last_error.strip()}")
-                logger.info(f"Retrying in {delay:.1f}s...")
+                logger.debug(f"pg0 start attempt {attempt}/{max_retries} failed: {last_error.strip()}")
+                logger.debug(f"Retrying in {delay:.1f}s...")
                 await asyncio.sleep(delay)
             else:
-                logger.warning(f"pg0 start attempt {attempt}/{max_retries} failed: {last_error.strip()}")
+                logger.debug(f"pg0 start attempt {attempt}/{max_retries} failed: {last_error.strip()}")
 
-        # All retries exhausted - use constructed URI as fallback
-        uri = f"postgresql://{self.username}:{self.password}@localhost:{self.port}/{self.database}"
-        logger.warning(f"All pg0 start attempts failed, using constructed URI: {uri}")
-        return uri
+        # All retries exhausted - fail
+        raise RuntimeError(
+            f"Failed to start embedded PostgreSQL after {max_retries} attempts. "
+            f"Last error: {last_error.strip() if last_error else 'unknown'}"
+        )
 
     async def stop(self) -> None:
         """Stop the PostgreSQL server."""

@@ -672,11 +672,15 @@ class DeleteResponse(BaseModel):
     """Response model for delete operations."""
     model_config = ConfigDict(json_schema_extra={
         "example": {
-            "success": True
+            "success": True,
+            "message": "Deleted successfully",
+            "deleted_count": 10
         }
     })
 
     success: bool
+    message: Optional[str] = None
+    deleted_count: Optional[int] = None
 
 
 def create_app(memory: MemoryEngine, initialize_memory: bool = True) -> FastAPI:
@@ -1693,6 +1697,31 @@ def _register_routes(app: FastAPI):
             import traceback
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             logger.error(f"Error in /v1/default/banks/{bank_id}: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+    @app.delete(
+        "/v1/default/banks/{bank_id}",
+        response_model=DeleteResponse,
+        summary="Delete memory bank",
+        description="Delete an entire memory bank including all memories, entities, documents, and the bank profile itself. "
+        "This is a destructive operation that cannot be undone.",
+        operation_id="delete_bank",
+        tags=["Banks"]
+    )
+    async def api_delete_bank(bank_id: str):
+        """Delete an entire memory bank and all its data."""
+        try:
+            result = await app.state.memory.delete_bank(bank_id)
+            return DeleteResponse(
+                success=True,
+                message=f"Bank '{bank_id}' and all associated data deleted successfully",
+                deleted_count=result.get("memory_units_deleted", 0) + result.get("entities_deleted", 0) + result.get("documents_deleted", 0)
+            )
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Error in DELETE /v1/default/banks/{bank_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
 

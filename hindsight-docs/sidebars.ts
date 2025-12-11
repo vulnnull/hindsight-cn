@@ -147,28 +147,6 @@ const sidebars: SidebarsConfig = {
         },
       ],
     },
-    {
-      type: 'category',
-      label: 'Integrations',
-      collapsible: false,
-      items: [
-        {
-          type: 'doc',
-          id: 'sdks/openai',
-          label: 'OpenAI',
-        },
-        {
-          type: 'doc',
-          id: 'sdks/langgraph',
-          label: 'LangGraph',
-        },
-        {
-          type: 'doc',
-          id: 'sdks/mcp',
-          label: 'MCP Server',
-        },
-      ],
-    },
   ],
   cookbookSidebar: [
     {

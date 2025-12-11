@@ -91,12 +91,35 @@ class LLMProvider:
             self._client = AsyncOpenAI(api_key="ollama", base_url=self.base_url, max_retries=0)
             self._gemini_client = None
         else:
-            self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url, max_retries=0)
+            # Only pass base_url if it's set (OpenAI uses default URL otherwise)
+            client_kwargs = {"api_key": self.api_key, "max_retries": 0}
+            if self.base_url:
+                client_kwargs["base_url"] = self.base_url
+            self._client = AsyncOpenAI(**client_kwargs)
             self._gemini_client = None
 
-        logger.info(
-            f"Initialized LLM: provider={self.provider}, model={self.model}, base_url={self.base_url}"
-        )
+    async def verify_connection(self) -> None:
+        """
+        Verify that the LLM provider is configured correctly by making a simple test call.
+
+        Raises:
+            RuntimeError: If the connection test fails.
+        """
+        try:
+            logger.info(f"Verifying LLM: provider={self.provider}, model={self.model}, base_url={self.base_url or 'default'}...")
+            await self.call(
+                messages=[{"role": "user", "content": "Say 'ok'"}],
+                max_completion_tokens=10,
+                max_retries=2,
+                initial_backoff=0.5,
+                max_backoff=2.0,
+            )
+            # If we get here without exception, the connection is working
+            logger.info(f"LLM verified: {self.provider}/{self.model}")
+        except Exception as e:
+            raise RuntimeError(
+                f"LLM connection verification failed for {self.provider}/{self.model}: {e}"
+            ) from e
 
     async def call(
         self,
@@ -149,7 +172,12 @@ class LLMProvider:
 
             if max_completion_tokens is not None:
                 call_params["max_completion_tokens"] = max_completion_tokens
-            if temperature is not None:
+            # Check if model supports reasoning parameter (o1, o3, gpt-5 families)
+            model_lower = self.model.lower()
+            is_reasoning_model = any(x in model_lower for x in ["gpt-5", "o1", "o3"])
+
+            # GPT-5/o1/o3 family doesn't support custom temperature (only default 1)
+            if temperature is not None and not is_reasoning_model:
                 call_params["temperature"] = temperature
 
             # Provider-specific parameters
@@ -216,7 +244,8 @@ class LLMProvider:
                 except APIConnectionError as e:
                     last_exception = e
                     if attempt < max_retries:
-                        logger.warning(f"Connection error, retrying... (attempt {attempt + 1}/{max_retries + 1})")
+                        status_code = getattr(e, 'status_code', None) or getattr(getattr(e, 'response', None), 'status_code', None)
+                        logger.warning(f"Connection error, retrying... (attempt {attempt + 1}/{max_retries + 1}) - status_code={status_code}, message={e}")
                         backoff = min(initial_backoff * (2 ** attempt), max_backoff)
                         await asyncio.sleep(backoff)
                         continue

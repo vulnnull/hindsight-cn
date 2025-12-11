@@ -6,6 +6,17 @@ sidebar_position: 4
 
 When you call `reflect()`, Hindsight doesn't just retrieve facts — it **reasons** about them through the lens of the bank's unique disposition, forming new opinions and generating contextual responses.
 
+```mermaid
+graph LR
+    A[Query] --> B[Recall Memories]
+    B --> C[Load Disposition]
+    C --> D[Reason]
+    D --> E[Form Opinions]
+    E --> F[Response]
+```
+
+---
+
 ## Why Reflect?
 
 Most AI systems can retrieve facts, but they can't **reason** about them in a consistent way. Every response is generated fresh without a stable perspective or evolving beliefs.
@@ -38,16 +49,6 @@ With reflect:
 **Example:**
 - `recall("Alice")` → Returns all Alice facts
 - `reflect("Should we hire Alice?")` → Reasons about Alice's fit based on accumulated knowledge, weighs evidence, forms opinion
-
----
-
-## The Reflect Process
-
-1. **Recall** relevant memories based on the query
-2. **Load** the bank's disposition traits and background
-3. **Reason** about the memories through the disposition lens
-4. **Form** new opinions with confidence scores
-5. **Return** response, sources, and any new beliefs
 
 ---
 

@@ -31,10 +31,10 @@ API available at http://localhost:8888
 
 export OPENAI_API_KEY=sk-xxx
 
-docker run -it -p 8888:8888 -p 9999:9999 \
+docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
   -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
   -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
-  ghcr.io/vectorize-io/hindsight
+  ghcr.io/vectorize-io/hindsight:latest
 ```
 
 - **API**: http://localhost:8888
@@ -100,7 +100,7 @@ await client.reflect('my-bank', 'Tell me about Alice');
 <TabItem value="cli" label="CLI">
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/main/hindsight-cli/install.sh | bash
+curl -fsSL https://hindsight.vectorize.io/get-cli | bash
 ```
 
 ```bash

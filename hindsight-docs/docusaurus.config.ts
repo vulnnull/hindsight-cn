@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'Hindsight',
   tagline: 'Entity-Aware Memory System for AI Agents',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/favicon.png',
 
   future: {
     v4: true,
@@ -49,7 +49,7 @@ const config: Config = {
       tagName: 'link',
       attributes: {
         rel: 'stylesheet',
-        href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Nunito+Sans:wght@400;500;600;700;800&display=swap',
+        href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap',
         media: 'print',
         onload: "this.media='all'",
       },
@@ -83,7 +83,7 @@ const config: Config = {
           },
         ],
         theme: {
-          primaryColor: '#0d9488',
+          primaryColor: '#0074d9',
           sidebar: {
             backgroundColor: '#09090b',
           },
@@ -92,9 +92,9 @@ const config: Config = {
           },
           typography: {
             fontSize: '15px',
-            fontFamily: "'Avenir Book', 'Avenir', 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
             headings: {
-              fontFamily: "'Avenir', 'Avenir Book', 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+              fontFamily: "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
             },
             code: {
               fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, Consolas, monospace",
@@ -121,10 +121,10 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'Hindsight',
       logo: {
         alt: 'Hindsight Logo',
-        src: 'img/logo.svg',
+        src: 'img/logo.png',
+        style: { height: '32px' },
       },
       items: [
         {
@@ -164,8 +164,9 @@ const config: Config = {
         },
         {
           href: 'https://github.com/vectorize-io/hindsight',
-          label: 'GitHub',
           position: 'right',
+          className: 'header-github-link',
+          'aria-label': 'GitHub repository',
         },
       ],
     },
@@ -209,24 +210,39 @@ const config: Config = {
     mermaid: {
       theme: {
         light: 'base',
-        dark: 'dark',
+        dark: 'base',
       },
       options: {
         themeVariables: {
-          primaryColor: '#6366f1',
+          // Gradient start (#0074d9 blue) for nodes
+          primaryColor: '#0074d9',
           primaryTextColor: '#ffffff',
-          primaryBorderColor: '#4f46e5',
-          secondaryColor: '#f1f5f9',
-          secondaryTextColor: '#1e293b',
-          secondaryBorderColor: '#cbd5e1',
-          tertiaryColor: '#e0e7ff',
-          lineColor: '#94a3b8',
+          primaryBorderColor: '#005db0',
+          // Gradient end (#009296 teal) for edges/clusters
+          secondaryColor: '#009296',
+          secondaryTextColor: '#ffffff',
+          secondaryBorderColor: '#007a7d',
+          // Tertiary
+          tertiaryColor: '#e6f7f8',
+          tertiaryTextColor: '#1e293b',
+          // Lines and edges - gradient end color
+          lineColor: '#009296',
+          // Text
           textColor: '#1e293b',
-          mainBkg: '#ffffff',
-          nodeBorder: '#4f46e5',
-          clusterBkg: '#f8fafc',
-          clusterBorder: '#e2e8f0',
-          fontFamily: 'system-ui, -apple-system, sans-serif',
+          // Node specific - gradient start
+          nodeBkg: '#0074d9',
+          nodeTextColor: '#ffffff',
+          nodeBorder: '#005db0',
+          // Main background
+          mainBkg: '#0074d9',
+          // Clusters/subgraphs - gradient end
+          clusterBkg: 'rgba(0, 146, 150, 0.08)',
+          clusterBorder: '#009296',
+          // Labels
+          edgeLabelBackground: 'transparent',
+          labelBackground: 'transparent',
+          // Font - Inter to match body text
+          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         },
       },
     },

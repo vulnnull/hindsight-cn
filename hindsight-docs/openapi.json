@@ -1046,6 +1046,47 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "Banks"
+        ],
+        "summary": "Delete memory bank",
+        "description": "Delete an entire memory bank including all memories, entities, documents, and the bank profile itself. This is a destructive operation that cannot be undone.",
+        "operationId": "delete_bank",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/default/banks/{bank_id}/memories": {
@@ -1494,6 +1535,28 @@
           "success": {
             "type": "boolean",
             "title": "Success"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "deleted_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted Count"
           }
         },
         "type": "object",
@@ -1503,7 +1566,9 @@
         "title": "DeleteResponse",
         "description": "Response model for delete operations.",
         "example": {
-          "success": true
+          "success": true,
+          "message": "Deleted successfully",
+          "deleted_count": 10
         }
       },
       "DispositionTraits": {

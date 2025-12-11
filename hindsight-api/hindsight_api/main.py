@@ -21,6 +21,10 @@ from . import MemoryEngine
 from .api import create_app
 from .config import get_config, HindsightConfig
 
+from .banner import print_banner
+print()
+print_banner()
+
 # Filter deprecation warnings from third-party libraries
 warnings.filterwarnings("ignore", message="websockets.legacy is deprecated")
 warnings.filterwarnings("ignore", message="websockets.server.WebSocketServerProtocol is deprecated")
@@ -184,15 +188,19 @@ def main():
     if args.ssl_certfile:
         uvicorn_config["ssl_certfile"] = args.ssl_certfile
 
-    print(f"\nStarting Hindsight API...")
-    print(f"  URL: http://{args.host}:{args.port}")
-    print(f"  Database: {config.database_url}")
-    print(f"  LLM: {config.llm_provider} / {config.llm_model}")
-    print(f"  Embeddings: {config.embeddings_provider}")
-    print(f"  Reranker: {config.reranker_provider}")
-    if config.mcp_enabled:
-        print(f"  MCP: enabled at /mcp")
-    print()
+
+
+    from .banner import print_startup_info
+    print_startup_info(
+        host=args.host,
+        port=args.port,
+        database_url=config.database_url,
+        llm_provider=config.llm_provider,
+        llm_model=config.llm_model,
+        embeddings_provider=config.embeddings_provider,
+        reranker_provider=config.reranker_provider,
+        mcp_enabled=config.mcp_enabled,
+    )
 
     uvicorn.run(**uvicorn_config)
 

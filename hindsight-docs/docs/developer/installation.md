@@ -37,11 +37,12 @@ See [Models](./models) for detailed comparison and configuration.
 Run everything in one container with embedded PostgreSQL:
 
 ```bash
-docker run -p 8888:8888 -p 9999:9999 \
-  -e HINDSIGHT_API_LLM_PROVIDER=openai \
-  -e HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx \
-  -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
-  ghcr.io/vectorize-io/hindsight
+export OPENAI_API_KEY=sk-xxx
+
+docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
+  -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
+  -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
+  ghcr.io/vectorize-io/hindsight:latest
 ```
 
 - **API Server**: http://localhost:8888

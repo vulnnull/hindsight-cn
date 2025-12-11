@@ -398,7 +398,7 @@ Answer:
                     ],
                     response_format=QuestionAnswer,
                     scope="memory",
-                    max_tokens=32768,
+                    max_completion_tokens=32768,
                 )
                 reasoning_text = answer_obj.reasoning or ""
                 if reasoning_text:

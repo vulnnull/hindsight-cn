@@ -8,16 +8,12 @@ When you call `retain()`, Hindsight transforms conversations and documents into 
 
 ## What Retain Does
 
-```
-Your Content
-     ↓
-Extract Rich Facts
-     ↓
-Identify Entities
-     ↓
-Build Connections
-     ↓
-Searchable Memory Bank
+```mermaid
+graph LR
+    A[Your Content] --> B[Extract Facts]
+    B --> C[Identify Entities]
+    C --> D[Build Connections]
+    D --> E[Memory Bank]
 ```
 
 ---

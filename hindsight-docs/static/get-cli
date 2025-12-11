@@ -2,7 +2,7 @@
 set -e
 
 # Hindsight CLI installer
-# Usage: curl -sSf https://your-domain.com/install.sh | sh
+# Usage: curl -fsSL https://hindsight.vectorize.io/get-cli | bash
 
 REPO_URL="https://github.com/vectorize-io/hindsight"
 INSTALL_DIR="${HINDSIGHT_INSTALL_DIR:-$HOME/.local/bin}"

@@ -453,12 +453,17 @@ class MemoryEngine:
             # Query analyzer load is sync and CPU-bound
             await loop.run_in_executor(None, self.query_analyzer.load)
 
+        async def verify_llm():
+            """Verify LLM connection is working."""
+            await self._llm_config.verify_connection()
+
         # Run pg0 and all model initializations in parallel
         await asyncio.gather(
             start_pg0(),
             init_embeddings(),
             init_cross_encoder(),
             init_query_analyzer(),
+            verify_llm(),
         )
 
         # Run database migrations if enabled
@@ -1791,10 +1796,14 @@ class MemoryEngine:
                         # Delete entities (cascades to unit_entities, entity_cooccurrences, memory_links with entity_id)
                         await conn.execute("DELETE FROM entities WHERE bank_id = $1", bank_id)
 
+                        # Delete the bank profile itself
+                        await conn.execute("DELETE FROM banks WHERE bank_id = $1", bank_id)
+
                         return {
                             "memory_units_deleted": units_count,
                             "entities_deleted": entities_count,
-                            "documents_deleted": documents_count
+                            "documents_deleted": documents_count,
+                            "bank_deleted": True
                         }
 
                 except Exception as e:
@@ -1839,10 +1848,11 @@ class MemoryEngine:
             """, *query_params)
 
             # Get links, filtering to only include links between units of the selected agent
+            # Use DISTINCT ON with LEAST/GREATEST to deduplicate bidirectional links
             unit_ids = [row['id'] for row in units]
             if unit_ids:
                 links = await conn.fetch("""
-                    SELECT
+                    SELECT DISTINCT ON (LEAST(ml.from_unit_id, ml.to_unit_id), GREATEST(ml.from_unit_id, ml.to_unit_id), ml.link_type, COALESCE(ml.entity_id, '00000000-0000-0000-0000-000000000000'::uuid))
                         ml.from_unit_id,
                         ml.to_unit_id,
                         ml.link_type,
@@ -1851,7 +1861,7 @@ class MemoryEngine:
                     FROM memory_links ml
                     LEFT JOIN entities e ON ml.entity_id = e.id
                     WHERE ml.from_unit_id = ANY($1::uuid[]) AND ml.to_unit_id = ANY($1::uuid[])
-                    ORDER BY ml.link_type, ml.weight DESC
+                    ORDER BY LEAST(ml.from_unit_id, ml.to_unit_id), GREATEST(ml.from_unit_id, ml.to_unit_id), ml.link_type, COALESCE(ml.entity_id, '00000000-0000-0000-0000-000000000000'::uuid), ml.weight DESC
                 """, unit_ids)
             else:
                 links = []

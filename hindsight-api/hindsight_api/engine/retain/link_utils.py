@@ -390,6 +390,27 @@ async def create_temporal_links_batch_per_fact(
         # Filter and create links in memory (much faster than N queries)
         link_gen_start = time_mod.time()
         links = compute_temporal_links(new_units, all_candidates, time_window_hours)
+
+        # Also compute temporal links WITHIN the new batch (new units to each other)
+        if len(new_units) > 1:
+            # Convert new_units dict to candidate format for within-batch linking
+            new_unit_items = list(new_units.items())
+            for i, (unit_id, event_date) in enumerate(new_unit_items):
+                unit_event_date_norm = _normalize_datetime(event_date)
+
+                # Compare with other new units (only those after this one to avoid duplicates)
+                for j in range(i + 1, len(new_unit_items)):
+                    other_id, other_event_date = new_unit_items[j]
+                    other_event_date_norm = _normalize_datetime(other_event_date)
+
+                    # Check if within time window
+                    time_diff_hours = abs((unit_event_date_norm - other_event_date_norm).total_seconds() / 3600)
+                    if time_diff_hours <= time_window_hours:
+                        weight = max(0.3, 1.0 - (time_diff_hours / time_window_hours))
+                        # Create bidirectional links
+                        links.append((unit_id, other_id, 'temporal', weight, None))
+                        links.append((other_id, unit_id, 'temporal', weight, None))
+
         _log(log_buffer, f"      [7.3] Generate {len(links)} temporal links: {time_mod.time() - link_gen_start:.3f}s")
 
         if links:
@@ -514,8 +535,37 @@ async def create_semantic_links_batch(
 
                     for idx in sorted_indices:
                         similar_id = existing_ids[idx]
-                        similarity = float(similarities[idx])
+                        # Clamp to [0, 1] to handle floating point precision issues
+                        similarity = float(min(1.0, max(0.0, similarities[idx])))
                         all_links.append((unit_id, similar_id, 'semantic', similarity, None))
+
+        # Also compute similarities WITHIN the new batch (new units to each other)
+        # Apply the same top_k limit per unit as we do for existing units
+        if len(unit_ids) > 1:
+            new_embeddings_matrix = np.array(embeddings)
+
+            for i, unit_id in enumerate(unit_ids):
+                # Compute similarities with all OTHER new units
+                other_indices = [j for j in range(len(unit_ids)) if j != i]
+                if not other_indices:
+                    continue
+
+                other_embeddings = new_embeddings_matrix[other_indices]
+                similarities = np.dot(other_embeddings, new_embeddings_matrix[i])
+
+                # Find top-k above threshold (same logic as existing units)
+                above_threshold = np.where(similarities >= threshold)[0]
+
+                if len(above_threshold) > 0:
+                    # Sort by similarity (descending) and take top-k
+                    sorted_local_indices = above_threshold[np.argsort(-similarities[above_threshold])][:top_k]
+
+                    for local_idx in sorted_local_indices:
+                        other_idx = other_indices[local_idx]
+                        other_id = unit_ids[other_idx]
+                        # Clamp to [0, 1] to handle floating point precision issues
+                        similarity = float(min(1.0, max(0.0, similarities[local_idx])))
+                        all_links.append((unit_id, other_id, 'semantic', similarity, None))
 
         _log(log_buffer, f"      [8.2] Compute similarities & generate {len(all_links)} semantic links: {time_mod.time() - compute_start:.3f}s")
 

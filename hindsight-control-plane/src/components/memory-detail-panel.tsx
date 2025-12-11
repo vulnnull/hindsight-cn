@@ -64,13 +64,12 @@ export function MemoryDetailPanel({
               <p className="text-sm text-muted-foreground mt-1">Full memory content and metadata</p>
             </div>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={onClose}
-              className="h-9 px-3 gap-2"
+              className="h-8 w-8 p-0"
             >
-              <X className="h-4 w-4" />
-              Close
+              <X className="h-5 w-5" />
             </Button>
           </div>
 

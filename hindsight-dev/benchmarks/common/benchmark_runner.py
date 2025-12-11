@@ -317,7 +317,7 @@ If it's correct, set correct=true.
                         response_format=JudgeResponse,
                         scope="judge",
                         temperature=0,
-                        max_tokens=4096
+                        max_completion_tokens=4096
                     )
 
                     return judgement.correct, judgement.reasoning
