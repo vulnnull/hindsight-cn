@@ -3,7 +3,7 @@
 > Agent Memory that Works Like Human Memory
 
 This file contains the complete Hindsight documentation for LLM consumption.
-Generated: 2025-12-11T08:22:46.057Z
+Generated: 2025-12-11T11:54:08.183Z
 
 ---
 
@@ -163,10 +163,10 @@ API available at http://localhost:8888
 
 export OPENAI_API_KEY=sk-xxx
 
-docker run -it -p 8888:8888 -p 9999:9999 \
+docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
   -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
   -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
-  ghcr.io/vectorize-io/hindsight
+  ghcr.io/vectorize-io/hindsight:latest
 ```
 
 - **API**: http://localhost:8888
@@ -599,16 +599,12 @@ When you call `retain()`, Hindsight transforms conversations and documents into 
 
 ## What Retain Does
 
-```
-Your Content
-     ↓
-Extract Rich Facts
-     ↓
-Identify Entities
-     ↓
-Build Connections
-     ↓
-Searchable Memory Bank
+```mermaid
+graph LR
+    A[Your Content] --> B[Extract Facts]
+    B --> C[Identify Entities]
+    C --> D[Build Connections]
+    D --> E[Memory Bank]
 ```
 
 ---
@@ -792,6 +788,24 @@ All stored in your isolated **memory bank**, ready for `recall()` and `reflect()
 
 When you call `recall()`, Hindsight uses multiple search strategies in parallel to find the most relevant memories, regardless of how you phrase your query.
 
+```mermaid
+graph LR
+    Q[Query] --> S[Semantic]
+    Q --> K[Keyword]
+    Q --> G[Graph]
+    Q --> T[Temporal]
+
+    S --> RRF[RRF Fusion]
+    K --> RRF
+    G --> RRF
+    T --> RRF
+
+    RRF --> CE[Cross-Encoder]
+    CE --> R[Results]
+```
+
+---
+
 ## The Challenge of Memory Recall
 
 Different queries need different search approaches:
@@ -903,19 +917,6 @@ This gives your agent richer context while maintaining precise control over tota
 
 ---
 
-## How Recall Works
-
-When you call `recall(query, bank_id)`:
-
-1. **Parse** → Detect temporal expressions, understand intent
-2. **Search** → Run 4 strategies in parallel
-3. **Fuse** → Combine results, prioritizing consensus
-4. **Rerank** → Neural reranking for final relevance
-5. **Filter** → Select top memories within token budget
-6. **Return** → Ranked, relevant memories
-
----
-
 ## Tuning Recall: Quality vs Latency
 
 Different use cases require different trade-offs between **recall quality** and **response speed**. Two parameters control this:
@@ -1001,6 +1002,17 @@ The **fusion** of all four gives you exactly what you're looking for, even thoug
 
 When you call `reflect()`, Hindsight doesn't just retrieve facts — it **reasons** about them through the lens of the bank's unique disposition, forming new opinions and generating contextual responses.
 
+```mermaid
+graph LR
+    A[Query] --> B[Recall Memories]
+    B --> C[Load Disposition]
+    C --> D[Reason]
+    D --> E[Form Opinions]
+    E --> F[Response]
+```
+
+---
+
 ## Why Reflect?
 
 Most AI systems can retrieve facts, but they can't **reason** about them in a consistent way. Every response is generated fresh without a stable perspective or evolving beliefs.
@@ -1033,16 +1045,6 @@ With reflect:
 **Example:**
 - `recall("Alice")` → Returns all Alice facts
 - `reflect("Should we hire Alice?")` → Reasons about Alice's fit based on accumulated knowledge, weighs evidence, forms opinion
-
----
-
-## The Reflect Process
-
-1. **Recall** relevant memories based on the query
-2. **Load** the bank's disposition traits and background
-3. **Reason** about the memories through the disposition lens
-4. **Form** new opinions with confidence scores
-5. **Return** response, sources, and any new beliefs
 
 ---
 
@@ -2434,11 +2436,12 @@ See [Models](./models) for detailed comparison and configuration.
 Run everything in one container with embedded PostgreSQL:
 
 ```bash
-docker run -p 8888:8888 -p 9999:9999 \
-  -e HINDSIGHT_API_LLM_PROVIDER=openai \
-  -e HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx \
-  -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
-  ghcr.io/vectorize-io/hindsight
+export OPENAI_API_KEY=sk-xxx
+
+docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
+  -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
+  -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
+  ghcr.io/vectorize-io/hindsight:latest
 ```
 
 - **API Server**: http://localhost:8888
@@ -3672,11 +3675,31 @@ hindsight memory recall <bank_id> "query" -o yaml
 
 ## Interactive Explorer
 
-Launch the TUI explorer for visual navigation:
+Launch the TUI explorer for visual navigation of your memory banks:
 
 ```bash
 hindsight explore
 ```
+
+The explorer provides an interactive terminal interface to:
+
+- **Browse memory banks** — View all banks and their statistics
+- **Search memories** — Run recall queries with real-time results
+- **Inspect entities** — Explore the knowledge graph and entity relationships
+- **View facts** — Browse world facts, experiences, and opinions
+- **Navigate documents** — See source documents and their extracted memories
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate items |
+| `Enter` | Select / Expand |
+| `Tab` | Switch panels |
+| `/` | Search |
+| `q` | Quit |
+
+<!-- Screenshot placeholder: explore command TUI -->
 
 ## Example Workflow
 
@@ -3698,98 +3721,6 @@ hindsight memory reflect demo "What do you know about the team?"
 # Check bank profile
 hindsight bank profile demo
 ```
-
-
----
-
-
-## File: sdks/mcp.md
-
-# MCP Server
-
-Model Context Protocol server for AI assistants like Claude Desktop.
-
-## Setup
-
-The MCP server is included in the Hindsight API. When running the API with MCP enabled, it exposes MCP tools at `/mcp/{bank_id}/sse`.
-
-### Claude Desktop Configuration
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "hindsight": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8888/mcp/my-bank-id/sse"]
-    }
-  }
-}
-```
-
-Replace `my-bank-id` with your memory bank ID.
-
-## Available Tools
-
-### retain
-
-Store a memory:
-
-```json
-{
-  "name": "retain",
-  "arguments": {
-    "content": "User prefers Python for data analysis",
-    "context": "preferences"
-  }
-}
-```
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `content` | string | yes | Memory content to store |
-| `context` | string | no | Category (default: 'general') |
-
-### recall
-
-Search memories:
-
-```json
-{
-  "name": "recall",
-  "arguments": {
-    "query": "What does the user do for work?"
-  }
-}
-```
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | yes | Natural language search query |
-| `max_results` | integer | no | Max results (default: 10) |
-
-## Usage Example
-
-Once configured, Claude can use Hindsight naturally:
-
-**User**: "Remember that I prefer morning meetings"
-
-**Claude**: *Uses retain*
-
-> "I've noted that you prefer morning meetings."
-
----
-
-**User**: "What do you know about my preferences?"
-
-**Claude**: *Uses recall*
-
-> "Based on our conversations, you prefer morning meetings and like Python for data analysis."
 
 
 ---
@@ -4869,9 +4800,9 @@ Search memories to provide personalized responses.
 
 ## Integration with AI Assistants
 
-The MCP server can be used with any MCP-compatible AI assistant. For Claude Desktop integration using the CLI, see [MCP Server (CLI)](/sdks/mcp).
+The MCP server can be used with any MCP-compatible AI assistant.
 
-### Example: Claude Desktop Configuration
+### Claude Desktop Configuration
 
 To connect Claude Desktop to a specific memory bank:
 
@@ -5164,262 +5095,6 @@ Any PostgreSQL instance that satisfies these requirements should work. If you en
 - Azure Database for PostgreSQL
 - Supabase
 - Neon
-
-
----
-
-
-## File: sdks/langgraph.md
-
-# LangGraph
-
-Hindsight provides a `BaseStore` implementation for LangGraph's memory system.
-
-## Installation
-
-```bash
-cd hindsight-langmem && uv pip install -e .
-```
-
-## Quick Start
-
-```python
-from hindsight_langmem import HindsightStore
-
-# Create store
-store = HindsightStore(
-    base_url="http://localhost:8888",
-    default_agent_id="my-agent",
-)
-
-# Store data
-store.put(
-    namespace=("user", "preferences"),
-    key="language",
-    value={"language": "Python", "reason": "data science"}
-)
-
-# Retrieve data
-item = store.get(namespace=("user", "preferences"), key="language")
-print(item.value)  # {"language": "Python", "reason": "data science"}
-
-# Search
-results = store.search(
-    namespace_prefix=("user",),
-    query="programming language",
-    limit=10
-)
-```
-
-## How It Works
-
-`HindsightStore` implements LangGraph's `BaseStore` interface:
-
-- **Namespaces** map to Hindsight agent IDs (joined with `__`)
-- **Keys** map to document IDs
-- **Values** are stored as JSON in memory content
-
-## BaseStore Interface
-
-### put
-
-Store an item:
-
-```python
-store.put(
-    namespace=("user", "session-123"),
-    key="preferences",
-    value={"theme": "dark", "language": "en"}
-)
-```
-
-### get
-
-Retrieve an item:
-
-```python
-item = store.get(namespace=("user", "session-123"), key="preferences")
-if item:
-    print(item.value)  # {"theme": "dark", "language": "en"}
-    print(item.created_at)
-    print(item.updated_at)
-```
-
-### search
-
-Search within a namespace:
-
-```python
-results = store.search(
-    namespace_prefix=("user",),
-    query="theme preferences",
-    limit=10,
-    offset=0
-)
-
-for item in results:
-    print(f"{item.key}: {item.value}")
-```
-
-### delete
-
-Delete an item:
-
-```python
-store.delete(namespace=("user", "session-123"), key="preferences")
-```
-
-## Async Support
-
-All operations have async variants:
-
-```python
-await store.aput(namespace, key, value)
-item = await store.aget(namespace, key)
-results = await store.asearch(namespace_prefix, query)
-await store.adelete(namespace, key)
-```
-
-## With LangGraph
-
-```python
-from langgraph.graph import StateGraph
-from hindsight_langmem import HindsightStore
-
-store = HindsightStore(base_url="http://localhost:8888")
-
-# Use store in your graph
-graph = StateGraph()
-# ... configure graph with store
-```
-
-## Namespace Mapping
-
-Namespaces are converted to Hindsight agent IDs:
-
-| Namespace | bank ID |
-|-----------|----------|
-| `("user",)` | `user` |
-| `("user", "session")` | `user__session` |
-| `("app", "v1", "data")` | `app__v1__data` |
-| `()` | `default_agent_id` |
-
-Memory banks are created automatically if they don't exist.
-
-
----
-
-
-## File: sdks/openai.md
-
-# OpenAI
-
-Drop-in replacement for the OpenAI Python client with automatic memory integration.
-
-## Installation
-
-```bash
-cd hindsight-openai && uv pip install -e .
-```
-
-## Quick Start
-
-```python
-from hindsight_openai import configure, OpenAI
-
-# Configure once
-configure(
-    hindsight_api_url="http://localhost:8888",
-    agent_id="my-agent",
-)
-
-# Use OpenAI client normally
-client = OpenAI(api_key="sk-...")
-
-response = client.chat.completions.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": "What did we discuss about AI?"}]
-)
-```
-
-## How It Works
-
-The wrapper intercepts OpenAI calls:
-
-1. **Before**: Retrieves relevant memories and injects as system message
-2. **After**: Stores conversation to Hindsight
-
-Your code works exactly as before, but now has memory.
-
-## Configuration
-
-```python
-configure(
-    hindsight_api_url="http://localhost:8888",  # Hindsight API
-    agent_id="my-agent",                      # Required
-    store_conversations=True,                 # Store conversations
-    inject_memories=True,                     # Inject memories into prompts
-    document_id="session-123",                # Group by document
-    enabled=True,                             # Master switch
-)
-```
-
-## Memory Injection
-
-When enabled, memories are automatically injected:
-
-```python
-# Your code
-messages = [{"role": "user", "content": "What trails did Alice recommend?"}]
-
-# What gets sent to OpenAI
-messages = [
-    {
-        "role": "system",
-        "content": "Relevant context:\n- Alice loves hiking in Yosemite\n- Alice recommended Half Dome trail"
-    },
-    {"role": "user", "content": "What trails did Alice recommend?"}
-]
-```
-
-## Async Support
-
-```python
-from hindsight_openai import configure, AsyncOpenAI
-
-configure(hindsight_api_url="http://localhost:8888", agent_id="my-agent")
-
-client = AsyncOpenAI(api_key="sk-...")
-
-response = await client.chat.completions.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": "Tell me about my preferences"}]
-)
-```
-
-## Streaming
-
-Fully supported:
-
-```python
-stream = client.chat.completions.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": "Tell me a story"}],
-    stream=True,
-)
-
-for chunk in stream:
-    print(chunk.choices[0].delta.content or "", end="")
-```
-
-## Disable Temporarily
-
-```python
-from hindsight_openai import configure
-
-configure(enabled=False)  # Disable
-configure(enabled=True)   # Re-enable
-```
 
 
 ---

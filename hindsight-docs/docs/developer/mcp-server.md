@@ -110,9 +110,9 @@ Search memories to provide personalized responses.
 
 ## Integration with AI Assistants
 
-The MCP server can be used with any MCP-compatible AI assistant. For Claude Desktop integration using the CLI, see [MCP Server (CLI)](/sdks/mcp).
+The MCP server can be used with any MCP-compatible AI assistant.
 
-### Example: Claude Desktop Configuration
+### Claude Desktop Configuration
 
 To connect Claude Desktop to a specific memory bank:
 
