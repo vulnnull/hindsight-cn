@@ -106,7 +106,15 @@ download_binary() {
     print_info "Downloading Hindsight CLI ${version} for $platform..." >&2
 
     if command -v curl > /dev/null 2>&1; then
-        curl -fsSL "$download_url" -o "$tmp_file"
+        # GitHub returns 302 redirect to Azure blob storage
+        # curl -L sometimes fails with 503, so manually handle redirect
+        local redirect_url=$(curl -sI "$download_url" 2>/dev/null | grep -i "^location:" | sed 's/location: //i' | tr -d '\r\n')
+        if [[ -n "$redirect_url" ]]; then
+            curl -fsSL "$redirect_url" -o "$tmp_file"
+        else
+            # Fallback to direct download if no redirect
+            curl -fsSL "$download_url" -o "$tmp_file"
+        fi
     elif command -v wget > /dev/null 2>&1; then
         wget -q "$download_url" -O "$tmp_file"
     else
