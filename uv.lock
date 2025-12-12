@@ -1182,6 +1182,7 @@ dependencies = [
     { name = "opentelemetry-exporter-prometheus" },
     { name = "opentelemetry-instrumentation-fastapi" },
     { name = "opentelemetry-sdk" },
+    { name = "pg0-embedded" },
     { name = "pgvector" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
@@ -1233,6 +1234,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-prometheus", specifier = ">=0.41b0" },
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.41b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.20.0" },
+    { name = "pg0-embedded", specifier = ">=0.1.0" },
     { name = "pgvector", specifier = ">=0.4.1" },
     { name = "psycopg2-binary", specifier = ">=2.9.11" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -2500,6 +2502,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fa/2a/52a8da6fe965dea6192eb716b357558e103aea0a1e9a8352ad575a8406ca/pathvalidate-3.3.1.tar.gz", hash = "sha256:b18c07212bfead624345bb8e1d6141cdcf15a39736994ea0b94035ad2b1ba177", size = 63262 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9a/70/875f4a23bfc4731703a5835487d0d2fb999031bd415e7d17c0ae615c18b7/pathvalidate-3.3.1-py3-none-any.whl", hash = "sha256:5263baab691f8e1af96092fa5137ee17df5bdfbd6cff1fcac4d6ef4bc2e1735f", size = 24305 },
+]
+
+[[package]]
+name = "pg0-embedded"
+version = "0.10.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5d/2a/26aed143a5bc4396321c5016c3e7574d596b94122e4de555ec21ebd1f135/pg0_embedded-0.10.1.tar.gz", hash = "sha256:afbfa9e050bec48587d55410e2a93694390c8fb50e1bbab2ac22a36a7eec146d", size = 17619 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/61/03f089d9d812e782db200f330e7cf35903834d7f106a2d650bb92c73c8d7/pg0_embedded-0.10.1-py3-none-macosx_14_0_arm64.whl", hash = "sha256:913010ad1a2321367f47cdc907a1639537af36597cd9b61549a341d8da3f249b", size = 13073670 },
+    { url = "https://files.pythonhosted.org/packages/72/03/d6e64310c59da880cda4931216f328f72a014c19722fa754b1a0d6422cbb/pg0_embedded-0.10.1-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:b6f2fc089e844a67dbc1b16899f582ca857744bdd7842b4166a6eecce807a5af", size = 14785516 },
+    { url = "https://files.pythonhosted.org/packages/7b/25/a2f84a1c142b48c2a41f14765721650076e2be56762b5ad7cd72ae32e5e4/pg0_embedded-0.10.1-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:f2ae4ed1ce0aa42a310f20b1ea47dd6091f0f74106b7ded39e9c089e7f80ab25", size = 15224456 },
+    { url = "https://files.pythonhosted.org/packages/d0/a8/64963aef0d6ae720b88068441ebdede95b727218c26927e0b8c17d91cf2f/pg0_embedded-0.10.1-py3-none-win_amd64.whl", hash = "sha256:39516c952edc050fbb9e24c35d28c9e013f108879b9c8e91091325231cbdb5a1", size = 54977766 },
 ]
 
 [[package]]

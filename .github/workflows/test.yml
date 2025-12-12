@@ -125,9 +125,6 @@ jobs:
       with:
         python-version-file: ".python-version"
 
-    - name: Install pg0
-      uses: ./.github/actions/setup-pg0
-
     - name: Build API
       working-directory: ./hindsight-api
       run: uv build
@@ -184,9 +181,6 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version-file: ".python-version"
-
-    - name: Install pg0
-      uses: ./.github/actions/setup-pg0
 
     - name: Build API
       working-directory: ./hindsight-api
@@ -268,9 +262,6 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-
-    - name: Install pg0
-      uses: ./.github/actions/setup-pg0
 
     - name: Build API
       working-directory: ./hindsight-api
@@ -359,9 +350,6 @@ jobs:
           ~/.cargo/git
           hindsight-clients/rust/target
         key: ${{ runner.os }}-cargo-client-${{ hashFiles('hindsight-clients/rust/Cargo.lock') }}
-
-    - name: Install pg0
-      uses: ./.github/actions/setup-pg0
 
     - name: Build API
       working-directory: ./hindsight-api
