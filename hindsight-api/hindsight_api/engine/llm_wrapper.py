@@ -268,9 +268,9 @@ class LLMProvider:
                         raise
 
                 except APIStatusError as e:
-                    # Fast fail on 4xx client errors (except 429 rate limit and 498 which is treated as server error)
-                    if 400 <= e.status_code < 500 and e.status_code not in (429, 498):
-                        logger.error(f"Client error (HTTP {e.status_code}), not retrying: {str(e)}")
+                    # Fast fail only on 401 (unauthorized) and 403 (forbidden) - these won't recover with retries
+                    if e.status_code in (401, 403):
+                        logger.error(f"Auth error (HTTP {e.status_code}), not retrying: {str(e)}")
                         raise
 
                     last_exception = e
@@ -408,13 +408,13 @@ class LLMProvider:
                     raise
 
             except genai_errors.APIError as e:
-                # Fast fail on 4xx client errors (except 429 rate limit)
-                if e.code and 400 <= e.code < 500 and e.code != 429:
-                    logger.error(f"Gemini client error (HTTP {e.code}), not retrying: {str(e)}")
+                # Fast fail only on 401 (unauthorized) and 403 (forbidden) - these won't recover with retries
+                if e.code in (401, 403):
+                    logger.error(f"Gemini auth error (HTTP {e.code}), not retrying: {str(e)}")
                     raise
 
-                # Retry on 429 and 5xx
-                if e.code in (429, 500, 502, 503, 504):
+                # Retry on retryable errors (rate limits, server errors, and other client errors like 400)
+                if e.code in (400, 429, 500, 502, 503, 504) or (e.code and e.code >= 500):
                     last_exception = e
                     if attempt < max_retries:
                         backoff = min(initial_backoff * (2 ** attempt), max_backoff)
