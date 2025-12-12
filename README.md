@@ -1,6 +1,6 @@
 <div align="center">
 
-![Hindsight Banner](./hindsight-docs/static/img/banner.webp)
+![Hindsight Banner](./hindsight-docs/static/img/banner.svg)
 
 [Documentation](https://vectorize-io.github.io/hindsight) • [Paper](#coming-soon) • [Examples](https://github.com/vectorize-io/hindsight-cookbook)
 
