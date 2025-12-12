@@ -9,6 +9,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  build-python-packages:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: hindsight-all
+            path: hindsight
+          - name: hindsight-api
+            path: hindsight-api
+          - name: hindsight-client
+            path: hindsight-clients/python
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version-file: ".python-version"
+
+    - name: Build ${{ matrix.name }}
+      working-directory: ./${{ matrix.path }}
+      run: uv build
+
+  build-typescript-client:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+
+    - name: Install dependencies
+      run: npm ci --workspace=hindsight-clients/typescript
+
+    - name: Build TypeScript client
+      run: npm run build --workspace=hindsight-clients/typescript
+
   build-docs:
     runs-on: ubuntu-latest
 
@@ -19,14 +67,14 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
 
     - name: Install dependencies
-      working-directory: ./hindsight-docs
-      run: npm ci
+      run: npm ci --workspace=hindsight-docs
 
     - name: Build docs
-      working-directory: ./hindsight-docs
-      run: npm run build
+      run: npm run build --workspace=hindsight-docs
 
   build-rust-cli:
     runs-on: ubuntu-latest
