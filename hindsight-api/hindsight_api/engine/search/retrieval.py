@@ -8,22 +8,50 @@ Implements:
 4. Temporal retrieval (time-aware search with spreading)
 """
 
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Optional
+from dataclasses import dataclass, field
 from datetime import datetime
 import asyncio
+import logging
 from ..db_utils import acquire_with_retry
 from .types import RetrievalResult
 from .graph_retrieval import GraphRetriever, BFSGraphRetriever
+from .mpfp_retrieval import MPFPGraphRetriever
+from ...config import get_config
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ParallelRetrievalResult:
+    """Result from parallel retrieval across all methods."""
+    semantic: List[RetrievalResult]
+    bm25: List[RetrievalResult]
+    graph: List[RetrievalResult]
+    temporal: Optional[List[RetrievalResult]]
+    timings: Dict[str, float] = field(default_factory=dict)
+    temporal_constraint: Optional[tuple] = None  # (start_date, end_date)
+
 
 # Default graph retriever instance (can be overridden)
 _default_graph_retriever: Optional[GraphRetriever] = None
 
 
 def get_default_graph_retriever() -> GraphRetriever:
-    """Get or create the default graph retriever."""
+    """Get or create the default graph retriever based on config."""
     global _default_graph_retriever
     if _default_graph_retriever is None:
-        _default_graph_retriever = BFSGraphRetriever()
+        config = get_config()
+        retriever_type = config.graph_retriever.lower()
+        if retriever_type == "mpfp":
+            _default_graph_retriever = MPFPGraphRetriever()
+            logger.info("Using MPFP graph retriever")
+        elif retriever_type == "bfs":
+            _default_graph_retriever = BFSGraphRetriever()
+            logger.info("Using BFS graph retriever")
+        else:
+            logger.warning(f"Unknown graph retriever '{retriever_type}', falling back to MPFP")
+            _default_graph_retriever = MPFPGraphRetriever()
     return _default_graph_retriever
 
 
@@ -324,7 +352,7 @@ async def retrieve_parallel(
     question_date: Optional[datetime] = None,
     query_analyzer: Optional["QueryAnalyzer"] = None,
     graph_retriever: Optional[GraphRetriever] = None,
-) -> Tuple[List[RetrievalResult], List[RetrievalResult], List[RetrievalResult], Optional[List[RetrievalResult]], Dict[str, float], Optional[Tuple[datetime, datetime]]]:
+) -> ParallelRetrievalResult:
     """
     Run 3-way or 4-way parallel retrieval (adds temporal if detected).
 
@@ -337,43 +365,259 @@ async def retrieve_parallel(
         thinking_budget: Budget for graph traversal and retrieval limits
         question_date: Optional date when question was asked (for temporal filtering)
         query_analyzer: Query analyzer to use (defaults to TransformerQueryAnalyzer)
-        graph_retriever: Graph retrieval strategy (defaults to BFSGraphRetriever)
+        graph_retriever: Graph retrieval strategy (defaults to configured retriever)
 
     Returns:
-        Tuple of (semantic_results, bm25_results, graph_results, temporal_results, timings, temporal_constraint)
-        Each results list contains RetrievalResult objects
-        temporal_results is None if no temporal constraint detected
-        timings is a dict with per-method latencies in seconds
-        temporal_constraint is the (start_date, end_date) tuple if detected, else None
+        ParallelRetrievalResult with semantic, bm25, graph, temporal results and timings
     """
-    # Detect temporal constraint
     from .temporal_extraction import extract_temporal_constraint
-    import time
 
     temporal_constraint = extract_temporal_constraint(
         query_text, reference_date=question_date, analyzer=query_analyzer
     )
 
-    # Use provided graph retriever or default
     retriever = graph_retriever or get_default_graph_retriever()
 
-    # Wrapper to track timing for each retrieval method
-    async def timed_retrieval(name: str, coro):
+    if retriever.name == "mpfp":
+        return await _retrieve_parallel_mpfp(
+            pool, query_text, query_embedding_str, bank_id, fact_type,
+            thinking_budget, temporal_constraint, retriever
+        )
+    else:
+        return await _retrieve_parallel_bfs(
+            pool, query_text, query_embedding_str, bank_id, fact_type,
+            thinking_budget, temporal_constraint, retriever
+        )
+
+
+@dataclass
+class _SemanticGraphResult:
+    """Internal result from semantic→graph chain."""
+    semantic: List[RetrievalResult]
+    graph: List[RetrievalResult]
+    semantic_time: float
+    graph_time: float
+
+
+@dataclass
+class _TimedResult:
+    """Internal result with timing."""
+    results: List[RetrievalResult]
+    time: float
+
+
+async def _retrieve_parallel_mpfp(
+    pool,
+    query_text: str,
+    query_embedding_str: str,
+    bank_id: str,
+    fact_type: str,
+    thinking_budget: int,
+    temporal_constraint: Optional[tuple],
+    retriever: GraphRetriever,
+) -> ParallelRetrievalResult:
+    """
+    MPFP retrieval with optimized parallelization.
+
+    Runs 2-3 parallel task chains:
+    - Task 1: Semantic → Graph (chained, graph uses semantic seeds)
+    - Task 2: BM25 (independent)
+    - Task 3: Temporal (if constraint detected)
+    """
+    import time
+
+    async def run_semantic_then_graph() -> _SemanticGraphResult:
+        """Chain: semantic retrieval → graph retrieval (using semantic as seeds)."""
         start = time.time()
-        result = await coro
-        duration = time.time() - start
-        return result, name, duration
-
-    async def run_semantic():
         async with acquire_with_retry(pool) as conn:
-            return await retrieve_semantic(conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget)
+            semantic = await retrieve_semantic(
+                conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget
+            )
+        semantic_time = time.time() - start
 
-    async def run_bm25():
+        # Get temporal seeds if needed (quick query, part of this chain)
+        temporal_seeds = None
+        if temporal_constraint:
+            tc_start, tc_end = temporal_constraint
+            async with acquire_with_retry(pool) as conn:
+                temporal_seeds = await _get_temporal_entry_points(
+                    conn, query_embedding_str, bank_id, fact_type,
+                    tc_start, tc_end, limit=20
+                )
+
+        # Run graph with seeds
+        start = time.time()
+        graph = await retriever.retrieve(
+            pool=pool,
+            query_embedding_str=query_embedding_str,
+            bank_id=bank_id,
+            fact_type=fact_type,
+            budget=thinking_budget,
+            query_text=query_text,
+            semantic_seeds=semantic,
+            temporal_seeds=temporal_seeds,
+        )
+        graph_time = time.time() - start
+
+        return _SemanticGraphResult(semantic, graph, semantic_time, graph_time)
+
+    async def run_bm25() -> _TimedResult:
+        """Independent BM25 retrieval."""
+        start = time.time()
         async with acquire_with_retry(pool) as conn:
-            return await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget)
+            results = await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget)
+        return _TimedResult(results, time.time() - start)
 
-    async def run_graph():
-        return await retriever.retrieve(
+    async def run_temporal(tc_start, tc_end) -> _TimedResult:
+        """Temporal retrieval (uses its own entry point finding)."""
+        start = time.time()
+        async with acquire_with_retry(pool) as conn:
+            results = await retrieve_temporal(
+                conn, query_embedding_str, bank_id, fact_type,
+                tc_start, tc_end, budget=thinking_budget, semantic_threshold=0.1
+            )
+        return _TimedResult(results, time.time() - start)
+
+    # Run parallel task chains
+    if temporal_constraint:
+        tc_start, tc_end = temporal_constraint
+        sg_result, bm25_result, temporal_result = await asyncio.gather(
+            run_semantic_then_graph(),
+            run_bm25(),
+            run_temporal(tc_start, tc_end),
+        )
+        return ParallelRetrievalResult(
+            semantic=sg_result.semantic,
+            bm25=bm25_result.results,
+            graph=sg_result.graph,
+            temporal=temporal_result.results,
+            timings={
+                "semantic": sg_result.semantic_time,
+                "graph": sg_result.graph_time,
+                "bm25": bm25_result.time,
+                "temporal": temporal_result.time,
+            },
+            temporal_constraint=temporal_constraint,
+        )
+    else:
+        sg_result, bm25_result = await asyncio.gather(
+            run_semantic_then_graph(),
+            run_bm25(),
+        )
+        return ParallelRetrievalResult(
+            semantic=sg_result.semantic,
+            bm25=bm25_result.results,
+            graph=sg_result.graph,
+            temporal=None,
+            timings={
+                "semantic": sg_result.semantic_time,
+                "graph": sg_result.graph_time,
+                "bm25": bm25_result.time,
+            },
+            temporal_constraint=None,
+        )
+
+
+async def _get_temporal_entry_points(
+    conn,
+    query_embedding_str: str,
+    bank_id: str,
+    fact_type: str,
+    start_date: datetime,
+    end_date: datetime,
+    limit: int = 20,
+    semantic_threshold: float = 0.1,
+) -> List[RetrievalResult]:
+    """Get temporal entry points (facts in date range with semantic relevance)."""
+    from datetime import timezone
+
+    if start_date.tzinfo is None:
+        start_date = start_date.replace(tzinfo=timezone.utc)
+    if end_date.tzinfo is None:
+        end_date = end_date.replace(tzinfo=timezone.utc)
+
+    rows = await conn.fetch(
+        """
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at,
+               access_count, embedding, fact_type, document_id, chunk_id,
+               1 - (embedding <=> $1::vector) AS similarity
+        FROM memory_units
+        WHERE bank_id = $2
+          AND fact_type = $3
+          AND embedding IS NOT NULL
+          AND (
+              (occurred_start IS NOT NULL AND occurred_end IS NOT NULL
+               AND occurred_start <= $5 AND occurred_end >= $4)
+              OR (mentioned_at IS NOT NULL AND mentioned_at BETWEEN $4 AND $5)
+              OR (occurred_start IS NOT NULL AND occurred_start BETWEEN $4 AND $5)
+              OR (occurred_end IS NOT NULL AND occurred_end BETWEEN $4 AND $5)
+          )
+          AND (1 - (embedding <=> $1::vector)) >= $6
+        ORDER BY COALESCE(occurred_start, mentioned_at, occurred_end) DESC,
+                 (embedding <=> $1::vector) ASC
+        LIMIT $7
+        """,
+        query_embedding_str, bank_id, fact_type, start_date, end_date, semantic_threshold, limit
+    )
+
+    results = []
+    total_days = max((end_date - start_date).total_seconds() / 86400, 1)
+    mid_date = start_date + (end_date - start_date) / 2
+
+    for row in rows:
+        result = RetrievalResult.from_db_row(dict(row))
+
+        # Calculate temporal proximity score
+        best_date = None
+        if row["occurred_start"] and row["occurred_end"]:
+            best_date = row["occurred_start"] + (row["occurred_end"] - row["occurred_start"]) / 2
+        elif row["occurred_start"]:
+            best_date = row["occurred_start"]
+        elif row["occurred_end"]:
+            best_date = row["occurred_end"]
+        elif row["mentioned_at"]:
+            best_date = row["mentioned_at"]
+
+        if best_date:
+            days_from_mid = abs((best_date - mid_date).total_seconds() / 86400)
+            result.temporal_proximity = 1.0 - min(days_from_mid / (total_days / 2), 1.0)
+        else:
+            result.temporal_proximity = 0.5
+
+        result.temporal_score = result.temporal_proximity
+        results.append(result)
+
+    return results
+
+
+async def _retrieve_parallel_bfs(
+    pool,
+    query_text: str,
+    query_embedding_str: str,
+    bank_id: str,
+    fact_type: str,
+    thinking_budget: int,
+    temporal_constraint: Optional[tuple],
+    retriever: GraphRetriever,
+) -> ParallelRetrievalResult:
+    """BFS retrieval: all methods run in parallel (original behavior)."""
+    import time
+
+    async def run_semantic() -> _TimedResult:
+        start = time.time()
+        async with acquire_with_retry(pool) as conn:
+            results = await retrieve_semantic(conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget)
+        return _TimedResult(results, time.time() - start)
+
+    async def run_bm25() -> _TimedResult:
+        start = time.time()
+        async with acquire_with_retry(pool) as conn:
+            results = await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget)
+        return _TimedResult(results, time.time() - start)
+
+    async def run_graph() -> _TimedResult:
+        start = time.time()
+        results = await retriever.retrieve(
             pool=pool,
             query_embedding_str=query_embedding_str,
             bank_id=bank_id,
@@ -381,37 +625,53 @@ async def retrieve_parallel(
             budget=thinking_budget,
             query_text=query_text,
         )
+        return _TimedResult(results, time.time() - start)
 
-    async def run_temporal(start_date, end_date):
+    async def run_temporal(tc_start, tc_end) -> _TimedResult:
+        start = time.time()
         async with acquire_with_retry(pool) as conn:
-            return await retrieve_temporal(
+            results = await retrieve_temporal(
                 conn, query_embedding_str, bank_id, fact_type,
-                start_date, end_date, budget=thinking_budget, semantic_threshold=0.1
+                tc_start, tc_end, budget=thinking_budget, semantic_threshold=0.1
             )
+        return _TimedResult(results, time.time() - start)
 
-    # Run retrievals in parallel with timing
-    timings = {}
     if temporal_constraint:
-        start_date, end_date = temporal_constraint
-        results = await asyncio.gather(
-            timed_retrieval("semantic", run_semantic()),
-            timed_retrieval("bm25", run_bm25()),
-            timed_retrieval("graph", run_graph()),
-            timed_retrieval("temporal", run_temporal(start_date, end_date))
+        tc_start, tc_end = temporal_constraint
+        semantic_r, bm25_r, graph_r, temporal_r = await asyncio.gather(
+            run_semantic(),
+            run_bm25(),
+            run_graph(),
+            run_temporal(tc_start, tc_end),
         )
-        semantic_results, _, timings["semantic"] = results[0]
-        bm25_results, _, timings["bm25"] = results[1]
-        graph_results, _, timings["graph"] = results[2]
-        temporal_results, _, timings["temporal"] = results[3]
+        return ParallelRetrievalResult(
+            semantic=semantic_r.results,
+            bm25=bm25_r.results,
+            graph=graph_r.results,
+            temporal=temporal_r.results,
+            timings={
+                "semantic": semantic_r.time,
+                "bm25": bm25_r.time,
+                "graph": graph_r.time,
+                "temporal": temporal_r.time,
+            },
+            temporal_constraint=temporal_constraint,
+        )
     else:
-        results = await asyncio.gather(
-            timed_retrieval("semantic", run_semantic()),
-            timed_retrieval("bm25", run_bm25()),
-            timed_retrieval("graph", run_graph())
+        semantic_r, bm25_r, graph_r = await asyncio.gather(
+            run_semantic(),
+            run_bm25(),
+            run_graph(),
         )
-        semantic_results, _, timings["semantic"] = results[0]
-        bm25_results, _, timings["bm25"] = results[1]
-        graph_results, _, timings["graph"] = results[2]
-        temporal_results = None
-
-    return semantic_results, bm25_results, graph_results, temporal_results, timings, temporal_constraint
+        return ParallelRetrievalResult(
+            semantic=semantic_r.results,
+            bm25=bm25_r.results,
+            graph=graph_r.results,
+            temporal=None,
+            timings={
+                "semantic": semantic_r.time,
+                "bm25": bm25_r.time,
+                "graph": graph_r.time,
+            },
+            temporal_constraint=None,
+        )

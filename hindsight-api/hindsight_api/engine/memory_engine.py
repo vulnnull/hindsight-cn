@@ -1156,22 +1156,22 @@ class MemoryEngine:
             aggregated_timings = {"semantic": 0.0, "bm25": 0.0, "graph": 0.0, "temporal": 0.0}
 
             detected_temporal_constraint = None
-            for idx, (ft_semantic, ft_bm25, ft_graph, ft_temporal, ft_timings, ft_temporal_constraint) in enumerate(all_retrievals):
+            for idx, retrieval_result in enumerate(all_retrievals):
                 # Log fact types in this retrieval batch
                 ft_name = fact_type[idx] if idx < len(fact_type) else "unknown"
-                logger.debug(f"[RECALL {recall_id}] Fact type '{ft_name}': semantic={len(ft_semantic)}, bm25={len(ft_bm25)}, graph={len(ft_graph)}, temporal={len(ft_temporal) if ft_temporal else 0}")
+                logger.debug(f"[RECALL {recall_id}] Fact type '{ft_name}': semantic={len(retrieval_result.semantic)}, bm25={len(retrieval_result.bm25)}, graph={len(retrieval_result.graph)}, temporal={len(retrieval_result.temporal) if retrieval_result.temporal else 0}")
 
-                semantic_results.extend(ft_semantic)
-                bm25_results.extend(ft_bm25)
-                graph_results.extend(ft_graph)
-                if ft_temporal:
-                    temporal_results.extend(ft_temporal)
+                semantic_results.extend(retrieval_result.semantic)
+                bm25_results.extend(retrieval_result.bm25)
+                graph_results.extend(retrieval_result.graph)
+                if retrieval_result.temporal:
+                    temporal_results.extend(retrieval_result.temporal)
                 # Track max timing for each method (since they run in parallel across fact types)
-                for method, duration in ft_timings.items():
-                    aggregated_timings[method] = max(aggregated_timings[method], duration)
+                for method, duration in retrieval_result.timings.items():
+                    aggregated_timings[method] = max(aggregated_timings.get(method, 0.0), duration)
                 # Capture temporal constraint (same across all fact types)
-                if ft_temporal_constraint:
-                    detected_temporal_constraint = ft_temporal_constraint
+                if retrieval_result.temporal_constraint:
+                    detected_temporal_constraint = retrieval_result.temporal_constraint
 
             # If no temporal results from any fact type, set to None
             if not temporal_results:
@@ -1210,14 +1210,14 @@ class MemoryEngine:
                     return [(r.id, r.__dict__) for r in results]
 
                 # Add retrieval results per fact type (to show parallel execution in UI)
-                for idx, (ft_semantic, ft_bm25, ft_graph, ft_temporal, ft_timings, _) in enumerate(all_retrievals):
+                for idx, rr in enumerate(all_retrievals):
                     ft_name = fact_type[idx] if idx < len(fact_type) else "unknown"
 
                     # Add semantic retrieval results for this fact type
                     tracer.add_retrieval_results(
                         method_name="semantic",
-                        results=to_tuple_format(ft_semantic),
-                        duration_seconds=ft_timings.get("semantic", 0.0),
+                        results=to_tuple_format(rr.semantic),
+                        duration_seconds=rr.timings.get("semantic", 0.0),
                         score_field="similarity",
                         metadata={"limit": thinking_budget},
                         fact_type=ft_name
@@ -1226,8 +1226,8 @@ class MemoryEngine:
                     # Add BM25 retrieval results for this fact type
                     tracer.add_retrieval_results(
                         method_name="bm25",
-                        results=to_tuple_format(ft_bm25),
-                        duration_seconds=ft_timings.get("bm25", 0.0),
+                        results=to_tuple_format(rr.bm25),
+                        duration_seconds=rr.timings.get("bm25", 0.0),
                         score_field="bm25_score",
                         metadata={"limit": thinking_budget},
                         fact_type=ft_name
@@ -1236,19 +1236,19 @@ class MemoryEngine:
                     # Add graph retrieval results for this fact type
                     tracer.add_retrieval_results(
                         method_name="graph",
-                        results=to_tuple_format(ft_graph),
-                        duration_seconds=ft_timings.get("graph", 0.0),
+                        results=to_tuple_format(rr.graph),
+                        duration_seconds=rr.timings.get("graph", 0.0),
                         score_field="activation",
                         metadata={"budget": thinking_budget},
                         fact_type=ft_name
                     )
 
                     # Add temporal retrieval results for this fact type (even if empty, to show it ran)
-                    if ft_temporal is not None:
+                    if rr.temporal is not None:
                         tracer.add_retrieval_results(
                             method_name="temporal",
-                            results=to_tuple_format(ft_temporal),
-                            duration_seconds=ft_timings.get("temporal", 0.0),
+                            results=to_tuple_format(rr.temporal),
+                            duration_seconds=rr.timings.get("temporal", 0.0),
                             score_field="temporal_score",
                             metadata={"budget": thinking_budget},
                             fact_type=ft_name

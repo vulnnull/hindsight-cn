@@ -29,7 +29,7 @@ class GraphRetriever(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """Return identifier for this retrieval strategy (e.g., 'bfs', 'ppr')."""
+        """Return identifier for this retrieval strategy (e.g., 'bfs', 'mpfp')."""
         pass
 
     @abstractmethod
@@ -41,6 +41,8 @@ class GraphRetriever(ABC):
         fact_type: str,
         budget: int,
         query_text: Optional[str] = None,
+        semantic_seeds: Optional[List[RetrievalResult]] = None,
+        temporal_seeds: Optional[List[RetrievalResult]] = None,
     ) -> List[RetrievalResult]:
         """
         Retrieve relevant facts via graph traversal.
@@ -52,6 +54,8 @@ class GraphRetriever(ABC):
             fact_type: Fact type to filter ('world', 'experience', 'opinion', 'observation')
             budget: Maximum number of nodes to explore/return
             query_text: Original query text (optional, for some strategies)
+            semantic_seeds: Pre-computed semantic entry points (from semantic retrieval)
+            temporal_seeds: Pre-computed temporal entry points (from temporal retrieval)
 
         Returns:
             List of RetrievalResult objects with activation scores set
@@ -106,6 +110,8 @@ class BFSGraphRetriever(GraphRetriever):
         fact_type: str,
         budget: int,
         query_text: Optional[str] = None,
+        semantic_seeds: Optional[List[RetrievalResult]] = None,
+        temporal_seeds: Optional[List[RetrievalResult]] = None,
     ) -> List[RetrievalResult]:
         """
         Retrieve facts using BFS spreading activation.
@@ -115,6 +121,10 @@ class BFSGraphRetriever(GraphRetriever):
         2. BFS traversal: visit neighbors, propagate decaying activation
         3. Boost causal links (causes, enables, prevents)
         4. Return visited nodes up to budget
+
+        Note: BFS finds its own entry points via embedding search.
+        The semantic_seeds and temporal_seeds parameters are accepted
+        for interface compatibility but not used.
         """
         async with acquire_with_retry(pool) as conn:
             return await self._retrieve_with_conn(

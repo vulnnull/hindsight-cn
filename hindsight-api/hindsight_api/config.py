@@ -29,6 +29,7 @@ ENV_HOST = "HINDSIGHT_API_HOST"
 ENV_PORT = "HINDSIGHT_API_PORT"
 ENV_LOG_LEVEL = "HINDSIGHT_API_LOG_LEVEL"
 ENV_MCP_ENABLED = "HINDSIGHT_API_MCP_ENABLED"
+ENV_GRAPH_RETRIEVER = "HINDSIGHT_API_GRAPH_RETRIEVER"
 
 # Default values
 DEFAULT_DATABASE_URL = "pg0"
@@ -45,6 +46,7 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8888
 DEFAULT_LOG_LEVEL = "info"
 DEFAULT_MCP_ENABLED = True
+DEFAULT_GRAPH_RETRIEVER = "bfs"  # Options: "bfs", "mpfp"
 
 # Required embedding dimension for database schema
 EMBEDDING_DIMENSION = 384
@@ -79,6 +81,9 @@ class HindsightConfig:
     log_level: str
     mcp_enabled: bool
 
+    # Recall
+    graph_retriever: str
+
     @classmethod
     def from_env(cls) -> "HindsightConfig":
         """Create configuration from environment variables."""
@@ -107,6 +112,9 @@ class HindsightConfig:
             port=int(os.getenv(ENV_PORT, DEFAULT_PORT)),
             log_level=os.getenv(ENV_LOG_LEVEL, DEFAULT_LOG_LEVEL),
             mcp_enabled=os.getenv(ENV_MCP_ENABLED, str(DEFAULT_MCP_ENABLED)).lower() == "true",
+
+            # Recall
+            graph_retriever=os.getenv(ENV_GRAPH_RETRIEVER, DEFAULT_GRAPH_RETRIEVER),
         )
 
     def get_llm_base_url(self) -> str:
@@ -147,6 +155,7 @@ class HindsightConfig:
         logger.info(f"LLM: provider={self.llm_provider}, model={self.llm_model}")
         logger.info(f"Embeddings: provider={self.embeddings_provider}")
         logger.info(f"Reranker: provider={self.reranker_provider}")
+        logger.info(f"Graph retriever: {self.graph_retriever}")
 
 
 def get_config() -> HindsightConfig:
