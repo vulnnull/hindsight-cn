@@ -1203,48 +1203,56 @@ class MemoryEngine:
                 temporal_info = f" | temporal_range={start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}"
             log_buffer.append(f"  [2] {total_retrievals}-way retrieval ({len(fact_type)} fact_types): {', '.join(timing_parts)} in {step_duration:.3f}s{temporal_info}")
 
-            # Record retrieval results for tracer (convert typed results to old format)
+            # Record retrieval results for tracer - per fact type
             if tracer:
                 # Convert RetrievalResult to old tuple format for tracer
                 def to_tuple_format(results):
                     return [(r.id, r.__dict__) for r in results]
 
-                # Add semantic retrieval results
-                tracer.add_retrieval_results(
-                    method_name="semantic",
-                    results=to_tuple_format(semantic_results),
-                    duration_seconds=aggregated_timings["semantic"],
-                    score_field="similarity",
-                    metadata={"limit": thinking_budget}
-                )
+                # Add retrieval results per fact type (to show parallel execution in UI)
+                for idx, (ft_semantic, ft_bm25, ft_graph, ft_temporal, ft_timings, _) in enumerate(all_retrievals):
+                    ft_name = fact_type[idx] if idx < len(fact_type) else "unknown"
 
-                # Add BM25 retrieval results
-                tracer.add_retrieval_results(
-                    method_name="bm25",
-                    results=to_tuple_format(bm25_results),
-                    duration_seconds=aggregated_timings["bm25"],
-                    score_field="bm25_score",
-                    metadata={"limit": thinking_budget}
-                )
-
-                # Add graph retrieval results
-                tracer.add_retrieval_results(
-                    method_name="graph",
-                    results=to_tuple_format(graph_results),
-                    duration_seconds=aggregated_timings["graph"],
-                    score_field="similarity",  # Graph uses similarity for activation
-                    metadata={"budget": thinking_budget}
-                )
-
-                # Add temporal retrieval results if present
-                if temporal_results:
+                    # Add semantic retrieval results for this fact type
                     tracer.add_retrieval_results(
-                        method_name="temporal",
-                        results=to_tuple_format(temporal_results),
-                        duration_seconds=aggregated_timings["temporal"],
-                        score_field="temporal_score",
-                        metadata={"budget": thinking_budget}
+                        method_name="semantic",
+                        results=to_tuple_format(ft_semantic),
+                        duration_seconds=ft_timings.get("semantic", 0.0),
+                        score_field="similarity",
+                        metadata={"limit": thinking_budget},
+                        fact_type=ft_name
                     )
+
+                    # Add BM25 retrieval results for this fact type
+                    tracer.add_retrieval_results(
+                        method_name="bm25",
+                        results=to_tuple_format(ft_bm25),
+                        duration_seconds=ft_timings.get("bm25", 0.0),
+                        score_field="bm25_score",
+                        metadata={"limit": thinking_budget},
+                        fact_type=ft_name
+                    )
+
+                    # Add graph retrieval results for this fact type
+                    tracer.add_retrieval_results(
+                        method_name="graph",
+                        results=to_tuple_format(ft_graph),
+                        duration_seconds=ft_timings.get("graph", 0.0),
+                        score_field="activation",
+                        metadata={"budget": thinking_budget},
+                        fact_type=ft_name
+                    )
+
+                    # Add temporal retrieval results for this fact type (even if empty, to show it ran)
+                    if ft_temporal is not None:
+                        tracer.add_retrieval_results(
+                            method_name="temporal",
+                            results=to_tuple_format(ft_temporal),
+                            duration_seconds=ft_timings.get("temporal", 0.0),
+                            score_field="temporal_score",
+                            metadata={"budget": thinking_budget},
+                            fact_type=ft_name
+                        )
 
                 # Record entry points (from semantic results) for legacy graph view
                 for rank, retrieval in enumerate(semantic_results[:10], start=1):  # Top 10 as entry points
@@ -1287,31 +1295,24 @@ class MemoryEngine:
             step_duration = time.time() - step_start
             log_buffer.append(f"  [4] Reranking: {len(scored_results)} candidates scored in {step_duration:.3f}s")
 
-            if tracer:
-                # Convert to old format for tracer
-                results_dict = [sr.to_dict() for sr in scored_results]
-                tracer_merged = [(mc.id, mc.retrieval.__dict__, {"rrf_score": mc.rrf_score, **mc.source_ranks})
-                                for mc in merged_candidates]
-                tracer.add_reranked(results_dict, tracer_merged)
-                tracer.add_phase_metric("reranking", step_duration, {
-                    "reranker_type": "cross-encoder",
-                    "candidates_reranked": len(scored_results)
-                })
-
             # Step 4.5: Combine cross-encoder score with retrieval signals
             # This preserves retrieval work (RRF, temporal, recency) instead of pure cross-encoder ranking
             if scored_results:
-                # Normalize RRF scores to [0, 1] range
+                # Normalize RRF scores to [0, 1] range using min-max normalization
                 rrf_scores = [sr.candidate.rrf_score for sr in scored_results]
-                max_rrf = max(rrf_scores) if rrf_scores else 1.0
+                max_rrf = max(rrf_scores) if rrf_scores else 0.0
                 min_rrf = min(rrf_scores) if rrf_scores else 0.0
-                rrf_range = max_rrf - min_rrf if max_rrf > min_rrf else 1.0
+                rrf_range = max_rrf - min_rrf  # Don't force to 1.0, let fallback handle it
 
                 # Calculate recency based on occurred_start (more recent = higher score)
                 now = utcnow()
                 for sr in scored_results:
-                    # Normalize RRF score
-                    sr.rrf_normalized = (sr.candidate.rrf_score - min_rrf) / rrf_range if rrf_range > 0 else 0.5
+                    # Normalize RRF score (0-1 range, 0.5 if all same)
+                    if rrf_range > 0:
+                        sr.rrf_normalized = (sr.candidate.rrf_score - min_rrf) / rrf_range
+                    else:
+                        # All RRF scores are the same, use neutral value
+                        sr.rrf_normalized = 0.5
 
                     # Calculate recency (decay over 365 days, minimum 0.1)
                     sr.recency = 0.5  # default for missing dates
@@ -1342,6 +1343,17 @@ class MemoryEngine:
                 # Re-sort by combined score
                 scored_results.sort(key=lambda x: x.weight, reverse=True)
                 log_buffer.append(f"  [4.6] Combined scoring: cross_encoder(0.6) + rrf(0.2) + temporal(0.1) + recency(0.1)")
+
+            # Add reranked results to tracer AFTER combined scoring (so normalized values are included)
+            if tracer:
+                results_dict = [sr.to_dict() for sr in scored_results]
+                tracer_merged = [(mc.id, mc.retrieval.__dict__, {"rrf_score": mc.rrf_score, **mc.source_ranks})
+                                for mc in merged_candidates]
+                tracer.add_reranked(results_dict, tracer_merged)
+                tracer.add_phase_metric("reranking", step_duration, {
+                    "reranker_type": "cross-encoder",
+                    "candidates_reranked": len(scored_results)
+                })
 
             # Step 5: Truncate to thinking_budget * 2 for token filtering
             rerank_limit = thinking_budget * 2

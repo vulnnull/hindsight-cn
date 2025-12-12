@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Search, Clock, Zap, ChevronRight, Database, FileText, Users } from 'lucide-react';
+import { Search, Clock, Zap, ChevronRight, ChevronDown, Database, FileText, Users, ArrowDown } from 'lucide-react';
 import JsonView from 'react18-json-view';
 import 'react18-json-view/src/style.css';
 import { MemoryDetailPanel } from './memory-detail-panel';
@@ -38,6 +38,34 @@ export function SearchDebugView() {
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('results');
   const [selectedMemory, setSelectedMemory] = useState<any | null>(null);
+  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
+  const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
+
+  const toggleStep = (step: string) => {
+    setExpandedSteps(prev => {
+      const next = new Set(prev);
+      if (next.has(step)) {
+        next.delete(step);
+      } else {
+        next.add(step);
+      }
+      return next;
+    });
+  };
+
+  const toggleExpandResults = (key: string) => {
+    setExpandedResults(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const INITIAL_RESULTS_COUNT = 5;
 
   const runSearch = async () => {
     if (!currentBank) {
@@ -316,55 +344,431 @@ export function SearchDebugView() {
 
           {/* Trace View */}
           {viewMode === 'trace' && trace && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Recall Trace</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Retrieval Methods */}
-                {trace.retrieval_results && (
+            <div className="space-y-4">
+              {/* Parallel Retrieval Methods - Grouped by Fact Type */}
+              {trace.retrieval_results && trace.retrieval_results.length > 0 && (() => {
+                // Group retrieval results by fact type
+                const factTypeGroups: Record<string, any[]> = {};
+                trace.retrieval_results.forEach((method: any) => {
+                  const ft = method.fact_type || 'all';
+                  if (!factTypeGroups[ft]) factTypeGroups[ft] = [];
+                  factTypeGroups[ft].push(method);
+                });
+                const factTypes = Object.keys(factTypeGroups);
+
+                return (
                   <div>
-                    <h4 className="font-semibold mb-3">Retrieval Methods</h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      {trace.retrieval_results.map((method: any, idx: number) => (
-                        <div key={idx} className="p-4 rounded-lg bg-muted/50">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-medium capitalize">{method.method_name}</span>
-                            <span className="text-sm text-muted-foreground">
-                              {method.duration_seconds?.toFixed(3)}s
-                            </span>
+                    <div className="text-xs font-medium text-muted-foreground mb-3 flex items-center gap-2">
+                      <div className="flex-1 h-px bg-border" />
+                      <span>PARALLEL RETRIEVAL</span>
+                      <div className="flex-1 h-px bg-border" />
+                    </div>
+
+                    {/* Fact type lanes */}
+                    <div className="space-y-2">
+                      {factTypes.map((factType, ftIdx) => {
+                        const methods = factTypeGroups[factType];
+                        const laneKey = `lane-${factType}`;
+                        const isLaneExpanded = expandedSteps.has(laneKey);
+                        const totalResults = methods.reduce((sum: number, m: any) => sum + (m.results?.length || 0), 0);
+                        const totalDuration = Math.max(...methods.map((m: any) => m.duration_seconds || 0));
+
+                        // Color coding for fact types
+                        const ftColors: Record<string, { bg: string; text: string; border: string }> = {
+                          world: { bg: 'bg-blue-500/10', text: 'text-blue-500', border: 'border-blue-500/30' },
+                          experience: { bg: 'bg-green-500/10', text: 'text-green-500', border: 'border-green-500/30' },
+                          opinion: { bg: 'bg-purple-500/10', text: 'text-purple-500', border: 'border-purple-500/30' },
+                          all: { bg: 'bg-gray-500/10', text: 'text-gray-500', border: 'border-gray-500/30' },
+                        };
+                        const colors = ftColors[factType] || ftColors.all;
+
+                        return (
+                          <Card
+                            key={laneKey}
+                            className={`transition-colors ${isLaneExpanded ? 'border-primary' : colors.border}`}
+                          >
+                            <CardContent className="py-3 px-4">
+                              {/* Lane Header */}
+                              <div
+                                className="flex items-center gap-3 cursor-pointer"
+                                onClick={() => toggleStep(laneKey)}
+                              >
+                                <div className={`w-8 h-8 rounded-lg ${colors.bg} flex items-center justify-center`}>
+                                  <span className={`text-sm font-bold ${colors.text} capitalize`}>
+                                    {factType.charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-foreground capitalize">{factType}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {methods.length} methods
+                                    </span>
+                                  </div>
+                                  {/* Method summary pills */}
+                                  <div className="flex gap-1.5 mt-1">
+                                    {methods.map((m: any, mIdx: number) => (
+                                      <span
+                                        key={mIdx}
+                                        className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground capitalize"
+                                      >
+                                        {m.method_name}: {m.results?.length || 0}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-2xl font-bold text-foreground">{totalResults}</div>
+                                  <div className="text-[10px] text-muted-foreground">{totalDuration.toFixed(2)}s</div>
+                                </div>
+                                {isLaneExpanded ? (
+                                  <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                                ) : (
+                                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                                )}
+                              </div>
+
+                              {/* Expanded: Show methods grid */}
+                              {isLaneExpanded && (
+                                <div className="mt-4 pt-4 border-t border-border">
+                                  <div className={`grid gap-3 ${
+                                    methods.length === 1 ? 'grid-cols-1' :
+                                    methods.length === 2 ? 'grid-cols-2' :
+                                    methods.length === 3 ? 'grid-cols-3' :
+                                    'grid-cols-4'
+                                  }`}>
+                                    {methods.map((method: any, mIdx: number) => {
+                                      const methodKey = `${laneKey}-method-${mIdx}`;
+                                      const isMethodExpanded = expandedSteps.has(methodKey);
+                                      const methodResults = method.results || [];
+
+                                      return (
+                                        <div key={methodKey} className="flex flex-col">
+                                          <div
+                                            className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                                              isMethodExpanded ? 'bg-primary/10 border border-primary' : 'bg-muted/50 hover:bg-muted'
+                                            }`}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              toggleStep(methodKey);
+                                            }}
+                                          >
+                                            <div className="flex items-center justify-between mb-1">
+                                              <span className="font-medium text-sm text-foreground capitalize">{method.method_name}</span>
+                                              {isMethodExpanded ? (
+                                                <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                                              ) : (
+                                                <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                                              )}
+                                            </div>
+                                            <div className="flex items-end justify-between">
+                                              <div className="text-2xl font-bold text-foreground">{methodResults.length}</div>
+                                              <div className="text-[10px] text-muted-foreground">{method.duration_seconds?.toFixed(2)}s</div>
+                                            </div>
+                                          </div>
+
+                                          {/* Method Results */}
+                                          {isMethodExpanded && methodResults.length > 0 && (() => {
+                                            const resultsKey = `results-${methodKey}`;
+                                            const showAll = expandedResults.has(resultsKey);
+                                            const displayResults = showAll ? methodResults : methodResults.slice(0, INITIAL_RESULTS_COUNT);
+                                            const hasMore = methodResults.length > INITIAL_RESULTS_COUNT;
+
+                                            return (
+                                              <div className="mt-2 space-y-1.5 max-h-[300px] overflow-y-auto">
+                                                {displayResults.map((r: any, rIdx: number) => (
+                                                  <div
+                                                    key={rIdx}
+                                                    className="p-2 bg-background rounded cursor-pointer hover:bg-muted/50 transition-colors border border-border"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      setSelectedMemory(r);
+                                                    }}
+                                                  >
+                                                    <div className="flex items-start gap-2">
+                                                      <span className="text-[10px] font-mono text-muted-foreground mt-0.5">{rIdx + 1}</span>
+                                                      <div className="flex-1 min-w-0">
+                                                        <p className="text-xs text-foreground line-clamp-2">{r.text}</p>
+                                                        <div className="flex items-center gap-2 mt-1">
+                                                          <span className="text-[10px] text-muted-foreground">
+                                                            {(r.score || r.similarity || 0).toFixed(4)}
+                                                          </span>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                                {hasMore && (
+                                                  <button
+                                                    className="w-full text-[10px] text-primary hover:text-primary/80 py-1.5 hover:bg-muted/50 rounded transition-colors"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      toggleExpandResults(resultsKey);
+                                                    }}
+                                                  >
+                                                    {showAll ? `Show less` : `View all ${methodResults.length} results`}
+                                                  </button>
+                                                )}
+                                              </div>
+                                            );
+                                          })()}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+
+                    {/* Parallel indicator - vertical lines showing all run together */}
+                    <div className="flex justify-center py-2">
+                      <div className="flex items-center gap-2">
+                        {factTypes.map((ft, i) => {
+                          const ftColors: Record<string, string> = {
+                            world: 'bg-blue-500',
+                            experience: 'bg-green-500',
+                            opinion: 'bg-purple-500',
+                            all: 'bg-gray-500',
+                          };
+                          return (
+                            <div key={i} className="flex flex-col items-center">
+                              <div className={`w-1 h-4 ${ftColors[ft] || ftColors.all} rounded-full opacity-50`} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="flex justify-center">
+                      <ArrowDown className="h-5 w-5 text-muted-foreground/50" />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Step 2: RRF Merge */}
+              {trace.rrf_merged && (() => {
+                const stepKey = 'rrf-merge';
+                const isExpanded = expandedSteps.has(stepKey);
+
+                return (
+                  <div>
+                    <Card
+                      className={`cursor-pointer transition-colors ${isExpanded ? 'border-primary' : 'hover:border-primary/50'}`}
+                      onClick={() => toggleStep(stepKey)}
+                    >
+                      <CardContent className="py-4">
+                        <div className="flex items-center gap-4">
+                          <div className="flex-shrink-0 w-10 h-10 rounded-full bg-purple-500/10 flex items-center justify-center">
+                            <span className="text-sm font-bold text-purple-500">∪</span>
                           </div>
-                          <div className="text-2xl font-bold">{method.results?.length || 0}</div>
-                          <div className="text-xs text-muted-foreground">results</div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-foreground">RRF Fusion</span>
+                              <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">merge</span>
+                            </div>
+                            <div className="text-sm text-muted-foreground mt-0.5">
+                              Reciprocal Rank Fusion of all retrieval results
+                            </div>
+                          </div>
+                          <div className="text-2xl font-bold text-foreground">{trace.rrf_merged.length}</div>
+                          {isExpanded ? (
+                            <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                      </CardContent>
+                    </Card>
 
-                {/* RRF Merge */}
-                {trace.rrf_merged && (
-                  <div>
-                    <h4 className="font-semibold mb-3">RRF Merge</h4>
-                    <div className="p-4 rounded-lg bg-muted/50">
-                      <div className="text-2xl font-bold">{trace.rrf_merged.length}</div>
-                      <div className="text-xs text-muted-foreground">candidates after fusion</div>
-                    </div>
-                  </div>
-                )}
+                    {/* Expanded Results */}
+                    {isExpanded && trace.rrf_merged.length > 0 && (() => {
+                      const resultsKey = 'results-rrf';
+                      const showAll = expandedResults.has(resultsKey);
+                      const displayResults = showAll ? trace.rrf_merged : trace.rrf_merged.slice(0, INITIAL_RESULTS_COUNT);
+                      const hasMore = trace.rrf_merged.length > INITIAL_RESULTS_COUNT;
 
-                {/* Reranking */}
-                {trace.reranked && (
-                  <div>
-                    <h4 className="font-semibold mb-3">Reranking</h4>
-                    <div className="p-4 rounded-lg bg-muted/50">
-                      <div className="text-2xl font-bold">{trace.reranked.length}</div>
-                      <div className="text-xs text-muted-foreground">results after cross-encoder</div>
+                      return (
+                        <div className="ml-6 mt-2 space-y-2 border-l-2 border-muted pl-4 max-h-[400px] overflow-y-auto">
+                          {displayResults.map((r: any, rIdx: number) => (
+                            <div
+                              key={rIdx}
+                              className="p-3 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedMemory(r);
+                              }}
+                            >
+                              <div className="flex items-start gap-3">
+                                <span className="text-xs font-mono text-muted-foreground">{rIdx + 1}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm text-foreground line-clamp-2">{r.text}</p>
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    RRF Score: {(r.rrf_score || r.score || 0).toFixed(4)}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {hasMore && (
+                            <button
+                              className="w-full text-xs text-primary hover:text-primary/80 py-2 hover:bg-muted/50 rounded transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleExpandResults(resultsKey);
+                              }}
+                            >
+                              {showAll ? `Show less` : `View all ${trace.rrf_merged.length} results`}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Arrow */}
+                    <div className="flex justify-center py-2">
+                      <ArrowDown className="h-4 w-4 text-muted-foreground/50" />
                     </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                );
+              })()}
+
+              {/* Step 3: Combined Scoring */}
+              {trace.reranked && (() => {
+                const stepKey = 'reranking';
+                const isExpanded = expandedSteps.has(stepKey);
+
+                return (
+                  <div>
+                    <Card
+                      className={`cursor-pointer transition-colors ${isExpanded ? 'border-primary' : 'hover:border-primary/50'}`}
+                      onClick={() => toggleStep(stepKey)}
+                    >
+                      <CardContent className="py-4">
+                        <div className="flex items-center gap-4">
+                          <div className="flex-shrink-0 w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center">
+                            <span className="text-sm font-bold text-amber-500">⚡</span>
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-foreground">Combined Scoring</span>
+                              <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">rerank</span>
+                            </div>
+                            <div className="text-sm text-muted-foreground mt-0.5">
+                              <span className="font-mono text-xs">0.6×cross_encoder + 0.2×rrf + 0.1×temporal + 0.1×recency</span>
+                            </div>
+                          </div>
+                          <div className="text-2xl font-bold text-foreground">{trace.reranked.length}</div>
+                          {isExpanded ? (
+                            <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Expanded Results */}
+                    {isExpanded && trace.reranked.length > 0 && (() => {
+                      const resultsKey = 'results-rerank';
+                      const showAll = expandedResults.has(resultsKey);
+                      const displayResults = showAll ? trace.reranked : trace.reranked.slice(0, INITIAL_RESULTS_COUNT);
+                      const hasMore = trace.reranked.length > INITIAL_RESULTS_COUNT;
+
+                      return (
+                        <div className="ml-6 mt-2 space-y-2 border-l-2 border-muted pl-4 max-h-[400px] overflow-y-auto">
+                          {displayResults.map((r: any, rIdx: number) => {
+                            const sc = r.score_components || {};
+                            return (
+                              <div
+                                key={rIdx}
+                                className="p-3 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedMemory(r);
+                                }}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <span className="text-xs font-mono text-muted-foreground">{rIdx + 1}</span>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm text-foreground line-clamp-2">{r.text}</p>
+                                    <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[10px] text-muted-foreground font-mono">
+                                      <span className="font-semibold text-foreground">
+                                        = {(r.rerank_score || r.score || 0).toFixed(4)}
+                                      </span>
+                                      {sc.cross_encoder_score_normalized !== undefined && (
+                                        <span title="Cross-encoder (60%)">
+                                          CE: {sc.cross_encoder_score_normalized.toFixed(3)}
+                                        </span>
+                                      )}
+                                      {sc.rrf_normalized !== undefined && (
+                                        <span title={`RRF normalized (20%) - raw: ${sc.rrf_score?.toFixed(4) || 'N/A'}`}>
+                                          RRF: {sc.rrf_normalized.toFixed(3)}
+                                        </span>
+                                      )}
+                                      {sc.temporal !== undefined && (
+                                        <span title="Temporal proximity (10%)">
+                                          Tmp: {sc.temporal.toFixed(3)}
+                                        </span>
+                                      )}
+                                      {sc.recency !== undefined && (
+                                        <span title="Recency (10%)">
+                                          Rec: {sc.recency.toFixed(3)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {hasMore && (
+                            <button
+                              className="w-full text-xs text-primary hover:text-primary/80 py-2 hover:bg-muted/50 rounded transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleExpandResults(resultsKey);
+                              }}
+                            >
+                              {showAll ? `Show less` : `View all ${trace.reranked.length} results`}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Arrow */}
+                    <div className="flex justify-center py-2">
+                      <ArrowDown className="h-4 w-4 text-muted-foreground/50" />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Final: Results */}
+              <Card className="border-primary bg-primary/5">
+                <CardContent className="py-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                      <span className="text-sm font-bold text-primary">✓</span>
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground">Final Results</span>
+                        <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">output</span>
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-0.5">
+                        Top results after all processing steps
+                      </div>
+                    </div>
+                    <div className="text-2xl font-bold text-primary">{results?.length || 0}</div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           )}
 
           {/* JSON View */}

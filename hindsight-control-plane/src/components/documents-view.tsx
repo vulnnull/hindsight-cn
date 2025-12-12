@@ -193,7 +193,7 @@ export function DocumentsView() {
                     {/* Document ID */}
                     <div className="p-4 bg-muted/50 rounded-lg">
                       <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Document ID</div>
-                      <div className="text-sm font-mono break-all">{selectedDocument.id}</div>
+                      <code className="text-sm font-mono break-all text-foreground">{selectedDocument.id}</code>
                     </div>
 
                     {/* Created & Memory Units */}
@@ -201,11 +201,11 @@ export function DocumentsView() {
                       <div className="grid grid-cols-2 gap-4">
                         <div className="p-4 bg-muted/50 rounded-lg">
                           <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Created</div>
-                          <div className="text-sm font-medium">{new Date(selectedDocument.created_at).toLocaleString()}</div>
+                          <div className="text-sm font-medium text-foreground">{new Date(selectedDocument.created_at).toLocaleString()}</div>
                         </div>
                         <div className="p-4 bg-muted/50 rounded-lg">
                           <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Memory Units</div>
-                          <div className="text-sm font-medium">{selectedDocument.memory_unit_count}</div>
+                          <div className="text-sm font-medium text-foreground">{selectedDocument.memory_unit_count}</div>
                         </div>
                       </div>
                     )}
@@ -214,7 +214,7 @@ export function DocumentsView() {
                     {selectedDocument.original_text && (
                       <div className="p-4 bg-muted/50 rounded-lg">
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Text Length</div>
-                        <div className="text-sm font-medium">{selectedDocument.original_text.length.toLocaleString()} characters</div>
+                        <div className="text-sm font-medium text-foreground">{selectedDocument.original_text.length.toLocaleString()} characters</div>
                       </div>
                     )}
 
@@ -244,7 +244,7 @@ export function DocumentsView() {
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Original Text</div>
                         <div className="p-4 bg-muted/50 rounded-lg border border-border max-h-[400px] overflow-y-auto">
-                          <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed">{selectedDocument.original_text}</pre>
+                          <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed text-foreground">{selectedDocument.original_text}</pre>
                         </div>
                       </div>
                     )}

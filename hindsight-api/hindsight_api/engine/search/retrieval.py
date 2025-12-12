@@ -4,7 +4,7 @@ Retrieval module for 4-way parallel search.
 Implements:
 1. Semantic retrieval (vector similarity)
 2. BM25 retrieval (keyword/full-text search)
-3. Graph retrieval (spreading activation)
+3. Graph retrieval (via pluggable GraphRetriever interface)
 4. Temporal retrieval (time-aware search with spreading)
 """
 
@@ -13,6 +13,24 @@ from datetime import datetime
 import asyncio
 from ..db_utils import acquire_with_retry
 from .types import RetrievalResult
+from .graph_retrieval import GraphRetriever, BFSGraphRetriever
+
+# Default graph retriever instance (can be overridden)
+_default_graph_retriever: Optional[GraphRetriever] = None
+
+
+def get_default_graph_retriever() -> GraphRetriever:
+    """Get or create the default graph retriever."""
+    global _default_graph_retriever
+    if _default_graph_retriever is None:
+        _default_graph_retriever = BFSGraphRetriever()
+    return _default_graph_retriever
+
+
+def set_default_graph_retriever(retriever: GraphRetriever) -> None:
+    """Set the default graph retriever (for configuration/testing)."""
+    global _default_graph_retriever
+    _default_graph_retriever = retriever
 
 
 async def retrieve_semantic(
@@ -103,121 +121,6 @@ async def retrieve_bm25(
         query_tsquery, bank_id, fact_type, limit
     )
     return [RetrievalResult.from_db_row(dict(r)) for r in results]
-
-
-async def retrieve_graph(
-    conn,
-    query_emb_str: str,
-    bank_id: str,
-    fact_type: str,
-    budget: int
-) -> List[RetrievalResult]:
-    """
-    Graph retrieval via spreading activation.
-
-    Args:
-        conn: Database connection
-        query_emb_str: Query embedding as string
-        agent_id: bank ID
-        fact_type: Fact type to filter
-        budget: Node budget for graph traversal
-
-    Returns:
-        List of RetrievalResult objects
-    """
-    # Find entry points
-    entry_points = await conn.fetch(
-        """
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
-               1 - (embedding <=> $1::vector) AS similarity
-        FROM memory_units
-        WHERE bank_id = $2
-          AND embedding IS NOT NULL
-          AND fact_type = $3
-          AND (1 - (embedding <=> $1::vector)) >= 0.5
-        ORDER BY embedding <=> $1::vector
-        LIMIT 5
-        """,
-        query_emb_str, bank_id, fact_type
-    )
-
-    if not entry_points:
-        return []
-
-    # BFS-style spreading activation with batched neighbor fetching
-    visited = set()
-    results = []
-    queue = [(RetrievalResult.from_db_row(dict(r)), r["similarity"]) for r in entry_points]
-    budget_remaining = budget
-
-    # Process nodes in batches to reduce DB roundtrips
-    batch_size = 20  # Fetch neighbors for up to 20 nodes at once
-
-    while queue and budget_remaining > 0:
-        # Collect a batch of nodes to process
-        batch_nodes = []
-        batch_activations = {}
-
-        while queue and len(batch_nodes) < batch_size and budget_remaining > 0:
-            current, activation = queue.pop(0)
-            unit_id = current.id
-
-            if unit_id not in visited:
-                visited.add(unit_id)
-                budget_remaining -= 1
-                results.append(current)
-                batch_nodes.append(current.id)
-                batch_activations[unit_id] = activation
-
-        # Batch fetch neighbors for all nodes in this batch
-        # Fetch top weighted neighbors (batch_size * 20 = ~400 for good distribution)
-        if batch_nodes and budget_remaining > 0:
-            max_neighbors = len(batch_nodes) * 20
-            neighbors = await conn.fetch(
-                """
-                SELECT mu.id, mu.text, mu.context, mu.occurred_start, mu.occurred_end, mu.mentioned_at,
-                       mu.access_count, mu.embedding, mu.fact_type, mu.document_id, mu.chunk_id,
-                       ml.weight, ml.link_type, ml.from_unit_id
-                FROM memory_links ml
-                JOIN memory_units mu ON ml.to_unit_id = mu.id
-                WHERE ml.from_unit_id = ANY($1::uuid[])
-                  AND ml.weight >= 0.1
-                  AND mu.fact_type = $2
-                ORDER BY ml.weight DESC
-                LIMIT $3
-                """,
-                batch_nodes, fact_type, max_neighbors
-            )
-
-            for n in neighbors:
-                neighbor_id = str(n["id"])
-                if neighbor_id not in visited:
-                    # Get parent activation
-                    parent_id = str(n["from_unit_id"])
-                    activation = batch_activations.get(parent_id, 0.5)
-
-                    # Boost activation for causal links (they're high-value relationships)
-                    link_type = n["link_type"]
-                    base_weight = n["weight"]
-
-                    # Causal links get 1.5-2.0x boost depending on type
-                    if link_type in ("causes", "caused_by"):
-                        # Direct causation - very strong relationship
-                        causal_boost = 2.0
-                    elif link_type in ("enables", "prevents"):
-                        # Conditional causation - strong but not as direct
-                        causal_boost = 1.5
-                    else:
-                        # Temporal, semantic, entity links - standard weight
-                        causal_boost = 1.0
-
-                    effective_weight = base_weight * causal_boost
-                    new_activation = activation * effective_weight * 0.8
-                    if new_activation > 0.1:
-                        neighbor_result = RetrievalResult.from_db_row(dict(n))
-                        queue.append((neighbor_result, new_activation))
-
-    return results
 
 
 async def retrieve_temporal(
@@ -419,7 +322,8 @@ async def retrieve_parallel(
     fact_type: str,
     thinking_budget: int,
     question_date: Optional[datetime] = None,
-    query_analyzer: Optional["QueryAnalyzer"] = None
+    query_analyzer: Optional["QueryAnalyzer"] = None,
+    graph_retriever: Optional[GraphRetriever] = None,
 ) -> Tuple[List[RetrievalResult], List[RetrievalResult], List[RetrievalResult], Optional[List[RetrievalResult]], Dict[str, float], Optional[Tuple[datetime, datetime]]]:
     """
     Run 3-way or 4-way parallel retrieval (adds temporal if detected).
@@ -428,11 +332,12 @@ async def retrieve_parallel(
         pool: Database connection pool
         query_text: Query text
         query_embedding_str: Query embedding as string
-        agent_id: bank ID
+        bank_id: Bank ID
         fact_type: Fact type to filter
         thinking_budget: Budget for graph traversal and retrieval limits
         question_date: Optional date when question was asked (for temporal filtering)
         query_analyzer: Query analyzer to use (defaults to TransformerQueryAnalyzer)
+        graph_retriever: Graph retrieval strategy (defaults to BFSGraphRetriever)
 
     Returns:
         Tuple of (semantic_results, bm25_results, graph_results, temporal_results, timings, temporal_constraint)
@@ -448,6 +353,9 @@ async def retrieve_parallel(
     temporal_constraint = extract_temporal_constraint(
         query_text, reference_date=question_date, analyzer=query_analyzer
     )
+
+    # Use provided graph retriever or default
+    retriever = graph_retriever or get_default_graph_retriever()
 
     # Wrapper to track timing for each retrieval method
     async def timed_retrieval(name: str, coro):
@@ -465,8 +373,14 @@ async def retrieve_parallel(
             return await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget)
 
     async def run_graph():
-        async with acquire_with_retry(pool) as conn:
-            return await retrieve_graph(conn, query_embedding_str, bank_id, fact_type, budget=thinking_budget)
+        return await retriever.retrieve(
+            pool=pool,
+            query_embedding_str=query_embedding_str,
+            bank_id=bank_id,
+            fact_type=fact_type,
+            budget=thinking_budget,
+            query_text=query_text,
+        )
 
     async def run_temporal(start_date, end_date):
         async with acquire_with_retry(pool) as conn:
