@@ -514,6 +514,27 @@ article a:not(.button):not([class*="hash-link"]):hover {
   text-decoration-color: var(--hindsight-gradient-start);
 }
 
+/* Links inside code blocks - use solid color instead of gradient */
+code a,
+pre a,
+article code a,
+article pre a {
+  background: none !important;
+  -webkit-background-clip: unset !important;
+  -webkit-text-fill-color: var(--ifm-color-primary) !important;
+  background-clip: unset !important;
+  color: var(--ifm-color-primary) !important;
+  text-decoration: underline;
+}
+
+code a:hover,
+pre a:hover,
+article code a:hover,
+article pre a:hover {
+  color: var(--ifm-color-primary-dark) !important;
+  -webkit-text-fill-color: var(--ifm-color-primary-dark) !important;
+}
+
 /* Admonitions - gradient themed */
 .theme-admonition,
 [class*="admonition_"] {
