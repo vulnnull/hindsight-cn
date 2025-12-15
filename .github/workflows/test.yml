@@ -154,6 +154,9 @@ jobs:
     env:
       HINDSIGHT_API_LLM_PROVIDER: groq
       HINDSIGHT_API_LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-20b
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Prefer CPU-only PyTorch in CI (but keep PyPI for everything else)
