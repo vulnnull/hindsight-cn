@@ -24,3 +24,4 @@ hindsight-api = { workspace = true }
 
 [project.scripts]
 generate-openapi = "hindsight_dev.generate_openapi:generate_openapi_spec"
+generate-changelog = "hindsight_dev.generate_changelog:main"

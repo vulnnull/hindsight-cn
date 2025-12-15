@@ -3,7 +3,7 @@
 > Agent Memory that Works Like Human Memory
 
 This file contains the complete Hindsight documentation for LLM consumption.
-Generated: 2025-12-15T10:18:45.836Z
+Generated: 2025-12-15T11:03:02.071Z
 
 ---
 
@@ -4081,7 +4081,7 @@ Known Solutions:
 
 # Changelog
 
-Coming soon.
+For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
 
 ---
