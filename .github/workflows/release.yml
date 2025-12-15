@@ -38,6 +38,10 @@ jobs:
       working-directory: ./hindsight
       run: uv build --out-dir dist
 
+    - name: Build hindsight-litellm
+      working-directory: ./hindsight-integrations/litellm
+      run: uv build --out-dir dist
+
     # Publish in order (client and api first, then hindsight-all which depends on them)
     - name: Publish hindsight-client to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
@@ -57,6 +61,12 @@ jobs:
         packages-dir: ./hindsight/dist
         skip-existing: true
 
+    - name: Publish hindsight-litellm to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: ./hindsight-integrations/litellm/dist
+        skip-existing: true
+
     # Upload artifacts for GitHub release
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -66,6 +76,7 @@ jobs:
           hindsight-clients/python/dist/*
           hindsight-api/dist/*
           hindsight/dist/*
+          hindsight-integrations/litellm/dist/*
         retention-days: 1
 
   release-typescript-client:
@@ -306,6 +317,7 @@ jobs:
         cp artifacts/python-packages/hindsight-clients/python/dist/* release-assets/ || true
         cp artifacts/python-packages/hindsight-api/dist/* release-assets/ || true
         cp artifacts/python-packages/hindsight/dist/* release-assets/ || true
+        cp artifacts/python-packages/hindsight-integrations/litellm/dist/* release-assets/ || true
         # TypeScript client
         cp artifacts/typescript-client/*.tgz release-assets/ || true
         # Rust CLI binaries
@@ -316,54 +328,11 @@ jobs:
         cp artifacts/helm-chart/*.tgz release-assets/ || true
         ls -la release-assets/
 
-    - name: Generate release notes
-      run: |
-        cat << 'EOF' > release-notes.md
-        ## Quick Start
-
-        ```bash
-        # Install the CLI
-        curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/main/hindsight-cli/install.sh | bash
-
-        # Start the server
-        docker run -p 8888:8888 -p 9999:9999 \
-          -e HINDSIGHT_API_LLM_PROVIDER=openai \
-          -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
-          -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
-          ghcr.io/${{ github.repository_owner }}/hindsight:${{ steps.get_version.outputs.VERSION }}
-        ```
-
-        ## Docker Images
-        - `ghcr.io/${{ github.repository_owner }}/hindsight:${{ steps.get_version.outputs.VERSION }}` - Standalone (recommended)
-        - `ghcr.io/${{ github.repository_owner }}/hindsight-api:${{ steps.get_version.outputs.VERSION }}` - API only
-        - `ghcr.io/${{ github.repository_owner }}/hindsight-control-plane:${{ steps.get_version.outputs.VERSION }}` - Web UI only
-
-        ## CLI
-        ```bash
-        curl -fsSL https://raw.githubusercontent.com/vectorize-io/hindsight/refs/heads/main/hindsight-cli/install.sh | bash
-        ```
-
-        ## Python
-        ```bash
-        pip install hindsight-all  # or hindsight-api, hindsight-client
-        ```
-
-        ## TypeScript/JavaScript
-        ```bash
-        npm install @vectorize-io/hindsight-client
-        ```
-
-        ## Helm
-        ```bash
-        helm install hindsight oci://ghcr.io/${{ github.repository_owner }}/charts/hindsight --version ${{ steps.get_version.outputs.VERSION }}
-        ```
-        EOF
-
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         files: release-assets/*
-        body_path: release-notes.md
+        generate_release_notes: true
         draft: false
         prerelease: false
       env:

@@ -3,7 +3,7 @@
 > Agent Memory that Works Like Human Memory
 
 This file contains the complete Hindsight documentation for LLM consumption.
-Generated: 2025-12-11T12:49:49.534Z
+Generated: 2025-12-15T09:47:27.854Z
 
 ---
 
@@ -3023,15 +3023,15 @@ with HindsightServer(
     client = HindsightClient(base_url=server.url)
 
     # Retain a memory
-    client.retain(bank_id="my-agent", content="Alice works at Google")
+    client.retain(bank_id="my-bank", content="Alice works at Google")
 
     # Recall memories
-    results = client.recall(bank_id="my-agent", query="What does Alice do?")
+    results = client.recall(bank_id="my-bank", query="What does Alice do?")
     for r in results:
         print(r.text)
 
     # Reflect - generate response with disposition
-    answer = client.reflect(bank_id="my-agent", query="Tell me about Alice")
+    answer = client.reflect(bank_id="my-bank", query="Tell me about Alice")
     print(answer.text)
 ```
 
@@ -3044,15 +3044,15 @@ from hindsight_client import Hindsight
 client = Hindsight(base_url="http://localhost:8888")
 
 # Retain a memory
-client.retain(bank_id="my-agent", content="Alice works at Google")
+client.retain(bank_id="my-bank", content="Alice works at Google")
 
 # Recall memories
-results = client.recall(bank_id="my-agent", query="What does Alice do?")
+results = client.recall(bank_id="my-bank", query="What does Alice do?")
 for r in results:
     print(r.text)
 
 # Reflect - generate response with disposition
-answer = client.reflect(bank_id="my-agent", query="Tell me about Alice")
+answer = client.reflect(bank_id="my-bank", query="Tell me about Alice")
 print(answer.text)
 ```
 
@@ -3077,7 +3077,7 @@ client = Hindsight(
 ```python
 # Simple
 client.retain(
-    bank_id="my-agent",
+    bank_id="my-bank",
     content="Alice works at Google as a software engineer",
 )
 
@@ -3085,7 +3085,7 @@ client.retain(
 from datetime import datetime
 
 client.retain(
-    bank_id="my-agent",
+    bank_id="my-bank",
     content="Alice got promoted",
     context="career update",
     timestamp=datetime(2024, 1, 15),
@@ -3098,7 +3098,7 @@ client.retain(
 
 ```python
 client.retain_batch(
-    bank_id="my-agent",
+    bank_id="my-bank",
     items=[
         {"content": "Alice works at Google", "context": "career"},
         {"content": "Bob is a data scientist", "context": "career"},
@@ -3113,16 +3113,16 @@ client.retain_batch(
 ```python
 # Simple - returns list of RecallResult
 results = client.recall(
-    bank_id="my-agent",
+    bank_id="my-bank",
     query="What does Alice do?",
 )
 
-for r in results:
+for r in results.results:
     print(f"{r.text} (type: {r.type})")
 
 # With options
 results = client.recall(
-    bank_id="my-agent",
+    bank_id="my-bank",
     query="What does Alice do?",
     types=["world", "opinion"],  # Filter by fact type
     max_tokens=4096,
@@ -3133,16 +3133,15 @@ results = client.recall(
 ### Recall with Full Response
 
 ```python
-# Returns RecallResponse with entities and trace info
-response = client.recall_memories(
-    bank_id="my-agent",
+# Returns RecallResponse with entities and chunks
+response = client.recall(
+    bank_id="my-bank",
     query="What does Alice do?",
     types=["world", "experience"],
     budget="mid",
     max_tokens=4096,
-    trace=True,
     include_entities=True,
-    max_entity_tokens=500,
+    max_entity_tokens=500
 )
 
 print(f"Found {len(response.results)} memories")
@@ -3159,14 +3158,13 @@ if response.entities:
 
 ```python
 answer = client.reflect(
-    bank_id="my-agent",
+    bank_id="my-bank",
     query="What should I know about Alice?",
     budget="low",  # low, mid, or high
     context="preparing for a meeting",
 )
 
 print(answer.text)  # Generated response
-print(answer.based_on)  # Memories used
 ```
 
 ## Bank Management
@@ -3175,7 +3173,7 @@ print(answer.based_on)  # Memories used
 
 ```python
 client.create_bank(
-    bank_id="my-agent",
+    bank_id="my-bank",
     name="Assistant",
     background="I am a helpful AI assistant",
     disposition={
@@ -3189,16 +3187,13 @@ client.create_bank(
 ### List Memories
 
 ```python
-response = client.list_memories(
-    bank_id="my-agent",
+client.list_memories(
+    bank_id="my-bank",
     type="world",  # Optional: filter by type
     search_query="Alice",  # Optional: text search
     limit=100,
     offset=0,
 )
-
-for memory in response.memories:
-    print(f"{memory.id}: {memory.text}")
 ```
 
 ## Async Support
@@ -3213,36 +3208,20 @@ async def main():
     client = Hindsight(base_url="http://localhost:8888")
 
     # Async retain
-    await client.aretain(bank_id="my-agent", content="Hello world")
+    await client.aretain(bank_id="my-bank", content="Hello world")
 
     # Async recall
-    results = await client.arecall(bank_id="my-agent", query="Hello")
+    results = await client.arecall(bank_id="my-bank", query="Hello")
     for r in results:
         print(r.text)
 
     # Async reflect
-    answer = await client.areflect(bank_id="my-agent", query="What did I say?")
+    answer = await client.areflect(bank_id="my-bank", query="What did I say?")
     print(answer.text)
 
     client.close()
 
 asyncio.run(main())
-```
-
-## Response Types
-
-The client exports response types for type hints:
-
-```python
-from hindsight_client import (
-    Hindsight,
-    RetainResponse,
-    RecallResponse,
-    RecallResult,
-    ReflectResponse,
-    BankProfileResponse,
-    DispositionTraits,
-)
 ```
 
 ## Context Manager
@@ -3251,8 +3230,8 @@ from hindsight_client import (
 from hindsight_client import Hindsight
 
 with Hindsight(base_url="http://localhost:8888") as client:
-    client.retain(bank_id="my-agent", content="Hello")
-    results = client.recall(bank_id="my-agent", query="Hello")
+    client.retain(bank_id="my-bank", content="Hello")
+    results = client.recall(bank_id="my-bank", query="Hello")
 # Client automatically closed
 ```
 
@@ -3275,21 +3254,21 @@ npm install @vectorize-io/hindsight-client
 ## Quick Start
 
 ```typescript
-
+const { HindsightClient } = require('@vectorize-io/hindsight-client');
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
 // Retain a memory
-await client.retain('my-agent', 'Alice works at Google');
+await client.retain('my-bank', 'Alice works at Google');
 
 // Recall memories
-const response = await client.recall('my-agent', 'What does Alice do?');
+const response = await client.recall('my-bank', 'What does Alice do?');
 for (const r of response.results) {
     console.log(r.text);
 }
 
 // Reflect - generate response with disposition
-const answer = await client.reflect('my-agent', 'Tell me about Alice');
+const answer = await client.reflect('my-bank', 'Tell me about Alice');
 console.log(answer.text);
 ```
 
@@ -3309,10 +3288,10 @@ const client = new HindsightClient({
 
 ```typescript
 // Simple
-await client.retain('my-agent', 'Alice works at Google');
+await client.retain('my-bank', 'Alice works at Google');
 
 // With options
-await client.retain('my-agent', 'Alice got promoted', {
+await client.retain('my-bank', 'Alice got promoted', {
     timestamp: new Date('2024-01-15'),
     context: 'career update',
     metadata: { source: 'slack' },
@@ -3323,11 +3302,10 @@ await client.retain('my-agent', 'Alice got promoted', {
 ### Retain Batch
 
 ```typescript
-await client.retainBatch('my-agent', [
+await client.retainBatch('my-bank', [
     { content: 'Alice works at Google', context: 'career' },
     { content: 'Bob is a data scientist', context: 'career' },
 ], {
-    documentId: 'conversation_001',
     async: false,
 });
 ```
@@ -3336,31 +3314,29 @@ await client.retainBatch('my-agent', [
 
 ```typescript
 // Simple - returns RecallResponse
-const response = await client.recall('my-agent', 'What does Alice do?');
+const response = await client.recall('my-bank', 'What does Alice do?');
 
 for (const r of response.results) {
     console.log(`${r.text} (type: ${r.type})`);
 }
 
 // With options
-const response = await client.recall('my-agent', 'What does Alice do?', {
+const response = await client.recall('my-bank', 'What does Alice do?', {
     types: ['world', 'opinion'],  // Filter by fact type
     maxTokens: 4096,
     budget: 'high',  // 'low', 'mid', or 'high'
-    trace: true,
 });
 ```
 
 ### Reflect (Generate Response)
 
 ```typescript
-const answer = await client.reflect('my-agent', 'What should I know about Alice?', {
+const answer = await client.reflect('my-bank', 'What should I know about Alice?', {
     budget: 'low',  // 'low', 'mid', or 'high'
     context: 'preparing for a meeting',
 });
 
 console.log(answer.text);       // Generated response
-console.log(answer.based_on);   // Memories used
 ```
 
 ## Bank Management
@@ -3368,7 +3344,7 @@ console.log(answer.based_on);   // Memories used
 ### Create Bank
 
 ```typescript
-await client.createBank('my-agent', {
+await client.createBank('my-bank', {
     name: 'Assistant',
     background: 'I am a helpful AI assistant',
     disposition: {
@@ -3379,119 +3355,16 @@ await client.createBank('my-agent', {
 });
 ```
 
-### Get Bank Profile
-
-```typescript
-const profile = await client.getBankProfile('my-agent');
-console.log(profile.disposition);
-console.log(profile.background);
-```
-
 ### List Memories
 
 ```typescript
-const response = await client.listMemories('my-agent', {
+const response = await client.listMemories('my-bank', {
     type: 'world',  // Optional filter
     q: 'Alice',     // Optional text search
     limit: 100,
     offset: 0,
 });
-
-for (const memory of response.memories) {
-    console.log(`${memory.id}: ${memory.text}`);
-}
-```
-
-## TypeScript Types
-
-The client exports all types for full TypeScript support:
-
-```typescript
-
-    RetainResponse,
-    RecallResponse,
-    RecallResult,
-    ReflectResponse,
-    BankProfileResponse,
-    Budget,
-} from '@vectorize-io/hindsight-client';
-
-// Budget is a union type: 'low' | 'mid' | 'high'
-const budget: Budget = 'mid';
-```
-
-## Advanced: Low-Level SDK
-
-For advanced use cases, access the auto-generated SDK directly:
-
-```typescript
-
-
-const client = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
-
-// Use sdk functions directly
-const response = await sdk.recallMemories({
-    client,
-    path: { bank_id: 'my-agent' },
-    body: {
-        query: 'What does Alice do?',
-        budget: 'mid',
-        max_tokens: 4096,
-    },
-});
-```
-
-## Error Handling
-
-```typescript
-
-
-const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
-
-try {
-    const response = await client.recall('unknown-agent', 'test');
-} catch (error) {
-    console.error('Error:', error.message);
-}
-```
-
-## Example: Full Workflow
-
-```typescript
-
-
-async function main() {
-    const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
-
-    // Create a bank with disposition
-    await client.createBank('demo', {
-        name: 'Demo Agent',
-        background: 'A helpful assistant for demos',
-        disposition: {
-            skepticism: 2,   // Trusting
-            literalism: 3,   // Balanced
-            empathy: 4,      // Empathetic
-        },
-    });
-
-    // Store some memories
-    await client.retain('demo', 'Alice works at Google');
-    await client.retain('demo', 'Bob is a data scientist at Google');
-    await client.retain('demo', 'Alice and Bob collaborate on ML projects');
-
-    // Search for memories
-    const searchResults = await client.recall('demo', 'Who works at Google?');
-    console.log('Search results:');
-    for (const r of searchResults.results) {
-        console.log(`  - ${r.text}`);
-    }
-
-    // Generate a response
-    const answer = await client.reflect('demo', 'What do you know about the team?');
-    console.log('\nReflection:', answer.text);
-}
-
-main().catch(console.error);
+console.log(response)
 ```
 
 
@@ -4384,162 +4257,6 @@ Opinions below a confidence threshold may be:
 ---
 
 
-## File: developer/api/think-vs-search.md
-
-# Think vs Search
-
-When to use `search` vs `think`.
-
-## Quick Comparison
-
-| | Search | Think |
-|---|--------|-------|
-| **Returns** | Raw memory results | Generated response |
-| **Use case** | Retrieval, lookup | Q&A, reasoning |
-| **LLM calls** | 0 (retrieval only) | 1+ (generation) |
-| **Speed** | Fast (~100-200ms) | Slower (~500-2000ms) |
-| **Opinions** | Returns existing | Can form new ones |
-| **Disposition** | Not applied | Applied to response |
-
-## When to Use Search
-
-**Use Search when you need:**
-
-- Raw facts for your own processing
-- Fast retrieval without generation
-- To populate context for another LLM
-- To check what's in memory
-- Debugging retrieval quality
-
-```python
-# Get raw facts to inject into your own prompt
-results = client.search(agent_id="my-agent", query="Alice's preferences")
-
-context = "\n".join([r["text"] for r in results])
-# Use context in your own LLM call
-```
-
-**Examples:**
-
-```python
-# Lookup — just get the facts
-results = client.search(agent_id="my-agent", query="Alice's email address")
-
-# Context building — feed into another system
-results = client.search(agent_id="my-agent", query="Recent project discussions")
-context = format_for_prompt(results)
-
-# Verification — check what's stored
-results = client.search(agent_id="my-agent", query="What do I know about Bob?")
-```
-
-## When to Use Think
-
-**Use Think when you need:**
-
-- A natural language response
-- Disposition-aware answers
-- Opinion formation
-- Reasoning over multiple facts
-- Source attribution
-
-```python
-# Get a complete answer with disposition
-answer = client.think(agent_id="my-agent", query="What should I recommend to Alice?")
-print(answer["text"])  # Natural language response
-print(answer["based_on"])  # Sources used
-```
-
-**Examples:**
-
-```python
-# Q&A — need a response, not just facts
-answer = client.think(agent_id="my-agent", query="What does Alice do for work?")
-
-# Reasoning — synthesize multiple facts
-answer = client.think(agent_id="my-agent", query="How are Alice and Bob connected?")
-
-# Opinion — agent forms a view
-answer = client.think(agent_id="my-agent", query="What do you think about Python?")
-
-# Recommendation — disposition-influenced
-answer = client.think(agent_id="my-agent", query="What book should I read next?")
-```
-
-## Performance Comparison
-
-```mermaid
-graph LR
-    subgraph Search
-        S1[Query] --> S2[4-way Retrieval]
-        S2 --> S3[RRF + Rerank]
-        S3 --> S4[Results]
-    end
-
-    subgraph Think
-        T1[Query] --> T2[4-way Retrieval]
-        T2 --> T3[RRF + Rerank]
-        T3 --> T4[Load Disposition]
-        T4 --> T5[LLM Generation]
-        T5 --> T6[Store Opinions]
-        T6 --> T7[Response]
-    end
-```
-
-| Operation | Search | Think |
-|-----------|--------|-------|
-| Retrieval | ~100ms | ~100ms |
-| Reranking | ~35ms | ~35ms |
-| LLM Generation | — | ~500-1500ms |
-| Opinion Storage | — | ~50ms |
-| **Total** | **~135ms** | **~700-1700ms** |
-
-## Hybrid Pattern
-
-Use Search for context, Think for final response:
-
-```python
-# First: fast search to check relevance
-results = client.search(agent_id="my-agent", query="Alice project status")
-
-if len(results) > 0:
-    # Only call Think if we have relevant memories
-    answer = client.think(agent_id="my-agent", query="Summarize Alice's project status")
-else:
-    answer = {"text": "I don't have information about Alice's projects."}
-```
-
-## Decision Flowchart
-
-```mermaid
-graph TD
-    A[Need memory access] --> B{Need natural language response?}
-    B -->|No| C[Use Search]
-    B -->|Yes| D{Need disposition/opinions?}
-    D -->|No| E{Building context for another LLM?}
-    E -->|Yes| C
-    E -->|No| F[Use Think]
-    D -->|Yes| F
-```
-
-## Cost Considerations
-
-| Factor | Search | Think |
-|--------|--------|-------|
-| API calls | 1 | 1 |
-| LLM tokens | 0 | 500-2000 |
-| Latency | Low | Medium |
-| Cost | Low | Higher (LLM usage) |
-
-If you're making many requests or building a high-throughput system, consider:
-- Use Search for bulk operations
-- Use Think for user-facing responses
-- Cache Think responses when appropriate
-
-
----
-
-
 ## File: developer/development.md
 
 # Development Guide
@@ -5097,6 +4814,354 @@ Any PostgreSQL instance that satisfies these requirements should work. If you en
 - Azure Database for PostgreSQL
 - Supabase
 - Neon
+
+
+---
+
+
+## File: sdks/integrations/litellm.md
+
+# LiteLLM
+
+Universal LLM memory integration via [LiteLLM](https://github.com/BerriAI/litellm). Add persistent memory to any LLM application with just a few lines of code.
+
+## Features
+
+- **Universal LLM Support** - Works with 100+ LLM providers via LiteLLM (OpenAI, Anthropic, Groq, Azure, AWS Bedrock, Google Vertex AI, and more)
+- **Simple Integration** - Just configure, enable, and use `hindsight_litellm.completion()`
+- **Automatic Memory Injection** - Relevant memories are injected into prompts before LLM calls
+- **Automatic Conversation Storage** - Conversations are stored to Hindsight for future recall
+- **Two Memory Modes** - Choose between `reflect` (synthesized context) or `recall` (raw memory retrieval)
+- **Direct Memory APIs** - Query, synthesize, and store memories manually
+- **Native Client Wrappers** - Alternative wrappers for OpenAI and Anthropic SDKs
+
+## Installation
+
+```bash
+pip install hindsight-litellm
+```
+
+## Quick Start
+
+```python
+
+
+# Configure and enable memory integration
+hindsight_litellm.configure(
+    hindsight_api_url="http://localhost:8888",
+    bank_id="my-agent",
+)
+hindsight_litellm.enable()
+
+# Use the convenience wrapper - memory is automatically injected and stored
+response = hindsight_litellm.completion(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "What did we discuss about AI?"}]
+)
+```
+
+## How It Works
+
+When you call `completion()`, the following happens automatically:
+
+1. **Memory Retrieval** - Hindsight is queried for relevant memories based on the conversation
+2. **Prompt Injection** - Memories are injected into the system message
+3. **LLM Call** - The enriched prompt is sent to the LLM
+4. **Conversation Storage** - The conversation is stored to Hindsight for future recall
+5. **Response Returned** - You receive the response as normal
+
+## Configuration Options
+
+```python
+hindsight_litellm.configure(
+    # Required
+    hindsight_api_url="http://localhost:8888",  # Hindsight API server URL
+    bank_id="my-agent",                          # Memory bank ID
+
+    api_key="your-api-key",        # Optional API key for authentication
+
+    # Optional - Memory behavior
+    store_conversations=True,      # Store conversations after LLM calls
+    inject_memories=True,          # Inject relevant memories into prompts
+    use_reflect=False,             # Use reflect API (synthesized) vs recall (raw memories)
+    reflect_include_facts=False,   # Include source facts with reflect responses
+    max_memories=None,             # Maximum memories to inject (None = unlimited)
+    max_memory_tokens=4096,        # Maximum tokens for memory context
+    recall_budget="mid",           # Recall budget: "low", "mid", "high"
+    fact_types=["world", "agent"], # Filter fact types to inject
+
+    # Optional - Bank Configuration
+    bank_name="My Agent",          # Human-readable display name for the memory bank
+    background="This agent...",    # Instructions guiding what Hindsight should remember
+
+    # Optional - Advanced
+    injection_mode="system_message",  # or "prepend_user"
+    excluded_models=["gpt-3.5*"],     # Exclude certain models
+    verbose=True,                     # Enable verbose logging and debug info
+)
+```
+
+### Bank Configuration
+
+The `background` and `bank_name` parameters configure the memory bank itself. When provided, `configure()` will automatically create or update the bank with these settings.
+
+```python
+hindsight_litellm.configure(
+    hindsight_api_url="http://localhost:8888",
+    bank_id="support-router",
+    bank_name="Customer Support Router",
+    background="""This agent routes customer support requests to the appropriate team.
+    Remember which types of issues should go to which teams (billing, technical, sales).
+    Track customer preferences for communication channels and past issue resolutions.""",
+)
+```
+
+### Memory Modes: Reflect vs Recall
+
+- **Recall mode** (`use_reflect=False`, default): Retrieves raw memory facts and injects them as a numbered list. Best when you need precise, individual memories.
+- **Reflect mode** (`use_reflect=True`): Synthesizes memories into a coherent context paragraph. Best for natural, conversational memory context.
+
+```python
+# Recall mode - raw memories
+hindsight_litellm.configure(
+    bank_id="my-agent",
+    use_reflect=False,  # Default
+)
+# Injects: "1. [WORLD] User prefers Python\n2. [OPINION] User dislikes Java..."
+
+# Reflect mode - synthesized context
+hindsight_litellm.configure(
+    bank_id="my-agent",
+    use_reflect=True,
+)
+# Injects: "Based on previous conversations, the user is a Python developer who..."
+```
+
+## Multi-Provider Support
+
+Works with any LiteLLM-supported provider:
+
+```python
+
+
+hindsight_litellm.configure(
+    hindsight_api_url="http://localhost:8888",
+    bank_id="my-agent",
+)
+hindsight_litellm.enable()
+
+# OpenAI
+hindsight_litellm.completion(model="gpt-4o", messages=[...])
+
+# Anthropic
+hindsight_litellm.completion(model="claude-3-5-sonnet-20241022", messages=[...])
+
+# Groq
+hindsight_litellm.completion(model="groq/llama-3.1-70b-versatile", messages=[...])
+
+# Azure OpenAI
+hindsight_litellm.completion(model="azure/gpt-4", messages=[...])
+
+# AWS Bedrock
+hindsight_litellm.completion(model="bedrock/anthropic.claude-3", messages=[...])
+
+# Google Vertex AI
+hindsight_litellm.completion(model="vertex_ai/gemini-pro", messages=[...])
+```
+
+## Direct Memory APIs
+
+### Recall - Query raw memories
+
+```python
+from hindsight_litellm import configure, recall
+
+configure(bank_id="my-agent", hindsight_api_url="http://localhost:8888")
+
+memories = recall("what projects am I working on?", budget="mid")
+for m in memories:
+    print(f"- [{m.fact_type}] {m.text}")
+```
+
+### Reflect - Get synthesized context
+
+```python
+from hindsight_litellm import configure, reflect
+
+configure(bank_id="my-agent", hindsight_api_url="http://localhost:8888")
+
+result = reflect("what do you know about the user's preferences?")
+print(result.text)
+```
+
+### Retain - Store memories
+
+```python
+from hindsight_litellm import configure, retain
+
+configure(bank_id="my-agent", hindsight_api_url="http://localhost:8888")
+
+result = retain(
+    content="User mentioned they're working on a machine learning project",
+    context="Discussion about current projects",
+)
+```
+
+### Async APIs
+
+```python
+from hindsight_litellm import arecall, areflect, aretain
+
+# Async versions of all memory APIs
+memories = await arecall("what do you know about me?")
+context = await areflect("summarize user preferences")
+result = await aretain(content="New information to remember")
+```
+
+## Native Client Wrappers
+
+Alternative to LiteLLM callbacks for direct SDK integration.
+
+### OpenAI Wrapper
+
+```python
+from openai import OpenAI
+from hindsight_litellm import wrap_openai
+
+client = OpenAI()
+wrapped = wrap_openai(
+    client,
+    bank_id="my-agent",
+    hindsight_api_url="http://localhost:8888",
+)
+
+response = wrapped.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "What do you know about me?"}]
+)
+```
+
+### Anthropic Wrapper
+
+```python
+from anthropic import Anthropic
+from hindsight_litellm import wrap_anthropic
+
+client = Anthropic()
+wrapped = wrap_anthropic(
+    client,
+    bank_id="my-agent",
+    hindsight_api_url="http://localhost:8888",
+)
+
+response = wrapped.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+## Debug Mode
+
+When `verbose=True`, you can inspect exactly what memories are being injected:
+
+```python
+from hindsight_litellm import configure, enable, completion, get_last_injection_debug
+
+configure(
+    bank_id="my-agent",
+    hindsight_api_url="http://localhost:8888",
+    verbose=True,
+)
+enable()
+
+response = completion(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "What's my favorite color?"}]
+)
+
+# Inspect what was injected
+debug = get_last_injection_debug()
+if debug:
+    print(f"Mode: {debug.mode}")           # "reflect" or "recall"
+    print(f"Injected: {debug.injected}")   # True/False
+    print(f"Results: {debug.results_count}")
+    print(f"Memory context:\n{debug.memory_context}")
+```
+
+## Context Manager
+
+```python
+from hindsight_litellm import hindsight_memory
+
+
+with hindsight_memory(bank_id="user-123"):
+    response = litellm.completion(model="gpt-4", messages=[...])
+# Memory integration automatically disabled after context
+```
+
+## Disabling and Cleanup
+
+```python
+from hindsight_litellm import disable, cleanup
+
+# Temporarily disable memory integration
+disable()
+
+# Clean up all resources (call when shutting down)
+cleanup()
+```
+
+## API Reference
+
+### Main Functions
+
+| Function | Description |
+|----------|-------------|
+| `configure(...)` | Configure global Hindsight settings |
+| `enable()` | Enable memory integration with LiteLLM |
+| `disable()` | Disable memory integration |
+| `is_enabled()` | Check if memory integration is enabled |
+| `cleanup()` | Clean up all resources |
+
+### Configuration Functions
+
+| Function | Description |
+|----------|-------------|
+| `get_config()` | Get current configuration |
+| `is_configured()` | Check if Hindsight is configured |
+| `reset_config()` | Reset configuration to defaults |
+
+### Memory Functions
+
+| Function | Description |
+|----------|-------------|
+| `recall(query, ...)` | Synchronously query raw memories |
+| `arecall(query, ...)` | Asynchronously query raw memories |
+| `reflect(query, ...)` | Synchronously get synthesized memory context |
+| `areflect(query, ...)` | Asynchronously get synthesized memory context |
+| `retain(content, ...)` | Synchronously store a memory |
+| `aretain(content, ...)` | Asynchronously store a memory |
+
+### Debug Functions
+
+| Function | Description |
+|----------|-------------|
+| `get_last_injection_debug()` | Get debug info from last memory injection |
+| `clear_injection_debug()` | Clear stored debug info |
+
+### Client Wrappers
+
+| Function | Description |
+|----------|-------------|
+| `wrap_openai(client, ...)` | Wrap OpenAI client with memory |
+| `wrap_anthropic(client, ...)` | Wrap Anthropic client with memory |
+
+## Requirements
+
+- Python >= 3.10
+- litellm >= 1.40.0
+- A running Hindsight API server
 
 
 ---

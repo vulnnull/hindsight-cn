@@ -147,6 +147,18 @@ const sidebars: SidebarsConfig = {
         },
       ],
     },
+    {
+      type: 'category',
+      label: 'Integrations',
+      collapsible: false,
+      items: [
+        {
+          type: 'doc',
+          id: 'sdks/integrations/litellm',
+          label: 'LiteLLM',
+        },
+      ],
+    },
   ],
   cookbookSidebar: [
     {
