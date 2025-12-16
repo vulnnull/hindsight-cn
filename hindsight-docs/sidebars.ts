@@ -154,6 +154,11 @@ const sidebars: SidebarsConfig = {
       items: [
         {
           type: 'doc',
+          id: 'sdks/integrations/local-mcp',
+          label: 'Local MCP Server',
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/litellm',
           label: 'LiteLLM',
         },

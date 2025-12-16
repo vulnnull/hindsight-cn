@@ -282,3 +282,81 @@ If no genuine opinions are expressed (e.g., the response just says "I don't know
     except Exception as e:
         logger.warning(f"Failed to extract opinions: {str(e)}")
         return []
+
+
+async def reflect(
+    llm_config,
+    query: str,
+    experience_facts: List[str] = None,
+    world_facts: List[str] = None,
+    opinion_facts: List[str] = None,
+    name: str = "Assistant",
+    disposition: DispositionTraits = None,
+    background: str = "",
+    context: str = None,
+) -> str:
+    """
+    Standalone reflect function for generating answers based on facts.
+
+    This is a static version of the reflect operation that can be called
+    without a MemoryEngine instance, useful for testing.
+
+    Args:
+        llm_config: LLM provider instance
+        query: Question to answer
+        experience_facts: List of experience/agent fact strings
+        world_facts: List of world fact strings
+        opinion_facts: List of opinion fact strings
+        name: Name of the agent/persona
+        disposition: Disposition traits (defaults to neutral)
+        background: Background information
+        context: Additional context for the prompt
+
+    Returns:
+        Generated answer text
+    """
+    # Default disposition if not provided
+    if disposition is None:
+        disposition = DispositionTraits(skepticism=3, literalism=3, empathy=3)
+
+    # Convert string lists to MemoryFact format for formatting
+    def to_memory_facts(facts: List[str], fact_type: str) -> List[MemoryFact]:
+        if not facts:
+            return []
+        return [MemoryFact(id=f"test-{i}", text=f, fact_type=fact_type) for i, f in enumerate(facts)]
+
+    agent_results = to_memory_facts(experience_facts or [], "experience")
+    world_results = to_memory_facts(world_facts or [], "world")
+    opinion_results = to_memory_facts(opinion_facts or [], "opinion")
+
+    # Format facts for prompt
+    agent_facts_text = format_facts_for_prompt(agent_results)
+    world_facts_text = format_facts_for_prompt(world_results)
+    opinion_facts_text = format_facts_for_prompt(opinion_results)
+
+    # Build prompt
+    prompt = build_think_prompt(
+        agent_facts_text=agent_facts_text,
+        world_facts_text=world_facts_text,
+        opinion_facts_text=opinion_facts_text,
+        query=query,
+        name=name,
+        disposition=disposition,
+        background=background,
+        context=context,
+    )
+
+    system_message = get_system_message(disposition)
+
+    # Call LLM
+    answer_text = await llm_config.call(
+        messages=[
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": prompt}
+        ],
+        scope="memory_think",
+        temperature=0.9,
+        max_completion_tokens=1000
+    )
+
+    return answer_text.strip()

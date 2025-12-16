@@ -509,30 +509,20 @@ article a:not(.button):not([class*="hash-link"]) {
   font-weight: 500;
 }
 
+/* Links containing code - the code inherits the transparent text-fill from the link */
+article a code {
+  -webkit-text-fill-color: #3396e8 !important;
+  color: #3396e8 !important;
+}
+
+article a:hover code {
+  -webkit-text-fill-color: #0074d9 !important;
+  color: #0074d9 !important;
+}
+
 article a:not(.button):not([class*="hash-link"]):hover {
   text-decoration: underline;
   text-decoration-color: var(--hindsight-gradient-start);
-}
-
-/* Links inside code blocks - use solid color instead of gradient */
-code a,
-pre a,
-article code a,
-article pre a {
-  background: none !important;
-  -webkit-background-clip: unset !important;
-  -webkit-text-fill-color: var(--ifm-color-primary) !important;
-  background-clip: unset !important;
-  color: var(--ifm-color-primary) !important;
-  text-decoration: underline;
-}
-
-code a:hover,
-pre a:hover,
-article code a:hover,
-article pre a:hover {
-  color: var(--ifm-color-primary-dark) !important;
-  -webkit-text-fill-color: var(--ifm-color-primary-dark) !important;
 }
 
 /* Admonitions - gradient themed */

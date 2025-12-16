@@ -65,13 +65,13 @@ By default, memories are stored in a bank called `mcp`. To use a different bank:
 
 ## Environment Variables
 
+All standard [Hindsight configuration variables](/developer/configuration) are supported.
+
+### Local MCP Specific
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HINDSIGHT_API_LLM_API_KEY` | Yes | - | API key for the LLM provider |
-| `HINDSIGHT_API_LLM_PROVIDER` | No | `openai` | LLM provider (`openai`, `groq`, `anthropic`) |
-| `HINDSIGHT_API_LLM_MODEL` | No | `gpt-4o-mini` | Model to use for fact extraction |
-| `HINDSIGHT_API_MCP_LOCAL_BANK_ID` | No | `mcp` | Memory bank ID |
-| `HINDSIGHT_API_LOG_LEVEL` | No | `info` | Log level (`debug`, `info`, `warning`, `error`) |
+| `HINDSIGHT_API_MCP_LOCAL_BANK_ID` | No | `mcp` | Memory bank ID to use |
 
 ## Available Tools
 
@@ -125,23 +125,6 @@ Search memories to provide personalized responses.
 }
 ```
 
-**Response:**
-```json
-{
-  "results": [
-    {
-      "id": "...",
-      "text": "User's favorite color is blue",
-      "fact_type": "world",
-      "context": "preferences",
-      "event_date": null,
-      "score": 0.95
-    }
-  ],
-  "total_tokens": 42
-}
-```
-
 ## How It Works
 
 The local MCP server:
@@ -151,16 +134,6 @@ The local MCP server:
 3. **Connects via stdio** to Claude Code using the MCP protocol
 
 Data is persisted in the pg0 data directory (`~/.pg0/hindsight-mcp/`), so your memories survive restarts.
-
-## Comparison: Local vs Server MCP
-
-| Feature | Local MCP | Server MCP |
-|---------|-----------|------------|
-| Setup | Zero config | Requires running server |
-| Database | Embedded (pg0) | External PostgreSQL |
-| Multi-user | Single user | Multi-tenant |
-| Scalability | Single machine | Horizontally scalable |
-| Use case | Personal/development | Production/teams |
 
 ## Troubleshooting
 
