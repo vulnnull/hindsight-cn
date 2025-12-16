@@ -2,6 +2,10 @@ import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
+// Announcement bar - supports HTML for links
+// Set to empty string '' to hide the bar
+const ANNOUNCEMENT_BAR = 'HINDSIGHT is State-of-the-Art on Memory for AI Agents | <a href="https://arxiv.org/abs/2512.12818" target="_blank">Read the paper →</a>';
+
 const config: Config = {
   title: 'Hindsight',
   tagline: 'Entity-Aware Memory System for AI Agents',
@@ -115,6 +119,15 @@ const config: Config = {
   themes: ['@docusaurus/theme-mermaid'],
 
   themeConfig: {
+    ...(ANNOUNCEMENT_BAR && {
+      announcementBar: {
+        id: 'announcement',
+        content: ANNOUNCEMENT_BAR,
+        backgroundColor: '#0074d9',
+        textColor: '#ffffff',
+        isCloseable: true,
+      },
+    }),
     image: 'img/hindsight-social-card.jpg',
     colorMode: {
       defaultMode: 'dark',

@@ -108,6 +108,19 @@ After the four strategies run, results are **fused together**:
 
 ---
 
+## Why Multiple Strategies?
+
+Consider the query: **"What did Alice think about Python last spring?"**
+
+- **Semantic** finds facts about Alice's opinions on programming
+- **Keyword** ensures "Python" is actually mentioned
+- **Graph** connects Alice → opinions → programming languages
+- **Temporal** filters to "last spring" timeframe
+
+The **fusion** of all four gives you exactly what you're looking for, even though no single strategy would suffice.
+
+---
+
 ## Token Budget Management
 
 Hindsight is built for AI agents, not humans. Traditional search systems return "top-k" results, but agents don't think in terms of result counts—they think in tokens. An agent's context window is measured in tokens, and that's exactly how Hindsight measures results.
@@ -119,19 +132,43 @@ Hindsight is built for AI agents, not humans. Traditional search systems return 
 
 **Parameters you control:**
 - `max_tokens`: How much memory content to return (default: 4096 tokens)
-- `budget`: Budget level for graph traversal (low, mid, high)
+- `budget`: Search depth level (low, mid, high)
 - `fact_type`: Filter by world, experience, opinion, or all
 
-### Additional Context: Chunks and Entity Observations
+### Expanding Context: Chunks and Entity Observations
 
-For the most relevant memories, you can optionally retrieve additional context—each with its own token budget:
+Memories are distilled facts—concise but sometimes missing nuance. When your agent needs deeper context, you can optionally retrieve the source material and related knowledge:
 
-| Option | Parameters | Description |
+| Option | Parameters | When to Use |
 |--------|------------|-------------|
-| **Chunks** | `include_chunks`, `max_chunk_tokens` | Raw text chunks that generated the memories |
-| **Entity Observations** | `include_entities`, `max_entity_tokens` | Related observations about entities mentioned in results |
+| **Chunks** | `include_chunks`, `max_chunk_tokens` | Need exact quotes, original phrasing, or surrounding context |
+| **Entity Observations** | `include_entities`, `max_entity_tokens` | Need broader knowledge about people/things mentioned in results |
 
-This gives your agent richer context while maintaining precise control over total token consumption.
+**Chunks** return the raw text that generated each memory—useful when the distilled fact loses important nuance:
+
+```
+Memory: "Alice prefers Python over JavaScript"
+Chunk:  "Alice mentioned she prefers Python over JavaScript, mainly because
+         of its data science ecosystem, though she admits JS is better for
+         frontend work and she's been learning TypeScript lately."
+```
+
+**Entity Observations** pull in related facts about entities mentioned in your results. If a memory mentions "Alice", you automatically get her role, skills, and other relevant context—without needing a separate query:
+
+```
+Query: "What programming languages does Alice like?"
+Memory: "Alice prefers Python over JavaScript"
+Entity Observations (Alice):
+  - "Alice is a senior data scientist at Google"
+  - "Alice specializes in machine learning"
+  - "Alice has been learning TypeScript"
+```
+
+**When to include them:**
+- **Chunks**: When generating responses that need verbatim quotes or when context matters (e.g., "What exactly did Alice say about the project?")
+- **Entity Observations**: When building complete profiles or when the conversation might reference multiple aspects of an entity (e.g., "Tell me about Alice's work")
+
+Each has its own token budget, giving you precise control over total context size.
 
 ---
 
@@ -139,17 +176,17 @@ This gives your agent richer context while maintaining precise control over tota
 
 Different use cases require different trade-offs between **recall quality** and **response speed**. Two parameters control this:
 
-### Budget: Graph Exploration Depth
+### Budget: Search Depth
 
-Controls how many nodes to explore when traversing the knowledge graph:
+Controls how thoroughly Hindsight explores the memory bank—affecting graph traversal depth, candidate pool size, and cross-encoder re-ranking:
 
-| Budget | Nodes Explored | Best For | Trade-off |
-|--------|----------------|----------|-----------|
-| **low** | 100 nodes | Quick lookups, simple queries | Fast, may miss distant connections |
-| **mid** | 300 nodes | Most queries, balanced | Good coverage, reasonable speed |
-| **high** | 600 nodes | Complex multi-hop queries | Thorough, slower |
+| Budget | Best For | Trade-off |
+|--------|----------|-----------|
+| **low** | Quick lookups, simple queries | Fast, may miss indirect connections |
+| **mid** | Most queries, balanced | Good coverage, reasonable speed |
+| **high** | Complex queries requiring deep exploration | Thorough, slower |
 
-**Example:** "What did Alice's manager's team work on?" benefits from high budget to traverse Alice → manager → team → projects.
+**Example:** "What did Alice's manager's team work on?" benefits from high budget to traverse multiple hops (Alice → manager → team → projects) and evaluate more candidates.
 
 ### Max Tokens: Context Window Size
 
@@ -169,7 +206,7 @@ Budget and max_tokens control different aspects of recall:
 
 | Parameter | What it controls | Latency impact | Example |
 |-----------|------------------|----------------|---------|
-| **Budget** | How deep to explore the graph | Search time | High budget finds Alice → manager → team → projects |
+| **Budget** | How thoroughly to explore memories | Search time | High budget finds Alice → manager → team → projects |
 | **Max Tokens** | How much context to return | LLM processing time | High tokens returns more memories to the agent |
 
 **They're independent.** Common combinations:
@@ -189,19 +226,6 @@ Budget and max_tokens control different aspects of recall:
 | **Document Q&A** | mid | 4096 | Balanced coverage and speed |
 | **Research queries** | high | 8192 | Comprehensive, multi-hop reasoning |
 | **Real-time search** | low | 2048 | Minimize latency |
-
----
-
-## Why Multiple Strategies?
-
-Consider the query: **"What did Alice think about Python last spring?"**
-
-- **Semantic** finds facts about Alice's opinions on programming
-- **Keyword** ensures "Python" is actually mentioned
-- **Graph** connects Alice → opinions → programming languages
-- **Temporal** filters to "last spring" timeframe
-
-The **fusion** of all four gives you exactly what you're looking for, even though no single strategy would suffice.
 
 ---
 

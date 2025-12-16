@@ -62,9 +62,9 @@ Hindsight distinguishes between **world** facts (about others) and **experience*
 | **world**       | Facts about people, places, things | "Alice works at Google" |
 | **experience** | Conversations and events         | "I recommended Python to Alice" |
 
-This separation is important for `reflect()` — the bank can reason about what it knows versus what happened in conversations.
 
 **Note:** Opinions aren't created during `retain()` — only during `reflect()` when the bank forms beliefs.
+This separation is important for `reflect()` — the bank can reason about what it knows versus what happened in conversations.
 
 ---
 

@@ -52,10 +52,9 @@ pg0 is a single binary containing:
 ### Behavior
 
 When no `DATABASE_URL` is configured, Hindsight:
-1. Downloads the pg0 binary for the current platform (macOS ARM, Linux x86_64/ARM64, Windows)
-2. Starts an embedded PostgreSQL instance on port 5555
-3. Initializes the schema
-4. Stores data in `~/.hindsight/pg0/`
+1. Starts an embedded PostgreSQL instance on port 5555
+2. Initializes the schema
+3. Stores data in `~/.hindsight/pg0/`
 
 ### Environments
 

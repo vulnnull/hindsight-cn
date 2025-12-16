@@ -48,5 +48,8 @@
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.182.0",
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "prettier": "^3.7.4"
   }
 }

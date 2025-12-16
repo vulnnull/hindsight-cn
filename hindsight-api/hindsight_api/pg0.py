@@ -44,7 +44,7 @@ class EmbeddedPostgres:
             self._pg0 = Pg0(**kwargs)
         return self._pg0
 
-    async def start(self, max_retries: int = 3, retry_delay: float = 2.0) -> str:
+    async def start(self, max_retries: int = 5, retry_delay: float = 4.0) -> str:
         """Start the PostgreSQL server with retry logic."""
         port_info = f"port={self.port}" if self.port else "port=auto"
         logger.info(f"Starting embedded PostgreSQL (name={self.name}, {port_info})...")

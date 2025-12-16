@@ -126,7 +126,6 @@ hindsight-api
 hindsight-api --port 9000          # Custom port (default: 8888)
 hindsight-api --host 127.0.0.1     # Bind to localhost only
 hindsight-api --workers 4          # Multiple worker processes
-hindsight-api --mcp                # Enable MCP server
 hindsight-api --log-level debug    # Verbose logging
 ```
 

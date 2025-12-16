@@ -60,8 +60,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY hindsight-clients/typescript/ ./hindsight-clients/typescript/
 
-# Install and build SDK using workspace
-RUN npm ci -w @vectorize-io/hindsight-client
+# Install and build SDK using workspace (--ignore-scripts skips git hooks setup)
+RUN npm ci --ignore-scripts -w @vectorize-io/hindsight-client
 RUN npm run build -w @vectorize-io/hindsight-client
 
 # =============================================================================

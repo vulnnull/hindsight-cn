@@ -25,10 +25,10 @@ This means **Recall (search) operations are blazingly fast** because all the hea
 
 ### Performance Comparison
 
-| Operation | Typical Latency | Primary Bottleneck | Optimization Strategy |
-|-----------|----------------|-------------------|----------------------|
-| **Recall** | 100-600ms | Vector search, graph traversal | ✅ Already optimized |
-| **Reflect** | 800-3000ms | LLM generation + search | Reduce search budget, use faster LLM |
+| Operation | Typical Latency | Primary Bottleneck | Optimization Strategy            |
+|-----------|----------------|-------------------|----------------------------------|
+| **Recall** | 100-600ms | Re-ranker (on CPU) | Use GPU for re-ranking, or reduce budget |
+| **Reflect** | 800-3000ms | LLM generation | Use faster LLM                   |
 | **Retain** | 500ms-2000ms per batch | **LLM fact extraction** | Use high-throughput LLM provider |
 
 Hindsight is designed to ensure your **application's read path (recall/reflect) is always fast**, even if it means spending more time upfront during writes. This is the right trade-off for memory systems where:
@@ -50,8 +50,8 @@ The fact extraction process is structured and well-defined, so smaller, faster m
 To maximize retention throughput:
 
 1. **Use high-throughput LLM providers**: Choose providers with high requests-per-minute (RPM) limits and low latency
-   - ✅ **Fast**: [Groq](https://groq.com) with `gpt-oss-20b` or other openai-oss models, self-hosted models on GPU clusters (vLLM, TGI)
-   - ⚠️ **Slower**: Standard cloud LLM providers with rate limits
+   - **Fast**: [Groq](https://groq.com) with `gpt-oss-20b` or other openai-oss models, self-hosted models on GPU clusters (vLLM, TGI)
+   - **Slow**: Standard cloud LLM providers with rate limits
 
 2. **Batch your operations**: Group related content into batch requests. The only limit is the HTTP payload size — Hindsight automatically splits large batches into smaller, optimized chunks under the hood, so you don't have to worry about it.
 
@@ -61,15 +61,7 @@ To maximize retention throughput:
 
 ### Throughput
 
-Typical ingestion performance:
-
-| Mode | Items/second | Use Case |
-|------|--------------|----------|
-| Synchronous | ~50-100 | Real-time updates, small batches |
-| Async (batched) | ~500-1000 | Bulk imports, background processing |
-| Parallel async | ~2000-5000 | Large-scale data migration |
-
-**Factors affecting throughput:**
+Factors affecting throughput:
 - Document size and complexity
 - LLM provider rate limits (for fact extraction)
 - Database write performance
@@ -83,13 +75,13 @@ Typical ingestion performance:
 
 The `budget` parameter controls the search depth and quality. Choose based on query complexity — comprehensive questions that need thorough analysis benefit from higher budgets:
 
-| Budget | Latency | Memory Activation | Use Case |
-|--------|---------|-------------------|----------|
-| `low` | 100-300ms | ~10-50 facts | Quick lookups, real-time chat |
-| `mid` | 300-600ms | ~50-200 facts | Standard queries, balanced performance |
-| `high` | 500-1500ms | ~200-500 facts | Comprehensive questions, thorough analysis |
+| Budget | Use Case |
+|--------|----------|
+| `low` | Quick lookups, real-time chat |
+| `mid` | Standard queries, balanced performance |
+| `high` | Comprehensive questions, thorough analysis |
 
-### Search Optimization
+### Optimization
 
 1. **Appropriate budgets**: Use lower budgets for simple queries, higher for comprehensive reasoning
 2. **Limit result tokens**: Set `max_tokens` to control response size (default: 4096)
@@ -107,18 +99,16 @@ Hindsight uses PostgreSQL with pgvector for efficient vector search:
 
 ### Performance Characteristics
 
-| Component | Latency | Description |
-|-----------|---------|-------------|
-| Memory search | 300-1000ms | Based on budget (low/mid/high) |
-| LLM generation | 500-2000ms | Depends on provider and response length |
-| **Total** | **800-3000ms** | Typical end-to-end latency |
+| Component | Latency        | Description |
+|-----------|----------------|-------------|
+| Memory search | 100-600ms      | Based on budget (low/mid/high) |
+| LLM generation | 500-2000ms     | Depends on provider and response length |
+| **Total** | **600-2600ms** | Typical end-to-end latency |
 
 ### Optimization Strategies
 
 1. **Budget selection**: Use lower budgets when context is sufficient
-2. **Context provision**: Provide relevant `context` to reduce search requirements
-3. **Streaming responses**: Use streaming APIs (when available) for faster time-to-first-token
-4. **Caching**: Cache frequent queries at the application level
+2. **Context provision**: Provide relevant `context` to reduce recall requirements and steer towards more focused answers
 
 ## Best Practices
 

@@ -1,127 +1,81 @@
 # Configuration
 
-Complete reference for configuring Hindsight server through environment variables and configuration files.
+Complete reference for configuring Hindsight services through environment variables.
 
-## Environment Variables
+Hindsight has two services, each with its own configuration prefix:
 
-Hindsight is configured entirely through environment variables, making it easy to deploy across different environments and container orchestration platforms.
+| Service | Prefix | Description |
+|---------|--------|-------------|
+| **API Service** | `HINDSIGHT_API_*` | Core memory engine |
+| **Control Plane** | `HINDSIGHT_CP_*` | Web UI |
 
-All environment variable names and defaults are defined in `hindsight_api.config`. You can use `MemoryEngine.from_env()` to create a MemoryEngine instance configured from environment variables:
+---
 
-```python
-from hindsight_api import MemoryEngine
+## API Service
 
-# Create from environment variables
-memory = MemoryEngine.from_env()
-await memory.initialize()
-```
+The API service handles all memory operations (retain, recall, reflect).
 
-### LLM Provider Configuration
+### Database
 
-Configure the LLM provider used for fact extraction, entity resolution, and reasoning operations.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_DATABASE_URL` | PostgreSQL connection string | `pg0` (embedded) |
 
-#### Common LLM Settings
+If not provided, the server uses embedded `pg0` — convenient for development but not recommended for production.
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `HINDSIGHT_API_LLM_PROVIDER` | LLM provider: `groq`, `openai`, `gemini`, `ollama` | `groq` | Yes |
-| `HINDSIGHT_API_LLM_API_KEY` | API key for LLM provider | - | Yes (except ollama) |
-| `HINDSIGHT_API_LLM_MODEL` | Model name | Provider-specific | No |
-| `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default | No |
+### LLM Provider
 
-#### Provider-Specific Examples
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `groq`, `openai`, `gemini`, `ollama` | `openai` |
+| `HINDSIGHT_API_LLM_API_KEY` | API key for LLM provider | - |
+| `HINDSIGHT_API_LLM_MODEL` | Model name | `gpt-5-mini` |
+| `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default |
 
-**Groq (Recommended for Fast Inference)**
+**Provider Examples**
 
 ```bash
+# Groq (recommended for fast inference)
 export HINDSIGHT_API_LLM_PROVIDER=groq
 export HINDSIGHT_API_LLM_API_KEY=gsk_xxxxxxxxxxxx
 export HINDSIGHT_API_LLM_MODEL=openai/gpt-oss-20b
-```
 
-**OpenAI**
-
-```bash
+# OpenAI
 export HINDSIGHT_API_LLM_PROVIDER=openai
 export HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx
 export HINDSIGHT_API_LLM_MODEL=gpt-4o
-```
 
-**Gemini**
-
-```bash
+# Gemini
 export HINDSIGHT_API_LLM_PROVIDER=gemini
 export HINDSIGHT_API_LLM_API_KEY=xxxxxxxxxxxx
 export HINDSIGHT_API_LLM_MODEL=gemini-2.0-flash
-```
 
-**Ollama (Local, No API Key)**
-
-```bash
+# Ollama (local, no API key)
 export HINDSIGHT_API_LLM_PROVIDER=ollama
 export HINDSIGHT_API_LLM_BASE_URL=http://localhost:11434/v1
 export HINDSIGHT_API_LLM_MODEL=llama3.1
-```
 
-**OpenAI-Compatible Endpoints**
-
-```bash
+# OpenAI-compatible endpoint
 export HINDSIGHT_API_LLM_PROVIDER=openai
 export HINDSIGHT_API_LLM_BASE_URL=https://your-endpoint.com/v1
 export HINDSIGHT_API_LLM_API_KEY=your-api-key
 export HINDSIGHT_API_LLM_MODEL=your-model-name
 ```
 
-### Database Configuration
+### Embeddings
 
-Configure the PostgreSQL database connection and behavior.
-
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `HINDSIGHT_API_DATABASE_URL` | PostgreSQL connection string | - | Yes* |
-
-**\*Note**: If `DATABASE_URL` is not provided, the server will use embedded `pg0` (embedded PostGRE).
-
-### MCP Server Configuration
-
-Configure the Model Context Protocol (MCP) server for AI assistant integrations.
-
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `HINDSIGHT_API_MCP_ENABLED` | Enable MCP server | `true` | No |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local` or `tei` | `local` |
+| `HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL` | Model for local provider | `BAAI/bge-small-en-v1.5` |
+| `HINDSIGHT_API_EMBEDDINGS_TEI_URL` | TEI server URL | - |
 
 ```bash
-# Enable MCP server (default)
-export HINDSIGHT_API_MCP_ENABLED=true
-
-# Disable MCP server
-export HINDSIGHT_API_MCP_ENABLED=false
-```
-
-### Embeddings Configuration
-
-Configure the embeddings provider for semantic search. By default, uses local SentenceTransformers models.
-
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local` or `tei` | `local` | No |
-| `HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL` | Model name for local provider | `BAAI/bge-small-en-v1.5` | No |
-| `HINDSIGHT_API_EMBEDDINGS_TEI_URL` | TEI server URL | - | Yes (if provider is `tei`) |
-
-**Local Provider (Default)**
-
-Uses SentenceTransformers to run embedding models locally. Good for development and smaller deployments.
-
-```bash
+# Local (default) - uses SentenceTransformers
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
 export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-small-en-v1.5
-```
 
-**TEI Provider (HuggingFace Text Embeddings Inference)**
-
-Uses a remote [TEI server](https://github.com/huggingface/text-embeddings-inference) for high-performance inference. Recommended for production deployments.
-
-```bash
+# TEI - HuggingFace Text Embeddings Inference (recommended for production)
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=tei
 export HINDSIGHT_API_EMBEDDINGS_TEI_URL=http://localhost:8080
 ```
@@ -130,63 +84,73 @@ export HINDSIGHT_API_EMBEDDINGS_TEI_URL=http://localhost:8080
 All embedding models must produce 384-dimensional vectors to match the database schema.
 :::
 
-### Reranker Configuration
+### Reranker
 
-Configure the cross-encoder reranker for improving search result relevance. By default, uses local SentenceTransformers models.
-
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local` or `tei` | `local` | No |
-| `HINDSIGHT_API_RERANKER_LOCAL_MODEL` | Model name for local provider | `cross-encoder/ms-marco-MiniLM-L-6-v2` | No |
-| `HINDSIGHT_API_RERANKER_TEI_URL` | TEI server URL | - | Yes (if provider is `tei`) |
-
-**Local Provider (Default)**
-
-Uses SentenceTransformers CrossEncoder to run reranking locally.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local` or `tei` | `local` |
+| `HINDSIGHT_API_RERANKER_LOCAL_MODEL` | Model for local provider | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+| `HINDSIGHT_API_RERANKER_TEI_URL` | TEI server URL | - |
 
 ```bash
+# Local (default) - uses SentenceTransformers CrossEncoder
 export HINDSIGHT_API_RERANKER_PROVIDER=local
 export HINDSIGHT_API_RERANKER_LOCAL_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
-```
 
-**TEI Provider (HuggingFace Text Embeddings Inference)**
-
-Uses a remote [TEI server](https://github.com/huggingface/text-embeddings-inference) with a reranker model.
-
-```bash
+# TEI - for high-performance inference
 export HINDSIGHT_API_RERANKER_PROVIDER=tei
 export HINDSIGHT_API_RERANKER_TEI_URL=http://localhost:8081
 ```
 
-:::tip
-When using TEI, you can run separate servers for embeddings and reranking, or use a single server if it supports both operations with your chosen model.
-:::
+### Server
 
-## Configuration Files
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_HOST` | Bind address | `0.0.0.0` |
+| `HINDSIGHT_API_PORT` | Server port | `8888` |
+| `HINDSIGHT_API_LOG_LEVEL` | Log level: `debug`, `info`, `warning`, `error` | `info` |
+| `HINDSIGHT_API_MCP_ENABLED` | Enable MCP server | `true` |
 
-### .env File
+### Programmatic Configuration
 
-The Hindsight API will look for a `.env` file:
+You can also configure the API programmatically using `MemoryEngine.from_env()`:
 
-```bash
-# .env
+```python
+from hindsight_api import MemoryEngine
 
-# Database
-HINDSIGHT_API_DATABASE_URL=postgresql://hindsight:hindsight_dev@localhost:5432/hindsight
-
-# LLM
-HINDSIGHT_API_LLM_PROVIDER=groq
-HINDSIGHT_API_LLM_API_KEY=gsk_xxxxxxxxxxxx
-
-# Embeddings (optional, defaults to local)
-# HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
-# HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-small-en-v1.5
-
-# Reranker (optional, defaults to local)
-# HINDSIGHT_API_RERANKER_PROVIDER=local
-# HINDSIGHT_API_RERANKER_LOCAL_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+memory = MemoryEngine.from_env()
+await memory.initialize()
 ```
 
 ---
 
-For configuration issues not covered here, please [open an issue](https://github.com/your-repo/hindsight/issues) on GitHub.
+## Control Plane
+
+The Control Plane is the web UI for managing memory banks.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_CP_DATAPLANE_API_URL` | URL of the API service | `http://localhost:8888` |
+
+```bash
+# Point Control Plane to a remote API service
+export HINDSIGHT_CP_DATAPLANE_API_URL=http://api.example.com:8888
+```
+
+---
+
+## Example .env File
+
+```bash
+# API Service
+HINDSIGHT_API_DATABASE_URL=postgresql://hindsight:hindsight_dev@localhost:5432/hindsight
+HINDSIGHT_API_LLM_PROVIDER=groq
+HINDSIGHT_API_LLM_API_KEY=gsk_xxxxxxxxxxxx
+
+# Control Plane
+HINDSIGHT_CP_DATAPLANE_API_URL=http://localhost:8888
+```
+
+---
+
+For configuration issues not covered here, please [open an issue](https://github.com/vectorize-io/hindsight/issues) on GitHub.

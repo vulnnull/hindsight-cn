@@ -32,6 +32,9 @@ logs/
 
 .DS_Store
 
+# Generated docs files
+hindsight-docs/static/llms-full.txt
+
 
 hindsight-dev/benchmarks/locomo/results/
 hindsight-dev/benchmarks/longmemeval/results/

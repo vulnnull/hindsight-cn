@@ -22,7 +22,7 @@ export HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY
 hindsight-api
 ```
 
-API available at http://localhost:8888
+API available at [http://localhost:8888](http://localhost:8888/docs)
 
 </TabItem>
 <TabItem value="docker" label="Docker (Full Experience)">

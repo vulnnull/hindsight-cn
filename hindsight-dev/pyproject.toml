@@ -25,3 +25,5 @@ hindsight-api = { workspace = true }
 [project.scripts]
 generate-openapi = "hindsight_dev.generate_openapi:generate_openapi_spec"
 generate-changelog = "hindsight_dev.generate_changelog:main"
+sync-cookbook = "hindsight_dev.sync_cookbook:main"
+generate-llms-full = "hindsight_dev.generate_llms_full:main"

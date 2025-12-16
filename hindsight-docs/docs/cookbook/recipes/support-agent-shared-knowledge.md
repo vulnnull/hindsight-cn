@@ -4,6 +4,13 @@ sidebar_position: 3
 
 # Support Agent with Shared Knowledge
 
+
+:::tip Run this notebook
+This recipe is available as an interactive Jupyter notebook.
+[**Open in GitHub →**](https://github.com/vectorize-io/hindsight-cookbook/blob/main/notebooks/03-support-agent-shared-knowledge.ipynb)
+:::
+
+
 This pattern shows how to build a support agent that combines **per-user memory** with **shared product knowledge** (RAG), giving users personalized support while leveraging a single source of truth for documentation.
 
 ## The Problem
@@ -16,8 +23,6 @@ You're building a support agent that needs to:
 A naive approach would index product docs into each user's memory bank, but this is expensive and wasteful (N copies for N users).
 
 ## The Solution: Multi-Bank Architecture
-
-Create separate memory banks for different concerns:
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
@@ -40,16 +45,39 @@ Create separate memory banks for different concerns:
 - User memory is 100% isolated
 - Simple mental model, no complex filtering
 
-## Implementation
 
-### 1. Set Up Memory Banks
+```python
+!pip install hindsight-client nest_asyncio openai python-dotenv -U
+```
+
+## 1. Set Up Memory Banks
 
 Create three types of banks:
 
-```python
-from hindsight import HindsightClient
 
-client = HindsightClient()
+```python
+# Jupyter notebooks already run an asyncio event loop. The hindsight client 
+# uses loop.run_until_complete() internally, but Python doesn't allow nested 
+# event loops by default. nest_asyncio patches this to allow nesting.
+import nest_asyncio
+nest_asyncio.apply()
+
+import os
+from dotenv import load_dotenv
+from openai import OpenAI as OpenAIClient
+
+# Load environment variables from .env file
+# Copy .env.example to .env and fill in your values
+load_dotenv()
+
+# Configuration (override with env vars if set)
+HINDSIGHT_API_URL = os.getenv("HINDSIGHT_API_URL", "http://localhost:8888")
+HINDSIGHT_UI_URL = os.getenv("HINDSIGHT_UI_URL", "http://localhost:9999")
+
+from hindsight_client import Hindsight
+
+client = Hindsight(base_url=HINDSIGHT_API_URL)
+llm = OpenAIClient()  # Uses OPENAI_API_KEY from .env
 
 # Shared knowledge bank (created once)
 shared_bank = client.create_bank(
@@ -65,55 +93,57 @@ def create_user_bank(user_id: str):
     )
 ```
 
-### 2. Index Product Documentation
+## 2. Index Product Documentation
 
 Index your product docs into the shared bank (do this once, or on doc updates):
 
+
 ```python
-# Index product documentation
+# Index product documentation - retain each doc separately
 client.retain(
     bank_id="product-docs",
-    content=[
-        {
-            "role": "document",
-            "content": "# Pricing Tiers\n\nBasic: $10/mo...",
-            "metadata": {"source": "pricing.md"}
-        },
-        {
-            "role": "document",
-            "content": "# Getting Started\n\nTo set up...",
-            "metadata": {"source": "quickstart.md"}
-        }
-    ]
+    content="# Pricing Tiers\n\nBasic: $10/mo, Pro: $25/mo, Enterprise: Contact us"
 )
+
+client.retain(
+    bank_id="product-docs",
+    content="# Getting Started\n\nTo set up your account, visit the dashboard and click 'New Project'"
+)
+
+# View the stored documents in the UI:
+print(f"View documents: {HINDSIGHT_UI_URL}/banks/product-docs?view=documents")
 ```
 
-### 3. Store User Conversations
+## 3. Store User Conversations
 
 After each support interaction, retain it in the user's bank:
 
+
 ```python
 def save_conversation(user_id: str, messages: list):
+    # Convert messages to string format
+    content = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
     client.retain(
         bank_id=f"user-{user_id}",
-        content=messages  # [{"role": "user", "content": "..."}, ...]
+        content=content
     )
 ```
 
-### 4. Query Multiple Banks at Support Time
+## 4. Query Multiple Banks at Support Time
 
 When handling a user query, retrieve context from both banks:
 
+
 ```python
-async def get_support_context(user_id: str, query: str):
+def get_support_context(user_id: str, query: str):
     # Get user's personal context
-    user_context = await client.recall(
+    user_context = client.recall(
         bank_id=f"user-{user_id}",
         query=query
     )
 
     # Get relevant product documentation
-    docs_context = await client.recall(
+    docs_context = client.recall(
         bank_id="product-docs",
         query=query
     )
@@ -124,11 +154,18 @@ async def get_support_context(user_id: str, query: str):
     }
 ```
 
-### 5. Build the Agent Prompt
+## 5. Build the Agent Prompt
 
 Combine both contexts in your agent's prompt:
 
+
 ```python
+def format_results(results):
+    """Format recall results for the prompt."""
+    if not results:
+        return "No relevant information found."
+    return "\n".join([f"- {r.text}" for r in results])
+
 def build_prompt(query: str, context: dict) -> str:
     return f"""You are a helpful support agent.
 
@@ -167,6 +204,7 @@ When the agent discovers a solution that's not in the docs, you can optionally p
                            all three banks
 ```
 
+
 ```python
 # Optional: Create a curated learnings bank
 learnings_bank = client.create_bank(
@@ -178,71 +216,77 @@ learnings_bank = client.create_bank(
 def promote_learning(insight: str):
     client.retain(
         bank_id="support-learnings",
-        content=[{
-            "role": "system",
-            "content": insight,
-            "metadata": {"type": "verified_solution"}
-        }]
+        content=insight
     )
 ```
 
-Then query three banks: user + docs + learnings.
-
 ## Complete Example
 
+
 ```python
-from hindsight import HindsightClient
+def format_results(results):
+    if not results:
+        return "No relevant information found."
+    return "\n".join([f"- {r.text}" for r in results])
 
-client = HindsightClient()
-
-async def handle_support_request(user_id: str, query: str):
+def handle_support_request(user_id: str, query: str):
     # 1. Recall from user's memory
-    user_recall = await client.recall(
+    user_recall = client.recall(
         bank_id=f"user-{user_id}",
         query=query
     )
 
     # 2. Recall from shared docs
-    docs_recall = await client.recall(
+    docs_recall = client.recall(
         bank_id="product-docs",
         query=query
     )
 
     # 3. Recall from learnings (optional)
-    learnings_recall = await client.recall(
+    learnings_recall = client.recall(
         bank_id="support-learnings",
         query=query
     )
 
-    # 4. Build context for LLM
-    context = f"""
-User History:
+    # 4. Build system prompt with context
+    system_prompt = f"""You are a helpful support agent. Use the context below to answer the user's question.
+
+## User's History
 {format_results(user_recall.results)}
 
-Product Docs:
+## Product Documentation
 {format_results(docs_recall.results)}
 
-Known Solutions:
+## Known Solutions
 {format_results(learnings_recall.results)}
-"""
 
-    # 5. Generate response with your LLM
-    response = await llm.complete(
-        system="You are a support agent...",
-        context=context,
-        query=query
-    )
+Provide helpful, accurate responses based on the documentation. Reference the user's history when relevant."""
 
-    # 6. Save the conversation to user's memory
-    await client.retain(
-        bank_id=f"user-{user_id}",
-        content=[
-            {"role": "user", "content": query},
-            {"role": "assistant", "content": response}
+    # 5. Generate response using OpenAI
+    response = llm.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": query}
         ]
     )
+    assistant_response = response.choices[0].message.content
 
-    return response
+    # 6. Save the conversation to user's memory
+    conversation = f"user: {query}\nassistant: {assistant_response}"
+    client.retain(
+        bank_id=f"user-{user_id}",
+        content=conversation
+    )
+
+    return assistant_response
+
+# Test the function
+create_user_bank("bob")
+print("User: How do I get started?")
+result = handle_support_request("bob", "How do I get started?")
+print(f"Assistant: {result}")
+print(f"\nView user memory: {HINDSIGHT_UI_URL}/banks/user-bob?view=documents")
 ```
 
 ## When to Use This Pattern
@@ -256,3 +300,16 @@ Known Solutions:
 - You need cross-user learning (users benefiting from other users' solutions)
 - Entity relationships must span across users and docs
 
+## Cleanup
+
+Delete the banks created during this notebook:
+
+
+```python
+import requests
+
+# Delete all banks created in this notebook
+for bank_id in ["product-docs", "support-learnings", "user-bob"]:
+    response = requests.delete(f"{HINDSIGHT_API_URL}/v1/default/banks/{bank_id}")
+    print(f"Deleted {bank_id}: {response.json()}")
+```
