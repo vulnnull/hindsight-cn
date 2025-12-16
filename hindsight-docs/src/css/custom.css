@@ -814,3 +814,79 @@ article li {
   margin-bottom: 0.25rem;
 }
 
+/* Announcement bar */
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+@keyframes gradientShift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+div[class*="announcementBar"] {
+  padding: 0.875rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: linear-gradient(90deg, #0074d9 0%, #009296 100%) !important;
+  background-size: 100% 100% !important;
+  border: none !important;
+  position: relative;
+  overflow: hidden;
+}
+
+div[class*="announcementBar"]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+div[class*="announcementBar"] > div {
+  position: relative;
+  z-index: 1;
+}
+
+div[class*="announcementBarContent"] {
+  font-size: 0.875rem;
+  font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: 0.02em;
+}
+
+div[class*="announcementBar"] a {
+  color: #ffffff !important;
+  text-decoration: none;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  margin-left: 0.5rem;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 0.25rem;
+  transition: all 0.2s ease;
+  font-size: 0.8125rem;
+}
+
+div[class*="announcementBar"] a:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+

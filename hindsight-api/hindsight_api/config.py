@@ -3,10 +3,10 @@ Centralized configuration for Hindsight API.
 
 All environment variables and their defaults are defined here.
 """
+
+import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -63,19 +63,19 @@ class HindsightConfig:
 
     # LLM
     llm_provider: str
-    llm_api_key: Optional[str]
+    llm_api_key: str | None
     llm_model: str
-    llm_base_url: Optional[str]
+    llm_base_url: str | None
 
     # Embeddings
     embeddings_provider: str
     embeddings_local_model: str
-    embeddings_tei_url: Optional[str]
+    embeddings_tei_url: str | None
 
     # Reranker
     reranker_provider: str
     reranker_local_model: str
-    reranker_tei_url: Optional[str]
+    reranker_tei_url: str | None
 
     # Server
     host: str
@@ -92,29 +92,24 @@ class HindsightConfig:
         return cls(
             # Database
             database_url=os.getenv(ENV_DATABASE_URL, DEFAULT_DATABASE_URL),
-
             # LLM
             llm_provider=os.getenv(ENV_LLM_PROVIDER, DEFAULT_LLM_PROVIDER),
             llm_api_key=os.getenv(ENV_LLM_API_KEY),
             llm_model=os.getenv(ENV_LLM_MODEL, DEFAULT_LLM_MODEL),
             llm_base_url=os.getenv(ENV_LLM_BASE_URL) or None,
-
             # Embeddings
             embeddings_provider=os.getenv(ENV_EMBEDDINGS_PROVIDER, DEFAULT_EMBEDDINGS_PROVIDER),
             embeddings_local_model=os.getenv(ENV_EMBEDDINGS_LOCAL_MODEL, DEFAULT_EMBEDDINGS_LOCAL_MODEL),
             embeddings_tei_url=os.getenv(ENV_EMBEDDINGS_TEI_URL),
-
             # Reranker
             reranker_provider=os.getenv(ENV_RERANKER_PROVIDER, DEFAULT_RERANKER_PROVIDER),
             reranker_local_model=os.getenv(ENV_RERANKER_LOCAL_MODEL, DEFAULT_RERANKER_LOCAL_MODEL),
             reranker_tei_url=os.getenv(ENV_RERANKER_TEI_URL),
-
             # Server
             host=os.getenv(ENV_HOST, DEFAULT_HOST),
             port=int(os.getenv(ENV_PORT, DEFAULT_PORT)),
             log_level=os.getenv(ENV_LOG_LEVEL, DEFAULT_LOG_LEVEL),
             mcp_enabled=os.getenv(ENV_MCP_ENABLED, str(DEFAULT_MCP_ENABLED)).lower() == "true",
-
             # Recall
             graph_retriever=os.getenv(ENV_GRAPH_RETRIEVER, DEFAULT_GRAPH_RETRIEVER),
         )
@@ -147,8 +142,7 @@ class HindsightConfig:
     def configure_logging(self) -> None:
         """Configure Python logging based on the log level."""
         logging.basicConfig(
-            level=self.get_python_log_level(),
-            format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+            level=self.get_python_log_level(), format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
         )
 
     def log_config(self) -> None:

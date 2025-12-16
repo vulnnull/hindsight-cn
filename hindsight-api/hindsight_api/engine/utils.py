@@ -1,9 +1,10 @@
 """
 Utility functions for memory system.
 """
+
 import logging
 from datetime import datetime
-from typing import List, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .llm_wrapper import LLMConfig
@@ -12,7 +13,14 @@ if TYPE_CHECKING:
 from .retain.fact_extraction import extract_facts_from_text
 
 
-async def extract_facts(text: str, event_date: datetime, context: str = "", llm_config: 'LLMConfig' = None, agent_name: str = None, extract_opinions: bool = False) -> tuple[List['Fact'], List[tuple[str, int]]]:
+async def extract_facts(
+    text: str,
+    event_date: datetime,
+    context: str = "",
+    llm_config: "LLMConfig" = None,
+    agent_name: str = None,
+    extract_opinions: bool = False,
+) -> tuple[list["Fact"], list[tuple[str, int]]]:
     """
     Extract semantic facts from text using LLM.
 
@@ -41,16 +49,25 @@ async def extract_facts(text: str, event_date: datetime, context: str = "", llm_
     if not text or not text.strip():
         return [], []
 
-    facts, chunks = await extract_facts_from_text(text, event_date, context=context, llm_config=llm_config, agent_name=agent_name, extract_opinions=extract_opinions)
+    facts, chunks = await extract_facts_from_text(
+        text,
+        event_date,
+        context=context,
+        llm_config=llm_config,
+        agent_name=agent_name,
+        extract_opinions=extract_opinions,
+    )
 
     if not facts:
-        logging.warning(f"LLM extracted 0 facts from text of length {len(text)}. This may indicate the text contains no meaningful information, or the LLM failed to extract facts. Full text: {text}")
+        logging.warning(
+            f"LLM extracted 0 facts from text of length {len(text)}. This may indicate the text contains no meaningful information, or the LLM failed to extract facts. Full text: {text}"
+        )
         return [], chunks
 
     return facts, chunks
 
 
-def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     """
     Calculate cosine similarity between two vectors.
 
@@ -100,6 +117,7 @@ def calculate_recency_weight(days_since: float, half_life_days: float = 365.0) -
         Weight between 0 and 1
     """
     import math
+
     # Logarithmic decay: 1 / (1 + log(1 + days_since/half_life))
     # This decays much slower than exponential, giving better long-term differentiation
     normalized_age = days_since / half_life_days
@@ -121,6 +139,7 @@ def calculate_frequency_weight(access_count: int, max_boost: float = 2.0) -> flo
         Weight between 1.0 and max_boost
     """
     import math
+
     if access_count <= 0:
         return 1.0
 
@@ -158,11 +177,7 @@ def calculate_temporal_anchor(occurred_start: datetime, occurred_end: datetime) 
     return midpoint
 
 
-def calculate_temporal_proximity(
-    anchor_a: datetime,
-    anchor_b: datetime,
-    half_life_days: float = 30.0
-) -> float:
+def calculate_temporal_proximity(anchor_a: datetime, anchor_b: datetime, half_life_days: float = 30.0) -> float:
     """
     Calculate temporal proximity between two temporal anchors.
 

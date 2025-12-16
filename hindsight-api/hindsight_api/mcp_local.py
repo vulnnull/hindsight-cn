@@ -38,8 +38,8 @@ import sys
 from mcp.server.fastmcp import FastMCP
 
 from hindsight_api.config import (
-    ENV_MCP_LOCAL_BANK_ID,
     DEFAULT_MCP_LOCAL_BANK_ID,
+    ENV_MCP_LOCAL_BANK_ID,
 )
 
 # Configure logging - default to info
@@ -103,10 +103,7 @@ def create_local_mcp_server(bank_id: str, memory=None) -> FastMCP:
 
         async def _retain():
             try:
-                await memory.retain_batch_async(
-                    bank_id=bank_id,
-                    contents=[{"content": content, "context": context}]
-                )
+                await memory.retain_batch_async(bank_id=bank_id, contents=[{"content": content, "context": context}])
             except Exception as e:
                 logger.error(f"Error storing memory: {e}", exc_info=True)
 
@@ -140,7 +137,7 @@ def create_local_mcp_server(bank_id: str, memory=None) -> FastMCP:
                 query=query,
                 fact_type=list(VALID_RECALL_FACT_TYPES),
                 budget=budget_enum,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
             )
 
             return search_result.model_dump()
@@ -169,7 +166,8 @@ async def _initialize_and_run(bank_id: str):
 def main():
     """Main entry point for the stdio MCP server."""
     import asyncio
-    from hindsight_api.config import get_config, ENV_LLM_API_KEY
+
+    from hindsight_api.config import ENV_LLM_API_KEY, get_config
 
     # Check for required environment variables
     config = get_config()

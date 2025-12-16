@@ -2,10 +2,9 @@
 Link creation utilities for temporal, semantic, and entity links.
 """
 
-import time
 import logging
-from typing import List
-from datetime import timedelta, datetime, timezone
+import time
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from .types import EntityLink
@@ -19,7 +18,7 @@ def _normalize_datetime(dt):
         return None
     if dt.tzinfo is None:
         # Naive datetime - assume UTC
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -54,24 +53,26 @@ def compute_temporal_links(
         try:
             time_lower = unit_event_date_norm - timedelta(hours=time_window_hours)
         except OverflowError:
-            time_lower = datetime.min.replace(tzinfo=timezone.utc)
+            time_lower = datetime.min.replace(tzinfo=UTC)
         try:
             time_upper = unit_event_date_norm + timedelta(hours=time_window_hours)
         except OverflowError:
-            time_upper = datetime.max.replace(tzinfo=timezone.utc)
+            time_upper = datetime.max.replace(tzinfo=UTC)
 
         # Filter candidates within this unit's time window
         matching_neighbors = [
-            (row['id'], row['event_date'])
+            (row["id"], row["event_date"])
             for row in candidates
-            if time_lower <= _normalize_datetime(row['event_date']) <= time_upper
+            if time_lower <= _normalize_datetime(row["event_date"]) <= time_upper
         ][:10]  # Limit to top 10
 
         for recent_id, recent_event_date in matching_neighbors:
             # Calculate temporal proximity weight
-            time_diff_hours = abs((unit_event_date_norm - _normalize_datetime(recent_event_date)).total_seconds() / 3600)
+            time_diff_hours = abs(
+                (unit_event_date_norm - _normalize_datetime(recent_event_date)).total_seconds() / 3600
+            )
             weight = max(0.3, 1.0 - (time_diff_hours / time_window_hours))
-            links.append((unit_id, str(recent_id), 'temporal', weight, None))
+            links.append((unit_id, str(recent_id), "temporal", weight, None))
 
     return links
 
@@ -99,17 +100,17 @@ def compute_temporal_query_bounds(
     try:
         min_date = min(all_dates) - timedelta(hours=time_window_hours)
     except OverflowError:
-        min_date = datetime.min.replace(tzinfo=timezone.utc)
+        min_date = datetime.min.replace(tzinfo=UTC)
 
     try:
         max_date = max(all_dates) + timedelta(hours=time_window_hours)
     except OverflowError:
-        max_date = datetime.max.replace(tzinfo=timezone.utc)
+        max_date = datetime.max.replace(tzinfo=UTC)
 
     return min_date, max_date
 
 
-def _log(log_buffer, message, level='info'):
+def _log(log_buffer, message, level="info"):
     """Helper to log to buffer if available, otherwise use logger.
 
     Args:
@@ -117,7 +118,7 @@ def _log(log_buffer, message, level='info'):
         message: The log message
         level: 'info', 'debug', 'warning', or 'error'. Debug messages are not added to buffer.
     """
-    if level == 'debug':
+    if level == "debug":
         # Debug messages only go to logger, not to buffer
         logger.debug(message)
         return
@@ -125,23 +126,23 @@ def _log(log_buffer, message, level='info'):
     if log_buffer is not None:
         log_buffer.append(message)
     else:
-        if level == 'info':
+        if level == "info":
             logger.info(message)
         else:
-            logger.log(logging.WARNING if level == 'warning' else logging.ERROR, message)
+            logger.log(logging.WARNING if level == "warning" else logging.ERROR, message)
 
 
 async def extract_entities_batch_optimized(
     entity_resolver,
     conn,
     bank_id: str,
-    unit_ids: List[str],
-    sentences: List[str],
+    unit_ids: list[str],
+    sentences: list[str],
     context: str,
-    fact_dates: List,
-    llm_entities: List[List[dict]],
-    log_buffer: List[str] = None,
-) -> List[tuple]:
+    fact_dates: list,
+    llm_entities: list[list[dict]],
+    log_buffer: list[str] = None,
+) -> list[tuple]:
     """
     Process LLM-extracted entities for ALL facts in batch.
 
@@ -171,15 +172,19 @@ async def extract_entities_batch_optimized(
             formatted_entities = []
             for ent in entity_list:
                 # Handle both Entity objects and dicts
-                if hasattr(ent, 'text'):
+                if hasattr(ent, "text"):
                     # Entity objects only have 'text', default type to 'CONCEPT'
-                    formatted_entities.append({'text': ent.text, 'type': 'CONCEPT'})
+                    formatted_entities.append({"text": ent.text, "type": "CONCEPT"})
                 elif isinstance(ent, dict):
-                    formatted_entities.append({'text': ent.get('text', ''), 'type': ent.get('type', 'CONCEPT')})
+                    formatted_entities.append({"text": ent.get("text", ""), "type": ent.get("type", "CONCEPT")})
             all_entities.append(formatted_entities)
 
         total_entities = sum(len(ents) for ents in all_entities)
-        _log(log_buffer, f"  [6.1] Process LLM entities: {total_entities} entities from {len(sentences)} facts in {time.time() - substep_start:.3f}s", level='debug')
+        _log(
+            log_buffer,
+            f"  [6.1] Process LLM entities: {total_entities} entities from {len(sentences)} facts in {time.time() - substep_start:.3f}s",
+            level="debug",
+        )
 
         # Step 2: Resolve entities in BATCH (much faster!)
         substep_start = time.time()
@@ -195,13 +200,19 @@ async def extract_entities_batch_optimized(
                 continue
 
             for local_idx, entity in enumerate(entities):
-                all_entities_flat.append({
-                    'text': entity['text'],
-                    'type': entity['type'],
-                    'nearby_entities': entities,
-                })
+                all_entities_flat.append(
+                    {
+                        "text": entity["text"],
+                        "type": entity["type"],
+                        "nearby_entities": entities,
+                    }
+                )
                 entity_to_unit.append((unit_id, local_idx, fact_date))
-        _log(log_buffer, f"    [6.2.1] Prepare entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_1_start:.3f}s", level='debug')
+        _log(
+            log_buffer,
+            f"    [6.2.1] Prepare entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_1_start:.3f}s",
+            level="debug",
+        )
 
         # Resolve ALL entities in one batch call
         if all_entities_flat:
@@ -210,7 +221,7 @@ async def extract_entities_batch_optimized(
 
             # Add per-entity dates to entity data for batch resolution
             for idx, (unit_id, local_idx, fact_date) in enumerate(entity_to_unit):
-                all_entities_flat[idx]['event_date'] = fact_date
+                all_entities_flat[idx]["event_date"] = fact_date
 
             # Resolve ALL entities in ONE batch call (much faster than sequential buckets)
             # INSERT ... ON CONFLICT handles any race conditions at the DB level
@@ -219,10 +230,14 @@ async def extract_entities_batch_optimized(
                 entities_data=all_entities_flat,
                 context=context,
                 unit_event_date=None,  # Not used when per-entity dates provided
-                conn=conn  # Use main transaction connection
+                conn=conn,  # Use main transaction connection
             )
 
-            _log(log_buffer, f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities in single batch in {time.time() - substep_6_2_2_start:.3f}s", level='debug')
+            _log(
+                log_buffer,
+                f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities in single batch in {time.time() - substep_6_2_2_start:.3f}s",
+                level="debug",
+            )
 
             # [6.2.3] Create unit-entity links in BATCH
             substep_6_2_3_start = time.time()
@@ -239,12 +254,24 @@ async def extract_entities_batch_optimized(
 
             # Batch insert all unit-entity links (MUCH faster!)
             await entity_resolver.link_units_to_entities_batch(unit_entity_pairs, conn=conn)
-            _log(log_buffer, f"    [6.2.3] Create unit-entity links (batched): {len(unit_entity_pairs)} links in {time.time() - substep_6_2_3_start:.3f}s", level='debug')
+            _log(
+                log_buffer,
+                f"    [6.2.3] Create unit-entity links (batched): {len(unit_entity_pairs)} links in {time.time() - substep_6_2_3_start:.3f}s",
+                level="debug",
+            )
 
-            _log(log_buffer, f"  [6.2] Entity resolution (batched): {len(all_entities_flat)} entities resolved in {time.time() - step_6_2_start:.3f}s", level='debug')
+            _log(
+                log_buffer,
+                f"  [6.2] Entity resolution (batched): {len(all_entities_flat)} entities resolved in {time.time() - step_6_2_start:.3f}s",
+                level="debug",
+            )
         else:
             unit_to_entity_ids = {}
-            _log(log_buffer, f"  [6.2] Entity resolution (batched): 0 entities in {time.time() - step_6_2_start:.3f}s", level='debug')
+            _log(
+                log_buffer,
+                f"  [6.2] Entity resolution (batched): 0 entities in {time.time() - step_6_2_start:.3f}s",
+                level="debug",
+            )
 
         # Step 3: Create entity links between units that share entities
         substep_start = time.time()
@@ -253,13 +280,14 @@ async def extract_entities_batch_optimized(
         for entity_ids in unit_to_entity_ids.values():
             all_entity_ids.update(entity_ids)
 
-        _log(log_buffer, f"  [6.3] Creating entity links for {len(all_entity_ids)} unique entities...", level='debug')
+        _log(log_buffer, f"  [6.3] Creating entity links for {len(all_entity_ids)} unique entities...", level="debug")
 
         # Find all units that reference these entities (ONE batched query)
         entity_to_units = {}
         if all_entity_ids:
             query_start = time.time()
             import uuid
+
             entity_id_list = [uuid.UUID(eid) if isinstance(eid, str) else eid for eid in all_entity_ids]
             rows = await conn.fetch(
                 """
@@ -267,25 +295,29 @@ async def extract_entities_batch_optimized(
                 FROM unit_entities
                 WHERE entity_id = ANY($1::uuid[])
                 """,
-                entity_id_list
+                entity_id_list,
             )
-            _log(log_buffer, f"      [6.3.1] Query unit_entities: {len(rows)} rows in {time.time() - query_start:.3f}s", level='debug')
+            _log(
+                log_buffer,
+                f"      [6.3.1] Query unit_entities: {len(rows)} rows in {time.time() - query_start:.3f}s",
+                level="debug",
+            )
 
             # Group by entity_id
             group_start = time.time()
             for row in rows:
-                entity_id = row['entity_id']
+                entity_id = row["entity_id"]
                 if entity_id not in entity_to_units:
                     entity_to_units[entity_id] = []
-                entity_to_units[entity_id].append(row['unit_id'])
-            _log(log_buffer, f"      [6.3.2] Group by entity_id: {time.time() - group_start:.3f}s", level='debug')
+                entity_to_units[entity_id].append(row["unit_id"])
+            _log(log_buffer, f"      [6.3.2] Group by entity_id: {time.time() - group_start:.3f}s", level="debug")
 
         # Create bidirectional links between units that share entities
         # OPTIMIZATION: Limit links per entity to avoid N² explosion
         # Only link each new unit to the most recent MAX_LINKS_PER_ENTITY units
         MAX_LINKS_PER_ENTITY = 50  # Limit to prevent explosion when entity appears in many facts
         link_gen_start = time.time()
-        links: List[EntityLink] = []
+        links: list[EntityLink] = []
         new_unit_set = set(unit_ids)  # Units from this batch
 
         def to_uuid(val) -> UUID:
@@ -299,27 +331,52 @@ async def extract_entities_batch_optimized(
 
             # Link new units to each other (within batch) - also limited
             # For very common entities, limit within-batch links too
-            new_units_to_link = new_units[-MAX_LINKS_PER_ENTITY:] if len(new_units) > MAX_LINKS_PER_ENTITY else new_units
+            new_units_to_link = (
+                new_units[-MAX_LINKS_PER_ENTITY:] if len(new_units) > MAX_LINKS_PER_ENTITY else new_units
+            )
             for i, unit_id_1 in enumerate(new_units_to_link):
-                for unit_id_2 in new_units_to_link[i+1:]:
-                    links.append(EntityLink(from_unit_id=to_uuid(unit_id_1), to_unit_id=to_uuid(unit_id_2), entity_id=entity_uuid))
-                    links.append(EntityLink(from_unit_id=to_uuid(unit_id_2), to_unit_id=to_uuid(unit_id_1), entity_id=entity_uuid))
+                for unit_id_2 in new_units_to_link[i + 1 :]:
+                    links.append(
+                        EntityLink(
+                            from_unit_id=to_uuid(unit_id_1), to_unit_id=to_uuid(unit_id_2), entity_id=entity_uuid
+                        )
+                    )
+                    links.append(
+                        EntityLink(
+                            from_unit_id=to_uuid(unit_id_2), to_unit_id=to_uuid(unit_id_1), entity_id=entity_uuid
+                        )
+                    )
 
             # Link new units to LIMITED existing units (most recent)
             existing_to_link = existing_units[-MAX_LINKS_PER_ENTITY:]  # Take most recent
             for new_unit in new_units:
                 for existing_unit in existing_to_link:
-                    links.append(EntityLink(from_unit_id=to_uuid(new_unit), to_unit_id=to_uuid(existing_unit), entity_id=entity_uuid))
-                    links.append(EntityLink(from_unit_id=to_uuid(existing_unit), to_unit_id=to_uuid(new_unit), entity_id=entity_uuid))
+                    links.append(
+                        EntityLink(
+                            from_unit_id=to_uuid(new_unit), to_unit_id=to_uuid(existing_unit), entity_id=entity_uuid
+                        )
+                    )
+                    links.append(
+                        EntityLink(
+                            from_unit_id=to_uuid(existing_unit), to_unit_id=to_uuid(new_unit), entity_id=entity_uuid
+                        )
+                    )
 
-        _log(log_buffer, f"      [6.3.3] Generate {len(links)} links: {time.time() - link_gen_start:.3f}s", level='debug')
-        _log(log_buffer, f"  [6.3] Entity link creation: {len(links)} links for {len(all_entity_ids)} unique entities in {time.time() - substep_start:.3f}s", level='debug')
+        _log(
+            log_buffer, f"      [6.3.3] Generate {len(links)} links: {time.time() - link_gen_start:.3f}s", level="debug"
+        )
+        _log(
+            log_buffer,
+            f"  [6.3] Entity link creation: {len(links)} links for {len(all_entity_ids)} unique entities in {time.time() - substep_start:.3f}s",
+            level="debug",
+        )
 
         return links
 
     except Exception as e:
         logger.error(f"Failed to extract entities in batch: {str(e)}")
         import traceback
+
         traceback.print_exc()
         raise
 
@@ -327,9 +384,9 @@ async def extract_entities_batch_optimized(
 async def create_temporal_links_batch_per_fact(
     conn,
     bank_id: str,
-    unit_ids: List[str],
+    unit_ids: list[str],
     time_window_hours: int = 24,
-    log_buffer: List[str] = None,
+    log_buffer: list[str] = None,
 ) -> int:
     """
     Create temporal links for multiple units, each with their own event_date.
@@ -361,10 +418,13 @@ async def create_temporal_links_batch_per_fact(
             FROM memory_units
             WHERE id::text = ANY($1)
             """,
-            unit_ids
+            unit_ids,
         )
-        new_units = {str(row['id']): row['event_date'] for row in rows}
-        _log(log_buffer, f"      [7.1] Fetch event_dates for {len(unit_ids)} units: {time_mod.time() - fetch_dates_start:.3f}s")
+        new_units = {str(row["id"]): row["event_date"] for row in rows}
+        _log(
+            log_buffer,
+            f"      [7.1] Fetch event_dates for {len(unit_ids)} units: {time_mod.time() - fetch_dates_start:.3f}s",
+        )
 
         # Fetch ALL potential temporal neighbors in ONE query (much faster!)
         # Get time range across all units with overflow protection
@@ -383,9 +443,12 @@ async def create_temporal_links_batch_per_fact(
             bank_id,
             min_date,
             max_date,
-            unit_ids
+            unit_ids,
         )
-        _log(log_buffer, f"      [7.2] Fetch {len(all_candidates)} candidate neighbors (1 query): {time_mod.time() - fetch_neighbors_start:.3f}s")
+        _log(
+            log_buffer,
+            f"      [7.2] Fetch {len(all_candidates)} candidate neighbors (1 query): {time_mod.time() - fetch_neighbors_start:.3f}s",
+        )
 
         # Filter and create links in memory (much faster than N queries)
         link_gen_start = time_mod.time()
@@ -408,8 +471,8 @@ async def create_temporal_links_batch_per_fact(
                     if time_diff_hours <= time_window_hours:
                         weight = max(0.3, 1.0 - (time_diff_hours / time_window_hours))
                         # Create bidirectional links
-                        links.append((unit_id, other_id, 'temporal', weight, None))
-                        links.append((other_id, unit_id, 'temporal', weight, None))
+                        links.append((unit_id, other_id, "temporal", weight, None))
+                        links.append((other_id, unit_id, "temporal", weight, None))
 
         _log(log_buffer, f"      [7.3] Generate {len(links)} temporal links: {time_mod.time() - link_gen_start:.3f}s")
 
@@ -421,7 +484,7 @@ async def create_temporal_links_batch_per_fact(
                 VALUES ($1, $2, $3, $4, $5)
                 ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
                 """,
-                links
+                links,
             )
             _log(log_buffer, f"      [7.4] Insert {len(links)} temporal links: {time_mod.time() - insert_start:.3f}s")
 
@@ -430,6 +493,7 @@ async def create_temporal_links_batch_per_fact(
     except Exception as e:
         logger.error(f"Failed to create temporal links: {str(e)}")
         import traceback
+
         traceback.print_exc()
         raise
 
@@ -437,11 +501,11 @@ async def create_temporal_links_batch_per_fact(
 async def create_semantic_links_batch(
     conn,
     bank_id: str,
-    unit_ids: List[str],
-    embeddings: List[List[float]],
+    unit_ids: list[str],
+    embeddings: list[list[float]],
     top_k: int = 5,
     threshold: float = 0.7,
-    log_buffer: List[str] = None,
+    log_buffer: list[str] = None,
 ) -> int:
     """
     Create semantic links for multiple units efficiently.
@@ -465,6 +529,7 @@ async def create_semantic_links_batch(
 
     try:
         import time as time_mod
+
         import numpy as np
 
         # Fetch ALL existing units with embeddings in ONE query
@@ -478,9 +543,12 @@ async def create_semantic_links_batch(
               AND id::text != ALL($2)
             """,
             bank_id,
-            unit_ids
+            unit_ids,
         )
-        _log(log_buffer, f"      [8.1] Fetch {len(all_existing)} existing embeddings (1 query): {time_mod.time() - fetch_start:.3f}s")
+        _log(
+            log_buffer,
+            f"      [8.1] Fetch {len(all_existing)} existing embeddings (1 query): {time_mod.time() - fetch_start:.3f}s",
+        )
 
         # Convert to numpy for vectorized similarity computation
         compute_start = time_mod.time()
@@ -488,15 +556,16 @@ async def create_semantic_links_batch(
 
         if all_existing:
             # Convert existing embeddings to numpy array
-            existing_ids = [str(row['id']) for row in all_existing]
+            existing_ids = [str(row["id"]) for row in all_existing]
             # Stack embeddings as 2D array: (num_embeddings, embedding_dim)
             embedding_arrays = []
             for row in all_existing:
-                raw_emb = row['embedding']
+                raw_emb = row["embedding"]
                 # Handle different pgvector formats
                 if isinstance(raw_emb, str):
                     # Parse string format: "[1.0, 2.0, ...]"
                     import json
+
                     emb = np.array(json.loads(raw_emb), dtype=np.float32)
                 elif isinstance(raw_emb, (list, tuple)):
                     emb = np.array(raw_emb, dtype=np.float32)
@@ -537,7 +606,7 @@ async def create_semantic_links_batch(
                         similar_id = existing_ids[idx]
                         # Clamp to [0, 1] to handle floating point precision issues
                         similarity = float(min(1.0, max(0.0, similarities[idx])))
-                        all_links.append((unit_id, similar_id, 'semantic', similarity, None))
+                        all_links.append((unit_id, similar_id, "semantic", similarity, None))
 
         # Also compute similarities WITHIN the new batch (new units to each other)
         # Apply the same top_k limit per unit as we do for existing units
@@ -565,9 +634,12 @@ async def create_semantic_links_batch(
                         other_id = unit_ids[other_idx]
                         # Clamp to [0, 1] to handle floating point precision issues
                         similarity = float(min(1.0, max(0.0, similarities[local_idx])))
-                        all_links.append((unit_id, other_id, 'semantic', similarity, None))
+                        all_links.append((unit_id, other_id, "semantic", similarity, None))
 
-        _log(log_buffer, f"      [8.2] Compute similarities & generate {len(all_links)} semantic links: {time_mod.time() - compute_start:.3f}s")
+        _log(
+            log_buffer,
+            f"      [8.2] Compute similarities & generate {len(all_links)} semantic links: {time_mod.time() - compute_start:.3f}s",
+        )
 
         if all_links:
             insert_start = time_mod.time()
@@ -577,20 +649,23 @@ async def create_semantic_links_batch(
                 VALUES ($1, $2, $3, $4, $5)
                 ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
                 """,
-                all_links
+                all_links,
             )
-            _log(log_buffer, f"      [8.3] Insert {len(all_links)} semantic links: {time_mod.time() - insert_start:.3f}s")
+            _log(
+                log_buffer, f"      [8.3] Insert {len(all_links)} semantic links: {time_mod.time() - insert_start:.3f}s"
+            )
 
         return len(all_links)
 
     except Exception as e:
         logger.error(f"Failed to create semantic links: {str(e)}")
         import traceback
+
         traceback.print_exc()
         raise
 
 
-async def insert_entity_links_batch(conn, links: List[EntityLink], chunk_size: int = 50000):
+async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: int = 50000):
     """
     Insert all entity links using COPY to temp table + INSERT for maximum speed.
 
@@ -606,7 +681,6 @@ async def insert_entity_links_batch(conn, links: List[EntityLink], chunk_size: i
     if not links:
         return
 
-    import uuid as uuid_mod
     import time as time_mod
 
     total_start = time_mod.time()
@@ -633,21 +707,15 @@ async def insert_entity_links_batch(conn, links: List[EntityLink], chunk_size: i
     convert_start = time_mod.time()
     records = []
     for link in links:
-        records.append((
-            link.from_unit_id,
-            link.to_unit_id,
-            link.link_type,
-            link.weight,
-            link.entity_id
-        ))
+        records.append((link.from_unit_id, link.to_unit_id, link.link_type, link.weight, link.entity_id))
     logger.debug(f"      [9.3] Convert {len(records)} records: {time_mod.time() - convert_start:.3f}s")
 
     # Bulk load using COPY (fastest method)
     copy_start = time_mod.time()
     await conn.copy_records_to_table(
-        '_temp_entity_links',
+        "_temp_entity_links",
         records=records,
-        columns=['from_unit_id', 'to_unit_id', 'link_type', 'weight', 'entity_id']
+        columns=["from_unit_id", "to_unit_id", "link_type", "weight", "entity_id"],
     )
     logger.debug(f"      [9.4] COPY {len(records)} records to temp table: {time_mod.time() - copy_start:.3f}s")
 
@@ -665,8 +733,8 @@ async def insert_entity_links_batch(conn, links: List[EntityLink], chunk_size: i
 
 async def create_causal_links_batch(
     conn,
-    unit_ids: List[str],
-    causal_relations_per_fact: List[List[dict]],
+    unit_ids: list[str],
+    causal_relations_per_fact: list[list[dict]],
 ) -> int:
     """
     Create causal links between facts based on LLM-extracted causal relationships.
@@ -694,6 +762,7 @@ async def create_causal_links_batch(
 
     try:
         import time as time_mod
+
         create_start = time_mod.time()
 
         # Build links list
@@ -705,12 +774,12 @@ async def create_causal_links_batch(
             from_unit_id = unit_ids[fact_idx]
 
             for relation in causal_relations:
-                target_idx = relation['target_fact_index']
-                relation_type = relation['relation_type']
-                strength = relation.get('strength', 1.0)
+                target_idx = relation["target_fact_index"]
+                relation_type = relation["relation_type"]
+                strength = relation.get("strength", 1.0)
 
                 # Validate relation_type - must match database constraint
-                valid_types = {'causes', 'caused_by', 'enables', 'prevents'}
+                valid_types = {"causes", "caused_by", "enables", "prevents"}
                 if relation_type not in valid_types:
                     logger.error(
                         f"Invalid relation_type '{relation_type}' (type: {type(relation_type).__name__}) "
@@ -735,7 +804,6 @@ async def create_causal_links_batch(
                 # weight is the strength of the relationship
                 links.append((from_unit_id, to_unit_id, relation_type, strength, None))
 
-
         if links:
             insert_start = time_mod.time()
             try:
@@ -745,14 +813,16 @@ async def create_causal_links_batch(
                     VALUES ($1, $2, $3, $4, $5)
                     ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
                     """,
-                    links
+                    links,
                 )
             except Exception as db_error:
                 # Log the actual data being inserted for debugging
                 logger.error(f"Database insert failed for causal links. Error: {db_error}")
                 logger.error(f"Attempted to insert {len(links)} links. First few:")
                 for i, link in enumerate(links[:3]):
-                    logger.error(f"  Link {i}: from={link[0]}, to={link[1]}, type='{link[2]}' (repr={repr(link[2])}), weight={link[3]}, entity={link[4]}")
+                    logger.error(
+                        f"  Link {i}: from={link[0]}, to={link[1]}, type='{link[2]}' (repr={repr(link[2])}), weight={link[3]}, entity={link[4]}"
+                    )
                 raise
 
         return len(links)
@@ -760,5 +830,6 @@ async def create_causal_links_batch(
     except Exception as e:
         logger.error(f"Failed to create causal links: {str(e)}")
         import traceback
+
         traceback.print_exc()
         raise

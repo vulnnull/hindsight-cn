@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { client } from './api';
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { client } from "./api";
 
 interface AgentContextType {
   currentAgent: string | null;
@@ -23,7 +23,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       const agentIds = data.banks?.map((agent: any) => agent.bank_id) || [];
       setAgents(agentIds);
     } catch (error) {
-      console.error('Error loading agents:', error);
+      console.error("Error loading agents:", error);
     }
   };
 
@@ -41,7 +41,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 export function useAgent() {
   const context = useContext(AgentContext);
   if (context === undefined) {
-    throw new Error('useAgent must be used within an AgentProvider');
+    throw new Error("useAgent must be used within an AgentProvider");
   }
   return context;
 }

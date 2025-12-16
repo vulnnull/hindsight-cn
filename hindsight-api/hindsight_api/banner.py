@@ -28,7 +28,6 @@ def _interpolate_color(start: tuple, end: tuple, t: float) -> tuple:
 
 def gradient_text(text: str, start: tuple = GRADIENT_START, end: tuple = GRADIENT_END) -> str:
     """Render text with a gradient color effect."""
-
     result = []
     length = len(text)
     for i, char in enumerate(text):

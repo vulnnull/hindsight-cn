@@ -8,22 +8,23 @@ This implements a sophisticated memory architecture that combines:
 4. Spreading activation: Search through the graph with activation decay
 5. Dynamic weighting: Recency and frequency-based importance
 """
-import json
-import os
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union, TypedDict, TYPE_CHECKING
-import asyncpg
+
 import asyncio
-from .embeddings import Embeddings, create_embeddings_from_env
-from .cross_encoder import CrossEncoderModel, create_cross_encoder_from_env
-import time
-import numpy as np
-import uuid
 import logging
+import time
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any, TypedDict
+
+import asyncpg
+import numpy as np
 from pydantic import BaseModel, Field
 
+from .cross_encoder import CrossEncoderModel
+from .embeddings import Embeddings, create_embeddings_from_env
+
 if TYPE_CHECKING:
-    from ..config import HindsightConfig
+    pass
 
 
 class RetainContentDict(TypedDict, total=False):
@@ -36,30 +37,31 @@ class RetainContentDict(TypedDict, total=False):
         metadata: Custom key-value metadata (optional)
         document_id: Document ID for this content item (optional)
     """
+
     content: str  # Required
     context: str
     event_date: datetime
-    metadata: Dict[str, str]
+    metadata: dict[str, str]
     document_id: str
 
-from .query_analyzer import QueryAnalyzer
-from .search.scoring import (
-    calculate_recency_weight,
-    calculate_frequency_weight,
-)
-from .entity_resolver import EntityResolver
-from .retain import embedding_utils, bank_utils
-from .search import think_utils, observation_utils
-from .llm_wrapper import LLMConfig
-from .response_models import RecallResult as RecallResultModel, ReflectResult, MemoryFact, EntityState, EntityObservation, VALID_RECALL_FACT_TYPES
-from .task_backend import TaskBackend, AsyncIOQueueBackend
-from .search.reranking import CrossEncoderReranker
-from ..pg0 import EmbeddedPostgres
+
 from enum import Enum
+
+from ..pg0 import EmbeddedPostgres
+from .entity_resolver import EntityResolver
+from .llm_wrapper import LLMConfig
+from .query_analyzer import QueryAnalyzer
+from .response_models import VALID_RECALL_FACT_TYPES, EntityObservation, EntityState, MemoryFact, ReflectResult
+from .response_models import RecallResult as RecallResultModel
+from .retain import bank_utils, embedding_utils
+from .search import observation_utils, think_utils
+from .search.reranking import CrossEncoderReranker
+from .task_backend import AsyncIOQueueBackend, TaskBackend
 
 
 class Budget(str, Enum):
     """Budget levels for recall/reflect operations."""
+
     LOW = "low"
     MID = "mid"
     HIGH = "high"
@@ -67,19 +69,19 @@ class Budget(str, Enum):
 
 def utcnow():
     """Get current UTC time with timezone info."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # Logger for memory system
 logger = logging.getLogger(__name__)
 
-from .db_utils import acquire_with_retry, retry_with_backoff
-
 import tiktoken
-from dateutil import parser as date_parser
+
+from .db_utils import acquire_with_retry
 
 # Cache tiktoken encoding for token budget filtering (module-level singleton)
 _TIKTOKEN_ENCODING = None
+
 
 def _get_tiktoken_encoding():
     """Get cached tiktoken encoding (cl100k_base for GPT-4/3.5)."""
@@ -102,17 +104,17 @@ class MemoryEngine:
 
     def __init__(
         self,
-        db_url: Optional[str] = None,
-        memory_llm_provider: Optional[str] = None,
-        memory_llm_api_key: Optional[str] = None,
-        memory_llm_model: Optional[str] = None,
-        memory_llm_base_url: Optional[str] = None,
-        embeddings: Optional[Embeddings] = None,
-        cross_encoder: Optional[CrossEncoderModel] = None,
-        query_analyzer: Optional[QueryAnalyzer] = None,
+        db_url: str | None = None,
+        memory_llm_provider: str | None = None,
+        memory_llm_api_key: str | None = None,
+        memory_llm_model: str | None = None,
+        memory_llm_base_url: str | None = None,
+        embeddings: Embeddings | None = None,
+        cross_encoder: CrossEncoderModel | None = None,
+        query_analyzer: QueryAnalyzer | None = None,
         pool_min_size: int = 5,
         pool_max_size: int = 100,
-        task_backend: Optional[TaskBackend] = None,
+        task_backend: TaskBackend | None = None,
         run_migrations: bool = True,
     ):
         """
@@ -138,6 +140,7 @@ class MemoryEngine:
         """
         # Load config from environment for any missing parameters
         from ..config import get_config
+
         config = get_config()
 
         # Apply defaults from config
@@ -147,8 +150,8 @@ class MemoryEngine:
         memory_llm_model = memory_llm_model or config.llm_model
         memory_llm_base_url = memory_llm_base_url or config.get_llm_base_url() or None
         # Track pg0 instance (if used)
-        self._pg0: Optional[EmbeddedPostgres] = None
-        self._pg0_instance_name: Optional[str] = None
+        self._pg0: EmbeddedPostgres | None = None
+        self._pg0_instance_name: str | None = None
 
         # Initialize PostgreSQL connection URL
         # The actual URL will be set during initialize() after starting the server
@@ -174,7 +177,6 @@ class MemoryEngine:
             self._pg0_instance_name = None
             self._pg0_port = None
             self.db_url = db_url
-
 
         # Set default base URL if not provided
         if memory_llm_base_url is None:
@@ -206,6 +208,7 @@ class MemoryEngine:
             self.query_analyzer = query_analyzer
         else:
             from .query_analyzer import DateparserQueryAnalyzer
+
             self.query_analyzer = DateparserQueryAnalyzer()
 
         # Initialize LLM configuration
@@ -224,10 +227,7 @@ class MemoryEngine:
         self._cross_encoder_reranker = CrossEncoderReranker(cross_encoder=cross_encoder)
 
         # Initialize task backend
-        self._task_backend = task_backend or AsyncIOQueueBackend(
-            batch_size=100,
-            batch_interval=1.0
-        )
+        self._task_backend = task_backend or AsyncIOQueueBackend(batch_size=100, batch_interval=1.0)
 
         # Backpressure mechanism: limit concurrent searches to prevent overwhelming the database
         # Limit concurrent searches to prevent connection pool exhaustion
@@ -243,14 +243,14 @@ class MemoryEngine:
         # initialize encoding eagerly to avoid delaying the first time
         _get_tiktoken_encoding()
 
-    async def _handle_access_count_update(self, task_dict: Dict[str, Any]):
+    async def _handle_access_count_update(self, task_dict: dict[str, Any]):
         """
         Handler for access count update tasks.
 
         Args:
             task_dict: Dict with 'node_ids' key containing list of node IDs to update
         """
-        node_ids = task_dict.get('node_ids', [])
+        node_ids = task_dict.get("node_ids", [])
         if not node_ids:
             return
 
@@ -260,13 +260,12 @@ class MemoryEngine:
             uuid_list = [uuid.UUID(nid) for nid in node_ids]
             async with acquire_with_retry(pool) as conn:
                 await conn.execute(
-                    "UPDATE memory_units SET access_count = access_count + 1 WHERE id = ANY($1::uuid[])",
-                    uuid_list
+                    "UPDATE memory_units SET access_count = access_count + 1 WHERE id = ANY($1::uuid[])", uuid_list
                 )
         except Exception as e:
             logger.error(f"Access count handler: Error updating access counts: {e}")
 
-    async def _handle_batch_retain(self, task_dict: Dict[str, Any]):
+    async def _handle_batch_retain(self, task_dict: dict[str, Any]):
         """
         Handler for batch retain tasks.
 
@@ -274,23 +273,23 @@ class MemoryEngine:
             task_dict: Dict with 'bank_id', 'contents'
         """
         try:
-            bank_id = task_dict.get('bank_id')
-            contents = task_dict.get('contents', [])
+            bank_id = task_dict.get("bank_id")
+            contents = task_dict.get("contents", [])
 
-            logger.info(f"[BATCH_RETAIN_TASK] Starting background batch retain for bank_id={bank_id}, {len(contents)} items")
-
-            await self.retain_batch_async(
-                bank_id=bank_id,
-                contents=contents
+            logger.info(
+                f"[BATCH_RETAIN_TASK] Starting background batch retain for bank_id={bank_id}, {len(contents)} items"
             )
+
+            await self.retain_batch_async(bank_id=bank_id, contents=contents)
 
             logger.info(f"[BATCH_RETAIN_TASK] Completed background batch retain for bank_id={bank_id}")
         except Exception as e:
             logger.error(f"Batch retain handler: Error processing batch retain: {e}")
             import traceback
+
             traceback.print_exc()
 
-    async def execute_task(self, task_dict: Dict[str, Any]):
+    async def execute_task(self, task_dict: dict[str, Any]):
         """
         Execute a task by routing it to the appropriate handler.
 
@@ -301,9 +300,9 @@ class MemoryEngine:
             task_dict: Task dictionary with 'type' key and other payload data
                       Example: {'type': 'access_count_update', 'node_ids': [...]}
         """
-        task_type = task_dict.get('type')
-        operation_id = task_dict.get('operation_id')
-        retry_count = task_dict.get('retry_count', 0)
+        task_type = task_dict.get("type")
+        operation_id = task_dict.get("operation_id")
+        retry_count = task_dict.get("retry_count", 0)
         max_retries = 3
 
         # Check if operation was cancelled (only for tasks with operation_id)
@@ -312,8 +311,7 @@ class MemoryEngine:
                 pool = await self._get_pool()
                 async with acquire_with_retry(pool) as conn:
                     result = await conn.fetchrow(
-                        "SELECT id FROM async_operations WHERE id = $1",
-                        uuid.UUID(operation_id)
+                        "SELECT id FROM async_operations WHERE id = $1", uuid.UUID(operation_id)
                     )
                     if not result:
                         # Operation was cancelled, skip processing
@@ -324,15 +322,15 @@ class MemoryEngine:
                 # Continue with processing if we can't check status
 
         try:
-            if task_type == 'access_count_update':
+            if task_type == "access_count_update":
                 await self._handle_access_count_update(task_dict)
-            elif task_type == 'reinforce_opinion':
+            elif task_type == "reinforce_opinion":
                 await self._handle_reinforce_opinion(task_dict)
-            elif task_type == 'form_opinion':
+            elif task_type == "form_opinion":
                 await self._handle_form_opinion(task_dict)
-            elif task_type == 'batch_retain':
+            elif task_type == "batch_retain":
                 await self._handle_batch_retain(task_dict)
-            elif task_type == 'regenerate_observations':
+            elif task_type == "regenerate_observations":
                 await self._handle_regenerate_observations(task_dict)
             else:
                 logger.error(f"Unknown task type: {task_type}")
@@ -347,14 +345,17 @@ class MemoryEngine:
 
         except Exception as e:
             # Task failed - check if we should retry
-            logger.error(f"Task execution failed (attempt {retry_count + 1}/{max_retries + 1}): {task_type}, error: {e}")
+            logger.error(
+                f"Task execution failed (attempt {retry_count + 1}/{max_retries + 1}): {task_type}, error: {e}"
+            )
             import traceback
+
             error_traceback = traceback.format_exc()
             traceback.print_exc()
 
             if retry_count < max_retries:
                 # Reschedule with incremented retry count
-                task_dict['retry_count'] = retry_count + 1
+                task_dict["retry_count"] = retry_count + 1
                 logger.info(f"Rescheduling task {task_type} (retry {retry_count + 1}/{max_retries})")
                 await self._task_backend.submit_task(task_dict)
             else:
@@ -368,10 +369,7 @@ class MemoryEngine:
         try:
             pool = await self._get_pool()
             async with acquire_with_retry(pool) as conn:
-                await conn.execute(
-                    "DELETE FROM async_operations WHERE id = $1",
-                    uuid.UUID(operation_id)
-                )
+                await conn.execute("DELETE FROM async_operations WHERE id = $1", uuid.UUID(operation_id))
         except Exception as e:
             logger.error(f"Failed to delete async operation record {operation_id}: {e}")
 
@@ -391,7 +389,7 @@ class MemoryEngine:
                     WHERE id = $1
                     """,
                     uuid.UUID(operation_id),
-                    truncated_error
+                    truncated_error,
                 )
             logger.info(f"Marked async operation as failed: {operation_id}")
         except Exception as e:
@@ -405,8 +403,6 @@ class MemoryEngine:
         """
         if self._initialized:
             return
-
-        import concurrent.futures
 
         # Run model loading in thread pool (CPU-bound) in parallel with pg0 startup
         loop = asyncio.get_event_loop()
@@ -429,10 +425,7 @@ class MemoryEngine:
             """Initialize embedding model."""
             # For local providers, run in thread pool to avoid blocking event loop
             if self.embeddings.provider_name == "local":
-                await loop.run_in_executor(
-                    None,
-                    lambda: asyncio.run(self.embeddings.initialize())
-                )
+                await loop.run_in_executor(None, lambda: asyncio.run(self.embeddings.initialize()))
             else:
                 await self.embeddings.initialize()
 
@@ -441,10 +434,7 @@ class MemoryEngine:
             cross_encoder = self._cross_encoder_reranker.cross_encoder
             # For local providers, run in thread pool to avoid blocking event loop
             if cross_encoder.provider_name == "local":
-                await loop.run_in_executor(
-                    None,
-                    lambda: asyncio.run(cross_encoder.initialize())
-                )
+                await loop.run_in_executor(None, lambda: asyncio.run(cross_encoder.initialize()))
             else:
                 await cross_encoder.initialize()
 
@@ -469,6 +459,7 @@ class MemoryEngine:
         # Run database migrations if enabled
         if self._run_migrations:
             from ..migrations import run_migrations
+
             logger.info("Running database migrations...")
             run_migrations(self.db_url)
 
@@ -555,7 +546,6 @@ class MemoryEngine:
             self._pg0 = None
             logger.info("pg0 stopped")
 
-
     async def wait_for_background_tasks(self):
         """
         Wait for all pending background tasks to complete.
@@ -563,7 +553,7 @@ class MemoryEngine:
         This is useful in tests to ensure background tasks (like opinion reinforcement)
         complete before making assertions.
         """
-        if hasattr(self._task_backend, 'wait_for_pending_tasks'):
+        if hasattr(self._task_backend, "wait_for_pending_tasks"):
             await self._task_backend.wait_for_pending_tasks()
 
     def _format_readable_date(self, dt: datetime) -> str:
@@ -596,12 +586,12 @@ class MemoryEngine:
         self,
         conn,
         bank_id: str,
-        texts: List[str],
-        embeddings: List[List[float]],
+        texts: list[str],
+        embeddings: list[list[float]],
         event_date: datetime,
         time_window_hours: int = 24,
-        similarity_threshold: float = 0.95
-    ) -> List[bool]:
+        similarity_threshold: float = 0.95,
+    ) -> list[bool]:
         """
         Check which facts are duplicates using semantic similarity + temporal window.
 
@@ -635,6 +625,7 @@ class MemoryEngine:
 
         # Fetch ALL existing facts in time window ONCE (much faster than N queries)
         import time as time_mod
+
         fetch_start = time_mod.time()
         existing_facts = await conn.fetch(
             """
@@ -643,7 +634,9 @@ class MemoryEngine:
             WHERE bank_id = $1
               AND event_date BETWEEN $2 AND $3
             """,
-            bank_id, time_lower, time_upper
+            bank_id,
+            time_lower,
+            time_upper,
         )
 
         # If no existing facts, nothing is duplicate
@@ -651,17 +644,17 @@ class MemoryEngine:
             return [False] * len(texts)
 
         # Compute similarities in Python (vectorized with numpy)
-        import numpy as np
         is_duplicate = []
 
         # Convert existing embeddings to numpy for faster computation
         embedding_arrays = []
         for row in existing_facts:
-            raw_emb = row['embedding']
+            raw_emb = row["embedding"]
             # Handle different pgvector formats
             if isinstance(raw_emb, str):
                 # Parse string format: "[1.0, 2.0, ...]"
                 import json
+
                 emb = np.array(json.loads(raw_emb), dtype=np.float32)
             elif isinstance(raw_emb, (list, tuple)):
                 emb = np.array(raw_emb, dtype=np.float32)
@@ -691,7 +684,6 @@ class MemoryEngine:
             max_similarity = np.max(similarities) if len(similarities) > 0 else 0
             is_duplicate.append(max_similarity > similarity_threshold)
 
-
         return is_duplicate
 
     def retain(
@@ -699,8 +691,8 @@ class MemoryEngine:
         bank_id: str,
         content: str,
         context: str = "",
-        event_date: Optional[datetime] = None,
-    ) -> List[str]:
+        event_date: datetime | None = None,
+    ) -> list[str]:
         """
         Store content as memory units (synchronous wrapper).
 
@@ -724,11 +716,11 @@ class MemoryEngine:
         bank_id: str,
         content: str,
         context: str = "",
-        event_date: Optional[datetime] = None,
-        document_id: Optional[str] = None,
-        fact_type_override: Optional[str] = None,
-        confidence_score: Optional[float] = None,
-    ) -> List[str]:
+        event_date: datetime | None = None,
+        document_id: str | None = None,
+        fact_type_override: str | None = None,
+        confidence_score: float | None = None,
+    ) -> list[str]:
         """
         Store content as memory units with temporal and semantic links (ASYNC version).
 
@@ -747,11 +739,7 @@ class MemoryEngine:
             List of created unit IDs
         """
         # Build content dict
-        content_dict: RetainContentDict = {
-            "content": content,
-            "context": context,
-            "event_date": event_date
-        }
+        content_dict: RetainContentDict = {"content": content, "context": context, "event_date": event_date}
         if document_id:
             content_dict["document_id"] = document_id
 
@@ -760,7 +748,7 @@ class MemoryEngine:
             bank_id=bank_id,
             contents=[content_dict],
             fact_type_override=fact_type_override,
-            confidence_score=confidence_score
+            confidence_score=confidence_score,
         )
 
         # Return the first (and only) list of unit IDs
@@ -769,11 +757,11 @@ class MemoryEngine:
     async def retain_batch_async(
         self,
         bank_id: str,
-        contents: List[RetainContentDict],
-        document_id: Optional[str] = None,
-        fact_type_override: Optional[str] = None,
-        confidence_score: Optional[float] = None,
-    ) -> List[List[str]]:
+        contents: list[RetainContentDict],
+        document_id: str | None = None,
+        fact_type_override: str | None = None,
+        confidence_score: float | None = None,
+    ) -> list[list[str]]:
         """
         Store multiple content items as memory units in ONE batch operation.
 
@@ -839,7 +827,9 @@ class MemoryEngine:
 
         if total_chars > CHARS_PER_BATCH:
             # Split into smaller batches based on character count
-            logger.info(f"Large batch detected ({total_chars:,} chars from {len(contents)} items). Splitting into sub-batches of ~{CHARS_PER_BATCH:,} chars each...")
+            logger.info(
+                f"Large batch detected ({total_chars:,} chars from {len(contents)} items). Splitting into sub-batches of ~{CHARS_PER_BATCH:,} chars each..."
+            )
 
             sub_batches = []
             current_batch = []
@@ -868,7 +858,9 @@ class MemoryEngine:
             all_results = []
             for i, sub_batch in enumerate(sub_batches, 1):
                 sub_batch_chars = sum(len(item.get("content", "")) for item in sub_batch)
-                logger.info(f"Processing sub-batch {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_chars:,} chars")
+                logger.info(
+                    f"Processing sub-batch {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_chars:,} chars"
+                )
 
                 sub_results = await self._retain_batch_async_internal(
                     bank_id=bank_id,
@@ -876,12 +868,14 @@ class MemoryEngine:
                     document_id=document_id,
                     is_first_batch=i == 1,  # Only upsert on first batch
                     fact_type_override=fact_type_override,
-                    confidence_score=confidence_score
+                    confidence_score=confidence_score,
                 )
                 all_results.extend(sub_results)
 
             total_time = time.time() - start_time
-            logger.info(f"RETAIN_BATCH_ASYNC (chunked) COMPLETE: {len(all_results)} results from {len(contents)} contents in {total_time:.3f}s")
+            logger.info(
+                f"RETAIN_BATCH_ASYNC (chunked) COMPLETE: {len(all_results)} results from {len(contents)} contents in {total_time:.3f}s"
+            )
             return all_results
 
         # Small batch - use internal method directly
@@ -891,18 +885,18 @@ class MemoryEngine:
             document_id=document_id,
             is_first_batch=True,
             fact_type_override=fact_type_override,
-            confidence_score=confidence_score
+            confidence_score=confidence_score,
         )
 
     async def _retain_batch_async_internal(
         self,
         bank_id: str,
-        contents: List[RetainContentDict],
-        document_id: Optional[str] = None,
+        contents: list[RetainContentDict],
+        document_id: str | None = None,
         is_first_batch: bool = True,
-        fact_type_override: Optional[str] = None,
-        confidence_score: Optional[float] = None,
-    ) -> List[List[str]]:
+        fact_type_override: str | None = None,
+        confidence_score: float | None = None,
+    ) -> list[list[str]]:
         """
         Internal method for batch processing without chunking logic.
 
@@ -938,7 +932,7 @@ class MemoryEngine:
                 document_id=document_id,
                 is_first_batch=is_first_batch,
                 fact_type_override=fact_type_override,
-                confidence_score=confidence_score
+                confidence_score=confidence_score,
             )
 
     def recall(
@@ -949,7 +943,7 @@ class MemoryEngine:
         budget: Budget = Budget.MID,
         max_tokens: int = 4096,
         enable_trace: bool = False,
-    ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
+    ) -> tuple[list[dict[str, Any]], Any | None]:
         """
         Recall memories using 4-way parallel retrieval (synchronous wrapper).
 
@@ -968,19 +962,17 @@ class MemoryEngine:
             Tuple of (results, trace)
         """
         # Run async version synchronously
-        return asyncio.run(self.recall_async(
-            bank_id, query, [fact_type], budget, max_tokens, enable_trace
-        ))
+        return asyncio.run(self.recall_async(bank_id, query, [fact_type], budget, max_tokens, enable_trace))
 
     async def recall_async(
         self,
         bank_id: str,
         query: str,
-        fact_type: List[str],
+        fact_type: list[str],
         budget: Budget = Budget.MID,
         max_tokens: int = 4096,
         enable_trace: bool = False,
-        question_date: Optional[datetime] = None,
+        question_date: datetime | None = None,
         include_entities: bool = False,
         max_entity_tokens: int = 1024,
         include_chunks: bool = False,
@@ -1027,11 +1019,7 @@ class MemoryEngine:
             )
 
         # Map budget enum to thinking_budget number
-        budget_mapping = {
-            Budget.LOW: 100,
-            Budget.MID: 300,
-            Budget.HIGH: 1000
-        }
+        budget_mapping = {Budget.LOW: 100, Budget.MID: 300, Budget.HIGH: 1000}
         thinking_budget = budget_mapping[budget]
 
         # Backpressure: limit concurrent recalls to prevent overwhelming the database
@@ -1041,20 +1029,29 @@ class MemoryEngine:
             for attempt in range(max_retries + 1):
                 try:
                     return await self._search_with_retries(
-                        bank_id, query, fact_type, thinking_budget, max_tokens, enable_trace, question_date,
-                        include_entities, max_entity_tokens, include_chunks, max_chunk_tokens
+                        bank_id,
+                        query,
+                        fact_type,
+                        thinking_budget,
+                        max_tokens,
+                        enable_trace,
+                        question_date,
+                        include_entities,
+                        max_entity_tokens,
+                        include_chunks,
+                        max_chunk_tokens,
                     )
                 except Exception as e:
                     # Check if it's a connection error
                     is_connection_error = (
-                        isinstance(e, asyncpg.TooManyConnectionsError) or
-                        isinstance(e, asyncpg.CannotConnectNowError) or
-                        (isinstance(e, asyncpg.PostgresError) and 'connection' in str(e).lower())
+                        isinstance(e, asyncpg.TooManyConnectionsError)
+                        or isinstance(e, asyncpg.CannotConnectNowError)
+                        or (isinstance(e, asyncpg.PostgresError) and "connection" in str(e).lower())
                     )
 
                     if is_connection_error and attempt < max_retries:
                         # Wait with exponential backoff before retry
-                        wait_time = 0.5 * (2 ** attempt)  # 0.5s, 1s, 2s
+                        wait_time = 0.5 * (2**attempt)  # 0.5s, 1s, 2s
                         logger.warning(
                             f"Connection error on search attempt {attempt + 1}/{max_retries + 1}: {str(e)}. "
                             f"Retrying in {wait_time:.1f}s..."
@@ -1069,11 +1066,11 @@ class MemoryEngine:
         self,
         bank_id: str,
         query: str,
-        fact_type: List[str],
+        fact_type: list[str],
         thinking_budget: int,
         max_tokens: int,
         enable_trace: bool,
-        question_date: Optional[datetime] = None,
+        question_date: datetime | None = None,
         include_entities: bool = False,
         max_entity_tokens: int = 500,
         include_chunks: bool = False,
@@ -1106,6 +1103,7 @@ class MemoryEngine:
         """
         # Initialize tracer if requested
         from .search.tracer import SearchTracer
+
         tracer = SearchTracer(query, thinking_budget, max_tokens) if enable_trace else None
         if tracer:
             tracer.start()
@@ -1116,7 +1114,9 @@ class MemoryEngine:
         # Buffer logs for clean output in concurrent scenarios
         recall_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
         log_buffer = []
-        log_buffer.append(f"[RECALL {recall_id}] Query: '{query[:50]}...' (budget={thinking_budget}, max_tokens={max_tokens})")
+        log_buffer.append(
+            f"[RECALL {recall_id}] Query: '{query[:50]}...' (budget={thinking_budget}, max_tokens={max_tokens})"
+        )
 
         try:
             # Step 1: Generate query embedding (for semantic search)
@@ -1141,8 +1141,7 @@ class MemoryEngine:
             # Run retrieval for each fact type in parallel
             retrieval_tasks = [
                 retrieve_parallel(
-                    pool, query, query_embedding_str, bank_id, ft, thinking_budget,
-                    question_date, self.query_analyzer
+                    pool, query, query_embedding_str, bank_id, ft, thinking_budget, question_date, self.query_analyzer
                 )
                 for ft in fact_type
             ]
@@ -1159,7 +1158,9 @@ class MemoryEngine:
             for idx, retrieval_result in enumerate(all_retrievals):
                 # Log fact types in this retrieval batch
                 ft_name = fact_type[idx] if idx < len(fact_type) else "unknown"
-                logger.debug(f"[RECALL {recall_id}] Fact type '{ft_name}': semantic={len(retrieval_result.semantic)}, bm25={len(retrieval_result.bm25)}, graph={len(retrieval_result.graph)}, temporal={len(retrieval_result.temporal) if retrieval_result.temporal else 0}")
+                logger.debug(
+                    f"[RECALL {recall_id}] Fact type '{ft_name}': semantic={len(retrieval_result.semantic)}, bm25={len(retrieval_result.bm25)}, graph={len(retrieval_result.graph)}, temporal={len(retrieval_result.temporal) if retrieval_result.temporal else 0}"
+                )
 
                 semantic_results.extend(retrieval_result.semantic)
                 bm25_results.extend(retrieval_result.bm25)
@@ -1179,11 +1180,13 @@ class MemoryEngine:
 
             # Sort combined results by score (descending) so higher-scored results
             # get better ranks in the trace, regardless of fact type
-            semantic_results.sort(key=lambda r: r.similarity if hasattr(r, 'similarity') else 0, reverse=True)
-            bm25_results.sort(key=lambda r: r.bm25_score if hasattr(r, 'bm25_score') else 0, reverse=True)
-            graph_results.sort(key=lambda r: r.activation if hasattr(r, 'activation') else 0, reverse=True)
+            semantic_results.sort(key=lambda r: r.similarity if hasattr(r, "similarity") else 0, reverse=True)
+            bm25_results.sort(key=lambda r: r.bm25_score if hasattr(r, "bm25_score") else 0, reverse=True)
+            graph_results.sort(key=lambda r: r.activation if hasattr(r, "activation") else 0, reverse=True)
             if temporal_results:
-                temporal_results.sort(key=lambda r: r.combined_score if hasattr(r, 'combined_score') else 0, reverse=True)
+                temporal_results.sort(
+                    key=lambda r: r.combined_score if hasattr(r, "combined_score") else 0, reverse=True
+                )
 
             retrieval_duration = time.time() - retrieval_start
 
@@ -1193,7 +1196,7 @@ class MemoryEngine:
             timing_parts = [
                 f"semantic={len(semantic_results)}({aggregated_timings['semantic']:.3f}s)",
                 f"bm25={len(bm25_results)}({aggregated_timings['bm25']:.3f}s)",
-                f"graph={len(graph_results)}({aggregated_timings['graph']:.3f}s)"
+                f"graph={len(graph_results)}({aggregated_timings['graph']:.3f}s)",
             ]
             temporal_info = ""
             if detected_temporal_constraint:
@@ -1201,7 +1204,9 @@ class MemoryEngine:
                 temporal_count = len(temporal_results) if temporal_results else 0
                 timing_parts.append(f"temporal={temporal_count}({aggregated_timings['temporal']:.3f}s)")
                 temporal_info = f" | temporal_range={start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}"
-            log_buffer.append(f"  [2] {total_retrievals}-way retrieval ({len(fact_type)} fact_types): {', '.join(timing_parts)} in {step_duration:.3f}s{temporal_info}")
+            log_buffer.append(
+                f"  [2] {total_retrievals}-way retrieval ({len(fact_type)} fact_types): {', '.join(timing_parts)} in {step_duration:.3f}s{temporal_info}"
+            )
 
             # Record retrieval results for tracer - per fact type
             if tracer:
@@ -1220,7 +1225,7 @@ class MemoryEngine:
                         duration_seconds=rr.timings.get("semantic", 0.0),
                         score_field="similarity",
                         metadata={"limit": thinking_budget},
-                        fact_type=ft_name
+                        fact_type=ft_name,
                     )
 
                     # Add BM25 retrieval results for this fact type
@@ -1230,7 +1235,7 @@ class MemoryEngine:
                         duration_seconds=rr.timings.get("bm25", 0.0),
                         score_field="bm25_score",
                         metadata={"limit": thinking_budget},
-                        fact_type=ft_name
+                        fact_type=ft_name,
                     )
 
                     # Add graph retrieval results for this fact type
@@ -1240,7 +1245,7 @@ class MemoryEngine:
                         duration_seconds=rr.timings.get("graph", 0.0),
                         score_field="activation",
                         metadata={"budget": thinking_budget},
-                        fact_type=ft_name
+                        fact_type=ft_name,
                     )
 
                     # Add temporal retrieval results for this fact type (even if empty, to show it ran)
@@ -1251,19 +1256,23 @@ class MemoryEngine:
                             duration_seconds=rr.timings.get("temporal", 0.0),
                             score_field="temporal_score",
                             metadata={"budget": thinking_budget},
-                            fact_type=ft_name
+                            fact_type=ft_name,
                         )
 
                 # Record entry points (from semantic results) for legacy graph view
                 for rank, retrieval in enumerate(semantic_results[:10], start=1):  # Top 10 as entry points
                     tracer.add_entry_point(retrieval.id, retrieval.text, retrieval.similarity or 0.0, rank)
 
-                tracer.add_phase_metric("parallel_retrieval", step_duration, {
-                    "semantic_count": len(semantic_results),
-                    "bm25_count": len(bm25_results),
-                    "graph_count": len(graph_results),
-                    "temporal_count": len(temporal_results) if temporal_results else 0
-                })
+                tracer.add_phase_metric(
+                    "parallel_retrieval",
+                    step_duration,
+                    {
+                        "semantic_count": len(semantic_results),
+                        "bm25_count": len(bm25_results),
+                        "graph_count": len(graph_results),
+                        "temporal_count": len(temporal_results) if temporal_results else 0,
+                    },
+                )
 
             # Step 3: Merge with RRF
             step_start = time.time()
@@ -1271,7 +1280,9 @@ class MemoryEngine:
 
             # Merge 3 or 4 result lists depending on temporal constraint
             if temporal_results:
-                merged_candidates = reciprocal_rank_fusion([semantic_results, bm25_results, graph_results, temporal_results])
+                merged_candidates = reciprocal_rank_fusion(
+                    [semantic_results, bm25_results, graph_results, temporal_results]
+                )
             else:
                 merged_candidates = reciprocal_rank_fusion([semantic_results, bm25_results, graph_results])
 
@@ -1280,8 +1291,10 @@ class MemoryEngine:
 
             if tracer:
                 # Convert MergedCandidate to old tuple format for tracer
-                tracer_merged = [(mc.id, mc.retrieval.__dict__, {"rrf_score": mc.rrf_score, **mc.source_ranks})
-                                for mc in merged_candidates]
+                tracer_merged = [
+                    (mc.id, mc.retrieval.__dict__, {"rrf_score": mc.rrf_score, **mc.source_ranks})
+                    for mc in merged_candidates
+                ]
                 tracer.add_rrf_merged(tracer_merged)
                 tracer.add_phase_metric("rrf_merge", step_duration, {"candidates_merged": len(merged_candidates)})
 
@@ -1318,14 +1331,15 @@ class MemoryEngine:
                     sr.recency = 0.5  # default for missing dates
                     if sr.retrieval.occurred_start:
                         occurred = sr.retrieval.occurred_start
-                        if hasattr(occurred, 'tzinfo') and occurred.tzinfo is None:
-                            from datetime import timezone
-                            occurred = occurred.replace(tzinfo=timezone.utc)
+                        if hasattr(occurred, "tzinfo") and occurred.tzinfo is None:
+                            occurred = occurred.replace(tzinfo=UTC)
                         days_ago = (now - occurred).total_seconds() / 86400
                         sr.recency = max(0.1, 1.0 - (days_ago / 365))  # Linear decay over 1 year
 
                     # Get temporal proximity if available (already 0-1)
-                    sr.temporal = sr.retrieval.temporal_proximity if sr.retrieval.temporal_proximity is not None else 0.5
+                    sr.temporal = (
+                        sr.retrieval.temporal_proximity if sr.retrieval.temporal_proximity is not None else 0.5
+                    )
 
                     # Weighted combination
                     # Cross-encoder: 60% (semantic relevance)
@@ -1333,27 +1347,32 @@ class MemoryEngine:
                     # Temporal proximity: 10% (time relevance for temporal queries)
                     # Recency: 10% (prefer recent facts)
                     sr.combined_score = (
-                        0.6 * sr.cross_encoder_score_normalized +
-                        0.2 * sr.rrf_normalized +
-                        0.1 * sr.temporal +
-                        0.1 * sr.recency
+                        0.6 * sr.cross_encoder_score_normalized
+                        + 0.2 * sr.rrf_normalized
+                        + 0.1 * sr.temporal
+                        + 0.1 * sr.recency
                     )
                     sr.weight = sr.combined_score  # Update weight for final ranking
 
                 # Re-sort by combined score
                 scored_results.sort(key=lambda x: x.weight, reverse=True)
-                log_buffer.append(f"  [4.6] Combined scoring: cross_encoder(0.6) + rrf(0.2) + temporal(0.1) + recency(0.1)")
+                log_buffer.append(
+                    "  [4.6] Combined scoring: cross_encoder(0.6) + rrf(0.2) + temporal(0.1) + recency(0.1)"
+                )
 
             # Add reranked results to tracer AFTER combined scoring (so normalized values are included)
             if tracer:
                 results_dict = [sr.to_dict() for sr in scored_results]
-                tracer_merged = [(mc.id, mc.retrieval.__dict__, {"rrf_score": mc.rrf_score, **mc.source_ranks})
-                                for mc in merged_candidates]
+                tracer_merged = [
+                    (mc.id, mc.retrieval.__dict__, {"rrf_score": mc.rrf_score, **mc.source_ranks})
+                    for mc in merged_candidates
+                ]
                 tracer.add_reranked(results_dict, tracer_merged)
-                tracer.add_phase_metric("reranking", step_duration, {
-                    "reranker_type": "cross-encoder",
-                    "candidates_reranked": len(scored_results)
-                })
+                tracer.add_phase_metric(
+                    "reranking",
+                    step_duration,
+                    {"reranker_type": "cross-encoder", "candidates_reranked": len(scored_results)},
+                )
 
             # Step 5: Truncate to thinking_budget * 2 for token filtering
             rerank_limit = thinking_budget * 2
@@ -1372,14 +1391,16 @@ class MemoryEngine:
             top_scored = [sr for sr in top_scored if sr.id in filtered_ids]
 
             step_duration = time.time() - step_start
-            log_buffer.append(f"  [6] Token filtering: {len(top_scored)} results, {total_tokens}/{max_tokens} tokens in {step_duration:.3f}s")
+            log_buffer.append(
+                f"  [6] Token filtering: {len(top_scored)} results, {total_tokens}/{max_tokens} tokens in {step_duration:.3f}s"
+            )
 
             if tracer:
-                tracer.add_phase_metric("token_filtering", step_duration, {
-                    "results_selected": len(top_scored),
-                    "tokens_used": total_tokens,
-                    "max_tokens": max_tokens
-                })
+                tracer.add_phase_metric(
+                    "token_filtering",
+                    step_duration,
+                    {"results_selected": len(top_scored), "tokens_used": total_tokens, "max_tokens": max_tokens},
+                )
 
             # Record visits for all retrieved nodes
             if tracer:
@@ -1398,16 +1419,13 @@ class MemoryEngine:
                         semantic_similarity=sr.retrieval.similarity or 0.0,
                         recency=sr.recency,
                         frequency=0.0,
-                        final_weight=sr.weight
+                        final_weight=sr.weight,
                     )
 
             # Step 8: Queue access count updates for visited nodes
             visited_ids = list(set([sr.id for sr in scored_results[:50]]))  # Top 50
             if visited_ids:
-                await self._task_backend.submit_task({
-                    'type': 'access_count_update',
-                    'node_ids': visited_ids
-                })
+                await self._task_backend.submit_task({"type": "access_count_update", "node_ids": visited_ids})
                 log_buffer.append(f"  [7] Queued access count updates for {len(visited_ids)} nodes")
 
             # Log fact_type distribution in results
@@ -1425,13 +1443,19 @@ class MemoryEngine:
                 # Convert datetime objects to ISO strings for JSON serialization
                 if result_dict.get("occurred_start"):
                     occurred_start = result_dict["occurred_start"]
-                    result_dict["occurred_start"] = occurred_start.isoformat() if hasattr(occurred_start, 'isoformat') else occurred_start
+                    result_dict["occurred_start"] = (
+                        occurred_start.isoformat() if hasattr(occurred_start, "isoformat") else occurred_start
+                    )
                 if result_dict.get("occurred_end"):
                     occurred_end = result_dict["occurred_end"]
-                    result_dict["occurred_end"] = occurred_end.isoformat() if hasattr(occurred_end, 'isoformat') else occurred_end
+                    result_dict["occurred_end"] = (
+                        occurred_end.isoformat() if hasattr(occurred_end, "isoformat") else occurred_end
+                    )
                 if result_dict.get("mentioned_at"):
                     mentioned_at = result_dict["mentioned_at"]
-                    result_dict["mentioned_at"] = mentioned_at.isoformat() if hasattr(mentioned_at, 'isoformat') else mentioned_at
+                    result_dict["mentioned_at"] = (
+                        mentioned_at.isoformat() if hasattr(mentioned_at, "isoformat") else mentioned_at
+                    )
                 top_results_dicts.append(result_dict)
 
             # Get entities for each fact if include_entities is requested
@@ -1447,16 +1471,15 @@ class MemoryEngine:
                             JOIN entities e ON ue.entity_id = e.id
                             WHERE ue.unit_id = ANY($1::uuid[])
                             """,
-                            unit_ids
+                            unit_ids,
                         )
                         for row in entity_rows:
-                            unit_id = str(row['unit_id'])
+                            unit_id = str(row["unit_id"])
                             if unit_id not in fact_entity_map:
                                 fact_entity_map[unit_id] = []
-                            fact_entity_map[unit_id].append({
-                                'entity_id': str(row['entity_id']),
-                                'canonical_name': row['canonical_name']
-                            })
+                            fact_entity_map[unit_id].append(
+                                {"entity_id": str(row["entity_id"]), "canonical_name": row["canonical_name"]}
+                            )
 
             # Convert results to MemoryFact objects
             memory_facts = []
@@ -1465,20 +1488,22 @@ class MemoryEngine:
                 # Get entity names for this fact
                 entity_names = None
                 if include_entities and result_id in fact_entity_map:
-                    entity_names = [e['canonical_name'] for e in fact_entity_map[result_id]]
+                    entity_names = [e["canonical_name"] for e in fact_entity_map[result_id]]
 
-                memory_facts.append(MemoryFact(
-                    id=result_id,
-                    text=result_dict.get("text"),
-                    fact_type=result_dict.get("fact_type", "world"),
-                    entities=entity_names,
-                    context=result_dict.get("context"),
-                    occurred_start=result_dict.get("occurred_start"),
-                    occurred_end=result_dict.get("occurred_end"),
-                    mentioned_at=result_dict.get("mentioned_at"),
-                    document_id=result_dict.get("document_id"),
-                    chunk_id=result_dict.get("chunk_id"),
-                ))
+                memory_facts.append(
+                    MemoryFact(
+                        id=result_id,
+                        text=result_dict.get("text"),
+                        fact_type=result_dict.get("fact_type", "world"),
+                        entities=entity_names,
+                        context=result_dict.get("context"),
+                        occurred_start=result_dict.get("occurred_start"),
+                        occurred_end=result_dict.get("occurred_end"),
+                        mentioned_at=result_dict.get("mentioned_at"),
+                        document_id=result_dict.get("document_id"),
+                        chunk_id=result_dict.get("chunk_id"),
+                    )
+                )
 
             # Fetch entity observations if requested
             entities_dict = None
@@ -1495,8 +1520,8 @@ class MemoryEngine:
                     unit_id = sr.id
                     if unit_id in fact_entity_map:
                         for entity in fact_entity_map[unit_id]:
-                            entity_id = entity['entity_id']
-                            entity_name = entity['canonical_name']
+                            entity_id = entity["entity_id"]
+                            entity_name = entity["canonical_name"]
                             if entity_id not in seen_entity_ids:
                                 entities_ordered.append((entity_id, entity_name))
                                 seen_entity_ids.add(entity_id)
@@ -1524,9 +1549,7 @@ class MemoryEngine:
 
                     if included_observations:
                         entities_dict[entity_name] = EntityState(
-                            entity_id=entity_id,
-                            canonical_name=entity_name,
-                            observations=included_observations
+                            entity_id=entity_id, canonical_name=entity_name, observations=included_observations
                         )
                         total_entity_tokens += entity_tokens
 
@@ -1554,11 +1577,11 @@ class MemoryEngine:
                             FROM chunks
                             WHERE chunk_id = ANY($1::text[])
                             """,
-                            chunk_ids_ordered
+                            chunk_ids_ordered,
                         )
 
                     # Create a lookup dict for fast access
-                    chunks_lookup = {row['chunk_id']: row for row in chunks_rows}
+                    chunks_lookup = {row["chunk_id"]: row for row in chunks_rows}
 
                     # Apply token limit and build chunks_dict in the order of chunk_ids_ordered
                     chunks_dict = {}
@@ -1569,7 +1592,7 @@ class MemoryEngine:
                             continue
 
                         row = chunks_lookup[chunk_id]
-                        chunk_text = row['chunk_text']
+                        chunk_text = row["chunk_text"]
                         chunk_tokens = len(encoding.encode(chunk_text))
 
                         # Check if adding this chunk would exceed the limit
@@ -1580,18 +1603,14 @@ class MemoryEngine:
                                 # Truncate to remaining tokens
                                 truncated_text = encoding.decode(encoding.encode(chunk_text)[:remaining_tokens])
                                 chunks_dict[chunk_id] = ChunkInfo(
-                                    chunk_text=truncated_text,
-                                    chunk_index=row['chunk_index'],
-                                    truncated=True
+                                    chunk_text=truncated_text, chunk_index=row["chunk_index"], truncated=True
                                 )
                                 total_chunk_tokens = max_chunk_tokens
                             # Stop adding more chunks once we hit the limit
                             break
                         else:
                             chunks_dict[chunk_id] = ChunkInfo(
-                                chunk_text=chunk_text,
-                                chunk_index=row['chunk_index'],
-                                truncated=False
+                                chunk_text=chunk_text, chunk_index=row["chunk_index"], truncated=False
                             )
                             total_chunk_tokens += chunk_tokens
 
@@ -1605,7 +1624,9 @@ class MemoryEngine:
             total_time = time.time() - recall_start
             num_chunks = len(chunks_dict) if chunks_dict else 0
             num_entities = len(entities_dict) if entities_dict else 0
-            log_buffer.append(f"[RECALL {recall_id}] Complete: {len(top_scored)} facts ({total_tokens} tok), {num_chunks} chunks ({total_chunk_tokens} tok), {num_entities} entities ({total_entity_tokens} tok) | {fact_type_summary} | {total_time:.3f}s")
+            log_buffer.append(
+                f"[RECALL {recall_id}] Complete: {len(top_scored)} facts ({total_tokens} tok), {num_chunks} chunks ({total_chunk_tokens} tok), {num_entities} entities ({total_entity_tokens} tok) | {fact_type_summary} | {total_time:.3f}s"
+            )
             logger.info("\n" + "\n".join(log_buffer))
 
             return RecallResultModel(results=memory_facts, trace=trace_dict, entities=entities_dict, chunks=chunks_dict)
@@ -1616,10 +1637,8 @@ class MemoryEngine:
             raise Exception(f"Failed to search memories: {str(e)}")
 
     def _filter_by_token_budget(
-        self,
-        results: List[Dict[str, Any]],
-        max_tokens: int
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        self, results: list[dict[str, Any]], max_tokens: int
+    ) -> tuple[list[dict[str, Any]], int]:
         """
         Filter results to fit within token budget.
 
@@ -1652,7 +1671,7 @@ class MemoryEngine:
 
         return filtered_results, total_tokens
 
-    async def get_document(self, document_id: str, bank_id: str) -> Optional[Dict[str, Any]]:
+    async def get_document(self, document_id: str, bank_id: str) -> dict[str, Any] | None:
         """
         Retrieve document metadata and statistics.
 
@@ -1674,7 +1693,8 @@ class MemoryEngine:
                 WHERE d.id = $1 AND d.bank_id = $2
                 GROUP BY d.id, d.bank_id, d.original_text, d.content_hash, d.created_at, d.updated_at
                 """,
-                document_id, bank_id
+                document_id,
+                bank_id,
             )
 
             if not doc:
@@ -1687,10 +1707,10 @@ class MemoryEngine:
                 "content_hash": doc["content_hash"],
                 "memory_unit_count": doc["unit_count"],
                 "created_at": doc["created_at"],
-                "updated_at": doc["updated_at"]
+                "updated_at": doc["updated_at"],
             }
 
-    async def delete_document(self, document_id: str, bank_id: str) -> Dict[str, int]:
+    async def delete_document(self, document_id: str, bank_id: str) -> dict[str, int]:
         """
         Delete a document and all its associated memory units and links.
 
@@ -1706,22 +1726,17 @@ class MemoryEngine:
             async with conn.transaction():
                 # Count units before deletion
                 units_count = await conn.fetchval(
-                    "SELECT COUNT(*) FROM memory_units WHERE document_id = $1",
-                    document_id
+                    "SELECT COUNT(*) FROM memory_units WHERE document_id = $1", document_id
                 )
 
                 # Delete document (cascades to memory_units and all their links)
                 deleted = await conn.fetchval(
-                    "DELETE FROM documents WHERE id = $1 AND bank_id = $2 RETURNING id",
-                    document_id, bank_id
+                    "DELETE FROM documents WHERE id = $1 AND bank_id = $2 RETURNING id", document_id, bank_id
                 )
 
-                return {
-                    "document_deleted": 1 if deleted else 0,
-                    "memory_units_deleted": units_count if deleted else 0
-                }
+                return {"document_deleted": 1 if deleted else 0, "memory_units_deleted": units_count if deleted else 0}
 
-    async def delete_memory_unit(self, unit_id: str) -> Dict[str, Any]:
+    async def delete_memory_unit(self, unit_id: str) -> dict[str, Any]:
         """
         Delete a single memory unit and all its associated links.
 
@@ -1740,18 +1755,17 @@ class MemoryEngine:
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
                 # Delete the memory unit (cascades to links and associations)
-                deleted = await conn.fetchval(
-                    "DELETE FROM memory_units WHERE id = $1 RETURNING id",
-                    unit_id
-                )
+                deleted = await conn.fetchval("DELETE FROM memory_units WHERE id = $1 RETURNING id", unit_id)
 
                 return {
                     "success": deleted is not None,
                     "unit_id": str(deleted) if deleted else None,
-                    "message": "Memory unit and all its links deleted successfully" if deleted else "Memory unit not found"
+                    "message": "Memory unit and all its links deleted successfully"
+                    if deleted
+                    else "Memory unit not found",
                 }
 
-    async def delete_bank(self, bank_id: str, fact_type: Optional[str] = None) -> Dict[str, int]:
+    async def delete_bank(self, bank_id: str, fact_type: str | None = None) -> dict[str, int]:
         """
         Delete all data for a specific agent (multi-tenant cleanup).
 
@@ -1780,24 +1794,27 @@ class MemoryEngine:
                         # Delete only memories of a specific fact type
                         units_count = await conn.fetchval(
                             "SELECT COUNT(*) FROM memory_units WHERE bank_id = $1 AND fact_type = $2",
-                            bank_id, fact_type
+                            bank_id,
+                            fact_type,
                         )
                         await conn.execute(
-                            "DELETE FROM memory_units WHERE bank_id = $1 AND fact_type = $2",
-                            bank_id, fact_type
+                            "DELETE FROM memory_units WHERE bank_id = $1 AND fact_type = $2", bank_id, fact_type
                         )
 
                         # Note: We don't delete entities when fact_type is specified,
                         # as they may be referenced by other memory units
-                        return {
-                            "memory_units_deleted": units_count,
-                            "entities_deleted": 0
-                        }
+                        return {"memory_units_deleted": units_count, "entities_deleted": 0}
                     else:
                         # Delete all data for the bank
-                        units_count = await conn.fetchval("SELECT COUNT(*) FROM memory_units WHERE bank_id = $1", bank_id)
-                        entities_count = await conn.fetchval("SELECT COUNT(*) FROM entities WHERE bank_id = $1", bank_id)
-                        documents_count = await conn.fetchval("SELECT COUNT(*) FROM documents WHERE bank_id = $1", bank_id)
+                        units_count = await conn.fetchval(
+                            "SELECT COUNT(*) FROM memory_units WHERE bank_id = $1", bank_id
+                        )
+                        entities_count = await conn.fetchval(
+                            "SELECT COUNT(*) FROM entities WHERE bank_id = $1", bank_id
+                        )
+                        documents_count = await conn.fetchval(
+                            "SELECT COUNT(*) FROM documents WHERE bank_id = $1", bank_id
+                        )
 
                         # Delete documents (cascades to chunks)
                         await conn.execute("DELETE FROM documents WHERE bank_id = $1", bank_id)
@@ -1815,13 +1832,13 @@ class MemoryEngine:
                             "memory_units_deleted": units_count,
                             "entities_deleted": entities_count,
                             "documents_deleted": documents_count,
-                            "bank_deleted": True
+                            "bank_deleted": True,
                         }
 
                 except Exception as e:
                     raise Exception(f"Failed to delete agent data: {str(e)}")
 
-    async def get_graph_data(self, bank_id: Optional[str] = None, fact_type: Optional[str] = None):
+    async def get_graph_data(self, bank_id: str | None = None, fact_type: str | None = None):
         """
         Get graph data for visualization.
 
@@ -1851,19 +1868,23 @@ class MemoryEngine:
 
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
 
-            units = await conn.fetch(f"""
+            units = await conn.fetch(
+                f"""
                 SELECT id, text, event_date, context, occurred_start, occurred_end, mentioned_at, document_id, chunk_id, fact_type
                 FROM memory_units
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, event_date DESC
                 LIMIT 1000
-            """, *query_params)
+            """,
+                *query_params,
+            )
 
             # Get links, filtering to only include links between units of the selected agent
             # Use DISTINCT ON with LEAST/GREATEST to deduplicate bidirectional links
-            unit_ids = [row['id'] for row in units]
+            unit_ids = [row["id"] for row in units]
             if unit_ids:
-                links = await conn.fetch("""
+                links = await conn.fetch(
+                    """
                     SELECT DISTINCT ON (LEAST(ml.from_unit_id, ml.to_unit_id), GREATEST(ml.from_unit_id, ml.to_unit_id), ml.link_type, COALESCE(ml.entity_id, '00000000-0000-0000-0000-000000000000'::uuid))
                         ml.from_unit_id,
                         ml.to_unit_id,
@@ -1874,7 +1895,9 @@ class MemoryEngine:
                     LEFT JOIN entities e ON ml.entity_id = e.id
                     WHERE ml.from_unit_id = ANY($1::uuid[]) AND ml.to_unit_id = ANY($1::uuid[])
                     ORDER BY LEAST(ml.from_unit_id, ml.to_unit_id), GREATEST(ml.from_unit_id, ml.to_unit_id), ml.link_type, COALESCE(ml.entity_id, '00000000-0000-0000-0000-000000000000'::uuid), ml.weight DESC
-                """, unit_ids)
+                """,
+                    unit_ids,
+                )
             else:
                 links = []
 
@@ -1889,8 +1912,8 @@ class MemoryEngine:
         # Build entity mapping
         entity_map = {}
         for row in unit_entities:
-            unit_id = row['unit_id']
-            entity_name = row['canonical_name']
+            unit_id = row["unit_id"]
+            entity_name = row["canonical_name"]
             if unit_id not in entity_map:
                 entity_map[unit_id] = []
             entity_map[unit_id].append(entity_name)
@@ -1898,10 +1921,10 @@ class MemoryEngine:
         # Build nodes
         nodes = []
         for row in units:
-            unit_id = row['id']
-            text = row['text']
-            event_date = row['event_date']
-            context = row['context']
+            unit_id = row["id"]
+            text = row["text"]
+            event_date = row["event_date"]
+            context = row["context"]
 
             entities = entity_map.get(unit_id, [])
             entity_count = len(entities)
@@ -1914,88 +1937,91 @@ class MemoryEngine:
             else:
                 color = "#42a5f5"
 
-            nodes.append({
-                "data": {
-                    "id": str(unit_id),
-                    "label": f"{text[:30]}..." if len(text) > 30 else text,
-                    "text": text,
-                    "date": event_date.isoformat() if event_date else "",
-                    "context": context if context else "",
-                    "entities": ", ".join(entities) if entities else "None",
-                    "color": color
+            nodes.append(
+                {
+                    "data": {
+                        "id": str(unit_id),
+                        "label": f"{text[:30]}..." if len(text) > 30 else text,
+                        "text": text,
+                        "date": event_date.isoformat() if event_date else "",
+                        "context": context if context else "",
+                        "entities": ", ".join(entities) if entities else "None",
+                        "color": color,
+                    }
                 }
-            })
+            )
 
         # Build edges
         edges = []
         for row in links:
-            from_id = str(row['from_unit_id'])
-            to_id = str(row['to_unit_id'])
-            link_type = row['link_type']
-            weight = row['weight']
-            entity_name = row['entity_name']
+            from_id = str(row["from_unit_id"])
+            to_id = str(row["to_unit_id"])
+            link_type = row["link_type"]
+            weight = row["weight"]
+            entity_name = row["entity_name"]
 
             # Color by link type
-            if link_type == 'temporal':
+            if link_type == "temporal":
                 color = "#00bcd4"
                 line_style = "dashed"
-            elif link_type == 'semantic':
+            elif link_type == "semantic":
                 color = "#ff69b4"
                 line_style = "solid"
-            elif link_type == 'entity':
+            elif link_type == "entity":
                 color = "#ffd700"
                 line_style = "solid"
             else:
                 color = "#999999"
                 line_style = "solid"
 
-            edges.append({
-                "data": {
-                    "id": f"{from_id}-{to_id}-{link_type}",
-                    "source": from_id,
-                    "target": to_id,
-                    "linkType": link_type,
-                    "weight": weight,
-                    "entityName": entity_name if entity_name else "",
-                    "color": color,
-                    "lineStyle": line_style
+            edges.append(
+                {
+                    "data": {
+                        "id": f"{from_id}-{to_id}-{link_type}",
+                        "source": from_id,
+                        "target": to_id,
+                        "linkType": link_type,
+                        "weight": weight,
+                        "entityName": entity_name if entity_name else "",
+                        "color": color,
+                        "lineStyle": line_style,
+                    }
                 }
-            })
+            )
 
         # Build table rows
         table_rows = []
         for row in units:
-            unit_id = row['id']
+            unit_id = row["id"]
             entities = entity_map.get(unit_id, [])
 
-            table_rows.append({
-                "id": str(unit_id),
-                "text": row['text'],
-                "context": row['context'] if row['context'] else "N/A",
-                "occurred_start": row['occurred_start'].isoformat() if row['occurred_start'] else None,
-                "occurred_end": row['occurred_end'].isoformat() if row['occurred_end'] else None,
-                "mentioned_at": row['mentioned_at'].isoformat() if row['mentioned_at'] else None,
-                "date": row['event_date'].strftime("%Y-%m-%d %H:%M") if row['event_date'] else "N/A",  # Deprecated, kept for backwards compatibility
-                "entities": ", ".join(entities) if entities else "None",
-                "document_id": row['document_id'],
-                "chunk_id": row['chunk_id'] if row['chunk_id'] else None,
-                "fact_type": row['fact_type']
-            })
+            table_rows.append(
+                {
+                    "id": str(unit_id),
+                    "text": row["text"],
+                    "context": row["context"] if row["context"] else "N/A",
+                    "occurred_start": row["occurred_start"].isoformat() if row["occurred_start"] else None,
+                    "occurred_end": row["occurred_end"].isoformat() if row["occurred_end"] else None,
+                    "mentioned_at": row["mentioned_at"].isoformat() if row["mentioned_at"] else None,
+                    "date": row["event_date"].strftime("%Y-%m-%d %H:%M")
+                    if row["event_date"]
+                    else "N/A",  # Deprecated, kept for backwards compatibility
+                    "entities": ", ".join(entities) if entities else "None",
+                    "document_id": row["document_id"],
+                    "chunk_id": row["chunk_id"] if row["chunk_id"] else None,
+                    "fact_type": row["fact_type"],
+                }
+            )
 
-        return {
-            "nodes": nodes,
-            "edges": edges,
-            "table_rows": table_rows,
-            "total_units": len(units)
-        }
+        return {"nodes": nodes, "edges": edges, "table_rows": table_rows, "total_units": len(units)}
 
     async def list_memory_units(
         self,
-        bank_id: Optional[str] = None,
-        fact_type: Optional[str] = None,
-        search_query: Optional[str] = None,
+        bank_id: str | None = None,
+        fact_type: str | None = None,
+        search_query: str | None = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ):
         """
         List memory units for table view with optional full-text search.
@@ -2042,7 +2068,7 @@ class MemoryEngine:
                 {where_clause}
             """
             count_result = await conn.fetchrow(count_query, *query_params)
-            total = count_result['total']
+            total = count_result["total"]
 
             # Get units with limit and offset
             param_count += 1
@@ -2053,32 +2079,38 @@ class MemoryEngine:
             offset_param = f"${param_count}"
             query_params.append(offset)
 
-            units = await conn.fetch(f"""
+            units = await conn.fetch(
+                f"""
                 SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end, chunk_id
                 FROM memory_units
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, created_at DESC
                 LIMIT {limit_param} OFFSET {offset_param}
-            """, *query_params)
+            """,
+                *query_params,
+            )
 
             # Get entity information for these units
             if units:
-                unit_ids = [row['id'] for row in units]
-                unit_entities = await conn.fetch("""
+                unit_ids = [row["id"] for row in units]
+                unit_entities = await conn.fetch(
+                    """
                     SELECT ue.unit_id, e.canonical_name
                     FROM unit_entities ue
                     JOIN entities e ON ue.entity_id = e.id
                     WHERE ue.unit_id = ANY($1::uuid[])
                     ORDER BY ue.unit_id
-                """, unit_ids)
+                """,
+                    unit_ids,
+                )
             else:
                 unit_entities = []
 
             # Build entity mapping
             entity_map = {}
             for row in unit_entities:
-                unit_id = row['unit_id']
-                entity_name = row['canonical_name']
+                unit_id = row["unit_id"]
+                entity_name = row["canonical_name"]
                 if unit_id not in entity_map:
                     entity_map[unit_id] = []
                 entity_map[unit_id].append(entity_name)
@@ -2086,36 +2118,27 @@ class MemoryEngine:
             # Build result items
             items = []
             for row in units:
-                unit_id = row['id']
+                unit_id = row["id"]
                 entities = entity_map.get(unit_id, [])
 
-                items.append({
-                    "id": str(unit_id),
-                    "text": row['text'],
-                    "context": row['context'] if row['context'] else "",
-                    "date": row['event_date'].isoformat() if row['event_date'] else "",
-                    "fact_type": row['fact_type'],
-                    "mentioned_at": row['mentioned_at'].isoformat() if row['mentioned_at'] else None,
-                    "occurred_start": row['occurred_start'].isoformat() if row['occurred_start'] else None,
-                    "occurred_end": row['occurred_end'].isoformat() if row['occurred_end'] else None,
-                    "entities": ", ".join(entities) if entities else "",
-                    "chunk_id": row['chunk_id'] if row['chunk_id'] else None
-                })
+                items.append(
+                    {
+                        "id": str(unit_id),
+                        "text": row["text"],
+                        "context": row["context"] if row["context"] else "",
+                        "date": row["event_date"].isoformat() if row["event_date"] else "",
+                        "fact_type": row["fact_type"],
+                        "mentioned_at": row["mentioned_at"].isoformat() if row["mentioned_at"] else None,
+                        "occurred_start": row["occurred_start"].isoformat() if row["occurred_start"] else None,
+                        "occurred_end": row["occurred_end"].isoformat() if row["occurred_end"] else None,
+                        "entities": ", ".join(entities) if entities else "",
+                        "chunk_id": row["chunk_id"] if row["chunk_id"] else None,
+                    }
+                )
 
-            return {
-                "items": items,
-                "total": total,
-                "limit": limit,
-                "offset": offset
-            }
+            return {"items": items, "total": total, "limit": limit, "offset": offset}
 
-    async def list_documents(
-        self,
-        bank_id: str,
-        search_query: Optional[str] = None,
-        limit: int = 100,
-        offset: int = 0
-    ):
+    async def list_documents(self, bank_id: str, search_query: str | None = None, limit: int = 100, offset: int = 0):
         """
         List documents with optional search and pagination.
 
@@ -2154,7 +2177,7 @@ class MemoryEngine:
                 {where_clause}
             """
             count_result = await conn.fetchrow(count_query, *query_params)
-            total = count_result['total']
+            total = count_result["total"]
 
             # Get documents with limit and offset (without original_text for performance)
             param_count += 1
@@ -2165,7 +2188,8 @@ class MemoryEngine:
             offset_param = f"${param_count}"
             query_params.append(offset)
 
-            documents = await conn.fetch(f"""
+            documents = await conn.fetch(
+                f"""
                 SELECT
                     id,
                     bank_id,
@@ -2178,11 +2202,13 @@ class MemoryEngine:
                 {where_clause}
                 ORDER BY created_at DESC
                 LIMIT {limit_param} OFFSET {offset_param}
-            """, *query_params)
+            """,
+                *query_params,
+            )
 
             # Get memory unit count for each document
             if documents:
-                doc_ids = [(row['id'], row['bank_id']) for row in documents]
+                doc_ids = [(row["id"], row["bank_id"]) for row in documents]
 
                 # Create placeholders for the query
                 placeholders = []
@@ -2195,48 +2221,44 @@ class MemoryEngine:
 
                 where_clause_count = " OR ".join(placeholders)
 
-                unit_counts = await conn.fetch(f"""
+                unit_counts = await conn.fetch(
+                    f"""
                     SELECT document_id, bank_id, COUNT(*) as unit_count
                     FROM memory_units
                     WHERE {where_clause_count}
                     GROUP BY document_id, bank_id
-                """, *params_for_count)
+                """,
+                    *params_for_count,
+                )
             else:
                 unit_counts = []
 
             # Build count mapping
-            count_map = {(row['document_id'], row['bank_id']): row['unit_count'] for row in unit_counts}
+            count_map = {(row["document_id"], row["bank_id"]): row["unit_count"] for row in unit_counts}
 
             # Build result items
             items = []
             for row in documents:
-                doc_id = row['id']
-                bank_id_val = row['bank_id']
+                doc_id = row["id"]
+                bank_id_val = row["bank_id"]
                 unit_count = count_map.get((doc_id, bank_id_val), 0)
 
-                items.append({
-                    "id": doc_id,
-                    "bank_id": bank_id_val,
-                    "content_hash": row['content_hash'],
-                    "created_at": row['created_at'].isoformat() if row['created_at'] else "",
-                    "updated_at": row['updated_at'].isoformat() if row['updated_at'] else "",
-                    "text_length": row['text_length'] or 0,
-                    "memory_unit_count": unit_count,
-                    "retain_params": row['retain_params'] if row['retain_params'] else None
-                })
+                items.append(
+                    {
+                        "id": doc_id,
+                        "bank_id": bank_id_val,
+                        "content_hash": row["content_hash"],
+                        "created_at": row["created_at"].isoformat() if row["created_at"] else "",
+                        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else "",
+                        "text_length": row["text_length"] or 0,
+                        "memory_unit_count": unit_count,
+                        "retain_params": row["retain_params"] if row["retain_params"] else None,
+                    }
+                )
 
-            return {
-                "items": items,
-                "total": total,
-                "limit": limit,
-                "offset": offset
-            }
+            return {"items": items, "total": total, "limit": limit, "offset": offset}
 
-    async def get_document(
-        self,
-        document_id: str,
-        bank_id: str
-    ):
+    async def get_document(self, document_id: str, bank_id: str):
         """
         Get a specific document including its original_text.
 
@@ -2249,7 +2271,8 @@ class MemoryEngine:
         """
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
-            doc = await conn.fetchrow("""
+            doc = await conn.fetchrow(
+                """
                 SELECT
                     id,
                     bank_id,
@@ -2260,33 +2283,37 @@ class MemoryEngine:
                     retain_params
                 FROM documents
                 WHERE id = $1 AND bank_id = $2
-            """, document_id, bank_id)
+            """,
+                document_id,
+                bank_id,
+            )
 
             if not doc:
                 return None
 
             # Get memory unit count
-            unit_count_row = await conn.fetchrow("""
+            unit_count_row = await conn.fetchrow(
+                """
                 SELECT COUNT(*) as unit_count
                 FROM memory_units
                 WHERE document_id = $1 AND bank_id = $2
-            """, document_id, bank_id)
+            """,
+                document_id,
+                bank_id,
+            )
 
             return {
-                "id": doc['id'],
-                "bank_id": doc['bank_id'],
-                "original_text": doc['original_text'],
-                "content_hash": doc['content_hash'],
-                "created_at": doc['created_at'].isoformat() if doc['created_at'] else "",
-                "updated_at": doc['updated_at'].isoformat() if doc['updated_at'] else "",
-                "memory_unit_count": unit_count_row['unit_count'] if unit_count_row else 0,
-                "retain_params": doc['retain_params'] if doc['retain_params'] else None
+                "id": doc["id"],
+                "bank_id": doc["bank_id"],
+                "original_text": doc["original_text"],
+                "content_hash": doc["content_hash"],
+                "created_at": doc["created_at"].isoformat() if doc["created_at"] else "",
+                "updated_at": doc["updated_at"].isoformat() if doc["updated_at"] else "",
+                "memory_unit_count": unit_count_row["unit_count"] if unit_count_row else 0,
+                "retain_params": doc["retain_params"] if doc["retain_params"] else None,
             }
 
-    async def get_chunk(
-        self,
-        chunk_id: str
-    ):
+    async def get_chunk(self, chunk_id: str):
         """
         Get a specific chunk by its ID.
 
@@ -2298,7 +2325,8 @@ class MemoryEngine:
         """
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
-            chunk = await conn.fetchrow("""
+            chunk = await conn.fetchrow(
+                """
                 SELECT
                     chunk_id,
                     document_id,
@@ -2308,18 +2336,20 @@ class MemoryEngine:
                     created_at
                 FROM chunks
                 WHERE chunk_id = $1
-            """, chunk_id)
+            """,
+                chunk_id,
+            )
 
             if not chunk:
                 return None
 
             return {
-                "chunk_id": chunk['chunk_id'],
-                "document_id": chunk['document_id'],
-                "bank_id": chunk['bank_id'],
-                "chunk_index": chunk['chunk_index'],
-                "chunk_text": chunk['chunk_text'],
-                "created_at": chunk['created_at'].isoformat() if chunk['created_at'] else ""
+                "chunk_id": chunk["chunk_id"],
+                "document_id": chunk["document_id"],
+                "bank_id": chunk["bank_id"],
+                "chunk_index": chunk["chunk_index"],
+                "chunk_text": chunk["chunk_text"],
+                "created_at": chunk["created_at"].isoformat() if chunk["created_at"] else "",
             }
 
     async def _evaluate_opinion_update_async(
@@ -2328,7 +2358,7 @@ class MemoryEngine:
         opinion_confidence: float,
         new_event_text: str,
         entity_name: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Evaluate if an opinion should be updated based on a new event.
 
@@ -2342,16 +2372,18 @@ class MemoryEngine:
             Dict with 'action' ('keep'|'update'), 'new_confidence', 'new_text' (if action=='update')
             or None if no changes needed
         """
-        from pydantic import BaseModel, Field
 
         class OpinionEvaluation(BaseModel):
             """Evaluation of whether an opinion should be updated."""
+
             action: str = Field(description="Action to take: 'keep' (no change) or 'update' (modify opinion)")
             reasoning: str = Field(description="Brief explanation of why this action was chosen")
-            new_confidence: float = Field(description="New confidence score (0.0-1.0). Can be higher, lower, or same as before.")
-            new_opinion_text: Optional[str] = Field(
+            new_confidence: float = Field(
+                description="New confidence score (0.0-1.0). Can be higher, lower, or same as before."
+            )
+            new_opinion_text: str | None = Field(
                 default=None,
-                description="If action is 'update', the revised opinion text that acknowledges the previous view. Otherwise None."
+                description="If action is 'update', the revised opinion text that acknowledges the previous view. Otherwise None.",
             )
 
         evaluation_prompt = f"""You are evaluating whether an existing opinion should be updated based on new information.
@@ -2381,70 +2413,63 @@ Guidelines:
             result = await self._llm_config.call(
                 messages=[
                     {"role": "system", "content": "You evaluate and update opinions based on new information."},
-                    {"role": "user", "content": evaluation_prompt}
+                    {"role": "user", "content": evaluation_prompt},
                 ],
                 response_format=OpinionEvaluation,
                 scope="memory_evaluate_opinion",
-                temperature=0.3  # Lower temperature for more consistent evaluation
+                temperature=0.3,  # Lower temperature for more consistent evaluation
             )
 
             # Only return updates if something actually changed
-            if result.action == 'keep' and abs(result.new_confidence - opinion_confidence) < 0.01:
+            if result.action == "keep" and abs(result.new_confidence - opinion_confidence) < 0.01:
                 return None
 
             return {
-                'action': result.action,
-                'reasoning': result.reasoning,
-                'new_confidence': result.new_confidence,
-                'new_text': result.new_opinion_text if result.action == 'update' else None
+                "action": result.action,
+                "reasoning": result.reasoning,
+                "new_confidence": result.new_confidence,
+                "new_text": result.new_opinion_text if result.action == "update" else None,
             }
 
         except Exception as e:
             logger.warning(f"Failed to evaluate opinion update: {str(e)}")
             return None
 
-    async def _handle_form_opinion(self, task_dict: Dict[str, Any]):
+    async def _handle_form_opinion(self, task_dict: dict[str, Any]):
         """
         Handler for form opinion tasks.
 
         Args:
             task_dict: Dict with keys: 'bank_id', 'answer_text', 'query'
         """
-        bank_id = task_dict['bank_id']
-        answer_text = task_dict['answer_text']
-        query = task_dict['query']
+        bank_id = task_dict["bank_id"]
+        answer_text = task_dict["answer_text"]
+        query = task_dict["query"]
 
-        await self._extract_and_store_opinions_async(
-            bank_id=bank_id,
-            answer_text=answer_text,
-            query=query
-        )
+        await self._extract_and_store_opinions_async(bank_id=bank_id, answer_text=answer_text, query=query)
 
-    async def _handle_reinforce_opinion(self, task_dict: Dict[str, Any]):
+    async def _handle_reinforce_opinion(self, task_dict: dict[str, Any]):
         """
         Handler for reinforce opinion tasks.
 
         Args:
             task_dict: Dict with keys: 'bank_id', 'created_unit_ids', 'unit_texts', 'unit_entities'
         """
-        bank_id = task_dict['bank_id']
-        created_unit_ids = task_dict['created_unit_ids']
-        unit_texts = task_dict['unit_texts']
-        unit_entities = task_dict['unit_entities']
+        bank_id = task_dict["bank_id"]
+        created_unit_ids = task_dict["created_unit_ids"]
+        unit_texts = task_dict["unit_texts"]
+        unit_entities = task_dict["unit_entities"]
 
         await self._reinforce_opinions_async(
-            bank_id=bank_id,
-            created_unit_ids=created_unit_ids,
-            unit_texts=unit_texts,
-            unit_entities=unit_entities
+            bank_id=bank_id, created_unit_ids=created_unit_ids, unit_texts=unit_texts, unit_entities=unit_entities
         )
 
     async def _reinforce_opinions_async(
         self,
         bank_id: str,
-        created_unit_ids: List[str],
-        unit_texts: List[str],
-        unit_entities: List[List[Dict[str, str]]],
+        created_unit_ids: list[str],
+        unit_texts: list[str],
+        unit_entities: list[list[dict[str, str]]],
     ):
         """
         Background task to reinforce opinions based on newly ingested events.
@@ -2463,14 +2488,13 @@ Guidelines:
             for entities_list in unit_entities:
                 for entity in entities_list:
                     # Handle both Entity objects and dicts
-                    if hasattr(entity, 'text'):
+                    if hasattr(entity, "text"):
                         entity_names.add(entity.text)
                     elif isinstance(entity, dict):
-                        entity_names.add(entity['text'])
+                        entity_names.add(entity["text"])
 
             if not entity_names:
                 return
-
 
             pool = await self._get_pool()
             async with acquire_with_retry(pool) as conn:
@@ -2486,12 +2510,11 @@ Guidelines:
                       AND e.canonical_name = ANY($2::text[])
                     """,
                     bank_id,
-                    list(entity_names)
+                    list(entity_names),
                 )
 
                 if not opinions:
                     return
-
 
                 # Use cached LLM config
                 if self._llm_config is None:
@@ -2501,15 +2524,15 @@ Guidelines:
                 # Evaluate each opinion against the new events
                 updates_to_apply = []
                 for opinion in opinions:
-                    opinion_id = str(opinion['id'])
-                    opinion_text = opinion['text']
-                    opinion_confidence = opinion['confidence_score']
-                    entity_name = opinion['canonical_name']
+                    opinion_id = str(opinion["id"])
+                    opinion_text = opinion["text"]
+                    opinion_confidence = opinion["confidence_score"]
+                    entity_name = opinion["canonical_name"]
 
                     # Find all new events mentioning this entity
                     relevant_events = []
                     for unit_text, entities_list in zip(unit_texts, unit_entities):
-                        if any(e['text'] == entity_name for e in entities_list):
+                        if any(e["text"] == entity_name for e in entities_list):
                             relevant_events.append(unit_text)
 
                     if not relevant_events:
@@ -2520,26 +2543,20 @@ Guidelines:
 
                     # Evaluate if opinion should be updated
                     evaluation = await self._evaluate_opinion_update_async(
-                        opinion_text,
-                        opinion_confidence,
-                        combined_events,
-                        entity_name
+                        opinion_text, opinion_confidence, combined_events, entity_name
                     )
 
                     if evaluation:
-                        updates_to_apply.append({
-                            'opinion_id': opinion_id,
-                            'evaluation': evaluation
-                        })
+                        updates_to_apply.append({"opinion_id": opinion_id, "evaluation": evaluation})
 
                 # Apply all updates in a single transaction
                 if updates_to_apply:
                     async with conn.transaction():
                         for update in updates_to_apply:
-                            opinion_id = update['opinion_id']
-                            evaluation = update['evaluation']
+                            opinion_id = update["opinion_id"]
+                            evaluation = update["evaluation"]
 
-                            if evaluation['action'] == 'update' and evaluation['new_text']:
+                            if evaluation["action"] == "update" and evaluation["new_text"]:
                                 # Update both text and confidence
                                 await conn.execute(
                                     """
@@ -2547,9 +2564,9 @@ Guidelines:
                                     SET text = $1, confidence_score = $2, updated_at = NOW()
                                     WHERE id = $3
                                     """,
-                                    evaluation['new_text'],
-                                    evaluation['new_confidence'],
-                                    uuid.UUID(opinion_id)
+                                    evaluation["new_text"],
+                                    evaluation["new_confidence"],
+                                    uuid.UUID(opinion_id),
                                 )
                             else:
                                 # Only update confidence
@@ -2559,8 +2576,8 @@ Guidelines:
                                     SET confidence_score = $1, updated_at = NOW()
                                     WHERE id = $2
                                     """,
-                                    evaluation['new_confidence'],
-                                    uuid.UUID(opinion_id)
+                                    evaluation["new_confidence"],
+                                    uuid.UUID(opinion_id),
                                 )
 
                 else:
@@ -2569,6 +2586,7 @@ Guidelines:
         except Exception as e:
             logger.error(f"[REINFORCE] Error during opinion reinforcement: {str(e)}")
             import traceback
+
             traceback.print_exc()
 
     # ==================== bank profile Methods ====================
@@ -2587,11 +2605,7 @@ Guidelines:
         pool = await self._get_pool()
         return await bank_utils.get_bank_profile(pool, bank_id)
 
-    async def update_bank_disposition(
-        self,
-        bank_id: str,
-        disposition: Dict[str, int]
-    ) -> None:
+    async def update_bank_disposition(self, bank_id: str, disposition: dict[str, int]) -> None:
         """
         Update bank disposition traits.
 
@@ -2602,12 +2616,7 @@ Guidelines:
         pool = await self._get_pool()
         await bank_utils.update_bank_disposition(pool, bank_id, disposition)
 
-    async def merge_bank_background(
-        self,
-        bank_id: str,
-        new_info: str,
-        update_disposition: bool = True
-    ) -> dict:
+    async def merge_bank_background(self, bank_id: str, new_info: str, update_disposition: bool = True) -> dict:
         """
         Merge new background information with existing background using LLM.
         Normalizes to first person ("I") and resolves conflicts.
@@ -2622,9 +2631,7 @@ Guidelines:
             Dict with 'background' (str) and optionally 'disposition' (dict) keys
         """
         pool = await self._get_pool()
-        return await bank_utils.merge_bank_background(
-            pool, self._llm_config, bank_id, new_info, update_disposition
-        )
+        return await bank_utils.merge_bank_background(pool, self._llm_config, bank_id, new_info, update_disposition)
 
     async def list_banks(self) -> list:
         """
@@ -2685,19 +2692,21 @@ Guidelines:
             budget=budget,
             max_tokens=4096,
             enable_trace=False,
-            fact_type=['experience', 'world', 'opinion'],
-            include_entities=True
+            fact_type=["experience", "world", "opinion"],
+            include_entities=True,
         )
         recall_time = time.time() - recall_start
 
         all_results = search_result.results
 
         # Split results by fact type for structured response
-        agent_results = [r for r in all_results if r.fact_type == 'experience']
-        world_results = [r for r in all_results if r.fact_type == 'world']
-        opinion_results = [r for r in all_results if r.fact_type == 'opinion']
+        agent_results = [r for r in all_results if r.fact_type == "experience"]
+        world_results = [r for r in all_results if r.fact_type == "world"]
+        opinion_results = [r for r in all_results if r.fact_type == "opinion"]
 
-        log_buffer.append(f"[REFLECT {reflect_id}] Recall: {len(all_results)} facts (experience={len(agent_results)}, world={len(world_results)}, opinion={len(opinion_results)}) in {recall_time:.3f}s")
+        log_buffer.append(
+            f"[REFLECT {reflect_id}] Recall: {len(all_results)} facts (experience={len(agent_results)}, world={len(world_results)}, opinion={len(opinion_results)}) in {recall_time:.3f}s"
+        )
 
         # Format facts for LLM
         agent_facts_text = think_utils.format_facts_for_prompt(agent_results)
@@ -2728,47 +2737,34 @@ Guidelines:
 
         llm_start = time.time()
         answer_text = await self._llm_config.call(
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "system", "content": system_message}, {"role": "user", "content": prompt}],
             scope="memory_think",
             temperature=0.9,
-            max_completion_tokens=1000
+            max_completion_tokens=1000,
         )
         llm_time = time.time() - llm_start
 
         answer_text = answer_text.strip()
 
         # Submit form_opinion task for background processing
-        await self._task_backend.submit_task({
-            'type': 'form_opinion',
-            'bank_id': bank_id,
-            'answer_text': answer_text,
-            'query': query
-        })
+        await self._task_backend.submit_task(
+            {"type": "form_opinion", "bank_id": bank_id, "answer_text": answer_text, "query": query}
+        )
 
         total_time = time.time() - reflect_start
-        log_buffer.append(f"[REFLECT {reflect_id}] Complete: {len(answer_text)} chars response, LLM {llm_time:.3f}s, total {total_time:.3f}s")
+        log_buffer.append(
+            f"[REFLECT {reflect_id}] Complete: {len(answer_text)} chars response, LLM {llm_time:.3f}s, total {total_time:.3f}s"
+        )
         logger.info("\n" + "\n".join(log_buffer))
 
         # Return response with facts split by type
         return ReflectResult(
             text=answer_text,
-            based_on={
-                "world": world_results,
-                "experience": agent_results,
-                "opinion": opinion_results
-            },
-            new_opinions=[]  # Opinions are being extracted asynchronously
+            based_on={"world": world_results, "experience": agent_results, "opinion": opinion_results},
+            new_opinions=[],  # Opinions are being extracted asynchronously
         )
 
-    async def _extract_and_store_opinions_async(
-        self,
-        bank_id: str,
-        answer_text: str,
-        query: str
-    ):
+    async def _extract_and_store_opinions_async(self, bank_id: str, answer_text: str, query: str):
         """
         Background task to extract and store opinions from think response.
 
@@ -2781,33 +2777,27 @@ Guidelines:
         """
         try:
             # Extract opinions from the answer
-            new_opinions = await think_utils.extract_opinions_from_text(
-                self._llm_config, text=answer_text, query=query
-            )
+            new_opinions = await think_utils.extract_opinions_from_text(self._llm_config, text=answer_text, query=query)
 
             # Store new opinions
             if new_opinions:
-                from datetime import datetime, timezone
-                current_time = datetime.now(timezone.utc)
+                from datetime import datetime
+
+                current_time = datetime.now(UTC)
                 for opinion in new_opinions:
                     await self.retain_async(
                         bank_id=bank_id,
                         content=opinion.opinion,
                         context=f"formed during thinking about: {query}",
                         event_date=current_time,
-                        fact_type_override='opinion',
-                        confidence_score=opinion.confidence
+                        fact_type_override="opinion",
+                        confidence_score=opinion.confidence,
                     )
 
         except Exception as e:
             logger.warning(f"[REFLECT] Failed to extract/store opinions: {str(e)}")
 
-    async def get_entity_observations(
-        self,
-        bank_id: str,
-        entity_id: str,
-        limit: int = 10
-    ) -> List[EntityObservation]:
+    async def get_entity_observations(self, bank_id: str, entity_id: str, limit: int = 10) -> list[EntityObservation]:
         """
         Get observations linked to an entity.
 
@@ -2832,23 +2822,18 @@ Guidelines:
                 ORDER BY mu.mentioned_at DESC
                 LIMIT $3
                 """,
-                bank_id, uuid.UUID(entity_id), limit
+                bank_id,
+                uuid.UUID(entity_id),
+                limit,
             )
 
             observations = []
             for row in rows:
-                mentioned_at = row['mentioned_at'].isoformat() if row['mentioned_at'] else None
-                observations.append(EntityObservation(
-                    text=row['text'],
-                    mentioned_at=mentioned_at
-                ))
+                mentioned_at = row["mentioned_at"].isoformat() if row["mentioned_at"] else None
+                observations.append(EntityObservation(text=row["text"], mentioned_at=mentioned_at))
             return observations
 
-    async def list_entities(
-        self,
-        bank_id: str,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
+    async def list_entities(self, bank_id: str, limit: int = 100) -> list[dict[str, Any]]:
         """
         List all entities for a bank.
 
@@ -2869,39 +2854,37 @@ Guidelines:
                 ORDER BY mention_count DESC, last_seen DESC
                 LIMIT $2
                 """,
-                bank_id, limit
+                bank_id,
+                limit,
             )
 
             entities = []
             for row in rows:
                 # Handle metadata - may be dict, JSON string, or None
-                metadata = row['metadata']
+                metadata = row["metadata"]
                 if metadata is None:
                     metadata = {}
                 elif isinstance(metadata, str):
                     import json
+
                     try:
                         metadata = json.loads(metadata)
                     except json.JSONDecodeError:
                         metadata = {}
 
-                entities.append({
-                    'id': str(row['id']),
-                    'canonical_name': row['canonical_name'],
-                    'mention_count': row['mention_count'],
-                    'first_seen': row['first_seen'].isoformat() if row['first_seen'] else None,
-                    'last_seen': row['last_seen'].isoformat() if row['last_seen'] else None,
-                    'metadata': metadata
-                })
+                entities.append(
+                    {
+                        "id": str(row["id"]),
+                        "canonical_name": row["canonical_name"],
+                        "mention_count": row["mention_count"],
+                        "first_seen": row["first_seen"].isoformat() if row["first_seen"] else None,
+                        "last_seen": row["last_seen"].isoformat() if row["last_seen"] else None,
+                        "metadata": metadata,
+                    }
+                )
             return entities
 
-    async def get_entity_state(
-        self,
-        bank_id: str,
-        entity_id: str,
-        entity_name: str,
-        limit: int = 10
-    ) -> EntityState:
+    async def get_entity_state(self, bank_id: str, entity_id: str, entity_name: str, limit: int = 10) -> EntityState:
         """
         Get the current state (mental model) of an entity.
 
@@ -2915,20 +2898,11 @@ Guidelines:
             EntityState with observations
         """
         observations = await self.get_entity_observations(bank_id, entity_id, limit)
-        return EntityState(
-            entity_id=entity_id,
-            canonical_name=entity_name,
-            observations=observations
-        )
+        return EntityState(entity_id=entity_id, canonical_name=entity_name, observations=observations)
 
     async def regenerate_entity_observations(
-        self,
-        bank_id: str,
-        entity_id: str,
-        entity_name: str,
-        version: str | None = None,
-        conn=None
-    ) -> List[str]:
+        self, bank_id: str, entity_id: str, entity_name: str, version: str | None = None, conn=None
+    ) -> list[str]:
         """
         Regenerate observations for an entity by:
         1. Checking version for deduplication (if provided)
@@ -2973,7 +2947,8 @@ Guidelines:
                 FROM entities
                 WHERE id = $1 AND bank_id = $2
                 """,
-                entity_uuid, bank_id
+                entity_uuid,
+                bank_id,
             )
 
             if current_last_seen and current_last_seen.isoformat() != version:
@@ -2991,7 +2966,8 @@ Guidelines:
             ORDER BY mu.occurred_start DESC
             LIMIT 50
             """,
-            bank_id, entity_uuid
+            bank_id,
+            entity_uuid,
         )
 
         if not rows:
@@ -3000,21 +2976,19 @@ Guidelines:
         # Convert to MemoryFact objects for the observation extraction
         facts = []
         for row in rows:
-            occurred_start = row['occurred_start'].isoformat() if row['occurred_start'] else None
-            facts.append(MemoryFact(
-                id=str(row['id']),
-                text=row['text'],
-                fact_type=row['fact_type'],
-                context=row['context'],
-                occurred_start=occurred_start
-            ))
+            occurred_start = row["occurred_start"].isoformat() if row["occurred_start"] else None
+            facts.append(
+                MemoryFact(
+                    id=str(row["id"]),
+                    text=row["text"],
+                    fact_type=row["fact_type"],
+                    context=row["context"],
+                    occurred_start=occurred_start,
+                )
+            )
 
         # Step 3: Extract observations using LLM (no personality)
-        observations = await observation_utils.extract_observations_from_facts(
-            self._llm_config,
-            entity_name,
-            facts
-        )
+        observations = await observation_utils.extract_observations_from_facts(self._llm_config, entity_name, facts)
 
         if not observations:
             return []
@@ -3036,13 +3010,12 @@ Guidelines:
                       AND ue.entity_id = $2
                 )
                 """,
-                bank_id, entity_uuid
+                bank_id,
+                entity_uuid,
             )
 
             # Generate embeddings for new observations
-            embeddings = await embedding_utils.generate_embeddings_batch(
-                self.embeddings, observations
-            )
+            embeddings = await embedding_utils.generate_embeddings_batch(self.embeddings, observations)
 
             # Insert new observations
             current_time = utcnow()
@@ -3066,9 +3039,9 @@ Guidelines:
                     current_time,
                     current_time,
                     current_time,
-                    current_time
+                    current_time,
                 )
-                obs_id = str(result['id'])
+                obs_id = str(result["id"])
                 created_ids.append(obs_id)
 
                 # Link observation to entity
@@ -3077,7 +3050,8 @@ Guidelines:
                     INSERT INTO unit_entities (unit_id, entity_id)
                     VALUES ($1, $2)
                     """,
-                    uuid.UUID(obs_id), entity_uuid
+                    uuid.UUID(obs_id),
+                    entity_uuid,
                 )
 
             return created_ids
@@ -3092,11 +3066,7 @@ Guidelines:
                     return await do_db_operations(acquired_conn)
 
     async def _regenerate_observations_sync(
-        self,
-        bank_id: str,
-        entity_ids: List[str],
-        min_facts: int = 5,
-        conn=None
+        self, bank_id: str, entity_ids: list[str], min_facts: int = 5, conn=None
     ) -> None:
         """
         Regenerate observations for entities synchronously (called during retain).
@@ -3123,9 +3093,10 @@ Guidelines:
                 SELECT id, canonical_name FROM entities
                 WHERE id = ANY($1) AND bank_id = $2
                 """,
-                entity_uuids, bank_id
+                entity_uuids,
+                bank_id,
             )
-            entity_names = {row['id']: row['canonical_name'] for row in entity_rows}
+            entity_names = {row["id"]: row["canonical_name"] for row in entity_rows}
 
             fact_counts = await conn.fetch(
                 """
@@ -3135,9 +3106,10 @@ Guidelines:
                 WHERE ue.entity_id = ANY($1) AND mu.bank_id = $2
                 GROUP BY ue.entity_id
                 """,
-                entity_uuids, bank_id
+                entity_uuids,
+                bank_id,
             )
-            entity_fact_counts = {row['entity_id']: row['cnt'] for row in fact_counts}
+            entity_fact_counts = {row["entity_id"]: row["cnt"] for row in fact_counts}
         else:
             # Acquire a new connection (standalone call)
             pool = await self._get_pool()
@@ -3147,9 +3119,10 @@ Guidelines:
                     SELECT id, canonical_name FROM entities
                     WHERE id = ANY($1) AND bank_id = $2
                     """,
-                    entity_uuids, bank_id
+                    entity_uuids,
+                    bank_id,
                 )
-                entity_names = {row['id']: row['canonical_name'] for row in entity_rows}
+                entity_names = {row["id"]: row["canonical_name"] for row in entity_rows}
 
                 fact_counts = await acquired_conn.fetch(
                     """
@@ -3159,9 +3132,10 @@ Guidelines:
                     WHERE ue.entity_id = ANY($1) AND mu.bank_id = $2
                     GROUP BY ue.entity_id
                     """,
-                    entity_uuids, bank_id
+                    entity_uuids,
+                    bank_id,
                 )
-                entity_fact_counts = {row['entity_id']: row['cnt'] for row in fact_counts}
+                entity_fact_counts = {row["entity_id"]: row["cnt"] for row in fact_counts}
 
         # Filter entities that meet the threshold
         entities_to_process = []
@@ -3183,11 +3157,9 @@ Guidelines:
             except Exception as e:
                 logger.error(f"[OBSERVATIONS] Error processing entity {entity_id}: {e}")
 
-        await asyncio.gather(*[
-            process_entity(eid, name) for eid, name in entities_to_process
-        ])
+        await asyncio.gather(*[process_entity(eid, name) for eid, name in entities_to_process])
 
-    async def _handle_regenerate_observations(self, task_dict: Dict[str, Any]):
+    async def _handle_regenerate_observations(self, task_dict: dict[str, Any]):
         """
         Handler for regenerate_observations tasks.
 
@@ -3197,12 +3169,12 @@ Guidelines:
                        - 'entity_id', 'entity_name': Process single entity (legacy)
         """
         try:
-            bank_id = task_dict.get('bank_id')
+            bank_id = task_dict.get("bank_id")
 
             # New format: multiple entity_ids
-            if 'entity_ids' in task_dict:
-                entity_ids = task_dict.get('entity_ids', [])
-                min_facts = task_dict.get('min_facts', 5)
+            if "entity_ids" in task_dict:
+                entity_ids = task_dict.get("entity_ids", [])
+                min_facts = task_dict.get("min_facts", 5)
 
                 if not bank_id or not entity_ids:
                     logger.error(f"[OBSERVATIONS] Missing required fields in task: {task_dict}")
@@ -3215,31 +3187,37 @@ Guidelines:
                         try:
                             # Fetch entity name and check fact count
                             import uuid as uuid_module
+
                             entity_uuid = uuid_module.UUID(entity_id) if isinstance(entity_id, str) else entity_id
 
                             # First check if entity exists
                             entity_exists = await conn.fetchrow(
                                 "SELECT canonical_name FROM entities WHERE id = $1 AND bank_id = $2",
-                                entity_uuid, bank_id
+                                entity_uuid,
+                                bank_id,
                             )
 
                             if not entity_exists:
                                 logger.debug(f"[OBSERVATIONS] Entity {entity_id} not yet in bank {bank_id}, skipping")
                                 continue
 
-                            entity_name = entity_exists['canonical_name']
+                            entity_name = entity_exists["canonical_name"]
 
                             # Count facts linked to this entity
-                            fact_count = await conn.fetchval(
-                                "SELECT COUNT(*) FROM unit_entities WHERE entity_id = $1",
-                                entity_uuid
-                            ) or 0
+                            fact_count = (
+                                await conn.fetchval(
+                                    "SELECT COUNT(*) FROM unit_entities WHERE entity_id = $1", entity_uuid
+                                )
+                                or 0
+                            )
 
                             # Only regenerate if entity has enough facts
                             if fact_count >= min_facts:
                                 await self.regenerate_entity_observations(bank_id, entity_id, entity_name, version=None)
                             else:
-                                logger.debug(f"[OBSERVATIONS] Skipping {entity_name} ({fact_count} facts < {min_facts} threshold)")
+                                logger.debug(
+                                    f"[OBSERVATIONS] Skipping {entity_name} ({fact_count} facts < {min_facts} threshold)"
+                                )
 
                         except Exception as e:
                             logger.error(f"[OBSERVATIONS] Error processing entity {entity_id}: {e}")
@@ -3247,9 +3225,9 @@ Guidelines:
 
             # Legacy format: single entity
             else:
-                entity_id = task_dict.get('entity_id')
-                entity_name = task_dict.get('entity_name')
-                version = task_dict.get('version')
+                entity_id = task_dict.get("entity_id")
+                entity_name = task_dict.get("entity_name")
+                version = task_dict.get("version")
 
                 if not all([bank_id, entity_id, entity_name]):
                     logger.error(f"[OBSERVATIONS] Missing required fields in task: {task_dict}")
@@ -3260,5 +3238,5 @@ Guidelines:
         except Exception as e:
             logger.error(f"[OBSERVATIONS] Error regenerating observations: {e}")
             import traceback
-            traceback.print_exc()
 
+            traceback.print_exc()

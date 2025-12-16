@@ -3,20 +3,16 @@ Link creation for retain pipeline.
 
 Handles creation of temporal, semantic, and causal links between facts.
 """
-import logging
-from typing import List
 
-from .types import ProcessedFact, CausalRelation
+import logging
+
 from . import link_utils
+from .types import ProcessedFact
 
 logger = logging.getLogger(__name__)
 
 
-async def create_temporal_links_batch(
-    conn,
-    bank_id: str,
-    unit_ids: List[str]
-) -> int:
+async def create_temporal_links_batch(conn, bank_id: str, unit_ids: list[str]) -> int:
     """
     Create temporal links between facts.
 
@@ -33,20 +29,10 @@ async def create_temporal_links_batch(
     if not unit_ids:
         return 0
 
-    return await link_utils.create_temporal_links_batch_per_fact(
-        conn,
-        bank_id,
-        unit_ids,
-        log_buffer=[]
-    )
+    return await link_utils.create_temporal_links_batch_per_fact(conn, bank_id, unit_ids, log_buffer=[])
 
 
-async def create_semantic_links_batch(
-    conn,
-    bank_id: str,
-    unit_ids: List[str],
-    embeddings: List[List[float]]
-) -> int:
+async def create_semantic_links_batch(conn, bank_id: str, unit_ids: list[str], embeddings: list[list[float]]) -> int:
     """
     Create semantic links between facts.
 
@@ -67,20 +53,10 @@ async def create_semantic_links_batch(
     if len(unit_ids) != len(embeddings):
         raise ValueError(f"Mismatch between unit_ids ({len(unit_ids)}) and embeddings ({len(embeddings)})")
 
-    return await link_utils.create_semantic_links_batch(
-        conn,
-        bank_id,
-        unit_ids,
-        embeddings,
-        log_buffer=[]
-    )
+    return await link_utils.create_semantic_links_batch(conn, bank_id, unit_ids, embeddings, log_buffer=[])
 
 
-async def create_causal_links_batch(
-    conn,
-    unit_ids: List[str],
-    facts: List[ProcessedFact]
-) -> int:
+async def create_causal_links_batch(conn, unit_ids: list[str], facts: list[ProcessedFact]) -> int:
     """
     Create causal links between facts.
 
@@ -108,9 +84,9 @@ async def create_causal_links_batch(
             # Convert CausalRelation objects to dicts
             relations_dicts = [
                 {
-                    'relation_type': rel.relation_type,
-                    'target_fact_index': rel.target_fact_index,
-                    'strength': rel.strength
+                    "relation_type": rel.relation_type,
+                    "target_fact_index": rel.target_fact_index,
+                    "strength": rel.strength,
                 }
                 for rel in fact.causal_relations
             ]
@@ -118,10 +94,6 @@ async def create_causal_links_batch(
         else:
             causal_relations_per_fact.append([])
 
-    link_count = await link_utils.create_causal_links_batch(
-        conn,
-        unit_ids,
-        causal_relations_per_fact
-    )
+    link_count = await link_utils.create_causal_links_batch(conn, unit_ids, causal_relations_per_fact)
 
     return link_count

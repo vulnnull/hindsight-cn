@@ -8,20 +8,20 @@ the database schema (pgvector column defined as vector(384)).
 
 Configuration via environment variables - see hindsight_api.config for all env var names.
 """
-from abc import ABC, abstractmethod
-from typing import List, Optional
+
 import logging
 import os
+from abc import ABC, abstractmethod
 
 import httpx
 
 from ..config import (
-    ENV_EMBEDDINGS_PROVIDER,
-    ENV_EMBEDDINGS_LOCAL_MODEL,
-    ENV_EMBEDDINGS_TEI_URL,
-    DEFAULT_EMBEDDINGS_PROVIDER,
     DEFAULT_EMBEDDINGS_LOCAL_MODEL,
+    DEFAULT_EMBEDDINGS_PROVIDER,
     EMBEDDING_DIMENSION,
+    ENV_EMBEDDINGS_LOCAL_MODEL,
+    ENV_EMBEDDINGS_PROVIDER,
+    ENV_EMBEDDINGS_TEI_URL,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ class Embeddings(ABC):
         pass
 
     @abstractmethod
-    def encode(self, texts: List[str]) -> List[List[float]]:
+    def encode(self, texts: list[str]) -> list[list[float]]:
         """
         Generate 384-dimensional embeddings for a list of texts.
 
@@ -75,7 +75,7 @@ class LocalSTEmbeddings(Embeddings):
     embeddings matching the database schema.
     """
 
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(self, model_name: str | None = None):
         """
         Initialize local SentenceTransformers embeddings.
 
@@ -123,7 +123,7 @@ class LocalSTEmbeddings(Embeddings):
 
         logger.info(f"Embeddings: local provider initialized (dim: {model_dim})")
 
-    def encode(self, texts: List[str]) -> List[List[float]]:
+    def encode(self, texts: list[str]) -> list[list[float]]:
         """
         Generate 384-dimensional embeddings for a list of texts.
 
@@ -172,8 +172,8 @@ class RemoteTEIEmbeddings(Embeddings):
         self.batch_size = batch_size
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self._client: Optional[httpx.Client] = None
-        self._model_id: Optional[str] = None
+        self._client: httpx.Client | None = None
+        self._model_id: str | None = None
 
     @property
     def provider_name(self) -> str:
@@ -182,6 +182,7 @@ class RemoteTEIEmbeddings(Embeddings):
     def _request_with_retry(self, method: str, url: str, **kwargs) -> httpx.Response:
         """Make an HTTP request with automatic retries on transient errors."""
         import time
+
         last_error = None
         delay = self.retry_delay
 
@@ -196,14 +197,18 @@ class RemoteTEIEmbeddings(Embeddings):
             except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as e:
                 last_error = e
                 if attempt < self.max_retries:
-                    logger.warning(f"TEI request failed (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s...")
+                    logger.warning(
+                        f"TEI request failed (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s..."
+                    )
                     time.sleep(delay)
                     delay *= 2  # Exponential backoff
             except httpx.HTTPStatusError as e:
                 # Retry on 5xx server errors
                 if e.response.status_code >= 500 and attempt < self.max_retries:
                     last_error = e
-                    logger.warning(f"TEI server error (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s...")
+                    logger.warning(
+                        f"TEI server error (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s..."
+                    )
                     time.sleep(delay)
                     delay *= 2
                 else:
@@ -228,7 +233,7 @@ class RemoteTEIEmbeddings(Embeddings):
         except httpx.HTTPError as e:
             raise RuntimeError(f"Failed to connect to TEI server at {self.base_url}: {e}")
 
-    def encode(self, texts: List[str]) -> List[List[float]]:
+    def encode(self, texts: list[str]) -> list[list[float]]:
         """
         Generate embeddings using the remote TEI server.
 
@@ -248,7 +253,7 @@ class RemoteTEIEmbeddings(Embeddings):
 
         # Process in batches
         for i in range(0, len(texts), self.batch_size):
-            batch = texts[i:i + self.batch_size]
+            batch = texts[i : i + self.batch_size]
 
             try:
                 response = self._request_with_retry(
@@ -278,15 +283,11 @@ def create_embeddings_from_env() -> Embeddings:
     if provider == "tei":
         url = os.environ.get(ENV_EMBEDDINGS_TEI_URL)
         if not url:
-            raise ValueError(
-                f"{ENV_EMBEDDINGS_TEI_URL} is required when {ENV_EMBEDDINGS_PROVIDER} is 'tei'"
-            )
+            raise ValueError(f"{ENV_EMBEDDINGS_TEI_URL} is required when {ENV_EMBEDDINGS_PROVIDER} is 'tei'")
         return RemoteTEIEmbeddings(base_url=url)
     elif provider == "local":
         model = os.environ.get(ENV_EMBEDDINGS_LOCAL_MODEL)
         model_name = model or DEFAULT_EMBEDDINGS_LOCAL_MODEL
         return LocalSTEmbeddings(model_name=model_name)
     else:
-        raise ValueError(
-            f"Unknown embeddings provider: {provider}. Supported: 'local', 'tei'"
-        )
+        raise ValueError(f"Unknown embeddings provider: {provider}. Supported: 'local', 'tei'")

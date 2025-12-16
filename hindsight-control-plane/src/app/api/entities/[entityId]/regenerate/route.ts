@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { sdk, lowLevelClient } from '@/lib/hindsight-client';
+import { NextRequest, NextResponse } from "next/server";
+import { sdk, lowLevelClient } from "@/lib/hindsight-client";
 
 export async function POST(
   request: NextRequest,
@@ -8,13 +8,10 @@ export async function POST(
   try {
     const { entityId } = await params;
     const searchParams = request.nextUrl.searchParams;
-    const bankId = searchParams.get('bank_id');
+    const bankId = searchParams.get("bank_id");
 
     if (!bankId) {
-      return NextResponse.json(
-        { error: 'bank_id is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "bank_id is required" }, { status: 400 });
     }
 
     const decodedEntityId = decodeURIComponent(entityId);
@@ -23,15 +20,15 @@ export async function POST(
       client: lowLevelClient,
       path: {
         bank_id: bankId,
-        entity_id: decodedEntityId
-      }
+        entity_id: decodedEntityId,
+      },
     });
 
     return NextResponse.json(response.data, { status: 200 });
   } catch (error) {
-    console.error('Error regenerating entity observations:', error);
+    console.error("Error regenerating entity observations:", error);
     return NextResponse.json(
-      { error: 'Failed to regenerate entity observations' },
+      { error: "Failed to regenerate entity observations" },
       { status: 500 }
     );
   }

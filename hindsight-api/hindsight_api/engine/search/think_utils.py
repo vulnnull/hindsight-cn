@@ -2,41 +2,35 @@
 Think operation utilities for formulating answers based on agent and world facts.
 """
 
-import asyncio
 import logging
 import re
-from datetime import datetime, timezone
-from typing import Dict, List, Any
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
-from ..response_models import ReflectResult, MemoryFact, DispositionTraits
+from ..response_models import DispositionTraits, MemoryFact
 
 logger = logging.getLogger(__name__)
 
 
 class Opinion(BaseModel):
     """An opinion formed by the bank."""
+
     opinion: str = Field(description="The opinion or perspective with reasoning included")
     confidence: float = Field(description="Confidence score for this opinion (0.0 to 1.0, where 1.0 is very confident)")
 
 
 class OpinionExtractionResponse(BaseModel):
     """Response containing extracted opinions."""
-    opinions: List[Opinion] = Field(
-        default_factory=list,
-        description="List of opinions formed with their supporting reasons and confidence scores"
+
+    opinions: list[Opinion] = Field(
+        default_factory=list, description="List of opinions formed with their supporting reasons and confidence scores"
     )
 
 
 def describe_trait_level(value: int) -> str:
     """Convert trait value (1-5) to descriptive text."""
-    levels = {
-        1: "very low",
-        2: "low",
-        3: "moderate",
-        4: "high",
-        5: "very high"
-    }
+    levels = {1: "very low", 2: "low", 3: "moderate", 4: "high", 5: "very high"}
     return levels.get(value, "moderate")
 
 
@@ -47,7 +41,7 @@ def build_disposition_description(disposition: DispositionTraits) -> str:
         2: "You tend to trust information but may question obvious inconsistencies.",
         3: "You have a balanced approach to information, neither too trusting nor too skeptical.",
         4: "You are somewhat skeptical and often question the reliability of information.",
-        5: "You are highly skeptical and critically examine all information for accuracy and hidden motives."
+        5: "You are highly skeptical and critically examine all information for accuracy and hidden motives.",
     }
 
     literalism_desc = {
@@ -55,7 +49,7 @@ def build_disposition_description(disposition: DispositionTraits) -> str:
         2: "You tend to consider context and implied meaning alongside literal statements.",
         3: "You balance literal interpretation with contextual understanding.",
         4: "You prefer to interpret information more literally and precisely.",
-        5: "You interpret information very literally and focus on exact wording and commitments."
+        5: "You interpret information very literally and focus on exact wording and commitments.",
     }
 
     empathy_desc = {
@@ -63,7 +57,7 @@ def build_disposition_description(disposition: DispositionTraits) -> str:
         2: "You consider facts first but acknowledge emotional factors exist.",
         3: "You balance factual analysis with emotional understanding.",
         4: "You give significant weight to emotional context and human factors.",
-        5: "You strongly consider the emotional state and circumstances of others when forming memories."
+        5: "You strongly consider the emotional state and circumstances of others when forming memories.",
     }
 
     return f"""Your disposition traits:
@@ -72,7 +66,7 @@ def build_disposition_description(disposition: DispositionTraits) -> str:
 - Empathy ({describe_trait_level(disposition.empathy)}): {empathy_desc.get(disposition.empathy, empathy_desc[3])}"""
 
 
-def format_facts_for_prompt(facts: List[MemoryFact]) -> str:
+def format_facts_for_prompt(facts: list[MemoryFact]) -> str:
     """Format facts as JSON for LLM prompt."""
     import json
 
@@ -80,9 +74,7 @@ def format_facts_for_prompt(facts: List[MemoryFact]) -> str:
         return "[]"
     formatted = []
     for fact in facts:
-        fact_obj = {
-            "text": fact.text
-        }
+        fact_obj = {"text": fact.text}
 
         # Add context if available
         if fact.context:
@@ -94,7 +86,7 @@ def format_facts_for_prompt(facts: List[MemoryFact]) -> str:
             if isinstance(occurred_start, str):
                 fact_obj["occurred_start"] = occurred_start
             elif isinstance(occurred_start, datetime):
-                fact_obj["occurred_start"] = occurred_start.strftime('%Y-%m-%d %H:%M:%S')
+                fact_obj["occurred_start"] = occurred_start.strftime("%Y-%m-%d %H:%M:%S")
 
         formatted.append(fact_obj)
 
@@ -176,16 +168,14 @@ def get_system_message(disposition: DispositionTraits) -> str:
     elif disposition.empathy <= 2:
         instructions.append("Focus on facts and outcomes rather than emotional context.")
 
-    disposition_instruction = " ".join(instructions) if instructions else "Balance your disposition traits when interpreting information."
+    disposition_instruction = (
+        " ".join(instructions) if instructions else "Balance your disposition traits when interpreting information."
+    )
 
     return f"You are a person with your own thoughts, experiences, opinions, and disposition. When asked a question, respond naturally like a human would - share what you genuinely think based on what you know and have experienced. {disposition_instruction} Be direct, express your views confidently, and use 'I think', 'I believe', 'in my view', etc. Respond in plain text without markdown formatting."
 
 
-async def extract_opinions_from_text(
-    llm_config,
-    text: str,
-    query: str
-) -> List[Opinion]:
+async def extract_opinions_from_text(llm_config, text: str, query: str) -> list[Opinion]:
     """
     Extract opinions with reasons and confidence from text using LLM.
 
@@ -238,11 +228,14 @@ If no genuine opinions are expressed (e.g., the response just says "I don't know
     try:
         result = await llm_config.call(
             messages=[
-                {"role": "system", "content": "You are converting opinions from text into first-person statements. Always use 'I think', 'I believe', 'I feel', etc. NEVER use third-person like 'The speaker' or 'They'."},
-                {"role": "user", "content": extraction_prompt}
+                {
+                    "role": "system",
+                    "content": "You are converting opinions from text into first-person statements. Always use 'I think', 'I believe', 'I feel', etc. NEVER use third-person like 'The speaker' or 'They'.",
+                },
+                {"role": "user", "content": extraction_prompt},
             ],
             response_format=OpinionExtractionResponse,
-            scope="memory_extract_opinion"
+            scope="memory_extract_opinion",
         )
 
         # Format opinions with confidence score and convert to first-person
@@ -253,14 +246,18 @@ If no genuine opinions are expressed (e.g., the response just says "I don't know
 
             # Replace common third-person patterns with first-person
             def singularize_verb(verb):
-                if verb.endswith('es'):
+                if verb.endswith("es"):
                     return verb[:-1]  # believes -> believe
-                elif verb.endswith('s'):
+                elif verb.endswith("s"):
                     return verb[:-1]  # thinks -> think
                 return verb
 
             # Pattern: "The speaker/user [verb]..." -> "I [verb]..."
-            match = re.match(r'^(The speaker|The user|They|It is believed) (believes?|thinks?|feels?|says|asserts?|considers?)(\s+that)?(.*)$', opinion_text, re.IGNORECASE)
+            match = re.match(
+                r"^(The speaker|The user|They|It is believed) (believes?|thinks?|feels?|says|asserts?|considers?)(\s+that)?(.*)$",
+                opinion_text,
+                re.IGNORECASE,
+            )
             if match:
                 verb = singularize_verb(match.group(2))
                 that_part = match.group(3) or ""  # Keep " that" if present
@@ -268,14 +265,18 @@ If no genuine opinions are expressed (e.g., the response just says "I don't know
                 opinion_text = f"I {verb}{that_part}{rest}"
 
             # If still doesn't start with first-person, prepend "I believe that "
-            first_person_starters = ["I think", "I believe", "I feel", "In my view", "I've come to believe", "Previously I"]
+            first_person_starters = [
+                "I think",
+                "I believe",
+                "I feel",
+                "In my view",
+                "I've come to believe",
+                "Previously I",
+            ]
             if not any(opinion_text.startswith(starter) for starter in first_person_starters):
                 opinion_text = "I believe that " + opinion_text[0].lower() + opinion_text[1:]
 
-            formatted_opinions.append(Opinion(
-                opinion=opinion_text,
-                confidence=op.confidence
-            ))
+            formatted_opinions.append(Opinion(opinion=opinion_text, confidence=op.confidence))
 
         return formatted_opinions
 
@@ -287,9 +288,9 @@ If no genuine opinions are expressed (e.g., the response just says "I don't know
 async def reflect(
     llm_config,
     query: str,
-    experience_facts: List[str] = None,
-    world_facts: List[str] = None,
-    opinion_facts: List[str] = None,
+    experience_facts: list[str] = None,
+    world_facts: list[str] = None,
+    opinion_facts: list[str] = None,
     name: str = "Assistant",
     disposition: DispositionTraits = None,
     background: str = "",
@@ -320,7 +321,7 @@ async def reflect(
         disposition = DispositionTraits(skepticism=3, literalism=3, empathy=3)
 
     # Convert string lists to MemoryFact format for formatting
-    def to_memory_facts(facts: List[str], fact_type: str) -> List[MemoryFact]:
+    def to_memory_facts(facts: list[str], fact_type: str) -> list[MemoryFact]:
         if not facts:
             return []
         return [MemoryFact(id=f"test-{i}", text=f, fact_type=fact_type) for i, f in enumerate(facts)]
@@ -350,13 +351,10 @@ async def reflect(
 
     # Call LLM
     answer_text = await llm_config.call(
-        messages=[
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": prompt}
-        ],
+        messages=[{"role": "system", "content": system_message}, {"role": "user", "content": prompt}],
         scope="memory_think",
         temperature=0.9,
-        max_completion_tokens=1000
+        max_completion_tokens=1000,
     )
 
     return answer_text.strip()

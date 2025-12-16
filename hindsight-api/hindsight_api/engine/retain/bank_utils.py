@@ -5,8 +5,10 @@ bank profile utilities for disposition and background management.
 import json
 import logging
 import re
-from typing import Dict, Optional, TypedDict
+from typing import TypedDict
+
 from pydantic import BaseModel, Field
+
 from ..db_utils import acquire_with_retry
 from ..response_models import DispositionTraits
 
@@ -21,6 +23,7 @@ DEFAULT_DISPOSITION = {
 
 class BankProfile(TypedDict):
     """Type for bank profile data."""
+
     name: str
     disposition: DispositionTraits
     background: str
@@ -28,6 +31,7 @@ class BankProfile(TypedDict):
 
 class BackgroundMergeResponse(BaseModel):
     """LLM response for background merge with disposition inference."""
+
     background: str = Field(description="Merged background in first person perspective")
     disposition: DispositionTraits = Field(description="Inferred disposition traits (skepticism, literalism, empathy)")
 
@@ -51,7 +55,7 @@ async def get_bank_profile(pool, bank_id: str) -> BankProfile:
             SELECT name, disposition, background
             FROM banks WHERE bank_id = $1
             """,
-            bank_id
+            bank_id,
         )
 
         if row:
@@ -61,9 +65,7 @@ async def get_bank_profile(pool, bank_id: str) -> BankProfile:
                 disposition_data = json.loads(disposition_data)
 
             return BankProfile(
-                name=row["name"],
-                disposition=DispositionTraits(**disposition_data),
-                background=row["background"]
+                name=row["name"], disposition=DispositionTraits(**disposition_data), background=row["background"]
             )
 
         # Bank doesn't exist, create with defaults
@@ -76,21 +78,13 @@ async def get_bank_profile(pool, bank_id: str) -> BankProfile:
             bank_id,
             bank_id,  # Default name is the bank_id
             json.dumps(DEFAULT_DISPOSITION),
-            ""
+            "",
         )
 
-        return BankProfile(
-            name=bank_id,
-            disposition=DispositionTraits(**DEFAULT_DISPOSITION),
-            background=""
-        )
+        return BankProfile(name=bank_id, disposition=DispositionTraits(**DEFAULT_DISPOSITION), background="")
 
 
-async def update_bank_disposition(
-    pool,
-    bank_id: str,
-    disposition: Dict[str, int]
-) -> None:
+async def update_bank_disposition(pool, bank_id: str, disposition: dict[str, int]) -> None:
     """
     Update bank disposition traits.
 
@@ -111,17 +105,11 @@ async def update_bank_disposition(
             WHERE bank_id = $1
             """,
             bank_id,
-            json.dumps(disposition)
+            json.dumps(disposition),
         )
 
 
-async def merge_bank_background(
-    pool,
-    llm_config,
-    bank_id: str,
-    new_info: str,
-    update_disposition: bool = True
-) -> dict:
+async def merge_bank_background(pool, llm_config, bank_id: str, new_info: str, update_disposition: bool = True) -> dict:
     """
     Merge new background information with existing background using LLM.
     Normalizes to first person ("I") and resolves conflicts.
@@ -142,12 +130,7 @@ async def merge_bank_background(
     current_background = profile["background"]
 
     # Use LLM to merge backgrounds and optionally infer disposition
-    result = await _llm_merge_background(
-        llm_config,
-        current_background,
-        new_info,
-        infer_disposition=update_disposition
-    )
+    result = await _llm_merge_background(llm_config, current_background, new_info, infer_disposition=update_disposition)
 
     merged_background = result["background"]
     inferred_disposition = result.get("disposition")
@@ -166,7 +149,7 @@ async def merge_bank_background(
                 """,
                 bank_id,
                 merged_background,
-                json.dumps(inferred_disposition)
+                json.dumps(inferred_disposition),
             )
         else:
             # Update only background
@@ -178,7 +161,7 @@ async def merge_bank_background(
                 WHERE bank_id = $1
                 """,
                 bank_id,
-                merged_background
+                merged_background,
             )
 
     response = {"background": merged_background}
@@ -188,12 +171,7 @@ async def merge_bank_background(
     return response
 
 
-async def _llm_merge_background(
-    llm_config,
-    current: str,
-    new_info: str,
-    infer_disposition: bool = False
-) -> dict:
+async def _llm_merge_background(llm_config, current: str, new_info: str, infer_disposition: bool = False) -> dict:
     """
     Use LLM to intelligently merge background information.
     Optionally infer Big Five disposition traits from the merged background.
@@ -273,25 +251,19 @@ Merged background:"""
                     response_format=BackgroundMergeResponse,
                     scope="bank_background",
                     temperature=0.3,
-                    max_completion_tokens=8192
+                    max_completion_tokens=8192,
                 )
                 logger.info(f"Successfully got structured response: background={parsed.background[:100]}")
 
                 # Convert Pydantic model to dict format
-                return {
-                    "background": parsed.background,
-                    "disposition": parsed.disposition.model_dump()
-                }
+                return {"background": parsed.background, "disposition": parsed.disposition.model_dump()}
             except Exception as e:
                 logger.warning(f"Structured output failed, falling back to manual parsing: {e}")
                 # Fall through to manual parsing below
 
         # Manual parsing fallback or non-disposition merge
         content = await llm_config.call(
-            messages=messages,
-            scope="bank_background",
-            temperature=0.3,
-            max_completion_tokens=8192
+            messages=messages, scope="bank_background", temperature=0.3, max_completion_tokens=8192
         )
 
         logger.info(f"LLM response for background merge (first 500 chars): {content[:500]}")
@@ -310,7 +282,7 @@ Merged background:"""
             # Method 2: Extract from markdown code blocks
             if result is None:
                 # Remove markdown code blocks
-                code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+                code_block_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
                 if code_block_match:
                     try:
                         result = json.loads(code_block_match.group(1))
@@ -321,7 +293,9 @@ Merged background:"""
             # Method 3: Find nested JSON structure
             if result is None:
                 # Look for JSON object with nested structure
-                json_match = re.search(r'\{[^{}]*"background"[^{}]*"disposition"[^{}]*\{[^{}]*\}[^{}]*\}', content, re.DOTALL)
+                json_match = re.search(
+                    r'\{[^{}]*"background"[^{}]*"disposition"[^{}]*\{[^{}]*\}[^{}]*\}', content, re.DOTALL
+                )
                 if json_match:
                     try:
                         result = json.loads(json_match.group())
@@ -335,7 +309,7 @@ Merged background:"""
                 # Fallback: use new_info as background with default disposition
                 return {
                     "background": new_info if new_info else current if current else "",
-                    "disposition": DEFAULT_DISPOSITION.copy()
+                    "disposition": DEFAULT_DISPOSITION.copy(),
                 }
 
             # Validate disposition values
@@ -401,13 +375,15 @@ async def list_banks(pool) -> list:
             if isinstance(disposition_data, str):
                 disposition_data = json.loads(disposition_data)
 
-            result.append({
-                "bank_id": row["bank_id"],
-                "name": row["name"],
-                "disposition": disposition_data,
-                "background": row["background"],
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-            })
+            result.append(
+                {
+                    "bank_id": row["bank_id"],
+                    "name": row["name"],
+                    "disposition": disposition_data,
+                    "background": row["background"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                }
+            )
 
         return result

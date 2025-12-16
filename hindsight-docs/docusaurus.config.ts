@@ -4,11 +4,11 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 // Announcement bar - supports HTML for links
 // Set to empty string '' to hide the bar
-const ANNOUNCEMENT_BAR = 'HINDSIGHT is State-of-the-Art on Memory for AI Agents | <a href="https://arxiv.org/abs/2512.12818" target="_blank">Read the paper →</a>';
+const ANNOUNCEMENT_BAR = 'Hindsight is State-of-the-Art on Memory for AI Agents | <a href="https://arxiv.org/abs/2512.12818" target="_blank">Read the paper →</a>';
 
 const config: Config = {
   title: 'Hindsight',
-  tagline: 'Entity-Aware Memory System for AI Agents',
+  tagline: 'Hindsight: Agent Memory That Works Like Human Memory',
   favicon: 'img/favicon.png',
 
   future: {
@@ -125,7 +125,7 @@ const config: Config = {
         content: ANNOUNCEMENT_BAR,
         backgroundColor: '#0074d9',
         textColor: '#ffffff',
-        isCloseable: true,
+        isCloseable: false,
       },
     }),
     image: 'img/hindsight-social-card.jpg',

@@ -1,23 +1,29 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { client } from '@/lib/api';
-import { useBank } from '@/lib/bank-context';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Sparkles, Info } from 'lucide-react';
-import JsonView from 'react18-json-view';
-import 'react18-json-view/src/style.css';
+import { useState } from "react";
+import { client } from "@/lib/api";
+import { useBank } from "@/lib/bank-context";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sparkles, Info } from "lucide-react";
+import JsonView from "react18-json-view";
+import "react18-json-view/src/style.css";
 
 export function ThinkView() {
   const { currentBank } = useBank();
-  const [query, setQuery] = useState('');
-  const [context, setContext] = useState('');
-  const [budget, setBudget] = useState<'low' | 'mid' | 'high'>('mid');
+  const [query, setQuery] = useState("");
+  const [context, setContext] = useState("");
+  const [budget, setBudget] = useState<"low" | "mid" | "high">("mid");
   const [includeFacts, setIncludeFacts] = useState(true);
   const [showRawJson, setShowRawJson] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -38,8 +44,8 @@ export function ThinkView() {
       });
       setResult(data);
     } catch (error) {
-      console.error('Error running reflect:', error);
-      alert('Error running reflect: ' + (error as Error).message);
+      console.error("Error running reflect:", error);
+      alert("Error running reflect: " + (error as Error).message);
     } finally {
       setLoading(false);
     }
@@ -57,7 +63,7 @@ export function ThinkView() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Enter your question..."
-                onKeyDown={(e) => e.key === 'Enter' && runReflect()}
+                onKeyDown={(e) => e.key === "Enter" && runReflect()}
               />
             </div>
             <div>
@@ -83,10 +89,7 @@ export function ThinkView() {
                 Include Facts
               </label>
             </div>
-            <Button
-              onClick={runReflect}
-              disabled={loading || !query}
-            >
+            <Button onClick={runReflect} disabled={loading || !query}>
               <Sparkles className="w-4 h-4 mr-2" />
               Reflect
             </Button>
@@ -134,14 +137,14 @@ export function ThinkView() {
                 </div>
                 <div className="flex gap-2">
                   <Button
-                    variant={!showRawJson ? 'default' : 'outline'}
+                    variant={!showRawJson ? "default" : "outline"}
                     size="sm"
                     onClick={() => setShowRawJson(false)}
                   >
                     Based On
                   </Button>
                   <Button
-                    variant={showRawJson ? 'default' : 'outline'}
+                    variant={showRawJson ? "default" : "outline"}
                     size="sm"
                     onClick={() => setShowRawJson(true)}
                   >
@@ -155,9 +158,11 @@ export function ThinkView() {
                 includeFacts && result.based_on && result.based_on.length > 0 ? (
                   (() => {
                     // Group facts by type
-                    const worldFacts = result.based_on.filter((f: any) => f.type === 'world');
-                    const experienceFacts = result.based_on.filter((f: any) => f.type === 'experience');
-                    const opinionFacts = result.based_on.filter((f: any) => f.type === 'opinion');
+                    const worldFacts = result.based_on.filter((f: any) => f.type === "world");
+                    const experienceFacts = result.based_on.filter(
+                      (f: any) => f.type === "experience"
+                    );
+                    const opinionFacts = result.based_on.filter((f: any) => f.type === "opinion");
 
                     return (
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -172,7 +177,11 @@ export function ThinkView() {
                                 {worldFacts.map((fact: any, i: number) => (
                                   <li key={i} className="p-2 bg-muted rounded">
                                     {fact.text}
-                                    {fact.context && <div className="text-xs text-muted-foreground mt-1">{fact.context}</div>}
+                                    {fact.context && (
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        {fact.context}
+                                      </div>
+                                    )}
                                   </li>
                                 ))}
                               </ul>
@@ -185,7 +194,9 @@ export function ThinkView() {
                         <Card>
                           <CardHeader className="pb-3">
                             <CardTitle className="text-base">Experience</CardTitle>
-                            <CardDescription className="text-xs">Conversations & Events</CardDescription>
+                            <CardDescription className="text-xs">
+                              Conversations & Events
+                            </CardDescription>
                           </CardHeader>
                           <CardContent>
                             {experienceFacts.length > 0 ? (
@@ -193,7 +204,11 @@ export function ThinkView() {
                                 {experienceFacts.map((fact: any, i: number) => (
                                   <li key={i} className="p-2 bg-muted rounded">
                                     {fact.text}
-                                    {fact.context && <div className="text-xs text-muted-foreground mt-1">{fact.context}</div>}
+                                    {fact.context && (
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        {fact.context}
+                                      </div>
+                                    )}
                                   </li>
                                 ))}
                               </ul>
@@ -206,7 +221,9 @@ export function ThinkView() {
                         <Card>
                           <CardHeader className="pb-3">
                             <CardTitle className="text-base">Opinions</CardTitle>
-                            <CardDescription className="text-xs">Beliefs & Preferences</CardDescription>
+                            <CardDescription className="text-xs">
+                              Beliefs & Preferences
+                            </CardDescription>
                           </CardHeader>
                           <CardContent>
                             {opinionFacts.length > 0 ? (
@@ -214,7 +231,11 @@ export function ThinkView() {
                                 {opinionFacts.map((fact: any, i: number) => (
                                   <li key={i} className="p-2 bg-muted rounded">
                                     {fact.text}
-                                    {fact.context && <div className="text-xs text-muted-foreground mt-1">{fact.context}</div>}
+                                    {fact.context && (
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        {fact.context}
+                                      </div>
+                                    )}
                                   </li>
                                 ))}
                               </ul>
@@ -230,7 +251,9 @@ export function ThinkView() {
                   <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
                     <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                     <div>
-                      <p className="font-semibold text-amber-900 dark:text-amber-100">No facts found</p>
+                      <p className="font-semibold text-amber-900 dark:text-amber-100">
+                        No facts found
+                      </p>
                       <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
                         No memories were found or used to generate this answer.
                       </p>
@@ -240,20 +263,19 @@ export function ThinkView() {
                   <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
                     <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                     <div>
-                      <p className="font-semibold text-amber-900 dark:text-amber-100">Facts not included</p>
+                      <p className="font-semibold text-amber-900 dark:text-amber-100">
+                        Facts not included
+                      </p>
                       <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                        Enable "Include Facts" above to see which memories were used to generate this answer.
+                        Enable "Include Facts" above to see which memories were used to generate
+                        this answer.
                       </p>
                     </div>
                   </div>
                 )
               ) : (
                 <div className="bg-muted p-4 rounded border border-border overflow-auto max-h-[600px]">
-                  <JsonView
-                    src={result}
-                    collapsed={1}
-                    theme="default"
-                  />
+                  <JsonView src={result} collapsed={1} theme="default" />
                 </div>
               )}
             </CardContent>
@@ -273,7 +295,9 @@ export function ThinkView() {
                   {result.new_opinions.map((opinion: any, i: number) => (
                     <div key={i} className="p-3 bg-muted rounded-lg border border-border">
                       <div className="font-semibold text-foreground">{opinion.text}</div>
-                      <div className="text-sm text-muted-foreground mt-1">Confidence: {opinion.confidence?.toFixed(2)}</div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        Confidence: {opinion.confidence?.toFixed(2)}
+                      </div>
                     </div>
                   ))}
                 </div>

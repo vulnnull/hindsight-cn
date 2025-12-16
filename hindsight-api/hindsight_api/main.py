@@ -6,6 +6,7 @@ Run the server with:
 
 Stop with Ctrl+C.
 """
+
 import argparse
 import asyncio
 import atexit
@@ -13,15 +14,14 @@ import os
 import signal
 import sys
 import warnings
-from typing import Optional
 
 import uvicorn
 
 from . import MemoryEngine
 from .api import create_app
-from .config import get_config, HindsightConfig
-
 from .banner import print_banner
+from .config import HindsightConfig, get_config
+
 print()
 print_banner()
 
@@ -33,7 +33,7 @@ warnings.filterwarnings("ignore", message="websockets.server.WebSocketServerProt
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Global reference for cleanup
-_memory: Optional[MemoryEngine] = None
+_memory: MemoryEngine | None = None
 
 
 def _cleanup():
@@ -70,59 +70,41 @@ def main():
 
     # Server options
     parser.add_argument(
-        "--host", default=config.host,
-        help=f"Host to bind to (default: {config.host}, env: HINDSIGHT_API_HOST)"
+        "--host", default=config.host, help=f"Host to bind to (default: {config.host}, env: HINDSIGHT_API_HOST)"
     )
     parser.add_argument(
-        "--port", type=int, default=config.port,
-        help=f"Port to bind to (default: {config.port}, env: HINDSIGHT_API_PORT)"
+        "--port",
+        type=int,
+        default=config.port,
+        help=f"Port to bind to (default: {config.port}, env: HINDSIGHT_API_PORT)",
     )
     parser.add_argument(
-        "--log-level", default=config.log_level,
+        "--log-level",
+        default=config.log_level,
         choices=["critical", "error", "warning", "info", "debug", "trace"],
-        help=f"Log level (default: {config.log_level}, env: HINDSIGHT_API_LOG_LEVEL)"
+        help=f"Log level (default: {config.log_level}, env: HINDSIGHT_API_LOG_LEVEL)",
     )
 
     # Development options
-    parser.add_argument(
-        "--reload", action="store_true",
-        help="Enable auto-reload on code changes (development only)"
-    )
-    parser.add_argument(
-        "--workers", type=int, default=1,
-        help="Number of worker processes (default: 1)"
-    )
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes (development only)")
+    parser.add_argument("--workers", type=int, default=1, help="Number of worker processes (default: 1)")
 
     # Access log options
-    parser.add_argument(
-        "--access-log", action="store_true",
-        help="Enable access log"
-    )
-    parser.add_argument(
-        "--no-access-log", dest="access_log", action="store_false",
-        help="Disable access log (default)"
-    )
+    parser.add_argument("--access-log", action="store_true", help="Enable access log")
+    parser.add_argument("--no-access-log", dest="access_log", action="store_false", help="Disable access log (default)")
     parser.set_defaults(access_log=False)
 
     # Proxy options
     parser.add_argument(
-        "--proxy-headers", action="store_true",
-        help="Enable X-Forwarded-Proto, X-Forwarded-For headers"
+        "--proxy-headers", action="store_true", help="Enable X-Forwarded-Proto, X-Forwarded-For headers"
     )
     parser.add_argument(
-        "--forwarded-allow-ips", default=None,
-        help="Comma separated list of IPs to trust with proxy headers"
+        "--forwarded-allow-ips", default=None, help="Comma separated list of IPs to trust with proxy headers"
     )
 
     # SSL options
-    parser.add_argument(
-        "--ssl-keyfile", default=None,
-        help="SSL key file"
-    )
-    parser.add_argument(
-        "--ssl-certfile", default=None,
-        help="SSL certificate file"
-    )
+    parser.add_argument("--ssl-keyfile", default=None, help="SSL key file")
+    parser.add_argument("--ssl-certfile", default=None, help="SSL certificate file")
 
     args = parser.parse_args()
 
@@ -188,9 +170,8 @@ def main():
     if args.ssl_certfile:
         uvicorn_config["ssl_certfile"] = args.ssl_certfile
 
-
-
     from .banner import print_startup_info
+
     print_startup_info(
         host=args.host,
         port=args.port,

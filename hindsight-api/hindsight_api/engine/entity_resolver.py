@@ -4,12 +4,13 @@ Entity extraction and resolution for memory system.
 Uses spaCy for entity extraction and implements resolution logic
 to disambiguate entities across memory units.
 """
-import asyncpg
-from typing import List, Dict, Optional, Set, Any
-from difflib import SequenceMatcher
-from datetime import datetime, timezone
-from .db_utils import acquire_with_retry
 
+from datetime import UTC, datetime
+from difflib import SequenceMatcher
+
+import asyncpg
+
+from .db_utils import acquire_with_retry
 
 # Load spaCy model (singleton)
 _nlp = None
@@ -32,11 +33,11 @@ class EntityResolver:
     async def resolve_entities_batch(
         self,
         bank_id: str,
-        entities_data: List[Dict],
+        entities_data: list[dict],
         context: str,
         unit_event_date,
         conn=None,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Resolve multiple entities in batch (MUCH faster than sequential).
 
@@ -62,7 +63,9 @@ class EntityResolver:
         else:
             return await self._resolve_entities_batch_impl(conn, bank_id, entities_data, context, unit_event_date)
 
-    async def _resolve_entities_batch_impl(self, conn, bank_id: str, entities_data: List[Dict], context: str, unit_event_date) -> List[str]:
+    async def _resolve_entities_batch_impl(
+        self, conn, bank_id: str, entities_data: list[dict], context: str, unit_event_date
+    ) -> list[str]:
         # Query ALL candidates for this bank
         all_entities = await conn.fetch(
             """
@@ -70,11 +73,11 @@ class EntityResolver:
             FROM entities
             WHERE bank_id = $1
             """,
-            bank_id
+            bank_id,
         )
 
         # Build entity ID to name mapping for co-occurrence lookups
-        entity_id_to_name = {row['id']: row['canonical_name'].lower() for row in all_entities}
+        entity_id_to_name = {row["id"]: row["canonical_name"].lower() for row in all_entities}
 
         # Query ALL co-occurrences for this bank's entities in one query
         # This builds a map of entity_id -> set of co-occurring entity names
@@ -85,13 +88,13 @@ class EntityResolver:
             WHERE ec.entity_id_1 IN (SELECT id FROM entities WHERE bank_id = $1)
                OR ec.entity_id_2 IN (SELECT id FROM entities WHERE bank_id = $1)
             """,
-            bank_id
+            bank_id,
         )
 
         # Build co-occurrence map: entity_id -> set of co-occurring entity names (lowercase)
-        cooccurrence_map: Dict[str, Set[str]] = {}
+        cooccurrence_map: dict[str, set[str]] = {}
         for row in all_cooccurrences:
-            eid1, eid2 = row['entity_id_1'], row['entity_id_2']
+            eid1, eid2 = row["entity_id_1"], row["entity_id_2"]
             # Add both directions
             if eid1 not in cooccurrence_map:
                 cooccurrence_map[eid1] = set()
@@ -105,22 +108,24 @@ class EntityResolver:
 
         # Build candidate map for each entity text
         all_candidates = {}  # Maps entity_text -> list of candidates
-        entity_texts = list(set(e['text'] for e in entities_data))
+        entity_texts = list(set(e["text"] for e in entities_data))
 
         for entity_text in entity_texts:
             matching = []
             entity_text_lower = entity_text.lower()
             for row in all_entities:
-                canonical_name = row['canonical_name']
-                ent_id = row['id']
-                metadata = row['metadata']
-                last_seen = row['last_seen']
-                mention_count = row['mention_count']
+                canonical_name = row["canonical_name"]
+                ent_id = row["id"]
+                metadata = row["metadata"]
+                last_seen = row["last_seen"]
+                mention_count = row["mention_count"]
                 canonical_lower = canonical_name.lower()
                 # Match if exact or substring match
-                if (entity_text_lower == canonical_lower or
-                    entity_text_lower in canonical_lower or
-                    canonical_lower in entity_text_lower):
+                if (
+                    entity_text_lower == canonical_lower
+                    or entity_text_lower in canonical_lower
+                    or canonical_lower in entity_text_lower
+                ):
                     matching.append((ent_id, canonical_name, metadata, last_seen, mention_count))
             all_candidates[entity_text] = matching
 
@@ -130,10 +135,10 @@ class EntityResolver:
         entities_to_create = []  # (idx, entity_data, event_date)
 
         for idx, entity_data in enumerate(entities_data):
-            entity_text = entity_data['text']
-            nearby_entities = entity_data.get('nearby_entities', [])
+            entity_text = entity_data["text"]
+            nearby_entities = entity_data.get("nearby_entities", [])
             # Use per-entity date if available, otherwise fall back to batch-level date
-            entity_event_date = entity_data.get('event_date', unit_event_date)
+            entity_event_date = entity_data.get("event_date", unit_event_date)
 
             candidates = all_candidates.get(entity_text, [])
 
@@ -146,17 +151,13 @@ class EntityResolver:
             best_candidate = None
             best_score = 0.0
 
-            nearby_entity_set = {e['text'].lower() for e in nearby_entities if e['text'] != entity_text}
+            nearby_entity_set = {e["text"].lower() for e in nearby_entities if e["text"] != entity_text}
 
             for candidate_id, canonical_name, metadata, last_seen, mention_count in candidates:
                 score = 0.0
 
                 # 1. Name similarity (0-0.5)
-                name_similarity = SequenceMatcher(
-                    None,
-                    entity_text.lower(),
-                    canonical_name.lower()
-                ).ratio()
+                name_similarity = SequenceMatcher(None, entity_text.lower(), canonical_name.lower()).ratio()
                 score += name_similarity * 0.5
 
                 # 2. Co-occurring entities (0-0.3)
@@ -169,8 +170,10 @@ class EntityResolver:
                 # 3. Temporal proximity (0-0.2)
                 if last_seen and entity_event_date:
                     # Normalize timezone awareness for comparison
-                    event_date_utc = entity_event_date if entity_event_date.tzinfo else entity_event_date.replace(tzinfo=timezone.utc)
-                    last_seen_utc = last_seen if last_seen.tzinfo else last_seen.replace(tzinfo=timezone.utc)
+                    event_date_utc = (
+                        entity_event_date if entity_event_date.tzinfo else entity_event_date.replace(tzinfo=UTC)
+                    )
+                    last_seen_utc = last_seen if last_seen.tzinfo else last_seen.replace(tzinfo=UTC)
                     days_diff = abs((event_date_utc - last_seen_utc).total_seconds() / 86400)
                     if days_diff < 7:
                         temporal_score = max(0, 1.0 - (days_diff / 7))
@@ -198,7 +201,7 @@ class EntityResolver:
                     last_seen = $2
                 WHERE id = $1::uuid
                 """,
-                entities_to_update
+                entities_to_update,
             )
 
         # Batch create new entities using COPY + INSERT for maximum speed
@@ -208,7 +211,7 @@ class EntityResolver:
             # For duplicates, we only insert once and reuse the ID
             unique_entities = {}  # lowercase_name -> (entity_data, event_date, [indices])
             for idx, entity_data, event_date in entities_to_create:
-                name_lower = entity_data['text'].lower()
+                name_lower = entity_data["text"].lower()
                 if name_lower not in unique_entities:
                     unique_entities[name_lower] = (entity_data, event_date, [idx])
                 else:
@@ -222,7 +225,7 @@ class EntityResolver:
             indices_map = []  # Maps result index -> list of original indices
 
             for name_lower, (entity_data, event_date, indices) in unique_entities.items():
-                entity_names.append(entity_data['text'])
+                entity_names.append(entity_data["text"])
                 entity_dates.append(event_date)
                 indices_map.append(indices)
 
@@ -241,12 +244,12 @@ class EntityResolver:
                 """,
                 bank_id,
                 entity_names,
-                entity_dates
+                entity_dates,
             )
 
             # Map returned IDs back to original indices
             for result_idx, row in enumerate(rows):
-                entity_id = row['id']
+                entity_id = row["id"]
                 for original_idx in indices_map[result_idx]:
                     entity_ids[original_idx] = entity_id
 
@@ -257,7 +260,7 @@ class EntityResolver:
         bank_id: str,
         entity_text: str,
         context: str,
-        nearby_entities: List[Dict],
+        nearby_entities: list[dict],
         unit_event_date,
     ) -> str:
         """
@@ -287,14 +290,14 @@ class EntityResolver:
                   )
                 ORDER BY mention_count DESC
                 """,
-                bank_id, entity_text, f"%{entity_text}%"
+                bank_id,
+                entity_text,
+                f"%{entity_text}%",
             )
 
             if not candidates:
                 # New entity - create it
-                return await self._create_entity(
-                    conn, bank_id, entity_text, unit_event_date
-                )
+                return await self._create_entity(conn, bank_id, entity_text, unit_event_date)
 
             # Score candidates based on:
             # 1. Name similarity
@@ -306,21 +309,17 @@ class EntityResolver:
             best_score = 0.0
             best_name_similarity = 0.0
 
-            nearby_entity_set = {e['text'].lower() for e in nearby_entities if e['text'] != entity_text}
+            nearby_entity_set = {e["text"].lower() for e in nearby_entities if e["text"] != entity_text}
 
             for row in candidates:
-                candidate_id = row['id']
-                canonical_name = row['canonical_name']
-                metadata = row['metadata']
-                last_seen = row['last_seen']
+                candidate_id = row["id"]
+                canonical_name = row["canonical_name"]
+                metadata = row["metadata"]
+                last_seen = row["last_seen"]
                 score = 0.0
 
                 # 1. Name similarity (0-1)
-                name_similarity = SequenceMatcher(
-                    None,
-                    entity_text.lower(),
-                    canonical_name.lower()
-                ).ratio()
+                name_similarity = SequenceMatcher(None, entity_text.lower(), canonical_name.lower()).ratio()
                 score += name_similarity * 0.5
 
                 # 2. Co-occurring entities (0-0.5)
@@ -338,9 +337,9 @@ class EntityResolver:
                     )
                     WHERE ec.entity_id_1 = $1 OR ec.entity_id_2 = $1
                     """,
-                    candidate_id
+                    candidate_id,
                 )
-                co_entities = {r['canonical_name'].lower() for r in co_entity_rows}
+                co_entities = {r["canonical_name"].lower() for r in co_entity_rows}
 
                 # Check overlap with nearby entities
                 overlap = len(nearby_entity_set & co_entities)
@@ -372,14 +371,13 @@ class EntityResolver:
                         last_seen = $1
                     WHERE id = $2
                     """,
-                    unit_event_date, best_candidate
+                    unit_event_date,
+                    best_candidate,
                 )
                 return best_candidate
             else:
                 # Not confident - create new entity
-                return await self._create_entity(
-                    conn, bank_id, entity_text, unit_event_date
-                )
+                return await self._create_entity(conn, bank_id, entity_text, unit_event_date)
 
     async def _create_entity(
         self,
@@ -413,7 +411,10 @@ class EntityResolver:
                 last_seen = EXCLUDED.last_seen
             RETURNING id
             """,
-            bank_id, entity_text, event_date, event_date
+            bank_id,
+            entity_text,
+            event_date,
+            event_date,
         )
         return entity_id
 
@@ -434,7 +435,8 @@ class EntityResolver:
                 VALUES ($1, $2)
                 ON CONFLICT DO NOTHING
                 """,
-                unit_id, entity_id
+                unit_id,
+                entity_id,
             )
 
             # Update co-occurrence cache: find other entities in this unit
@@ -444,10 +446,11 @@ class EntityResolver:
                 FROM unit_entities
                 WHERE unit_id = $1 AND entity_id != $2
                 """,
-                unit_id, entity_id
+                unit_id,
+                entity_id,
             )
 
-            other_entities = [row['entity_id'] for row in rows]
+            other_entities = [row["entity_id"] for row in rows]
 
             # Update co-occurrences for each pair
             for other_entity_id in other_entities:
@@ -477,10 +480,11 @@ class EntityResolver:
                 cooccurrence_count = entity_cooccurrences.cooccurrence_count + 1,
                 last_cooccurred = NOW()
             """,
-            entity_id_1, entity_id_2
+            entity_id_1,
+            entity_id_2,
         )
 
-    async def link_units_to_entities_batch(self, unit_entity_pairs: List[tuple[str, str]], conn=None):
+    async def link_units_to_entities_batch(self, unit_entity_pairs: list[tuple[str, str]], conn=None):
         """
         Link multiple memory units to entities in batch (MUCH faster than sequential).
 
@@ -499,7 +503,7 @@ class EntityResolver:
         else:
             return await self._link_units_to_entities_batch_impl(conn, unit_entity_pairs)
 
-    async def _link_units_to_entities_batch_impl(self, conn, unit_entity_pairs: List[tuple[str, str]]):
+    async def _link_units_to_entities_batch_impl(self, conn, unit_entity_pairs: list[tuple[str, str]]):
         # Batch insert all unit-entity links
         await conn.executemany(
             """
@@ -507,7 +511,7 @@ class EntityResolver:
             VALUES ($1, $2)
             ON CONFLICT DO NOTHING
             """,
-            unit_entity_pairs
+            unit_entity_pairs,
         )
 
         # Build map of unit -> entities for co-occurrence calculation
@@ -524,7 +528,7 @@ class EntityResolver:
             entity_list = list(entity_ids)  # Convert set to list for iteration
             # For each pair of entities in this unit, create co-occurrence
             for i, entity_id_1 in enumerate(entity_list):
-                for entity_id_2 in entity_list[i+1:]:
+                for entity_id_2 in entity_list[i + 1 :]:
                     # Skip if same entity (shouldn't happen with set, but be safe)
                     if entity_id_1 == entity_id_2:
                         continue
@@ -535,7 +539,7 @@ class EntityResolver:
 
         # Batch update co-occurrences
         if cooccurrence_pairs:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             await conn.executemany(
                 """
                 INSERT INTO entity_cooccurrences (entity_id_1, entity_id_2, cooccurrence_count, last_cooccurred)
@@ -545,10 +549,10 @@ class EntityResolver:
                     cooccurrence_count = entity_cooccurrences.cooccurrence_count + 1,
                     last_cooccurred = EXCLUDED.last_cooccurred
                 """,
-                [(e1, e2, 1, now) for e1, e2 in cooccurrence_pairs]
+                [(e1, e2, 1, now) for e1, e2 in cooccurrence_pairs],
             )
 
-    async def get_units_by_entity(self, entity_id: str, limit: int = 100) -> List[str]:
+    async def get_units_by_entity(self, entity_id: str, limit: int = 100) -> list[str]:
         """
         Get all units that mention an entity.
 
@@ -568,15 +572,16 @@ class EntityResolver:
                 ORDER BY unit_id
                 LIMIT $2
                 """,
-                entity_id, limit
+                entity_id,
+                limit,
             )
-            return [row['unit_id'] for row in rows]
+            return [row["unit_id"] for row in rows]
 
     async def get_entity_by_text(
         self,
         bank_id: str,
         entity_text: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Find an entity by text (for query resolution).
 
@@ -596,7 +601,8 @@ class EntityResolver:
                 ORDER BY mention_count DESC
                 LIMIT 1
                 """,
-                bank_id, entity_text
+                bank_id,
+                entity_text,
             )
 
-            return row['id'] if row else None
+            return row["id"] if row else None

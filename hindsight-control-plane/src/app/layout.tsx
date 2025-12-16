@@ -20,9 +20,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className="bg-background text-foreground">
         <ThemeProvider>
-          <BankProvider>
-            {children}
-          </BankProvider>
+          <BankProvider>{children}</BankProvider>
         </ThemeProvider>
       </body>
     </html>

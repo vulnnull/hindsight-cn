@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from typing import Optional
 
 from pg0 import Pg0
 
@@ -16,7 +15,7 @@ class EmbeddedPostgres:
 
     def __init__(
         self,
-        port: Optional[int] = None,
+        port: int | None = None,
         username: str = DEFAULT_USERNAME,
         password: str = DEFAULT_PASSWORD,
         database: str = DEFAULT_DATABASE,
@@ -28,7 +27,7 @@ class EmbeddedPostgres:
         self.password = password
         self.database = database
         self.name = name
-        self._pg0: Optional[Pg0] = None
+        self._pg0: Pg0 | None = None
 
     def _get_pg0(self) -> Pg0:
         if self._pg0 is None:
@@ -71,8 +70,7 @@ class EmbeddedPostgres:
                     logger.debug(f"pg0 start attempt {attempt}/{max_retries} failed: {last_error}")
 
         raise RuntimeError(
-            f"Failed to start embedded PostgreSQL after {max_retries} attempts. "
-            f"Last error: {last_error}"
+            f"Failed to start embedded PostgreSQL after {max_retries} attempts. Last error: {last_error}"
         )
 
     async def stop(self) -> None:
@@ -113,7 +111,7 @@ class EmbeddedPostgres:
         return await self.start()
 
 
-_default_instance: Optional[EmbeddedPostgres] = None
+_default_instance: EmbeddedPostgres | None = None
 
 
 def get_embedded_postgres() -> EmbeddedPostgres:

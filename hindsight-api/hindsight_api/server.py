@@ -6,6 +6,7 @@ This module provides the ASGI app for uvicorn import string usage:
 
 For CLI usage, use the hindsight-api command instead.
 """
+
 import os
 import warnings
 
@@ -29,15 +30,11 @@ config.configure_logging()
 _memory = MemoryEngine()
 
 # Create unified app with both HTTP and optionally MCP
-app = create_app(
-    memory=_memory,
-    http_api_enabled=True,
-    mcp_api_enabled=config.mcp_enabled,
-    mcp_mount_path="/mcp"
-)
+app = create_app(memory=_memory, http_api_enabled=True, mcp_api_enabled=config.mcp_enabled, mcp_mount_path="/mcp")
 
 
 if __name__ == "__main__":
     # When run directly, delegate to the CLI
     from hindsight_api.main import main
+
     main()

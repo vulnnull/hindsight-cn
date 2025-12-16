@@ -2,7 +2,6 @@
 Cross-encoder neural reranking for search results.
 """
 
-from typing import List
 from .types import MergedCandidate, ScoredResult
 
 
@@ -24,14 +23,11 @@ class CrossEncoderReranker:
         """
         if cross_encoder is None:
             from hindsight_api.engine.cross_encoder import create_cross_encoder_from_env
+
             cross_encoder = create_cross_encoder_from_env()
         self.cross_encoder = cross_encoder
 
-    def rerank(
-        self,
-        query: str,
-        candidates: List[MergedCandidate]
-    ) -> List[ScoredResult]:
+    def rerank(self, query: str, candidates: list[MergedCandidate]) -> list[ScoredResult]:
         """
         Rerank candidates using cross-encoder scores.
 
@@ -77,6 +73,7 @@ class CrossEncoderReranker:
         # Normalize scores using sigmoid to [0, 1] range
         # Cross-encoder returns logits which can be negative
         import numpy as np
+
         def sigmoid(x):
             return 1 / (1 + np.exp(-x))
 
@@ -89,7 +86,7 @@ class CrossEncoderReranker:
                 candidate=candidate,
                 cross_encoder_score=float(raw_score),
                 cross_encoder_score_normalized=float(norm_score),
-                weight=float(norm_score)  # Initial weight is just cross-encoder score
+                weight=float(norm_score),  # Initial weight is just cross-encoder score
             )
             scored_results.append(scored_result)
 

@@ -7,15 +7,15 @@ Provides modular search architecture:
 - Reranking: Pluggable strategies (heuristic, cross-encoder)
 """
 
-from .retrieval import (
-    retrieve_parallel,
-    get_default_graph_retriever,
-    set_default_graph_retriever,
-    ParallelRetrievalResult,
-)
-from .graph_retrieval import GraphRetriever, BFSGraphRetriever
+from .graph_retrieval import BFSGraphRetriever, GraphRetriever
 from .mpfp_retrieval import MPFPGraphRetriever
 from .reranking import CrossEncoderReranker
+from .retrieval import (
+    ParallelRetrievalResult,
+    get_default_graph_retriever,
+    retrieve_parallel,
+    set_default_graph_retriever,
+)
 
 __all__ = [
     "retrieve_parallel",

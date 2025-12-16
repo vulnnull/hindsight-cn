@@ -2,15 +2,12 @@
 Helper functions for hybrid search (semantic + BM25 + graph).
 """
 
-from typing import List, Dict, Any, Tuple
-import asyncio
-from .types import RetrievalResult, MergedCandidate
+from typing import Any
+
+from .types import MergedCandidate, RetrievalResult
 
 
-def reciprocal_rank_fusion(
-    result_lists: List[List[RetrievalResult]],
-    k: int = 60
-) -> List[MergedCandidate]:
+def reciprocal_rank_fusion(result_lists: list[list[RetrievalResult]], k: int = 60) -> list[MergedCandidate]:
     """
     Merge multiple ranked result lists using Reciprocal Rank Fusion.
 
@@ -73,20 +70,14 @@ def reciprocal_rank_fusion(
         sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True), start=1
     ):
         merged_candidate = MergedCandidate(
-            retrieval=all_retrievals[doc_id],
-            rrf_score=rrf_score,
-            rrf_rank=rrf_rank,
-            source_ranks=source_ranks[doc_id]
+            retrieval=all_retrievals[doc_id], rrf_score=rrf_score, rrf_rank=rrf_rank, source_ranks=source_ranks[doc_id]
         )
         merged_results.append(merged_candidate)
 
     return merged_results
 
 
-def normalize_scores_on_deltas(
-    results: List[Dict[str, Any]],
-    score_keys: List[str]
-) -> List[Dict[str, Any]]:
+def normalize_scores_on_deltas(results: list[dict[str, Any]], score_keys: list[str]) -> list[dict[str, Any]]:
     """
     Normalize scores based on deltas (min-max normalization within result set).
 

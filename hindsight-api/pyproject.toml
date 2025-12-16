@@ -97,6 +97,10 @@ dev = [
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+exclude = [
+    "tests/",
+    "**/tests/",
+]
 
 [tool.ruff.lint]
 select = [
@@ -104,12 +108,14 @@ select = [
     "W",      # pycodestyle warnings
     "F",      # Pyflakes
     "I",      # isort
-    "B",      # flake8-bugbear
-    "UP",     # pyupgrade
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
-    "B008",   # do not perform function calls in argument defaults
+    "E402",   # module import not at top of file
+    "F401",   # unused import (too noisy during development)
+    "F841",   # unused variable (too noisy during development)
+    "F811",   # redefined while unused
+    "F821",   # undefined name (forward references in type hints)
 ]
 
 [tool.ruff.format]

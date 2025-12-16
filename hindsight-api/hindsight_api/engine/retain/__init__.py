@@ -12,23 +12,16 @@ This package contains modular components for the retain operation:
 - fact_storage: Handle fact insertion into database
 """
 
-from .types import (
-    RetainContent,
-    ExtractedFact,
-    ProcessedFact,
-    ChunkMetadata,
-    EntityRef,
-    CausalRelation,
-    RetainBatch
+from . import (
+    chunk_storage,
+    deduplication,
+    embedding_processing,
+    entity_processing,
+    fact_extraction,
+    fact_storage,
+    link_creation,
 )
-
-from . import fact_extraction
-from . import embedding_processing
-from . import deduplication
-from . import entity_processing
-from . import link_creation
-from . import chunk_storage
-from . import fact_storage
+from .types import CausalRelation, ChunkMetadata, EntityRef, ExtractedFact, ProcessedFact, RetainBatch, RetainContent
 
 __all__ = [
     # Types

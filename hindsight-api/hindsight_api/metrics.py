@@ -6,16 +6,15 @@ This module provides metrics for:
 - Token usage (input/output) per operation
 - Per-bank granularity via labels
 """
+
 import logging
-from typing import Dict, Any, Optional
-from contextlib import contextmanager
 import time
+from contextlib import contextmanager
 
 from opentelemetry import metrics
+from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.exporter.prometheus import PrometheusMetricReader
-from prometheus_client import REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +38,18 @@ def initialize_metrics(service_name: str = "hindsight-api", service_version: str
     global _meter
 
     # Create resource with service information
-    resource = Resource.create({
-        "service.name": service_name,
-        "service.version": service_version,
-    })
+    resource = Resource.create(
+        {
+            "service.name": service_name,
+            "service.version": service_version,
+        }
+    )
 
     # Create Prometheus metric reader
     prometheus_reader = PrometheusMetricReader()
 
     # Create meter provider with Prometheus exporter
-    provider = MeterProvider(
-        resource=resource,
-        metric_readers=[prometheus_reader]
-    )
+    provider = MeterProvider(resource=resource, metric_readers=[prometheus_reader])
 
     # Set the global meter provider
     metrics.set_meter_provider(provider)
@@ -73,11 +71,19 @@ class MetricsCollectorBase:
     """Base class for metrics collectors."""
 
     @contextmanager
-    def record_operation(self, operation: str, bank_id: str, budget: Optional[str] = None, max_tokens: Optional[int] = None):
+    def record_operation(self, operation: str, bank_id: str, budget: str | None = None, max_tokens: int | None = None):
         """Context manager to record operation duration and status."""
         raise NotImplementedError
 
-    def record_tokens(self, operation: str, bank_id: str, input_tokens: int = 0, output_tokens: int = 0, budget: Optional[str] = None, max_tokens: Optional[int] = None):
+    def record_tokens(
+        self,
+        operation: str,
+        bank_id: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        budget: str | None = None,
+        max_tokens: int | None = None,
+    ):
         """Record token usage for an operation."""
         raise NotImplementedError
 
@@ -86,11 +92,19 @@ class NoOpMetricsCollector(MetricsCollectorBase):
     """No-op metrics collector that does nothing. Used when metrics are disabled."""
 
     @contextmanager
-    def record_operation(self, operation: str, bank_id: str, budget: Optional[str] = None, max_tokens: Optional[int] = None):
+    def record_operation(self, operation: str, bank_id: str, budget: str | None = None, max_tokens: int | None = None):
         """No-op context manager."""
         yield
 
-    def record_tokens(self, operation: str, bank_id: str, input_tokens: int = 0, output_tokens: int = 0, budget: Optional[str] = None, max_tokens: Optional[int] = None):
+    def record_tokens(
+        self,
+        operation: str,
+        bank_id: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        budget: str | None = None,
+        max_tokens: int | None = None,
+    ):
         """No-op token recording."""
         pass
 
@@ -108,33 +122,25 @@ class MetricsCollector(MetricsCollectorBase):
         # Operation latency histogram (in seconds)
         # Records duration of retain, recall, reflect operations
         self.operation_duration = self.meter.create_histogram(
-            name="hindsight.operation.duration",
-            description="Duration of Hindsight operations in seconds",
-            unit="s"
+            name="hindsight.operation.duration", description="Duration of Hindsight operations in seconds", unit="s"
         )
 
         # Token usage counters
         self.tokens_input = self.meter.create_counter(
-            name="hindsight.tokens.input",
-            description="Number of input tokens consumed",
-            unit="tokens"
+            name="hindsight.tokens.input", description="Number of input tokens consumed", unit="tokens"
         )
 
         self.tokens_output = self.meter.create_counter(
-            name="hindsight.tokens.output",
-            description="Number of output tokens generated",
-            unit="tokens"
+            name="hindsight.tokens.output", description="Number of output tokens generated", unit="tokens"
         )
 
         # Operation counter (success/failure)
         self.operation_total = self.meter.create_counter(
-            name="hindsight.operation.total",
-            description="Total number of operations executed",
-            unit="operations"
+            name="hindsight.operation.total", description="Total number of operations executed", unit="operations"
         )
 
     @contextmanager
-    def record_operation(self, operation: str, bank_id: str, budget: Optional[str] = None, max_tokens: Optional[int] = None):
+    def record_operation(self, operation: str, bank_id: str, budget: str | None = None, max_tokens: int | None = None):
         """
         Context manager to record operation duration and status.
 
@@ -175,7 +181,15 @@ class MetricsCollector(MetricsCollectorBase):
             # Record operation count
             self.operation_total.add(1, attributes)
 
-    def record_tokens(self, operation: str, bank_id: str, input_tokens: int = 0, output_tokens: int = 0, budget: Optional[str] = None, max_tokens: Optional[int] = None):
+    def record_tokens(
+        self,
+        operation: str,
+        bank_id: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        budget: str | None = None,
+        max_tokens: int | None = None,
+    ):
         """
         Record token usage for an operation.
 

@@ -3,31 +3,33 @@ Main orchestrator for the retain pipeline.
 
 Coordinates all retain pipeline modules to store memories efficiently.
 """
+
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
-from . import bank_utils
 from ..db_utils import acquire_with_retry
+from . import bank_utils
 
 
 def utcnow():
     """Get current UTC time."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
-from .types import RetainContent, ExtractedFact, ProcessedFact, EntityLink
+
 from . import (
-    fact_extraction,
-    embedding_processing,
-    deduplication,
     chunk_storage,
-    fact_storage,
+    deduplication,
+    embedding_processing,
     entity_processing,
+    fact_extraction,
+    fact_storage,
     link_creation,
-    observation_regeneration
+    observation_regeneration,
 )
+from .types import ExtractedFact, ProcessedFact, RetainContent
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +43,12 @@ async def retain_batch(
     format_date_fn,
     duplicate_checker_fn,
     bank_id: str,
-    contents_dicts: List[Dict[str, Any]],
-    document_id: Optional[str] = None,
+    contents_dicts: list[dict[str, Any]],
+    document_id: str | None = None,
     is_first_batch: bool = True,
-    fact_type_override: Optional[str] = None,
-    confidence_score: Optional[float] = None,
-) -> List[List[str]]:
+    fact_type_override: str | None = None,
+    confidence_score: float | None = None,
+) -> list[list[str]]:
     """
     Process a batch of content through the retain pipeline.
 
@@ -73,10 +75,10 @@ async def retain_batch(
 
     # Buffer all logs
     log_buffer = []
-    log_buffer.append(f"{'='*60}")
+    log_buffer.append(f"{'=' * 60}")
     log_buffer.append(f"RETAIN_BATCH START: {bank_id}")
     log_buffer.append(f"Batch size: {len(contents_dicts)} content items, {total_chars:,} chars")
-    log_buffer.append(f"{'='*60}")
+    log_buffer.append(f"{'=' * 60}")
 
     # Get bank profile
     profile = await bank_utils.get_bank_profile(pool, bank_id)
@@ -89,21 +91,20 @@ async def retain_batch(
             content=item["content"],
             context=item.get("context", ""),
             event_date=item.get("event_date") or utcnow(),
-            metadata=item.get("metadata", {})
+            metadata=item.get("metadata", {}),
         )
         contents.append(content)
 
     # Step 1: Extract facts from all contents
     step_start = time.time()
-    extract_opinions = (fact_type_override == 'opinion')
+    extract_opinions = fact_type_override == "opinion"
 
     extracted_facts, chunks = await fact_extraction.extract_facts_from_contents(
-        contents,
-        llm_config,
-        agent_name,
-        extract_opinions
+        contents, llm_config, agent_name, extract_opinions
     )
-    log_buffer.append(f"[1] Extract facts: {len(extracted_facts)} facts, {len(chunks)} chunks from {len(contents)} contents in {time.time() - step_start:.3f}s")
+    log_buffer.append(
+        f"[1] Extract facts: {len(extracted_facts)} facts, {len(chunks)} chunks from {len(contents)} contents in {time.time() - step_start:.3f}s"
+    )
 
     if not extracted_facts:
         return [[] for _ in contents]
@@ -130,6 +131,7 @@ async def retain_batch(
 
     # Group contents by document_id for document tracking and chunk storage
     from collections import defaultdict
+
     contents_by_doc = defaultdict(list)
     for idx, content_dict in enumerate(contents_dicts):
         doc_id = content_dict.get("document_id")
@@ -155,7 +157,11 @@ async def retain_batch(
                     if first_item.get("context"):
                         retain_params["context"] = first_item["context"]
                     if first_item.get("event_date"):
-                        retain_params["event_date"] = first_item["event_date"].isoformat() if hasattr(first_item["event_date"], "isoformat") else str(first_item["event_date"])
+                        retain_params["event_date"] = (
+                            first_item["event_date"].isoformat()
+                            if hasattr(first_item["event_date"], "isoformat")
+                            else str(first_item["event_date"])
+                        )
                     if first_item.get("metadata"):
                         retain_params["metadata"] = first_item["metadata"]
 
@@ -195,7 +201,11 @@ async def retain_batch(
                                 if first_item.get("context"):
                                     retain_params["context"] = first_item["context"]
                                 if first_item.get("event_date"):
-                                    retain_params["event_date"] = first_item["event_date"].isoformat() if hasattr(first_item["event_date"], "isoformat") else str(first_item["event_date"])
+                                    retain_params["event_date"] = (
+                                        first_item["event_date"].isoformat()
+                                        if hasattr(first_item["event_date"], "isoformat")
+                                        else str(first_item["event_date"])
+                                    )
                                 if first_item.get("metadata"):
                                     retain_params["metadata"] = first_item["metadata"]
 
@@ -205,7 +215,9 @@ async def retain_batch(
                             document_ids_added.append(actual_doc_id)
 
             if document_ids_added:
-                log_buffer.append(f"[2.5] Document tracking: {len(document_ids_added)} documents in {time.time() - step_start:.3f}s")
+                log_buffer.append(
+                    f"[2.5] Document tracking: {len(document_ids_added)} documents in {time.time() - step_start:.3f}s"
+                )
 
             # Store chunks and map to facts for all documents
             step_start = time.time()
@@ -230,7 +242,9 @@ async def retain_batch(
                     for chunk_idx, chunk_id in chunk_id_map.items():
                         chunk_id_map_by_doc[(doc_id, chunk_idx)] = chunk_id
 
-                log_buffer.append(f"[3] Store chunks: {len(chunks)} chunks for {len(chunks_by_doc)} documents in {time.time() - step_start:.3f}s")
+                log_buffer.append(
+                    f"[3] Store chunks: {len(chunks)} chunks for {len(chunks_by_doc)} documents in {time.time() - step_start:.3f}s"
+                )
 
                 # Map chunk_ids and document_ids to facts
                 for fact, processed_fact in zip(extracted_facts, processed_facts):
@@ -265,7 +279,9 @@ async def retain_batch(
             is_duplicate_flags = await deduplication.check_duplicates_batch(
                 conn, bank_id, processed_facts, duplicate_checker_fn
             )
-            log_buffer.append(f"[4] Deduplication: {sum(is_duplicate_flags)} duplicates in {time.time() - step_start:.3f}s")
+            log_buffer.append(
+                f"[4] Deduplication: {sum(is_duplicate_flags)} duplicates in {time.time() - step_start:.3f}s"
+            )
 
             # Filter out duplicates
             non_duplicate_facts = deduplication.filter_duplicates(processed_facts, is_duplicate_flags)
@@ -293,14 +309,18 @@ async def retain_batch(
             # Create semantic links
             step_start = time.time()
             embeddings_for_links = [fact.embedding for fact in non_duplicate_facts]
-            semantic_link_count = await link_creation.create_semantic_links_batch(conn, bank_id, unit_ids, embeddings_for_links)
+            semantic_link_count = await link_creation.create_semantic_links_batch(
+                conn, bank_id, unit_ids, embeddings_for_links
+            )
             log_buffer.append(f"[8] Semantic links: {semantic_link_count} links in {time.time() - step_start:.3f}s")
 
             # Insert entity links
             step_start = time.time()
             if entity_links:
                 await entity_processing.insert_entity_links_batch(conn, entity_links)
-            log_buffer.append(f"[9] Entity links: {len(entity_links) if entity_links else 0} links in {time.time() - step_start:.3f}s")
+            log_buffer.append(
+                f"[9] Entity links: {len(entity_links) if entity_links else 0} links in {time.time() - step_start:.3f}s"
+            )
 
             # Create causal links
             step_start = time.time()
@@ -309,34 +329,22 @@ async def retain_batch(
 
             # Regenerate observations INSIDE transaction for atomicity
             await observation_regeneration.regenerate_observations_batch(
-                conn,
-                embeddings_model,
-                llm_config,
-                bank_id,
-                entity_links,
-                log_buffer
+                conn, embeddings_model, llm_config, bank_id, entity_links, log_buffer
             )
 
             # Map results back to original content items
-            result_unit_ids = _map_results_to_contents(
-                contents, extracted_facts, is_duplicate_flags, unit_ids
-            )
+            result_unit_ids = _map_results_to_contents(contents, extracted_facts, is_duplicate_flags, unit_ids)
 
         # Trigger background tasks AFTER transaction commits (opinion reinforcement only)
-        await _trigger_background_tasks(
-            task_backend,
-            bank_id,
-            unit_ids,
-            non_duplicate_facts
-        )
+        await _trigger_background_tasks(task_backend, bank_id, unit_ids, non_duplicate_facts)
 
         # Log final summary
         total_time = time.time() - start_time
-        log_buffer.append(f"{'='*60}")
+        log_buffer.append(f"{'=' * 60}")
         log_buffer.append(f"RETAIN_BATCH COMPLETE: {len(unit_ids)} units in {total_time:.3f}s")
         if document_ids_added:
             log_buffer.append(f"Documents: {', '.join(document_ids_added)}")
-        log_buffer.append(f"{'='*60}")
+        log_buffer.append(f"{'=' * 60}")
 
         logger.info("\n" + "\n".join(log_buffer) + "\n")
 
@@ -344,11 +352,11 @@ async def retain_batch(
 
 
 def _map_results_to_contents(
-    contents: List[RetainContent],
-    extracted_facts: List[ExtractedFact],
-    is_duplicate_flags: List[bool],
-    unit_ids: List[str]
-) -> List[List[str]]:
+    contents: list[RetainContent],
+    extracted_facts: list[ExtractedFact],
+    is_duplicate_flags: list[bool],
+    unit_ids: list[str],
+) -> list[list[str]]:
     """
     Map created unit IDs back to original content items.
 
@@ -376,17 +384,19 @@ def _map_results_to_contents(
 async def _trigger_background_tasks(
     task_backend,
     bank_id: str,
-    unit_ids: List[str],
-    facts: List[ProcessedFact],
+    unit_ids: list[str],
+    facts: list[ProcessedFact],
 ) -> None:
     """Trigger opinion reinforcement as background task (after transaction commits)."""
     # Trigger opinion reinforcement if there are entities
     fact_entities = [[e.name for e in fact.entities] for fact in facts]
     if any(fact_entities):
-        await task_backend.submit_task({
-            'type': 'reinforce_opinion',
-            'bank_id': bank_id,
-            'created_unit_ids': unit_ids,
-            'unit_texts': [fact.fact_text for fact in facts],
-            'unit_entities': fact_entities
-        })
+        await task_backend.submit_task(
+            {
+                "type": "reinforce_opinion",
+                "bank_id": bank_id,
+                "created_unit_ids": unit_ids,
+                "unit_texts": [fact.fact_text for fact in facts],
+                "unit_entities": fact_entities,
+            }
+        )

@@ -6,7 +6,7 @@ about an entity, without personality influence.
 """
 
 import logging
-from typing import List, Dict, Any
+
 from pydantic import BaseModel, Field
 
 from ..response_models import MemoryFact
@@ -16,18 +16,17 @@ logger = logging.getLogger(__name__)
 
 class Observation(BaseModel):
     """An observation about an entity."""
+
     observation: str = Field(description="The observation text - a factual statement about the entity")
 
 
 class ObservationExtractionResponse(BaseModel):
     """Response containing extracted observations."""
-    observations: List[Observation] = Field(
-        default_factory=list,
-        description="List of observations about the entity"
-    )
+
+    observations: list[Observation] = Field(default_factory=list, description="List of observations about the entity")
 
 
-def format_facts_for_observation_prompt(facts: List[MemoryFact]) -> str:
+def format_facts_for_observation_prompt(facts: list[MemoryFact]) -> str:
     """Format facts as text for observation extraction prompt."""
     import json
 
@@ -35,9 +34,7 @@ def format_facts_for_observation_prompt(facts: List[MemoryFact]) -> str:
         return "[]"
     formatted = []
     for fact in facts:
-        fact_obj = {
-            "text": fact.text
-        }
+        fact_obj = {"text": fact.text}
 
         # Add context if available
         if fact.context:
@@ -92,11 +89,7 @@ def get_observation_system_message() -> str:
     return "You are an objective observer synthesizing facts about an entity. Generate clear, factual observations without opinions or personality influence. Be concise and accurate."
 
 
-async def extract_observations_from_facts(
-    llm_config,
-    entity_name: str,
-    facts: List[MemoryFact]
-) -> List[str]:
+async def extract_observations_from_facts(llm_config, entity_name: str, facts: list[MemoryFact]) -> list[str]:
     """
     Extract observations from facts about an entity using LLM.
 
@@ -118,10 +111,10 @@ async def extract_observations_from_facts(
         result = await llm_config.call(
             messages=[
                 {"role": "system", "content": get_observation_system_message()},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
             response_format=ObservationExtractionResponse,
-            scope="memory_extract_observation"
+            scope="memory_extract_observation",
         )
 
         observations = [op.observation for op in result.observations]

@@ -1,14 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { lowLevelClient, sdk } from '@/lib/hindsight-client';
+import { NextRequest, NextResponse } from "next/server";
+import { lowLevelClient, sdk } from "@/lib/hindsight-client";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const bankId = body.bank_id || body.agent_id || 'default';
+    const bankId = body.bank_id || body.agent_id || "default";
     const { query, types, fact_type, max_tokens, trace, budget, include, query_timestamp } = body;
 
-    console.log('[Recall API] Request:', { bankId, query, types: types || fact_type, max_tokens, trace, budget, query_timestamp });
-    console.log('[Recall API] Include options:', JSON.stringify(include, null, 2));
+    console.log("[Recall API] Request:", {
+      bankId,
+      query,
+      types: types || fact_type,
+      max_tokens,
+      trace,
+      budget,
+      query_timestamp,
+    });
+    console.log("[Recall API] Include options:", JSON.stringify(include, null, 2));
 
     const response = await sdk.recallMemories({
       client: lowLevelClient,
@@ -18,18 +26,18 @@ export async function POST(request: NextRequest) {
         types: types || fact_type,
         max_tokens,
         trace,
-        budget: budget || 'mid',
+        budget: budget || "mid",
         include,
         query_timestamp,
       },
     });
 
     if (!response.data) {
-      console.error('[Recall API] No data in response', { response, error: response.error });
-      throw new Error(`API returned no data: ${JSON.stringify(response.error || 'Unknown error')}`);
+      console.error("[Recall API] No data in response", { response, error: response.error });
+      throw new Error(`API returned no data: ${JSON.stringify(response.error || "Unknown error")}`);
     }
 
-    console.log('[Recall API] Response structure:', {
+    console.log("[Recall API] Response structure:", {
       hasResults: !!response.data?.results,
       resultsCount: response.data?.results?.length,
       hasTrace: !!response.data?.trace,
@@ -52,10 +60,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(jsonResponse, { status: 200 });
   } catch (error) {
-    console.error('Error recalling:', error);
-    return NextResponse.json(
-      { error: 'Failed to recall' },
-      { status: 500 }
-    );
+    console.error("Error recalling:", error);
+    return NextResponse.json({ error: "Failed to recall" }, { status: 500 });
   }
 }

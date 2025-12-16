@@ -9,37 +9,17 @@
 }
 
 .carousel {
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--ifm-color-emphasis-400) transparent;
-  padding-bottom: 0.5rem;
-  margin: 0 -1rem;
-  padding: 0 1rem;
-}
-
-.carousel::-webkit-scrollbar {
-  height: 6px;
-}
-
-.carousel::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.carousel::-webkit-scrollbar-thumb {
-  background-color: var(--ifm-color-emphasis-400);
-  border-radius: 3px;
+  /* Grid layout instead of horizontal scroll */
 }
 
 .carouselTrack {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
-  padding-bottom: 0.5rem;
 }
 
 .card {
-  flex: 0 0 auto;
-  padding: 0.75rem 1rem;
+  padding: 1rem 1.25rem;
   border-radius: 8px;
   border: 1px solid var(--ifm-color-emphasis-300);
   background: var(--ifm-background-surface-color);
@@ -47,9 +27,9 @@
   color: inherit;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: space-between;
+  gap: 0.75rem;
   transition: all 0.2s ease;
-  white-space: nowrap;
 }
 
 .card:hover {
@@ -77,4 +57,5 @@
 .cardLink {
   color: var(--ifm-color-primary);
   font-weight: 500;
+  flex-shrink: 0;
 }

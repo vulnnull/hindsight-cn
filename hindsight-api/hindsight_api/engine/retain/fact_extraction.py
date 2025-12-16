@@ -4,16 +4,17 @@ Fact extraction from text using LLM.
 Extracts semantic facts, entities, and temporal information from text.
 Uses the LLMConfig wrapper for all LLM calls.
 """
-import logging
-import os
-import json
-import re
+
 import asyncio
+import json
+import logging
+import re
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Literal
-from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from ..llm_wrapper import OutputTooLongError, LLMConfig
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from ..llm_wrapper import LLMConfig, OutputTooLongError
 
 
 def _sanitize_text(text: str) -> str:
@@ -31,11 +32,12 @@ def _sanitize_text(text: str) -> str:
         return text
     # Remove surrogate characters (U+D800 to U+DFFF) using regex
     # These are invalid in UTF-8 and cause encoding errors
-    return re.sub(r'[\ud800-\udfff]', '', text)
+    return re.sub(r"[\ud800-\udfff]", "", text)
 
 
 class Entity(BaseModel):
     """An entity extracted from text."""
+
     text: str = Field(
         description="The specific, named entity as it appears in the fact. Must be a proper noun or specific identifier."
     )
@@ -48,42 +50,46 @@ class Fact(BaseModel):
     This is what fact_extraction returns and what the rest of the pipeline expects.
     Combined fact text format: "what | when | where | who | why"
     """
+
     # Required fields
     fact: str = Field(description="Combined fact text: what | when | where | who | why")
     fact_type: Literal["world", "experience", "opinion"] = Field(description="Perspective: world/experience/opinion")
 
     # Optional temporal fields
-    occurred_start: Optional[str] = None
-    occurred_end: Optional[str] = None
-    mentioned_at: Optional[str] = None
+    occurred_start: str | None = None
+    occurred_end: str | None = None
+    mentioned_at: str | None = None
 
     # Optional location field
-    where: Optional[str] = Field(None, description="WHERE the fact occurred or is about (specific location, place, or area)")
+    where: str | None = Field(
+        None, description="WHERE the fact occurred or is about (specific location, place, or area)"
+    )
 
     # Optional structured data
-    entities: Optional[List[Entity]] = None
-    causal_relations: Optional[List['CausalRelation']] = None
+    entities: list[Entity] | None = None
+    causal_relations: list["CausalRelation"] | None = None
 
 
 class CausalRelation(BaseModel):
     """Causal relationship between facts."""
+
     target_fact_index: int = Field(
         description="Index of the related fact in the facts array (0-based). "
-                   "This creates a directed causal link to another fact in the extraction."
+        "This creates a directed causal link to another fact in the extraction."
     )
     relation_type: Literal["causes", "caused_by", "enables", "prevents"] = Field(
         description="Type of causal relationship: "
-                   "'causes' = this fact directly causes the target fact, "
-                   "'caused_by' = this fact was caused by the target fact, "
-                   "'enables' = this fact enables/allows the target fact, "
-                   "'prevents' = this fact prevents/blocks the target fact"
+        "'causes' = this fact directly causes the target fact, "
+        "'caused_by' = this fact was caused by the target fact, "
+        "'enables' = this fact enables/allows the target fact, "
+        "'prevents' = this fact prevents/blocks the target fact"
     )
     strength: float = Field(
         description="Strength of causal relationship (0.0 to 1.0). "
-                   "1.0 = direct/strong causation, 0.5 = moderate, 0.3 = weak/indirect",
+        "1.0 = direct/strong causation, 0.5 = moderate, 0.3 = weak/indirect",
         ge=0.0,
         le=1.0,
-        default=1.0
+        default=1.0,
     )
 
 
@@ -92,9 +98,7 @@ class ExtractedFact(BaseModel):
 
     model_config = ConfigDict(
         json_schema_mode="validation",
-        json_schema_extra={
-            "required": ["what", "when", "where", "who", "why", "fact_type"]
-        }
+        json_schema_extra={"required": ["what", "when", "where", "who", "why", "fact_type"]},
     )
 
     # ==========================================================================
@@ -103,43 +107,43 @@ class ExtractedFact(BaseModel):
 
     what: str = Field(
         description="WHAT happened - COMPLETE, DETAILED description with ALL specifics. "
-                   "NEVER summarize or omit details. Include: exact actions, objects, quantities, specifics. "
-                   "BE VERBOSE - capture every detail that was mentioned. "
-                   "Example: 'Emily got married to Sarah at a rooftop garden ceremony with 50 guests attending and a live jazz band playing' "
-                   "NOT: 'A wedding happened' or 'Emily got married'"
+        "NEVER summarize or omit details. Include: exact actions, objects, quantities, specifics. "
+        "BE VERBOSE - capture every detail that was mentioned. "
+        "Example: 'Emily got married to Sarah at a rooftop garden ceremony with 50 guests attending and a live jazz band playing' "
+        "NOT: 'A wedding happened' or 'Emily got married'"
     )
 
     when: str = Field(
         description="WHEN it happened - ALWAYS include temporal information if mentioned. "
-                   "Include: specific dates, times, durations, relative time references. "
-                   "Examples: 'on June 15th, 2024 at 3pm', 'last weekend', 'for the past 3 years', 'every morning at 6am'. "
-                   "Write 'N/A' ONLY if absolutely no temporal context exists. Prefer converting to absolute dates when possible."
+        "Include: specific dates, times, durations, relative time references. "
+        "Examples: 'on June 15th, 2024 at 3pm', 'last weekend', 'for the past 3 years', 'every morning at 6am'. "
+        "Write 'N/A' ONLY if absolutely no temporal context exists. Prefer converting to absolute dates when possible."
     )
 
     where: str = Field(
         description="WHERE it happened or is about - SPECIFIC locations, places, areas, regions if applicable. "
-                   "Include: cities, neighborhoods, venues, buildings, countries, specific addresses when mentioned. "
-                   "Examples: 'downtown San Francisco at a rooftop garden venue', 'at the user's home in Brooklyn', 'online via Zoom', 'Paris, France'. "
-                   "Write 'N/A' ONLY if absolutely no location context exists or if the fact is completely location-agnostic."
+        "Include: cities, neighborhoods, venues, buildings, countries, specific addresses when mentioned. "
+        "Examples: 'downtown San Francisco at a rooftop garden venue', 'at the user's home in Brooklyn', 'online via Zoom', 'Paris, France'. "
+        "Write 'N/A' ONLY if absolutely no location context exists or if the fact is completely location-agnostic."
     )
 
     who: str = Field(
         description="WHO is involved - ALL people/entities with FULL context and relationships. "
-                   "Include: names, roles, relationships to user, background details. "
-                   "Resolve coreferences (if 'my roommate' is later named 'Emily', write 'Emily, the user's college roommate'). "
-                   "BE DETAILED about relationships and roles. "
-                   "Example: 'Emily (user's college roommate from Stanford, now works at Google), Sarah (Emily's partner of 5 years, software engineer)' "
-                   "NOT: 'my friend' or 'Emily and Sarah'"
+        "Include: names, roles, relationships to user, background details. "
+        "Resolve coreferences (if 'my roommate' is later named 'Emily', write 'Emily, the user's college roommate'). "
+        "BE DETAILED about relationships and roles. "
+        "Example: 'Emily (user's college roommate from Stanford, now works at Google), Sarah (Emily's partner of 5 years, software engineer)' "
+        "NOT: 'my friend' or 'Emily and Sarah'"
     )
 
     why: str = Field(
         description="WHY it matters - ALL emotional, contextual, and motivational details. "
-                   "Include EVERYTHING: feelings, preferences, motivations, observations, context, background, significance. "
-                   "BE VERBOSE - capture all the nuance and meaning. "
-                   "FOR ASSISTANT FACTS: MUST include what the user asked/requested that led to this interaction! "
-                   "Example (world): 'The user felt thrilled and inspired, has always dreamed of an outdoor ceremony, mentioned wanting a similar garden venue, was particularly moved by the intimate atmosphere and personal vows' "
-                   "Example (assistant): 'User asked how to fix slow API performance with 1000+ concurrent users, expected 70-80% reduction in database load' "
-                   "NOT: 'User liked it' or 'To help user'"
+        "Include EVERYTHING: feelings, preferences, motivations, observations, context, background, significance. "
+        "BE VERBOSE - capture all the nuance and meaning. "
+        "FOR ASSISTANT FACTS: MUST include what the user asked/requested that led to this interaction! "
+        "Example (world): 'The user felt thrilled and inspired, has always dreamed of an outdoor ceremony, mentioned wanting a similar garden venue, was particularly moved by the intimate atmosphere and personal vows' "
+        "Example (assistant): 'User asked how to fix slow API performance with 1000+ concurrent users, expected 70-80% reduction in database load' "
+        "NOT: 'User liked it' or 'To help user'"
     )
 
     # ==========================================================================
@@ -148,17 +152,17 @@ class ExtractedFact(BaseModel):
 
     fact_kind: str = Field(
         default="conversation",
-        description="'event' = specific datable occurrence (set occurred dates), 'conversation' = general info (no occurred dates)"
+        description="'event' = specific datable occurrence (set occurred dates), 'conversation' = general info (no occurred dates)",
     )
 
     # Temporal fields - optional
-    occurred_start: Optional[str] = Field(
+    occurred_start: str | None = Field(
         default=None,
-        description="WHEN the event happened (ISO timestamp). Only for fact_kind='event'. Leave null for conversations."
+        description="WHEN the event happened (ISO timestamp). Only for fact_kind='event'. Leave null for conversations.",
     )
-    occurred_end: Optional[str] = Field(
+    occurred_end: str | None = Field(
         default=None,
-        description="WHEN the event ended (ISO timestamp). Only for events with duration. Leave null for conversations."
+        description="WHEN the event ended (ISO timestamp). Only for events with duration. Leave null for conversations.",
     )
 
     # Classification (CRITICAL - required)
@@ -168,16 +172,15 @@ class ExtractedFact(BaseModel):
     )
 
     # Entities - extracted from fact content
-    entities: Optional[List[Entity]] = Field(
+    entities: list[Entity] | None = Field(
         default=None,
-        description="Named entities, objects, AND abstract concepts from the fact. Include: people names, organizations, places, significant objects (e.g., 'coffee maker', 'car'), AND abstract concepts/themes (e.g., 'friendship', 'career growth', 'loss', 'celebration'). Extract anything that could help link related facts together."
+        description="Named entities, objects, AND abstract concepts from the fact. Include: people names, organizations, places, significant objects (e.g., 'coffee maker', 'car'), AND abstract concepts/themes (e.g., 'friendship', 'career growth', 'loss', 'celebration'). Extract anything that could help link related facts together.",
     )
-    causal_relations: Optional[List[CausalRelation]] = Field(
-        default=None,
-        description="Causal links to other facts. Can be null."
+    causal_relations: list[CausalRelation] | None = Field(
+        default=None, description="Causal links to other facts. Can be null."
     )
 
-    @field_validator('entities', mode='before')
+    @field_validator("entities", mode="before")
     @classmethod
     def ensure_entities_list(cls, v):
         """Ensure entities is always a list (convert None to empty list)."""
@@ -185,7 +188,7 @@ class ExtractedFact(BaseModel):
             return []
         return v
 
-    @field_validator('causal_relations', mode='before')
+    @field_validator("causal_relations", mode="before")
     @classmethod
     def ensure_causal_relations_list(cls, v):
         """Ensure causal_relations is always a list (convert None to empty list)."""
@@ -198,11 +201,11 @@ class ExtractedFact(BaseModel):
         parts = [self.what]
 
         # Add 'who' if not N/A
-        if self.who and self.who.upper() != 'N/A':
+        if self.who and self.who.upper() != "N/A":
             parts.append(f"Involving: {self.who}")
 
         # Add 'why' if not N/A
-        if self.why and self.why.upper() != 'N/A':
+        if self.why and self.why.upper() != "N/A":
             parts.append(self.why)
 
         if len(parts) == 1:
@@ -213,12 +216,11 @@ class ExtractedFact(BaseModel):
 
 class FactExtractionResponse(BaseModel):
     """Response containing all extracted facts."""
-    facts: List[ExtractedFact] = Field(
-        description="List of extracted factual statements"
-    )
+
+    facts: list[ExtractedFact] = Field(description="List of extracted factual statements")
 
 
-def chunk_text(text: str, max_chars: int) -> List[str]:
+def chunk_text(text: str, max_chars: int) -> list[str]:
     """
     Split text into chunks, preserving conversation structure when possible.
 
@@ -232,7 +234,6 @@ def chunk_text(text: str, max_chars: int) -> List[str]:
     Returns:
         List of text chunks, roughly under max_chars
     """
-    import json
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
     # If text is small enough, return as-is
@@ -256,21 +257,21 @@ def chunk_text(text: str, max_chars: int) -> List[str]:
         is_separator_regex=False,
         separators=[
             "\n\n",  # Paragraph breaks
-            "\n",    # Line breaks
-            ". ",    # Sentence endings
-            "! ",    # Exclamations
-            "? ",    # Questions
-            "; ",    # Semicolons
-            ", ",    # Commas
-            " ",     # Words
-            "",      # Characters (last resort)
+            "\n",  # Line breaks
+            ". ",  # Sentence endings
+            "! ",  # Exclamations
+            "? ",  # Questions
+            "; ",  # Semicolons
+            ", ",  # Commas
+            " ",  # Words
+            "",  # Characters (last resort)
         ],
     )
 
     return splitter.split_text(text)
 
 
-def _chunk_conversation(turns: List[dict], max_chars: int) -> List[str]:
+def _chunk_conversation(turns: list[dict], max_chars: int) -> list[str]:
     """
     Chunk a conversation array at turn boundaries, preserving complete turns.
 
@@ -281,7 +282,6 @@ def _chunk_conversation(turns: List[dict], max_chars: int) -> List[str]:
     Returns:
         List of JSON-serialized chunks, each containing complete turns
     """
-    import json
 
     chunks = []
     current_chunk = []
@@ -315,10 +315,10 @@ async def _extract_facts_from_chunk(
     total_chunks: int,
     event_date: datetime,
     context: str,
-    llm_config: 'LLMConfig',
+    llm_config: "LLMConfig",
     agent_name: str = None,
-    extract_opinions: bool = False
-) -> List[Dict[str, str]]:
+    extract_opinions: bool = False,
+) -> list[dict[str, str]]:
     """
     Extract facts from a single chunk (internal helper for parallel processing).
 
@@ -333,7 +333,9 @@ async def _extract_facts_from_chunk(
         # Opinion extraction uses a separate prompt (not this one)
         fact_types_instruction = "Extract ONLY 'opinion' type facts (formed opinions, beliefs, and perspectives). DO NOT extract 'world' or 'assistant' facts."
     else:
-        fact_types_instruction = "Extract ONLY 'world' and 'assistant' type facts. DO NOT extract opinions - those are extracted separately."
+        fact_types_instruction = (
+            "Extract ONLY 'world' and 'assistant' type facts. DO NOT extract opinions - those are extracted separately."
+        )
 
     prompt = f"""Extract facts from text into structured format with FOUR required dimensions - BE EXTREMELY DETAILED.
 
@@ -534,10 +536,8 @@ WHAT TO EXTRACT vs SKIP
 ✅ EXTRACT: User preferences (ALWAYS as separate facts!), feelings, plans, events, relationships, achievements
 ❌ SKIP: Greetings, filler ("thanks", "cool"), purely structural statements"""
 
-
-
-
     import logging
+
     from openai import BadRequestError
 
     logger = logging.getLogger(__name__)
@@ -548,11 +548,11 @@ WHAT TO EXTRACT vs SKIP
 
     # Sanitize input text to prevent Unicode encoding errors (e.g., unpaired surrogates)
     sanitized_chunk = _sanitize_text(chunk)
-    sanitized_context = _sanitize_text(context) if context else 'none'
+    sanitized_context = _sanitize_text(context) if context else "none"
 
     # Build user message with metadata and chunk content in a clear format
     # Format event_date with day of week for better temporal reasoning
-    event_date_formatted = event_date.strftime('%A, %B %d, %Y')  # e.g., "Monday, June 10, 2024"
+    event_date_formatted = event_date.strftime("%A, %B %d, %Y")  # e.g., "Monday, June 10, 2024"
     user_message = f"""Extract facts from the following text chunk.
 {memory_bank_context}
 
@@ -566,16 +566,7 @@ Text:
     for attempt in range(max_retries):
         try:
             extraction_response_json = await llm_config.call(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": user_message
-                    }
-                ],
+                messages=[{"role": "system", "content": prompt}, {"role": "user", "content": user_message}],
                 response_format=FactExtractionResponse,
                 scope="memory_extract_facts",
                 temperature=0.1,
@@ -601,7 +592,7 @@ Text:
                     )
                     return []
 
-            raw_facts = extraction_response_json.get('facts', [])
+            raw_facts = extraction_response_json.get("facts", [])
             if not raw_facts:
                 logger.debug(
                     f"LLM response missing 'facts' field or returned empty list. "
@@ -622,48 +613,48 @@ Text:
                 # Helper to get non-empty value
                 def get_value(field_name):
                     value = llm_fact.get(field_name)
-                    if value and value != '' and value != [] and value != {} and str(value).upper() != 'N/A':
+                    if value and value != "" and value != [] and value != {} and str(value).upper() != "N/A":
                         return value
                     return None
 
                 # NEW FORMAT: what, when, who, why (all required)
-                what = get_value('what')
-                when = get_value('when')
-                who = get_value('who')
-                why = get_value('why')
+                what = get_value("what")
+                when = get_value("when")
+                who = get_value("who")
+                why = get_value("why")
 
                 # Fallback to old format if new fields not present
                 if not what:
-                    what = get_value('factual_core')
+                    what = get_value("factual_core")
                 if not what:
                     logger.warning(f"Skipping fact {i}: missing 'what' field")
                     continue
 
                 # Critical field: fact_type
                 # LLM uses "assistant" but we convert to "experience" for storage
-                fact_type = llm_fact.get('fact_type')
+                fact_type = llm_fact.get("fact_type")
 
                 # Convert "assistant" → "experience" for storage
-                if fact_type == 'assistant':
-                    fact_type = 'experience'
+                if fact_type == "assistant":
+                    fact_type = "experience"
 
                 # Validate fact_type (after conversion)
-                if fact_type not in ['world', 'experience', 'opinion']:
+                if fact_type not in ["world", "experience", "opinion"]:
                     # Try to fix common mistakes - check if they swapped fact_type and fact_kind
-                    fact_kind = llm_fact.get('fact_kind')
-                    if fact_kind == 'assistant':
-                        fact_type = 'experience'
-                    elif fact_kind in ['world', 'experience', 'opinion']:
+                    fact_kind = llm_fact.get("fact_kind")
+                    if fact_kind == "assistant":
+                        fact_type = "experience"
+                    elif fact_kind in ["world", "experience", "opinion"]:
                         fact_type = fact_kind
                     else:
                         # Default to 'world' if we can't determine
-                        fact_type = 'world'
+                        fact_type = "world"
                         logger.warning(f"Fact {i}: defaulting to fact_type='world'")
 
                 # Get fact_kind for temporal handling (but don't store it)
-                fact_kind = llm_fact.get('fact_kind', 'conversation')
-                if fact_kind not in ['conversation', 'event', 'other']:
-                    fact_kind = 'conversation'
+                fact_kind = llm_fact.get("fact_kind", "conversation")
+                if fact_kind not in ["conversation", "event", "other"]:
+                    fact_kind = "conversation"
 
                 # Build combined fact text from the 4 dimensions: what | when | who | why
                 fact_data = {}
@@ -682,20 +673,20 @@ Text:
 
                 # Add temporal fields
                 # For events: occurred_start/occurred_end (when the event happened)
-                if fact_kind == 'event':
-                    occurred_start = get_value('occurred_start')
-                    occurred_end = get_value('occurred_end')
+                if fact_kind == "event":
+                    occurred_start = get_value("occurred_start")
+                    occurred_end = get_value("occurred_end")
                     if occurred_start:
-                        fact_data['occurred_start'] = occurred_start
+                        fact_data["occurred_start"] = occurred_start
                         # For point events: if occurred_end not set, default to occurred_start
                         if occurred_end:
-                            fact_data['occurred_end'] = occurred_end
+                            fact_data["occurred_end"] = occurred_end
                         else:
-                            fact_data['occurred_end'] = occurred_start
+                            fact_data["occurred_end"] = occurred_start
 
                 # Add entities if present (validate as Entity objects)
                 # LLM sometimes returns strings instead of {"text": "..."} format
-                entities = get_value('entities')
+                entities = get_value("entities")
                 if entities:
                     # Validate and normalize each entity
                     validated_entities = []
@@ -703,38 +694,34 @@ Text:
                         if isinstance(ent, str):
                             # Normalize string to Entity object
                             validated_entities.append(Entity(text=ent))
-                        elif isinstance(ent, dict) and 'text' in ent:
+                        elif isinstance(ent, dict) and "text" in ent:
                             try:
                                 validated_entities.append(Entity.model_validate(ent))
                             except Exception as e:
                                 logger.warning(f"Invalid entity {ent}: {e}")
                     if validated_entities:
-                        fact_data['entities'] = validated_entities
+                        fact_data["entities"] = validated_entities
 
                 # Add causal relations if present (validate as CausalRelation objects)
                 # Filter out invalid relations (missing required fields)
-                causal_relations = get_value('causal_relations')
+                causal_relations = get_value("causal_relations")
                 if causal_relations:
                     validated_relations = []
                     for rel in causal_relations:
-                        if isinstance(rel, dict) and 'target_fact_index' in rel and 'relation_type' in rel:
+                        if isinstance(rel, dict) and "target_fact_index" in rel and "relation_type" in rel:
                             try:
                                 validated_relations.append(CausalRelation.model_validate(rel))
                             except Exception as e:
                                 logger.warning(f"Invalid causal relation {rel}: {e}")
                     if validated_relations:
-                        fact_data['causal_relations'] = validated_relations
+                        fact_data["causal_relations"] = validated_relations
 
                 # Always set mentioned_at to the event_date (when the conversation/document occurred)
-                fact_data['mentioned_at'] = event_date.isoformat()
+                fact_data["mentioned_at"] = event_date.isoformat()
 
                 # Build Fact model instance
                 try:
-                    fact = Fact(
-                        fact=combined_text,
-                        fact_type=fact_type,
-                        **fact_data
-                    )
+                    fact = Fact(fact=combined_text, fact_type=fact_type, **fact_data)
                     chunk_facts.append(fact)
                 except Exception as e:
                     logger.error(f"Failed to create Fact model for fact {i}: {e}")
@@ -753,7 +740,9 @@ Text:
         except BadRequestError as e:
             last_error = e
             if "json_validate_failed" in str(e):
-                logger.warning(f"          [1.3.{chunk_index + 1}] Attempt {attempt + 1}/{max_retries} failed with JSON validation error: {e}")
+                logger.warning(
+                    f"          [1.3.{chunk_index + 1}] Attempt {attempt + 1}/{max_retries} failed with JSON validation error: {e}"
+                )
                 if attempt < max_retries - 1:
                     logger.info(f"          [1.3.{chunk_index + 1}] Retrying...")
                     continue
@@ -772,8 +761,8 @@ async def _extract_facts_with_auto_split(
     context: str,
     llm_config: LLMConfig,
     agent_name: str = None,
-    extract_opinions: bool = False
-) -> List[Dict[str, str]]:
+    extract_opinions: bool = False,
+) -> list[dict[str, str]]:
     """
     Extract facts from a chunk with automatic splitting if output exceeds token limits.
 
@@ -794,6 +783,7 @@ async def _extract_facts_with_auto_split(
         List of fact dictionaries extracted from the chunk (possibly from sub-chunks)
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     try:
@@ -806,9 +796,9 @@ async def _extract_facts_with_auto_split(
             context=context,
             llm_config=llm_config,
             agent_name=agent_name,
-            extract_opinions=extract_opinions
+            extract_opinions=extract_opinions,
         )
-    except OutputTooLongError as e:
+    except OutputTooLongError:
         # Output exceeded token limits - split the chunk in half and retry
         logger.warning(
             f"Output too long for chunk {chunk_index + 1}/{total_chunks} "
@@ -824,7 +814,7 @@ async def _extract_facts_with_auto_split(
         search_start = max(0, mid_point - search_range)
         search_end = min(len(chunk), mid_point + search_range)
 
-        sentence_endings = ['. ', '! ', '? ', '\n\n']
+        sentence_endings = [". ", "! ", "? ", "\n\n"]
         best_split = mid_point
 
         for ending in sentence_endings:
@@ -838,8 +828,7 @@ async def _extract_facts_with_auto_split(
         second_half = chunk[best_split:].strip()
 
         logger.info(
-            f"Split chunk {chunk_index + 1} into two sub-chunks: "
-            f"{len(first_half)} chars and {len(second_half)} chars"
+            f"Split chunk {chunk_index + 1} into two sub-chunks: {len(first_half)} chars and {len(second_half)} chars"
         )
 
         # Process both halves recursively (in parallel)
@@ -852,7 +841,7 @@ async def _extract_facts_with_auto_split(
                 context=context,
                 llm_config=llm_config,
                 agent_name=agent_name,
-                extract_opinions=extract_opinions
+                extract_opinions=extract_opinions,
             ),
             _extract_facts_with_auto_split(
                 chunk=second_half,
@@ -862,8 +851,8 @@ async def _extract_facts_with_auto_split(
                 context=context,
                 llm_config=llm_config,
                 agent_name=agent_name,
-                extract_opinions=extract_opinions
-            )
+                extract_opinions=extract_opinions,
+            ),
         ]
 
         sub_results = await asyncio.gather(*sub_tasks)
@@ -873,9 +862,7 @@ async def _extract_facts_with_auto_split(
         for sub_result in sub_results:
             all_facts.extend(sub_result)
 
-        logger.info(
-            f"Successfully extracted {len(all_facts)} facts from split chunk {chunk_index + 1}"
-        )
+        logger.info(f"Successfully extracted {len(all_facts)} facts from split chunk {chunk_index + 1}")
 
         return all_facts
 
@@ -887,7 +874,7 @@ async def extract_facts_from_text(
     agent_name: str,
     context: str = "",
     extract_opinions: bool = False,
-) -> tuple[List[Fact], List[tuple[str, int]]]:
+) -> tuple[list[Fact], list[tuple[str, int]]]:
     """
     Extract semantic facts from conversational or narrative text using LLM.
 
@@ -920,7 +907,7 @@ async def extract_facts_from_text(
             context=context,
             llm_config=llm_config,
             agent_name=agent_name,
-            extract_opinions=extract_opinions
+            extract_opinions=extract_opinions,
         )
         for i, chunk in enumerate(chunks)
     ]
@@ -938,8 +925,10 @@ async def extract_facts_from_text(
 # ============================================================================
 
 # Import types for the orchestration layer (note: ExtractedFact here is different from the Pydantic model above)
-from .types import RetainContent, ExtractedFact as ExtractedFactType, ChunkMetadata, CausalRelation as CausalRelationType
-from typing import Tuple
+
+from .types import CausalRelation as CausalRelationType
+from .types import ChunkMetadata, RetainContent
+from .types import ExtractedFact as ExtractedFactType
 
 logger = logging.getLogger(__name__)
 
@@ -948,11 +937,8 @@ SECONDS_PER_FACT = 10
 
 
 async def extract_facts_from_contents(
-    contents: List[RetainContent],
-    llm_config,
-    agent_name: str,
-    extract_opinions: bool = False
-) -> Tuple[List[ExtractedFactType], List[ChunkMetadata]]:
+    contents: list[RetainContent], llm_config, agent_name: str, extract_opinions: bool = False
+) -> tuple[list[ExtractedFactType], list[ChunkMetadata]]:
     """
     Extract facts from multiple content items in parallel.
 
@@ -985,7 +971,7 @@ async def extract_facts_from_contents(
             context=item.context,
             llm_config=llm_config,
             agent_name=agent_name,
-            extract_opinions=extract_opinions
+            extract_opinions=extract_opinions,
         )
         fact_extraction_tasks.append(task)
 
@@ -993,8 +979,8 @@ async def extract_facts_from_contents(
     all_fact_results = await asyncio.gather(*fact_extraction_tasks)
 
     # Step 3: Flatten and convert to typed objects
-    extracted_facts: List[ExtractedFactType] = []
-    chunks_metadata: List[ChunkMetadata] = []
+    extracted_facts: list[ExtractedFactType] = []
+    chunks_metadata: list[ChunkMetadata] = []
 
     global_chunk_idx = 0
     global_fact_idx = 0
@@ -1008,7 +994,7 @@ async def extract_facts_from_contents(
                 chunk_text=chunk_text,
                 fact_count=chunk_fact_count,
                 content_index=content_index,
-                chunk_index=global_chunk_idx
+                chunk_index=global_chunk_idx,
             )
             chunks_metadata.append(chunk_metadata)
             global_chunk_idx += 1
@@ -1029,18 +1015,21 @@ async def extract_facts_from_contents(
                         fact_type=fact_from_llm.fact_type,
                         entities=[e.text for e in (fact_from_llm.entities or [])],
                         # occurred_start/end: from LLM only, leave None if not provided
-                        occurred_start=_parse_datetime(fact_from_llm.occurred_start) if fact_from_llm.occurred_start else None,
-                        occurred_end=_parse_datetime(fact_from_llm.occurred_end) if fact_from_llm.occurred_end else None,
+                        occurred_start=_parse_datetime(fact_from_llm.occurred_start)
+                        if fact_from_llm.occurred_start
+                        else None,
+                        occurred_end=_parse_datetime(fact_from_llm.occurred_end)
+                        if fact_from_llm.occurred_end
+                        else None,
                         causal_relations=_convert_causal_relations(
-                            fact_from_llm.causal_relations or [],
-                            global_fact_idx
+                            fact_from_llm.causal_relations or [], global_fact_idx
                         ),
                         content_index=content_index,
                         chunk_index=chunk_global_idx,
                         context=content.context,
                         # mentioned_at: always the event_date (when the conversation/document occurred)
                         mentioned_at=content.event_date,
-                        metadata=content.metadata
+                        metadata=content.metadata,
                     )
 
                     extracted_facts.append(extracted_fact)
@@ -1056,13 +1045,14 @@ async def extract_facts_from_contents(
 def _parse_datetime(date_str: str):
     """Parse ISO datetime string."""
     from dateutil import parser as date_parser
+
     try:
         return date_parser.isoparse(date_str)
     except Exception:
         return None
 
 
-def _convert_causal_relations(relations_from_llm, fact_start_idx: int) -> List[CausalRelationType]:
+def _convert_causal_relations(relations_from_llm, fact_start_idx: int) -> list[CausalRelationType]:
     """
     Convert causal relations from LLM format to ExtractedFact format.
 
@@ -1073,13 +1063,13 @@ def _convert_causal_relations(relations_from_llm, fact_start_idx: int) -> List[C
         causal_relation = CausalRelationType(
             relation_type=rel.relation_type,
             target_fact_index=fact_start_idx + rel.target_fact_index,
-            strength=rel.strength
+            strength=rel.strength,
         )
         causal_relations.append(causal_relation)
     return causal_relations
 
 
-def _add_temporal_offsets(facts: List[ExtractedFactType], contents: List[RetainContent]) -> None:
+def _add_temporal_offsets(facts: list[ExtractedFactType], contents: list[RetainContent]) -> None:
     """
     Add time offsets to preserve fact ordering within each content.
 

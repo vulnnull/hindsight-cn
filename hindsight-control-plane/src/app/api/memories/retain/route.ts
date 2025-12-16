@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { hindsightClient } from '@/lib/hindsight-client';
+import { NextRequest, NextResponse } from "next/server";
+import { hindsightClient } from "@/lib/hindsight-client";
 
 export async function POST(request: NextRequest) {
   try {
@@ -7,10 +7,7 @@ export async function POST(request: NextRequest) {
     const bankId = body.bank_id || body.agent_id;
 
     if (!bankId) {
-      return NextResponse.json(
-        { error: 'bank_id is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "bank_id is required" }, { status: 400 });
     }
 
     const { items, document_id } = body;
@@ -19,10 +16,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(response, { status: 200 });
   } catch (error) {
-    console.error('Error batch retain:', error);
-    return NextResponse.json(
-      { error: 'Failed to batch retain' },
-      { status: 500 }
-    );
+    console.error("Error batch retain:", error);
+    return NextResponse.json({ error: "Failed to batch retain" }, { status: 500 });
   }
 }

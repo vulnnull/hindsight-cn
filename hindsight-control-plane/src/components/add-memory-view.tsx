@@ -1,35 +1,35 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { client } from '@/lib/api';
-import { useBank } from '@/lib/bank-context';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
+import { useState } from "react";
+import { client } from "@/lib/api";
+import { useBank } from "@/lib/bank-context";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export function AddMemoryView() {
   const { currentBank } = useBank();
-  const [content, setContent] = useState('');
-  const [context, setContext] = useState('');
-  const [eventDate, setEventDate] = useState('');
-  const [documentId, setDocumentId] = useState('');
+  const [content, setContent] = useState("");
+  const [context, setContext] = useState("");
+  const [eventDate, setEventDate] = useState("");
+  const [documentId, setDocumentId] = useState("");
   const [async, setAsync] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
   const clearForm = () => {
-    setContent('');
-    setContext('');
-    setEventDate('');
-    setDocumentId('');
+    setContent("");
+    setContext("");
+    setEventDate("");
+    setDocumentId("");
     setAsync(false);
     setResult(null);
   };
 
   const submitMemory = async () => {
     if (!currentBank || !content) {
-      alert('Please enter content');
+      alert("Please enter content");
       return;
     }
 
@@ -49,10 +49,10 @@ export function AddMemoryView() {
       });
 
       setResult(data.message as string);
-      setContent('');
+      setContent("");
     } catch (error) {
-      console.error('Error submitting memory:', error);
-      setResult('Error: ' + (error as Error).message);
+      console.error("Error submitting memory:", error);
+      setResult("Error: " + (error as Error).message);
     } finally {
       setLoading(false);
     }
@@ -106,7 +106,8 @@ export function AddMemoryView() {
               placeholder="Optional document identifier (automatically upserts if document exists)..."
             />
             <small className="text-muted-foreground text-xs mt-1 block">
-              Note: If a document with this ID already exists, it will be automatically replaced with the new content.
+              Note: If a document with this ID already exists, it will be automatically replaced
+              with the new content.
             </small>
           </div>
 
@@ -124,23 +125,19 @@ export function AddMemoryView() {
           </div>
 
           <div className="flex gap-2.5">
-            <Button
-              onClick={submitMemory}
-              disabled={loading}
-            >
-              {loading ? 'Retaining...' : 'Retain Memory'}
+            <Button onClick={submitMemory} disabled={loading}>
+              {loading ? "Retaining..." : "Retain Memory"}
             </Button>
-            <Button
-              onClick={clearForm}
-              variant="secondary"
-            >
+            <Button onClick={clearForm} variant="secondary">
               Clear Form
             </Button>
           </div>
         </div>
 
         {result && (
-          <div className={`mt-5 p-5 rounded-lg border-2 ${result.startsWith('Error') ? 'bg-destructive/10 border-destructive text-destructive' : 'bg-primary/10 border-primary text-primary'}`}>
+          <div
+            className={`mt-5 p-5 rounded-lg border-2 ${result.startsWith("Error") ? "bg-destructive/10 border-destructive text-destructive" : "bg-primary/10 border-primary text-primary"}`}
+          >
             <div className="font-semibold">{result}</div>
           </div>
         )}

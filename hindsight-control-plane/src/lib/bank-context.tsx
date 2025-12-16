@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { usePathname } from 'next/navigation';
-import { client } from './api';
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
+import { client } from "./api";
 
 interface BankContextType {
   currentBank: string | null;
@@ -25,7 +25,7 @@ export function BankProvider({ children }: { children: React.ReactNode }) {
       const bankIds = response.banks?.map((bank: any) => bank.bank_id) || [];
       setBanks(bankIds);
     } catch (error) {
-      console.error('Error loading banks:', error);
+      console.error("Error loading banks:", error);
     }
   };
 
@@ -51,7 +51,7 @@ export function BankProvider({ children }: { children: React.ReactNode }) {
 export function useBank() {
   const context = useContext(BankContext);
   if (context === undefined) {
-    throw new Error('useBank must be used within a BankProvider');
+    throw new Error("useBank must be used within a BankProvider");
   }
   return context;
 }

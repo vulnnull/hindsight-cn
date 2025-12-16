@@ -2,7 +2,7 @@
 sidebar_position: 4
 ---
 
-# Hindsight Memory Demo with LiteLLM
+# Memory with LiteLLM
 
 
 :::tip Run this notebook

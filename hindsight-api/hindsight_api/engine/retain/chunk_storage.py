@@ -3,20 +3,15 @@ Chunk storage for retain pipeline.
 
 Handles storage of document chunks in the database.
 """
+
 import logging
-from typing import List, Dict, Optional
 
 from .types import ChunkMetadata
 
 logger = logging.getLogger(__name__)
 
 
-async def store_chunks_batch(
-    conn,
-    bank_id: str,
-    document_id: str,
-    chunks: List[ChunkMetadata]
-) -> Dict[int, str]:
+async def store_chunks_batch(conn, bank_id: str, document_id: str, chunks: list[ChunkMetadata]) -> dict[int, str]:
     """
     Store document chunks in the database.
 
@@ -55,16 +50,13 @@ async def store_chunks_batch(
         [document_id] * len(chunk_texts),
         [bank_id] * len(chunk_texts),
         chunk_texts,
-        chunk_indices
+        chunk_indices,
     )
 
     return chunk_id_map
 
 
-def map_facts_to_chunks(
-    facts_chunk_indices: List[int],
-    chunk_id_map: Dict[int, str]
-) -> List[Optional[str]]:
+def map_facts_to_chunks(facts_chunk_indices: list[int], chunk_id_map: dict[int, str]) -> list[str | None]:
     """
     Map fact chunk indices to chunk IDs.
 

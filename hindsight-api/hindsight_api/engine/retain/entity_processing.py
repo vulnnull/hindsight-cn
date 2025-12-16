@@ -3,24 +3,18 @@ Entity processing for retain pipeline.
 
 Handles entity extraction, resolution, and link creation for stored facts.
 """
-import logging
-from typing import List, Tuple, Dict, Any
-from uuid import UUID
 
-from .types import ProcessedFact, EntityRef, EntityLink
+import logging
+
 from . import link_utils
+from .types import EntityLink, ProcessedFact
 
 logger = logging.getLogger(__name__)
 
 
 async def process_entities_batch(
-    entity_resolver,
-    conn,
-    bank_id: str,
-    unit_ids: List[str],
-    facts: List[ProcessedFact],
-    log_buffer: List[str] = None
-) -> List[EntityLink]:
+    entity_resolver, conn, bank_id: str, unit_ids: list[str], facts: list[ProcessedFact], log_buffer: list[str] = None
+) -> list[EntityLink]:
     """
     Process entities for all facts and create entity links.
 
@@ -53,8 +47,7 @@ async def process_entities_batch(
     fact_dates = [fact.occurred_start if fact.occurred_start is not None else fact.mentioned_at for fact in facts]
     # Convert EntityRef objects to dict format expected by link_utils
     entities_per_fact = [
-        [{'text': entity.name, 'type': 'CONCEPT'} for entity in (fact.entities or [])]
-        for fact in facts
+        [{"text": entity.name, "type": "CONCEPT"} for entity in (fact.entities or [])] for fact in facts
     ]
 
     # Use existing link_utils function for entity processing
@@ -67,16 +60,13 @@ async def process_entities_batch(
         "",  # context (not used in current implementation)
         fact_dates,
         entities_per_fact,
-        log_buffer  # Pass log_buffer for detailed logging
+        log_buffer,  # Pass log_buffer for detailed logging
     )
 
     return entity_links
 
 
-async def insert_entity_links_batch(
-    conn,
-    entity_links: List[EntityLink]
-) -> None:
+async def insert_entity_links_batch(conn, entity_links: list[EntityLink]) -> None:
     """
     Insert entity links in batch.
 

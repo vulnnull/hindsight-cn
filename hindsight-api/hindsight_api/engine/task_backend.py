@@ -6,10 +6,12 @@ This provides an abstraction that can be adapted to different execution models:
 - Pub/Sub architectures (future)
 - Message brokers (future)
 """
-from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Callable, Awaitable
+
 import asyncio
 import logging
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +31,10 @@ class TaskBackend(ABC):
 
     def __init__(self):
         """Initialize the task backend."""
-        self._executor: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None
+        self._executor: Callable[[dict[str, Any]], Awaitable[None]] | None = None
         self._initialized = False
 
-    def set_executor(self, executor: Callable[[Dict[str, Any]], Awaitable[None]]):
+    def set_executor(self, executor: Callable[[dict[str, Any]], Awaitable[None]]):
         """
         Set the executor callback for processing tasks.
 
@@ -49,7 +51,7 @@ class TaskBackend(ABC):
         pass
 
     @abstractmethod
-    async def submit_task(self, task_dict: Dict[str, Any]):
+    async def submit_task(self, task_dict: dict[str, Any]):
         """
         Submit a task for execution.
 
@@ -65,7 +67,7 @@ class TaskBackend(ABC):
         """
         pass
 
-    async def _execute_task(self, task_dict: Dict[str, Any]):
+    async def _execute_task(self, task_dict: dict[str, Any]):
         """
         Execute a task through the registered executor.
 
@@ -73,16 +75,17 @@ class TaskBackend(ABC):
             task_dict: Task dictionary to execute
         """
         if self._executor is None:
-            task_type = task_dict.get('type', 'unknown')
+            task_type = task_dict.get("type", "unknown")
             logger.warning(f"No executor registered, skipping task {task_type}")
             return
 
         try:
             await self._executor(task_dict)
         except Exception as e:
-            task_type = task_dict.get('type', 'unknown')
+            task_type = task_dict.get("type", "unknown")
             logger.error(f"Error executing task {task_type}: {e}")
             import traceback
+
             traceback.print_exc()
 
 
@@ -94,11 +97,7 @@ class AsyncIOQueueBackend(TaskBackend):
     and a periodic consumer worker.
     """
 
-    def __init__(
-        self,
-        batch_size: int = 100,
-        batch_interval: float = 1.0
-    ):
+    def __init__(self, batch_size: int = 100, batch_interval: float = 1.0):
         """
         Initialize AsyncIO queue backend.
 
@@ -107,9 +106,9 @@ class AsyncIOQueueBackend(TaskBackend):
             batch_interval: Maximum time (seconds) to wait before processing batch
         """
         super().__init__()
-        self._queue: Optional[asyncio.Queue] = None
-        self._worker_task: Optional[asyncio.Task] = None
-        self._shutdown_event: Optional[asyncio.Event] = None
+        self._queue: asyncio.Queue | None = None
+        self._worker_task: asyncio.Task | None = None
+        self._shutdown_event: asyncio.Event | None = None
         self._batch_size = batch_size
         self._batch_interval = batch_interval
 
@@ -124,7 +123,7 @@ class AsyncIOQueueBackend(TaskBackend):
         self._initialized = True
         logger.info("AsyncIOQueueBackend initialized")
 
-    async def submit_task(self, task_dict: Dict[str, Any]):
+    async def submit_task(self, task_dict: dict[str, Any]):
         """
         Submit a task by putting it in the queue.
 
@@ -135,8 +134,8 @@ class AsyncIOQueueBackend(TaskBackend):
             await self.initialize()
 
         await self._queue.put(task_dict)
-        task_type = task_dict.get('type', 'unknown')
-        task_id = task_dict.get('id')
+        task_type = task_dict.get("type", "unknown")
+        task_id = task_dict.get("id")
 
     async def wait_for_pending_tasks(self, timeout: float = 5.0):
         """
@@ -200,20 +199,16 @@ class AsyncIOQueueBackend(TaskBackend):
                 while len(tasks) < self._batch_size and asyncio.get_event_loop().time() < deadline:
                     try:
                         remaining_time = max(0.1, deadline - asyncio.get_event_loop().time())
-                        task_dict = await asyncio.wait_for(
-                            self._queue.get(),
-                            timeout=remaining_time
-                        )
+                        task_dict = await asyncio.wait_for(self._queue.get(), timeout=remaining_time)
                         tasks.append(task_dict)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         break
 
                 # Process batch
                 if tasks:
                     # Execute tasks concurrently
                     await asyncio.gather(
-                        *[self._execute_task(task_dict) for task_dict in tasks],
-                        return_exceptions=True
+                        *[self._execute_task(task_dict) for task_dict in tasks], return_exceptions=True
                     )
 
             except asyncio.CancelledError:

@@ -3,9 +3,8 @@ Embedding processing for retain pipeline.
 
 Handles augmenting fact texts with temporal information and generating embeddings.
 """
+
 import logging
-from typing import List
-from datetime import datetime
 
 from . import embedding_utils
 from .types import ExtractedFact
@@ -13,7 +12,7 @@ from .types import ExtractedFact
 logger = logging.getLogger(__name__)
 
 
-def augment_texts_with_dates(facts: List[ExtractedFact], format_date_fn) -> List[str]:
+def augment_texts_with_dates(facts: list[ExtractedFact], format_date_fn) -> list[str]:
     """
     Augment fact texts with readable dates for better temporal matching.
 
@@ -37,10 +36,7 @@ def augment_texts_with_dates(facts: List[ExtractedFact], format_date_fn) -> List
     return augmented_texts
 
 
-async def generate_embeddings_batch(
-    embeddings_model,
-    texts: List[str]
-) -> List[List[float]]:
+async def generate_embeddings_batch(embeddings_model, texts: list[str]) -> list[list[float]]:
     """
     Generate embeddings for a batch of texts.
 
@@ -54,9 +50,6 @@ async def generate_embeddings_batch(
     if not texts:
         return []
 
-    embeddings = await embedding_utils.generate_embeddings_batch(
-        embeddings_model,
-        texts
-    )
+    embeddings = await embedding_utils.generate_embeddings_batch(embeddings_model, texts)
 
     return embeddings

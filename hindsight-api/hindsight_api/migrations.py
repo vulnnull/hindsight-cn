@@ -11,11 +11,10 @@ safe rolling deployments.
 
 No alembic.ini required - all configuration is done programmatically.
 """
+
 import logging
 import os
-import shutil
 from pathlib import Path
-from typing import Optional
 
 from alembic import command
 from alembic.config import Config
@@ -31,7 +30,7 @@ def _run_migrations_internal(database_url: str, script_location: str) -> None:
     """
     Internal function to run migrations without locking.
     """
-    logger.info(f"Running database migrations to head...")
+    logger.info("Running database migrations to head...")
     logger.info(f"Database URL: {database_url}")
     logger.info(f"Script location: {script_location}")
 
@@ -57,7 +56,7 @@ def _run_migrations_internal(database_url: str, script_location: str) -> None:
     logger.info("Database migrations completed successfully")
 
 
-def run_migrations(database_url: str, script_location: Optional[str] = None) -> None:
+def run_migrations(database_url: str, script_location: str | None = None) -> None:
     """
     Run database migrations to the latest version using programmatic Alembic configuration.
 
@@ -97,8 +96,7 @@ def run_migrations(database_url: str, script_location: Optional[str] = None) -> 
         script_path = Path(script_location)
         if not script_path.exists():
             raise FileNotFoundError(
-                f"Alembic script location not found at {script_location}. "
-                "Database migrations cannot be run."
+                f"Alembic script location not found at {script_location}. Database migrations cannot be run."
             )
 
         # Use PostgreSQL advisory lock to coordinate between distributed workers
@@ -130,7 +128,9 @@ def run_migrations(database_url: str, script_location: Optional[str] = None) -> 
         raise RuntimeError("Database migration failed") from e
 
 
-def check_migration_status(database_url: Optional[str] = None, script_location: Optional[str] = None) -> tuple[str | None, str | None]:
+def check_migration_status(
+    database_url: str | None = None, script_location: str | None = None
+) -> tuple[str | None, str | None]:
     """
     Check current database schema version and latest available version.
 
@@ -151,7 +151,9 @@ def check_migration_status(database_url: Optional[str] = None, script_location: 
         if database_url is None:
             database_url = os.getenv("HINDSIGHT_API_DATABASE_URL")
         if not database_url:
-            logger.warning("Database URL not provided and HINDSIGHT_API_DATABASE_URL not set, cannot check migration status")
+            logger.warning(
+                "Database URL not provided and HINDSIGHT_API_DATABASE_URL not set, cannot check migration status"
+            )
             return None, None
 
         # Get current revision from database

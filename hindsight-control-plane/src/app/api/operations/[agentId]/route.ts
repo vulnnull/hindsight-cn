@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { sdk, lowLevelClient } from '@/lib/hindsight-client';
+import { NextRequest, NextResponse } from "next/server";
+import { sdk, lowLevelClient } from "@/lib/hindsight-client";
 
 export async function GET(
   request: NextRequest,
@@ -9,15 +9,12 @@ export async function GET(
     const { agentId } = await params;
     const response = await sdk.listOperations({
       client: lowLevelClient,
-      path: { bank_id: agentId }
+      path: { bank_id: agentId },
     });
     return NextResponse.json(response.data || {}, { status: 200 });
   } catch (error) {
-    console.error('Error fetching operations:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch operations' },
-      { status: 500 }
-    );
+    console.error("Error fetching operations:", error);
+    return NextResponse.json({ error: "Failed to fetch operations" }, { status: 500 });
   }
 }
 
@@ -28,26 +25,20 @@ export async function DELETE(
   try {
     const { agentId } = await params;
     const searchParams = request.nextUrl.searchParams;
-    const operationId = searchParams.get('operation_id');
+    const operationId = searchParams.get("operation_id");
 
     if (!operationId) {
-      return NextResponse.json(
-        { error: 'operation_id is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "operation_id is required" }, { status: 400 });
     }
 
     const response = await sdk.cancelOperation({
       client: lowLevelClient,
-      path: { bank_id: agentId, operation_id: operationId }
+      path: { bank_id: agentId, operation_id: operationId },
     });
 
     return NextResponse.json(response.data || {}, { status: 200 });
   } catch (error) {
-    console.error('Error canceling operation:', error);
-    return NextResponse.json(
-      { error: 'Failed to cancel operation' },
-      { status: 500 }
-    );
+    console.error("Error canceling operation:", error);
+    return NextResponse.json({ error: "Failed to cancel operation" }, { status: 500 });
   }
 }

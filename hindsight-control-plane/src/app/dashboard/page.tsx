@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { BankSelector } from '@/components/bank-selector';
-import { useBank } from '@/lib/bank-context';
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { BankSelector } from "@/components/bank-selector";
+import { useBank } from "@/lib/bank-context";
 
 export default function DashboardPage() {
   const router = useRouter();

@@ -4,24 +4,25 @@ Search tracer for collecting detailed search execution traces.
 The SearchTracer collects comprehensive information about each step
 of the spreading activation search process for debugging and visualization.
 """
+
 import time
-from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Literal
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 from .trace import (
-    SearchTrace,
-    QueryInfo,
     EntryPoint,
-    NodeVisit,
-    WeightComponents,
     LinkInfo,
+    NodeVisit,
     PruningDecision,
-    SearchSummary,
-    SearchPhaseMetrics,
-    RetrievalResult,
-    RetrievalMethodResults,
-    RRFMergeResult,
+    QueryInfo,
     RerankedResult,
+    RetrievalMethodResults,
+    RetrievalResult,
+    RRFMergeResult,
+    SearchPhaseMetrics,
+    SearchSummary,
+    SearchTrace,
+    WeightComponents,
 )
 
 
@@ -58,17 +59,17 @@ class SearchTracer:
         self.max_tokens = max_tokens
 
         # Trace data
-        self.query_embedding: Optional[List[float]] = None
-        self.start_time: Optional[float] = None
-        self.entry_points: List[EntryPoint] = []
-        self.visits: List[NodeVisit] = []
-        self.pruned: List[PruningDecision] = []
-        self.phase_metrics: List[SearchPhaseMetrics] = []
+        self.query_embedding: list[float] | None = None
+        self.start_time: float | None = None
+        self.entry_points: list[EntryPoint] = []
+        self.visits: list[NodeVisit] = []
+        self.pruned: list[PruningDecision] = []
+        self.phase_metrics: list[SearchPhaseMetrics] = []
 
         # New 4-way retrieval tracking
-        self.retrieval_results: List[RetrievalMethodResults] = []
-        self.rrf_merged: List[RRFMergeResult] = []
-        self.reranked: List[RerankedResult] = []
+        self.retrieval_results: list[RetrievalMethodResults] = []
+        self.rrf_merged: list[RRFMergeResult] = []
+        self.reranked: list[RerankedResult] = []
 
         # Tracking state
         self.current_step = 0
@@ -83,7 +84,7 @@ class SearchTracer:
         """Start timing the search."""
         self.start_time = time.time()
 
-    def record_query_embedding(self, embedding: List[float]):
+    def record_query_embedding(self, embedding: list[float]):
         """Record the query embedding."""
         self.query_embedding = embedding
 
@@ -117,9 +118,9 @@ class SearchTracer:
         event_date: datetime,
         access_count: int,
         is_entry_point: bool,
-        parent_node_id: Optional[str],
-        link_type: Optional[Literal["temporal", "semantic", "entity"]],
-        link_weight: Optional[float],
+        parent_node_id: str | None,
+        link_type: Literal["temporal", "semantic", "entity"] | None,
+        link_weight: float | None,
         activation: float,
         semantic_similarity: float,
         recency: float,
@@ -199,10 +200,10 @@ class SearchTracer:
         to_node_id: str,
         link_type: Literal["temporal", "semantic", "entity"],
         link_weight: float,
-        entity_id: Optional[str],
-        new_activation: Optional[float],
+        entity_id: str | None,
+        new_activation: float | None,
         followed: bool,
-        prune_reason: Optional[str] = None,
+        prune_reason: str | None = None,
         is_supplementary: bool = False,
     ):
         """
@@ -266,7 +267,7 @@ class SearchTracer:
             )
         )
 
-    def add_phase_metric(self, phase_name: str, duration_seconds: float, details: Optional[Dict[str, Any]] = None):
+    def add_phase_metric(self, phase_name: str, duration_seconds: float, details: dict[str, Any] | None = None):
         """
         Record metrics for a search phase.
 
@@ -286,11 +287,11 @@ class SearchTracer:
     def add_retrieval_results(
         self,
         method_name: Literal["semantic", "bm25", "graph", "temporal"],
-        results: List[tuple],  # List of (doc_id, data) tuples
+        results: list[tuple],  # List of (doc_id, data) tuples
         duration_seconds: float,
         score_field: str,  # e.g., "similarity", "bm25_score"
-        metadata: Optional[Dict[str, Any]] = None,
-        fact_type: Optional[str] = None
+        metadata: dict[str, Any] | None = None,
+        fact_type: str | None = None,
     ):
         """
         Record results from a single retrieval method.
@@ -331,7 +332,7 @@ class SearchTracer:
             )
         )
 
-    def add_rrf_merged(self, merged_results: List[tuple]):
+    def add_rrf_merged(self, merged_results: list[tuple]):
         """
         Record RRF merged results.
 
@@ -350,7 +351,7 @@ class SearchTracer:
                 )
             )
 
-    def add_reranked(self, reranked_results: List[Dict[str, Any]], rrf_merged: List):
+    def add_reranked(self, reranked_results: list[dict[str, Any]], rrf_merged: list):
         """
         Record reranked results.
 
@@ -373,7 +374,15 @@ class SearchTracer:
             # Keys from ScoredResult.to_dict(): cross_encoder_score, cross_encoder_score_normalized,
             # rrf_normalized, temporal, recency, combined_score, weight
             score_components = {}
-            for key in ["cross_encoder_score", "cross_encoder_score_normalized", "rrf_score", "rrf_normalized", "temporal", "recency", "combined_score"]:
+            for key in [
+                "cross_encoder_score",
+                "cross_encoder_score_normalized",
+                "rrf_score",
+                "rrf_normalized",
+                "temporal",
+                "recency",
+                "combined_score",
+            ]:
                 if key in result and result[key] is not None:
                     score_components[key] = result[key]
 
@@ -389,7 +398,7 @@ class SearchTracer:
                 )
             )
 
-    def finalize(self, final_results: List[Dict[str, Any]]) -> SearchTrace:
+    def finalize(self, final_results: list[dict[str, Any]]) -> SearchTrace:
         """
         Finalize the trace and return the complete SearchTrace object.
 
@@ -416,7 +425,7 @@ class SearchTracer:
         query_info = QueryInfo(
             query_text=self.query_text,
             query_embedding=self.query_embedding or [],
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             budget=self.budget,
             max_tokens=self.max_tokens,
         )

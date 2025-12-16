@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import { Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useBank } from '@/lib/bank-context';
-import { client } from '@/lib/api';
-import { Button } from '@/components/ui/button';
+import * as React from "react";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useBank } from "@/lib/bank-context";
+import { client } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import {
   Command,
   CommandEmpty,
@@ -13,26 +13,22 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from '@/components/ui/command';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Check, ChevronsUpDown, Plus, FileText, Moon, Sun, Github } from 'lucide-react';
-import { useTheme } from '@/lib/theme-context';
-import Image from 'next/image';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
-import { cn } from '@/lib/utils';
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Check, ChevronsUpDown, Plus, FileText, Moon, Sun, Github } from "lucide-react";
+import { useTheme } from "@/lib/theme-context";
+import Image from "next/image";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 
 function BankSelectorInner() {
   const router = useRouter();
@@ -41,16 +37,16 @@ function BankSelectorInner() {
   const { theme, toggleTheme } = useTheme();
   const [open, setOpen] = React.useState(false);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
-  const [newBankId, setNewBankId] = React.useState('');
+  const [newBankId, setNewBankId] = React.useState("");
   const [isCreating, setIsCreating] = React.useState(false);
   const [createError, setCreateError] = React.useState<string | null>(null);
 
   // Document creation state
   const [docDialogOpen, setDocDialogOpen] = React.useState(false);
-  const [docContent, setDocContent] = React.useState('');
-  const [docContext, setDocContext] = React.useState('');
-  const [docEventDate, setDocEventDate] = React.useState('');
-  const [docDocumentId, setDocDocumentId] = React.useState('');
+  const [docContent, setDocContent] = React.useState("");
+  const [docContext, setDocContext] = React.useState("");
+  const [docEventDate, setDocEventDate] = React.useState("");
+  const [docDocumentId, setDocDocumentId] = React.useState("");
   const [docAsync, setDocAsync] = React.useState(false);
   const [isCreatingDoc, setIsCreatingDoc] = React.useState(false);
   const [docError, setDocError] = React.useState<string | null>(null);
@@ -69,12 +65,12 @@ function BankSelectorInner() {
       await client.createBank(newBankId.trim());
       await loadBanks();
       setCreateDialogOpen(false);
-      setNewBankId('');
+      setNewBankId("");
       // Navigate to the new bank
       setCurrentBank(newBankId.trim());
       router.push(`/banks/${newBankId.trim()}?view=data`);
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : 'Failed to create bank');
+      setCreateError(error instanceof Error ? error.message : "Failed to create bank");
     } finally {
       setIsCreating(false);
     }
@@ -106,16 +102,16 @@ function BankSelectorInner() {
 
       // Reset form and close dialog
       setDocDialogOpen(false);
-      setDocContent('');
-      setDocContext('');
-      setDocEventDate('');
-      setDocDocumentId('');
+      setDocContent("");
+      setDocContext("");
+      setDocEventDate("");
+      setDocDocumentId("");
       setDocAsync(false);
 
       // Navigate to documents view to see the new document
       router.push(`/banks/${currentBank}?view=documents`);
     } catch (error) {
-      setDocError(error instanceof Error ? error.message : 'Failed to create document');
+      setDocError(error instanceof Error ? error.message : "Failed to create document");
     } finally {
       setIsCreatingDoc(false);
     }
@@ -125,7 +121,14 @@ function BankSelectorInner() {
     <div className="bg-card text-card-foreground px-5 py-3 border-b-4 border-primary-gradient">
       <div className="flex items-center gap-4 text-sm">
         {/* Logo */}
-        <Image src="/logo.png" alt="Hindsight" width={40} height={40} className="h-10 w-auto" unoptimized />
+        <Image
+          src="/logo.png"
+          alt="Hindsight"
+          width={40}
+          height={40}
+          className="h-10 w-auto"
+          unoptimized
+        />
 
         {/* Separator */}
         <div className="h-8 w-px bg-border" />
@@ -145,9 +148,7 @@ function BankSelectorInner() {
           </PopoverTrigger>
           <PopoverContent className="w-[250px] p-0">
             <Command>
-              {sortedBanks.length > 0 && (
-                <CommandInput placeholder="Search memory banks..." />
-              )}
+              {sortedBanks.length > 0 && <CommandInput placeholder="Search memory banks..." />}
               <CommandList>
                 <CommandEmpty>No memory banks yet.</CommandEmpty>
                 <CommandGroup>
@@ -159,9 +160,11 @@ function BankSelectorInner() {
                         setCurrentBank(value);
                         setOpen(false);
                         // Preserve current view and subTab when switching banks
-                        const view = searchParams.get('view') || 'data';
-                        const subTab = searchParams.get('subTab');
-                        const queryString = subTab ? `?view=${view}&subTab=${subTab}` : `?view=${view}`;
+                        const view = searchParams.get("view") || "data";
+                        const subTab = searchParams.get("subTab");
+                        const queryString = subTab
+                          ? `?view=${view}&subTab=${subTab}`
+                          : `?view=${view}`;
                         router.push(`/banks/${value}${queryString}`);
                       }}
                     >
@@ -234,13 +237,9 @@ function BankSelectorInner() {
           size="icon"
           onClick={toggleTheme}
           className="h-9 w-9"
-          title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
         >
-          {theme === 'light' ? (
-            <Moon className="h-5 w-5" />
-          ) : (
-            <Sun className="h-5 w-5" />
-          )}
+          {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </Button>
 
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
@@ -254,32 +253,27 @@ function BankSelectorInner() {
                 value={newBankId}
                 onChange={(e) => setNewBankId(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !isCreating) {
+                  if (e.key === "Enter" && !isCreating) {
                     handleCreateBank();
                   }
                 }}
                 autoFocus
               />
-              {createError && (
-                <p className="text-sm text-destructive mt-2">{createError}</p>
-              )}
+              {createError && <p className="text-sm text-destructive mt-2">{createError}</p>}
             </div>
             <DialogFooter>
               <Button
                 variant="secondary"
                 onClick={() => {
                   setCreateDialogOpen(false);
-                  setNewBankId('');
+                  setNewBankId("");
                   setCreateError(null);
                 }}
               >
                 Cancel
               </Button>
-              <Button
-                onClick={handleCreateBank}
-                disabled={isCreating || !newBankId.trim()}
-              >
-                {isCreating ? 'Creating...' : 'Create'}
+              <Button onClick={handleCreateBank} disabled={isCreating || !newBankId.trim()}>
+                {isCreating ? "Creating..." : "Create"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -290,7 +284,8 @@ function BankSelectorInner() {
             <DialogHeader>
               <DialogTitle>Add New Document</DialogTitle>
               <p className="text-sm text-muted-foreground">
-                Add a new document to memory bank: <span className="font-semibold">{currentBank}</span>
+                Add a new document to memory bank:{" "}
+                <span className="font-semibold">{currentBank}</span>
               </p>
             </DialogHeader>
             <div className="py-4 space-y-4">
@@ -327,7 +322,9 @@ function BankSelectorInner() {
                 </div>
 
                 <div>
-                  <label className="font-bold block mb-1 text-sm text-foreground">Document ID</label>
+                  <label className="font-bold block mb-1 text-sm text-foreground">
+                    Document ID
+                  </label>
                   <Input
                     type="text"
                     value={docDocumentId}
@@ -348,30 +345,25 @@ function BankSelectorInner() {
                 </label>
               </div>
 
-              {docError && (
-                <p className="text-sm text-destructive">{docError}</p>
-              )}
+              {docError && <p className="text-sm text-destructive">{docError}</p>}
             </div>
             <DialogFooter>
               <Button
                 variant="secondary"
                 onClick={() => {
                   setDocDialogOpen(false);
-                  setDocContent('');
-                  setDocContext('');
-                  setDocEventDate('');
-                  setDocDocumentId('');
+                  setDocContent("");
+                  setDocContext("");
+                  setDocEventDate("");
+                  setDocDocumentId("");
                   setDocAsync(false);
                   setDocError(null);
                 }}
               >
                 Cancel
               </Button>
-              <Button
-                onClick={handleCreateDocument}
-                disabled={isCreatingDoc || !docContent.trim()}
-              >
-                {isCreatingDoc ? 'Adding...' : 'Add Document'}
+              <Button onClick={handleCreateDocument} disabled={isCreatingDoc || !docContent.trim()}>
+                {isCreatingDoc ? "Adding..." : "Add Document"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -383,36 +375,45 @@ function BankSelectorInner() {
 
 export function BankSelector() {
   return (
-    <Suspense fallback={
-      <div className="bg-card text-card-foreground px-5 py-3 border-b-4 border-primary-gradient">
-        <div className="flex items-center gap-4 text-sm">
-          <Image src="/logo.png" alt="Hindsight" width={40} height={40} className="h-10 w-auto" unoptimized />
-          <div className="h-8 w-px bg-border" />
-          <Button
-            variant="outline"
-            className="w-[250px] justify-between font-bold border-2 border-primary"
-            disabled
-          >
-            Loading...
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-          <div className="flex-1" />
-          <a
-            href="https://github.com/vectorize-io/hindsight"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-accent transition-colors text-muted-foreground"
-          >
-            <Github className="h-5 w-5" />
-            <span className="text-sm font-medium">GitHub</span>
-          </a>
-          <div className="h-8 w-px bg-border" />
-          <Button variant="ghost" size="icon" className="h-9 w-9" disabled>
-            <Moon className="h-5 w-5" />
-          </Button>
+    <Suspense
+      fallback={
+        <div className="bg-card text-card-foreground px-5 py-3 border-b-4 border-primary-gradient">
+          <div className="flex items-center gap-4 text-sm">
+            <Image
+              src="/logo.png"
+              alt="Hindsight"
+              width={40}
+              height={40}
+              className="h-10 w-auto"
+              unoptimized
+            />
+            <div className="h-8 w-px bg-border" />
+            <Button
+              variant="outline"
+              className="w-[250px] justify-between font-bold border-2 border-primary"
+              disabled
+            >
+              Loading...
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+            <div className="flex-1" />
+            <a
+              href="https://github.com/vectorize-io/hindsight"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-accent transition-colors text-muted-foreground"
+            >
+              <Github className="h-5 w-5" />
+              <span className="text-sm font-medium">GitHub</span>
+            </a>
+            <div className="h-8 w-px bg-border" />
+            <Button variant="ghost" size="icon" className="h-9 w-9" disabled>
+              <Moon className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
-      </div>
-    }>
+      }
+    >
       <BankSelectorInner />
     </Suspense>
   );

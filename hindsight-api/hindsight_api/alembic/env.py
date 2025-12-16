@@ -2,19 +2,18 @@
 Alembic environment configuration for SQLAlchemy with pgvector.
 Uses synchronous psycopg2 driver for migrations to avoid pgbouncer issues.
 """
+
 import logging
 import os
-import sys
 from pathlib import Path
-
-from sqlalchemy import pool, engine_from_config
-from sqlalchemy.engine import Connection
 
 from alembic import context
 from dotenv import load_dotenv
+from sqlalchemy import engine_from_config, pool
 
 # Import your models here
 from hindsight_api.models import Base
+
 
 # Load environment variables based on HINDSIGHT_API_DATABASE_URL env var or default to local
 def load_env():
@@ -29,6 +28,7 @@ def load_env():
 
     if env_file.exists():
         load_dotenv(env_file)
+
 
 load_env()
 
@@ -128,10 +128,7 @@ def run_migrations_online() -> None:
         connection.execute(text("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE"))
         connection.commit()  # Commit the SET command
 
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

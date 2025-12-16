@@ -1,15 +1,17 @@
 """
 LLM wrapper for unified configuration across providers.
 """
+
+import asyncio
+import logging
 import os
 import time
-import asyncio
-from typing import Optional, Any, Dict, List
-from openai import AsyncOpenAI, RateLimitError, APIError, APIStatusError, APIConnectionError, LengthFinishReasonError
+from typing import Any
+
 from google import genai
-from google.genai import types as genai_types
 from google.genai import errors as genai_errors
-import logging
+from google.genai import types as genai_types
+from openai import APIConnectionError, APIStatusError, AsyncOpenAI, LengthFinishReasonError
 
 # Seed applied to every Groq request for deterministic behavior.
 DEFAULT_LLM_SEED = 4242
@@ -31,6 +33,7 @@ class OutputTooLongError(Exception):
     to allow callers to handle output length issues without depending on
     provider-specific implementations.
     """
+
     pass
 
 
@@ -68,9 +71,7 @@ class LLMProvider:
         # Validate provider
         valid_providers = ["openai", "groq", "ollama", "gemini"]
         if self.provider not in valid_providers:
-            raise ValueError(
-                f"Invalid LLM provider: {self.provider}. Must be one of: {', '.join(valid_providers)}"
-            )
+            raise ValueError(f"Invalid LLM provider: {self.provider}. Must be one of: {', '.join(valid_providers)}")
 
         # Set default base URLs
         if not self.base_url:
@@ -106,7 +107,9 @@ class LLMProvider:
             RuntimeError: If the connection test fails.
         """
         try:
-            logger.info(f"Verifying LLM: provider={self.provider}, model={self.model}, base_url={self.base_url or 'default'}...")
+            logger.info(
+                f"Verifying LLM: provider={self.provider}, model={self.model}, base_url={self.base_url or 'default'}..."
+            )
             await self.call(
                 messages=[{"role": "user", "content": "Say 'ok'"}],
                 max_completion_tokens=10,
@@ -117,16 +120,14 @@ class LLMProvider:
             # If we get here without exception, the connection is working
             logger.info(f"LLM verified: {self.provider}/{self.model}")
         except Exception as e:
-            raise RuntimeError(
-                f"LLM connection verification failed for {self.provider}/{self.model}: {e}"
-            ) from e
+            raise RuntimeError(f"LLM connection verification failed for {self.provider}/{self.model}: {e}") from e
 
     async def call(
         self,
-        messages: List[Dict[str, str]],
-        response_format: Optional[Any] = None,
-        max_completion_tokens: Optional[int] = None,
-        temperature: Optional[float] = None,
+        messages: list[dict[str, str]],
+        response_format: Any | None = None,
+        max_completion_tokens: int | None = None,
+        temperature: float | None = None,
         scope: str = "memory",
         max_retries: int = 10,
         initial_backoff: float = 1.0,
@@ -161,8 +162,7 @@ class LLMProvider:
             # Handle Gemini provider separately
             if self.provider == "gemini":
                 return await self._call_gemini(
-                    messages, response_format, max_retries, initial_backoff,
-                    max_backoff, skip_validation, start_time
+                    messages, response_format, max_retries, initial_backoff, max_backoff, skip_validation, start_time
                 )
 
             call_params = {
@@ -213,16 +213,18 @@ class LLMProvider:
                 try:
                     if response_format is not None:
                         # Add schema to system message for JSON mode
-                        if hasattr(response_format, 'model_json_schema'):
+                        if hasattr(response_format, "model_json_schema"):
                             schema = response_format.model_json_schema()
                             schema_msg = f"\n\nYou must respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
 
-                            if call_params['messages'] and call_params['messages'][0].get('role') == 'system':
-                                call_params['messages'][0]['content'] += schema_msg
-                            elif call_params['messages']:
-                                call_params['messages'][0]['content'] = schema_msg + "\n\n" + call_params['messages'][0]['content']
+                            if call_params["messages"] and call_params["messages"][0].get("role") == "system":
+                                call_params["messages"][0]["content"] += schema_msg
+                            elif call_params["messages"]:
+                                call_params["messages"][0]["content"] = (
+                                    schema_msg + "\n\n" + call_params["messages"][0]["content"]
+                                )
 
-                        call_params['response_format'] = {"type": "json_object"}
+                        call_params["response_format"] = {"type": "json_object"}
                         response = await self._client.chat.completions.create(**call_params)
 
                         content = response.choices[0].message.content
@@ -242,8 +244,8 @@ class LLMProvider:
                     if duration > 10.0:
                         ratio = max(1, usage.completion_tokens) / usage.prompt_tokens
                         cached_tokens = 0
-                        if hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
-                            cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
+                        if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details:
+                            cached_tokens = getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
                         cache_info = f", cached_tokens={cached_tokens}" if cached_tokens > 0 else ""
                         logger.info(
                             f"slow llm call: model={self.provider}/{self.model}, "
@@ -256,15 +258,19 @@ class LLMProvider:
                 except LengthFinishReasonError as e:
                     logger.warning(f"LLM output exceeded token limits: {str(e)}")
                     raise OutputTooLongError(
-                        f"LLM output exceeded token limits. Input may need to be split into smaller chunks."
+                        "LLM output exceeded token limits. Input may need to be split into smaller chunks."
                     ) from e
 
                 except APIConnectionError as e:
                     last_exception = e
                     if attempt < max_retries:
-                        status_code = getattr(e, 'status_code', None) or getattr(getattr(e, 'response', None), 'status_code', None)
-                        logger.warning(f"Connection error, retrying... (attempt {attempt + 1}/{max_retries + 1}) - status_code={status_code}, message={e}")
-                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                        status_code = getattr(e, "status_code", None) or getattr(
+                            getattr(e, "response", None), "status_code", None
+                        )
+                        logger.warning(
+                            f"Connection error, retrying... (attempt {attempt + 1}/{max_retries + 1}) - status_code={status_code}, message={e}"
+                        )
+                        backoff = min(initial_backoff * (2**attempt), max_backoff)
                         await asyncio.sleep(backoff)
                         continue
                     else:
@@ -279,7 +285,7 @@ class LLMProvider:
 
                     last_exception = e
                     if attempt < max_retries:
-                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                        backoff = min(initial_backoff * (2**attempt), max_backoff)
                         jitter = backoff * 0.2 * (2 * (time.time() % 1) - 1)
                         sleep_time = backoff + jitter
                         await asyncio.sleep(sleep_time)
@@ -293,12 +299,12 @@ class LLMProvider:
 
             if last_exception:
                 raise last_exception
-            raise RuntimeError(f"LLM call failed after all retries with no exception captured")
+            raise RuntimeError("LLM call failed after all retries with no exception captured")
 
     async def _call_gemini(
         self,
-        messages: List[Dict[str, str]],
-        response_format: Optional[Any],
+        messages: list[dict[str, str]],
+        response_format: Any | None,
         max_retries: int,
         initial_backoff: float,
         max_backoff: float,
@@ -313,27 +319,21 @@ class LLMProvider:
         gemini_contents = []
 
         for msg in messages:
-            role = msg.get('role', 'user')
-            content = msg.get('content', '')
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
 
-            if role == 'system':
+            if role == "system":
                 if system_instruction:
                     system_instruction += "\n\n" + content
                 else:
                     system_instruction = content
-            elif role == 'assistant':
-                gemini_contents.append(genai_types.Content(
-                    role="model",
-                    parts=[genai_types.Part(text=content)]
-                ))
+            elif role == "assistant":
+                gemini_contents.append(genai_types.Content(role="model", parts=[genai_types.Part(text=content)]))
             else:
-                gemini_contents.append(genai_types.Content(
-                    role="user",
-                    parts=[genai_types.Part(text=content)]
-                ))
+                gemini_contents.append(genai_types.Content(role="user", parts=[genai_types.Part(text=content)]))
 
         # Add JSON schema instruction if response_format is provided
-        if response_format is not None and hasattr(response_format, 'model_json_schema'):
+        if response_format is not None and hasattr(response_format, "model_json_schema"):
             schema = response_format.model_json_schema()
             schema_msg = f"\n\nYou must respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
             if system_instruction:
@@ -344,10 +344,10 @@ class LLMProvider:
         # Build generation config
         config_kwargs = {}
         if system_instruction:
-            config_kwargs['system_instruction'] = system_instruction
+            config_kwargs["system_instruction"] = system_instruction
         if response_format is not None:
-            config_kwargs['response_mime_type'] = 'application/json'
-            config_kwargs['response_schema'] = response_format
+            config_kwargs["response_mime_type"] = "application/json"
+            config_kwargs["response_schema"] = response_format
 
         generation_config = genai_types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
@@ -366,14 +366,14 @@ class LLMProvider:
                 # Handle empty response
                 if content is None:
                     block_reason = None
-                    if hasattr(response, 'candidates') and response.candidates:
+                    if hasattr(response, "candidates") and response.candidates:
                         candidate = response.candidates[0]
-                        if hasattr(candidate, 'finish_reason'):
+                        if hasattr(candidate, "finish_reason"):
                             block_reason = candidate.finish_reason
 
                     if attempt < max_retries:
                         logger.warning(f"Gemini returned empty response (reason: {block_reason}), retrying...")
-                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                        backoff = min(initial_backoff * (2**attempt), max_backoff)
                         await asyncio.sleep(backoff)
                         continue
                     else:
@@ -390,7 +390,7 @@ class LLMProvider:
 
                 # Log slow calls
                 duration = time.time() - start_time
-                if duration > 10.0 and hasattr(response, 'usage_metadata') and response.usage_metadata:
+                if duration > 10.0 and hasattr(response, "usage_metadata") and response.usage_metadata:
                     usage = response.usage_metadata
                     logger.info(
                         f"slow llm call: model={self.provider}/{self.model}, "
@@ -403,8 +403,8 @@ class LLMProvider:
             except json.JSONDecodeError as e:
                 last_exception = e
                 if attempt < max_retries:
-                    logger.warning(f"Gemini returned invalid JSON, retrying...")
-                    backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                    logger.warning("Gemini returned invalid JSON, retrying...")
+                    backoff = min(initial_backoff * (2**attempt), max_backoff)
                     await asyncio.sleep(backoff)
                     continue
                 else:
@@ -421,7 +421,7 @@ class LLMProvider:
                 if e.code in (400, 429, 500, 502, 503, 504) or (e.code and e.code >= 500):
                     last_exception = e
                     if attempt < max_retries:
-                        backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                        backoff = min(initial_backoff * (2**attempt), max_backoff)
                         jitter = backoff * 0.2 * (2 * (time.time() % 1) - 1)
                         await asyncio.sleep(backoff + jitter)
                     else:
@@ -437,7 +437,7 @@ class LLMProvider:
 
         if last_exception:
             raise last_exception
-        raise RuntimeError(f"Gemini call failed after all retries")
+        raise RuntimeError("Gemini call failed after all retries")
 
     @classmethod
     def for_memory(cls) -> "LLMProvider":
@@ -447,13 +447,7 @@ class LLMProvider:
         base_url = os.getenv("HINDSIGHT_API_LLM_BASE_URL", "")
         model = os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b")
 
-        return cls(
-            provider=provider,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            reasoning_effort="low"
-        )
+        return cls(provider=provider, api_key=api_key, base_url=base_url, model=model, reasoning_effort="low")
 
     @classmethod
     def for_answer_generation(cls) -> "LLMProvider":
@@ -463,13 +457,7 @@ class LLMProvider:
         base_url = os.getenv("HINDSIGHT_API_ANSWER_LLM_BASE_URL", os.getenv("HINDSIGHT_API_LLM_BASE_URL", ""))
         model = os.getenv("HINDSIGHT_API_ANSWER_LLM_MODEL", os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"))
 
-        return cls(
-            provider=provider,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            reasoning_effort="high"
-        )
+        return cls(provider=provider, api_key=api_key, base_url=base_url, model=model, reasoning_effort="high")
 
     @classmethod
     def for_judge(cls) -> "LLMProvider":
@@ -479,13 +467,7 @@ class LLMProvider:
         base_url = os.getenv("HINDSIGHT_API_JUDGE_LLM_BASE_URL", os.getenv("HINDSIGHT_API_LLM_BASE_URL", ""))
         model = os.getenv("HINDSIGHT_API_JUDGE_LLM_MODEL", os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"))
 
-        return cls(
-            provider=provider,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            reasoning_effort="high"
-        )
+        return cls(provider=provider, api_key=api_key, base_url=base_url, model=model, reasoning_effort="high")
 
 
 # Backwards compatibility alias

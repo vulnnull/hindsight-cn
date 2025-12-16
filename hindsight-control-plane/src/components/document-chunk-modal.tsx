@@ -1,18 +1,18 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { client } from '@/lib/api';
-import { useBank } from '@/lib/bank-context';
+import { useState, useEffect } from "react";
+import { client } from "@/lib/api";
+import { useBank } from "@/lib/bank-context";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from '@/components/ui/dialog';
+} from "@/components/ui/dialog";
 
 interface DocumentChunkModalProps {
-  type: 'document' | 'chunk';
+  type: "document" | "chunk";
   id: string | null;
   onClose: () => void;
 }
@@ -30,9 +30,9 @@ export function DocumentChunkModal({ type, id, onClose }: DocumentChunkModalProp
       setLoading(true);
       setError(null);
       try {
-        if (type === 'document') {
+        if (type === "document") {
           if (!currentBank) {
-            setError('No bank selected');
+            setError("No bank selected");
             return;
           }
           const doc = await client.getDocument(id, currentBank);
@@ -58,13 +58,11 @@ export function DocumentChunkModal({ type, id, onClose }: DocumentChunkModalProp
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>
-            {type === 'document' ? 'Document Details' : 'Chunk Details'}
-          </DialogTitle>
+          <DialogTitle>{type === "document" ? "Document Details" : "Chunk Details"}</DialogTitle>
           <DialogDescription>
-            {type === 'document'
-              ? 'View the original document text and metadata'
-              : 'View the chunk text and metadata'}
+            {type === "document"
+              ? "View the original document text and metadata"
+              : "View the chunk text and metadata"}
           </DialogDescription>
         </DialogHeader>
 
@@ -73,9 +71,7 @@ export function DocumentChunkModal({ type, id, onClose }: DocumentChunkModalProp
             <div className="flex items-center justify-center py-20">
               <div className="text-center">
                 <div className="text-4xl mb-2">⏳</div>
-                <div className="text-sm text-muted-foreground">
-                  Loading {type}...
-                </div>
+                <div className="text-sm text-muted-foreground">Loading {type}...</div>
               </div>
             </div>
           ) : error ? (
@@ -87,7 +83,7 @@ export function DocumentChunkModal({ type, id, onClose }: DocumentChunkModalProp
             </div>
           ) : data ? (
             <div className="space-y-4">
-              {type === 'document' ? (
+              {type === "document" ? (
                 <>
                   <div className="space-y-3">
                     <div className="p-3 bg-muted rounded-lg">
@@ -128,9 +124,7 @@ export function DocumentChunkModal({ type, id, onClose }: DocumentChunkModalProp
 
                   {data.original_text && (
                     <div>
-                      <div className="text-sm font-bold text-foreground mb-2">
-                        Original Text
-                      </div>
+                      <div className="text-sm font-bold text-foreground mb-2">Original Text</div>
                       <div className="p-4 bg-muted rounded-lg border border-border max-h-[300px] overflow-y-auto">
                         <pre className="text-sm whitespace-pre-wrap font-mono text-foreground">
                           {data.original_text}
@@ -190,9 +184,7 @@ export function DocumentChunkModal({ type, id, onClose }: DocumentChunkModalProp
 
                   {data.chunk_text && (
                     <div>
-                      <div className="text-sm font-bold text-foreground mb-2">
-                        Chunk Text
-                      </div>
+                      <div className="text-sm font-bold text-foreground mb-2">Chunk Text</div>
                       <div className="p-4 bg-muted rounded-lg border border-border max-h-[300px] overflow-y-auto">
                         <pre className="text-sm whitespace-pre-wrap font-mono text-foreground">
                           {data.chunk_text}

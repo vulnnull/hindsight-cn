@@ -199,12 +199,12 @@ const sidebars: SidebarsConfig = {
         {
           type: 'doc',
           id: 'cookbook/recipes/litellm-memory-demo',
-          label: 'Hindsight Memory Demo with LiteLLM',
+          label: 'Memory with LiteLLM',
         },
         {
           type: 'doc',
           id: 'cookbook/recipes/tool-learning-demo',
-          label: 'Hindsight Tool Learning Demo',
+          label: 'Routing Tool Learning',
         }
       ],
     },

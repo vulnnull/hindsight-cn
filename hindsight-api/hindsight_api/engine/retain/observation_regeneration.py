@@ -3,15 +3,14 @@ Observation regeneration for retain pipeline.
 
 Regenerates entity observations as part of the retain transaction.
 """
+
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import List, Dict, Optional
+from datetime import UTC, datetime
 
 from ..search import observation_utils
 from . import embedding_utils
-from ..db_utils import acquire_with_retry
 from .types import EntityLink
 
 logger = logging.getLogger(__name__)
@@ -19,12 +18,12 @@ logger = logging.getLogger(__name__)
 
 def utcnow():
     """Get current UTC time."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # Simple dataclass-like container for facts (avoid importing from memory_engine)
 class MemoryFactForObservation:
-    def __init__(self, id: str, text: str, fact_type: str, context: str, occurred_start: Optional[str]):
+    def __init__(self, id: str, text: str, fact_type: str, context: str, occurred_start: str | None):
         self.id = id
         self.text = text
         self.fact_type = fact_type
@@ -33,12 +32,7 @@ class MemoryFactForObservation:
 
 
 async def regenerate_observations_batch(
-    conn,
-    embeddings_model,
-    llm_config,
-    bank_id: str,
-    entity_links: List[EntityLink],
-    log_buffer: List[str] = None
+    conn, embeddings_model, llm_config, bank_id: str, entity_links: list[EntityLink], log_buffer: list[str] = None
 ) -> None:
     """
     Regenerate observations for top entities in this batch.
@@ -61,7 +55,7 @@ async def regenerate_observations_batch(
         return
 
     # Count mentions per entity in this batch
-    entity_mention_counts: Dict[str, int] = {}
+    entity_mention_counts: dict[str, int] = {}
     for link in entity_links:
         if link.entity_id:
             entity_id = str(link.entity_id)
@@ -71,11 +65,7 @@ async def regenerate_observations_batch(
         return
 
     # Sort by mention count descending and take top N
-    sorted_entities = sorted(
-        entity_mention_counts.items(),
-        key=lambda x: x[1],
-        reverse=True
-    )
+    sorted_entities = sorted(entity_mention_counts.items(), key=lambda x: x[1], reverse=True)
     entities_to_process = [e[0] for e in sorted_entities[:TOP_N_ENTITIES]]
 
     obs_start = time.time()
@@ -89,9 +79,10 @@ async def regenerate_observations_batch(
         SELECT id, canonical_name FROM entities
         WHERE id = ANY($1) AND bank_id = $2
         """,
-        entity_uuids, bank_id
+        entity_uuids,
+        bank_id,
     )
-    entity_names = {row['id']: row['canonical_name'] for row in entity_rows}
+    entity_names = {row["id"]: row["canonical_name"] for row in entity_rows}
 
     # Batch query for fact counts
     fact_counts = await conn.fetch(
@@ -102,9 +93,10 @@ async def regenerate_observations_batch(
         WHERE ue.entity_id = ANY($1) AND mu.bank_id = $2
         GROUP BY ue.entity_id
         """,
-        entity_uuids, bank_id
+        entity_uuids,
+        bank_id,
     )
-    entity_fact_counts = {row['entity_id']: row['cnt'] for row in fact_counts}
+    entity_fact_counts = {row["entity_id"]: row["cnt"] for row in fact_counts}
 
     # Filter entities that meet the threshold
     entities_with_names = []
@@ -126,8 +118,7 @@ async def regenerate_observations_batch(
     for entity_id, entity_name in entities_with_names:
         try:
             obs_ids = await _regenerate_entity_observations(
-                conn, embeddings_model, llm_config,
-                bank_id, entity_id, entity_name
+                conn, embeddings_model, llm_config, bank_id, entity_id, entity_name
             )
             total_observations += len(obs_ids)
         except Exception as e:
@@ -135,17 +126,14 @@ async def regenerate_observations_batch(
 
     obs_time = time.time() - obs_start
     if log_buffer is not None:
-        log_buffer.append(f"[11] Observations: {total_observations} observations for {len(entities_with_names)} entities in {obs_time:.3f}s")
+        log_buffer.append(
+            f"[11] Observations: {total_observations} observations for {len(entities_with_names)} entities in {obs_time:.3f}s"
+        )
 
 
 async def _regenerate_entity_observations(
-    conn,
-    embeddings_model,
-    llm_config,
-    bank_id: str,
-    entity_id: str,
-    entity_name: str
-) -> List[str]:
+    conn, embeddings_model, llm_config, bank_id: str, entity_id: str, entity_name: str
+) -> list[str]:
     """
     Regenerate observations for a single entity.
 
@@ -176,7 +164,8 @@ async def _regenerate_entity_observations(
         ORDER BY mu.occurred_start DESC
         LIMIT 50
         """,
-        bank_id, entity_uuid
+        bank_id,
+        entity_uuid,
     )
 
     if not rows:
@@ -185,21 +174,19 @@ async def _regenerate_entity_observations(
     # Convert to fact objects for observation extraction
     facts = []
     for row in rows:
-        occurred_start = row['occurred_start'].isoformat() if row['occurred_start'] else None
-        facts.append(MemoryFactForObservation(
-            id=str(row['id']),
-            text=row['text'],
-            fact_type=row['fact_type'],
-            context=row['context'],
-            occurred_start=occurred_start
-        ))
+        occurred_start = row["occurred_start"].isoformat() if row["occurred_start"] else None
+        facts.append(
+            MemoryFactForObservation(
+                id=str(row["id"]),
+                text=row["text"],
+                fact_type=row["fact_type"],
+                context=row["context"],
+                occurred_start=occurred_start,
+            )
+        )
 
     # Extract observations using LLM
-    observations = await observation_utils.extract_observations_from_facts(
-        llm_config,
-        entity_name,
-        facts
-    )
+    observations = await observation_utils.extract_observations_from_facts(llm_config, entity_name, facts)
 
     if not observations:
         return []
@@ -217,13 +204,12 @@ async def _regenerate_entity_observations(
               AND ue.entity_id = $2
         )
         """,
-        bank_id, entity_uuid
+        bank_id,
+        entity_uuid,
     )
 
     # Generate embeddings for new observations
-    embeddings = await embedding_utils.generate_embeddings_batch(
-        embeddings_model, observations
-    )
+    embeddings = await embedding_utils.generate_embeddings_batch(embeddings_model, observations)
 
     # Insert new observations
     current_time = utcnow()
@@ -247,9 +233,9 @@ async def _regenerate_entity_observations(
             current_time,
             current_time,
             current_time,
-            current_time
+            current_time,
         )
-        obs_id = str(result['id'])
+        obs_id = str(result["id"])
         created_ids.append(obs_id)
 
         # Link observation to entity
@@ -258,7 +244,8 @@ async def _regenerate_entity_observations(
             INSERT INTO unit_entities (unit_id, entity_id)
             VALUES ($1, $2)
             """,
-            uuid.UUID(obs_id), entity_uuid
+            uuid.UUID(obs_id),
+            entity_uuid,
         )
 
     return created_ids

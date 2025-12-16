@@ -1,9 +1,11 @@
 """
 Database utility functions for connection management with retry logic.
 """
+
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+
 import asyncpg
 
 logger = logging.getLogger(__name__)
@@ -54,16 +56,14 @@ async def retry_with_backoff(
         except retryable_exceptions as e:
             last_exception = e
             if attempt < max_retries:
-                delay = min(base_delay * (2 ** attempt), max_delay)
+                delay = min(base_delay * (2**attempt), max_delay)
                 logger.warning(
                     f"Database operation failed (attempt {attempt + 1}/{max_retries + 1}): {e}. "
                     f"Retrying in {delay:.1f}s..."
                 )
                 await asyncio.sleep(delay)
             else:
-                logger.error(
-                    f"Database operation failed after {max_retries + 1} attempts: {e}"
-                )
+                logger.error(f"Database operation failed after {max_retries + 1} attempts: {e}")
     raise last_exception
 
 
@@ -83,6 +83,7 @@ async def acquire_with_retry(pool: asyncpg.Pool, max_retries: int = DEFAULT_MAX_
     Yields:
         An asyncpg connection
     """
+
     async def acquire():
         return await pool.acquire()
 

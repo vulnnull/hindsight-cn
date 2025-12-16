@@ -12,12 +12,12 @@ This comprehensive test suite validates that the fact extraction system:
 These are quality/accuracy tests that verify the LLM-based extraction
 produces semantically correct and complete facts.
 """
-import pytest
-import re
-from datetime import datetime, timezone
-from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
-from hindsight_api import LLMConfig
+from datetime import UTC, datetime
 
+import pytest
+
+from hindsight_api import LLMConfig
+from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
 
 # =============================================================================
 # DIMENSION PRESERVATION TESTS
@@ -432,6 +432,7 @@ with a concert surrounded by music, joy and the warm summer breeze.
         assert birthday_fact is not None, "Should extract fact about birthday celebration"
 
         fact_date_str = birthday_fact.occurred_start
+        assert fact_date_str is not None, "occurred_start should not be None for temporal events"
 
         if 'T' in fact_date_str:
             fact_date = datetime.fromisoformat(fact_date_str.replace('Z', '+00:00'))
@@ -497,7 +498,7 @@ Yesterday I went for a morning jog for the first time in a nearby park.
     async def test_extract_facts_with_relative_dates(self):
         """Test that relative dates are converted to absolute dates."""
 
-        reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=timezone.utc)
+        reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=UTC)
         llm_config = LLMConfig.for_memory()
 
         text = """
@@ -531,7 +532,7 @@ Yesterday I went for a morning jog for the first time in a nearby park.
     async def test_extract_facts_with_no_temporal_info(self):
         """Test that facts without temporal info are still extracted."""
 
-        reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=timezone.utc)
+        reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=UTC)
         llm_config = LLMConfig.for_memory()
 
         text = "Alice works at Google. She loves Python programming."
@@ -555,7 +556,7 @@ Yesterday I went for a morning jog for the first time in a nearby park.
     async def test_extract_facts_with_absolute_dates(self):
         """Test that absolute dates in text are preserved."""
 
-        reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=timezone.utc)
+        reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=UTC)
         llm_config = LLMConfig.for_memory()
 
         text = """

@@ -3,10 +3,9 @@ Fact storage for retain pipeline.
 
 Handles insertion of facts into the database.
 """
-import logging
+
 import json
-from typing import List, Optional
-from uuid import UUID
+import logging
 
 from .types import ProcessedFact
 
@@ -14,11 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 async def insert_facts_batch(
-    conn,
-    bank_id: str,
-    facts: List[ProcessedFact],
-    document_id: Optional[str] = None
-) -> List[str]:
+    conn, bank_id: str, facts: list[ProcessedFact], document_id: str | None = None
+) -> list[str]:
     """
     Insert facts into the database in batch.
 
@@ -62,7 +58,7 @@ async def insert_facts_batch(
         contexts.append(fact.context)
         fact_types.append(fact.fact_type)
         # confidence_score is only for opinion facts
-        confidence_scores.append(1.0 if fact.fact_type == 'opinion' else None)
+        confidence_scores.append(1.0 if fact.fact_type == "opinion" else None)
         access_counts.append(0)  # Initial access count
         metadata_jsons.append(json.dumps(fact.metadata))
         chunk_ids.append(fact.chunk_id)
@@ -93,10 +89,10 @@ async def insert_facts_batch(
         access_counts,
         metadata_jsons,
         chunk_ids,
-        document_ids
+        document_ids,
     )
 
-    unit_ids = [str(row['id']) for row in results]
+    unit_ids = [str(row["id"]) for row in results]
     return unit_ids
 
 
@@ -119,17 +115,12 @@ async def ensure_bank_exists(conn, bank_id: str) -> None:
         """,
         bank_id,
         '{"skepticism": 3, "literalism": 3, "empathy": 3}',
-        ""
+        "",
     )
 
 
 async def handle_document_tracking(
-    conn,
-    bank_id: str,
-    document_id: str,
-    combined_content: str,
-    is_first_batch: bool,
-    retain_params: Optional[dict] = None
+    conn, bank_id: str, document_id: str, combined_content: str, is_first_batch: bool, retain_params: dict | None = None
 ) -> None:
     """
     Handle document tracking in the database.
@@ -150,10 +141,7 @@ async def handle_document_tracking(
     # Always delete old document first if it exists (cascades to units and links)
     # Only delete on the first batch to avoid deleting data we just inserted
     if is_first_batch:
-        await conn.fetchval(
-            "DELETE FROM documents WHERE id = $1 AND bank_id = $2 RETURNING id",
-            document_id, bank_id
-        )
+        await conn.fetchval("DELETE FROM documents WHERE id = $1 AND bank_id = $2 RETURNING id", document_id, bank_id)
 
     # Insert document (or update if exists from concurrent operations)
     await conn.execute(
@@ -172,5 +160,5 @@ async def handle_document_tracking(
         combined_content,
         content_hash,
         json.dumps({}),  # Empty metadata dict
-        json.dumps(retain_params) if retain_params else None
+        json.dumps(retain_params) if retain_params else None,
     )

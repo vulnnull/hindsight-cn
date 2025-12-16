@@ -2,7 +2,7 @@
 sidebar_position: 5
 ---
 
-# Hindsight Tool Learning Demo
+# Routing Tool Learning
 
 
 :::tip Run this notebook

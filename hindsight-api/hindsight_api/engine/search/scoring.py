@@ -4,11 +4,11 @@ Scoring functions for memory search and retrieval.
 Includes recency weighting, frequency weighting, temporal proximity,
 and similarity calculations used in memory activation and ranking.
 """
+
 from datetime import datetime
-from typing import List
 
 
-def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     """
     Calculate cosine similarity between two vectors.
 
@@ -58,6 +58,7 @@ def calculate_recency_weight(days_since: float, half_life_days: float = 365.0) -
         Weight between 0 and 1
     """
     import math
+
     # Logarithmic decay: 1 / (1 + log(1 + days_since/half_life))
     # This decays much slower than exponential, giving better long-term differentiation
     normalized_age = days_since / half_life_days
@@ -79,6 +80,7 @@ def calculate_frequency_weight(access_count: int, max_boost: float = 2.0) -> flo
         Weight between 1.0 and max_boost
     """
     import math
+
     if access_count <= 0:
         return 1.0
 
@@ -116,11 +118,7 @@ def calculate_temporal_anchor(occurred_start: datetime, occurred_end: datetime) 
     return midpoint
 
 
-def calculate_temporal_proximity(
-    anchor_a: datetime,
-    anchor_b: datetime,
-    half_life_days: float = 30.0
-) -> float:
+def calculate_temporal_proximity(anchor_a: datetime, anchor_b: datetime, half_life_days: float = 30.0) -> float:
     """
     Calculate temporal proximity between two temporal anchors.
 

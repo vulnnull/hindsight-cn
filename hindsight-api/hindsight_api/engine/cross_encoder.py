@@ -5,19 +5,19 @@ Provides an interface for reranking with different backends.
 
 Configuration via environment variables - see hindsight_api.config for all env var names.
 """
-from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional
+
 import logging
 import os
+from abc import ABC, abstractmethod
 
 import httpx
 
 from ..config import (
-    ENV_RERANKER_PROVIDER,
-    ENV_RERANKER_LOCAL_MODEL,
-    ENV_RERANKER_TEI_URL,
-    DEFAULT_RERANKER_PROVIDER,
     DEFAULT_RERANKER_LOCAL_MODEL,
+    DEFAULT_RERANKER_PROVIDER,
+    ENV_RERANKER_LOCAL_MODEL,
+    ENV_RERANKER_PROVIDER,
+    ENV_RERANKER_TEI_URL,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class CrossEncoderModel(ABC):
         pass
 
     @abstractmethod
-    def predict(self, pairs: List[Tuple[str, str]]) -> List[float]:
+    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
         Score query-document pairs for relevance.
 
@@ -72,7 +72,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
     - Trained for passage re-ranking
     """
 
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(self, model_name: str | None = None):
         """
         Initialize local SentenceTransformers cross-encoder.
 
@@ -104,7 +104,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         self._model = CrossEncoder(self.model_name)
         logger.info("Reranker: local provider initialized")
 
-    def predict(self, pairs: List[Tuple[str, str]]) -> List[float]:
+    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
         Score query-document pairs for relevance.
 
@@ -117,7 +117,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         if self._model is None:
             raise RuntimeError("Reranker not initialized. Call initialize() first.")
         scores = self._model.predict(pairs, show_progress_bar=False)
-        return scores.tolist() if hasattr(scores, 'tolist') else list(scores)
+        return scores.tolist() if hasattr(scores, "tolist") else list(scores)
 
 
 class RemoteTEICrossEncoder(CrossEncoderModel):
@@ -153,8 +153,8 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
         self.batch_size = batch_size
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self._client: Optional[httpx.Client] = None
-        self._model_id: Optional[str] = None
+        self._client: httpx.Client | None = None
+        self._model_id: str | None = None
 
     @property
     def provider_name(self) -> str:
@@ -163,6 +163,7 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
     def _request_with_retry(self, method: str, url: str, **kwargs) -> httpx.Response:
         """Make an HTTP request with automatic retries on transient errors."""
         import time
+
         last_error = None
         delay = self.retry_delay
 
@@ -177,14 +178,18 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
             except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as e:
                 last_error = e
                 if attempt < self.max_retries:
-                    logger.warning(f"TEI request failed (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s...")
+                    logger.warning(
+                        f"TEI request failed (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s..."
+                    )
                     time.sleep(delay)
                     delay *= 2  # Exponential backoff
             except httpx.HTTPStatusError as e:
                 # Retry on 5xx server errors
                 if e.response.status_code >= 500 and attempt < self.max_retries:
                     last_error = e
-                    logger.warning(f"TEI server error (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s...")
+                    logger.warning(
+                        f"TEI server error (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s..."
+                    )
                     time.sleep(delay)
                     delay *= 2
                 else:
@@ -209,7 +214,7 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
         except httpx.HTTPError as e:
             raise RuntimeError(f"Failed to connect to TEI server at {self.base_url}: {e}")
 
-    def predict(self, pairs: List[Tuple[str, str]]) -> List[float]:
+    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
         Score query-document pairs using the remote TEI reranker.
 
@@ -229,7 +234,7 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
 
         # Process in batches
         for i in range(0, len(pairs), self.batch_size):
-            batch = pairs[i:i + self.batch_size]
+            batch = pairs[i : i + self.batch_size]
 
             # TEI rerank endpoint expects query and texts separately
             # All pairs in a batch should have the same query for optimal performance
@@ -287,15 +292,11 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
     if provider == "tei":
         url = os.environ.get(ENV_RERANKER_TEI_URL)
         if not url:
-            raise ValueError(
-                f"{ENV_RERANKER_TEI_URL} is required when {ENV_RERANKER_PROVIDER} is 'tei'"
-            )
+            raise ValueError(f"{ENV_RERANKER_TEI_URL} is required when {ENV_RERANKER_PROVIDER} is 'tei'")
         return RemoteTEICrossEncoder(base_url=url)
     elif provider == "local":
         model = os.environ.get(ENV_RERANKER_LOCAL_MODEL)
         model_name = model or DEFAULT_RERANKER_LOCAL_MODEL
         return LocalSTCrossEncoder(model_name=model_name)
     else:
-        raise ValueError(
-            f"Unknown reranker provider: {provider}. Supported: 'local', 'tei'"
-        )
+        raise ValueError(f"Unknown reranker provider: {provider}. Supported: 'local', 'tei'")

@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { sdk, lowLevelClient } from '@/lib/hindsight-client';
+import { NextRequest, NextResponse } from "next/server";
+import { sdk, lowLevelClient } from "@/lib/hindsight-client";
 
 export async function POST(request: NextRequest) {
   try {
@@ -7,10 +7,7 @@ export async function POST(request: NextRequest) {
     const bankId = body.bank_id || body.agent_id;
 
     if (!bankId) {
-      return NextResponse.json(
-        { error: 'bank_id is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "bank_id is required" }, { status: 400 });
     }
 
     const { items } = body;
@@ -18,15 +15,12 @@ export async function POST(request: NextRequest) {
     const response = await sdk.retainMemories({
       client: lowLevelClient,
       path: { bank_id: bankId },
-      body: { items, async: true }
+      body: { items, async: true },
     });
 
     return NextResponse.json(response.data, { status: 200 });
   } catch (error) {
-    console.error('Error batch retain async:', error);
-    return NextResponse.json(
-      { error: 'Failed to batch retain async' },
-      { status: 500 }
-    );
+    console.error("Error batch retain async:", error);
+    return NextResponse.json({ error: "Failed to batch retain async" }, { status: 500 });
   }
 }

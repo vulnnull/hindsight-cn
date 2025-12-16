@@ -6,8 +6,8 @@ providing type safety and making data flow explicit.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -17,28 +17,29 @@ class RetrievalResult:
 
     This represents a raw result from the database query, before merging or reranking.
     """
+
     id: str
     text: str
     fact_type: str
-    context: Optional[str] = None
-    event_date: Optional[datetime] = None
-    occurred_start: Optional[datetime] = None
-    occurred_end: Optional[datetime] = None
-    mentioned_at: Optional[datetime] = None
-    document_id: Optional[str] = None
-    chunk_id: Optional[str] = None
+    context: str | None = None
+    event_date: datetime | None = None
+    occurred_start: datetime | None = None
+    occurred_end: datetime | None = None
+    mentioned_at: datetime | None = None
+    document_id: str | None = None
+    chunk_id: str | None = None
     access_count: int = 0
-    embedding: Optional[List[float]] = None
+    embedding: list[float] | None = None
 
     # Retrieval-specific scores (only one will be set depending on retrieval method)
-    similarity: Optional[float] = None  # Semantic retrieval
-    bm25_score: Optional[float] = None  # BM25 retrieval
-    activation: Optional[float] = None  # Graph retrieval (spreading activation)
-    temporal_score: Optional[float] = None  # Temporal retrieval
-    temporal_proximity: Optional[float] = None  # Temporal retrieval
+    similarity: float | None = None  # Semantic retrieval
+    bm25_score: float | None = None  # BM25 retrieval
+    activation: float | None = None  # Graph retrieval (spreading activation)
+    temporal_score: float | None = None  # Temporal retrieval
+    temporal_proximity: float | None = None  # Temporal retrieval
 
     @classmethod
-    def from_db_row(cls, row: Dict[str, Any]) -> "RetrievalResult":
+    def from_db_row(cls, row: dict[str, Any]) -> "RetrievalResult":
         """Create from a database row (asyncpg Record converted to dict)."""
         return cls(
             id=str(row["id"]),
@@ -68,13 +69,14 @@ class MergedCandidate:
 
     Contains the original retrieval data plus RRF metadata.
     """
+
     # Original retrieval data
     retrieval: RetrievalResult
 
     # RRF metadata
     rrf_score: float
     rrf_rank: int = 0
-    source_ranks: Dict[str, int] = field(default_factory=dict)  # method_name -> rank
+    source_ranks: dict[str, int] = field(default_factory=dict)  # method_name -> rank
 
     @property
     def id(self) -> str:
@@ -89,6 +91,7 @@ class ScoredResult:
 
     Contains all retrieval/merge data plus reranking scores and combined score.
     """
+
     # Original merged candidate
     candidate: MergedCandidate
 
@@ -115,7 +118,7 @@ class ScoredResult:
         """Convenience property to access retrieval data."""
         return self.candidate.retrieval
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert to dict for backwards compatibility.
 

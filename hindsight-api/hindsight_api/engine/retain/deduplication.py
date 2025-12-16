@@ -3,22 +3,17 @@ Deduplication logic for retain pipeline.
 
 Checks for duplicate facts using semantic similarity and temporal proximity.
 """
+
 import logging
-from datetime import datetime
-from typing import List
 from collections import defaultdict
+from datetime import UTC
 
 from .types import ProcessedFact
 
 logger = logging.getLogger(__name__)
 
 
-async def check_duplicates_batch(
-    conn,
-    bank_id: str,
-    facts: List[ProcessedFact],
-    duplicate_checker_fn
-) -> List[bool]:
+async def check_duplicates_batch(conn, bank_id: str, facts: list[ProcessedFact], duplicate_checker_fn) -> list[bool]:
     """
     Check which facts are duplicates using batched time-window queries.
 
@@ -47,16 +42,12 @@ async def check_duplicates_batch(
 
         # Defensive: if both are None (shouldn't happen), use now()
         if fact_date is None:
-            from datetime import datetime, timezone
-            fact_date = datetime.now(timezone.utc)
+            from datetime import datetime
+
+            fact_date = datetime.now(UTC)
 
         # Round to 12-hour bucket to group similar times
-        bucket_key = fact_date.replace(
-            hour=(fact_date.hour // 12) * 12,
-            minute=0,
-            second=0,
-            microsecond=0
-        )
+        bucket_key = fact_date.replace(hour=(fact_date.hour // 12) * 12, minute=0, second=0, microsecond=0)
         time_buckets[bucket_key].append((idx, fact))
 
     # Process each bucket in batch
@@ -68,14 +59,7 @@ async def check_duplicates_batch(
         embeddings = [item[1].embedding for item in bucket_items]
 
         # Check duplicates for this time bucket
-        dup_flags = await duplicate_checker_fn(
-            conn,
-            bank_id,
-            texts,
-            embeddings,
-            bucket_date,
-            time_window_hours=24
-        )
+        dup_flags = await duplicate_checker_fn(conn, bank_id, texts, embeddings, bucket_date, time_window_hours=24)
 
         # Map results back to original indices
         for idx, is_dup in zip(indices, dup_flags):
@@ -84,10 +68,7 @@ async def check_duplicates_batch(
     return all_is_duplicate
 
 
-def filter_duplicates(
-    facts: List[ProcessedFact],
-    is_duplicate_flags: List[bool]
-) -> List[ProcessedFact]:
+def filter_duplicates(facts: list[ProcessedFact], is_duplicate_flags: list[bool]) -> list[ProcessedFact]:
     """
     Filter out duplicate facts based on duplicate flags.
 

@@ -6,13 +6,11 @@ allowing different algorithms (BFS spreading activation, PPR, etc.) to be
 swapped without changing the rest of the recall pipeline.
 """
 
-from abc import ABC, abstractmethod
-from typing import List, Optional
-from datetime import datetime
 import logging
+from abc import ABC, abstractmethod
 
-from .types import RetrievalResult
 from ..db_utils import acquire_with_retry
+from .types import RetrievalResult
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +38,10 @@ class GraphRetriever(ABC):
         bank_id: str,
         fact_type: str,
         budget: int,
-        query_text: Optional[str] = None,
-        semantic_seeds: Optional[List[RetrievalResult]] = None,
-        temporal_seeds: Optional[List[RetrievalResult]] = None,
-    ) -> List[RetrievalResult]:
+        query_text: str | None = None,
+        semantic_seeds: list[RetrievalResult] | None = None,
+        temporal_seeds: list[RetrievalResult] | None = None,
+    ) -> list[RetrievalResult]:
         """
         Retrieve relevant facts via graph traversal.
 
@@ -109,10 +107,10 @@ class BFSGraphRetriever(GraphRetriever):
         bank_id: str,
         fact_type: str,
         budget: int,
-        query_text: Optional[str] = None,
-        semantic_seeds: Optional[List[RetrievalResult]] = None,
-        temporal_seeds: Optional[List[RetrievalResult]] = None,
-    ) -> List[RetrievalResult]:
+        query_text: str | None = None,
+        semantic_seeds: list[RetrievalResult] | None = None,
+        temporal_seeds: list[RetrievalResult] | None = None,
+    ) -> list[RetrievalResult]:
         """
         Retrieve facts using BFS spreading activation.
 
@@ -127,9 +125,7 @@ class BFSGraphRetriever(GraphRetriever):
         for interface compatibility but not used.
         """
         async with acquire_with_retry(pool) as conn:
-            return await self._retrieve_with_conn(
-                conn, query_embedding_str, bank_id, fact_type, budget
-            )
+            return await self._retrieve_with_conn(conn, query_embedding_str, bank_id, fact_type, budget)
 
     async def _retrieve_with_conn(
         self,
@@ -138,7 +134,7 @@ class BFSGraphRetriever(GraphRetriever):
         bank_id: str,
         fact_type: str,
         budget: int,
-    ) -> List[RetrievalResult]:
+    ) -> list[RetrievalResult]:
         """Internal implementation with connection."""
 
         # Step 1: Find entry points
@@ -155,8 +151,11 @@ class BFSGraphRetriever(GraphRetriever):
             ORDER BY embedding <=> $1::vector
             LIMIT $5
             """,
-            query_embedding_str, bank_id, fact_type,
-            self.entry_point_threshold, self.entry_point_limit
+            query_embedding_str,
+            bank_id,
+            fact_type,
+            self.entry_point_threshold,
+            self.entry_point_limit,
         )
 
         if not entry_points:
@@ -165,10 +164,7 @@ class BFSGraphRetriever(GraphRetriever):
         # Step 2: BFS spreading activation
         visited = set()
         results = []
-        queue = [
-            (RetrievalResult.from_db_row(dict(r)), r["similarity"])
-            for r in entry_points
-        ]
+        queue = [(RetrievalResult.from_db_row(dict(r)), r["similarity"]) for r in entry_points]
         budget_remaining = budget
 
         while queue and budget_remaining > 0:
@@ -205,7 +201,10 @@ class BFSGraphRetriever(GraphRetriever):
                     ORDER BY ml.weight DESC
                     LIMIT $4
                     """,
-                    batch_nodes, self.min_activation, fact_type, max_neighbors
+                    batch_nodes,
+                    self.min_activation,
+                    fact_type,
+                    max_neighbors,
                 )
 
                 for n in neighbors:

@@ -8,7 +8,7 @@ export class ControlPlaneClient {
     const response = await fetch(path, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...options?.headers,
       },
     });
@@ -25,15 +25,15 @@ export class ControlPlaneClient {
    * List all banks
    */
   async listBanks() {
-    return this.fetchApi<{ banks: any[] }>('/api/banks', { cache: 'no-store' as RequestCache });
+    return this.fetchApi<{ banks: any[] }>("/api/banks", { cache: "no-store" as RequestCache });
   }
 
   /**
    * Create a new bank
    */
   async createBank(bankId: string) {
-    return this.fetchApi<{ bank_id: string }>('/api/banks', {
-      method: 'POST',
+    return this.fetchApi<{ bank_id: string }>("/api/banks", {
+      method: "POST",
       body: JSON.stringify({ bank_id: bankId }),
     });
   }
@@ -54,8 +54,8 @@ export class ControlPlaneClient {
     };
     query_timestamp?: string;
   }) {
-    return this.fetchApi('/api/recall', {
-      method: 'POST',
+    return this.fetchApi("/api/recall", {
+      method: "POST",
       body: JSON.stringify(params),
     });
   }
@@ -70,8 +70,8 @@ export class ControlPlaneClient {
     context?: string;
     include_facts?: boolean;
   }) {
-    return this.fetchApi('/api/reflect', {
-      method: 'POST',
+    return this.fetchApi("/api/reflect", {
+      method: "POST",
       body: JSON.stringify(params),
     });
   }
@@ -89,9 +89,9 @@ export class ControlPlaneClient {
     document_id?: string;
     async?: boolean;
   }) {
-    const endpoint = params.async ? '/api/memories/retain_async' : '/api/memories/retain';
+    const endpoint = params.async ? "/api/memories/retain_async" : "/api/memories/retain";
     return this.fetchApi(endpoint, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(params),
     });
   }
@@ -108,8 +108,8 @@ export class ControlPlaneClient {
    */
   async getGraph(params: { bank_id: string; type?: string }) {
     const queryParams = new URLSearchParams();
-    queryParams.append('bank_id', params.bank_id);
-    if (params.type) queryParams.append('type', params.type);
+    queryParams.append("bank_id", params.bank_id);
+    if (params.type) queryParams.append("type", params.type);
     return this.fetchApi(`/api/graph?${queryParams}`);
   }
 
@@ -125,8 +125,8 @@ export class ControlPlaneClient {
    */
   async listEntities(params: { bank_id: string; limit?: number }) {
     const queryParams = new URLSearchParams();
-    queryParams.append('bank_id', params.bank_id);
-    if (params.limit) queryParams.append('limit', params.limit.toString());
+    queryParams.append("bank_id", params.bank_id);
+    if (params.limit) queryParams.append("limit", params.limit.toString());
     return this.fetchApi(`/api/entities?${queryParams}`);
   }
 
@@ -142,7 +142,7 @@ export class ControlPlaneClient {
    */
   async regenerateEntityObservations(entityId: string, bankId: string) {
     return this.fetchApi(`/api/entities/${entityId}/regenerate?bank_id=${bankId}`, {
-      method: 'POST',
+      method: "POST",
     });
   }
 
@@ -151,10 +151,10 @@ export class ControlPlaneClient {
    */
   async listDocuments(params: { bank_id: string; q?: string; limit?: number; offset?: number }) {
     const queryParams = new URLSearchParams();
-    queryParams.append('bank_id', params.bank_id);
-    if (params.q) queryParams.append('q', params.q);
-    if (params.limit) queryParams.append('limit', params.limit.toString());
-    if (params.offset) queryParams.append('offset', params.offset.toString());
+    queryParams.append("bank_id", params.bank_id);
+    if (params.q) queryParams.append("q", params.q);
+    if (params.limit) queryParams.append("limit", params.limit.toString());
+    if (params.offset) queryParams.append("offset", params.offset.toString());
     return this.fetchApi(`/api/documents?${queryParams}`);
   }
 
@@ -191,17 +191,20 @@ export class ControlPlaneClient {
   /**
    * Update bank profile
    */
-  async updateBankProfile(bankId: string, profile: {
-    name?: string;
-    disposition?: {
-      skepticism: number;
-      literalism: number;
-      empathy: number;
-    };
-    background?: string;
-  }) {
+  async updateBankProfile(
+    bankId: string,
+    profile: {
+      name?: string;
+      disposition?: {
+        skepticism: number;
+        literalism: number;
+        empathy: number;
+      };
+      background?: string;
+    }
+  ) {
     return this.fetchApi(`/api/profile/${bankId}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(profile),
     });
   }

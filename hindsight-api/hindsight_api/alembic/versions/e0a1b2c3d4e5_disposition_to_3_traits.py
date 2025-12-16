@@ -8,17 +8,17 @@ Migrate disposition traits from Big Five (openness, conscientiousness, extravers
 agreeableness, neuroticism, bias_strength with 0-1 float values) to the new 3-trait
 system (skepticism, literalism, empathy with 1-5 integer values).
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'e0a1b2c3d4e5'
-down_revision: Union[str, Sequence[str], None] = 'rename_personality'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "e0a1b2c3d4e5"
+down_revision: str | Sequence[str] | None = "rename_personality"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -31,17 +31,21 @@ def upgrade() -> None:
     # - literalism: derived from conscientiousness (detail-oriented people are more literal)
     # - empathy: derived from agreeableness + inverse of neuroticism
     # Default all to 3 (neutral) for simplicity
-    conn.execute(sa.text("""
+    conn.execute(
+        sa.text("""
         UPDATE banks
         SET disposition = '{"skepticism": 3, "literalism": 3, "empathy": 3}'::jsonb
         WHERE disposition IS NOT NULL
-    """))
+    """)
+    )
 
     # Update the default for new banks
-    conn.execute(sa.text("""
+    conn.execute(
+        sa.text("""
         ALTER TABLE banks
         ALTER COLUMN disposition SET DEFAULT '{"skepticism": 3, "literalism": 3, "empathy": 3}'::jsonb
-    """))
+    """)
+    )
 
 
 def downgrade() -> None:
@@ -49,14 +53,18 @@ def downgrade() -> None:
     conn = op.get_bind()
 
     # Revert to Big Five format with default values
-    conn.execute(sa.text("""
+    conn.execute(
+        sa.text("""
         UPDATE banks
         SET disposition = '{"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5, "bias_strength": 0.5}'::jsonb
         WHERE disposition IS NOT NULL
-    """))
+    """)
+    )
 
     # Update the default for new banks
-    conn.execute(sa.text("""
+    conn.execute(
+        sa.text("""
         ALTER TABLE banks
         ALTER COLUMN disposition SET DEFAULT '{"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5, "bias_strength": 0.5}'::jsonb
-    """))
+    """)
+    )

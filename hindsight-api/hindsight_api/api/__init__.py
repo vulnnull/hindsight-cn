@@ -3,8 +3,10 @@ Unified API module for Hindsight.
 
 Provides both HTTP REST API and MCP (Model Context Protocol) server.
 """
+
 import logging
 from typing import Optional
+
 from fastapi import FastAPI
 
 from hindsight_api import MemoryEngine
@@ -17,7 +19,7 @@ def create_app(
     http_api_enabled: bool = True,
     mcp_api_enabled: bool = False,
     mcp_mount_path: str = "/mcp",
-    initialize_memory: bool = True
+    initialize_memory: bool = True,
 ) -> FastAPI:
     """
     Create and configure the unified Hindsight API application.
@@ -47,10 +49,8 @@ def create_app(
     # Import and create HTTP API if enabled
     if http_api_enabled:
         from .http import create_app as create_http_app
-        app = create_http_app(
-            memory=memory,
-            initialize_memory=initialize_memory
-        )
+
+        app = create_http_app(memory=memory, initialize_memory=initialize_memory)
         logger.info("HTTP REST API enabled")
     else:
         # Create minimal FastAPI app
@@ -77,15 +77,15 @@ def create_app(
 
 # Re-export commonly used items for backwards compatibility
 from .http import (
-    RecallRequest,
-    RecallResult,
-    RecallResponse,
-    MemoryItem,
-    RetainRequest,
-    ReflectRequest,
-    ReflectResponse,
     CreateBankRequest,
     DispositionTraits,
+    MemoryItem,
+    RecallRequest,
+    RecallResponse,
+    RecallResult,
+    ReflectRequest,
+    ReflectResponse,
+    RetainRequest,
 )
 
 __all__ = [

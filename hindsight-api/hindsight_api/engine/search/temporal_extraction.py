@@ -4,16 +4,16 @@ Temporal extraction for time-aware search queries.
 Handles natural language temporal expressions using transformer-based query analysis.
 """
 
-from typing import Optional, Tuple
-from datetime import datetime
 import logging
-from hindsight_api.engine.query_analyzer import QueryAnalyzer, DateparserQueryAnalyzer
+from datetime import datetime
+
+from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer, QueryAnalyzer
 
 logger = logging.getLogger(__name__)
 
 # Global default analyzer instance
 # Can be overridden by passing a custom analyzer to extract_temporal_constraint
-_default_analyzer: Optional[QueryAnalyzer] = None
+_default_analyzer: QueryAnalyzer | None = None
 
 
 def get_default_analyzer() -> QueryAnalyzer:
@@ -33,9 +33,9 @@ def get_default_analyzer() -> QueryAnalyzer:
 
 def extract_temporal_constraint(
     query: str,
-    reference_date: Optional[datetime] = None,
-    analyzer: Optional[QueryAnalyzer] = None,
-) -> Optional[Tuple[datetime, datetime]]:
+    reference_date: datetime | None = None,
+    analyzer: QueryAnalyzer | None = None,
+) -> tuple[datetime, datetime] | None:
     """
     Extract temporal constraint from query.
 
@@ -55,10 +55,7 @@ def extract_temporal_constraint(
     analysis = analyzer.analyze(query, reference_date)
 
     if analysis.temporal_constraint:
-        result = (
-            analysis.temporal_constraint.start_date,
-            analysis.temporal_constraint.end_date
-        )
+        result = (analysis.temporal_constraint.start_date, analysis.temporal_constraint.end_date)
         return result
 
     return None
