@@ -6,6 +6,17 @@ sidebar_position: 1
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.1.6](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.6)
+
+**Features**
+
+- Added support for the Gemini 3 Pro and GPT-5.2 models. ([`bb1f9cb`](https://github.com/vectorize-io/hindsight/commit/bb1f9cb))
+- Added a local MCP server option for running/connecting to Hindsight via MCP without a separate remote service. ([`7dd6853`](https://github.com/vectorize-io/hindsight/commit/7dd6853))
+
+**Improvements**
+
+- Updated the Postgres/pg0 dependency to a newer 0.11.x series for improved compatibility and stability. ([`47be07f`](https://github.com/vectorize-io/hindsight/commit/47be07f))
+
 ## [0.1.5](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.5)
 
 **Features**
