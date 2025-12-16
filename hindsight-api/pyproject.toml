@@ -50,6 +50,7 @@ test = [
 
 [project.scripts]
 hindsight-api = "hindsight_api.main:main"
+hindsight-local-mcp = "hindsight_api.mcp_local:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["hindsight_api"]

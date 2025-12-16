@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 def mock_memory():
     """Create a mock MemoryEngine."""
     memory = MagicMock()
-    memory.put_batch_async = AsyncMock()
+    memory.retain_batch_async = AsyncMock()
     memory.recall_async = AsyncMock(return_value=MagicMock(results=[]))
     return memory
 
@@ -52,8 +52,8 @@ async def test_mcp_tools_use_context_bank_id(mock_memory):
         assert "successfully" in result.lower()
 
         # Verify the memory was called with the context bank_id
-        mock_memory.put_batch_async.assert_called_once()
-        call_kwargs = mock_memory.put_batch_async.call_args.kwargs
+        mock_memory.retain_batch_async.assert_called_once()
+        call_kwargs = mock_memory.retain_batch_async.call_args.kwargs
         assert call_kwargs["bank_id"] == "context-bank-id"
     finally:
         _current_bank_id.reset(token)

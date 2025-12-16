@@ -61,7 +61,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
         """
         try:
             bank_id = get_current_bank_id()
-            await memory.put_batch_async(
+            await memory.retain_batch_async(
                 bank_id=bank_id,
                 contents=[{"content": content, "context": context}]
             )
