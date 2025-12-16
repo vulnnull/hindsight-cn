@@ -2,7 +2,7 @@
 
 ![Hindsight Banner](./hindsight-docs/static/img/banner.svg)
 
-[Documentation](https://vectorize-io.github.io/hindsight) • [Paper](#coming-soon) • [Examples](https://github.com/vectorize-io/hindsight-cookbook)
+[Documentation](https://vectorize-io.github.io/hindsight) • [Paper](https://arxiv.org/abs/2512.12818) • [Examples](https://github.com/vectorize-io/hindsight-cookbook)
 
 [![CI](https://github.com/vectorize-io/hindsight/actions/workflows/release.yml/badge.svg)](https://github.com/vectorize-io/hindsight/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -18,7 +18,7 @@
 
 ## What is Hindsight?
 
-Hindsight™ is an agent memory system built to create smarter agents that learn over time. It eliminates the shortcomings of alternative techniques such as RAG and knowledge graph.
+Hindsight™ is an agent memory system built to create smarter agents that learn over time. It eliminates the shortcomings of alternative techniques such as RAG and knowledge graph and delivers state-of-the-art performance on long term memory tasks.
 
 Hindsight addresses common challenges that have frustrated AI engineers building agents to automate tasks and assist users with conversational interfaces. Many of these challenges stem directly from a lack of memory.
 
@@ -26,16 +26,18 @@ Hindsight addresses common challenges that have frustrated AI engineers building
 - **Hallucinations:** Long term memory can be seeded with external knowledge to ground agent behavior in reliable sources to augment training data.
 - **Cognitive Overload:** As workflows get complex, retrievals, tool calls, user messages and agent responses can grow to fill the context window leading to context rot. Short term memory optimization allows agents to reduce tokens and focus context by removing irrelevant details.
 
-## How Hindsight Works
+## How is Hindsight Different From Other Memory Systems?
 
 ![Overview](./hindsight-docs/static/img/hindsight-overview.webp)
 
-Hindsight organizes memory into four networks to mimic the way human memory works:
+Most agent memory implementation rely on basic vector search or sometimes use a knowledge graph. Hindsight uses biomimetic data structures to organize agent memories in a way that is more like how human memory works:
 
 - **World:** Facts about the world ("The stove gets hot")
 - **Experiences:** Agent's own experiences ("I touched the stove and it really hurt")
 - **Opinion:** Beliefs with confidence scores ("I shouldn't touch the stove again" - .99 confidence)
 - **Observation:** Complex mental models derived by reflecting on facts and experiences ("Curling irons, ovens, and fire are also hot. I shouldn't touch those either.")
+
+Memories in Hindsight are stored in banks (i.e. memory banks). When memories are added to Hindsight, they are pushed into either the world facts or experiences memory pathway. They are then represented as a combination of entities, relationships, and time series with sparse/dense vector representations to aid in later recall.
 
 Hindsight provides three simple methods to interact with the system:
 
@@ -43,9 +45,28 @@ Hindsight provides three simple methods to interact with the system:
 - **Recall:** Retrieve memories from Hindsight
 - **Reflect:** Reflect on memories and experiences to generate new observations and insights from existing memories.
 
-Memories in Hindsight are stored in banks (e.g. memory banks). When memories are retained, they are transformed to construct a series of search indexes, time series data, and entity/relationship graphs.
+### Agent Memory That Learns
+
+A key goal of Hindsight is to build agent memory that enables agents to learn and improve over time. This is the role of the `reflect` operation which provides the agent to form broader opinions and observations over time.
+
+For example, imagine a product support agent that is helping a user troubleshoot a problem. It uses a `search-documentation` tool it found on an MCP server. Later in the conversation, the agent discovers that the documentation returned from the tool wasn't for the product the user was asking about. The agent now has an experience in its memory bank. And just like humans, we want that agent to learn from its experience.
+
+As the agent gains more experiences, `reflect` allows the agent to form observations about what worked, what didn't, and what to do differently the next time it encounters a similar task.
 
 ---
+
+## Memory Performance & Accuracy
+
+Hindsight has achieved state-of-the-art performance on the LongMemEval benchmark, widely used to assess memory system performance across a variety of conversational
+AI scenarios. The current reported performance of Hindsight and other agent memory solutions as of December 2025 is shown here:
+
+![Overview](./hindsight-docs/static/img/hindsight-bench.jpg)
+
+The benchmark performance data for Hindsight and GPT-4o (full context) have been reproduced by research collaborators at the Virginia Tech [Sanghani Center for Artificial Intelligence and Data Analytics](https://sanghani.cs.vt.edu/) and The Washington Post. Other scores are self-reported by software vendors.
+
+A thorough examination of the techniques implemented in Hindsight and detailed breakdowns of benchmark performance are [available on arXiv](https://arxiv.org/abs/2512.12818). This research is currently being prepared for conference submission and the wider peer review process.
+
+The benchmark results from this research can be inspected in our [visual benchmark explorer](https://hindsight-benchmarks.vercel.app). As additional improvements are made to Hindsight, new benchmark data will be available for review using this same tool.
 
 ## Quick Start
 
@@ -223,6 +244,10 @@ client.reflect(bank_id="my-bank", query="What should I know about Alice?")
 - [Slack](https://join.slack.com/t/hindsight-space/shared_invite/zt-3klo21kua-VUCC_zHP5rIcXFB1_5yw6A)
 - [GitHub Issues](https://github.com/vectorize-io/hindsight/issues)
 
+---
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=vectorize-io/hindsight&type=date&legend=top-left)](https://www.star-history.com/#vectorize-io/hindsight&type=date&legend=top-left)
 ---
 
 ## Contributing
