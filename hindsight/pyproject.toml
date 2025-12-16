@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "hindsight-all"
 version = "0.1.6"
-description = "All-in-one package for Hindsight - Semantic memory system with personality-driven thinking"
+description = "Hindsight: Agent Memory That Works Like Human Memory - All-in-One Bundle"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

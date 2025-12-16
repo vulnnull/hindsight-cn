@@ -1,6 +1,6 @@
 # hindsight-all
 
-All-in-one package for Hindsight - Semantic memory system with personality-driven thinking for AI agents.
+All-in-one package for Hindsight - Agent Memory That Works Like Human Memory
 
 ## Quick Start
 

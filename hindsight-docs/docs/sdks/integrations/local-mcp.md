@@ -16,7 +16,7 @@ This is ideal for:
 ### With uvx (recommended)
 
 ```bash
-uvx hindsight-api@latest hindsight-local-mcp
+uvx --from hindsight-api hindsight-local-mcp
 ```
 
 ### With pip
@@ -35,7 +35,7 @@ Add to your Claude Code MCP settings (`~/.claude/claude_desktop_config.json`):
   "mcpServers": {
     "hindsight": {
       "command": "uvx",
-      "args": ["hindsight-api@latest", "hindsight-local-mcp"],
+      "args": ["--from", "hindsight-api", "hindsight-local-mcp"],
       "env": {
         "HINDSIGHT_API_LLM_API_KEY": "your-openai-key"
       }
@@ -53,7 +53,7 @@ By default, memories are stored in a bank called `mcp`. To use a different bank:
   "mcpServers": {
     "hindsight": {
       "command": "uvx",
-      "args": ["hindsight-api@latest", "hindsight-local-mcp"],
+      "args": ["--from", "hindsight-api", "hindsight-local-mcp"],
       "env": {
         "HINDSIGHT_API_LLM_API_KEY": "your-openai-key",
         "HINDSIGHT_API_MCP_LOCAL_BANK_ID": "my-personal-memory"
