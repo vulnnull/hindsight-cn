@@ -311,7 +311,7 @@ class MemoryEngine:
                 pool = await self._get_pool()
                 async with acquire_with_retry(pool) as conn:
                     result = await conn.fetchrow(
-                        "SELECT id FROM async_operations WHERE id = $1", uuid.UUID(operation_id)
+                        "SELECT operation_id FROM async_operations WHERE operation_id = $1", uuid.UUID(operation_id)
                     )
                     if not result:
                         # Operation was cancelled, skip processing
@@ -369,7 +369,7 @@ class MemoryEngine:
         try:
             pool = await self._get_pool()
             async with acquire_with_retry(pool) as conn:
-                await conn.execute("DELETE FROM async_operations WHERE id = $1", uuid.UUID(operation_id))
+                await conn.execute("DELETE FROM async_operations WHERE operation_id = $1", uuid.UUID(operation_id))
         except Exception as e:
             logger.error(f"Failed to delete async operation record {operation_id}: {e}")
 
@@ -386,7 +386,7 @@ class MemoryEngine:
                     """
                     UPDATE async_operations
                     SET status = 'failed', error_message = $2
-                    WHERE id = $1
+                    WHERE operation_id = $1
                     """,
                     uuid.UUID(operation_id),
                     truncated_error,

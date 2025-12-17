@@ -1452,18 +1452,22 @@ def _register_routes(app: FastAPI):
                     bank_id,
                 )
 
+                def parse_metadata(metadata):
+                    """Parse result_metadata which may be a string or dict."""
+                    if metadata is None:
+                        return {}
+                    if isinstance(metadata, str):
+                        return json.loads(metadata)
+                    return metadata
+
                 return {
                     "bank_id": bank_id,
                     "operations": [
                         {
                             "id": str(row["operation_id"]),
                             "task_type": row["operation_type"],
-                            "items_count": row["result_metadata"].get("items_count", 0)
-                            if row["result_metadata"]
-                            else 0,
-                            "document_id": row["result_metadata"].get("document_id")
-                            if row["result_metadata"]
-                            else None,
+                            "items_count": parse_metadata(row["result_metadata"]).get("items_count", 0),
+                            "document_id": parse_metadata(row["result_metadata"]).get("document_id"),
                             "created_at": row["created_at"].isoformat(),
                             "status": row["status"],
                             "error_message": row["error_message"],
@@ -1499,7 +1503,7 @@ def _register_routes(app: FastAPI):
             async with acquire_with_retry(pool) as conn:
                 # Check if operation exists and belongs to this memory bank
                 result = await conn.fetchrow(
-                    "SELECT bank_id FROM async_operations WHERE id = $1 AND bank_id = $2", op_uuid, bank_id
+                    "SELECT bank_id FROM async_operations WHERE operation_id = $1 AND bank_id = $2", op_uuid, bank_id
                 )
 
                 if not result:
@@ -1508,7 +1512,7 @@ def _register_routes(app: FastAPI):
                     )
 
                 # Delete the operation
-                await conn.execute("DELETE FROM async_operations WHERE id = $1", op_uuid)
+                await conn.execute("DELETE FROM async_operations WHERE operation_id = $1", op_uuid)
 
                 return {
                     "success": True,
@@ -1769,13 +1773,13 @@ def _register_routes(app: FastAPI):
                 async with acquire_with_retry(pool) as conn:
                     await conn.execute(
                         """
-                        INSERT INTO async_operations (id, bank_id, task_type, items_count)
+                        INSERT INTO async_operations (operation_id, bank_id, operation_type, result_metadata)
                         VALUES ($1, $2, $3, $4)
                         """,
                         operation_id,
                         bank_id,
                         "retain",
-                        len(contents),
+                        json.dumps({"items_count": len(contents)}),
                     )
 
                 # Submit task to background queue
