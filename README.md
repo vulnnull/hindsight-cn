@@ -2,14 +2,13 @@
 
 ![Hindsight Banner](./hindsight-docs/static/img/banner.svg)
 
-[Documentation](https://vectorize-io.github.io/hindsight) • [Paper](https://arxiv.org/abs/2512.12818) • [Examples](https://github.com/vectorize-io/hindsight-cookbook)
+[Documentation](https://vectorize-io.github.io/hindsight) • [Paper](https://arxiv.org/abs/2512.12818) • [Cookbook](https://hindsight.vectorize.io/cookbook)
 
 [![CI](https://github.com/vectorize-io/hindsight/actions/workflows/release.yml/badge.svg)](https://github.com/vectorize-io/hindsight/actions/workflows/release.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI - hindsight-api](https://img.shields.io/pypi/v/hindsight-api?label=hindsight-api)](https://pypi.org/project/hindsight-api/)
-[![PyPI - hindsight-client](https://img.shields.io/pypi/v/hindsight-client?label=hindsight-client)](https://pypi.org/project/hindsight-client/)
-[![npm - @vectorize-io/hindsight-client](https://img.shields.io/npm/v/@vectorize-io/hindsight-client)](https://www.npmjs.com/package/@vectorize-io/hindsight-client)
 [![Slack Community](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/hindsight-space/shared_invite/zt-3klo21kua-VUCC_zHP5rIcXFB1_5yw6A)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/hindsight-api?label=PyPI)
+![NPM Downloads](https://img.shields.io/npm/dm/%40vectorize-io%2Fhindsight-client?logoColor=orange&label=NPM&color=blue&link=https%3A%2F%2Fwww.npmjs.com%2Fpackage%2F%40vectorize-io%2Fhindsight-client)
 
 
 </div>
