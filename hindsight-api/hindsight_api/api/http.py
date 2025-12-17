@@ -506,9 +506,9 @@ class BankListItem(BaseModel):
     """Bank list item with profile summary."""
 
     bank_id: str
-    name: str
+    name: str | None = None
     disposition: DispositionTraits
-    background: str
+    background: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
