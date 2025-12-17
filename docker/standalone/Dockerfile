@@ -104,9 +104,10 @@ FROM python:3.11-slim AS api-only
 
 WORKDIR /app
 
-# Install pg0 dependencies
+# Install pg0 dependencies (procps provides 'kill' command needed by pg0)
 RUN apt-get update && apt-get install -y \
     curl \
+    procps \
     libxml2 \
     libssl3 \
     libgssapi-krb5-2 \
@@ -200,9 +201,10 @@ FROM python:3.11-slim AS standalone
 
 WORKDIR /app
 
-# Install Node.js, curl, uv, and pg0 dependencies
+# Install Node.js, curl, uv, and pg0 dependencies (procps provides 'kill' command needed by pg0)
 RUN apt-get update && apt-get install -y \
     curl \
+    procps \
     libxml2 \
     libssl3 \
     libgssapi-krb5-2 \

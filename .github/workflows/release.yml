@@ -206,7 +206,7 @@ jobs:
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-    - name: Extract metadata
+    - name: Extract metadata for release tags
       id: meta
       uses: docker/metadata-action@v5
       with:
@@ -217,7 +217,29 @@ jobs:
           type=semver,pattern={{major}},value=${{ steps.get_version.outputs.VERSION }}
           type=raw,value=latest
 
-    - name: Build and push
+    # Step 1: Build for local testing (single platform, no push)
+    # This creates an identical image to what will be released, just for one platform
+    - name: Build image for testing
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: docker/standalone/Dockerfile
+        target: ${{ matrix.target }}
+        push: false
+        load: true
+        tags: ${{ matrix.image_name }}:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # Step 2: Test the image before pushing anything
+    - name: Smoke test - verify container starts
+      env:
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      run: ./scripts/docker-smoke-test.sh "${{ matrix.image_name }}:test" "${{ matrix.target }}"
+
+    # Step 3: Only if smoke test passed, build multi-platform and push to release tags
+    # Build layers are cached, so this is fast - just builds the other platform
+    - name: Build and push release images
       uses: docker/build-push-action@v6
       with:
         context: .
@@ -227,6 +249,8 @@ jobs:
         platforms: linux/amd64,linux/arm64
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
   release-helm-chart:
     runs-on: ubuntu-latest
