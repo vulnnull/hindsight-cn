@@ -175,6 +175,12 @@ const config: Config = {
           className: 'navbar-item-changelog',
         },
         {
+          href: 'https://vectorize.io/hindsight/cloud',
+          position: 'right',
+          label: 'Hindsight Cloud',
+          className: 'navbar-item-cloud',
+        },
+        {
           href: 'https://github.com/vectorize-io/hindsight',
           position: 'right',
           className: 'header-github-link',

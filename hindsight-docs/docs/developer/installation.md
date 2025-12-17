@@ -1,6 +1,10 @@
 # Installation
 
-Hindsight can be deployed in three ways depending on your infrastructure and requirements.
+Hindsight can be deployed in several ways depending on your infrastructure and requirements.
+
+:::tip Don't want to manage infrastructure?
+**[Hindsight Cloud](https://vectorize.io/hindsight/cloud)** is a fully managed service that handles all infrastructure, scaling, and maintenance. We're onboarding design partners now — [request early access](https://vectorize.io/hindsight/cloud).
+:::
 
 ## Prerequisites
 
