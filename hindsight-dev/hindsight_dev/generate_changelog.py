@@ -214,15 +214,21 @@ def build_changelog_markdown(
     # Build markdown
     lines = [f"## [{version}]({release_url})", ""]
 
+    has_entries = False
     for cat_key in ["breaking", "feature", "improvement", "bugfix", "other"]:
         cat_name, cat_entries = categories[cat_key]
         if cat_entries:
+            has_entries = True
             lines.append(f"**{cat_name}**")
             lines.append("")
             for entry in cat_entries:
                 commit_url = f"{GITHUB_COMMIT_URL}/{entry.commit_id}"
                 lines.append(f"- {entry.summary} ([`{entry.commit_id}`]({commit_url}))")
             lines.append("")
+
+    if not has_entries:
+        lines.append("*This release contains internal maintenance and infrastructure changes only.*")
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -235,6 +241,8 @@ sidebar_position: 1
 ---
 
 # Changelog
+
+This changelog highlights user-facing changes only. Internal maintenance, CI/CD, and infrastructure updates are omitted.
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 """

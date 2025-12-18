@@ -4,7 +4,37 @@ sidebar_position: 1
 
 # Changelog
 
+This changelog highlights user-facing changes only. Internal maintenance, CI/CD, and infrastructure updates are omitted.
+
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
+
+## [0.1.10](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.10)
+
+*This release contains internal maintenance and infrastructure changes only.*
+
+
+## [0.1.9](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.9)
+
+**Features**
+
+- Simplified local MCP installation and added a standalone UI option for easier setup. ([`1c6acc3`](https://github.com/vectorize-io/hindsight/commit/1c6acc3))
+
+**Bug Fixes**
+
+- Fixed the standalone Docker image so it builds and starts reliably. ([`b52eb90`](https://github.com/vectorize-io/hindsight/commit/b52eb90))
+- Improved Docker runtime reliability by adding required system utilities (procps). ([`ae80876`](https://github.com/vectorize-io/hindsight/commit/ae80876))
+
+## [0.1.8](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.8)
+
+**Bug Fixes**
+
+- Fix bank list responses when a bank has no name. ([`04f01ab`](https://github.com/vectorize-io/hindsight/commit/04f01ab))
+- Fix failures when retaining memories asynchronously. ([`63f5138`](https://github.com/vectorize-io/hindsight/commit/63f5138))
+- Fix a race condition in the bank selector when switching banks. ([`e468a4e`](https://github.com/vectorize-io/hindsight/commit/e468a4e))
+
+## [0.1.7](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.7)
+
+*This release contains internal maintenance and infrastructure changes only.*
 
 ## [0.1.6](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.6)
 
