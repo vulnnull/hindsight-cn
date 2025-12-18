@@ -496,3 +496,95 @@ jobs:
     - name: Run tests
       working-directory: ./hindsight-integrations/litellm
       run: uv run pytest tests -v
+
+  test-doc-examples:
+    runs-on: ubuntu-latest
+    env:
+      HINDSIGHT_API_LLM_PROVIDER: groq
+      HINDSIGHT_API_LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-20b
+      HINDSIGHT_API_URL: http://localhost:8888
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        prune-cache: false
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version-file: ".python-version"
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+
+    - name: Build and install API
+      working-directory: ./hindsight-api
+      run: |
+        uv build
+        uv sync --no-install-project --index-strategy unsafe-best-match
+
+    - name: Install Python client dependencies
+      working-directory: ./hindsight-clients/python
+      run: uv sync --extra test --index-strategy unsafe-best-match
+
+    - name: Install TypeScript client
+      run: |
+        npm ci --workspace=hindsight-clients/typescript
+        npm run build --workspace=hindsight-clients/typescript
+
+    - name: Create .env file
+      run: |
+        cat > .env << EOF
+        HINDSIGHT_API_LLM_PROVIDER=${{ env.HINDSIGHT_API_LLM_PROVIDER }}
+        HINDSIGHT_API_LLM_API_KEY=${{ env.HINDSIGHT_API_LLM_API_KEY }}
+        HINDSIGHT_API_LLM_MODEL=${{ env.HINDSIGHT_API_LLM_MODEL }}
+        EOF
+
+    - name: Start API server
+      run: |
+        ./scripts/dev/start-api.sh > /tmp/api-server.log 2>&1 &
+        echo "Waiting for API server to be ready..."
+        for i in {1..60}; do
+          if curl -sf http://localhost:8888/health > /dev/null 2>&1; then
+            echo "API server is ready after ${i}s"
+            break
+          fi
+          if [ $i -eq 60 ]; then
+            echo "API server failed to start after 60s"
+            cat /tmp/api-server.log
+            exit 1
+          fi
+          sleep 1
+        done
+
+    - name: Run Python doc examples
+      working-directory: ./hindsight-clients/python
+      run: |
+        for f in ../../hindsight-docs/examples/api/*.py; do
+          echo "Running $f..."
+          uv run python "$f"
+        done
+
+    - name: Run Node.js doc examples
+      run: |
+        for f in hindsight-docs/examples/api/*.mjs; do
+          echo "Running $f..."
+          node "$f"
+        done
+
+    - name: Show API server logs
+      if: always()
+      run: |
+        echo "=== API Server Logs ==="
+        cat /tmp/api-server.log || echo "No API server log found"

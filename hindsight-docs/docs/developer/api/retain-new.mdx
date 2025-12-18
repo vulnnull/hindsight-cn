@@ -1,0 +1,71 @@
+---
+sidebar_position: 2
+---
+
+# Ingest Data (New Format)
+
+This is a demo of the new code snippet approach. Code examples are pulled from executable script files.
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import CodeSnippet from '@site/src/components/CodeSnippet';
+
+{/* Import raw source files */}
+import retainPy from '!!raw-loader!@site/examples/api/retain.py';
+import retainMjs from '!!raw-loader!@site/examples/api/retain.mjs';
+import retainSh from '!!raw-loader!@site/examples/api/retain.sh';
+
+:::tip How This Works
+The code examples below are extracted from actual runnable script files in `examples/api/`.
+When CI runs these scripts, it validates the documentation is correct.
+:::
+
+## Store a Single Memory
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={retainPy} section="retain-basic" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={retainMjs} section="retain-basic" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={retainSh} section="retain-basic" language="bash" />
+</TabItem>
+</Tabs>
+
+## Store with Context
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={retainPy} section="retain-with-context" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={retainMjs} section="retain-with-context" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={retainSh} section="retain-with-context" language="bash" />
+</TabItem>
+</Tabs>
+
+## Batch Ingestion
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={retainPy} section="retain-batch" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={retainMjs} section="retain-batch" language="javascript" />
+</TabItem>
+</Tabs>
+
+## Async Ingestion
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={retainPy} section="retain-async" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={retainMjs} section="retain-async" language="javascript" />
+</TabItem>
+</Tabs>
