@@ -18,7 +18,13 @@ All local models (embedding, cross-encoder) are automatically downloaded from Hu
 
 Used for fact extraction, entity resolution, opinion generation, and answer synthesis.
 
-**Supported providers:** OpenAI, Gemini, Groq, Ollama
+**Supported providers:** OpenAI, Gemini, Groq, Ollama, and **any OpenAI-compatible API**
+
+:::tip OpenAI-Compatible Providers
+Hindsight works with any provider that exposes an OpenAI-compatible API (e.g., Azure OpenAI). Simply set `HINDSIGHT_API_LLM_PROVIDER=openai` and configure `HINDSIGHT_API_LLM_BASE_URL` to point to your provider's endpoint.
+
+See [Configuration](./configuration#llm-provider) for setup examples.
+:::
 
 ### Tested Models
 
