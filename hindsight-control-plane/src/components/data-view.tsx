@@ -102,12 +102,6 @@ export function DataView({ factType }: DataViewProps) {
         bank_id: currentBank,
         type: factType,
       });
-      console.log("Loaded graph data:", {
-        total_units: graphData.total_units,
-        nodes: graphData.nodes?.length,
-        edges: graphData.edges?.length,
-        table_rows: graphData.table_rows?.length,
-      });
       setData(graphData);
     } catch (error) {
       console.error("Error loading data:", error);
@@ -191,10 +185,6 @@ export function DataView({ factType }: DataViewProps) {
         otherTypes[type] = (otherTypes[type] || 0) + 1;
       }
     });
-    console.log("Graph link stats:", { semantic, temporal, entity, causal, total });
-    if (Object.keys(otherTypes).length > 0) {
-      console.log("Other link types:", otherTypes);
-    }
     return { semantic, temporal, entity, causal, total, otherTypes };
   }, [graph2DData]);
 

@@ -67,9 +67,11 @@ fi
 # Determine health endpoint based on target
 if [ "$TARGET" = "cp-only" ]; then
     HEALTH_PORT=9999
+    HEALTH_PATH="/api/health"
     NEEDS_LLM=false
 else
     HEALTH_PORT=8888
+    HEALTH_PATH="/health"
     NEEDS_LLM=true
 fi
 
@@ -92,7 +94,7 @@ trap cleanup EXIT
 
 echo -e "${YELLOW}Starting smoke test for: ${IMAGE}${NC}"
 echo "  Target: $TARGET"
-echo "  Health port: $HEALTH_PORT"
+echo "  Health endpoint: http://localhost:${HEALTH_PORT}${HEALTH_PATH}"
 echo "  Timeout: ${TIMEOUT}s"
 echo ""
 
@@ -115,18 +117,18 @@ else
 fi
 
 # Wait for health endpoint
-echo "Waiting for health endpoint on port ${HEALTH_PORT}..."
+echo "Waiting for health endpoint at http://localhost:${HEALTH_PORT}${HEALTH_PATH}..."
 start_time=$(date +%s)
 
 for i in $(seq 1 "$TIMEOUT"); do
-    if curl -sf "http://localhost:${HEALTH_PORT}/health" > /dev/null 2>&1; then
+    if curl -sf "http://localhost:${HEALTH_PORT}${HEALTH_PATH}" > /dev/null 2>&1; then
         end_time=$(date +%s)
         duration=$((end_time - start_time))
         echo ""
         echo -e "${GREEN}Container is healthy after ${duration}s${NC}"
         echo ""
         echo "=== Health Response ==="
-        curl -s "http://localhost:${HEALTH_PORT}/health" | python3 -m json.tool 2>/dev/null || curl -s "http://localhost:${HEALTH_PORT}/health"
+        curl -s "http://localhost:${HEALTH_PORT}${HEALTH_PATH}" | python3 -m json.tool 2>/dev/null || curl -s "http://localhost:${HEALTH_PORT}${HEALTH_PATH}"
         echo ""
         echo ""
         echo "=== Container Logs (last 50 lines) ==="

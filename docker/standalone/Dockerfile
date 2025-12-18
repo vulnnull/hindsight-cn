@@ -114,6 +114,7 @@ FROM python:3.11-slim AS api-only
 WORKDIR /app
 
 # Install pg0 dependencies (procps provides 'kill' command needed by pg0)
+# Note: libicu version varies by Debian version - try common versions in order
 RUN apt-get update && apt-get install -y \
     curl \
     procps \
@@ -121,7 +122,7 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     libgssapi-krb5-2 \
     libossp-uuid16 \
-    && apt-get install -y libicu72 || apt-get install -y libicu74 || apt-get install -y libicu* \
+    && (apt-get install -y libicu72 2>/dev/null || apt-get install -y libicu74 2>/dev/null || apt-get install -y libicu76 2>/dev/null || true) \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir uv
 
@@ -211,6 +212,7 @@ FROM python:3.11-slim AS standalone
 WORKDIR /app
 
 # Install Node.js, curl, uv, and pg0 dependencies (procps provides 'kill' command needed by pg0)
+# Note: libicu version varies by Debian version - try common versions in order
 RUN apt-get update && apt-get install -y \
     curl \
     procps \
@@ -218,7 +220,7 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     libgssapi-krb5-2 \
     libossp-uuid16 \
-    && apt-get install -y libicu72 || apt-get install -y libicu74 || apt-get install -y libicu* \
+    && (apt-get install -y libicu72 2>/dev/null || apt-get install -y libicu74 2>/dev/null || apt-get install -y libicu76 2>/dev/null || true) \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/* \

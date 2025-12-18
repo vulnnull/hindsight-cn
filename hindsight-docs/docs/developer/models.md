@@ -64,7 +64,7 @@ export HINDSIGHT_API_LLM_MODEL=gemini-2.0-flash
 # Ollama (local)
 export HINDSIGHT_API_LLM_PROVIDER=ollama
 export HINDSIGHT_API_LLM_BASE_URL=http://localhost:11434/v1
-export HINDSIGHT_API_LLM_MODEL=llama3.1
+export HINDSIGHT_API_LLM_MODEL=gpt-oss-20b
 ```
 
 **Note:** The LLM is the primary bottleneck for retain operations. See [Performance](./performance) for optimization strategies.
