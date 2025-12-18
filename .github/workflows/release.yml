@@ -138,6 +138,13 @@ jobs:
     - name: Build TypeScript client (dependency)
       run: npm run build --workspace=hindsight-clients/typescript
 
+    - name: Fix platform-specific native modules
+      run: |
+        # npm ci installs from lockfile which may have wrong platform binaries
+        # Delete hoisted native modules and reinstall for current platform
+        rm -rf node_modules/lightningcss node_modules/@tailwindcss
+        npm install lightningcss @tailwindcss/postcss @tailwindcss/node
+
     - name: Build
       run: npm run build --workspace=hindsight-control-plane
 
