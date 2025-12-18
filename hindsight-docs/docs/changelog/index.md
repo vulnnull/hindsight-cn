@@ -8,6 +8,12 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.1.11](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.11)
+
+**Bug Fixes**
+
+- Fixed the standalone Docker image and control plane standalone build process so standalone deployments build correctly. ([`2948cb6`](https://github.com/vectorize-io/hindsight/commit/2948cb6))
+
 ## [0.1.10](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.10)
 
 *This release contains internal maintenance and infrastructure changes only.*
