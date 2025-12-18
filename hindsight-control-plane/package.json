@@ -1,17 +1,26 @@
 {
-  "name": "hindsight-control-plane",
+  "name": "@vectorize-io/hindsight-control-plane",
   "version": "0.1.8",
-  "private": true,
+  "description": "Control plane for Hindsight - Semantic memory system",
+  "bin": {
+    "hindsight-control-plane": "./bin/cli.js"
+  },
+  "files": [
+    "bin",
+    "standalone",
+    "public"
+  ],
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && npm run build:standalone",
+    "build:standalone": "rm -rf standalone && STANDALONE_ROOT=$(dirname $(find .next/standalone -name 'server.js' | head -1)) && cp -r \"$STANDALONE_ROOT\" standalone && mkdir -p standalone/.next && cp -r .next/static standalone/.next/static && mkdir -p standalone/public && cp -r public/* standalone/public/ 2>/dev/null || true",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": [],
+  "keywords": ["hindsight", "memory", "semantic", "ai"],
   "author": "Hindsight Team",
   "license": "ISC",
-  "description": "Control plane for Hindsight - Semantic memory system",
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -27,7 +36,6 @@
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
-    "@vectorize-io/hindsight-client": "file:../hindsight-clients/typescript",
     "autoprefixer": "^10.4.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -50,6 +58,7 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
+    "@vectorize-io/hindsight-client": "file:../hindsight-clients/typescript",
     "@eslint/eslintrc": "^3.3.3",
     "@eslint/js": "^9.39.2",
     "eslint-plugin-react": "^7.37.5",

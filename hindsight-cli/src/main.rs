@@ -91,6 +91,9 @@ enum Commands {
     #[command(alias = "tui")]
     Explore,
 
+    /// Launch the web-based control plane UI
+    Ui,
+
     /// Configure the CLI (API URL, etc.)
     #[command(after_help = "Configuration priority:\n  1. Environment variable (HINDSIGHT_API_URL) - highest priority\n  2. Config file (~/.hindsight/config)\n  3. Default (http://localhost:8888)")]
     Configure {
@@ -373,6 +376,11 @@ fn run() -> Result<()> {
         return handle_configure(api_url, output_format);
     }
 
+    // Handle ui command - needs config but not API client
+    if let Commands::Ui = cli.command {
+        return handle_ui(output_format);
+    }
+
     // Load configuration
     let config = Config::from_env().unwrap_or_else(|e| {
         ui::print_error(&format!("Configuration error: {}", e));
@@ -390,6 +398,7 @@ fn run() -> Result<()> {
     // Execute command and handle errors
     let result: Result<()> = match cli.command {
         Commands::Configure { .. } => unreachable!(), // Handled above
+        Commands::Ui => unreachable!(), // Handled above
         Commands::Explore => commands::explore::run(&client),
         Commands::Bank(bank_cmd) => match bank_cmd {
             BankCommands::List => commands::bank::list(&client, verbose, output_format),
@@ -517,6 +526,53 @@ fn handle_configure(api_url: Option<String>, output_format: OutputFormat) -> Res
             "config_path": config_path.display().to_string(),
         });
         output::print_output(&result, output_format)?;
+    }
+
+    Ok(())
+}
+
+fn handle_ui(output_format: OutputFormat) -> Result<()> {
+    use std::process::Command;
+
+    // Load configuration to get the API URL
+    let config = Config::load().unwrap_or_else(|e| {
+        ui::print_error(&format!("Configuration error: {}", e));
+        errors::print_config_help();
+        std::process::exit(1);
+    });
+
+    let api_url = config.api_url();
+
+    if output_format == OutputFormat::Pretty {
+        ui::print_info("Launching Hindsight Control Plane UI...");
+        println!();
+        println!("  API URL: {}", api_url);
+        println!();
+    }
+
+    // Run npx @vectorize-io/hindsight-control-plane --api-url {api_url}
+    let status = Command::new("npx")
+        .arg("@vectorize-io/hindsight-control-plane")
+        .arg("--api-url")
+        .arg(api_url)
+        .status();
+
+    match status {
+        Ok(exit_status) => {
+            if !exit_status.success() {
+                if let Some(code) = exit_status.code() {
+                    std::process::exit(code);
+                } else {
+                    std::process::exit(1);
+                }
+            }
+        }
+        Err(e) => {
+            ui::print_error(&format!("Failed to launch control plane UI: {}", e));
+            ui::print_info("Make sure you have Node.js and npm installed.");
+            ui::print_info("You can also install the control plane globally: npm install -g @vectorize-io/hindsight-control-plane");
+            std::process::exit(1);
+        }
     }
 
     Ok(())

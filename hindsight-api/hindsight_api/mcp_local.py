@@ -28,7 +28,15 @@ Environment variables:
     HINDSIGHT_API_LLM_PROVIDER: Optional. LLM provider (default: "openai").
     HINDSIGHT_API_LLM_MODEL: Optional. LLM model (default: "gpt-4o-mini").
     HINDSIGHT_API_MCP_LOCAL_BANK_ID: Optional. Memory bank ID (default: "mcp").
-    HINDSIGHT_API_LOG_LEVEL: Optional. Log level (default: "info").
+    HINDSIGHT_API_LOG_LEVEL: Optional. Log level (default: "warning").
+    HINDSIGHT_API_MCP_INSTRUCTIONS: Optional. Additional instructions appended to both retain and recall tools.
+
+Example custom instructions (these are ADDED to the default behavior):
+    To also store assistant actions:
+        HINDSIGHT_API_MCP_INSTRUCTIONS="Also store every action you take, including tool calls, code written, and decisions made."
+
+    To also store conversation summaries:
+        HINDSIGHT_API_MCP_INSTRUCTIONS="Also store summaries of important conversations and their outcomes."
 """
 
 import logging
@@ -36,14 +44,19 @@ import os
 import sys
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Icon
 
 from hindsight_api.config import (
     DEFAULT_MCP_LOCAL_BANK_ID,
+    DEFAULT_MCP_RECALL_DESCRIPTION,
+    DEFAULT_MCP_RETAIN_DESCRIPTION,
+    ENV_MCP_INSTRUCTIONS,
     ENV_MCP_LOCAL_BANK_ID,
 )
 
-# Configure logging - default to info
-_log_level_str = os.environ.get("HINDSIGHT_API_LOG_LEVEL", "info").lower()
+# Configure logging - default to warning to avoid polluting stderr during MCP init
+# MCP clients interpret stderr output as errors, so we suppress INFO logs by default
+_log_level_str = os.environ.get("HINDSIGHT_API_LOG_LEVEL", "warning").lower()
 _log_level_map = {
     "critical": logging.CRITICAL,
     "error": logging.ERROR,
@@ -79,22 +92,21 @@ def create_local_mcp_server(bank_id: str, memory=None) -> FastMCP:
     if memory is None:
         memory = MemoryEngine(db_url="pg0://hindsight-mcp")
 
+    # Get custom instructions from environment variable (appended to both tools)
+    extra_instructions = os.environ.get(ENV_MCP_INSTRUCTIONS, "")
+
+    retain_description = DEFAULT_MCP_RETAIN_DESCRIPTION
+    recall_description = DEFAULT_MCP_RECALL_DESCRIPTION
+
+    if extra_instructions:
+        retain_description = f"{DEFAULT_MCP_RETAIN_DESCRIPTION}\n\nAdditional instructions: {extra_instructions}"
+        recall_description = f"{DEFAULT_MCP_RECALL_DESCRIPTION}\n\nAdditional instructions: {extra_instructions}"
+
     mcp = FastMCP("hindsight")
 
-    @mcp.tool()
+    @mcp.tool(description=retain_description)
     async def retain(content: str, context: str = "general") -> dict:
         """
-        Store important information to long-term memory.
-
-        Use this tool PROACTIVELY whenever the user shares:
-        - Personal facts, preferences, or interests
-        - Important events or milestones
-        - User history, experiences, or background
-        - Decisions, opinions, or stated preferences
-        - Goals, plans, or future intentions
-        - Relationships or people mentioned
-        - Work context, projects, or responsibilities
-
         Args:
             content: The fact/memory to store (be specific and include relevant details)
             context: Category for the memory (e.g., 'preferences', 'work', 'hobbies', 'family'). Default: 'general'
@@ -111,17 +123,9 @@ def create_local_mcp_server(bank_id: str, memory=None) -> FastMCP:
         asyncio.create_task(_retain())
         return {"status": "accepted", "message": "Memory storage initiated"}
 
-    @mcp.tool()
+    @mcp.tool(description=recall_description)
     async def recall(query: str, max_tokens: int = 4096, budget: str = "low") -> dict:
         """
-        Search memories to provide personalized, context-aware responses.
-
-        Use this tool PROACTIVELY to:
-        - Check user's preferences before making suggestions
-        - Recall user's history to provide continuity
-        - Remember user's goals and context
-        - Personalize responses based on past interactions
-
         Args:
             query: Natural language search query (e.g., "user's food preferences", "what projects is user working on")
             max_tokens: Maximum tokens to return in results (default: 4096)
@@ -153,10 +157,9 @@ async def _initialize_and_run(bank_id: str):
     from hindsight_api import MemoryEngine
 
     # Create and initialize memory engine with pg0 embedded database
-    print("Initializing memory engine...", file=sys.stderr)
+    # Note: We avoid printing to stderr during init as MCP clients show it as "errors"
     memory = MemoryEngine(db_url="pg0://hindsight-mcp")
     await memory.initialize()
-    print("Memory engine initialized.", file=sys.stderr)
 
     # Create and run the server
     mcp = create_local_mcp_server(bank_id, memory=memory)
@@ -179,8 +182,8 @@ def main():
     # Get bank ID from environment, default to "mcp"
     bank_id = os.environ.get(ENV_MCP_LOCAL_BANK_ID, DEFAULT_MCP_LOCAL_BANK_ID)
 
-    # Print startup message to stderr (stdout is reserved for MCP protocol)
-    print(f"Hindsight MCP server starting (bank_id={bank_id})...", file=sys.stderr)
+    # Note: We don't print to stderr as MCP clients display it as "error output"
+    # Use HINDSIGHT_API_LOG_LEVEL=debug for verbose startup logging
 
     # Run the async initialization and server
     asyncio.run(_initialize_and_run(bank_id))

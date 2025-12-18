@@ -172,7 +172,7 @@ class LLMProvider:
 
             # Check if model supports reasoning parameter (o1, o3, gpt-5 families)
             model_lower = self.model.lower()
-            is_reasoning_model = any(x in model_lower for x in ["gpt-5", "o1", "o3"])
+            is_reasoning_model = any(x in model_lower for x in ["gpt-5", "o1", "o3", "deepseek"])
 
             # For GPT-4 and GPT-4.1 models, cap max_completion_tokens to 32000
             # For GPT-4o models, cap to 16384
@@ -194,7 +194,7 @@ class LLMProvider:
                 call_params["temperature"] = temperature
 
             # Set reasoning_effort for reasoning models (OpenAI gpt-5, o1, o3)
-            if is_reasoning_model and self.provider == "openai":
+            if is_reasoning_model:
                 call_params["reasoning_effort"] = self.reasoning_effort
 
             # Provider-specific parameters
@@ -203,7 +203,6 @@ class LLMProvider:
                 extra_body = {"service_tier": "auto"}
                 # Only add reasoning parameters for reasoning models
                 if is_reasoning_model:
-                    extra_body["reasoning_effort"] = self.reasoning_effort
                     extra_body["include_reasoning"] = False
                 call_params["extra_body"] = extra_body
 

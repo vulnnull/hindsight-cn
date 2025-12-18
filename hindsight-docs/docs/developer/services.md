@@ -25,11 +25,9 @@ Web UI for managing and exploring your memory banks:
 - View ingestion history and operations
 - Test recall queries interactively
 
-```
-hindsight-control-plane    # Default port: 9999
-```
-
 The Control Plane connects to the API service and provides a visual interface for development and debugging.
+
+For bare metal deployments, you can run the Control Plane standalone using npx. See [Installation - Bare Metal](./installation#control-plane) for details.
 
 ## Deployment Options
 
@@ -39,4 +37,4 @@ The Control Plane connects to the API service and provides a visual interface fo
 | **Helm / Kubernetes** | Separate pods | Production, scaling |
 | **Bare metal** | Run independently | Custom deployments |
 
-In the Docker quickstart, both services run in a single container. For production Kubernetes deployments, they run as separate pods with independent scaling.
+In the Docker quickstart, both services run in a single container. For production Kubernetes deployments, they run as separate pods with independent scaling. For bare metal, you can run the API via pip and the Control Plane via npx.

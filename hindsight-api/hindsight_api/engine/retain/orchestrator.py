@@ -107,6 +107,10 @@ async def retain_batch(
     )
 
     if not extracted_facts:
+        total_time = time.time() - start_time
+        logger.info(
+            f"RETAIN_BATCH COMPLETE: 0 facts extracted from {len(contents)} contents in {total_time:.3f}s (nothing to store)"
+        )
         return [[] for _ in contents]
 
     # Apply fact_type_override if provided

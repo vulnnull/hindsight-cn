@@ -72,30 +72,39 @@ FROM node:20-slim AS cp-builder
 ARG INCLUDE_CP
 RUN if [ "$INCLUDE_CP" != "true" ]; then echo "Skipping CP build" && exit 0; fi
 
-WORKDIR /app
-
-# Copy built SDK
-COPY --from=sdk-builder /app/hindsight-clients/typescript /app/sdk
+# Create directory structure matching the monorepo layout
+# This is required because build:standalone script expects .next/standalone/memory-poc/hindsight-control-plane
+WORKDIR /app/memory-poc/hindsight-control-plane
 
 # Install Control Plane dependencies
 # Only copy package.json (not package-lock.json) to ensure npm installs
 # correct platform-specific native bindings for lightningcss/tailwindcss
 COPY hindsight-control-plane/package.json ./
+# Remove the file: dependency on SDK (we'll copy it directly later)
+RUN sed -i '/"@vectorize-io\/hindsight-client":/d' package.json
 RUN npm install
 
 # Copy Control Plane source (excluding node_modules via .dockerignore)
 COPY hindsight-control-plane/ ./
 # Remove package-lock.json to avoid conflicts with installed native bindings
-RUN rm -f package-lock.json
+# Also remove the file: dependency from package.json (restored by COPY above)
+RUN rm -f package-lock.json && sed -i '/"@vectorize-io\/hindsight-client":/d' package.json
 
-# Link SDK (temporary for build)
-RUN cd /app/sdk && npm link && cd /app && npm link @vectorize-io/hindsight-client
+# Copy built SDK directly into node_modules (more reliable than npm link in Docker)
+COPY --from=sdk-builder /app/hindsight-clients/typescript ./node_modules/@vectorize-io/hindsight-client
 
-# Build Control Plane
-RUN npm run build
+# Build Control Plane - run next build first, then custom standalone copy
+# (The build:standalone script expects a specific path structure that differs in Docker)
+RUN npm exec -- next build
 
-# Create public directory if it doesn't exist
-RUN mkdir -p public
+# Create standalone directory structure manually
+# Next.js standalone output structure varies, so we find server.js and work from there
+RUN mkdir -p standalone/.next && \
+    STANDALONE_ROOT=$(dirname $(find .next/standalone -name "server.js" | head -1)) && \
+    cp -r "$STANDALONE_ROOT"/* standalone/ && \
+    cp -r .next/static standalone/.next/static && \
+    mkdir -p standalone/public && \
+    cp -r public/* standalone/public/ 2>/dev/null || true
 
 # =============================================================================
 # Stage: Final Image - API Only
@@ -172,9 +181,9 @@ COPY --from=sdk-builder /app/hindsight-clients/typescript /app/sdk
 
 # Copy Control Plane standalone build
 WORKDIR /app/control-plane
-COPY --from=cp-builder /app/.next/standalone ./
-COPY --from=cp-builder /app/.next/static ./.next/static
-COPY --from=cp-builder /app/public ./public
+COPY --from=cp-builder /app/memory-poc/hindsight-control-plane/standalone ./
+COPY --from=cp-builder /app/memory-poc/hindsight-control-plane/.next/static ./.next/static
+COPY --from=cp-builder /app/memory-poc/hindsight-control-plane/public ./public
 
 WORKDIR /app
 
@@ -226,9 +235,9 @@ COPY --from=sdk-builder /app/hindsight-clients/typescript /app/sdk
 
 # Copy Control Plane standalone build
 WORKDIR /app/control-plane
-COPY --from=cp-builder /app/.next/standalone ./
-COPY --from=cp-builder /app/.next/static ./.next/static
-COPY --from=cp-builder /app/public ./public
+COPY --from=cp-builder /app/memory-poc/hindsight-control-plane/standalone ./
+COPY --from=cp-builder /app/memory-poc/hindsight-control-plane/.next/static ./.next/static
+COPY --from=cp-builder /app/memory-poc/hindsight-control-plane/public ./public
 
 WORKDIR /app
 

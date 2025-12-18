@@ -133,6 +133,38 @@ hindsight-api --workers 4          # Multiple worker processes
 hindsight-api --log-level debug    # Verbose logging
 ```
 
+### Control Plane
+
+The Control Plane (Web UI) can be run standalone using npx:
+
+```bash
+npx @vectorize-io/hindsight-control-plane --api-url http://localhost:8888
+```
+
+This connects to your running API server and provides a visual interface for managing memory banks, exploring entities, and testing queries.
+
+#### Options
+
+| Option | Environment Variable | Default | Description |
+|--------|---------------------|---------|-------------|
+| `-p, --port` | `PORT` | 9999 | Port to listen on |
+| `-H, --hostname` | `HOSTNAME` | 0.0.0.0 | Hostname to bind to |
+| `-a, --api-url` | `HINDSIGHT_CP_DATAPLANE_API_URL` | http://localhost:8888 | Hindsight API URL |
+
+#### Examples
+
+```bash
+# Run on custom port
+npx @vectorize-io/hindsight-control-plane --port 9999 --api-url http://localhost:8888
+
+# Using environment variables
+export HINDSIGHT_CP_DATAPLANE_API_URL=http://api.example.com
+npx @vectorize-io/hindsight-control-plane
+
+# Production deployment
+PORT=80 HINDSIGHT_CP_DATAPLANE_API_URL=https://api.hindsight.io npx @vectorize-io/hindsight-control-plane
+```
+
 ---
 
 ## Next Steps

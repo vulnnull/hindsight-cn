@@ -2,7 +2,7 @@
 set -e
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
-cd "$ROOT_DIR/hindsight-control-plane" || exit 1
+cd "$ROOT_DIR" || exit 1
 
 # Check if .env exists in workspace root
 if [ ! -f "$ROOT_DIR/.env" ]; then
@@ -30,4 +30,4 @@ fi
 export HOSTNAME="${HINDSIGHT_CP_HOSTNAME:-0.0.0.0}"
 
 # Run dev server
-npm run dev -w hindsight-control-plane
+npm run dev -w @vectorize-io/hindsight-control-plane

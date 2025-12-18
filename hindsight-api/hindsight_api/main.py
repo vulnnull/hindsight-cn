@@ -127,8 +127,10 @@ def main():
             port=args.port,
             log_level=args.log_level,
             mcp_enabled=config.mcp_enabled,
+            graph_retriever=config.graph_retriever,
         )
     config.configure_logging()
+    config.log_config()
 
     # Register cleanup handlers
     atexit.register(_cleanup)

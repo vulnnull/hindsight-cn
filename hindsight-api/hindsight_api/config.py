@@ -31,6 +31,7 @@ ENV_LOG_LEVEL = "HINDSIGHT_API_LOG_LEVEL"
 ENV_MCP_ENABLED = "HINDSIGHT_API_MCP_ENABLED"
 ENV_GRAPH_RETRIEVER = "HINDSIGHT_API_GRAPH_RETRIEVER"
 ENV_MCP_LOCAL_BANK_ID = "HINDSIGHT_API_MCP_LOCAL_BANK_ID"
+ENV_MCP_INSTRUCTIONS = "HINDSIGHT_API_MCP_INSTRUCTIONS"
 
 # Default values
 DEFAULT_DATABASE_URL = "pg0"
@@ -49,6 +50,26 @@ DEFAULT_LOG_LEVEL = "info"
 DEFAULT_MCP_ENABLED = True
 DEFAULT_GRAPH_RETRIEVER = "bfs"  # Options: "bfs", "mpfp"
 DEFAULT_MCP_LOCAL_BANK_ID = "mcp"
+
+# Default MCP tool descriptions (can be customized via env vars)
+DEFAULT_MCP_RETAIN_DESCRIPTION = """Store important information to long-term memory.
+
+Use this tool PROACTIVELY whenever the user shares:
+- Personal facts, preferences, or interests
+- Important events or milestones
+- User history, experiences, or background
+- Decisions, opinions, or stated preferences
+- Goals, plans, or future intentions
+- Relationships or people mentioned
+- Work context, projects, or responsibilities"""
+
+DEFAULT_MCP_RECALL_DESCRIPTION = """Search memories to provide personalized, context-aware responses.
+
+Use this tool PROACTIVELY to:
+- Check user's preferences before making suggestions
+- Recall user's history to provide continuity
+- Remember user's goals and context
+- Personalize responses based on past interactions"""
 
 # Required embedding dimension for database schema
 EMBEDDING_DIMENSION = 384
@@ -142,7 +163,9 @@ class HindsightConfig:
     def configure_logging(self) -> None:
         """Configure Python logging based on the log level."""
         logging.basicConfig(
-            level=self.get_python_log_level(), format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+            level=self.get_python_log_level(),
+            format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+            force=True,  # Override any existing configuration
         )
 
     def log_config(self) -> None:

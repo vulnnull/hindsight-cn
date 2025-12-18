@@ -7,28 +7,35 @@ sidebar_position: 2
 Hindsight provides a fully local MCP server that runs entirely on your machine with an embedded PostgreSQL database. No external server or database setup required.
 
 This is ideal for:
-- **Personal use with Claude Code** — Give Claude long-term memory across conversations
+- **Personal use with Claude Desktop** — Give Claude long-term memory across conversations
 - **Development and testing** — Quick setup without infrastructure
 - **Privacy-focused setups** — All data stays on your machine
 
-## Quick Start
-
-### With uvx (recommended)
+## Quick Install
 
 ```bash
-uvx --from hindsight-api hindsight-local-mcp
+curl -fsSL https://hindsight.vectorize.io/get-mcp | bash -s -- \
+  --app claude-desktop \
+  --set HINDSIGHT_API_LLM_API_KEY=sk-...
 ```
 
-### With pip
+This script will:
+1. Install [uv](https://docs.astral.sh/uv/) if not already installed
+2. Configure Claude Desktop to use the Hindsight MCP server
+3. Set the provided environment variables in the MCP configuration
 
-```bash
-pip install hindsight-api
-hindsight-local-mcp
-```
+:::info Other MCP Applications
+The quick install script currently supports Claude Desktop only. For other MCP-compatible applications (Cursor, Cline, etc.), follow the [Manual Configuration](#manual-configuration) steps below.
+:::
 
-## Claude Code Configuration
+## Manual Configuration
 
-Add to your Claude Code MCP settings (`~/.claude/claude_desktop_config.json`):
+Add the following to your MCP client's configuration. For Claude Desktop:
+
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+For other MCP clients, refer to their documentation for the configuration file location.
 
 ```json
 {
@@ -37,7 +44,7 @@ Add to your Claude Code MCP settings (`~/.claude/claude_desktop_config.json`):
       "command": "uvx",
       "args": ["--from", "hindsight-api", "hindsight-local-mcp"],
       "env": {
-        "HINDSIGHT_API_LLM_API_KEY": "your-openai-key"
+        "HINDSIGHT_API_LLM_API_KEY": "sk-..."
       }
     }
   }
@@ -55,7 +62,7 @@ By default, memories are stored in a bank called `mcp`. To use a different bank:
       "command": "uvx",
       "args": ["--from", "hindsight-api", "hindsight-local-mcp"],
       "env": {
-        "HINDSIGHT_API_LLM_API_KEY": "your-openai-key",
+        "HINDSIGHT_API_LLM_API_KEY": "sk-...",
         "HINDSIGHT_API_MCP_LOCAL_BANK_ID": "my-personal-memory"
       }
     }
@@ -72,6 +79,20 @@ All standard [Hindsight configuration variables](/developer/configuration) are s
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `HINDSIGHT_API_MCP_LOCAL_BANK_ID` | No | `mcp` | Memory bank ID to use |
+| `HINDSIGHT_API_MCP_INSTRUCTIONS` | No | - | Additional instructions appended to both `retain` and `recall` tools |
+
+### Customizing Tool Behavior
+
+You can customize what gets stored by adding instructions to the tools. Re-run the install script with the additional `--set` flag:
+
+```bash
+curl -fsSL https://hindsight.vectorize.io/get-mcp | bash -s -- \
+  --app claude-desktop \
+  --set HINDSIGHT_API_LLM_API_KEY=sk-... \
+  --set HINDSIGHT_API_MCP_INSTRUCTIONS="Also store every action you take, code you write, and files you modify."
+```
+
+These instructions are appended to the default tool descriptions, guiding Claude on when and how to use the memory tools.
 
 ## Available Tools
 

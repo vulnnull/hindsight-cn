@@ -177,6 +177,25 @@ hindsight memory recall <bank_id> "query" -o yaml
 | `--help` | Show help |
 | `--version` | Show version |
 
+## Control Plane UI
+
+Launch the web-based Control Plane UI directly from the CLI:
+
+```bash
+hindsight ui
+```
+
+This runs the Control Plane locally on port 9999 using the API URL from your configuration. The UI provides:
+
+- **Memory bank management** — Browse and manage all your banks
+- **Entity explorer** — Visualize the knowledge graph
+- **Query testing** — Interactive recall and reflect testing
+- **Operation history** — View ingestion and processing logs
+
+:::tip
+The UI command requires Node.js to be installed. It automatically downloads and runs the `@vectorize-io/hindsight-control-plane` package via npx.
+:::
+
 ## Interactive Explorer
 
 Launch the TUI explorer for visual navigation of your memory banks:
