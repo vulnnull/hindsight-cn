@@ -98,13 +98,22 @@ COPY --from=sdk-builder /app/hindsight-clients/typescript ./node_modules/@vector
 RUN npm exec -- next build
 
 # Create standalone directory structure manually
-# Next.js standalone output structure varies, so we find server.js and work from there
-RUN mkdir -p standalone/.next && \
-    STANDALONE_ROOT=$(dirname $(find .next/standalone -name "server.js" | head -1)) && \
+# Note: Must exclude node_modules from find to avoid wrong server.js from next/dist/experimental/testmode/
+# Note: Must explicitly copy .next since glob * doesn't match hidden directories
+RUN STANDALONE_ROOT=$(find .next/standalone -path '*/node_modules' -prune -o -name 'server.js' -print | head -1 | xargs dirname) && \
+    mkdir -p standalone && \
     cp -r "$STANDALONE_ROOT"/* standalone/ && \
+    cp -r "$STANDALONE_ROOT"/.next standalone/.next && \
+    # Copy node_modules if separate from app dir (monorepo structure)
+    if [ -d ".next/standalone/node_modules" ] && [ "$STANDALONE_ROOT" != ".next/standalone" ]; then \
+      cp -r .next/standalone/node_modules standalone/node_modules; \
+    fi && \
     cp -r .next/static standalone/.next/static && \
     mkdir -p standalone/public && \
-    cp -r public/* standalone/public/ 2>/dev/null || true
+    cp -r public/* standalone/public/ 2>/dev/null || true && \
+    # Verify required files exist
+    test -f standalone/server.js || (echo "ERROR: server.js missing!" && exit 1) && \
+    test -f standalone/.next/BUILD_ID || (echo "ERROR: BUILD_ID missing!" && exit 1)
 
 # =============================================================================
 # Stage: Final Image - API Only

@@ -113,7 +113,24 @@ jobs:
     - name: Verify standalone build
       run: |
         test -f hindsight-control-plane/standalone/server.js || exit 1
+        test -d hindsight-control-plane/standalone/node_modules || exit 1
         node hindsight-control-plane/bin/cli.js --help
+
+    - name: Smoke test - verify server starts
+      run: |
+        cd hindsight-control-plane
+        node bin/cli.js --port 9999 &
+        SERVER_PID=$!
+        sleep 5
+        if curl -sf http://localhost:9999 > /dev/null 2>&1; then
+          echo "Server started successfully"
+          kill $SERVER_PID 2>/dev/null || true
+          exit 0
+        else
+          echo "Server failed to respond"
+          kill $SERVER_PID 2>/dev/null || true
+          exit 1
+        fi
 
   build-docs:
     runs-on: ubuntu-latest

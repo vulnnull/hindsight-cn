@@ -13,7 +13,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build && npm run build:standalone",
-    "build:standalone": "rm -rf standalone && STANDALONE_ROOT=$(dirname $(find .next/standalone -name 'server.js' | head -1)) && cp -r \"$STANDALONE_ROOT\" standalone && mkdir -p standalone/.next && cp -r .next/static standalone/.next/static && mkdir -p standalone/public && cp -r public/* standalone/public/ 2>/dev/null || true",
+    "build:standalone": "rm -rf standalone && STANDALONE_ROOT=$(find .next/standalone -path '*/node_modules' -prune -o -name 'server.js' -print | head -1 | xargs dirname) && cp -r \"$STANDALONE_ROOT\" standalone && cp -r .next/standalone/node_modules standalone/node_modules && mkdir -p standalone/.next && cp -r .next/static standalone/.next/static && mkdir -p standalone/public && cp -r public/* standalone/public/ 2>/dev/null || true",
     "start": "next start",
     "lint": "next lint",
     "prepublishOnly": "npm run build"
