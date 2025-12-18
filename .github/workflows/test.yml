@@ -207,8 +207,6 @@ jobs:
         target: ${{ matrix.target }}
         push: false
         load: false
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
 
     # TODO: Re-enable smoke test when disk space issue is resolved
     # - name: Smoke test - verify container starts
