@@ -8,6 +8,11 @@ Memory banks are isolated containers that store all memory-related data for a sp
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+import CodeSnippet from '@site/src/components/CodeSnippet';
+
+{/* Import raw source files */}
+import memoryBanksPy from '!!raw-loader!@site/examples/api/memory-banks.py';
+import memoryBanksMjs from '!!raw-loader!@site/examples/api/memory-banks.mjs';
 
 ## What is a Memory Bank?
 
@@ -30,43 +35,10 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 
 <Tabs>
 <TabItem value="python" label="Python">
-
-```python
-from hindsight_client import Hindsight
-
-client = Hindsight(base_url="http://localhost:8888")
-
-client.create_bank(
-    bank_id="my-bank",
-    name="Research Assistant",
-    background="I am a research assistant specializing in machine learning",
-    disposition={
-        "skepticism": 4,
-        "literalism": 3,
-        "empathy": 3
-    }
-)
-```
-
+<CodeSnippet code={memoryBanksPy} section="create-bank" language="python" />
 </TabItem>
 <TabItem value="node" label="Node.js">
-
-```typescript
-import { HindsightClient } from '@vectorize-io/hindsight-client';
-
-const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
-
-await client.createBank('my-bank', {
-    name: 'Research Assistant',
-    background: 'I am a research assistant specializing in machine learning',
-    disposition: {
-        skepticism: 4,
-        literalism: 3,
-        empathy: 3
-    }
-});
-```
-
+<CodeSnippet code={memoryBanksMjs} section="create-bank" language="javascript" />
 </TabItem>
 <TabItem value="cli" label="CLI">
 
@@ -98,27 +70,10 @@ The background is a first-person narrative providing context for opinion formati
 
 <Tabs>
 <TabItem value="python" label="Python">
-
-```python
-client.create_bank(
-    bank_id="financial-advisor",
-    background="""I am a conservative financial advisor with 20 years of experience.
-    I prioritize capital preservation over aggressive growth.
-    I have seen multiple market crashes and believe in diversification."""
-)
-```
-
+<CodeSnippet code={memoryBanksPy} section="bank-background" language="python" />
 </TabItem>
 <TabItem value="node" label="Node.js">
-
-```typescript
-await client.createBank('financial-advisor', {
-    background: `I am a conservative financial advisor with 20 years of experience.
-    I prioritize capital preservation over aggressive growth.
-    I have seen multiple market crashes and believe in diversification.`
-});
-```
-
+<CodeSnippet code={memoryBanksMjs} section="bank-background" language="javascript" />
 </TabItem>
 </Tabs>
 

@@ -102,10 +102,10 @@ hindsight memory reflect <bank_id> "Summarize my week" --budget high
 hindsight bank list
 ```
 
-### View Profile
+### View Disposition
 
 ```bash
-hindsight bank profile <bank_id>
+hindsight bank disposition <bank_id>
 ```
 
 ### View Statistics
@@ -241,6 +241,6 @@ hindsight memory recall demo "Who works with Alice?"
 # Generate a response
 hindsight memory reflect demo "What do you know about the team?"
 
-# Check bank profile
-hindsight bank profile demo
+# Check bank disposition
+hindsight bank disposition demo
 ```

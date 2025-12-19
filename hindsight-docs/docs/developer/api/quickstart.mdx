@@ -8,6 +8,12 @@ Get up and running with Hindsight in 60 seconds.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+import CodeSnippet from '@site/src/components/CodeSnippet';
+
+{/* Import raw source files */}
+import quickstartPy from '!!raw-loader!@site/examples/api/quickstart.py';
+import quickstartMjs from '!!raw-loader!@site/examples/api/quickstart.mjs';
+import quickstartSh from '!!raw-loader!@site/examples/api/quickstart.sh';
 
 ## Start the API Server
 
@@ -59,20 +65,7 @@ See [LLM Providers](/developer/models#llm) for more details.
 pip install hindsight-client
 ```
 
-```python
-from hindsight_client import Hindsight
-
-client = Hindsight(base_url="http://localhost:8888")
-
-# Retain: Store information
-client.retain(bank_id="my-bank", content="Alice works at Google as a software engineer")
-
-# Recall: Search memories
-client.recall(bank_id="my-bank", query="What does Alice do?")
-
-# Reflect: Generate disposition-aware response
-client.reflect(bank_id="my-bank", query="Tell me about Alice")
-```
+<CodeSnippet code={quickstartPy} section="quickstart-full" language="python" />
 
 </TabItem>
 <TabItem value="node" label="Node.js">
@@ -81,20 +74,7 @@ client.reflect(bank_id="my-bank", query="Tell me about Alice")
 npm install @vectorize-io/hindsight-client
 ```
 
-```javascript
-const { HindsightClient } = require('@vectorize-io/hindsight-client');
-
-const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
-
-// Retain: Store information
-await client.retain('my-bank', 'Alice works at Google as a software engineer');
-
-// Recall: Search memories
-await client.recall('my-bank', 'What does Alice do?');
-
-// Reflect: Generate response
-await client.reflect('my-bank', 'Tell me about Alice');
-```
+<CodeSnippet code={quickstartMjs} section="quickstart-full" language="javascript" />
 
 </TabItem>
 <TabItem value="cli" label="CLI">
@@ -103,16 +83,7 @@ await client.reflect('my-bank', 'Tell me about Alice');
 curl -fsSL https://hindsight.vectorize.io/get-cli | bash
 ```
 
-```bash
-# Retain: Store information
-hindsight memory retain my-bank "Alice works at Google as a software engineer"
-
-# Recall: Search memories
-hindsight memory recall my-bank "What does Alice do?"
-
-# Reflect: Generate response
-hindsight memory reflect my-bank "Tell me about Alice"
-```
+<CodeSnippet code={quickstartSh} section="quickstart-full" language="bash" />
 
 </TabItem>
 </Tabs>

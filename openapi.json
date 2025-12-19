@@ -1268,14 +1268,28 @@
             "title": "Bank Id"
           },
           "name": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name"
           },
           "disposition": {
             "$ref": "#/components/schemas/DispositionTraits"
           },
           "background": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Background"
           },
           "created_at": {
@@ -1304,9 +1318,7 @@
         "type": "object",
         "required": [
           "bank_id",
-          "name",
-          "disposition",
-          "background"
+          "disposition"
         ],
         "title": "BankListItem",
         "description": "Bank list item with profile summary."
@@ -1566,9 +1578,9 @@
         "title": "DeleteResponse",
         "description": "Response model for delete operations.",
         "example": {
-          "success": true,
+          "deleted_count": 10,
           "message": "Deleted successfully",
-          "deleted_count": 10
+          "success": true
         }
       },
       "DispositionTraits": {

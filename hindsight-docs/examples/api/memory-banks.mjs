@@ -31,6 +31,7 @@ await client.createBank('my-bank', {
 
 // [docs:bank-background]
 await client.createBank('financial-advisor', {
+    name: 'Financial Advisor',
     background: `I am a conservative financial advisor with 20 years of experience.
     I prioritize capital preservation over aggressive growth.
     I have seen multiple market crashes and believe in diversification.`

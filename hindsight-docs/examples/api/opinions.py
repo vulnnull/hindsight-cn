@@ -52,11 +52,13 @@ for result in results.results:
 # Create two memory banks with different dispositions
 client.create_bank(
     bank_id="open-minded",
+    name="Open Minded",
     disposition={"skepticism": 2, "literalism": 2, "empathy": 4}
 )
 
 client.create_bank(
     bank_id="conservative",
+    name="Conservative",
     disposition={"skepticism": 5, "literalism": 5, "empathy": 2}
 )
 

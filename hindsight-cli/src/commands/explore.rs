@@ -944,7 +944,7 @@ fn render_banks(f: &mut Frame, app: &mut App, area: Rect) {
         .banks
         .iter()
         .map(|bank| {
-            let name = if bank.name.is_empty() { "Unnamed" } else { &bank.name };
+            let name = bank.name.as_deref().filter(|s| !s.is_empty()).unwrap_or("Unnamed");
             let content = format!("{} - {}", bank.bank_id, name);
             ListItem::new(content).style(Style::default().fg(Color::White))
         })

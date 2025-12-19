@@ -16,6 +16,12 @@ The response includes the generated answer along with the facts that were used, 
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+import CodeSnippet from '@site/src/components/CodeSnippet';
+
+{/* Import raw source files */}
+import reflectPy from '!!raw-loader!@site/examples/api/reflect.py';
+import reflectMjs from '!!raw-loader!@site/examples/api/reflect.mjs';
+import reflectSh from '!!raw-loader!@site/examples/api/reflect.sh';
 
 :::info How Reflect Works
 Learn about disposition-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
@@ -29,33 +35,13 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 
 <Tabs>
 <TabItem value="python" label="Python">
-
-```python
-from hindsight_client import Hindsight
-
-client = Hindsight(base_url="http://localhost:8888")
-
-client.reflect(bank_id="my-bank", query="What should I know about Alice?")
-```
-
+<CodeSnippet code={reflectPy} section="reflect-basic" language="python" />
 </TabItem>
 <TabItem value="node" label="Node.js">
-
-```typescript
-import { HindsightClient } from '@vectorize-io/hindsight-client';
-
-const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
-
-await client.reflect('my-bank', 'What should I know about Alice?');
-```
-
+<CodeSnippet code={reflectMjs} section="reflect-basic" language="javascript" />
 </TabItem>
 <TabItem value="cli" label="CLI">
-
-```bash
-hindsight memory think my-bank "What should I know about Alice?"
-```
-
+<CodeSnippet code={reflectSh} section="reflect-basic" language="bash" />
 </TabItem>
 </Tabs>
 
@@ -69,26 +55,10 @@ hindsight memory think my-bank "What should I know about Alice?"
 
 <Tabs>
 <TabItem value="python" label="Python">
-
-```python
-response = client.reflect(
-    bank_id="my-bank",
-    query="What do you think about remote work?",
-    budget="mid",
-    context="We're considering a hybrid work policy"
-)
-```
-
+<CodeSnippet code={reflectPy} section="reflect-with-params" language="python" />
 </TabItem>
 <TabItem value="node" label="Node.js">
-
-```typescript
-const response = await client.reflect('my-bank', 'What do you think about remote work?', {
-    budget: 'mid',
-    context: "We're considering a hybrid work policy"
-});
-```
-
+<CodeSnippet code={reflectMjs} section="reflect-with-params" language="javascript" />
 </TabItem>
 </Tabs>
 
@@ -103,26 +73,10 @@ The `context` parameter steers how the reflection is performed without impacting
 
 <Tabs>
 <TabItem value="python" label="Python">
-
-```python
-# Context is passed to the LLM to help it understand the situation
-response = client.reflect(
-    bank_id="my-bank",
-    query="What do you think about the proposal?",
-    context="We're in a budget review meeting discussing Q4 spending"
-)
-```
-
+<CodeSnippet code={reflectPy} section="reflect-with-context" language="python" />
 </TabItem>
 <TabItem value="node" label="Node.js">
-
-```typescript
-// Context helps the LLM understand the current situation
-const response = await client.reflect('my-bank', 'What do you think about the proposal?', {
-    context: "We're in a budget review meeting discussing Q4 spending"
-});
-```
-
+<CodeSnippet code={reflectMjs} section="reflect-with-context" language="javascript" />
 </TabItem>
 </Tabs>
 
@@ -149,45 +103,10 @@ The bank's disposition affects reflect responses:
 
 <Tabs>
 <TabItem value="python" label="Python">
-
-```python
-# Create a bank with specific disposition
-client.create_bank(
-    bank_id="cautious-advisor",
-    background="I am a risk-aware financial advisor",
-    disposition={
-        "skepticism": 5,   # Very skeptical of claims
-        "literalism": 4,   # Focuses on exact requirements
-        "empathy": 2       # Prioritizes facts over feelings
-    }
-)
-
-# Reflect responses will reflect this disposition
-response = client.reflect(
-    bank_id="cautious-advisor",
-    query="Should I invest in crypto?"
-)
-# Response will likely emphasize risks and caution
-```
-
+<CodeSnippet code={reflectPy} section="reflect-disposition" language="python" />
 </TabItem>
 <TabItem value="node" label="Node.js">
-
-```typescript
-// Create a bank with specific disposition
-await client.createBank('cautious-advisor', {
-    background: 'I am a risk-aware financial advisor',
-    disposition: {
-        skepticism: 5,
-        literalism: 4,
-        empathy: 2
-    }
-});
-
-// Reflect responses will reflect this disposition
-const response = await client.reflect('cautious-advisor', 'Should I invest in crypto?');
-```
-
+<CodeSnippet code={reflectMjs} section="reflect-disposition" language="javascript" />
 </TabItem>
 </Tabs>
 
@@ -197,29 +116,10 @@ The `based_on` field shows which memories informed the response:
 
 <Tabs>
 <TabItem value="python" label="Python">
-
-```python
-response = client.reflect(bank_id="my-bank", query="Tell me about Alice")
-
-print("Response:", response.text)
-print("\nBased on:")
-for fact in response.based_on or []:
-    print(f"  - [{fact.type}] {fact.text}")
-```
-
+<CodeSnippet code={reflectPy} section="reflect-sources" language="python" />
 </TabItem>
 <TabItem value="node" label="Node.js">
-
-```typescript
-const response = await client.reflect('my-bank', 'Tell me about Alice');
-
-console.log('Response:', response.text);
-console.log('\nBased on:');
-for (const fact of response.based_on || []) {
-    console.log(`  - [${fact.type}] ${fact.text}`);
-}
-```
-
+<CodeSnippet code={reflectMjs} section="reflect-sources" language="javascript" />
 </TabItem>
 </Tabs>
 
