@@ -112,7 +112,7 @@ class LLMProvider:
             )
             await self.call(
                 messages=[{"role": "user", "content": "Say 'ok'"}],
-                max_completion_tokens=10,
+                max_completion_tokens=100,
                 max_retries=2,
                 initial_backoff=0.5,
                 max_backoff=2.0,
