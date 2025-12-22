@@ -29,7 +29,7 @@ def _parse_metadata(metadata: Any) -> dict[str, Any]:
     return {}
 
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from hindsight_api import MemoryEngine
 from hindsight_api.engine.db_utils import acquire_with_retry
@@ -291,7 +291,7 @@ class MemoryItem(BaseModel):
                 "metadata": {"source": "slack", "channel": "engineering"},
                 "document_id": "meeting_notes_2024_01_15",
             }
-        }
+        },
     )
 
     content: str
@@ -299,6 +299,23 @@ class MemoryItem(BaseModel):
     context: str | None = None
     metadata: dict[str, str] | None = None
     document_id: str | None = Field(default=None, description="Optional document ID for this memory item.")
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, datetime):
+            return v
+        if isinstance(v, str):
+            try:
+                # Try parsing as ISO format
+                return datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid timestamp/event_date format: '{v}'. Expected ISO format like '2024-01-15T10:30:00' or '2024-01-15T10:30:00Z'"
+                ) from e
+        raise ValueError(f"timestamp must be a string or datetime, got {type(v).__name__}")
 
 
 class RetainRequest(BaseModel):

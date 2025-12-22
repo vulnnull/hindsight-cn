@@ -39,7 +39,8 @@ export function AddMemoryView() {
     try {
       const item: any = { content };
       if (context) item.context = context;
-      if (eventDate) item.timestamp = eventDate;
+      // datetime-local gives "2024-01-15T10:30", add seconds for proper ISO format
+      if (eventDate) item.timestamp = eventDate + ":00";
 
       const data: any = await client.retain({
         bank_id: currentBank,

@@ -85,7 +85,8 @@ function BankSelectorInner() {
     try {
       const item: any = { content: docContent };
       if (docContext) item.context = docContext;
-      if (docEventDate) item.event_date = docEventDate;
+      // datetime-local gives "2024-01-15T10:30", add seconds for proper ISO format
+      if (docEventDate) item.timestamp = docEventDate + ":00";
 
       const params: any = {
         bank_id: currentBank,
