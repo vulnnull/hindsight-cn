@@ -28,6 +28,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pydantic
 from hindsight_api import MemoryEngine
+from hindsight_api.config import get_config
+
+# Configure logging from environment variable
+get_config().configure_logging()
 from hindsight_api.engine.memory_engine import Budget
 from hindsight_api.models import RequestContext
 from openai import AsyncOpenAI

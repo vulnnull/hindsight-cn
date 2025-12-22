@@ -3,11 +3,13 @@ LLM wrapper for unified configuration across providers.
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
 from typing import Any
 
+import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
@@ -157,12 +159,25 @@ class LLMProvider:
         """
         async with _global_llm_semaphore:
             start_time = time.time()
-            import json
 
             # Handle Gemini provider separately
             if self.provider == "gemini":
                 return await self._call_gemini(
                     messages, response_format, max_retries, initial_backoff, max_backoff, skip_validation, start_time
+                )
+
+            # Handle Ollama with native API for structured output (better schema enforcement)
+            if self.provider == "ollama" and response_format is not None:
+                return await self._call_ollama_native(
+                    messages,
+                    response_format,
+                    max_completion_tokens,
+                    temperature,
+                    max_retries,
+                    initial_backoff,
+                    max_backoff,
+                    skip_validation,
+                    start_time,
                 )
 
             call_params = {
@@ -324,6 +339,129 @@ class LLMProvider:
                 raise last_exception
             raise RuntimeError("LLM call failed after all retries with no exception captured")
 
+    async def _call_ollama_native(
+        self,
+        messages: list[dict[str, str]],
+        response_format: Any,
+        max_completion_tokens: int | None,
+        temperature: float | None,
+        max_retries: int,
+        initial_backoff: float,
+        max_backoff: float,
+        skip_validation: bool,
+        start_time: float,
+    ) -> Any:
+        """
+        Call Ollama using native API with JSON schema enforcement.
+
+        Ollama's native API supports passing a full JSON schema in the 'format' parameter,
+        which provides better structured output control than the OpenAI-compatible API.
+        """
+        # Get the JSON schema from the Pydantic model
+        schema = response_format.model_json_schema() if hasattr(response_format, "model_json_schema") else None
+
+        # Build the base URL for Ollama's native API
+        # Default OpenAI-compatible URL is http://localhost:11434/v1
+        # Native API is at http://localhost:11434/api/chat
+        base_url = self.base_url or "http://localhost:11434/v1"
+        if base_url.endswith("/v1"):
+            native_url = base_url[:-3] + "/api/chat"
+        else:
+            native_url = base_url.rstrip("/") + "/api/chat"
+
+        # Build request payload
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+        }
+
+        # Add schema as format parameter for structured output
+        if schema:
+            payload["format"] = schema
+
+        # Add optional parameters with optimized defaults for Ollama
+        # Benchmarking shows num_ctx=16384 + num_batch=512 is optimal
+        options = {
+            "num_ctx": 16384,  # 16k context window for larger prompts
+            "num_batch": 512,  # Optimal batch size for prompt processing
+        }
+        if max_completion_tokens:
+            options["num_predict"] = max_completion_tokens
+        if temperature is not None:
+            options["temperature"] = temperature
+        payload["options"] = options
+
+        last_exception = None
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            for attempt in range(max_retries + 1):
+                try:
+                    response = await client.post(native_url, json=payload)
+                    response.raise_for_status()
+
+                    result = response.json()
+                    content = result.get("message", {}).get("content", "")
+
+                    # Parse JSON response
+                    try:
+                        json_data = json.loads(content)
+                    except json.JSONDecodeError as json_err:
+                        content_preview = content[:500] if content else "<empty>"
+                        if content and len(content) > 700:
+                            content_preview = f"{content[:500]}...TRUNCATED...{content[-200:]}"
+                        logger.warning(
+                            f"Ollama JSON parse error (attempt {attempt + 1}/{max_retries + 1}): {json_err}\n"
+                            f"  Model: ollama/{self.model}\n"
+                            f"  Content length: {len(content) if content else 0} chars\n"
+                            f"  Content preview: {content_preview!r}"
+                        )
+                        if attempt < max_retries:
+                            backoff = min(initial_backoff * (2**attempt), max_backoff)
+                            await asyncio.sleep(backoff)
+                            last_exception = json_err
+                            continue
+                        else:
+                            raise
+
+                    # Validate against Pydantic model or return raw JSON
+                    if skip_validation:
+                        return json_data
+                    else:
+                        return response_format.model_validate(json_data)
+
+                except httpx.HTTPStatusError as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"Ollama HTTP error (attempt {attempt + 1}/{max_retries + 1}): {e.response.status_code}"
+                        )
+                        backoff = min(initial_backoff * (2**attempt), max_backoff)
+                        await asyncio.sleep(backoff)
+                        continue
+                    else:
+                        logger.error(f"Ollama HTTP error after {max_retries + 1} attempts: {e}")
+                        raise
+
+                except httpx.RequestError as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        logger.warning(f"Ollama connection error (attempt {attempt + 1}/{max_retries + 1}): {e}")
+                        backoff = min(initial_backoff * (2**attempt), max_backoff)
+                        await asyncio.sleep(backoff)
+                        continue
+                    else:
+                        logger.error(f"Ollama connection error after {max_retries + 1} attempts: {e}")
+                        raise
+
+                except Exception as e:
+                    logger.error(f"Unexpected error during Ollama call: {type(e).__name__}: {e}")
+                    raise
+
+        if last_exception:
+            raise last_exception
+        raise RuntimeError("Ollama call failed after all retries")
+
     async def _call_gemini(
         self,
         messages: list[dict[str, str]],
@@ -335,8 +473,6 @@ class LLMProvider:
         start_time: float,
     ) -> Any:
         """Handle Gemini-specific API calls."""
-        import json
-
         # Convert OpenAI-style messages to Gemini format
         system_instruction = None
         gemini_contents = []

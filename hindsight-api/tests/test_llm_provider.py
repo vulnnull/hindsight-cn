@@ -26,6 +26,9 @@ MODEL_MATRIX = [
     ("gemini", "gemini-2.5-flash"),
     ("gemini", "gemini-2.5-flash-lite"),
     ("gemini", "gemini-3-pro-preview"),
+    # Ollama models (local)
+    ("ollama", "gemma3:12b"),
+    ("ollama", "gemma3:1b"),
 ]
 
 
@@ -48,12 +51,18 @@ async def test_llm_provider_memory_operations(provider: str, model: str):
     All models must pass this test.
     """
     api_key = get_api_key_for_provider(provider)
-    if not api_key:
+
+    # Skip Ollama tests in CI (no models available)
+    if provider == "ollama" and os.getenv("CI"):
+        pytest.skip(f"Skipping {provider}/{model}: Ollama not available in CI")
+
+    # Other providers need an API key
+    if provider != "ollama" and not api_key:
         pytest.skip(f"Skipping {provider}/{model}: no API key available")
 
     llm = LLMProvider(
         provider=provider,
-        api_key=api_key,
+        api_key=api_key or "",
         base_url="",
         model=model,
     )
