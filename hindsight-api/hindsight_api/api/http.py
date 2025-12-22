@@ -1802,9 +1802,11 @@ def _register_routes(app: FastAPI):
             input_summary = []
             for i, item in enumerate(request.items):
                 content_preview = item.content[:100] + "..." if len(item.content) > 100 else item.content
-                input_summary.append(f"  [{i}] content={content_preview!r}, context={item.context}, timestamp={item.timestamp}")
+                input_summary.append(
+                    f"  [{i}] content={content_preview!r}, context={item.context}, timestamp={item.timestamp}"
+                )
             input_debug = "\n".join(input_summary)
-            
+
             error_detail = (
                 f"{str(e)}\n\n"
                 f"Input ({len(request.items)} items):\n{input_debug}\n\n"

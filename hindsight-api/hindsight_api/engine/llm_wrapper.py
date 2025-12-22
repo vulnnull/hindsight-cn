@@ -227,7 +227,7 @@ class LLMProvider:
                         response = await self._client.chat.completions.create(**call_params)
 
                         content = response.choices[0].message.content
-                        
+
                         # Log raw LLM response for debugging JSON parse issues
                         try:
                             json_data = json.loads(content)

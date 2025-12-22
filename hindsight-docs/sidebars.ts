@@ -113,6 +113,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'developer/extensions',
+          label: 'Extensions',
+        },
+        {
+          type: 'doc',
           id: 'developer/models',
           label: 'Models',
         },
