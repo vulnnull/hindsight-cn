@@ -396,22 +396,22 @@ class MemoryEngine(MemoryEngineInterface):
 
         Args:
             task_dict: Dict with 'node_ids' key containing list of node IDs to update
+
+        Raises:
+            Exception: Any exception from database operations (propagates to execute_task for retry)
         """
         node_ids = task_dict.get("node_ids", [])
         if not node_ids:
             return
 
         pool = await self._get_pool()
-        try:
-            # Convert string UUIDs to UUID type for faster matching
-            uuid_list = [uuid.UUID(nid) for nid in node_ids]
-            async with acquire_with_retry(pool) as conn:
-                await conn.execute(
-                    f"UPDATE {fq_table('memory_units')} SET access_count = access_count + 1 WHERE id = ANY($1::uuid[])",
-                    uuid_list,
-                )
-        except Exception as e:
-            logger.error(f"Access count handler: Error updating access counts: {e}")
+        # Convert string UUIDs to UUID type for faster matching
+        uuid_list = [uuid.UUID(nid) for nid in node_ids]
+        async with acquire_with_retry(pool) as conn:
+            await conn.execute(
+                f"UPDATE {fq_table('memory_units')} SET access_count = access_count + 1 WHERE id = ANY($1::uuid[])",
+                uuid_list,
+            )
 
     async def _handle_batch_retain(self, task_dict: dict[str, Any]):
         """
@@ -419,29 +419,27 @@ class MemoryEngine(MemoryEngineInterface):
 
         Args:
             task_dict: Dict with 'bank_id', 'contents'
+
+        Raises:
+            ValueError: If bank_id is missing
+            Exception: Any exception from retain_batch_async (propagates to execute_task for retry)
         """
-        try:
-            bank_id = task_dict.get("bank_id")
-            if not bank_id:
-                raise ValueError("bank_id is required for batch retain task")
-            contents = task_dict.get("contents", [])
+        bank_id = task_dict.get("bank_id")
+        if not bank_id:
+            raise ValueError("bank_id is required for batch retain task")
+        contents = task_dict.get("contents", [])
 
-            logger.info(
-                f"[BATCH_RETAIN_TASK] Starting background batch retain for bank_id={bank_id}, {len(contents)} items"
-            )
+        logger.info(
+            f"[BATCH_RETAIN_TASK] Starting background batch retain for bank_id={bank_id}, {len(contents)} items"
+        )
 
-            # Use internal request context for background tasks
-            from hindsight_api.models import RequestContext
+        # Use internal request context for background tasks
+        from hindsight_api.models import RequestContext
 
-            internal_context = RequestContext()
-            await self.retain_batch_async(bank_id=bank_id, contents=contents, request_context=internal_context)
+        internal_context = RequestContext()
+        await self.retain_batch_async(bank_id=bank_id, contents=contents, request_context=internal_context)
 
-            logger.info(f"[BATCH_RETAIN_TASK] Completed background batch retain for bank_id={bank_id}")
-        except Exception as e:
-            logger.error(f"Batch retain handler: Error processing batch retain: {e}")
-            import traceback
-
-            traceback.print_exc()
+        logger.info(f"[BATCH_RETAIN_TASK] Completed background batch retain for bank_id={bank_id}")
 
     async def execute_task(self, task_dict: dict[str, Any]):
         """
@@ -3649,90 +3647,87 @@ Guidelines:
             task_dict: Dict with 'bank_id' and either:
                        - 'entity_ids' (list): Process multiple entities
                        - 'entity_id', 'entity_name': Process single entity (legacy)
+
+        Raises:
+            ValueError: If required fields are missing
+            Exception: Any exception from regenerate_entity_observations (propagates to execute_task for retry)
         """
-        try:
-            bank_id = task_dict.get("bank_id")
-            # Use internal request context for background tasks
-            from hindsight_api.models import RequestContext
+        bank_id = task_dict.get("bank_id")
+        # Use internal request context for background tasks
+        from hindsight_api.models import RequestContext
 
-            internal_context = RequestContext()
+        internal_context = RequestContext()
 
-            # New format: multiple entity_ids
-            if "entity_ids" in task_dict:
-                entity_ids = task_dict.get("entity_ids", [])
-                min_facts = task_dict.get("min_facts", 5)
+        # New format: multiple entity_ids
+        if "entity_ids" in task_dict:
+            entity_ids = task_dict.get("entity_ids", [])
+            min_facts = task_dict.get("min_facts", 5)
 
-                if not bank_id or not entity_ids:
-                    logger.error(f"[OBSERVATIONS] Missing required fields in task: {task_dict}")
-                    return
+            if not bank_id or not entity_ids:
+                raise ValueError(f"[OBSERVATIONS] Missing required fields in task: {task_dict}")
 
-                # Process each entity
-                pool = await self._get_pool()
-                async with pool.acquire() as conn:
-                    for entity_id in entity_ids:
-                        try:
-                            # Fetch entity name and check fact count
-                            import uuid as uuid_module
+            # Process each entity
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                for entity_id in entity_ids:
+                    try:
+                        # Fetch entity name and check fact count
+                        import uuid as uuid_module
 
-                            entity_uuid = uuid_module.UUID(entity_id) if isinstance(entity_id, str) else entity_id
+                        entity_uuid = uuid_module.UUID(entity_id) if isinstance(entity_id, str) else entity_id
 
-                            # First check if entity exists
-                            entity_exists = await conn.fetchrow(
-                                f"SELECT canonical_name FROM {fq_table('entities')} WHERE id = $1 AND bank_id = $2",
-                                entity_uuid,
-                                bank_id,
-                            )
+                        # First check if entity exists
+                        entity_exists = await conn.fetchrow(
+                            f"SELECT canonical_name FROM {fq_table('entities')} WHERE id = $1 AND bank_id = $2",
+                            entity_uuid,
+                            bank_id,
+                        )
 
-                            if not entity_exists:
-                                logger.debug(f"[OBSERVATIONS] Entity {entity_id} not yet in bank {bank_id}, skipping")
-                                continue
-
-                            entity_name = entity_exists["canonical_name"]
-
-                            # Count facts linked to this entity
-                            fact_count = (
-                                await conn.fetchval(
-                                    f"SELECT COUNT(*) FROM {fq_table('unit_entities')} WHERE entity_id = $1",
-                                    entity_uuid,
-                                )
-                                or 0
-                            )
-
-                            # Only regenerate if entity has enough facts
-                            if fact_count >= min_facts:
-                                await self.regenerate_entity_observations(
-                                    bank_id, entity_id, entity_name, version=None, request_context=internal_context
-                                )
-                            else:
-                                logger.debug(
-                                    f"[OBSERVATIONS] Skipping {entity_name} ({fact_count} facts < {min_facts} threshold)"
-                                )
-
-                        except Exception as e:
-                            logger.error(f"[OBSERVATIONS] Error processing entity {entity_id}: {e}")
+                        if not entity_exists:
+                            logger.debug(f"[OBSERVATIONS] Entity {entity_id} not yet in bank {bank_id}, skipping")
                             continue
 
-            # Legacy format: single entity
-            else:
-                entity_id = task_dict.get("entity_id")
-                entity_name = task_dict.get("entity_name")
-                version = task_dict.get("version")
+                        entity_name = entity_exists["canonical_name"]
 
-                if not all([bank_id, entity_id, entity_name]):
-                    logger.error(f"[OBSERVATIONS] Missing required fields in task: {task_dict}")
-                    return
+                        # Count facts linked to this entity
+                        fact_count = (
+                            await conn.fetchval(
+                                f"SELECT COUNT(*) FROM {fq_table('unit_entities')} WHERE entity_id = $1",
+                                entity_uuid,
+                            )
+                            or 0
+                        )
 
-                # Type assertions after validation
-                assert isinstance(bank_id, str) and isinstance(entity_id, str) and isinstance(entity_name, str)
-                await self.regenerate_entity_observations(
-                    bank_id, entity_id, entity_name, version=version, request_context=internal_context
-                )
+                        # Only regenerate if entity has enough facts
+                        if fact_count >= min_facts:
+                            await self.regenerate_entity_observations(
+                                bank_id, entity_id, entity_name, version=None, request_context=internal_context
+                            )
+                        else:
+                            logger.debug(
+                                f"[OBSERVATIONS] Skipping {entity_name} ({fact_count} facts < {min_facts} threshold)"
+                            )
 
-        except Exception as e:
-            logger.error(f"[OBSERVATIONS] Error regenerating observations: {e}")
-            import traceback
+                    except Exception as e:
+                        # Log but continue processing other entities - individual entity failures
+                        # shouldn't fail the whole batch
+                        logger.error(f"[OBSERVATIONS] Error processing entity {entity_id}: {e}")
+                        continue
 
-            traceback.print_exc()
+        # Legacy format: single entity
+        else:
+            entity_id = task_dict.get("entity_id")
+            entity_name = task_dict.get("entity_name")
+            version = task_dict.get("version")
+
+            if not all([bank_id, entity_id, entity_name]):
+                raise ValueError(f"[OBSERVATIONS] Missing required fields in task: {task_dict}")
+
+            # Type assertions after validation
+            assert isinstance(bank_id, str) and isinstance(entity_id, str) and isinstance(entity_name, str)
+            await self.regenerate_entity_observations(
+                bank_id, entity_id, entity_name, version=version, request_context=internal_context
+            )
 
     # =========================================================================
     # Statistics & Operations (for HTTP API layer)
