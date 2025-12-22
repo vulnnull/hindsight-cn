@@ -85,9 +85,21 @@ class Hindsight:
         self.close()
 
     def close(self):
-        """Close the API client."""
+        """Close the API client (sync version - use aclose() in async code)."""
         if self._api_client:
-            _run_async(self._api_client.close())
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an async context - schedule but don't wait
+                # The caller should use aclose() instead
+                loop.create_task(self._api_client.close())
+            except RuntimeError:
+                # No running loop - safe to run synchronously
+                _run_async(self._api_client.close())
+
+    async def aclose(self):
+        """Close the API client (async version)."""
+        if self._api_client:
+            await self._api_client.close()
 
     # Simplified methods for main operations
 

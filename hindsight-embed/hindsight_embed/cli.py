@@ -1,24 +1,23 @@
 """
 Hindsight Embedded CLI.
 
-A simple CLI for local memory operations using embedded PostgreSQL (pg0).
-No external server required - runs everything locally.
+A wrapper CLI that manages a local daemon and forwards commands to hindsight-cli.
+No external server required - runs everything locally with automatic daemon management.
 
 Usage:
     hindsight-embed configure              # Interactive setup
     hindsight-embed retain "User prefers dark mode"
     hindsight-embed recall "What are user preferences?"
+    hindsight-embed daemon status          # Check daemon status
 
 Environment variables:
     HINDSIGHT_EMBED_LLM_API_KEY: Required. API key for LLM provider.
     HINDSIGHT_EMBED_LLM_PROVIDER: Optional. LLM provider (default: "openai").
     HINDSIGHT_EMBED_LLM_MODEL: Optional. LLM model (default: "gpt-4o-mini").
     HINDSIGHT_EMBED_BANK_ID: Optional. Memory bank ID (default: "default").
-    HINDSIGHT_EMBED_LOG_LEVEL: Optional. Log level (default: "warning").
 """
 
 import argparse
-import asyncio
 import logging
 import os
 import sys
@@ -26,11 +25,12 @@ from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".hindsight"
 CONFIG_FILE = CONFIG_DIR / "embed"
+CONFIG_FILE_ALT = CONFIG_DIR / "config.env"  # Alternative config file location
 
 
 def setup_logging(verbose: bool = False):
     """Configure logging."""
-    level_str = os.environ.get("HINDSIGHT_EMBED_LOG_LEVEL", "warning").lower()
+    level_str = os.environ.get("HINDSIGHT_EMBED_LOG_LEVEL", "info").lower()
     if verbose:
         level_str = "debug"
 
@@ -40,7 +40,7 @@ def setup_logging(verbose: bool = False):
         "warning": logging.WARNING,
         "error": logging.ERROR,
     }
-    level = level_map.get(level_str, logging.WARNING)
+    level = level_map.get(level_str, logging.INFO)
 
     logging.basicConfig(
         level=level,
@@ -52,17 +52,20 @@ def setup_logging(verbose: bool = False):
 
 def load_config_file():
     """Load configuration from file if it exists."""
-    if CONFIG_FILE.exists():
-        with open(CONFIG_FILE) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    # Handle 'export VAR=value' format
-                    if line.startswith("export "):
-                        line = line[7:]
-                    key, value = line.split("=", 1)
-                    if key not in os.environ:  # Don't override env vars
-                        os.environ[key] = value
+    # Check both config file locations
+    config_files = [CONFIG_FILE, CONFIG_FILE_ALT]
+    for config_path in config_files:
+        if config_path.exists():
+            with open(config_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        # Handle 'export VAR=value' format
+                        if line.startswith("export "):
+                            line = line[7:]
+                        key, value = line.split("=", 1)
+                        if key not in os.environ:  # Don't override env vars
+                            os.environ[key] = value
 
 
 def get_config():
@@ -84,6 +87,16 @@ def do_configure(args):
     """Interactive configuration setup with beautiful TUI."""
     import questionary
     from questionary import Style
+
+    # If stdin is not a terminal (e.g., running via curl | bash),
+    # reopen stdin from /dev/tty for interactive prompts
+    if not sys.stdin.isatty():
+        try:
+            sys.stdin = open('/dev/tty', 'r')
+        except OSError:
+            print("Error: Cannot run interactive configuration without a terminal.", file=sys.stderr)
+            print("Run directly: uvx hindsight-embed configure", file=sys.stderr)
+            return 1
 
     # Custom style for the prompts
     custom_style = Style([
@@ -197,6 +210,25 @@ def do_configure(args):
 
     CONFIG_FILE.chmod(0o600)
 
+    # Stop existing daemon if running (it needs to pick up new config)
+    from . import daemon_client
+
+    if daemon_client._is_daemon_running():
+        print("\n  \033[2mRestarting daemon with new configuration...\033[0m")
+        daemon_client.stop_daemon()
+
+    # Start daemon with new config
+    new_config = {
+        "llm_api_key": api_key,
+        "llm_provider": provider,
+        "llm_model": model,
+        "bank_id": bank_id,
+    }
+    if daemon_client.ensure_daemon_running(new_config):
+        print("  \033[32m✓ Daemon started\033[0m")
+    else:
+        print("  \033[33m⚠ Failed to start daemon (will start on first command)\033[0m")
+
     print()
     print("\033[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
     print("\033[32m  ✓ Configuration saved!\033[0m")
@@ -212,211 +244,173 @@ def do_configure(args):
     return 0
 
 
-async def _create_engine(config: dict, logger):
-    """Create and initialize the memory engine."""
-    logger.debug("Setting up environment variables...")
+def do_daemon(args, config: dict, logger):
+    """Handle daemon subcommands."""
+    from pathlib import Path
+    from . import daemon_client
 
-    # Set hindsight-api environment variables from our config
-    if config["llm_api_key"]:
-        os.environ["HINDSIGHT_API_LLM_API_KEY"] = config["llm_api_key"]
-    if config["llm_provider"]:
-        os.environ["HINDSIGHT_API_LLM_PROVIDER"] = config["llm_provider"]
-    if config["llm_model"]:
-        os.environ["HINDSIGHT_API_LLM_MODEL"] = config["llm_model"]
+    daemon_log_path = Path.home() / ".hindsight" / "daemon.log"
 
-    logger.debug("Importing MemoryEngine...")
+    if args.daemon_command == "start":
+        if daemon_client._is_daemon_running():
+            print("Daemon is already running")
+            return 0
 
-    # Import after setting env vars
-    from hindsight_api import MemoryEngine
-    from hindsight_api.engine.task_backend import SyncTaskBackend
-
-    # Use pg0 embedded database
-    db_name = f"hindsight-embed-{config['bank_id']}"
-    logger.debug(f"Creating MemoryEngine with pg0://{db_name}")
-
-    # Use SyncTaskBackend to avoid background workers that prevent clean exit
-    memory = MemoryEngine(
-        db_url=f"pg0://{db_name}",
-        task_backend=SyncTaskBackend(),
-    )
-
-    logger.debug("Initializing engine...")
-    await memory.initialize()
-
-    logger.debug("Engine initialized")
-    return memory
-
-
-async def do_retain(args, config: dict, logger):
-    """Execute retain command."""
-    from hindsight_api.models import RequestContext
-
-    logger.info(f"Retaining memory: {args.content[:50]}...")
-
-    memory = await _create_engine(config, logger)
-
-    try:
-        logger.debug("Calling retain_batch_async...")
-        await memory.retain_batch_async(
-            bank_id=config["bank_id"],
-            contents=[{
-                "content": args.content,
-                "context": args.context or "general",
-            }],
-            request_context=RequestContext(),
-        )
-        msg = f"Stored memory: {args.content[:50]}..." if len(args.content) > 50 else f"Stored memory: {args.content}"
-        print(msg, flush=True)
-        return 0
-    except Exception as e:
-        logger.error(f"Retain failed: {e}", exc_info=True)
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-
-async def do_recall(args, config: dict, logger):
-    """Execute recall command."""
-    from hindsight_api.engine.memory_engine import Budget
-    from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES
-    from hindsight_api.models import RequestContext
-
-    logger.info(f"Recalling with query: {args.query}")
-
-    memory = await _create_engine(config, logger)
-
-    try:
-        budget_map = {"low": Budget.LOW, "mid": Budget.MID, "high": Budget.HIGH}
-        budget_enum = budget_map.get(args.budget.lower(), Budget.LOW)
-
-        logger.debug(f"Calling recall_async with budget={budget_enum}...")
-        result = await memory.recall_async(
-            bank_id=config["bank_id"],
-            query=args.query,
-            fact_type=list(VALID_RECALL_FACT_TYPES),
-            budget=budget_enum,
-            max_tokens=args.max_tokens,
-            request_context=RequestContext(),
-        )
-
-        logger.debug(f"Recall returned {len(result.results)} results")
-
-        if result.results:
-            print("Memories found:", flush=True)
-            print("-" * 40, flush=True)
-            for fact in result.results:
-                print(f"- {fact.text}", flush=True)
-                if args.verbose and fact.occurred_start:
-                    print(f"  (Date: {fact.occurred_start})", flush=True)
-            print("-" * 40, flush=True)
-            print(f"Total: {len(result.results)} memories", flush=True)
+        print("Starting daemon...")
+        if daemon_client.ensure_daemon_running(config):
+            print("Daemon started successfully")
+            print(f"  Port: {daemon_client.DAEMON_PORT}")
+            print(f"  Logs: {daemon_log_path}")
+            return 0
         else:
-            print("No relevant memories found.", flush=True)
+            print("Failed to start daemon", file=sys.stderr)
+            return 1
 
-        return 0
-    except Exception as e:
-        logger.error(f"Recall failed: {e}", exc_info=True)
-        print(f"Error: {e}", file=sys.stderr)
+    elif args.daemon_command == "stop":
+        if not daemon_client._is_daemon_running():
+            print("Daemon is not running")
+            return 0
+
+        print("Stopping daemon...")
+        if daemon_client.stop_daemon():
+            print("Daemon stopped")
+            return 0
+        else:
+            print("Failed to stop daemon", file=sys.stderr)
+            return 1
+
+    elif args.daemon_command == "status":
+        if daemon_client._is_daemon_running():
+            # Get PID from lockfile
+            lockfile = Path.home() / ".hindsight" / "daemon.lock"
+            pid = "unknown"
+            if lockfile.exists():
+                try:
+                    pid = lockfile.read_text().strip()
+                except Exception:
+                    pass
+            print(f"Daemon is running (PID: {pid})")
+            print(f"  URL: http://127.0.0.1:{daemon_client.DAEMON_PORT}")
+            print(f"  Logs: {daemon_log_path}")
+            return 0
+        else:
+            print("Daemon is not running")
+            return 1
+
+    elif args.daemon_command == "logs":
+        if not daemon_log_path.exists():
+            print("No daemon logs found", file=sys.stderr)
+            print(f"  Expected at: {daemon_log_path}")
+            return 1
+
+        if args.follow:
+            # Follow mode - like tail -f
+            import subprocess
+            try:
+                subprocess.run(["tail", "-f", str(daemon_log_path)])
+            except KeyboardInterrupt:
+                pass
+            return 0
+        else:
+            # Show last N lines
+            try:
+                with open(daemon_log_path) as f:
+                    lines = f.readlines()
+                    for line in lines[-args.lines:]:
+                        print(line, end="")
+                return 0
+            except Exception as e:
+                print(f"Error reading logs: {e}", file=sys.stderr)
+                return 1
+
+    else:
+        print("Usage: hindsight-embed daemon {start|stop|status|logs}", file=sys.stderr)
         return 1
 
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Hindsight Embedded CLI - local memory operations without a server",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    hindsight-embed configure                              # Interactive setup
-    hindsight-embed retain "User prefers dark mode"
-    hindsight-embed retain "Meeting on Monday" -c work
-    hindsight-embed recall "user preferences"
-    hindsight-embed recall "meetings" --budget high
-        """
-    )
+    # Check for built-in commands first (before argparse)
+    # This allows us to forward unknown commands to hindsight-cli
+    if len(sys.argv) > 1:
+        command = sys.argv[1]
 
-    parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Enable verbose/debug logging"
-    )
+        # Handle configure
+        if command == "configure":
+            logger = setup_logging(False)
+            exit_code = do_configure(None)
+            sys.exit(exit_code)
 
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
+        # Handle daemon subcommands
+        if command == "daemon":
+            # Parse daemon subcommand
+            parser = argparse.ArgumentParser(prog="hindsight-embed daemon")
+            subparsers = parser.add_subparsers(dest="daemon_command")
+            subparsers.add_parser("start", help="Start the daemon")
+            subparsers.add_parser("stop", help="Stop the daemon")
+            subparsers.add_parser("status", help="Check daemon status")
+            logs_parser = subparsers.add_parser("logs", help="View daemon logs")
+            logs_parser.add_argument("--follow", "-f", action="store_true")
+            logs_parser.add_argument("--lines", "-n", type=int, default=50)
 
-    # Configure command
-    subparsers.add_parser("configure", help="Interactive configuration setup")
+            args = parser.parse_args(sys.argv[2:])
+            logger = setup_logging(False)
+            config = get_config()
+            exit_code = do_daemon(args, config, logger)
+            sys.exit(exit_code)
 
-    # Retain command
-    retain_parser = subparsers.add_parser("retain", help="Store a memory")
-    retain_parser.add_argument("content", help="The memory content to store")
-    retain_parser.add_argument(
-        "--context", "-c",
-        help="Category for the memory (e.g., 'preferences', 'work')",
-        default="general"
-    )
+        # Handle --help / -h
+        if command in ("--help", "-h"):
+            print_help()
+            sys.exit(0)
 
-    # Recall command
-    recall_parser = subparsers.add_parser("recall", help="Search memories")
-    recall_parser.add_argument("query", help="Search query")
-    recall_parser.add_argument(
-        "--budget", "-b",
-        choices=["low", "mid", "high"],
-        default="low",
-        help="Search budget level (default: low)"
-    )
-    recall_parser.add_argument(
-        "--max-tokens", "-m",
-        type=int,
-        default=4096,
-        help="Maximum tokens in results (default: 4096)"
-    )
-    recall_parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Show additional details"
-    )
+        # Forward all other commands to hindsight-cli
+        config = get_config()
 
-    args = parser.parse_args()
+        # Check for LLM API key
+        if not config["llm_api_key"]:
+            print("Error: LLM API key is required.", file=sys.stderr)
+            print("Run 'hindsight-embed configure' to set up.", file=sys.stderr)
+            sys.exit(1)
 
-    # Setup logging
-    verbose = getattr(args, 'verbose', False)
-    logger = setup_logging(verbose)
+        from . import daemon_client
 
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
-
-    # Handle configure separately (no config needed)
-    if args.command == "configure":
-        exit_code = do_configure(args)
+        # Forward to hindsight-cli (handles daemon startup and CLI installation)
+        exit_code = daemon_client.run_cli(sys.argv[1:], config)
         sys.exit(exit_code)
 
-    config = get_config()
+    # No command - show help
+    print_help()
+    sys.exit(1)
 
-    # Check for LLM API key
-    if not config["llm_api_key"]:
-        print("Error: LLM API key is required.", file=sys.stderr)
-        print("Run 'hindsight-embed configure' to set up.", file=sys.stderr)
-        sys.exit(1)
 
-    # Run the appropriate command
-    exit_code = 1
-    try:
-        if args.command == "retain":
-            exit_code = asyncio.run(do_retain(args, config, logger))
-        elif args.command == "recall":
-            exit_code = asyncio.run(do_recall(args, config, logger))
-        else:
-            parser.print_help()
-            exit_code = 1
-    except KeyboardInterrupt:
-        logger.debug("Interrupted")
-        exit_code = 130
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
-        print(f"Error: {e}", file=sys.stderr)
-        exit_code = 1
+def print_help():
+    """Print help message."""
+    print("""Hindsight Embedded CLI - local memory operations with automatic daemon management.
 
-    sys.exit(exit_code)
+Usage: hindsight-embed <command> [options]
+
+Built-in commands:
+    configure              Interactive configuration setup
+    daemon start           Start the background daemon
+    daemon stop            Stop the daemon
+    daemon status          Check daemon status
+    daemon logs [-f] [-n]  View daemon logs
+
+CLI commands (forwarded to hindsight-cli):
+    memory retain <bank> <content>   Store a memory
+    memory recall <bank> <query>     Search memories
+    memory reflect <bank> <query>    Generate contextual answer
+    bank list                        List memory banks
+    ...                              Run 'hindsight --help' for all commands
+
+Examples:
+    hindsight-embed configure
+    hindsight-embed memory retain default "User prefers dark mode"
+    hindsight-embed memory recall default "user preferences"
+    hindsight-embed daemon status
+    hindsight-embed daemon logs -f
+""")
 
 
 if __name__ == "__main__":

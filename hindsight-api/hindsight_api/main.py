@@ -4,6 +4,9 @@ Command-line interface for Hindsight API.
 Run the server with:
     hindsight-api
 
+Run as background daemon:
+    hindsight-api --daemon
+
 Stop with Ctrl+C.
 """
 
@@ -21,9 +24,13 @@ from . import MemoryEngine
 from .api import create_app
 from .banner import print_banner
 from .config import HindsightConfig, get_config
-
-print()
-print_banner()
+from .daemon import (
+    DEFAULT_DAEMON_PORT,
+    DEFAULT_IDLE_TIMEOUT,
+    DaemonLock,
+    IdleTimeoutMiddleware,
+    daemonize,
+)
 
 # Filter deprecation warnings from third-party libraries
 warnings.filterwarnings("ignore", message="websockets.legacy is deprecated")
@@ -106,7 +113,51 @@ def main():
     parser.add_argument("--ssl-keyfile", default=None, help="SSL key file")
     parser.add_argument("--ssl-certfile", default=None, help="SSL certificate file")
 
+    # Daemon mode options
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help=f"Run as background daemon (uses port {DEFAULT_DAEMON_PORT}, auto-exits after idle)",
+    )
+    parser.add_argument(
+        "--idle-timeout",
+        type=int,
+        default=DEFAULT_IDLE_TIMEOUT,
+        help=f"Idle timeout in seconds before auto-exit in daemon mode (default: {DEFAULT_IDLE_TIMEOUT})",
+    )
+
     args = parser.parse_args()
+
+    # Daemon mode handling
+    if args.daemon:
+        # Use fixed daemon port
+        args.port = DEFAULT_DAEMON_PORT
+        args.host = "127.0.0.1"  # Only bind to localhost for security
+
+        # Check if another daemon is already running
+        daemon_lock = DaemonLock()
+        if not daemon_lock.acquire():
+            print(f"Daemon already running (PID: {daemon_lock.get_pid()})", file=sys.stderr)
+            sys.exit(1)
+
+        # Fork into background
+        daemonize()
+
+        # Re-acquire lock in child process
+        daemon_lock = DaemonLock()
+        if not daemon_lock.acquire():
+            sys.exit(1)
+
+        # Register cleanup to release lock
+        def release_lock():
+            daemon_lock.release()
+
+        atexit.register(release_lock)
+
+    # Print banner (not in daemon mode)
+    if not args.daemon:
+        print()
+        print_banner()
 
     # Configure Python logging based on log level
     # Update config with CLI override if provided
@@ -128,9 +179,12 @@ def main():
             log_level=args.log_level,
             mcp_enabled=config.mcp_enabled,
             graph_retriever=config.graph_retriever,
+            skip_llm_verification=config.skip_llm_verification,
+            lazy_reranker=config.lazy_reranker,
         )
     config.configure_logging()
-    config.log_config()
+    if not args.daemon:
+        config.log_config()
 
     # Register cleanup handlers
     atexit.register(_cleanup)
@@ -148,6 +202,12 @@ def main():
         mcp_mount_path="/mcp",
         initialize_memory=True,
     )
+
+    # Wrap with idle timeout middleware in daemon mode
+    idle_middleware = None
+    if args.daemon:
+        idle_middleware = IdleTimeoutMiddleware(app, idle_timeout=args.idle_timeout)
+        app = idle_middleware
 
     # Prepare uvicorn config
     uvicorn_config = {
@@ -172,18 +232,38 @@ def main():
     if args.ssl_certfile:
         uvicorn_config["ssl_certfile"] = args.ssl_certfile
 
-    from .banner import print_startup_info
+    # Print startup info (not in daemon mode)
+    if not args.daemon:
+        from .banner import print_startup_info
 
-    print_startup_info(
-        host=args.host,
-        port=args.port,
-        database_url=config.database_url,
-        llm_provider=config.llm_provider,
-        llm_model=config.llm_model,
-        embeddings_provider=config.embeddings_provider,
-        reranker_provider=config.reranker_provider,
-        mcp_enabled=config.mcp_enabled,
-    )
+        print_startup_info(
+            host=args.host,
+            port=args.port,
+            database_url=config.database_url,
+            llm_provider=config.llm_provider,
+            llm_model=config.llm_model,
+            embeddings_provider=config.embeddings_provider,
+            reranker_provider=config.reranker_provider,
+            mcp_enabled=config.mcp_enabled,
+        )
+
+    # Start idle checker in daemon mode
+    if idle_middleware is not None:
+        # Start the idle checker in a background thread with its own event loop
+        import threading
+
+        def run_idle_checker():
+            import time
+
+            time.sleep(2)  # Wait for uvicorn to start
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(idle_middleware._check_idle())
+            except Exception:
+                pass
+
+        threading.Thread(target=run_idle_checker, daemon=True).start()
 
     uvicorn.run(**uvicorn_config)  # type: ignore[invalid-argument-type] - dict kwargs
 

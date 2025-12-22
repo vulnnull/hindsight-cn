@@ -26,6 +26,23 @@ class CrossEncoderReranker:
 
             cross_encoder = create_cross_encoder_from_env()
         self.cross_encoder = cross_encoder
+        self._initialized = False
+
+    async def ensure_initialized(self):
+        """Ensure the cross-encoder model is initialized (for lazy initialization)."""
+        if self._initialized:
+            return
+
+        import asyncio
+
+        cross_encoder = self.cross_encoder
+        # For local providers, run in thread pool to avoid blocking event loop
+        if cross_encoder.provider_name == "local":
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: asyncio.run(cross_encoder.initialize()))
+        else:
+            await cross_encoder.initialize()
+        self._initialized = True
 
     def rerank(self, query: str, candidates: list[MergedCandidate]) -> list[ScoredResult]:
         """

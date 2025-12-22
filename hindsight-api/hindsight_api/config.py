@@ -33,6 +33,10 @@ ENV_GRAPH_RETRIEVER = "HINDSIGHT_API_GRAPH_RETRIEVER"
 ENV_MCP_LOCAL_BANK_ID = "HINDSIGHT_API_MCP_LOCAL_BANK_ID"
 ENV_MCP_INSTRUCTIONS = "HINDSIGHT_API_MCP_INSTRUCTIONS"
 
+# Optimization flags
+ENV_SKIP_LLM_VERIFICATION = "HINDSIGHT_API_SKIP_LLM_VERIFICATION"
+ENV_LAZY_RERANKER = "HINDSIGHT_API_LAZY_RERANKER"
+
 # Default values
 DEFAULT_DATABASE_URL = "pg0"
 DEFAULT_LLM_PROVIDER = "openai"
@@ -107,6 +111,10 @@ class HindsightConfig:
     # Recall
     graph_retriever: str
 
+    # Optimization flags
+    skip_llm_verification: bool
+    lazy_reranker: bool
+
     @classmethod
     def from_env(cls) -> "HindsightConfig":
         """Create configuration from environment variables."""
@@ -133,6 +141,9 @@ class HindsightConfig:
             mcp_enabled=os.getenv(ENV_MCP_ENABLED, str(DEFAULT_MCP_ENABLED)).lower() == "true",
             # Recall
             graph_retriever=os.getenv(ENV_GRAPH_RETRIEVER, DEFAULT_GRAPH_RETRIEVER),
+            # Optimization flags
+            skip_llm_verification=os.getenv(ENV_SKIP_LLM_VERIFICATION, "false").lower() == "true",
+            lazy_reranker=os.getenv(ENV_LAZY_RERANKER, "false").lower() == "true",
         )
 
     def get_llm_base_url(self) -> str:

@@ -202,6 +202,8 @@ class MemoryEngine(MemoryEngineInterface):
         run_migrations: bool = True,
         operation_validator: "OperationValidatorExtension | None" = None,
         tenant_extension: "TenantExtension | None" = None,
+        skip_llm_verification: bool | None = None,
+        lazy_reranker: bool | None = None,
     ):
         """
         Initialize the temporal + semantic memory system.
@@ -227,11 +229,22 @@ class MemoryEngine(MemoryEngineInterface):
                                 If provided, retain/recall/reflect operations will be validated.
             tenant_extension: Optional extension for multi-tenancy and API key authentication.
                              If provided, operations require a RequestContext for authentication.
+            skip_llm_verification: Skip LLM connection verification during initialization.
+                                  Defaults to HINDSIGHT_API_SKIP_LLM_VERIFICATION env var or False.
+            lazy_reranker: Delay reranker initialization until first use. Useful for retain-only
+                          operations that don't need the cross-encoder. Defaults to
+                          HINDSIGHT_API_LAZY_RERANKER env var or False.
         """
         # Load config from environment for any missing parameters
         from ..config import get_config
 
         config = get_config()
+
+        # Apply optimization flags from config if not explicitly provided
+        self._skip_llm_verification = (
+            skip_llm_verification if skip_llm_verification is not None else config.skip_llm_verification
+        )
+        self._lazy_reranker = lazy_reranker if lazy_reranker is not None else config.lazy_reranker
 
         # Apply defaults from config
         db_url = db_url or config.database_url
@@ -592,6 +605,8 @@ class MemoryEngine(MemoryEngineInterface):
                 await loop.run_in_executor(None, lambda: asyncio.run(cross_encoder.initialize()))
             else:
                 await cross_encoder.initialize()
+            # Mark reranker as initialized
+            self._cross_encoder_reranker._initialized = True
 
         async def init_query_analyzer():
             """Initialize query analyzer model."""
@@ -600,16 +615,26 @@ class MemoryEngine(MemoryEngineInterface):
 
         async def verify_llm():
             """Verify LLM connection is working."""
-            await self._llm_config.verify_connection()
+            if not self._skip_llm_verification:
+                await self._llm_config.verify_connection()
 
-        # Run pg0 and all model initializations in parallel
-        await asyncio.gather(
+        # Build list of initialization tasks
+        init_tasks = [
             start_pg0(),
             init_embeddings(),
-            init_cross_encoder(),
             init_query_analyzer(),
-            verify_llm(),
-        )
+        ]
+
+        # Only init cross-encoder eagerly if not using lazy initialization
+        if not self._lazy_reranker:
+            init_tasks.append(init_cross_encoder())
+
+        # Only verify LLM if not skipping
+        if not self._skip_llm_verification:
+            init_tasks.append(verify_llm())
+
+        # Run pg0 and selected model initializations in parallel
+        await asyncio.gather(*init_tasks)
 
         # Run database migrations if enabled
         if self._run_migrations:
@@ -1638,6 +1663,9 @@ class MemoryEngine(MemoryEngineInterface):
             # Step 4: Rerank using cross-encoder (MergedCandidate -> ScoredResult)
             step_start = time.time()
             reranker_instance = self._cross_encoder_reranker
+
+            # Ensure reranker is initialized (for lazy initialization mode)
+            await reranker_instance.ensure_initialized()
 
             # Rerank using cross-encoder
             scored_results = reranker_instance.rerank(query, merged_candidates)
