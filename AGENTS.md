@@ -14,6 +14,7 @@ This document captures architectural decisions and coding conventions for the Hi
 hindsight/              # Python package for embedded usage
 hindsight-api/          # FastAPI server (core memory engine)
 hindsight-cli/          # Rust CLI client
+hindsight-embed/        # Embedded CLI (no server needed)
 hindsight-control-plane/ # Next.js admin UI
 hindsight-docs/         # Docusaurus documentation site
 hindsight-dev/          # Development tools and benchmarks
@@ -148,4 +149,5 @@ Note: The maintained wrapper `hindsight_client.py` and `README.md` are preserved
 
 # Branding
 ## Colors
-- Primary: gradient from #0074d9 to #009296  
+- Primary: gradient from #0074d9 to #009296
+

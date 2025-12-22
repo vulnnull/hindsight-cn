@@ -89,6 +89,38 @@ class TaskBackend(ABC):
             traceback.print_exc()
 
 
+class SyncTaskBackend(TaskBackend):
+    """
+    Synchronous task backend that executes tasks immediately.
+
+    This is useful for embedded/CLI usage where we don't want background
+    workers that prevent clean exit. Tasks are executed inline rather than
+    being queued.
+    """
+
+    async def initialize(self):
+        """No-op for sync backend."""
+        self._initialized = True
+        logger.debug("SyncTaskBackend initialized")
+
+    async def submit_task(self, task_dict: dict[str, Any]):
+        """
+        Execute the task immediately (synchronously).
+
+        Args:
+            task_dict: Task dictionary to execute
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        await self._execute_task(task_dict)
+
+    async def shutdown(self):
+        """No-op for sync backend."""
+        self._initialized = False
+        logger.debug("SyncTaskBackend shutdown")
+
+
 class AsyncIOQueueBackend(TaskBackend):
     """
     Task backend implementation using asyncio queues.

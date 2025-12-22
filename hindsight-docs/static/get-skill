@@ -1,0 +1,244 @@
+#!/bin/bash
+#
+# Install Hindsight Agent Skill
+#
+# Usage:
+#   curl -fsSL https://hindsight.vectorize.io/get-skill | bash
+#
+# Options:
+#   --app <app>    Target app: claude, opencode, codex
+#
+# Examples:
+#   curl -fsSL https://hindsight.vectorize.io/get-skill | bash -s -- --app claude
+#   curl -fsSL https://hindsight.vectorize.io/get-skill | bash -s -- --app opencode
+#
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m' # No Color
+
+print_info() {
+    echo -e "${BLUE}ℹ${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}✗${NC} $1"
+    exit 1
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
+print_step() {
+    echo ""
+    echo -e "${BOLD}${CYAN}▸ $1${NC}"
+    echo ""
+}
+
+print_banner() {
+    echo ""
+    # ANSI logo
+    echo -e "  \033[38;2;9;127;184m▄\033[0m\033[48;2;8;130;178m\033[38;2;5;133;186m▄\033[0m       \033[48;2;10;143;160m\033[38;2;10;143;165m▄\033[0m\033[38;2;7;140;156m▄\033[0m  "
+    echo -e " \033[38;2;8;125;192m▄\033[0m \033[38;2;3;132;191m▀\033[0m\033[38;2;2;133;192m▄\033[0m \033[38;2;3;132;180m▄\033[0m\033[38;2;1;137;184m▄\033[0m\033[38;2;3;133;174m▄\033[0m \033[38;2;3;142;176m▄\033[0m\033[38;2;4;142;169m▀\033[0m \033[38;2;10;144;164m▄\033[0m "
+    echo -e "\033[38;2;6;121;195m▀\033[0m\033[38;2;5;128;203m▀\033[0m\033[48;2;5;124;195m\033[38;2;3;125;200m▄\033[0m\033[38;2;2;126;196m▄\033[0m\033[48;2;3;128;188m\033[38;2;1;131;196m▄\033[0m\033[48;2;0;152;219m\033[38;2;2;131;191m▄\033[0m\033[38;2;1;141;196m▀\033[0m\033[38;2;1;135;183m▀\033[0m\033[38;2;1;148;198m▀\033[0m\033[48;2;1;156;202m\033[38;2;2;135;180m▄\033[0m\033[48;2;4;134;169m\033[38;2;1;137;177m▄\033[0m\033[38;2;3;138;173m▄\033[0m\033[48;2;6;137;165m\033[38;2;2;140;170m▄\033[0m\033[38;2;7;144;169m▀\033[0m\033[38;2;7;139;158m▀\033[0m"
+    echo -e "   \033[48;2;2;128;202m\033[38;2;2;124;201m▄\033[0m\033[48;2;1;130;201m\033[38;2;0;135;212m▄\033[0m\033[38;2;2;128;196m▄\033[0m \033[48;2;2;142;204m\033[38;2;7;138;199m▄\033[0m \033[38;2;1;135;186m▄\033[0m\033[48;2;1;142;186m\033[38;2;2;144;194m▄\033[0m\033[48;2;3;138;176m\033[38;2;2;134;176m▄\033[0m   "
+    echo -e " \033[48;2;8;118;200m\033[38;2;8;121;209m▄\033[0m\033[38;2;3;121;203m▀\033[0m \033[38;2;3;122;192m▀\033[0m\033[38;2;1;138;216m▀\033[0m\033[48;2;0;138;210m\033[38;2;3;128;198m▄\033[0m\033[48;2;0;126;188m\033[38;2;2;131;198m▄\033[0m\033[48;2;0;142;205m\033[38;2;3;132;193m▄\033[0m\033[38;2;1;140;196m▀\033[0m  \033[38;2;4;134;175m▀\033[0m\033[48;2;13;135;167m\033[38;2;8;136;174m▄\033[0m "
+    echo ""
+    echo -e "  ${BOLD}HINDSIGHT SKILL INSTALLER${NC}"
+    echo -e "  ${DIM}Give your AI agent persistent memory${NC}"
+    echo ""
+}
+
+# Embedded SKILL.md content
+SKILL_CONTENT='---
+name: hindsight
+description: Give your agent persistent memory that works like human memory. Store facts, preferences, and context that persist across sessions.
+---
+
+# Hindsight Memory Skill
+
+You have access to persistent memory via the `hindsight-embed` CLI. Use it to remember important information about the user and recall it when relevant.
+
+## Setup (first time only)
+
+Run: `uvx hindsight-embed configure`
+
+## Commands
+
+### Store a memory
+
+Use `retain` to store important facts, preferences, decisions, or context:
+
+```bash
+uvx hindsight-embed retain "User prefers dark mode for all UIs"
+uvx hindsight-embed retain "Project uses Python 3.11 with FastAPI" --context work
+```
+
+### Recall memories
+
+Use `recall` to search for relevant memories before starting tasks:
+
+```bash
+uvx hindsight-embed recall "What are the user'"'"'s UI preferences?"
+uvx hindsight-embed recall "What tech stack does this project use?"
+```
+
+## When to Use
+
+### Store memories when you learn:
+- User preferences (coding style, tools, UI preferences)
+- Project context (tech stack, architecture decisions)
+- Personal information the user shares (name, role, company)
+- Important decisions or outcomes
+
+### Recall memories when:
+- Starting a new task (get relevant context first)
+- Making decisions that should consider user preferences
+- Working on a project where past context would help
+
+## Best Practices
+
+1. **Be specific**: Store "User prefers 2-space indentation" not "User has preferences"
+2. **Recall first**: Before starting tasks, recall relevant context
+3. **Use context tags**: Organize with `--context` (work, personal, preferences)
+'
+
+# Get skills directory for app (bash 3.x compatible)
+get_skills_dir() {
+    case "$1" in
+        claude)   echo "$HOME/.claude/skills" ;;
+        opencode) echo "$HOME/.opencode/skills" ;;
+        codex)    echo "$HOME/.codex/skills" ;;
+        *)        echo "" ;;
+    esac
+}
+
+# Get app display name (bash 3.x compatible)
+get_app_name() {
+    case "$1" in
+        claude)   echo "Claude Code" ;;
+        opencode) echo "OpenCode" ;;
+        codex)    echo "Codex CLI" ;;
+        *)        echo "$1" ;;
+    esac
+}
+
+# Parse arguments
+APP=""
+
+show_usage() {
+    echo "Usage: $0 [--app <app>]"
+    echo ""
+    echo "Options:"
+    echo "  --app <app>    Target app: claude, opencode, codex"
+    echo ""
+    echo "Examples:"
+    echo "  $0 --app claude"
+    echo "  $0 --app opencode"
+    exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --app)
+            APP="$2"
+            shift 2
+            ;;
+        --help|-h)
+            show_usage
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            ;;
+    esac
+done
+
+# Show banner
+print_banner
+
+# Validate app parameter
+if [ -z "$APP" ]; then
+    echo -e "${DIM}Select your AI coding assistant:${NC}"
+    echo ""
+    echo "  ${BOLD}1)${NC} Claude Code"
+    echo "  ${BOLD}2)${NC} OpenCode"
+    echo "  ${BOLD}3)${NC} Codex CLI"
+    echo ""
+    read -p "Enter choice [1]: " app_choice
+    app_choice=${app_choice:-1}
+
+    case $app_choice in
+        1) APP="claude" ;;
+        2) APP="opencode" ;;
+        3) APP="codex" ;;
+        *) APP="claude" ;;
+    esac
+    echo ""
+fi
+
+# Get skills directory for selected app
+SKILLS_DIR=$(get_skills_dir "$APP")
+APP_NAME=$(get_app_name "$APP")
+if [ -z "$SKILLS_DIR" ]; then
+    print_error "Unknown app '$APP'. Supported: claude, opencode, codex"
+fi
+
+print_info "Installing for ${BOLD}$APP_NAME${NC}"
+
+# Step 1: Check for Python/uvx
+print_step "Checking prerequisites"
+
+if ! command -v python3 &> /dev/null && ! command -v uvx &> /dev/null; then
+    print_error "Python 3 or uvx is required.\nInstall from https://python.org or https://docs.astral.sh/uv/"
+fi
+print_success "Python/uvx available"
+
+# Step 2: Configure LLM provider using the CLI
+print_step "Configuring LLM provider"
+
+# Install/run hindsight-embed configure
+if command -v uvx &> /dev/null; then
+    uvx hindsight-embed configure
+else
+    pip install -q hindsight-embed
+    hindsight-embed configure
+fi
+
+# Step 3: Install skill to app's skills directory
+print_step "Installing skill to $APP_NAME"
+
+mkdir -p "$SKILLS_DIR/hindsight"
+
+# Write embedded SKILL.md content
+echo "$SKILL_CONTENT" > "$SKILLS_DIR/hindsight/SKILL.md"
+print_success "Installed to $SKILLS_DIR/hindsight/"
+
+# Done!
+echo ""
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}  ✓ Installation Complete!${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "  The Hindsight skill is now available in ${BOLD}$APP_NAME${NC}."
+echo ""
+echo -e "  ${DIM}Test the CLI:${NC}"
+echo -e "    ${CYAN}uvx hindsight-embed retain \"Test memory\"${NC}"
+echo -e "    ${CYAN}uvx hindsight-embed recall \"test\"${NC}"
+echo ""
+echo -e "  ${DIM}$APP_NAME will automatically use the skill when relevant.${NC}"
+echo ""
+echo -e "  ${DIM}Documentation:${NC} ${BLUE}https://hindsight.vectorize.io${NC}"
+echo ""

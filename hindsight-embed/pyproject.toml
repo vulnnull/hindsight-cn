@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hindsight-embed"
+version = "0.1.0"
+description = "Hindsight embedded CLI - local memory operations without a server"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "hindsight-api>=0.1.11",
+    "questionary>=2.0.0",
+]
+
+[project.scripts]
+hindsight-embed = "hindsight_embed.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hindsight_embed"]
+
+[tool.uv.sources]
+hindsight-api = { workspace = true }
