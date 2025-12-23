@@ -31,6 +31,7 @@ from .daemon import (
     IdleTimeoutMiddleware,
     daemonize,
 )
+from .extensions import OperationValidatorExtension, load_extension
 
 # Filter deprecation warnings from third-party libraries
 warnings.filterwarnings("ignore", message="websockets.legacy is deprecated")
@@ -191,8 +192,14 @@ def main():
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
+    # Load operation validator extension if configured
+    operation_validator = load_extension("OPERATION_VALIDATOR", OperationValidatorExtension)
+    if operation_validator:
+        import logging
+        logging.info(f"Loaded operation validator: {operation_validator.__class__.__name__}")
+
     # Create MemoryEngine (reads configuration from environment)
-    _memory = MemoryEngine()
+    _memory = MemoryEngine(operation_validator=operation_validator)
 
     # Create FastAPI app
     app = create_app(
