@@ -25,3 +25,28 @@ export async function GET(
     return NextResponse.json({ error: "Failed to fetch document" }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ documentId: string }> }
+) {
+  try {
+    const { documentId } = await params;
+    const searchParams = request.nextUrl.searchParams;
+    const bankId = searchParams.get("bank_id");
+
+    if (!bankId) {
+      return NextResponse.json({ error: "bank_id is required" }, { status: 400 });
+    }
+
+    const response = await sdk.deleteDocument({
+      client: lowLevelClient,
+      path: { bank_id: bankId, document_id: documentId },
+    });
+
+    return NextResponse.json(response.data, { status: 200 });
+  } catch (error) {
+    console.error("Error deleting document:", error);
+    return NextResponse.json({ error: "Failed to delete document" }, { status: 500 });
+  }
+}

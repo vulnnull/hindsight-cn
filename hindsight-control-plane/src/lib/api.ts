@@ -166,6 +166,20 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Delete document and all its associated memory units
+   */
+  async deleteDocument(documentId: string, bankId: string) {
+    return this.fetchApi<{
+      success: boolean;
+      message: string;
+      document_id: string;
+      memory_units_deleted: number;
+    }>(`/api/documents/${documentId}?bank_id=${bankId}`, {
+      method: "DELETE",
+    });
+  }
+
+  /**
    * Get chunk
    */
   async getChunk(chunkId: string) {

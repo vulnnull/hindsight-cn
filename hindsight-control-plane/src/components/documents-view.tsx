@@ -13,7 +13,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { X, Trash2 } from "lucide-react";
 
 export function DocumentsView() {
   const { currentBank } = useBank();
@@ -25,6 +35,16 @@ export function DocumentsView() {
   // Document view panel state
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
   const [loadingDocument, setLoadingDocument] = useState(false);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+
+  // Delete confirmation dialog state
+  const [documentToDelete, setDocumentToDelete] = useState<{
+    id: string;
+    memoryCount?: number;
+  } | null>(null);
+  const [deleteResult, setDeleteResult] = useState<{ success: boolean; message: string } | null>(
+    null
+  );
 
   const loadDocuments = async () => {
     if (!currentBank) return;
@@ -62,6 +82,42 @@ export function DocumentsView() {
     } finally {
       setLoadingDocument(false);
     }
+  };
+
+  const confirmDeleteDocument = async () => {
+    if (!currentBank || !documentToDelete) return;
+
+    const documentId = documentToDelete.id;
+    setDeletingDocumentId(documentId);
+    setDocumentToDelete(null);
+
+    try {
+      const result = await client.deleteDocument(documentId, currentBank);
+      setDeleteResult({
+        success: true,
+        message: `Deleted document and ${result.memory_units_deleted} memory units.`,
+      });
+
+      // Close panel if this document was selected
+      if (selectedDocument?.id === documentId) {
+        setSelectedDocument(null);
+      }
+
+      // Reload documents list
+      loadDocuments();
+    } catch (error) {
+      console.error("Error deleting document:", error);
+      setDeleteResult({
+        success: false,
+        message: "Error deleting document: " + (error as Error).message,
+      });
+    } finally {
+      setDeletingDocumentId(null);
+    }
+  };
+
+  const requestDeleteDocument = (documentId: string, memoryCount?: number) => {
+    setDocumentToDelete({ id: documentId, memoryCount });
   };
 
   // Auto-load documents when component mounts
@@ -116,7 +172,6 @@ export function DocumentsView() {
                     <TableHead>Context</TableHead>
                     <TableHead>Text Length</TableHead>
                     <TableHead>Memory Units</TableHead>
-                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -142,24 +197,11 @@ export function DocumentsView() {
                         <TableCell className="text-card-foreground">
                           {doc.memory_unit_count}
                         </TableCell>
-                        <TableCell>
-                          <Button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              viewDocumentText(doc.id);
-                            }}
-                            size="sm"
-                            variant={selectedDocument?.id === doc.id ? "default" : "secondary"}
-                            title="View original text"
-                          >
-                            View Text
-                          </Button>
-                        </TableCell>
                       </TableRow>
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center">
+                      <TableCell colSpan={5} className="text-center">
                         Click "Load Documents" to view data
                       </TableCell>
                     </TableRow>
@@ -276,6 +318,29 @@ export function DocumentsView() {
                       </div>
                     )}
 
+                    {/* Delete Button */}
+                    <div className="pt-2 border-t border-border">
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() =>
+                          requestDeleteDocument(
+                            selectedDocument.id,
+                            selectedDocument.memory_unit_count
+                          )
+                        }
+                        className="w-full gap-2"
+                        disabled={deletingDocumentId === selectedDocument.id}
+                      >
+                        {deletingDocumentId === selectedDocument.id ? (
+                          <span className="animate-spin">⏳</span>
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                        Delete Document
+                      </Button>
+                    </div>
+
                     {/* Original Text */}
                     {selectedDocument.original_text && (
                       <div>
@@ -296,6 +361,58 @@ export function DocumentsView() {
           )}
         </>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog
+        open={!!documentToDelete}
+        onOpenChange={(open) => !open && setDocumentToDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Document</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete document{" "}
+              <span className="font-mono font-semibold">&quot;{documentToDelete?.id}&quot;</span>?
+              <br />
+              <br />
+              This will also delete{" "}
+              {documentToDelete?.memoryCount !== undefined ? (
+                <span className="font-semibold">{documentToDelete.memoryCount} memory units</span>
+              ) : (
+                "all memory units"
+              )}{" "}
+              extracted from this document.
+              <br />
+              <br />
+              <span className="text-destructive font-semibold">This action cannot be undone.</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeleteDocument}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Result Dialog */}
+      <AlertDialog open={!!deleteResult} onOpenChange={(open) => !open && setDeleteResult(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteResult?.success ? "Document Deleted" : "Error"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{deleteResult?.message}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setDeleteResult(null)}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

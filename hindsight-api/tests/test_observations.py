@@ -174,6 +174,107 @@ async def test_regenerate_entity_observations(memory, request_context):
 
 
 @pytest.mark.asyncio
+async def test_manual_regenerate_with_few_facts(memory, request_context):
+    """
+    Test that manual regeneration works even with fewer than 5 facts.
+
+    This is important because:
+    - Automatic generation during retain requires MIN_FACTS_THRESHOLD (5)
+    - But manual regeneration via API should work with any number of facts
+    - The UI triggers manual regeneration, so it should work regardless of fact count
+    """
+    bank_id = f"test_manual_regen_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Store only 2 facts - below the automatic threshold
+        await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice works at Google as a senior software engineer.",
+            context="work info",
+            event_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
+            request_context=request_context,
+        )
+        await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice loves hiking and outdoor photography.",
+            context="hobbies",
+            event_date=datetime(2024, 1, 16, tzinfo=timezone.utc),
+            request_context=request_context,
+        )
+
+        # Find the Alice entity
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            entity_row = await conn.fetchrow(
+                """
+                SELECT id, canonical_name
+                FROM entities
+                WHERE bank_id = $1 AND LOWER(canonical_name) LIKE '%alice%'
+                LIMIT 1
+                """,
+                bank_id
+            )
+
+        assert entity_row is not None, "Alice entity should have been extracted"
+
+        entity_id = str(entity_row['id'])
+        entity_name = entity_row['canonical_name']
+
+        # Check fact count - should be < 5
+        async with pool.acquire() as conn:
+            fact_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM unit_entities WHERE entity_id = $1",
+                entity_row['id']
+            )
+
+        print(f"\n=== Manual Regeneration Test ===")
+        print(f"Entity: {entity_name} (id: {entity_id})")
+        print(f"Linked facts: {fact_count}")
+
+        # Verify we're testing with fewer than the automatic threshold
+        assert fact_count < 5, f"Test requires < 5 facts, but entity has {fact_count}"
+
+        # Before regeneration - should have no observations (auto threshold not met)
+        obs_before = await memory.get_entity_observations(bank_id, entity_id, limit=10, request_context=request_context)
+        print(f"Observations before manual regenerate: {len(obs_before)}")
+
+        # Manually regenerate observations - this should work regardless of fact count
+        created_ids = await memory.regenerate_entity_observations(
+            bank_id=bank_id,
+            entity_id=entity_id,
+            entity_name=entity_name,
+            request_context=request_context,
+        )
+
+        print(f"Observations created by manual regenerate: {len(created_ids)}")
+
+        # Get observations after regeneration
+        observations = await memory.get_entity_observations(bank_id, entity_id, limit=10, request_context=request_context)
+        print(f"Observations after manual regenerate: {len(observations)}")
+        for obs in observations:
+            print(f"  - {obs.text}")
+
+        # Manual regeneration should create observations even with < 5 facts
+        assert len(observations) > 0, \
+            f"Manual regeneration should create observations even with only {fact_count} facts. " \
+            f"The LLM should synthesize at least 1 observation from the available facts."
+
+        # Verify observations contain relevant content
+        obs_texts = " ".join([o.text.lower() for o in observations])
+        assert any(keyword in obs_texts for keyword in ["google", "engineer", "hiking", "photography", "alice"]), \
+            "Observations should contain relevant information about Alice"
+
+        print(f"✓ Manual regeneration works with {fact_count} facts (below automatic threshold of 5)")
+
+    finally:
+        # Cleanup
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM memory_units WHERE bank_id = $1", bank_id)
+            await conn.execute("DELETE FROM entities WHERE bank_id = $1", bank_id)
+
+
+@pytest.mark.asyncio
 async def test_search_with_include_entities(memory, request_context):
     """
     Test that search with include_entities=True returns entity observations.

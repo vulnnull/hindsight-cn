@@ -139,7 +139,7 @@ const config: Config = {
         isCloseable: false,
       },
     }),
-    image: 'img/hindsight-social-card.jpg',
+    image: 'img/logo.png',
     colorMode: {
       defaultMode: 'dark',
       respectPrefersColorScheme: true,

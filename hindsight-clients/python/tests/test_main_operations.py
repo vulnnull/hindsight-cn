@@ -344,3 +344,160 @@ class TestDocuments:
         assert response.success is True
         assert response.document_id == doc_id
         assert response.memory_units_deleted >= 0
+
+    def test_get_document(self, client, bank_id):
+        """Test getting a document."""
+        import asyncio
+        from hindsight_client_api import ApiClient, Configuration
+        from hindsight_client_api.api import DocumentsApi
+
+        # First create a document
+        doc_id = f"test-doc-{uuid.uuid4().hex[:8]}"
+        client.retain(
+            bank_id=bank_id,
+            content="Test document content for retrieval",
+            document_id=doc_id,
+        )
+
+        async def do_get():
+            config = Configuration(host=HINDSIGHT_API_URL)
+            api_client = ApiClient(config)
+            api = DocumentsApi(api_client)
+            return await api.get_document(bank_id=bank_id, document_id=doc_id)
+
+        document = asyncio.get_event_loop().run_until_complete(do_get())
+
+        assert document is not None
+        assert document.id == doc_id
+        assert "Test document content" in document.original_text
+
+
+class TestEntities:
+    """Tests for entity endpoints."""
+
+    @pytest.fixture(autouse=True)
+    def setup_memories(self, client, bank_id):
+        """Setup: Store memories that will generate entities."""
+        client.retain_batch(
+            bank_id=bank_id,
+            items=[
+                {"content": "Alice works at Google as a software engineer"},
+                {"content": "Bob is friends with Alice and works at Microsoft"},
+            ],
+            retain_async=False,
+        )
+
+    def test_list_entities(self, client, bank_id):
+        """Test listing entities."""
+        import asyncio
+        from hindsight_client_api import ApiClient, Configuration
+        from hindsight_client_api.api import EntitiesApi
+
+        async def do_list():
+            config = Configuration(host=HINDSIGHT_API_URL)
+            api_client = ApiClient(config)
+            api = EntitiesApi(api_client)
+            return await api.list_entities(bank_id=bank_id)
+
+        response = asyncio.get_event_loop().run_until_complete(do_list())
+
+        assert response is not None
+        assert response.items is not None
+        assert isinstance(response.items, list)
+
+    def test_get_entity(self, client, bank_id):
+        """Test getting a specific entity."""
+        import asyncio
+        from hindsight_client_api import ApiClient, Configuration
+        from hindsight_client_api.api import EntitiesApi
+
+        async def do_test():
+            config = Configuration(host=HINDSIGHT_API_URL)
+            api_client = ApiClient(config)
+            api = EntitiesApi(api_client)
+
+            # First list entities to get an ID
+            list_response = await api.list_entities(bank_id=bank_id)
+
+            if list_response.items and len(list_response.items) > 0:
+                entity_id = list_response.items[0].id
+
+                # Get the entity
+                entity = await api.get_entity(bank_id=bank_id, entity_id=entity_id)
+                return entity_id, entity
+            return None, None
+
+        entity_id, entity = asyncio.get_event_loop().run_until_complete(do_test())
+
+        if entity_id:
+            assert entity is not None
+            assert entity.id == entity_id
+
+    def test_regenerate_entity_observations(self, client, bank_id):
+        """Test regenerating observations for an entity."""
+        import asyncio
+        from hindsight_client_api import ApiClient, Configuration
+        from hindsight_client_api.api import EntitiesApi
+
+        async def do_test():
+            config = Configuration(host=HINDSIGHT_API_URL)
+            api_client = ApiClient(config)
+            api = EntitiesApi(api_client)
+
+            # First list entities to get an ID
+            list_response = await api.list_entities(bank_id=bank_id)
+
+            if list_response.items and len(list_response.items) > 0:
+                entity_id = list_response.items[0].id
+
+                # Regenerate observations
+                result = await api.regenerate_entity_observations(
+                    bank_id=bank_id,
+                    entity_id=entity_id,
+                )
+                return entity_id, result
+            return None, None
+
+        entity_id, result = asyncio.get_event_loop().run_until_complete(do_test())
+
+        if entity_id:
+            assert result is not None
+            assert result.id == entity_id
+
+
+class TestDeleteBank:
+    """Tests for bank deletion."""
+
+    def test_delete_bank(self, client):
+        """Test deleting a bank."""
+        import asyncio
+        from hindsight_client_api import ApiClient, Configuration
+        from hindsight_client_api.api import BanksApi
+
+        # Create a unique bank for this test
+        bank_id = f"test_bank_delete_{uuid.uuid4().hex[:12]}"
+
+        # Create bank with some data
+        client.create_bank(
+            bank_id=bank_id,
+            background="This bank will be deleted",
+        )
+        client.retain(
+            bank_id=bank_id,
+            content="Some memory to store",
+        )
+
+        async def do_delete():
+            config = Configuration(host=HINDSIGHT_API_URL)
+            api_client = ApiClient(config)
+            api = BanksApi(api_client)
+            return await api.delete_bank(bank_id=bank_id)
+
+        response = asyncio.get_event_loop().run_until_complete(do_delete())
+
+        assert response is not None
+        assert response.success is True
+
+        # Verify bank data is deleted - memories should be gone
+        memories = client.list_memories(bank_id=bank_id)
+        assert memories.total == 0

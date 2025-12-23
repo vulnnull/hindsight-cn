@@ -512,7 +512,7 @@ export function Graph2D({
         ref={containerRef}
         className="w-full h-full"
         style={{
-          background: isDarkMode
+          backgroundImage: isDarkMode
             ? "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.08) 1px, transparent 0)"
             : "radial-gradient(circle at 1px 1px, rgba(0,0,0,0.06) 1px, transparent 0)",
           backgroundSize: "20px 20px",
