@@ -8,6 +8,16 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.1.15](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.15)
+
+**Features**
+
+- Add the ability to delete documents from the web UI. ([`f7ff32d`](https://github.com/vectorize-io/hindsight/commit/f7ff32d))
+
+**Improvements**
+
+- Improve the API health check endpoint and update the generated client APIs/types accordingly. ([`e06a612`](https://github.com/vectorize-io/hindsight/commit/e06a612))
+
 ## [0.1.14](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.14)
 
 **Bug Fixes**
