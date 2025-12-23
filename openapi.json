@@ -86,6 +86,22 @@
               ],
               "title": "Type"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -181,6 +197,22 @@
               "default": 0,
               "title": "Offset"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -223,6 +255,22 @@
             "schema": {
               "type": "string",
               "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -277,6 +325,22 @@
               "type": "string",
               "title": "Bank Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "requestBody": {
@@ -321,6 +385,24 @@
         "summary": "List all memory banks",
         "description": "Get a list of all agents with their profiles",
         "operationId": "list_banks",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -328,6 +410,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BankListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -359,7 +451,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BankStatsResponse"
+                }
               }
             }
           },
@@ -405,6 +499,22 @@
               "title": "Limit"
             },
             "description": "Maximum number of entities to return"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -457,6 +567,22 @@
               "type": "string",
               "title": "Entity Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -508,6 +634,22 @@
             "schema": {
               "type": "string",
               "title": "Entity Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -588,6 +730,22 @@
               "default": 0,
               "title": "Offset"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -640,6 +798,22 @@
               "type": "string",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -690,6 +864,22 @@
               "type": "string",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -697,7 +887,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteDocumentResponse"
+                }
               }
             }
           },
@@ -730,6 +922,22 @@
             "schema": {
               "type": "string",
               "title": "Chunk Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -774,6 +982,22 @@
               "type": "string",
               "title": "Bank Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -781,7 +1005,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OperationsListResponse"
+                }
               }
             }
           },
@@ -824,6 +1050,22 @@
               "type": "string",
               "title": "Operation Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -831,7 +1073,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CancelOperationResponse"
+                }
               }
             }
           },
@@ -864,6 +1108,22 @@
             "schema": {
               "type": "string",
               "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -905,6 +1165,22 @@
             "schema": {
               "type": "string",
               "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -959,6 +1235,22 @@
               "type": "string",
               "title": "Bank Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "requestBody": {
@@ -1012,6 +1304,22 @@
               "type": "string",
               "title": "Bank Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "requestBody": {
@@ -1063,6 +1371,22 @@
               "type": "string",
               "title": "Bank Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -1105,6 +1429,22 @@
             "schema": {
               "type": "string",
               "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -1175,6 +1515,22 @@
               "title": "Type"
             },
             "description": "Optional fact type filter (world, experience, opinion)"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -1394,6 +1750,110 @@
           "name": "Alice"
         }
       },
+      "BankStatsResponse": {
+        "properties": {
+          "bank_id": {
+            "type": "string",
+            "title": "Bank Id"
+          },
+          "total_nodes": {
+            "type": "integer",
+            "title": "Total Nodes"
+          },
+          "total_links": {
+            "type": "integer",
+            "title": "Total Links"
+          },
+          "total_documents": {
+            "type": "integer",
+            "title": "Total Documents"
+          },
+          "nodes_by_fact_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Nodes By Fact Type"
+          },
+          "links_by_link_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Links By Link Type"
+          },
+          "links_by_fact_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Links By Fact Type"
+          },
+          "links_breakdown": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Links Breakdown"
+          },
+          "pending_operations": {
+            "type": "integer",
+            "title": "Pending Operations"
+          },
+          "failed_operations": {
+            "type": "integer",
+            "title": "Failed Operations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bank_id",
+          "total_nodes",
+          "total_links",
+          "total_documents",
+          "nodes_by_fact_type",
+          "links_by_link_type",
+          "links_by_fact_type",
+          "links_breakdown",
+          "pending_operations",
+          "failed_operations"
+        ],
+        "title": "BankStatsResponse",
+        "description": "Response model for bank statistics endpoint.",
+        "example": {
+          "bank_id": "user123",
+          "failed_operations": 0,
+          "links_breakdown": {
+            "fact": {
+              "entity": 40,
+              "semantic": 60,
+              "temporal": 100
+            }
+          },
+          "links_by_fact_type": {
+            "fact": 200,
+            "observation": 40,
+            "preference": 60
+          },
+          "links_by_link_type": {
+            "entity": 50,
+            "semantic": 100,
+            "temporal": 150
+          },
+          "nodes_by_fact_type": {
+            "fact": 100,
+            "observation": 20,
+            "preference": 30
+          },
+          "pending_operations": 2,
+          "total_documents": 10,
+          "total_links": 300,
+          "total_nodes": 150
+        }
+      },
       "Budget": {
         "type": "string",
         "enum": [
@@ -1403,6 +1863,35 @@
         ],
         "title": "Budget",
         "description": "Budget levels for recall/reflect operations."
+      },
+      "CancelOperationResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "operation_id"
+        ],
+        "title": "CancelOperationResponse",
+        "description": "Response model for cancel operation endpoint.",
+        "example": {
+          "message": "Operation 550e8400-e29b-41d4-a716-446655440000 cancelled",
+          "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+          "success": true
+        }
       },
       "ChunkData": {
         "properties": {
@@ -1540,6 +2029,41 @@
             "skepticism": 3
           },
           "name": "Alice"
+        }
+      },
+      "DeleteDocumentResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "memory_units_deleted": {
+            "type": "integer",
+            "title": "Memory Units Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "document_id",
+          "memory_units_deleted"
+        ],
+        "title": "DeleteDocumentResponse",
+        "description": "Response model for delete document endpoint.",
+        "example": {
+          "document_id": "session_1",
+          "memory_units_deleted": 5,
+          "message": "Document 'session_1' and 5 associated memory units deleted successfully",
+          "success": true
         }
       },
       "DeleteResponse": {
@@ -2210,6 +2734,106 @@
             "source": "slack"
           },
           "timestamp": "2024-01-15T10:30:00Z"
+        }
+      },
+      "OperationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "task_type": {
+            "type": "string",
+            "title": "Task Type"
+          },
+          "items_count": {
+            "type": "integer",
+            "title": "Items Count"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "task_type",
+          "items_count",
+          "document_id",
+          "created_at",
+          "status",
+          "error_message"
+        ],
+        "title": "OperationResponse",
+        "description": "Response model for a single async operation.",
+        "example": {
+          "created_at": "2024-01-15T10:30:00Z",
+          "document_id": "meeting-notes-2024",
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "items_count": 5,
+          "status": "pending",
+          "task_type": "retain"
+        }
+      },
+      "OperationsListResponse": {
+        "properties": {
+          "bank_id": {
+            "type": "string",
+            "title": "Bank Id"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/OperationResponse"
+            },
+            "type": "array",
+            "title": "Operations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bank_id",
+          "operations"
+        ],
+        "title": "OperationsListResponse",
+        "description": "Response model for list operations endpoint.",
+        "example": {
+          "bank_id": "user123",
+          "operations": [
+            {
+              "created_at": "2024-01-15T10:30:00Z",
+              "id": "550e8400-e29b-41d4-a716-446655440000",
+              "items_count": 5,
+              "status": "pending",
+              "task_type": "retain"
+            }
+          ]
         }
       },
       "RecallRequest": {

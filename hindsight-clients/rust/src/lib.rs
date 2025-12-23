@@ -12,8 +12,8 @@
 //!     let client = Client::new("http://localhost:8888");
 //!
 //!     // List memory banks
-//!     let banks = client.list_banks().await?;
-//!     println!("Found {} banks", banks.into_inner().len());
+//!     let banks = client.list_banks(None).await?;
+//!     println!("Found {} banks", banks.into_inner().banks.len());
 //!
 //!     Ok(())
 //! }
@@ -48,7 +48,7 @@ mod tests {
             ..Default::default()
         };
         let create_response = client
-            .create_or_update_bank(&bank_id, &create_request)
+            .create_or_update_bank(&bank_id, None, &create_request)
             .await
             .expect("Failed to create bank");
         assert_eq!(create_response.into_inner().bank_id, bank_id);
@@ -74,7 +74,7 @@ mod tests {
             ],
         };
         let retain_response = client
-            .retain_memories(&bank_id, &retain_request)
+            .retain_memories(&bank_id, None, &retain_request)
             .await
             .expect("Failed to retain memories");
         assert!(retain_response.into_inner().success);
@@ -90,7 +90,7 @@ mod tests {
             types: None,
         };
         let recall_response = client
-            .recall_memories(&bank_id, &recall_request)
+            .recall_memories(&bank_id, None, &recall_request)
             .await
             .expect("Failed to recall memories");
         let recall_result = recall_response.into_inner();
@@ -104,13 +104,13 @@ mod tests {
             include: None,
         };
         let reflect_response = client
-            .reflect(&bank_id, &reflect_request)
+            .reflect(&bank_id, None, &reflect_request)
             .await
             .expect("Failed to reflect");
         let reflect_result = reflect_response.into_inner();
         assert!(!reflect_result.text.is_empty(), "Reflect should return some text");
 
         // Cleanup: delete the test bank's memories
-        let _ = client.clear_bank_memories(&bank_id, None).await;
+        let _ = client.clear_bank_memories(&bank_id, None, None).await;
     }
 }

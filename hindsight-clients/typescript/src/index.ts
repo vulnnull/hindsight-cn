@@ -78,9 +78,9 @@ export class HindsightClient {
     async retain(
         bankId: string,
         content: string,
-        options?: { timestamp?: Date | string; context?: string; metadata?: Record<string, string>; async?: boolean }
+        options?: { timestamp?: Date | string; context?: string; metadata?: Record<string, string>; documentId?: string; async?: boolean }
     ): Promise<RetainResponse> {
-        const item: { content: string; timestamp?: string; context?: string; metadata?: Record<string, string> } = { content };
+        const item: { content: string; timestamp?: string; context?: string; metadata?: Record<string, string>; document_id?: string } = { content };
         if (options?.timestamp) {
             item.timestamp =
                 options.timestamp instanceof Date
@@ -92,6 +92,9 @@ export class HindsightClient {
         }
         if (options?.metadata) {
             item.metadata = options.metadata;
+        }
+        if (options?.documentId) {
+            item.document_id = options.documentId;
         }
 
         const response = await sdk.retainMemories({

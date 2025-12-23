@@ -248,3 +248,99 @@ class TestEndToEndWorkflow:
         )
         assert reflect_response.text is not None
         assert len(reflect_response.text) > 0
+
+
+class TestBankStats:
+    """Tests for bank statistics endpoint."""
+
+    @pytest.fixture(autouse=True)
+    def setup_memories(self, client, bank_id):
+        """Setup: Store some test memories."""
+        client.retain_batch(
+            bank_id=bank_id,
+            items=[
+                {"content": "Alice likes Python programming"},
+                {"content": "Bob enjoys hiking in the mountains"},
+            ],
+            retain_async=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_bank_stats(self, client, bank_id):
+        """Test getting bank statistics."""
+        from hindsight_client_api import ApiClient, Configuration
+        from hindsight_client_api.api import BanksApi
+
+        config = Configuration(host=HINDSIGHT_API_URL)
+        api_client = ApiClient(config)
+        api = BanksApi(api_client)
+        stats = await api.get_agent_stats(bank_id=bank_id)
+
+        assert stats is not None
+        assert stats.bank_id == bank_id
+        assert stats.total_nodes >= 0
+        assert stats.total_links >= 0
+        assert stats.total_documents >= 0
+        assert isinstance(stats.nodes_by_fact_type, dict)
+        assert isinstance(stats.links_by_link_type, dict)
+
+
+class TestOperations:
+    """Tests for operations endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_list_operations(self, client, bank_id):
+        """Test listing operations."""
+        from hindsight_client_api import ApiClient, Configuration
+        from hindsight_client_api.api import OperationsApi
+
+        # First create an async operation using aretain_batch
+        await client.aretain_batch(
+            bank_id=bank_id,
+            items=[{"content": "Test content for async operation"}],
+            retain_async=True,
+        )
+
+        config = Configuration(host=HINDSIGHT_API_URL)
+        api_client = ApiClient(config)
+        api = OperationsApi(api_client)
+        response = await api.list_operations(bank_id=bank_id)
+
+        assert response is not None
+        assert response.bank_id == bank_id
+        assert isinstance(response.operations, list)
+
+
+class TestDocuments:
+    """Tests for document endpoints."""
+
+    def test_delete_document(self, client, bank_id):
+        """Test deleting a document."""
+        import asyncio
+        from hindsight_client_api import ApiClient, Configuration
+        from hindsight_client_api.api import DocumentsApi
+
+        # First create a document using sync retain
+        doc_id = f"test-doc-{uuid.uuid4().hex[:8]}"
+        client.retain(
+            bank_id=bank_id,
+            content="Test document content for deletion",
+            document_id=doc_id,
+        )
+
+        # Use async API for delete (run in event loop)
+        async def do_delete():
+            config = Configuration(host=HINDSIGHT_API_URL)
+            api_client = ApiClient(config)
+            api = DocumentsApi(api_client)
+
+            # Try to delete
+            response = await api.delete_document(bank_id=bank_id, document_id=doc_id)
+            return response
+
+        response = asyncio.get_event_loop().run_until_complete(do_delete())
+
+        assert response is not None
+        assert response.success is True
+        assert response.document_id == doc_id
+        assert response.memory_units_deleted >= 0

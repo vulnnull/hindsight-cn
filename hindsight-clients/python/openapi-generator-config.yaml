@@ -3,3 +3,7 @@ projectName: hindsight-client
 packageVersion: 0.0.7
 library: asyncio
 generateSourceCodeOnly: true
+# Don't generate auto tests - we have our own integration tests
+globalProperties:
+  apiTests: false
+  modelTests: false

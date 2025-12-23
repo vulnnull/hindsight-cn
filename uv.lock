@@ -1292,7 +1292,7 @@ wheels = [
 
 [[package]]
 name = "hindsight-all"
-version = "0.1.13"
+version = "0.1.14"
 source = { editable = "hindsight" }
 dependencies = [
     { name = "hindsight-api" },
@@ -1316,7 +1316,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "hindsight-api"
-version = "0.1.13"
+version = "0.1.14"
 source = { editable = "hindsight-api" }
 dependencies = [
     { name = "alembic" },
@@ -1422,7 +1422,7 @@ dev = [
 
 [[package]]
 name = "hindsight-client"
-version = "0.1.13"
+version = "0.1.14"
 source = { editable = "hindsight-clients/python" }
 dependencies = [
     { name = "aiohttp" },
@@ -1456,7 +1456,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "hindsight-dev"
-version = "0.1.13"
+version = "0.1.14"
 source = { editable = "hindsight-dev" }
 dependencies = [
     { name = "hindsight-api" },
@@ -1497,8 +1497,20 @@ dependencies = [
     { name = "httpx" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+    { name = "ty" },
+]
+
 [package.metadata]
 requires-dist = [{ name = "httpx", specifier = ">=0.27.0" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ruff", specifier = ">=0.8.0" },
+    { name = "ty", specifier = ">=0.0.1" },
+]
 
 [[package]]
 name = "httpcore"

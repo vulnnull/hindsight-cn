@@ -197,9 +197,9 @@ if [ -z "$APP" ]; then
     if [ -t 0 ] || [ -e /dev/tty ]; then
         echo -e "${DIM}Select your AI coding assistant:${NC}"
         echo ""
-        echo "  ${BOLD}1)${NC} Claude Code"
-        echo "  ${BOLD}2)${NC} OpenCode"
-        echo "  ${BOLD}3)${NC} Codex CLI"
+        echo -e "  ${BOLD}1)${NC} Claude Code"
+        echo -e "  ${BOLD}2)${NC} OpenCode"
+        echo -e "  ${BOLD}3)${NC} Codex CLI"
         echo ""
         # Use /dev/tty for input if stdin is piped
         if [ -t 0 ]; then
@@ -244,11 +244,12 @@ print_success "Python/uvx available"
 print_step "Configuring LLM provider"
 
 # Install/run hindsight-embed configure
+# Redirect stdin from /dev/tty to avoid "not a terminal" warnings
 if command -v uvx &> /dev/null; then
-    uvx hindsight-embed configure
+    uvx hindsight-embed configure </dev/tty
 else
     pip install -q hindsight-embed
-    hindsight-embed configure
+    hindsight-embed configure </dev/tty
 fi
 
 # Step 3: Install skill to app's skills directory

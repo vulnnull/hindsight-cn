@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 import hindsight_client_api
-from hindsight_client_api.api import default_api
+from hindsight_client_api.api import memory_api, banks_api
 from hindsight_client_api.models import (
     recall_request,
     retain_request,
@@ -74,7 +74,8 @@ class Hindsight:
         """
         config = hindsight_client_api.Configuration(host=base_url, access_token=api_key)
         self._api_client = hindsight_client_api.ApiClient(config)
-        self._api = default_api.DefaultApi(self._api_client)
+        self._memory_api = memory_api.MemoryApi(self._api_client)
+        self._banks_api = banks_api.BanksApi(self._api_client)
 
     def __enter__(self):
         """Context manager entry."""
@@ -168,7 +169,7 @@ class Hindsight:
             async_=retain_async,
         )
 
-        return _run_async(self._api.retain_memories(bank_id, request_obj))
+        return _run_async(self._memory_api.retain_memories(bank_id, request_obj))
 
     def recall(
         self,
@@ -220,7 +221,7 @@ class Hindsight:
             include=include_opts,
         )
 
-        return _run_async(self._api.recall_memories(bank_id, request_obj))
+        return _run_async(self._memory_api.recall_memories(bank_id, request_obj))
 
     def reflect(
         self,
@@ -247,7 +248,7 @@ class Hindsight:
             context=context,
         )
 
-        return _run_async(self._api.reflect(bank_id, request_obj))
+        return _run_async(self._memory_api.reflect(bank_id, request_obj))
 
     def list_memories(
         self,
@@ -258,7 +259,7 @@ class Hindsight:
         offset: int = 0,
     ) -> ListMemoryUnitsResponse:
         """List memory units with pagination."""
-        return _run_async(self._api.list_memories(
+        return _run_async(self._memory_api.list_memories(
             bank_id=bank_id,
             type=type,
             q=search_query,
@@ -286,7 +287,7 @@ class Hindsight:
             disposition=disposition_obj,
         )
 
-        return _run_async(self._api.create_or_update_bank(bank_id, request_obj))
+        return _run_async(self._banks_api.create_or_update_bank(bank_id, request_obj))
 
     # Async methods (native async, no _run_async wrapper)
 
@@ -326,7 +327,7 @@ class Hindsight:
             async_=retain_async,
         )
 
-        return await self._api.retain_memories(bank_id, request_obj)
+        return await self._memory_api.retain_memories(bank_id, request_obj)
 
     async def aretain(
         self,
@@ -386,7 +387,7 @@ class Hindsight:
             trace=False,
         )
 
-        response = await self._api.recall_memories(bank_id, request_obj)
+        response = await self._memory_api.recall_memories(bank_id, request_obj)
         return response.results if hasattr(response, 'results') else []
 
     async def areflect(
@@ -414,4 +415,4 @@ class Hindsight:
             context=context,
         )
 
-        return await self._api.reflect(bank_id, request_obj)
+        return await self._memory_api.reflect(bank_id, request_obj)

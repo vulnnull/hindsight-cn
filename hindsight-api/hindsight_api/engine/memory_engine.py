@@ -695,7 +695,14 @@ class MemoryEngine(MemoryEngineInterface):
 
         Returns:
             dict with status and optional error message
+
+        Note:
+            Returns unhealthy until initialize() has completed successfully.
         """
+        # Not healthy until fully initialized
+        if not self._initialized:
+            return {"status": "unhealthy", "reason": "not_initialized"}
+
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:

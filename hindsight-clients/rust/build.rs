@@ -118,10 +118,30 @@ fn main() {
 
     let syntax_tree = syn::parse2(tokens)
         .expect("Failed to parse generated tokens");
-    let formatted = prettyplease::unparse(&syntax_tree);
+    let mut formatted = prettyplease::unparse(&syntax_tree);
+
+    // Fix progenitor bug with optional header parameters
+    // The generated code tries to call .to_string() on Option<&str> which doesn't work
+    // We need to unwrap the Option first
+    formatted = fix_optional_header_params(&formatted);
 
     fs::write(&dest_path, formatted)
         .expect("Failed to write generated client code");
 
     println!("Generated client at: {}", dest_path.display());
+}
+
+/// Fix progenitor's generated code for optional header parameters
+/// Replaces patterns like `value.to_string().try_into()?` where value is Option<&str>
+/// with `value.unwrap_or_default().to_string().try_into()?`
+fn fix_optional_header_params(code: &str) -> String {
+    use regex::Regex;
+
+    // Pattern: header_map.append("authorization", value.to_string().try_into()?);
+    // Should become: header_map.append("authorization", value.unwrap_or_default().to_string().try_into()?);
+    let re = Regex::new(r#"header_map\.append\("authorization", value\.to_string\(\)\.try_into\(\)\?\)"#)
+        .expect("Invalid regex");
+
+    re.replace_all(code, r#"header_map.append("authorization", value.unwrap_or_default().to_string().try_into()?)"#)
+        .to_string()
 }

@@ -107,6 +107,30 @@ hindsight document get my-bank meeting-2024-03-15
 </TabItem>
 </Tabs>
 
+## Delete Document
+
+Remove a document and all its associated memories:
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={documentsPy} section="document-delete" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={documentsMjs} section="document-delete" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+hindsight document delete my-bank meeting-2024-03-15
+```
+
+</TabItem>
+</Tabs>
+
+:::warning
+Deleting a document permanently removes all memories extracted from it. This action cannot be undone.
+:::
+
 ## Document Response Format
 
 ```json

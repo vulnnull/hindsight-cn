@@ -47,6 +47,11 @@ run_task "ruff-dev-check" "$REPO_ROOT/hindsight-dev" "uv run ruff check --fix ."
 run_task "ruff-dev-format" "$REPO_ROOT/hindsight-dev" "uv run ruff format ."
 run_task "ty-dev" "$REPO_ROOT/hindsight-dev" "uv run ty check hindsight_dev benchmarks"
 
+# Python hindsight-embed tasks
+run_task "ruff-embed-check" "$REPO_ROOT/hindsight-embed" "uv run ruff check --fix ."
+run_task "ruff-embed-format" "$REPO_ROOT/hindsight-embed" "uv run ruff format ."
+run_task "ty-embed" "$REPO_ROOT/hindsight-embed" "uv run ty check hindsight_embed"
+
 # Wait for all tasks to complete
 for pid in "${PIDS[@]}"; do
     wait "$pid" 2>/dev/null || true

@@ -89,14 +89,14 @@ impl ApiClient {
 
     pub fn list_agents(&self, _verbose: bool) -> Result<Vec<types::BankListItem>> {
         self.runtime.block_on(async {
-            let response = self.client.list_banks().await?;
+            let response = self.client.list_banks(None).await?;
             Ok(response.into_inner().banks)
         })
     }
 
     pub fn get_profile(&self, agent_id: &str, _verbose: bool) -> Result<types::BankProfileResponse> {
         self.runtime.block_on(async {
-            let response = self.client.get_bank_profile(agent_id).await?;
+            let response = self.client.get_bank_profile(agent_id, None).await?;
             Ok(response.into_inner())
         })
     }
@@ -105,7 +105,9 @@ impl ApiClient {
         self.runtime.block_on(async {
             let response = self.client.get_agent_stats(agent_id).await?;
             let value = response.into_inner();
-            let stats: AgentStats = serde_json::from_value(value)?;
+            // Convert to JSON Value first, then parse into our type
+            let json_value = serde_json::to_value(&value)?;
+            let stats: AgentStats = serde_json::from_value(json_value)?;
             Ok(stats)
         })
     }
@@ -117,7 +119,7 @@ impl ApiClient {
                 background: None,
                 disposition: None,
             };
-            let response = self.client.create_or_update_bank(agent_id, &request).await?;
+            let response = self.client.create_or_update_bank(agent_id, None, &request).await?;
             Ok(response.into_inner())
         })
     }
@@ -128,7 +130,7 @@ impl ApiClient {
                 content: content.to_string(),
                 update_disposition,
             };
-            let response = self.client.add_bank_background(agent_id, &request).await?;
+            let response = self.client.add_bank_background(agent_id, None, &request).await?;
             Ok(response.into_inner())
         })
     }
@@ -138,21 +140,21 @@ impl ApiClient {
             eprintln!("Request body: {}", serde_json::to_string_pretty(request).unwrap_or_default());
         }
         self.runtime.block_on(async {
-            let response = self.client.recall_memories(agent_id, request).await?;
+            let response = self.client.recall_memories(agent_id, None, request).await?;
             Ok(response.into_inner())
         })
     }
 
     pub fn reflect(&self, agent_id: &str, request: &types::ReflectRequest, _verbose: bool) -> Result<types::ReflectResponse> {
         self.runtime.block_on(async {
-            let response = self.client.reflect(agent_id, request).await?;
+            let response = self.client.reflect(agent_id, None, request).await?;
             Ok(response.into_inner())
         })
     }
 
     pub fn retain(&self, agent_id: &str, request: &types::RetainRequest, _async_mode: bool, _verbose: bool) -> Result<MemoryPutResult> {
         self.runtime.block_on(async {
-            let response = self.client.retain_memories(agent_id, request).await?;
+            let response = self.client.retain_memories(agent_id, None, request).await?;
             let result = response.into_inner();
             Ok(MemoryPutResult {
                 success: result.success,
@@ -170,7 +172,7 @@ impl ApiClient {
 
     pub fn clear_memories(&self, agent_id: &str, fact_type: Option<&str>, _verbose: bool) -> Result<types::DeleteResponse> {
         self.runtime.block_on(async {
-            let response = self.client.clear_bank_memories(agent_id, fact_type).await?;
+            let response = self.client.clear_bank_memories(agent_id, None, Some(fact_type)).await?;
             Ok(response.into_inner())
         })
     }
@@ -181,7 +183,8 @@ impl ApiClient {
                 agent_id,
                 limit.map(|l| l as i64),
                 offset.map(|o| o as i64),
-                q
+                q,
+                None,
             ).await?;
             Ok(response.into_inner())
         })
@@ -189,69 +192,79 @@ impl ApiClient {
 
     pub fn get_document(&self, agent_id: &str, document_id: &str, _verbose: bool) -> Result<types::DocumentResponse> {
         self.runtime.block_on(async {
-            let response = self.client.get_document(agent_id, document_id).await?;
+            let response = self.client.get_document(agent_id, document_id, None).await?;
             Ok(response.into_inner())
         })
     }
 
     pub fn delete_document(&self, agent_id: &str, document_id: &str, _verbose: bool) -> Result<types::DeleteResponse> {
         self.runtime.block_on(async {
-            let response = self.client.delete_document(agent_id, document_id).await?;
+            let response = self.client.delete_document(agent_id, document_id, None).await?;
             let value = response.into_inner();
-            let result: types::DeleteResponse = serde_json::from_value(value)?;
-            Ok(result)
+            // Convert typed response to DeleteResponse
+            Ok(types::DeleteResponse {
+                deleted_count: Some(value.memory_units_deleted),
+                message: Some(value.message),
+                success: value.success,
+            })
         })
     }
 
     pub fn list_operations(&self, agent_id: &str, _verbose: bool) -> Result<OperationsResponse> {
         self.runtime.block_on(async {
-            let response = self.client.list_operations(agent_id).await?;
+            let response = self.client.list_operations(agent_id, None).await?;
             let value = response.into_inner();
-            let ops: OperationsResponse = serde_json::from_value(value)?;
+            // Convert to JSON Value first, then parse into our type
+            let json_value = serde_json::to_value(&value)?;
+            let ops: OperationsResponse = serde_json::from_value(json_value)?;
             Ok(ops)
         })
     }
 
     pub fn cancel_operation(&self, agent_id: &str, operation_id: &str, _verbose: bool) -> Result<types::DeleteResponse> {
         self.runtime.block_on(async {
-            let response = self.client.cancel_operation(agent_id, operation_id).await?;
+            let response = self.client.cancel_operation(agent_id, operation_id, None).await?;
             let value = response.into_inner();
-            let result: types::DeleteResponse = serde_json::from_value(value)?;
-            Ok(result)
+            // Convert typed response to DeleteResponse
+            Ok(types::DeleteResponse {
+                deleted_count: None,
+                message: Some(value.message),
+                success: value.success,
+            })
         })
     }
 
     pub fn list_memories(&self, bank_id: &str, type_filter: Option<&str>, q: Option<&str>, limit: Option<i64>, offset: Option<i64>, _verbose: bool) -> Result<types::ListMemoryUnitsResponse> {
         self.runtime.block_on(async {
-            let response = self.client.list_memories(bank_id, limit, offset, q, type_filter).await?;
+            let response = self.client.list_memories(bank_id, limit, offset, q, type_filter, None).await?;
             Ok(response.into_inner())
         })
     }
 
     pub fn list_entities(&self, bank_id: &str, limit: Option<i64>, _verbose: bool) -> Result<types::EntityListResponse> {
         self.runtime.block_on(async {
-            let response = self.client.list_entities(bank_id, limit).await?;
+            let response = self.client.list_entities(bank_id, limit, None).await?;
             Ok(response.into_inner())
         })
     }
 
     pub fn get_entity(&self, bank_id: &str, entity_id: &str, _verbose: bool) -> Result<types::EntityDetailResponse> {
         self.runtime.block_on(async {
-            let response = self.client.get_entity(bank_id, entity_id).await?;
+            let response = self.client.get_entity(bank_id, entity_id, None).await?;
             Ok(response.into_inner())
         })
     }
 
     pub fn regenerate_entity(&self, bank_id: &str, entity_id: &str, _verbose: bool) -> Result<types::EntityDetailResponse> {
         self.runtime.block_on(async {
-            let response = self.client.regenerate_entity_observations(bank_id, entity_id).await?;
+            let response = self.client.regenerate_entity_observations(bank_id, entity_id, None).await?;
             Ok(response.into_inner())
         })
     }
 
     pub fn delete_bank(&self, bank_id: &str, _verbose: bool) -> Result<types::DeleteResponse> {
         self.runtime.block_on(async {
-            let response = self.client.delete_bank(bank_id).await?;
+            let response = self.client.delete_bank(bank_id, None).await?;
             Ok(response.into_inner())
         })
     }

@@ -216,3 +216,199 @@ describe('TestEndToEndWorkflow', () => {
         expect(reflectResponse.text!.length).toBeGreaterThan(0);
     });
 });
+
+describe('TestBankProfile', () => {
+    test('get bank profile', async () => {
+        const bankId = randomBankId();
+
+        // Create bank with background
+        await client.createBank(bankId, {
+            name: 'Test Agent',
+            background: 'I am a helpful assistant for testing.',
+        });
+
+        // Get bank profile
+        const profile = await client.getBankProfile(bankId);
+
+        expect(profile).not.toBeNull();
+        expect(profile.bank_id).toBe(bankId);
+        expect(profile.name).toBe('Test Agent');
+        expect(profile.background).toBe('I am a helpful assistant for testing.');
+    });
+});
+
+describe('TestBankStats', () => {
+    let bankId: string;
+
+    beforeAll(async () => {
+        bankId = randomBankId();
+        // Setup: Store some test memories
+        await client.retainBatch(bankId, [
+            { content: 'Alice likes Python programming' },
+            { content: 'Bob enjoys hiking in the mountains' },
+        ]);
+    });
+
+    test('get bank stats', async () => {
+        const { sdk, createClient, createConfig } = await import('../src');
+        const apiClient = createClient(createConfig({ baseUrl: HINDSIGHT_API_URL }));
+
+        const { data: stats } = await sdk.getAgentStats({
+            client: apiClient,
+            path: { bank_id: bankId },
+        });
+
+        expect(stats).not.toBeNull();
+        expect(stats!.bank_id).toBe(bankId);
+        expect(stats!.total_nodes).toBeGreaterThanOrEqual(0);
+        expect(stats!.total_links).toBeGreaterThanOrEqual(0);
+        expect(stats!.total_documents).toBeGreaterThanOrEqual(0);
+        expect(typeof stats!.nodes_by_fact_type).toBe('object');
+        expect(typeof stats!.links_by_link_type).toBe('object');
+    });
+});
+
+describe('TestOperations', () => {
+    test('list operations', async () => {
+        const bankId = randomBankId();
+        const { sdk, createClient, createConfig } = await import('../src');
+
+        // First create an async operation
+        await client.retain(bankId, 'Test content for async operation', {
+            async: true,
+        });
+
+        const apiClient = createClient(createConfig({ baseUrl: HINDSIGHT_API_URL }));
+        const { data: response } = await sdk.listOperations({
+            client: apiClient,
+            path: { bank_id: bankId },
+        });
+
+        expect(response).not.toBeNull();
+        expect(response!.bank_id).toBe(bankId);
+        expect(Array.isArray(response!.operations)).toBe(true);
+    });
+});
+
+describe('TestDocuments', () => {
+    test('delete document', async () => {
+        const bankId = randomBankId();
+        const docId = `test-doc-${Math.random().toString(36).slice(2, 10)}`;
+        const { sdk, createClient, createConfig } = await import('../src');
+
+        // First create a document
+        const retainResponse = await client.retain(bankId, 'Test document content for deletion', {
+            documentId: docId,
+        });
+        expect(retainResponse.success).toBe(true);
+
+        const apiClient = createClient(createConfig({ baseUrl: HINDSIGHT_API_URL }));
+        const { data: response } = await sdk.deleteDocument({
+            client: apiClient,
+            path: { bank_id: bankId, document_id: docId },
+        });
+
+        expect(response).not.toBeNull();
+        expect(response!.success).toBe(true);
+        expect(response!.document_id).toBe(docId);
+        expect(response!.memory_units_deleted).toBeGreaterThanOrEqual(0);
+    });
+
+    test('get document', async () => {
+        const bankId = randomBankId();
+        const docId = `test-doc-${Math.random().toString(36).slice(2, 10)}`;
+        const { sdk, createClient, createConfig } = await import('../src');
+
+        // First create a document
+        await client.retain(bankId, 'Test document content for retrieval', {
+            documentId: docId,
+        });
+
+        const apiClient = createClient(createConfig({ baseUrl: HINDSIGHT_API_URL }));
+        const { data: document } = await sdk.getDocument({
+            client: apiClient,
+            path: { bank_id: bankId, document_id: docId },
+        });
+
+        expect(document).not.toBeNull();
+        expect(document!.id).toBe(docId);
+        expect(document!.original_text).toContain('Test document content');
+    });
+});
+
+describe('TestEntities', () => {
+    let bankId: string;
+
+    beforeAll(async () => {
+        bankId = randomBankId();
+        // Create memories that will generate entities
+        await client.retainBatch(bankId, [
+            { content: 'Alice works at Google as a software engineer' },
+            { content: 'Bob is friends with Alice and works at Microsoft' },
+        ]);
+    });
+
+    test('list entities', async () => {
+        const { sdk, createClient, createConfig } = await import('../src');
+        const apiClient = createClient(createConfig({ baseUrl: HINDSIGHT_API_URL }));
+
+        const { data: response } = await sdk.listEntities({
+            client: apiClient,
+            path: { bank_id: bankId },
+        });
+
+        expect(response).not.toBeNull();
+        expect(response!.items).toBeDefined();
+        expect(Array.isArray(response!.items)).toBe(true);
+    });
+
+    test('get entity', async () => {
+        const { sdk, createClient, createConfig } = await import('../src');
+        const apiClient = createClient(createConfig({ baseUrl: HINDSIGHT_API_URL }));
+
+        // First list entities to get an ID
+        const { data: listResponse } = await sdk.listEntities({
+            client: apiClient,
+            path: { bank_id: bankId },
+        });
+
+        if (listResponse?.items && listResponse.items.length > 0) {
+            const entityId = listResponse.items[0].id;
+
+            const { data: entity } = await sdk.getEntity({
+                client: apiClient,
+                path: { bank_id: bankId, entity_id: entityId },
+            });
+
+            expect(entity).not.toBeNull();
+            expect(entity!.id).toBe(entityId);
+        }
+    });
+});
+
+describe('TestDeleteBank', () => {
+    test('delete bank', async () => {
+        const bankId = randomBankId();
+        const { sdk, createClient, createConfig } = await import('../src');
+
+        // First create a bank with some data
+        await client.createBank(bankId, {
+            name: 'Bank to delete',
+            background: 'This bank will be deleted',
+        });
+        await client.retain(bankId, 'Some memory to store');
+
+        const apiClient = createClient(createConfig({ baseUrl: HINDSIGHT_API_URL }));
+        const { data: response } = await sdk.deleteBank({
+            client: apiClient,
+            path: { bank_id: bankId },
+        });
+
+        expect(response).not.toBeNull();
+        expect(response!.success).toBe(true);
+
+        // Verify bank data is deleted - memories should be gone
+        const memories = await client.listMemories(bankId);
+        expect(memories.total).toBe(0);
+    });
+});

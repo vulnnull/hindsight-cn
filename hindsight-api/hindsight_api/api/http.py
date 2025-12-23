@@ -689,6 +689,26 @@ class DocumentResponse(BaseModel):
     memory_unit_count: int
 
 
+class DeleteDocumentResponse(BaseModel):
+    """Response model for delete document endpoint."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "message": "Document 'session_1' and 5 associated memory units deleted successfully",
+                "document_id": "session_1",
+                "memory_units_deleted": 5,
+            }
+        }
+    )
+
+    success: bool
+    message: str
+    document_id: str
+    memory_units_deleted: int
+
+
 class ChunkResponse(BaseModel):
     """Response model for get chunk endpoint."""
 
@@ -723,6 +743,108 @@ class DeleteResponse(BaseModel):
     success: bool
     message: str | None = None
     deleted_count: int | None = None
+
+
+class BankStatsResponse(BaseModel):
+    """Response model for bank statistics endpoint."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "bank_id": "user123",
+                "total_nodes": 150,
+                "total_links": 300,
+                "total_documents": 10,
+                "nodes_by_fact_type": {"fact": 100, "preference": 30, "observation": 20},
+                "links_by_link_type": {"temporal": 150, "semantic": 100, "entity": 50},
+                "links_by_fact_type": {"fact": 200, "preference": 60, "observation": 40},
+                "links_breakdown": {"fact": {"temporal": 100, "semantic": 60, "entity": 40}},
+                "pending_operations": 2,
+                "failed_operations": 0,
+            }
+        }
+    )
+
+    bank_id: str
+    total_nodes: int
+    total_links: int
+    total_documents: int
+    nodes_by_fact_type: dict[str, int]
+    links_by_link_type: dict[str, int]
+    links_by_fact_type: dict[str, int]
+    links_breakdown: dict[str, dict[str, int]]
+    pending_operations: int
+    failed_operations: int
+
+
+class OperationResponse(BaseModel):
+    """Response model for a single async operation."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "task_type": "retain",
+                "items_count": 5,
+                "document_id": "meeting-notes-2024",
+                "created_at": "2024-01-15T10:30:00Z",
+                "status": "pending",
+                "error_message": None,
+            }
+        }
+    )
+
+    id: str
+    task_type: str
+    items_count: int
+    document_id: str | None
+    created_at: str
+    status: str
+    error_message: str | None
+
+
+class OperationsListResponse(BaseModel):
+    """Response model for list operations endpoint."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "bank_id": "user123",
+                "operations": [
+                    {
+                        "id": "550e8400-e29b-41d4-a716-446655440000",
+                        "task_type": "retain",
+                        "items_count": 5,
+                        "document_id": None,
+                        "created_at": "2024-01-15T10:30:00Z",
+                        "status": "pending",
+                        "error_message": None,
+                    }
+                ],
+            }
+        }
+    )
+
+    bank_id: str
+    operations: list[OperationResponse]
+
+
+class CancelOperationResponse(BaseModel):
+    """Response model for cancel operation endpoint."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "message": "Operation 550e8400-e29b-41d4-a716-446655440000 cancelled",
+                "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+            }
+        }
+    )
+
+    success: bool
+    message: str
+    operation_id: str
 
 
 def create_app(
@@ -1142,6 +1264,7 @@ def _register_routes(app: FastAPI):
 
     @app.get(
         "/v1/default/banks/{bank_id}/stats",
+        response_model=BankStatsResponse,
         summary="Get statistics for memory bank",
         description="Get statistics about nodes and links for a specific agent",
         operation_id="get_agent_stats",
@@ -1242,18 +1365,18 @@ def _register_routes(app: FastAPI):
                 total_nodes = sum(nodes_by_type.values())
                 total_links = sum(links_by_type.values())
 
-                return {
-                    "bank_id": bank_id,
-                    "total_nodes": total_nodes,
-                    "total_links": total_links,
-                    "total_documents": total_documents,
-                    "nodes_by_fact_type": nodes_by_type,
-                    "links_by_link_type": links_by_type,
-                    "links_by_fact_type": links_by_fact_type,
-                    "links_breakdown": links_breakdown,
-                    "pending_operations": pending_operations,
-                    "failed_operations": failed_operations,
-                }
+                return BankStatsResponse(
+                    bank_id=bank_id,
+                    total_nodes=total_nodes,
+                    total_links=total_links,
+                    total_documents=total_documents,
+                    nodes_by_fact_type=nodes_by_type,
+                    links_by_link_type=links_by_type,
+                    links_by_fact_type=links_by_fact_type,
+                    links_breakdown=links_breakdown,
+                    pending_operations=pending_operations,
+                    failed_operations=failed_operations,
+                )
 
         except Exception as e:
             import traceback
@@ -1477,6 +1600,7 @@ def _register_routes(app: FastAPI):
 
     @app.delete(
         "/v1/default/banks/{bank_id}/documents/{document_id}",
+        response_model=DeleteDocumentResponse,
         summary="Delete a document",
         description="Delete a document and all its associated memory units and links.\n\n"
         "This will cascade delete:\n"
@@ -1503,12 +1627,12 @@ def _register_routes(app: FastAPI):
             if result["document_deleted"] == 0:
                 raise HTTPException(status_code=404, detail="Document not found")
 
-            return {
-                "success": True,
-                "message": f"Document '{document_id}' and {result['memory_units_deleted']} associated memory units deleted successfully",
-                "document_id": document_id,
-                "memory_units_deleted": result["memory_units_deleted"],
-            }
+            return DeleteDocumentResponse(
+                success=True,
+                message=f"Document '{document_id}' and {result['memory_units_deleted']} associated memory units deleted successfully",
+                document_id=document_id,
+                memory_units_deleted=result["memory_units_deleted"],
+            )
         except HTTPException:
             raise
         except Exception as e:
@@ -1520,6 +1644,7 @@ def _register_routes(app: FastAPI):
 
     @app.get(
         "/v1/default/banks/{bank_id}/operations",
+        response_model=OperationsListResponse,
         summary="List async operations",
         description="Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations",
         operation_id="list_operations",
@@ -1529,10 +1654,10 @@ def _register_routes(app: FastAPI):
         """List all async operations (pending and failed) for a memory bank."""
         try:
             operations = await app.state.memory.list_operations(bank_id, request_context=request_context)
-            return {
-                "bank_id": bank_id,
-                "operations": operations,
-            }
+            return OperationsListResponse(
+                bank_id=bank_id,
+                operations=[OperationResponse(**op) for op in operations],
+            )
         except Exception as e:
             import traceback
 
@@ -1542,6 +1667,7 @@ def _register_routes(app: FastAPI):
 
     @app.delete(
         "/v1/default/banks/{bank_id}/operations/{operation_id}",
+        response_model=CancelOperationResponse,
         summary="Cancel a pending async operation",
         description="Cancel a pending async operation by removing it from the queue",
         operation_id="cancel_operation",
@@ -1559,7 +1685,7 @@ def _register_routes(app: FastAPI):
                 raise HTTPException(status_code=400, detail=f"Invalid operation_id format: {operation_id}")
 
             result = await app.state.memory.cancel_operation(bank_id, operation_id, request_context=request_context)
-            return result
+            return CancelOperationResponse(**result)
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:

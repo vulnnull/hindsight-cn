@@ -60,12 +60,12 @@ client.retain(
 # [docs:document-get]
 import asyncio
 from hindsight_client_api import ApiClient, Configuration
-from hindsight_client_api.api import DefaultApi
+from hindsight_client_api.api import DocumentsApi
 
 async def get_document_example():
     config = Configuration(host="http://localhost:8888")
     api_client = ApiClient(config)
-    api = DefaultApi(api_client)
+    api = DocumentsApi(api_client)
 
     # Get document to expand context from recall results
     doc = await api.get_document(
@@ -80,6 +80,27 @@ async def get_document_example():
 
 asyncio.run(get_document_example())
 # [/docs:document-get]
+
+
+# [docs:document-delete]
+from hindsight_client_api import ApiClient, Configuration
+from hindsight_client_api.api import DocumentsApi
+
+async def delete_document_example():
+    config = Configuration(host="http://localhost:8888")
+    api_client = ApiClient(config)
+    api = DocumentsApi(api_client)
+
+    # Delete document and all its memories
+    result = await api.delete_document(
+        bank_id="my-bank",
+        document_id="meeting-2024-03-15"
+    )
+
+    print(f"Deleted {result.memory_units_deleted} memories")
+
+asyncio.run(delete_document_example())
+# [/docs:document-delete]
 
 
 # =============================================================================

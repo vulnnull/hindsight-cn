@@ -60,6 +60,17 @@ console.log(`Created: ${doc.created_at}`);
 // [/docs:document-get]
 
 
+// [docs:document-delete]
+// Delete document and all its memories
+const { data: deleteResult } = await sdk.deleteDocument({
+    client: apiClient,
+    path: { bank_id: 'my-bank', document_id: 'meeting-2024-03-15' }
+});
+
+console.log(`Deleted ${deleteResult.memory_units_deleted} memories`);
+// [/docs:document-delete]
+
+
 // =============================================================================
 // Cleanup (not shown in docs)
 // =============================================================================

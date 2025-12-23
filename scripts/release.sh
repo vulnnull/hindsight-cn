@@ -145,7 +145,7 @@ fi
 # Commit changes
 print_info "Committing version changes..."
 git add -A
-git commit -m "Release v$VERSION
+git commit --no-verify -m "Release v$VERSION
 
 - Update version to $VERSION in all components
 - Python packages: hindsight-api, hindsight-dev, hindsight-all, hindsight-litellm

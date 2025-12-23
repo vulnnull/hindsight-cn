@@ -8,6 +8,39 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.1.14](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.14)
+
+**Bug Fixes**
+
+- Fixes the embedded “get-skill” installer so installing skills works correctly. ([`0b352d1`](https://github.com/vectorize-io/hindsight/commit/0b352d1))
+
+## [0.1.13](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.13)
+
+**Improvements**
+
+- Improve reliability by surfacing task handler failures so retries can occur when processing fails. ([`904ea4d`](https://github.com/vectorize-io/hindsight/commit/904ea4d))
+- Revamp the hindsight-embed component architecture, including a new daemon/client model and CLI updates for embedding workflows. ([`e6511e7`](https://github.com/vectorize-io/hindsight/commit/e6511e7))
+
+**Bug Fixes**
+
+- Fix memory retention so timestamps are correctly taken into account. ([`234d426`](https://github.com/vectorize-io/hindsight/commit/234d426))
+
+## [0.1.12](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.12)
+
+**Features**
+
+- Added an extensions system for plugging in new operations/skills (including built-in tenant support). ([`2a0c490`](https://github.com/vectorize-io/hindsight/commit/2a0c490))
+- Introduced the hindsight-embed tool and a native agentic skill for embedding/agent workflows. ([`da44a5e`](https://github.com/vectorize-io/hindsight/commit/da44a5e))
+
+**Improvements**
+
+- Improved reliability when parsing LLM JSON by retrying on parse errors and adding clearer diagnostics. ([`a831a7b`](https://github.com/vectorize-io/hindsight/commit/a831a7b))
+
+**Bug Fixes**
+
+- Fixed structured-output support for Ollama-based LLM providers. ([`32bca12`](https://github.com/vectorize-io/hindsight/commit/32bca12))
+- Adjusted LLM validation to cap max completion tokens at 100 to prevent validation failures. ([`b94b5cf`](https://github.com/vectorize-io/hindsight/commit/b94b5cf))
+
 ## [0.1.11](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.11)
 
 **Bug Fixes**

@@ -7,9 +7,9 @@ Bank list item with profile summary.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **bank_id** | **str** |  | 
-**name** | **str** |  | 
+**name** | **str** |  | [optional] 
 **disposition** | [**DispositionTraits**](DispositionTraits.md) |  | 
-**background** | **str** |  | 
+**background** | **str** |  | [optional] 
 **created_at** | **str** |  | [optional] 
 **updated_at** | **str** |  | [optional] 
 

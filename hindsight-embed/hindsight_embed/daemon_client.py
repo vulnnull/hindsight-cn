@@ -6,6 +6,7 @@ Handles daemon lifecycle (start if needed) and API requests via the Python clien
 
 import logging
 import os
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -72,10 +73,7 @@ def _start_daemon(config: dict) -> bool:
     # Use pg0 database specific to bank
     bank_id = config.get("bank_id", "default")
     env["HINDSIGHT_API_DATABASE_URL"] = f"pg0://hindsight-embed-{bank_id}"
-
-    # Optimization flags for faster startup
-    env["HINDSIGHT_API_SKIP_LLM_VERIFICATION"] = "true"
-    env["HINDSIGHT_API_LOG_LEVEL"] = "warning"
+    env["HINDSIGHT_API_LOG_LEVEL"] = "info"
 
     cmd = _find_hindsight_api_command() + ["--daemon", "--idle-timeout", str(DAEMON_IDLE_TIMEOUT)]
 
@@ -83,21 +81,20 @@ def _start_daemon(config: dict) -> bool:
     log_dir = Path.home() / ".hindsight"
     log_dir.mkdir(parents=True, exist_ok=True)
     daemon_log = log_dir / "daemon.log"
-    daemon_stderr = log_dir / "daemon.stderr"
 
     print(f"Starting daemon with command: {' '.join(cmd)}", file=sys.stderr)
     print(f"  Log file: {daemon_log}", file=sys.stderr)
 
     try:
-        # Start daemon in background, but capture initial stderr for debugging
-        with open(daemon_stderr, "w") as stderr_file:
-            process = subprocess.Popen(
-                cmd,
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=stderr_file,
-                start_new_session=True,
-            )
+        # Start daemon with shell redirection (works across forks)
+        # The >> appends to log file, 2>&1 redirects stderr to stdout
+        shell_cmd = f"{' '.join(cmd)} >> {shlex.quote(str(daemon_log))} 2>&1"
+        subprocess.Popen(
+            shell_cmd,
+            shell=True,
+            env=env,
+            start_new_session=True,
+        )
 
         # Wait for daemon to be ready
         # Note: With --daemon flag, the parent process forks and exits immediately (code 0).
@@ -107,8 +104,17 @@ def _start_daemon(config: dict) -> bool:
         last_check_time = start_time
         while time.time() - start_time < DAEMON_STARTUP_TIMEOUT:
             if _is_daemon_running():
-                logger.info("Daemon started successfully")
-                return True
+                # Health check passed - but daemon might crash during initialization
+                # Wait a moment and verify it's still healthy (stability check)
+                print("  Daemon responding, verifying stability...", file=sys.stderr)
+                time.sleep(2)
+                if _is_daemon_running():
+                    logger.info("Daemon started successfully")
+                    return True
+                else:
+                    # Daemon crashed after initial health check
+                    print("  Daemon crashed during initialization", file=sys.stderr)
+                    break
 
             # Periodically log progress
             if time.time() - last_check_time > 5:
@@ -118,16 +124,14 @@ def _start_daemon(config: dict) -> bool:
 
             time.sleep(0.5)
 
-        logger.error("Daemon failed to start within timeout")
-        # Show logs on timeout
+        logger.error("Daemon failed to start")
+        # Show logs on failure
         if daemon_log.exists():
             log_content = daemon_log.read_text()
             if log_content:
-                print(f"Daemon log:\n{log_content[-2000:]}", file=sys.stderr)  # Last 2000 chars
-        if daemon_stderr.exists():
-            stderr_content = daemon_stderr.read_text()
-            if stderr_content:
-                print(f"Daemon stderr:\n{stderr_content}", file=sys.stderr)
+                # Show last 3000 chars of log
+                print(f"\n  Daemon log ({daemon_log}):", file=sys.stderr)
+                print(f"{log_content[-3000:]}", file=sys.stderr)
         return False
 
     except FileNotFoundError as e:
@@ -155,7 +159,7 @@ def ensure_daemon_running(config: dict) -> bool:
 
 
 def stop_daemon() -> bool:
-    """Stop the running daemon."""
+    """Stop the running daemon and wait for it to fully stop."""
     # Try to kill by PID from lockfile
     lockfile = Path.home() / ".hindsight" / "daemon.lock"
     if lockfile.exists():
@@ -168,9 +172,15 @@ def stop_daemon() -> bool:
                 try:
                     os.kill(pid, 0)
                 except OSError:
-                    return True
+                    break  # Process exited
         except (ValueError, OSError):
             pass
+
+    # Wait for health check to fail (daemon fully stopped)
+    for _ in range(30):  # Wait up to 3 seconds
+        if not _is_daemon_running():
+            return True
+        time.sleep(0.1)
 
     return not _is_daemon_running()
 
