@@ -193,22 +193,34 @@ print_banner
 
 # Validate app parameter
 if [ -z "$APP" ]; then
-    echo -e "${DIM}Select your AI coding assistant:${NC}"
-    echo ""
-    echo "  ${BOLD}1)${NC} Claude Code"
-    echo "  ${BOLD}2)${NC} OpenCode"
-    echo "  ${BOLD}3)${NC} Codex CLI"
-    echo ""
-    read -p "Enter choice [1]: " app_choice
-    app_choice=${app_choice:-1}
+    # Check if we have a terminal for interactive prompts
+    if [ -t 0 ] || [ -e /dev/tty ]; then
+        echo -e "${DIM}Select your AI coding assistant:${NC}"
+        echo ""
+        echo "  ${BOLD}1)${NC} Claude Code"
+        echo "  ${BOLD}2)${NC} OpenCode"
+        echo "  ${BOLD}3)${NC} Codex CLI"
+        echo ""
+        # Use /dev/tty for input if stdin is piped
+        if [ -t 0 ]; then
+            read -p "Enter choice [1]: " app_choice
+        else
+            read -p "Enter choice [1]: " app_choice </dev/tty
+        fi
+        app_choice=${app_choice:-1}
 
-    case $app_choice in
-        1) APP="claude" ;;
-        2) APP="opencode" ;;
-        3) APP="codex" ;;
-        *) APP="claude" ;;
-    esac
-    echo ""
+        case $app_choice in
+            1) APP="claude" ;;
+            2) APP="opencode" ;;
+            3) APP="codex" ;;
+            *) APP="claude" ;;
+        esac
+        echo ""
+    else
+        # Non-interactive (CI) - default to claude
+        APP="claude"
+        print_info "Non-interactive mode detected, defaulting to Claude Code"
+    fi
 fi
 
 # Get skills directory for selected app

@@ -9,7 +9,6 @@ description = "Hindsight embedded CLI - local memory operations without a server
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "questionary>=2.0.0",
     "httpx>=0.27.0",
 ]
 
