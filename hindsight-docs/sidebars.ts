@@ -172,6 +172,11 @@ const sidebars: SidebarsConfig = {
           id: 'sdks/integrations/litellm',
           label: 'LiteLLM',
         },
+        {
+          type: 'doc',
+          id: 'sdks/integrations/skills',
+          label: 'Skills',
+        },
       ],
     },
   ],

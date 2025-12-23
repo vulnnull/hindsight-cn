@@ -65,77 +65,78 @@ print_banner() {
 # Embedded SKILL.md content
 SKILL_CONTENT='---
 name: hindsight
-description: Give your agent persistent memory that works like human memory. Store facts, preferences, and context that persist across sessions.
+description: Store user preferences, learnings from tasks, and procedure outcomes. Use to remember what works and recall context before new tasks.
 ---
 
 # Hindsight Memory Skill
 
-You have access to persistent memory via the `hindsight-embed` CLI. Use it to remember important information about the user and recall it when relevant.
-
-## Setup (first time only)
-
-Run: `uvx hindsight-embed configure`
-
-This will configure your LLM provider and start a local daemon that manages your memory bank.
+You have persistent memory via the `hindsight-embed` CLI. **Proactively store learnings and recall context** to provide better assistance.
 
 ## Commands
 
-The CLI uses a bank ID to organize memories. Use `default` for general memories or create project-specific banks.
-
 ### Store a memory
 
-Use `memory retain` to store important facts, preferences, decisions, or context:
+Use `memory retain` to store what you learn:
 
 ```bash
-uvx hindsight-embed memory retain default "User prefers dark mode for all UIs"
-uvx hindsight-embed memory retain default "Project uses Python 3.11 with FastAPI" --context work
-uvx hindsight-embed memory retain myproject "API uses JWT authentication"
+uvx hindsight-embed memory retain default "User prefers TypeScript with strict mode"
+uvx hindsight-embed memory retain default "Running tests requires NODE_ENV=test" --context procedures
+uvx hindsight-embed memory retain default "Build failed when using Node 18, works with Node 20" --context learnings
 ```
 
 ### Recall memories
 
-Use `memory recall` to search for relevant memories before starting tasks:
+Use `memory recall` BEFORE starting tasks to get relevant context:
 
 ```bash
-uvx hindsight-embed memory recall default "What are the user'"'"'s UI preferences?"
-uvx hindsight-embed memory recall default "What tech stack does this project use?"
+uvx hindsight-embed memory recall default "user preferences for this project"
+uvx hindsight-embed memory recall default "what issues have we encountered before"
 ```
 
 ### Reflect on memories
 
-Use `memory reflect` for contextual answers that synthesize multiple memories:
+Use `memory reflect` to synthesize context:
 
 ```bash
-uvx hindsight-embed memory reflect default "How should I set up the dev environment?"
+uvx hindsight-embed memory reflect default "How should I approach this task based on past experience?"
 ```
 
-### Other commands
+## IMPORTANT: When to Store Memories
 
-```bash
-uvx hindsight-embed bank list              # List all memory banks
-uvx hindsight-embed daemon status          # Check daemon status
-uvx hindsight-embed --help                 # Full CLI help
-```
+**Always store** after you learn something valuable:
 
-## When to Use
+### User Preferences
+- Coding style (indentation, naming conventions, language preferences)
+- Tool preferences (editors, linters, formatters)
+- Communication preferences
+- Project conventions
 
-### Store memories when you learn:
-- User preferences (coding style, tools, UI preferences)
-- Project context (tech stack, architecture decisions)
-- Personal information the user shares (name, role, company)
-- Important decisions or outcomes
+### Procedure Outcomes
+- Steps that successfully completed a task
+- Commands that worked (or failed) and why
+- Workarounds discovered
+- Configuration that resolved issues
 
-### Recall memories when:
-- Starting a new task (get relevant context first)
-- Making decisions that should consider user preferences
-- Working on a project where past context would help
+### Learnings from Tasks
+- Bugs encountered and their solutions
+- Performance optimizations that worked
+- Architecture decisions and rationale
+- Dependencies or version requirements
+
+## IMPORTANT: When to Recall Memories
+
+**Always recall** before:
+- Starting any non-trivial task
+- Making decisions about implementation
+- Suggesting tools, libraries, or approaches
+- Writing code in a new area of the project
 
 ## Best Practices
 
-1. **Be specific**: Store "User prefers 2-space indentation" not "User has preferences"
-2. **Recall first**: Before starting tasks, recall relevant context
-3. **Use context tags**: Organize with `--context` (work, personal, preferences)
-4. **Use project banks**: Create separate banks for different projects
+1. **Store immediately**: When you discover something, store it right away
+2. **Be specific**: Store "npm test requires --experimental-vm-modules flag" not "tests need a flag"
+3. **Include outcomes**: Store what worked AND what did not work
+4. **Recall first**: Always check for relevant context before starting work
 '
 
 # Get skills directory for app (bash 3.x compatible)
