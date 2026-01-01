@@ -81,7 +81,7 @@ docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
   ghcr.io/vectorize-io/hindsight:latest
 ```
 
-You can modify the LLM provider by setting `HINDSIGHT_API_LLM_PROVIDER`. Valid options are `gemini`, `groq`,  `ollama`, and `openai`. The documentation provides more details on [supported models](https://hindsight.vectorize.io/developer/models).
+You can modify the LLM provider by setting `HINDSIGHT_API_LLM_PROVIDER`. Valid options are `openai`, `anthropic`, `gemini`, `groq`, `ollama`, and `lmstudio`. The documentation provides more details on [supported models](https://hindsight.vectorize.io/developer/models).
 
 API: http://localhost:8888  
 UI: http://localhost:9999

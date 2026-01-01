@@ -18,7 +18,7 @@ All local models (embedding, cross-encoder) are automatically downloaded from Hu
 
 Used for fact extraction, entity resolution, opinion generation, and answer synthesis.
 
-**Supported providers:** OpenAI, Gemini, Groq, Ollama, and **any OpenAI-compatible API**
+**Supported providers:** OpenAI, Anthropic, Gemini, Groq, Ollama, LM Studio, and **any OpenAI-compatible API**
 
 :::tip OpenAI-Compatible Providers
 Hindsight works with any provider that exposes an OpenAI-compatible API (e.g., Azure OpenAI). Simply set `HINDSIGHT_API_LLM_PROVIDER=openai` and configure `HINDSIGHT_API_LLM_BASE_URL` to point to your provider's endpoint.
@@ -39,6 +39,8 @@ The following models have been tested and verified to work correctly with Hindsi
 | **OpenAI** | `gpt-4.1-mini` |
 | **OpenAI** | `gpt-4.1-nano` |
 | **OpenAI** | `gpt-4o-mini` |
+| **Anthropic** | `claude-sonnet-4-20250514` |
+| **Anthropic** | `claude-3-5-sonnet-20241022` |
 | **Gemini** | `gemini-3-pro-preview` |
 | **Gemini** | `gemini-2.5-flash` |
 | **Gemini** | `gemini-2.5-flash-lite` |
@@ -67,10 +69,20 @@ export HINDSIGHT_API_LLM_PROVIDER=gemini
 export HINDSIGHT_API_LLM_API_KEY=xxxxxxxxxxxx
 export HINDSIGHT_API_LLM_MODEL=gemini-2.0-flash
 
+# Anthropic
+export HINDSIGHT_API_LLM_PROVIDER=anthropic
+export HINDSIGHT_API_LLM_API_KEY=sk-ant-xxxxxxxxxxxx
+export HINDSIGHT_API_LLM_MODEL=claude-sonnet-4-20250514
+
 # Ollama (local)
 export HINDSIGHT_API_LLM_PROVIDER=ollama
 export HINDSIGHT_API_LLM_BASE_URL=http://localhost:11434/v1
-export HINDSIGHT_API_LLM_MODEL=gpt-oss-20b
+export HINDSIGHT_API_LLM_MODEL=llama3
+
+# LM Studio (local)
+export HINDSIGHT_API_LLM_PROVIDER=lmstudio
+export HINDSIGHT_API_LLM_BASE_URL=http://localhost:1234/v1
+export HINDSIGHT_API_LLM_MODEL=your-local-model
 ```
 
 **Note:** The LLM is the primary bottleneck for retain operations. See [Performance](./performance) for optimization strategies.

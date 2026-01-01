@@ -27,10 +27,12 @@ If not provided, the server uses embedded `pg0` — convenient for development b
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `groq`, `openai`, `gemini`, `ollama` | `openai` |
+| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `anthropic`, `gemini`, `groq`, `ollama`, `lmstudio` | `openai` |
 | `HINDSIGHT_API_LLM_API_KEY` | API key for LLM provider | - |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | `gpt-5-mini` |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default |
+| `HINDSIGHT_API_LLM_MAX_CONCURRENT` | Max concurrent LLM requests | `32` |
+| `HINDSIGHT_API_LLM_TIMEOUT` | LLM request timeout in seconds | `120` |
 
 **Provider Examples**
 
@@ -50,10 +52,20 @@ export HINDSIGHT_API_LLM_PROVIDER=gemini
 export HINDSIGHT_API_LLM_API_KEY=xxxxxxxxxxxx
 export HINDSIGHT_API_LLM_MODEL=gemini-2.0-flash
 
+# Anthropic
+export HINDSIGHT_API_LLM_PROVIDER=anthropic
+export HINDSIGHT_API_LLM_API_KEY=sk-ant-xxxxxxxxxxxx
+export HINDSIGHT_API_LLM_MODEL=claude-sonnet-4-20250514
+
 # Ollama (local, no API key)
 export HINDSIGHT_API_LLM_PROVIDER=ollama
 export HINDSIGHT_API_LLM_BASE_URL=http://localhost:11434/v1
-export HINDSIGHT_API_LLM_MODEL=gpt-oss-20b
+export HINDSIGHT_API_LLM_MODEL=llama3
+
+# LM Studio (local, no API key)
+export HINDSIGHT_API_LLM_PROVIDER=lmstudio
+export HINDSIGHT_API_LLM_BASE_URL=http://localhost:1234/v1
+export HINDSIGHT_API_LLM_MODEL=your-local-model
 
 # OpenAI-compatible endpoint
 export HINDSIGHT_API_LLM_PROVIDER=openai
@@ -109,7 +121,43 @@ export HINDSIGHT_API_RERANKER_TEI_URL=http://localhost:8081
 | `HINDSIGHT_API_HOST` | Bind address | `0.0.0.0` |
 | `HINDSIGHT_API_PORT` | Server port | `8888` |
 | `HINDSIGHT_API_LOG_LEVEL` | Log level: `debug`, `info`, `warning`, `error` | `info` |
-| `HINDSIGHT_API_MCP_ENABLED` | Enable MCP server | `true` |
+| `HINDSIGHT_API_MCP_ENABLED` | Enable MCP server at `/mcp/{bank_id}/` | `true` |
+
+### Retrieval
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_GRAPH_RETRIEVER` | Graph retrieval algorithm: `bfs` or `mpfp` | `bfs` |
+
+### Entity Observations
+
+Controls when the system generates entity observations (summaries about entities mentioned in retained content).
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_OBSERVATION_MIN_FACTS` | Minimum facts about an entity before generating observations | `5` |
+| `HINDSIGHT_API_OBSERVATION_TOP_ENTITIES` | Max entities to process per retain batch | `5` |
+
+### Local MCP Server
+
+Configuration for the local MCP server (`hindsight-local-mcp` command).
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_MCP_LOCAL_BANK_ID` | Memory bank ID for local MCP | `mcp` |
+| `HINDSIGHT_API_MCP_INSTRUCTIONS` | Additional instructions appended to retain/recall tool descriptions | - |
+
+```bash
+# Example: instruct MCP to also store assistant actions
+export HINDSIGHT_API_MCP_INSTRUCTIONS="Also store every action you take, including tool calls and decisions made."
+```
+
+### Performance Optimization
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_SKIP_LLM_VERIFICATION` | Skip LLM connection check on startup | `false` |
+| `HINDSIGHT_API_LAZY_RERANKER` | Lazy-load reranker model (faster startup) | `false` |
 
 ### Programmatic Configuration
 
