@@ -171,6 +171,7 @@ class LLMProvider:
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
         skip_validation: bool = False,
+        strict_schema: bool = False,
     ) -> Any:
         """
         Make an LLM API call with retry logic.
@@ -185,6 +186,7 @@ class LLMProvider:
             initial_backoff: Initial backoff time in seconds.
             max_backoff: Maximum backoff time in seconds.
             skip_validation: Return raw JSON without Pydantic validation.
+            strict_schema: Use strict JSON schema enforcement (OpenAI only). Guarantees all required fields.
 
         Returns:
             Parsed response if response_format is provided, otherwise text content.
@@ -268,22 +270,34 @@ class LLMProvider:
             for attempt in range(max_retries + 1):
                 try:
                     if response_format is not None:
-                        # Add schema to system message for JSON mode
+                        schema = None
                         if hasattr(response_format, "model_json_schema"):
                             schema = response_format.model_json_schema()
-                            schema_msg = f"\n\nYou must respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
 
-                            if call_params["messages"] and call_params["messages"][0].get("role") == "system":
-                                call_params["messages"][0]["content"] += schema_msg
-                            elif call_params["messages"]:
-                                call_params["messages"][0]["content"] = (
-                                    schema_msg + "\n\n" + call_params["messages"][0]["content"]
-                                )
+                        if strict_schema and schema is not None:
+                            # Use OpenAI's strict JSON schema enforcement
+                            # This guarantees all required fields are returned
+                            call_params["response_format"] = {
+                                "type": "json_schema",
+                                "json_schema": {
+                                    "name": "response",
+                                    "strict": True,
+                                    "schema": schema,
+                                },
+                            }
+                        else:
+                            # Soft enforcement: add schema to prompt and use json_object mode
+                            if schema is not None:
+                                schema_msg = f"\n\nYou must respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
 
-                        # LM Studio and Ollama don't support json_object response format reliably
-                        # We rely on the schema in the system message instead
-                        if self.provider not in ("lmstudio", "ollama"):
-                            call_params["response_format"] = {"type": "json_object"}
+                                if call_params["messages"] and call_params["messages"][0].get("role") == "system":
+                                    call_params["messages"][0]["content"] += schema_msg
+                                elif call_params["messages"]:
+                                    call_params["messages"][0]["content"] = (
+                                        schema_msg + "\n\n" + call_params["messages"][0]["content"]
+                                    )
+                            if self.provider not in ("lmstudio", "ollama"):
+                               call_params["response_format"] = {"type": "json_object"}
                         
                         logger.debug(f"Sending request to {self.provider}/{self.model} (timeout={self.timeout})")
                         response = await self._client.chat.completions.create(**call_params)
