@@ -17,8 +17,9 @@ if TYPE_CHECKING:
 class OperationValidationError(Exception):
     """Raised when an operation fails validation."""
 
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, status_code: int = 403):
         self.reason = reason
+        self.status_code = status_code
         super().__init__(f"Operation validation failed: {reason}")
 
 
@@ -28,6 +29,7 @@ class ValidationResult:
 
     allowed: bool
     reason: str | None = None
+    status_code: int = 403  # Default to Forbidden
 
     @classmethod
     def accept(cls) -> "ValidationResult":
@@ -35,9 +37,9 @@ class ValidationResult:
         return cls(allowed=True)
 
     @classmethod
-    def reject(cls, reason: str) -> "ValidationResult":
-        """Create a rejected validation result with a reason."""
-        return cls(allowed=False, reason=reason)
+    def reject(cls, reason: str, status_code: int = 403) -> "ValidationResult":
+        """Create a rejected validation result with a reason and HTTP status code."""
+        return cls(allowed=False, reason=reason, status_code=status_code)
 
 
 # =============================================================================

@@ -18,6 +18,9 @@ class RequestContext:
     """
 
     api_key: str | None = None
+    api_key_id: str | None = None  # UUID of the API key used for authentication
+    tenant_id: str | None = None  # Tenant identifier (set by extension after auth)
+    internal: bool = False  # True for background/internal operations (not user-visible)
 
 
 from pgvector.sqlalchemy import Vector
