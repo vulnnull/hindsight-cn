@@ -300,6 +300,8 @@ class LLMProvider:
                                         schema_msg + "\n\n" + call_params["messages"][0]["content"]
                                     )
                             if self.provider not in ("lmstudio", "ollama"):
+                                # LM Studio and Ollama don't support json_object response format reliably
+                                # We rely on the schema in the system message instead
                                 call_params["response_format"] = {"type": "json_object"}
 
                         logger.debug(f"Sending request to {self.provider}/{self.model} (timeout={self.timeout})")

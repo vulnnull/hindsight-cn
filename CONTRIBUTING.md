@@ -51,7 +51,36 @@ cd hindsight-api
 uv run pytest tests/
 ```
 
-### Code style
+### Code Style
+
+We use [Ruff](https://docs.astral.sh/ruff/) for Python linting and formatting, and ESLint/Prettier for TypeScript.
+
+#### Setting up git hooks (recommended)
+
+Set up git hooks to automatically lint and format code before each commit:
+
+```bash
+./scripts/setup-hooks.sh
+```
+
+This configures git to use the hooks in `.githooks/`, which run all scripts in `scripts/hooks/` on commit. The lint hook runs in parallel:
+- **Python**: `ruff check --fix`, `ruff format`, `ty check`
+- **TypeScript**: `eslint --fix`, `prettier`
+
+#### Manual linting and formatting
+
+```bash
+# Run all lints (same as pre-commit)
+./scripts/hooks/lint.sh
+
+# Or run individually for Python:
+cd hindsight-api
+uv run ruff check --fix .   # Lint and auto-fix
+uv run ruff format .        # Format code
+uv run ty check hindsight_api  # Type check
+```
+
+#### Style guidelines
 
 - Use Python type hints
 - Follow existing code patterns
