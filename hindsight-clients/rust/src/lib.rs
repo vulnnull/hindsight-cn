@@ -63,6 +63,7 @@ mod tests {
                     document_id: None,
                     metadata: None,
                     timestamp: None,
+                    entities: None,
                 },
                 types::MemoryItem {
                     content: "Bob works with Alice on the search team".to_string(),
@@ -70,6 +71,7 @@ mod tests {
                     document_id: None,
                     metadata: None,
                     timestamp: None,
+                    entities: None,
                 },
             ],
         };

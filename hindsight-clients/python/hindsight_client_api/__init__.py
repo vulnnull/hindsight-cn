@@ -16,127 +16,66 @@
 
 __version__ = "0.0.7"
 
-# Define package exports
-__all__ = [
-    "BanksApi",
-    "DocumentsApi",
-    "EntitiesApi",
-    "MemoryApi",
-    "MonitoringApi",
-    "OperationsApi",
-    "ApiResponse",
-    "ApiClient",
-    "Configuration",
-    "OpenApiException",
-    "ApiTypeError",
-    "ApiValueError",
-    "ApiKeyError",
-    "ApiAttributeError",
-    "ApiException",
-    "AddBackgroundRequest",
-    "BackgroundResponse",
-    "BankListItem",
-    "BankListResponse",
-    "BankProfileResponse",
-    "BankStatsResponse",
-    "Budget",
-    "CancelOperationResponse",
-    "ChunkData",
-    "ChunkIncludeOptions",
-    "ChunkResponse",
-    "CreateBankRequest",
-    "DeleteDocumentResponse",
-    "DeleteResponse",
-    "DispositionTraits",
-    "DocumentResponse",
-    "EntityDetailResponse",
-    "EntityIncludeOptions",
-    "EntityListItem",
-    "EntityListResponse",
-    "EntityObservationResponse",
-    "EntityStateResponse",
-    "GraphDataResponse",
-    "HTTPValidationError",
-    "IncludeOptions",
-    "ListDocumentsResponse",
-    "ListMemoryUnitsResponse",
-    "MemoryItem",
-    "OperationResponse",
-    "OperationsListResponse",
-    "RecallRequest",
-    "RecallResponse",
-    "RecallResult",
-    "ReflectFact",
-    "ReflectIncludeOptions",
-    "ReflectRequest",
-    "ReflectResponse",
-    "RetainRequest",
-    "RetainResponse",
-    "UpdateDispositionRequest",
-    "ValidationError",
-    "ValidationErrorLocInner",
-]
-
 # import apis into sdk package
-from hindsight_client_api.api.banks_api import BanksApi as BanksApi
-from hindsight_client_api.api.documents_api import DocumentsApi as DocumentsApi
-from hindsight_client_api.api.entities_api import EntitiesApi as EntitiesApi
-from hindsight_client_api.api.memory_api import MemoryApi as MemoryApi
-from hindsight_client_api.api.monitoring_api import MonitoringApi as MonitoringApi
-from hindsight_client_api.api.operations_api import OperationsApi as OperationsApi
+from hindsight_client_api.api.banks_api import BanksApi
+from hindsight_client_api.api.documents_api import DocumentsApi
+from hindsight_client_api.api.entities_api import EntitiesApi
+from hindsight_client_api.api.memory_api import MemoryApi
+from hindsight_client_api.api.monitoring_api import MonitoringApi
+from hindsight_client_api.api.operations_api import OperationsApi
 
 # import ApiClient
-from hindsight_client_api.api_response import ApiResponse as ApiResponse
-from hindsight_client_api.api_client import ApiClient as ApiClient
-from hindsight_client_api.configuration import Configuration as Configuration
-from hindsight_client_api.exceptions import OpenApiException as OpenApiException
-from hindsight_client_api.exceptions import ApiTypeError as ApiTypeError
-from hindsight_client_api.exceptions import ApiValueError as ApiValueError
-from hindsight_client_api.exceptions import ApiKeyError as ApiKeyError
-from hindsight_client_api.exceptions import ApiAttributeError as ApiAttributeError
-from hindsight_client_api.exceptions import ApiException as ApiException
+from hindsight_client_api.api_response import ApiResponse
+from hindsight_client_api.api_client import ApiClient
+from hindsight_client_api.configuration import Configuration
+from hindsight_client_api.exceptions import OpenApiException
+from hindsight_client_api.exceptions import ApiTypeError
+from hindsight_client_api.exceptions import ApiValueError
+from hindsight_client_api.exceptions import ApiKeyError
+from hindsight_client_api.exceptions import ApiAttributeError
+from hindsight_client_api.exceptions import ApiException
 
 # import models into sdk package
-from hindsight_client_api.models.add_background_request import AddBackgroundRequest as AddBackgroundRequest
-from hindsight_client_api.models.background_response import BackgroundResponse as BackgroundResponse
-from hindsight_client_api.models.bank_list_item import BankListItem as BankListItem
-from hindsight_client_api.models.bank_list_response import BankListResponse as BankListResponse
-from hindsight_client_api.models.bank_profile_response import BankProfileResponse as BankProfileResponse
-from hindsight_client_api.models.bank_stats_response import BankStatsResponse as BankStatsResponse
-from hindsight_client_api.models.budget import Budget as Budget
-from hindsight_client_api.models.cancel_operation_response import CancelOperationResponse as CancelOperationResponse
-from hindsight_client_api.models.chunk_data import ChunkData as ChunkData
-from hindsight_client_api.models.chunk_include_options import ChunkIncludeOptions as ChunkIncludeOptions
-from hindsight_client_api.models.chunk_response import ChunkResponse as ChunkResponse
-from hindsight_client_api.models.create_bank_request import CreateBankRequest as CreateBankRequest
-from hindsight_client_api.models.delete_document_response import DeleteDocumentResponse as DeleteDocumentResponse
-from hindsight_client_api.models.delete_response import DeleteResponse as DeleteResponse
-from hindsight_client_api.models.disposition_traits import DispositionTraits as DispositionTraits
-from hindsight_client_api.models.document_response import DocumentResponse as DocumentResponse
-from hindsight_client_api.models.entity_detail_response import EntityDetailResponse as EntityDetailResponse
-from hindsight_client_api.models.entity_include_options import EntityIncludeOptions as EntityIncludeOptions
-from hindsight_client_api.models.entity_list_item import EntityListItem as EntityListItem
-from hindsight_client_api.models.entity_list_response import EntityListResponse as EntityListResponse
-from hindsight_client_api.models.entity_observation_response import EntityObservationResponse as EntityObservationResponse
-from hindsight_client_api.models.entity_state_response import EntityStateResponse as EntityStateResponse
-from hindsight_client_api.models.graph_data_response import GraphDataResponse as GraphDataResponse
-from hindsight_client_api.models.http_validation_error import HTTPValidationError as HTTPValidationError
-from hindsight_client_api.models.include_options import IncludeOptions as IncludeOptions
-from hindsight_client_api.models.list_documents_response import ListDocumentsResponse as ListDocumentsResponse
-from hindsight_client_api.models.list_memory_units_response import ListMemoryUnitsResponse as ListMemoryUnitsResponse
-from hindsight_client_api.models.memory_item import MemoryItem as MemoryItem
-from hindsight_client_api.models.operation_response import OperationResponse as OperationResponse
-from hindsight_client_api.models.operations_list_response import OperationsListResponse as OperationsListResponse
-from hindsight_client_api.models.recall_request import RecallRequest as RecallRequest
-from hindsight_client_api.models.recall_response import RecallResponse as RecallResponse
-from hindsight_client_api.models.recall_result import RecallResult as RecallResult
-from hindsight_client_api.models.reflect_fact import ReflectFact as ReflectFact
-from hindsight_client_api.models.reflect_include_options import ReflectIncludeOptions as ReflectIncludeOptions
-from hindsight_client_api.models.reflect_request import ReflectRequest as ReflectRequest
-from hindsight_client_api.models.reflect_response import ReflectResponse as ReflectResponse
-from hindsight_client_api.models.retain_request import RetainRequest as RetainRequest
-from hindsight_client_api.models.retain_response import RetainResponse as RetainResponse
-from hindsight_client_api.models.update_disposition_request import UpdateDispositionRequest as UpdateDispositionRequest
-from hindsight_client_api.models.validation_error import ValidationError as ValidationError
-from hindsight_client_api.models.validation_error_loc_inner import ValidationErrorLocInner as ValidationErrorLocInner
-
+from hindsight_client_api.models.add_background_request import AddBackgroundRequest
+from hindsight_client_api.models.background_response import BackgroundResponse
+from hindsight_client_api.models.bank_list_item import BankListItem
+from hindsight_client_api.models.bank_list_response import BankListResponse
+from hindsight_client_api.models.bank_profile_response import BankProfileResponse
+from hindsight_client_api.models.bank_stats_response import BankStatsResponse
+from hindsight_client_api.models.budget import Budget
+from hindsight_client_api.models.cancel_operation_response import CancelOperationResponse
+from hindsight_client_api.models.chunk_data import ChunkData
+from hindsight_client_api.models.chunk_include_options import ChunkIncludeOptions
+from hindsight_client_api.models.chunk_response import ChunkResponse
+from hindsight_client_api.models.create_bank_request import CreateBankRequest
+from hindsight_client_api.models.delete_document_response import DeleteDocumentResponse
+from hindsight_client_api.models.delete_response import DeleteResponse
+from hindsight_client_api.models.disposition_traits import DispositionTraits
+from hindsight_client_api.models.document_response import DocumentResponse
+from hindsight_client_api.models.entity_detail_response import EntityDetailResponse
+from hindsight_client_api.models.entity_include_options import EntityIncludeOptions
+from hindsight_client_api.models.entity_input import EntityInput
+from hindsight_client_api.models.entity_list_item import EntityListItem
+from hindsight_client_api.models.entity_list_response import EntityListResponse
+from hindsight_client_api.models.entity_observation_response import EntityObservationResponse
+from hindsight_client_api.models.entity_state_response import EntityStateResponse
+from hindsight_client_api.models.graph_data_response import GraphDataResponse
+from hindsight_client_api.models.http_validation_error import HTTPValidationError
+from hindsight_client_api.models.include_options import IncludeOptions
+from hindsight_client_api.models.list_documents_response import ListDocumentsResponse
+from hindsight_client_api.models.list_memory_units_response import ListMemoryUnitsResponse
+from hindsight_client_api.models.memory_item import MemoryItem
+from hindsight_client_api.models.operation_response import OperationResponse
+from hindsight_client_api.models.operations_list_response import OperationsListResponse
+from hindsight_client_api.models.recall_request import RecallRequest
+from hindsight_client_api.models.recall_response import RecallResponse
+from hindsight_client_api.models.recall_result import RecallResult
+from hindsight_client_api.models.reflect_fact import ReflectFact
+from hindsight_client_api.models.reflect_include_options import ReflectIncludeOptions
+from hindsight_client_api.models.reflect_request import ReflectRequest
+from hindsight_client_api.models.reflect_response import ReflectResponse
+from hindsight_client_api.models.retain_request import RetainRequest
+from hindsight_client_api.models.retain_response import RetainResponse
+from hindsight_client_api.models.update_disposition_request import UpdateDispositionRequest
+from hindsight_client_api.models.validation_error import ValidationError
+from hindsight_client_api.models.validation_error_loc_inner import ValidationErrorLocInner

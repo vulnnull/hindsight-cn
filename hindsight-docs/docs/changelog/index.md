@@ -8,6 +8,27 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.2.0](https://github.com/vectorize-io/hindsight/releases/tag/v0.2.0)
+
+**Features**
+
+- Add additional model provider support, including Anthropic Claude and LM Studio. ([`787ed60`](https://github.com/vectorize-io/hindsight/commit/787ed60))
+- Add multi-bank access and new MCP tools for interacting with multiple memory banks via MCP. ([`6b5f593`](https://github.com/vectorize-io/hindsight/commit/6b5f593))
+- Allow supplying custom entities when retaining memories via the retain endpoint. ([`dd59bc8`](https://github.com/vectorize-io/hindsight/commit/dd59bc8))
+- Enhance the /reflect endpoint with max_tokens control and optional structured output responses. ([`d49e820`](https://github.com/vectorize-io/hindsight/commit/d49e820))
+
+
+**Improvements**
+
+- Improve local LLM support for reasoning-capable models and streamline Docker startup for local deployments. ([`eea0f27`](https://github.com/vectorize-io/hindsight/commit/eea0f27))
+- Support operation validator extensions and return proper HTTP errors when validation fails. ([`ce45d30`](https://github.com/vectorize-io/hindsight/commit/ce45d30))
+- Add configurable observation thresholds to control when observations are created/updated. ([`54e2df0`](https://github.com/vectorize-io/hindsight/commit/54e2df0))
+- Improve graph visualization to the control plane for exploring memory relationships. ([`1a62069`](https://github.com/vectorize-io/hindsight/commit/1a62069))
+
+**Bug Fixes**
+
+- Fix MCP server lifecycle handling so MCP lifespan is correctly tied to the FastAPI app lifespan. ([`6b78f7d`](https://github.com/vectorize-io/hindsight/commit/6b78f7d))
+
 ## [0.1.15](https://github.com/vectorize-io/hindsight/releases/tag/v0.1.15)
 
 **Features**

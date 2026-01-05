@@ -161,6 +161,7 @@ pub fn retain(
         metadata: None,
         timestamp: None,
         document_id: Some(doc_id.clone()),
+        entities: None,
     };
 
     let request = RetainRequest {
@@ -270,6 +271,7 @@ pub fn retain_files(
             metadata: None,
             timestamp: None,
             document_id: Some(doc_id),
+            entities: None,
         });
 
         pb.inc(1);

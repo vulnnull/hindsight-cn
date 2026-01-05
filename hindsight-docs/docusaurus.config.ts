@@ -81,7 +81,7 @@ const config: Config = {
         specs: [
           {
             id: 'hindsight-api',
-            spec: 'openapi.json',
+            spec: 'static/openapi.json',
             route: '/api-reference',
             url: '/openapi.json',
           },

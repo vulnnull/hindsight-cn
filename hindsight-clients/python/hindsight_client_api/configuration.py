@@ -17,7 +17,7 @@ import http.client as httplib
 import logging
 from logging import FileHandler
 import sys
-from typing import Any, ClassVar, Dict, List, Literal, Optional, TypedDict, Union
+from typing import Any, ClassVar, Dict, List, Literal, Optional, TypedDict
 from typing_extensions import NotRequired, Self
 
 import urllib3
@@ -159,10 +159,6 @@ class Configuration:
     :param ssl_ca_cert: str - the path to a file of concatenated CA certificates
       in PEM format.
     :param retries: Number of retries for API requests.
-    :param ca_cert_data: verify the peer using concatenated CA certificate data
-      in PEM (str) or DER (bytes) format.
-    :param cert_file: the path to a client certificate file, for mTLS.
-    :param key_file: the path to a client key file, for mTLS. 
 
     """
 
@@ -176,16 +172,13 @@ class Configuration:
         username: Optional[str]=None,
         password: Optional[str]=None,
         access_token: Optional[str]=None,
-        server_index: Optional[int]=None,
+        server_index: Optional[int]=None, 
         server_variables: Optional[ServerVariablesT]=None,
         server_operation_index: Optional[Dict[int, int]]=None,
         server_operation_variables: Optional[Dict[int, ServerVariablesT]]=None,
         ignore_operation_servers: bool=False,
         ssl_ca_cert: Optional[str]=None,
         retries: Optional[int] = None,
-        ca_cert_data: Optional[Union[str, bytes]] = None,
-        cert_file: Optional[str]=None,
-        key_file: Optional[str]=None,
         *,
         debug: Optional[bool] = None,
     ) -> None:
@@ -263,14 +256,10 @@ class Configuration:
         self.ssl_ca_cert = ssl_ca_cert
         """Set this to customize the certificate file to verify the peer.
         """
-        self.ca_cert_data = ca_cert_data
-        """Set this to verify the peer using PEM (str) or DER (bytes)
-           certificate data.
-        """
-        self.cert_file = cert_file
+        self.cert_file = None
         """client certificate file
         """
-        self.key_file = key_file
+        self.key_file = None
         """client key file
         """
         self.assert_hostname = None

@@ -2297,6 +2297,33 @@
         "title": "EntityIncludeOptions",
         "description": "Options for including entity observations in recall results."
       },
+      "EntityInput": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "The entity name/text"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "description": "Optional entity type (e.g., 'PERSON', 'ORG', 'CONCEPT')"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "EntityInput",
+        "description": "Entity to associate with retained content."
+      },
       "EntityListItem": {
         "properties": {
           "id": {
@@ -2717,6 +2744,21 @@
             ],
             "title": "Document Id",
             "description": "Optional document ID for this memory item."
+          },
+          "entities": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EntityInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entities",
+            "description": "Optional entities to combine with auto-extracted entities."
           }
         },
         "type": "object",
@@ -2729,6 +2771,15 @@
           "content": "Alice mentioned she's working on a new ML model",
           "context": "team meeting",
           "document_id": "meeting_notes_2024_01_15",
+          "entities": [
+            {
+              "text": "Alice"
+            },
+            {
+              "text": "ML model",
+              "type": "CONCEPT"
+            }
+          ],
           "metadata": {
             "channel": "engineering",
             "source": "slack"
