@@ -1,6 +1,6 @@
 [project]
 name = "hindsight-litellm"
-version = "0.1.16"
+version = "0.2.0"
 description = "Universal LLM memory integration via LiteLLM - works with 100+ providers"
 readme = "README.md"
 requires-python = ">=3.10"
