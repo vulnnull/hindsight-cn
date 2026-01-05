@@ -8,6 +8,7 @@ from contextvars import ContextVar
 from fastmcp import FastMCP
 
 from hindsight_api import MemoryEngine
+from hindsight_api.api.http import BankListItem, BankListResponse, BankProfileResponse, DispositionTraits
 from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES
 from hindsight_api.models import RequestContext
 
@@ -76,7 +77,9 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
             if target_bank is None:
                 return "Error: No bank_id configured"
             await memory.retain_batch_async(
-                bank_id=target_bank, contents=[{"content": content, "context": context}], request_context=RequestContext()
+                bank_id=target_bank,
+                contents=[{"content": content, "context": context}],
+                request_context=RequestContext(),
             )
             return f"Memory stored successfully in bank '{target_bank}'"
         except Exception as e:
@@ -84,7 +87,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
             return f"Error: {str(e)}"
 
     @mcp.tool()
-    async def recall(query: str, max_results: int = 10, bank_id: str | None = None) -> str:
+    async def recall(query: str, max_tokens: int = 4096, bank_id: str | None = None) -> str:
         """
         Search memories to provide personalized, context-aware responses.
 
@@ -96,7 +99,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
 
         Args:
             query: Natural language search query (e.g., "user's food preferences", "what projects is user working on")
-            max_results: Maximum number of results to return (default: 10)
+            max_tokens: Maximum tokens in the response (default: 4096)
             bank_id: Optional bank to search in (defaults to session bank). Use for cross-bank operations.
         """
         try:
@@ -105,29 +108,20 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
                 return "Error: No bank_id configured"
             from hindsight_api.engine.memory_engine import Budget
 
-            search_result = await memory.recall_async(
+            recall_result = await memory.recall_async(
                 bank_id=target_bank,
                 query=query,
                 fact_type=list(VALID_RECALL_FACT_TYPES),
-                budget=Budget.LOW,
+                budget=Budget.HIGH,
+                max_tokens=max_tokens,
                 request_context=RequestContext(),
             )
 
-            results = [
-                {
-                    "id": fact.id,
-                    "text": fact.text,
-                    "type": fact.fact_type,
-                    "context": fact.context,
-                    "occurred_start": fact.occurred_start,
-                }
-                for fact in search_result.results[:max_results]
-            ]
-
-            return json.dumps({"results": results, "bank_id": target_bank}, indent=2)
+            # Use model's JSON serialization
+            return recall_result.model_dump_json(indent=2)
         except Exception as e:
             logger.error(f"Error searching: {e}", exc_info=True)
-            return json.dumps({"error": str(e), "results": []})
+            return f'{{"error": "{e}", "results": []}}'
 
     @mcp.tool()
     async def reflect(query: str, context: str | None = None, budget: str = "low", bank_id: str | None = None) -> str:
@@ -174,31 +168,10 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
                 request_context=RequestContext(),
             )
 
-            # Return the reflection text and optionally facts used
-            result = {
-                "text": reflect_result.text,
-                "bank_id": target_bank,
-                "based_on": {
-                    fact_type: [
-                        {"id": f.id, "text": f.text, "context": f.context}
-                        for f in facts
-                    ]
-                    for fact_type, facts in (reflect_result.based_on or {}).items()
-                    if facts
-                },
-            }
-
-            # Include new opinions if any were formed
-            if reflect_result.new_opinions:
-                result["new_opinions"] = [
-                    {"text": op.text, "confidence": op.confidence}
-                    for op in reflect_result.new_opinions
-                ]
-
-            return json.dumps(result, indent=2)
+            return reflect_result.model_dump_json(indent=2)
         except Exception as e:
             logger.error(f"Error reflecting: {e}", exc_info=True)
-            return json.dumps({"error": str(e), "text": ""})
+            return f'{{"error": "{e}", "text": ""}}'
 
     @mcp.tool()
     async def list_banks() -> str:
@@ -209,23 +182,27 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
         the correct bank_id for cross-bank operations.
 
         Returns:
-            JSON list of banks with id, name, and creation date
+            JSON object with banks array containing bank_id, name, disposition, background, and timestamps
         """
         try:
             banks = await memory.list_banks(request_context=RequestContext())
-            return json.dumps({
-                "banks": [
-                    {
-                        "id": b["bank_id"],
-                        "name": b.get("name"),
-                        "created_at": str(b.get("created_at")) if b.get("created_at") else None
-                    }
-                    for b in banks
-                ]
-            }, indent=2)
+            bank_items = [
+                BankListItem(
+                    bank_id=b.get("bank_id") or b.get("id"),
+                    name=b.get("name"),
+                    disposition=DispositionTraits(
+                        **b.get("disposition", {"skepticism": 3, "literalism": 3, "empathy": 3})
+                    ),
+                    background=b.get("background"),
+                    created_at=str(b.get("created_at")) if b.get("created_at") else None,
+                    updated_at=str(b.get("updated_at")) if b.get("updated_at") else None,
+                )
+                for b in banks
+            ]
+            return BankListResponse(banks=bank_items).model_dump_json(indent=2)
         except Exception as e:
             logger.error(f"Error listing banks: {e}", exc_info=True)
-            return json.dumps({"error": str(e), "banks": []})
+            return f'{{"error": "{e}", "banks": []}}'
 
     @mcp.tool()
     async def create_bank(bank_id: str, name: str | None = None, background: str | None = None) -> str:
@@ -246,25 +223,28 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
 
             # Update name and/or background if provided
             if name is not None or background is not None:
-                await memory.update_bank_info(
-                    bank_id,
-                    name=name,
-                    background=background,
-                    request_context=RequestContext()
+                await memory.update_bank(bank_id, name=name, background=background, request_context=RequestContext())
+
+            # Get final profile and return using BankProfileResponse model
+            profile = await memory.get_bank_profile(bank_id, request_context=RequestContext())
+            disposition = profile.get("disposition")
+            if hasattr(disposition, "model_dump"):
+                disposition_traits = DispositionTraits(**disposition.model_dump())
+            else:
+                disposition_traits = DispositionTraits(
+                    **dict(disposition or {"skepticism": 3, "literalism": 3, "empathy": 3})
                 )
 
-            # Get final profile
-            profile = await memory.get_bank_profile(bank_id, request_context=RequestContext())
-            return json.dumps({
-                "success": True,
-                "bank_id": bank_id,
-                "name": profile.get("name"),
-                "background": profile.get("background"),
-                "disposition": profile.get("disposition").model_dump() if hasattr(profile.get("disposition"), "model_dump") else dict(profile.get("disposition", {}))
-            }, indent=2)
+            response = BankProfileResponse(
+                bank_id=bank_id,
+                name=profile.get("name") or "",
+                disposition=disposition_traits,
+                background=profile.get("background") or "",
+            )
+            return response.model_dump_json(indent=2)
         except Exception as e:
             logger.error(f"Error creating bank: {e}", exc_info=True)
-            return json.dumps({"error": str(e), "success": False})
+            return json.dumps({"error": str(e)})
 
     return mcp
 
@@ -286,9 +266,9 @@ class MCPMiddleware:
         self.app = app
         self.memory = memory
         self.mcp_server = create_mcp_server(memory)
-        self.mcp_app = self.mcp_server.http_app()
+        self.mcp_app = self.mcp_server.http_app(path="/")
         # Expose the lifespan for the parent app to chain
-        self.lifespan = self.mcp_app.lifespan_handler if hasattr(self.mcp_app, 'lifespan_handler') else None
+        self.lifespan = self.mcp_app.lifespan_handler if hasattr(self.mcp_app, "lifespan_handler") else None
 
     def _get_header(self, scope: dict, name: str) -> str | None:
         """Extract a header value from ASGI scope."""
@@ -308,7 +288,7 @@ class MCPMiddleware:
         # Strip any mount prefix (e.g., /mcp) that FastAPI might not have stripped
         root_path = scope.get("root_path", "")
         if root_path and path.startswith(root_path):
-            path = path[len(root_path):] or "/"
+            path = path[len(root_path) :] or "/"
 
         # Also handle case where mount path wasn't stripped (e.g., /mcp/...)
         if path.startswith("/mcp/"):
@@ -319,11 +299,15 @@ class MCPMiddleware:
         # Try to get bank_id from header first (for Claude Code compatibility)
         bank_id = self._get_header(scope, "X-Bank-Id")
 
+        # MCP endpoint paths that should not be treated as bank_ids
+        MCP_ENDPOINTS = {"sse", "messages"}
+
         # If no header, try to extract from path: /{bank_id}/...
         new_path = path
         if not bank_id and path.startswith("/") and len(path) > 1:
             parts = path[1:].split("/", 1)
-            if parts[0] and parts[0] != "mcp":
+            # Don't treat MCP endpoints as bank_ids
+            if parts[0] and parts[0] not in MCP_ENDPOINTS:
                 # First segment looks like a bank_id
                 bank_id = parts[0]
                 new_path = "/" + parts[1] if len(parts) > 1 else "/"

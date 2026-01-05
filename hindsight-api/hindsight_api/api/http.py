@@ -1607,7 +1607,7 @@ def _register_routes(app: FastAPI):
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get(
-        "/v1/default/banks/{bank_id}/documents/{document_id}",
+        "/v1/default/banks/{bank_id}/documents/{document_id:path}",
         response_model=DocumentResponse,
         summary="Get document details",
         description="Get a specific document including its original text",
@@ -1639,7 +1639,7 @@ def _register_routes(app: FastAPI):
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get(
-        "/v1/default/chunks/{chunk_id}",
+        "/v1/default/chunks/{chunk_id:path}",
         response_model=ChunkResponse,
         summary="Get chunk details",
         description="Get a specific chunk by its ID",
@@ -1668,7 +1668,7 @@ def _register_routes(app: FastAPI):
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.delete(
-        "/v1/default/banks/{bank_id}/documents/{document_id}",
+        "/v1/default/banks/{bank_id}/documents/{document_id:path}",
         response_model=DeleteDocumentResponse,
         summary="Delete a document",
         description="Delete a document and all its associated memory units and links.\n\n"
@@ -1999,9 +1999,7 @@ def _register_routes(app: FastAPI):
                 if item.document_id:
                     content_dict["document_id"] = item.document_id
                 if item.entities:
-                    content_dict["entities"] = [
-                        {"text": e.text, "type": e.type or "CONCEPT"} for e in item.entities
-                    ]
+                    content_dict["entities"] = [{"text": e.text, "type": e.type or "CONCEPT"} for e in item.entities]
                 contents.append(content_dict)
 
             if request.async_:

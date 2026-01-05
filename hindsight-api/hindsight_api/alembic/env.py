@@ -7,10 +7,9 @@ import logging
 import os
 from pathlib import Path
 
+from alembic import context
 from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
-
-from alembic import context
 
 # Import your models here
 from hindsight_api.models import Base

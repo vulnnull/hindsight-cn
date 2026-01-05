@@ -69,10 +69,12 @@ async def process_entities_batch(
         seen_texts = {e["text"].lower() for e in llm_entities}
         for user_entity in user_entities:
             if user_entity["text"].lower() not in seen_texts:
-                llm_entities.append({
-                    "text": user_entity["text"],
-                    "type": user_entity.get("type", "CONCEPT"),
-                })
+                llm_entities.append(
+                    {
+                        "text": user_entity["text"],
+                        "type": user_entity.get("type", "CONCEPT"),
+                    }
+                )
                 seen_texts.add(user_entity["text"].lower())
 
         entities_per_fact.append(llm_entities)

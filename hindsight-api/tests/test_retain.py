@@ -1778,3 +1778,71 @@ async def test_temporal_links_within_same_batch(memory, request_context):
 
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_user_provided_entities(memory, request_context):
+    """
+    Test that user-provided entities are merged with auto-extracted entities.
+
+    This tests the feature added in PR #91 where users can provide entities
+    via the 'entities' field in the retain request. These should be combined
+    with LLM-extracted entities, with case-insensitive deduplication.
+    """
+    bank_id = f"test_user_entities_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Store content with user-provided entities
+        # The content mentions "Alice" which LLM might extract,
+        # but we also provide "ProjectX" and "ACME Corp" which may not be in the text
+        contents = [
+            {
+                "content": "Alice completed the quarterly report.",
+                "context": "work update",
+                "entities": [
+                    {"text": "ProjectX", "type": "PROJECT"},
+                    {"text": "ACME Corp", "type": "ORG"},
+                    {"text": "Alice"},  # May also be extracted by LLM (dedup test)
+                ],
+            }
+        ]
+
+        result = await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=contents,
+            request_context=request_context,
+        )
+
+        # Flatten the list of lists
+        unit_ids = [uid for sublist in result for uid in sublist]
+        assert len(unit_ids) > 0, "Should have created at least one fact"
+
+        logger.info(f"Created {len(unit_ids)} facts with user-provided entities")
+
+        # Query entity links to verify user-provided entities were stored
+        async with memory._pool.acquire() as conn:
+            # Get all entities linked to our facts via the unit_entities junction table
+            entity_rows = await conn.fetch(
+                """
+                SELECT DISTINCT e.canonical_name
+                FROM entities e
+                JOIN unit_entities ue ON e.id = ue.entity_id
+                WHERE ue.unit_id::text = ANY($1)
+                """,
+                unit_ids
+            )
+
+            entity_names = {row['canonical_name'].lower() for row in entity_rows}
+            logger.info(f"Found entities linked to facts: {[row['canonical_name'] for row in entity_rows]}")
+
+            # Verify user-provided entities are present
+            assert "projectx" in entity_names, "User-provided entity 'ProjectX' should be linked"
+            assert "acme corp" in entity_names, "User-provided entity 'ACME Corp' should be linked"
+
+            # Alice should be present (either from LLM extraction or user-provided)
+            assert "alice" in entity_names, "Entity 'Alice' should be linked"
+
+            logger.info("✓ User-provided entities successfully merged with extracted entities")
+
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)

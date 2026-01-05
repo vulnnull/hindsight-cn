@@ -94,7 +94,7 @@ def create_app(
 
         # Mount the MCP middleware
         app.mount(mcp_mount_path, mcp_app)
-        logger.info(f"MCP server enabled at {mcp_mount_path}/{{bank_id}}/mcp")
+        logger.info(f"MCP server enabled at {mcp_mount_path}/")
 
     return app
 

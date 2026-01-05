@@ -429,6 +429,66 @@ async def test_document_deletion(api_client):
 
 
 @pytest.mark.asyncio
+async def test_document_deletion_with_slashes_in_id(api_client):
+    """
+    Test document deletion when document_id contains forward slashes.
+
+    Regression test for https://github.com/vectorize-io/hindsight/issues/92
+
+    Document IDs with slashes (e.g., "folder/file.md") should work correctly
+    for all operations including creation, listing, retrieval, and deletion.
+    """
+    import urllib.parse
+
+    test_bank_id = f"doc_slash_test_{datetime.now().timestamp()}"
+    document_id_with_slash = "reports/quarterly/q1-2024.md"
+
+    try:
+        # 1. Create a document with slashes in its ID
+        response = await api_client.post(
+            f"/v1/default/banks/{test_bank_id}/memories",
+            json={
+                "items": [
+                    {
+                        "content": "The Q1 2024 report shows significant growth in user engagement.",
+                        "context": "quarterly report",
+                        "document_id": document_id_with_slash
+                    }
+                ]
+            }
+        )
+        assert response.status_code == 200, f"Failed to create document: {response.text}"
+
+        # 2. Verify document exists via list endpoint
+        response = await api_client.get(f"/v1/default/banks/{test_bank_id}/documents")
+        assert response.status_code == 200
+        documents = response.json()
+        doc_ids = [doc["id"] for doc in documents["items"]]
+        assert document_id_with_slash in doc_ids, f"Document should be in list: {doc_ids}"
+
+        # 3. Delete the document (slashes in document_id should work with :path converter)
+        encoded_doc_id = urllib.parse.quote(document_id_with_slash, safe="")
+        response = await api_client.delete(
+            f"/v1/default/banks/{test_bank_id}/documents/{encoded_doc_id}"
+        )
+        assert response.status_code == 200, (
+            f"Failed to delete document with slashes in ID. "
+            f"Status: {response.status_code}, Response: {response.text}"
+        )
+
+        # Verify document is deleted
+        response = await api_client.get(f"/v1/default/banks/{test_bank_id}/documents")
+        assert response.status_code == 200
+        documents = response.json()
+        doc_ids = [doc["id"] for doc in documents["items"]]
+        assert document_id_with_slash not in doc_ids, "Document should be deleted"
+
+    finally:
+        # Cleanup - delete the bank
+        await api_client.delete(f"/v1/default/banks/{test_bank_id}")
+
+
+@pytest.mark.asyncio
 async def test_async_retain(api_client):
     """Test asynchronous retain functionality.
 
