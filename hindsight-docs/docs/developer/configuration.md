@@ -78,22 +78,41 @@ export HINDSIGHT_API_LLM_MODEL=your-model-name
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local` or `tei` | `local` |
+| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local`, `tei`, or `openai` | `local` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL` | Model for local provider | `BAAI/bge-small-en-v1.5` |
 | `HINDSIGHT_API_EMBEDDINGS_TEI_URL` | TEI server URL | - |
+| `HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY` | OpenAI API key (falls back to `HINDSIGHT_API_LLM_API_KEY`) | - |
+| `HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL` | OpenAI embedding model | `text-embedding-3-small` |
 
 ```bash
 # Local (default) - uses SentenceTransformers
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
 export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-small-en-v1.5
 
+# OpenAI - cloud-based embeddings
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai
+export HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY=sk-xxxxxxxxxxxx  # or reuses HINDSIGHT_API_LLM_API_KEY
+export HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=text-embedding-3-small  # 1536 dimensions
+
 # TEI - HuggingFace Text Embeddings Inference (recommended for production)
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=tei
 export HINDSIGHT_API_EMBEDDINGS_TEI_URL=http://localhost:8080
 ```
 
-:::warning
-All embedding models must produce 384-dimensional vectors to match the database schema.
+#### Embedding Dimensions
+
+Hindsight automatically detects the embedding dimension from the model at startup and adjusts the database schema accordingly. The default model (`BAAI/bge-small-en-v1.5`) produces 384-dimensional vectors, while OpenAI models produce 1536 or 3072 dimensions.
+
+:::warning Dimension Changes
+Once memories are stored, you cannot change the embedding dimension without losing data. If you need to switch to a model with different dimensions:
+
+1. **Empty database**: The schema is adjusted automatically on startup
+2. **Existing data**: Either delete all memories first, or use a model with matching dimensions
+
+Supported OpenAI embedding dimensions:
+- `text-embedding-3-small`: 1536 dimensions
+- `text-embedding-3-large`: 3072 dimensions
+- `text-embedding-ada-002`: 1536 dimensions (legacy)
 :::
 
 ### Reranker
