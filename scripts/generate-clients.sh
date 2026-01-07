@@ -324,9 +324,11 @@ rm -rf "$TYPESCRIPT_CLIENT_DIR/services"
 rm -f "$TYPESCRIPT_CLIENT_DIR/index.ts"
 
 # Generate new client using @hey-api/openapi-ts
+# Use npm run generate to use the locally installed version (pinned in package.json)
+# instead of npx --yes which would fetch the latest version
 echo "Generating from $OPENAPI_SPEC..."
 cd "$TYPESCRIPT_CLIENT_DIR"
-npx --yes @hey-api/openapi-ts
+npm run generate
 
 echo "✓ TypeScript client generated at $TYPESCRIPT_CLIENT_DIR"
 echo ""
