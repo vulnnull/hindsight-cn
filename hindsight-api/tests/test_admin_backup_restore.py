@@ -1,8 +1,9 @@
 """
 Tests for admin backup and restore functionality.
 
-Note: These tests run sequentially (not in parallel) because they all
-manipulate the same database and do full backup/restore operations.
+These tests use an isolated schema to avoid interfering with other tests.
+The backup/restore operations truncate tables, which would cause deadlocks
+and race conditions if run against the shared public schema.
 """
 
 import tempfile
@@ -10,49 +11,106 @@ import uuid
 import zipfile
 from pathlib import Path
 
+import asyncpg
 import pytest
+import pytest_asyncio
 
-from hindsight_api import RequestContext
 from hindsight_api.admin.cli import _backup, _restore, BACKUP_TABLES
+from hindsight_api.migrations import run_migrations
 
 
 # Run these tests sequentially since they do full DB backup/restore
 pytestmark = pytest.mark.xdist_group(name="backup_restore")
 
 
+@pytest_asyncio.fixture(scope="function")
+async def backup_test_schema(pg0_db_url, embeddings):
+    """Create an isolated schema for backup/restore tests.
+
+    Uses a unique schema name per test invocation to avoid conflicts with
+    parallel test runs or leftover state from interrupted runs.
+
+    Returns a tuple of (db_url, schema_name, fq_helper, embeddings).
+    """
+    # Initialize embeddings if not already done
+    await embeddings.initialize()
+
+    # Use unique schema name to avoid conflicts
+    schema_name = f"backup_test_{uuid.uuid4().hex[:8]}"
+
+    def _fq(table: str) -> str:
+        """Get fully-qualified table name in test schema."""
+        return f"{schema_name}.{table}"
+
+    conn = await asyncpg.connect(pg0_db_url)
+    try:
+        await conn.execute(f"CREATE SCHEMA {schema_name}")
+    finally:
+        await conn.close()
+
+    # Run migrations on the isolated schema
+    run_migrations(pg0_db_url, schema=schema_name)
+
+    yield pg0_db_url, schema_name, _fq, embeddings
+
+    # Cleanup after test
+    conn = await asyncpg.connect(pg0_db_url)
+    try:
+        await conn.execute(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE")
+    finally:
+        await conn.close()
+
+
 @pytest.mark.asyncio
-async def test_backup_restore_roundtrip(memory, pg0_db_url, request_context):
+async def test_backup_restore_roundtrip(backup_test_schema):
     """Test that backup and restore preserves all data correctly."""
-    # Use unique bank ID to avoid conflicts
+    db_url, schema_name, _fq, embeddings = backup_test_schema
     bank_id = f"test-backup-{uuid.uuid4().hex[:8]}"
+    conn = await asyncpg.connect(db_url)
 
-    # Create some test data
-    await memory.retain_batch_async(
-        bank_id=bank_id,
-        contents=[
-            {"content": "Alice is a software engineer who loves Python."},
-            {"content": "Bob works with Alice on the backend team."},
-            {"content": "The team uses PostgreSQL for their database."},
-        ],
-        request_context=request_context,
-    )
+    try:
+        # Create a bank
+        await conn.execute(
+            f"INSERT INTO {_fq('banks')} (bank_id) VALUES ($1) ON CONFLICT DO NOTHING",
+            bank_id,
+        )
 
-    # Get counts before backup
-    async with memory._pool.acquire() as conn:
+        # Create some test memory units with embeddings
+        # Convert embedding list to pgvector format string
+        embedding_list = embeddings.encode(["Test content about Alice"])[0]
+        embedding_str = "[" + ",".join(str(x) for x in embedding_list) + "]"
+        for text in [
+            "Alice is a software engineer who loves Python.",
+            "Bob works with Alice on the backend team.",
+            "The team uses PostgreSQL for their database.",
+        ]:
+            await conn.execute(
+                f"""INSERT INTO {_fq('memory_units')}
+                    (bank_id, text, fact_type, embedding, event_date)
+                    VALUES ($1, $2, 'world', $3::vector, NOW())""",
+                bank_id,
+                text,
+                embedding_str,
+            )
+
+        # Get counts before backup
         counts_before = {}
         for table in BACKUP_TABLES:
-            counts_before[table] = await conn.fetchval(f"SELECT COUNT(*) FROM {table}")
+            counts_before[table] = await conn.fetchval(f"SELECT COUNT(*) FROM {_fq(table)}")
 
-    # Verify we have data
-    assert counts_before["banks"] > 0
-    assert counts_before["memory_units"] > 0
+        # Verify we have data
+        assert counts_before["banks"] > 0
+        assert counts_before["memory_units"] > 0
+
+    finally:
+        await conn.close()
 
     # Backup to a temp file
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as f:
         backup_path = Path(f.name)
 
     try:
-        manifest = await _backup(pg0_db_url, backup_path)
+        manifest = await _backup(db_url, backup_path, schema=schema_name)
 
         # Verify backup file exists and is valid
         assert backup_path.exists()
@@ -72,33 +130,37 @@ async def test_backup_restore_roundtrip(memory, pg0_db_url, request_context):
                 assert f"{table}.bin" in zf.namelist()
 
         # Clear all data
-        async with memory._pool.acquire() as conn:
+        conn = await asyncpg.connect(db_url)
+        try:
             for table in reversed(BACKUP_TABLES):
-                await conn.execute(f"TRUNCATE TABLE {table} CASCADE")
+                await conn.execute(f"TRUNCATE TABLE {_fq(table)} CASCADE")
 
-        # Verify data is gone
-        async with memory._pool.acquire() as conn:
+            # Verify data is gone
             for table in BACKUP_TABLES:
-                count = await conn.fetchval(f"SELECT COUNT(*) FROM {table}")
+                count = await conn.fetchval(f"SELECT COUNT(*) FROM {_fq(table)}")
                 assert count == 0, f"Table {table} should be empty after truncate"
+        finally:
+            await conn.close()
 
         # Restore from backup
-        await _restore(pg0_db_url, backup_path)
+        await _restore(db_url, backup_path, schema=schema_name)
 
         # Verify counts match original
-        async with memory._pool.acquire() as conn:
+        conn = await asyncpg.connect(db_url)
+        try:
             for table in BACKUP_TABLES:
-                count = await conn.fetchval(f"SELECT COUNT(*) FROM {table}")
+                count = await conn.fetchval(f"SELECT COUNT(*) FROM {_fq(table)}")
                 assert count == counts_before[table], f"Table {table} count mismatch after restore"
 
-        # Verify data content is preserved
-        async with memory._pool.acquire() as conn:
+            # Verify data content is preserved
             texts = await conn.fetch(
-                "SELECT text FROM memory_units WHERE bank_id = $1",
+                f"SELECT text FROM {_fq('memory_units')} WHERE bank_id = $1",
                 bank_id,
             )
             text_content = " ".join(r["text"] for r in texts)
             assert "Alice" in text_content or "software" in text_content
+        finally:
+            await conn.close()
 
     finally:
         # Cleanup
@@ -107,42 +169,60 @@ async def test_backup_restore_roundtrip(memory, pg0_db_url, request_context):
 
 
 @pytest.mark.asyncio
-async def test_backup_restore_preserves_all_column_types(memory, pg0_db_url, request_context):
+async def test_backup_restore_preserves_all_column_types(backup_test_schema):
     """Test that all column types are preserved: vectors, UUIDs, timestamps, JSONB."""
-    # Use unique bank ID
+    db_url, schema_name, _fq, embeddings = backup_test_schema
     bank_id = f"test-types-{uuid.uuid4().hex[:8]}"
+    conn = await asyncpg.connect(db_url)
 
-    # Create data with meaningful content that will produce facts
-    await memory.retain_batch_async(
-        bank_id=bank_id,
-        contents=[
-            {"content": "John Smith is a senior engineer at Acme Corp since 2020."},
-            {"content": "The project deadline is December 15th 2024."},
-        ],
-        request_context=request_context,
-    )
+    try:
+        # Create a bank
+        await conn.execute(
+            f"INSERT INTO {_fq('banks')} (bank_id) VALUES ($1) ON CONFLICT DO NOTHING",
+            bank_id,
+        )
 
-    # Get original data with all important column types
-    async with memory._pool.acquire() as conn:
-        # memory_units: UUID (id), Vector (embedding), Timestamp (event_date, created_at), JSONB (metadata)
+        # Create a memory unit with all column types
+        # Convert embedding list to pgvector format string
+        embedding_list = embeddings.encode(["John Smith engineer"])[0]
+        embedding_str = "[" + ",".join(str(x) for x in embedding_list) + "]"
+        await conn.execute(
+            f"""INSERT INTO {_fq('memory_units')}
+                (bank_id, text, fact_type, embedding, event_date, metadata)
+                VALUES ($1, $2, 'world', $3::vector, NOW(), $4)""",
+            bank_id,
+            "John Smith is a senior engineer at Acme Corp since 2020.",
+            embedding_str,
+            '{"key": "value"}',
+        )
+
+        # Create an entity
+        await conn.execute(
+            f"""INSERT INTO {_fq('entities')}
+                (bank_id, canonical_name, metadata)
+                VALUES ($1, $2, $3)""",
+            bank_id,
+            "John Smith",
+            '{"role": "engineer"}',
+        )
+
+        # Get original data
         original_unit = await conn.fetchrow(
-            """SELECT id, embedding, event_date, created_at, metadata, text
-               FROM memory_units WHERE bank_id = $1 LIMIT 1""",
+            f"""SELECT id, embedding, event_date, created_at, metadata, text
+               FROM {_fq('memory_units')} WHERE bank_id = $1 LIMIT 1""",
             bank_id,
         )
-
-        # entities: UUID (id), Timestamp (first_seen, last_seen), JSONB (metadata)
         original_entity = await conn.fetchrow(
-            """SELECT id, first_seen, last_seen, metadata, canonical_name
-               FROM entities WHERE bank_id = $1 LIMIT 1""",
+            f"""SELECT id, first_seen, last_seen, metadata, canonical_name
+               FROM {_fq('entities')} WHERE bank_id = $1 LIMIT 1""",
             bank_id,
         )
-
-        # banks: JSONB (personality/disposition)
         original_bank = await conn.fetchrow(
-            "SELECT bank_id, created_at, updated_at FROM banks WHERE bank_id = $1",
+            f"SELECT bank_id, created_at, updated_at FROM {_fq('banks')} WHERE bank_id = $1",
             bank_id,
         )
+    finally:
+        await conn.close()
 
     assert original_unit is not None, "Should have created memory units"
     assert original_unit["embedding"] is not None, "Should have embedding"
@@ -153,33 +233,37 @@ async def test_backup_restore_preserves_all_column_types(memory, pg0_db_url, req
         backup_path = Path(f.name)
 
     try:
-        await _backup(pg0_db_url, backup_path)
+        await _backup(db_url, backup_path, schema=schema_name)
 
         # Clear all data
-        async with memory._pool.acquire() as conn:
+        conn = await asyncpg.connect(db_url)
+        try:
             for table in reversed(BACKUP_TABLES):
-                await conn.execute(f"TRUNCATE TABLE {table} CASCADE")
+                await conn.execute(f"TRUNCATE TABLE {_fq(table)} CASCADE")
+        finally:
+            await conn.close()
 
-        await _restore(pg0_db_url, backup_path)
+        await _restore(db_url, backup_path, schema=schema_name)
 
         # Verify all column types are preserved exactly
-        async with memory._pool.acquire() as conn:
+        conn = await asyncpg.connect(db_url)
+        try:
             restored_unit = await conn.fetchrow(
-                """SELECT id, embedding, event_date, created_at, metadata, text
-                   FROM memory_units WHERE bank_id = $1 LIMIT 1""",
+                f"""SELECT id, embedding, event_date, created_at, metadata, text
+                   FROM {_fq('memory_units')} WHERE bank_id = $1 LIMIT 1""",
                 bank_id,
             )
-
             restored_entity = await conn.fetchrow(
-                """SELECT id, first_seen, last_seen, metadata, canonical_name
-                   FROM entities WHERE bank_id = $1 LIMIT 1""",
+                f"""SELECT id, first_seen, last_seen, metadata, canonical_name
+                   FROM {_fq('entities')} WHERE bank_id = $1 LIMIT 1""",
                 bank_id,
             )
-
             restored_bank = await conn.fetchrow(
-                "SELECT bank_id, created_at, updated_at FROM banks WHERE bank_id = $1",
+                f"SELECT bank_id, created_at, updated_at FROM {_fq('banks')} WHERE bank_id = $1",
                 bank_id,
             )
+        finally:
+            await conn.close()
 
         # Verify memory_units
         assert restored_unit is not None, "Should have restored memory unit"
