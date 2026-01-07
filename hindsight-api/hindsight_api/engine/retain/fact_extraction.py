@@ -14,6 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ...config import get_config
 from ..llm_wrapper import LLMConfig, OutputTooLongError
 
 
@@ -583,6 +584,7 @@ WHAT TO EXTRACT vs SKIP
     # Retry logic for JSON validation errors
     max_retries = 2
     last_error = None
+    config = get_config()
 
     # Sanitize input text to prevent Unicode encoding errors (e.g., unpaired surrogates)
     sanitized_chunk = _sanitize_text(chunk)
@@ -608,7 +610,7 @@ Text:
                 response_format=FactExtractionResponse,
                 scope="memory_extract_facts",
                 temperature=0.1,
-                max_completion_tokens=65000,
+                max_completion_tokens=config.retain_max_completion_tokens,
                 skip_validation=True,  # Get raw JSON, we'll validate leniently
             )
 

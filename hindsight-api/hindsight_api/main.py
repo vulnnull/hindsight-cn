@@ -184,6 +184,7 @@ def main():
             graph_retriever=config.graph_retriever,
             observation_min_facts=config.observation_min_facts,
             observation_top_entities=config.observation_top_entities,
+            retain_max_completion_tokens=config.retain_max_completion_tokens,
             skip_llm_verification=config.skip_llm_verification,
             lazy_reranker=config.lazy_reranker,
         )
