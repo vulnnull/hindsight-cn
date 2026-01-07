@@ -8,6 +8,11 @@ import logging
 import os
 from dataclasses import dataclass
 
+from dotenv import find_dotenv, load_dotenv
+
+# Load .env file, searching current and parent directories (overrides existing env vars)
+load_dotenv(find_dotenv(usecwd=True), override=True)
+
 logger = logging.getLogger(__name__)
 
 # Environment variable names
