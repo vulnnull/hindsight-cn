@@ -15,7 +15,9 @@ spec:
   template:
     metadata:
       annotations:
+        {{- if not .Values.existingSecret }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -37,6 +39,11 @@ spec:
         - name: http
           containerPort: {{ .Values.controlPlane.service.targetPort }}
           protocol: TCP
+        {{- if .Values.existingSecret }}
+        envFrom:
+        - secretRef:
+            name: {{ .Values.existingSecret }}
+        {{- end }}
         env:
         - name: HINDSIGHT_CP_DATAPLANE_API_URL
           value: {{ include "hindsight.apiUrl" . | quote }}
@@ -44,12 +51,15 @@ spec:
         - name: {{ $key }}
           value: {{ $value | quote }}
         {{- end }}
+        {{- /* Only use controlPlane.secrets when not using existingSecret (for chart-managed secrets) */}}
+        {{- if not .Values.existingSecret }}
         {{- range $key, $value := .Values.controlPlane.secrets }}
         - name: {{ $key }}
           valueFrom:
             secretKeyRef:
-              name: {{ include "hindsight.fullname" $ }}-secret
+              name: {{ include "hindsight.secretName" $ }}
               key: {{ $key }}
+        {{- end }}
         {{- end }}
         livenessProbe:
           {{- toYaml .Values.controlPlane.livenessProbe | nindent 10 }}
