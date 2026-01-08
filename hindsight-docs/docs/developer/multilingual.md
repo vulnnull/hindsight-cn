@@ -137,42 +137,68 @@ hindsight.retain(
 
 ## Supported Languages
 
-Hindsight supports any language that your configured LLM can understand. This typically includes:
+**Hindsight's multilingual support depends entirely on your LLM's language capabilities.** Hindsight instructs the LLM to detect the input language and respond in that same language. If your LLM supports a language, Hindsight will work with it.
 
-| Language | Script | Example |
-|----------|--------|---------|
-| Chinese (Simplified) | 简体中文 | 张伟是软件工程师 |
-| Chinese (Traditional) | 繁體中文 | 張偉是軟體工程師 |
-| Japanese | 日本語 | 田中さんはエンジニアです |
-| Korean | 한국어 | 김철수는 개발자입니다 |
-| Arabic | العربية | أحمد مهندس برمجيات |
-| Russian | Русский | Иван - разработчик |
-| Spanish | Español | María es ingeniera |
-| French | Français | Pierre est développeur |
-| German | Deutsch | Hans ist Entwickler |
-| And many more... | | |
+Most modern LLMs (GPT-4, Claude, Gemini, Llama 3, etc.) support dozens of languages including:
 
-The actual language support depends on your LLM provider's capabilities.
+- **East Asian**: Chinese (Simplified/Traditional), Japanese, Korean
+- **European**: Spanish, French, German, Italian, Portuguese, Dutch, Polish, Russian
+- **Middle Eastern**: Arabic, Hebrew, Turkish
+- **South Asian**: Hindi, Bengali, Tamil
+- **Southeast Asian**: Thai, Vietnamese, Indonesian
+
+**To verify support for your target language**, test your LLM directly with content in that language. If the LLM can understand and generate text in the language, Hindsight will preserve it correctly.
 
 ---
 
-## Best Practices
+## Configuring for Multilingual Use
 
-### 1. Keep Content in One Language Per Retain Call
-While mixed content works, keeping each `retain` call in a single language produces more consistent results.
+For optimal multilingual performance, you should configure all three components of the pipeline:
 
-### 2. Query in the Same Language as Your Content
-For best results, query using the same language as your stored content. Cross-language queries (e.g., English query for Chinese content) may work but results can vary.
+### 1. LLM (Required)
+Your LLM must support the target languages. Most modern LLMs do, but verify with your specific model.
 
-### 3. Consider Embedding Model Language Support
-The default embedding model (`BAAI/bge-small-en-v1.5`) is English-optimized. For better multilingual semantic search, consider using a multilingual embedding model:
+### 2. Embedding Model (Recommended)
+The default embedding model (`BAAI/bge-small-en-v1.5`) is **English-only**. For multilingual content, use a multilingual embedding model:
 
 ```bash
 # In your .env file
 HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-m3
 ```
 
-The `bge-m3` model supports 100+ languages with better cross-lingual retrieval.
+**Recommended multilingual embedding models:**
+| Model | Languages | Notes |
+|-------|-----------|-------|
+| `BAAI/bge-m3` | 100+ | Best overall multilingual performance |
+| `intfloat/multilingual-e5-large` | 100+ | Good alternative |
+| `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | 50+ | Lighter weight |
+
+### 3. Reranker Model (Recommended)
+The default reranker (`cross-encoder/ms-marco-MiniLM-L-6-v2`) is **English-only**. For multilingual content, use a multilingual reranker:
+
+```bash
+# In your .env file
+HINDSIGHT_API_RERANKER_LOCAL_MODEL=BAAI/bge-reranker-v2-m3
+```
+
+**Recommended multilingual reranker models:**
+| Model | Languages | Notes |
+|-------|-----------|-------|
+| `BAAI/bge-reranker-v2-m3` | 100+ | Best multilingual reranking |
+| `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | 14 | Lighter alternative |
+
+---
+
+## Best Practices
+
+### 1. Use Multilingual Models for Non-English Content
+If you primarily work with non-English content, configure multilingual embedding and reranker models. English-only models will still store your content correctly, but semantic search quality will be degraded.
+
+### 2. Keep Content in One Language Per Retain Call
+While mixed content works, keeping each `retain` call in a single language produces more consistent results.
+
+### 3. Query in the Same Language as Your Content
+For best results, query using the same language as your stored content. Cross-language queries (e.g., English query for Chinese content) may work but results can vary depending on your embedding model.
 
 ---
 

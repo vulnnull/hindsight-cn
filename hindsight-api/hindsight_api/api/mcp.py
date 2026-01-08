@@ -187,6 +187,60 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
             logger.error(f"Error reflecting: {e}", exc_info=True)
             return f'{{"error": "{e}", "text": ""}}'
 
+    @mcp.tool()
+    async def list_banks() -> str:
+        """
+        List all available memory banks.
+
+        Use this tool to discover what memory banks exist in the system.
+        Each bank is an isolated memory store (like a separate "brain").
+
+        Returns:
+            JSON list of banks with their IDs, names, dispositions, and backgrounds.
+        """
+        try:
+            banks = await memory.list_banks(request_context=RequestContext())
+            return json.dumps({"banks": banks}, indent=2)
+        except Exception as e:
+            logger.error(f"Error listing banks: {e}", exc_info=True)
+            return f'{{"error": "{e}", "banks": []}}'
+
+    @mcp.tool()
+    async def create_bank(bank_id: str, name: str | None = None, background: str | None = None) -> str:
+        """
+        Create a new memory bank or get an existing one.
+
+        Memory banks are isolated stores - each one is like a separate "brain" for a user/agent.
+        Banks are auto-created with default settings if they don't exist.
+
+        Args:
+            bank_id: Unique identifier for the bank (e.g., 'user-123', 'agent-alpha')
+            name: Optional human-friendly name for the bank
+            background: Optional background context about the bank's owner/purpose
+        """
+        try:
+            # get_bank_profile auto-creates bank if it doesn't exist
+            profile = await memory.get_bank_profile(bank_id, request_context=RequestContext())
+
+            # Update name/background if provided
+            if name is not None or background is not None:
+                await memory.update_bank(
+                    bank_id,
+                    name=name,
+                    background=background,
+                    request_context=RequestContext(),
+                )
+                # Fetch updated profile
+                profile = await memory.get_bank_profile(bank_id, request_context=RequestContext())
+
+            # Serialize disposition if it's a Pydantic model
+            if "disposition" in profile and hasattr(profile["disposition"], "model_dump"):
+                profile["disposition"] = profile["disposition"].model_dump()
+            return json.dumps(profile, indent=2)
+        except Exception as e:
+            logger.error(f"Error creating bank: {e}", exc_info=True)
+            return f'{{"error": "{e}"}}'
+
     return mcp
 
 

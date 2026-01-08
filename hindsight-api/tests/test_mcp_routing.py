@@ -9,6 +9,7 @@ def mock_memory():
     """Create a mock MemoryEngine."""
     memory = MagicMock()
     memory.retain_batch_async = AsyncMock()
+    memory.submit_async_retain = AsyncMock(return_value={"operation_id": "test-op-123"})
     memory.recall_async = AsyncMock(return_value=MagicMock(results=[]))
     return memory
 
@@ -44,11 +45,11 @@ async def test_mcp_tools_use_context_bank_id(mock_memory):
     assert "retain" in tools
     assert "recall" in tools
 
-    # Test retain with bank_id from context
+    # Test retain with bank_id from context (use async_processing=False for synchronous test)
     token = _current_bank_id.set("context-bank-id")
     try:
         retain_tool = tools["retain"]
-        result = await retain_tool.fn(content="test content", context="test_context")
+        result = await retain_tool.fn(content="test content", context="test_context", async_processing=False)
         assert "successfully" in result.lower()
 
         # Verify the memory was called with the context bank_id
