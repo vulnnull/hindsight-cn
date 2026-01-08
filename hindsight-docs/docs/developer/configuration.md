@@ -24,6 +24,17 @@ The API service handles all memory operations (retain, recall, reflect).
 
 If not provided, the server uses embedded `pg0` — convenient for development but not recommended for production.
 
+### Database Connection Pool
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_DB_POOL_MIN_SIZE` | Minimum connections in the pool | `5` |
+| `HINDSIGHT_API_DB_POOL_MAX_SIZE` | Maximum connections in the pool | `100` |
+| `HINDSIGHT_API_DB_COMMAND_TIMEOUT` | PostgreSQL command timeout in seconds | `60` |
+| `HINDSIGHT_API_DB_ACQUIRE_TIMEOUT` | Connection acquisition timeout in seconds | `30` |
+
+For high-concurrency workloads, increase `DB_POOL_MAX_SIZE`. Each concurrent recall/think operation can use 2-4 connections.
+
 To run migrations manually (e.g., before starting the API), use the admin CLI:
 
 ```bash
@@ -265,6 +276,15 @@ Configuration for the local MCP server (`hindsight-local-mcp` command).
 # Example: instruct MCP to also store assistant actions
 export HINDSIGHT_API_MCP_INSTRUCTIONS="Also store every action you take, including tool calls and decisions made."
 ```
+
+### Background Tasks
+
+Controls background task processing for async operations like opinion formation and entity observations.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_TASK_BATCH_SIZE` | Max tasks to process in one batch | `10` |
+| `HINDSIGHT_API_TASK_BATCH_INTERVAL` | Interval between batch processing in seconds | `1.0` |
 
 ### Performance Optimization
 

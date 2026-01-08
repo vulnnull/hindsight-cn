@@ -215,9 +215,13 @@ class MemoryEngine(MemoryEngineInterface):
         embeddings: Embeddings | None = None,
         cross_encoder: CrossEncoderModel | None = None,
         query_analyzer: QueryAnalyzer | None = None,
-        pool_min_size: int = 5,
-        pool_max_size: int = 100,
+        pool_min_size: int | None = None,
+        pool_max_size: int | None = None,
+        db_command_timeout: int | None = None,
+        db_acquire_timeout: int | None = None,
         task_backend: TaskBackend | None = None,
+        task_batch_size: int | None = None,
+        task_batch_interval: float | None = None,
         run_migrations: bool = True,
         operation_validator: "OperationValidatorExtension | None" = None,
         tenant_extension: "TenantExtension | None" = None,
@@ -248,9 +252,13 @@ class MemoryEngine(MemoryEngineInterface):
             embeddings: Embeddings implementation. If not provided, created from env vars.
             cross_encoder: Cross-encoder model. If not provided, created from env vars.
             query_analyzer: Query analyzer implementation. If not provided, uses DateparserQueryAnalyzer.
-            pool_min_size: Minimum number of connections in the pool (default: 5)
-            pool_max_size: Maximum number of connections in the pool (default: 100)
+            pool_min_size: Minimum number of connections in the pool. Defaults to HINDSIGHT_API_DB_POOL_MIN_SIZE.
+            pool_max_size: Maximum number of connections in the pool. Defaults to HINDSIGHT_API_DB_POOL_MAX_SIZE.
+            db_command_timeout: PostgreSQL command timeout in seconds. Defaults to HINDSIGHT_API_DB_COMMAND_TIMEOUT.
+            db_acquire_timeout: Connection acquisition timeout in seconds. Defaults to HINDSIGHT_API_DB_ACQUIRE_TIMEOUT.
             task_backend: Custom task backend. If not provided, uses AsyncIOQueueBackend.
+            task_batch_size: Background task batch size. Defaults to HINDSIGHT_API_TASK_BATCH_SIZE.
+            task_batch_interval: Background task batch interval in seconds. Defaults to HINDSIGHT_API_TASK_BATCH_INTERVAL.
             run_migrations: Whether to run database migrations during initialize(). Default: True
             operation_validator: Optional extension to validate operations before execution.
                                 If provided, retain/recall/reflect operations will be validated.
@@ -306,8 +314,10 @@ class MemoryEngine(MemoryEngineInterface):
         # Connection pool (will be created in initialize())
         self._pool = None
         self._initialized = False
-        self._pool_min_size = pool_min_size
-        self._pool_max_size = pool_max_size
+        self._pool_min_size = pool_min_size if pool_min_size is not None else config.db_pool_min_size
+        self._pool_max_size = pool_max_size if pool_max_size is not None else config.db_pool_max_size
+        self._db_command_timeout = db_command_timeout if db_command_timeout is not None else config.db_command_timeout
+        self._db_acquire_timeout = db_acquire_timeout if db_acquire_timeout is not None else config.db_acquire_timeout
         self._run_migrations = run_migrations
 
         # Initialize entity resolver (will be created in initialize())
@@ -386,7 +396,11 @@ class MemoryEngine(MemoryEngineInterface):
         self._cross_encoder_reranker = CrossEncoderReranker(cross_encoder=cross_encoder)
 
         # Initialize task backend
-        self._task_backend = task_backend or AsyncIOQueueBackend(batch_size=100, batch_interval=1.0)
+        _task_batch_size = task_batch_size if task_batch_size is not None else config.task_batch_size
+        _task_batch_interval = task_batch_interval if task_batch_interval is not None else config.task_batch_interval
+        self._task_backend = task_backend or AsyncIOQueueBackend(
+            batch_size=_task_batch_size, batch_interval=_task_batch_interval
+        )
 
         # Backpressure mechanism: limit concurrent searches to prevent overwhelming the database
         # Limit concurrent searches to prevent connection pool exhaustion
@@ -731,9 +745,9 @@ class MemoryEngine(MemoryEngineInterface):
             self.db_url,
             min_size=self._pool_min_size,
             max_size=self._pool_max_size,
-            command_timeout=60,
+            command_timeout=self._db_command_timeout,
             statement_cache_size=0,  # Disable prepared statement cache
-            timeout=30,  # Connection acquisition timeout (seconds)
+            timeout=self._db_acquire_timeout,  # Connection acquisition timeout (seconds)
         )
 
         # Initialize entity resolver with pool

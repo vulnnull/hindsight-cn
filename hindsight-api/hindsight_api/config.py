@@ -73,6 +73,16 @@ ENV_LAZY_RERANKER = "HINDSIGHT_API_LAZY_RERANKER"
 # Database migrations
 ENV_RUN_MIGRATIONS_ON_STARTUP = "HINDSIGHT_API_RUN_MIGRATIONS_ON_STARTUP"
 
+# Database connection pool
+ENV_DB_POOL_MIN_SIZE = "HINDSIGHT_API_DB_POOL_MIN_SIZE"
+ENV_DB_POOL_MAX_SIZE = "HINDSIGHT_API_DB_POOL_MAX_SIZE"
+ENV_DB_COMMAND_TIMEOUT = "HINDSIGHT_API_DB_COMMAND_TIMEOUT"
+ENV_DB_ACQUIRE_TIMEOUT = "HINDSIGHT_API_DB_ACQUIRE_TIMEOUT"
+
+# Background task processing
+ENV_TASK_BATCH_SIZE = "HINDSIGHT_API_TASK_BATCH_SIZE"
+ENV_TASK_BATCH_INTERVAL = "HINDSIGHT_API_TASK_BATCH_INTERVAL"
+
 # Default values
 DEFAULT_DATABASE_URL = "pg0"
 DEFAULT_LLM_PROVIDER = "openai"
@@ -108,6 +118,16 @@ DEFAULT_RETAIN_CHUNK_SIZE = 3000  # Max chars per chunk for fact extraction
 
 # Database migrations
 DEFAULT_RUN_MIGRATIONS_ON_STARTUP = True
+
+# Database connection pool
+DEFAULT_DB_POOL_MIN_SIZE = 5
+DEFAULT_DB_POOL_MAX_SIZE = 100
+DEFAULT_DB_COMMAND_TIMEOUT = 60  # seconds
+DEFAULT_DB_ACQUIRE_TIMEOUT = 30  # seconds
+
+# Background task processing
+DEFAULT_TASK_BATCH_SIZE = 10
+DEFAULT_TASK_BATCH_INTERVAL = 1.0  # seconds
 
 # Default MCP tool descriptions (can be customized via env vars)
 DEFAULT_MCP_RETAIN_DESCRIPTION = """Store important information to long-term memory.
@@ -193,6 +213,16 @@ class HindsightConfig:
     # Database migrations
     run_migrations_on_startup: bool
 
+    # Database connection pool
+    db_pool_min_size: int
+    db_pool_max_size: int
+    db_command_timeout: int
+    db_acquire_timeout: int
+
+    # Background task processing
+    task_batch_size: int
+    task_batch_interval: float
+
     @classmethod
     def from_env(cls) -> "HindsightConfig":
         """Create configuration from environment variables."""
@@ -245,6 +275,14 @@ class HindsightConfig:
             retain_chunk_size=int(os.getenv(ENV_RETAIN_CHUNK_SIZE, str(DEFAULT_RETAIN_CHUNK_SIZE))),
             # Database migrations
             run_migrations_on_startup=os.getenv(ENV_RUN_MIGRATIONS_ON_STARTUP, "true").lower() == "true",
+            # Database connection pool
+            db_pool_min_size=int(os.getenv(ENV_DB_POOL_MIN_SIZE, str(DEFAULT_DB_POOL_MIN_SIZE))),
+            db_pool_max_size=int(os.getenv(ENV_DB_POOL_MAX_SIZE, str(DEFAULT_DB_POOL_MAX_SIZE))),
+            db_command_timeout=int(os.getenv(ENV_DB_COMMAND_TIMEOUT, str(DEFAULT_DB_COMMAND_TIMEOUT))),
+            db_acquire_timeout=int(os.getenv(ENV_DB_ACQUIRE_TIMEOUT, str(DEFAULT_DB_ACQUIRE_TIMEOUT))),
+            # Background task processing
+            task_batch_size=int(os.getenv(ENV_TASK_BATCH_SIZE, str(DEFAULT_TASK_BATCH_SIZE))),
+            task_batch_interval=float(os.getenv(ENV_TASK_BATCH_INTERVAL, str(DEFAULT_TASK_BATCH_INTERVAL))),
         )
 
     def get_llm_base_url(self) -> str:

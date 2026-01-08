@@ -197,6 +197,12 @@ def main():
             skip_llm_verification=config.skip_llm_verification,
             lazy_reranker=config.lazy_reranker,
             run_migrations_on_startup=config.run_migrations_on_startup,
+            db_pool_min_size=config.db_pool_min_size,
+            db_pool_max_size=config.db_pool_max_size,
+            db_command_timeout=config.db_command_timeout,
+            db_acquire_timeout=config.db_acquire_timeout,
+            task_batch_size=config.task_batch_size,
+            task_batch_interval=config.task_batch_interval,
         )
     config.configure_logging()
     if not args.daemon:
