@@ -647,6 +647,7 @@ class GraphDataResponse(BaseModel):
                     }
                 ],
                 "total_units": 2,
+                "limit": 1000,
             }
         }
     )
@@ -655,6 +656,7 @@ class GraphDataResponse(BaseModel):
     edges: list[dict[str, Any]]
     table_rows: list[dict[str, Any]]
     total_units: int
+    limit: int
 
 
 class ListMemoryUnitsResponse(BaseModel):
@@ -1066,16 +1068,19 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/graph",
         response_model=GraphDataResponse,
         summary="Get memory graph data",
-        description="Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.",
+        description="Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion).",
         operation_id="get_graph",
         tags=["Memory"],
     )
     async def api_graph(
-        bank_id: str, type: str | None = None, request_context: RequestContext = Depends(get_request_context)
+        bank_id: str,
+        type: str | None = None,
+        limit: int = 1000,
+        request_context: RequestContext = Depends(get_request_context),
     ):
         """Get graph data from database, filtered by bank_id and optionally by type."""
         try:
-            data = await app.state.memory.get_graph_data(bank_id, type, request_context=request_context)
+            data = await app.state.memory.get_graph_data(bank_id, type, limit=limit, request_context=request_context)
             return data
         except (AuthenticationError, HTTPException):
             raise

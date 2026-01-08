@@ -52,6 +52,9 @@ export function DataView({ factType }: DataViewProps) {
   const [selectedTableMemory, setSelectedTableMemory] = useState<any>(null);
   const itemsPerPage = 100;
 
+  // Fetch limit state - how many memories to load from the API
+  const [fetchLimit, setFetchLimit] = useState(1000);
+
   // Graph controls state
   const [showLabels, setShowLabels] = useState(true);
   const [maxNodes, setMaxNodes] = useState<number | undefined>(undefined);
@@ -93,7 +96,7 @@ export function DataView({ factType }: DataViewProps) {
     }
   };
 
-  const loadData = async () => {
+  const loadData = async (limit?: number) => {
     if (!currentBank) return;
 
     setLoading(true);
@@ -101,6 +104,7 @@ export function DataView({ factType }: DataViewProps) {
       const graphData: any = await client.getGraph({
         bank_id: currentBank,
         type: factType,
+        limit: limit ?? fetchLimit,
       });
       setData(graphData);
     } catch (error) {
@@ -265,9 +269,25 @@ export function DataView({ factType }: DataViewProps) {
 
           <div className="flex items-center justify-between mb-6">
             <div className="text-sm text-muted-foreground">
-              {searchQuery
-                ? `${filteredTableRows.length} of ${data.total_units} memories`
-                : `${data.total_units} total memories`}
+              {searchQuery ? (
+                `${filteredTableRows.length} of ${data.table_rows?.length ?? 0} loaded memories`
+              ) : data.table_rows?.length < data.total_units ? (
+                <span>
+                  Showing {data.table_rows?.length ?? 0} of {data.total_units} total memories
+                  <button
+                    onClick={() => {
+                      const newLimit = Math.min(data.total_units, fetchLimit + 1000);
+                      setFetchLimit(newLimit);
+                      loadData(newLimit);
+                    }}
+                    className="ml-2 text-primary hover:underline"
+                  >
+                    Load more
+                  </button>
+                </span>
+              ) : (
+                `${data.total_units} total memories`
+              )}
             </div>
             <div className="flex items-center gap-2 bg-muted rounded-lg p-1">
               <button

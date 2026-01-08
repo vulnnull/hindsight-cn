@@ -2264,6 +2264,7 @@ class MemoryEngine(MemoryEngineInterface):
         bank_id: str | None = None,
         fact_type: str | None = None,
         *,
+        limit: int = 1000,
         request_context: "RequestContext",
     ):
         """
@@ -2272,10 +2273,11 @@ class MemoryEngine(MemoryEngineInterface):
         Args:
             bank_id: Filter by bank ID
             fact_type: Filter by fact type (world, experience, opinion)
+            limit: Maximum number of items to return (default: 1000)
             request_context: Request context for authentication.
 
         Returns:
-            Dict with nodes, edges, and table_rows
+            Dict with nodes, edges, table_rows, total_units, and limit
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
@@ -2297,15 +2299,29 @@ class MemoryEngine(MemoryEngineInterface):
 
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
 
+            # Get total count first
+            total_count_result = await conn.fetchrow(
+                f"""
+                SELECT COUNT(*) as total
+                FROM {fq_table("memory_units")}
+                {where_clause}
+            """,
+                *query_params,
+            )
+            total_count = total_count_result["total"] if total_count_result else 0
+
+            # Get units with limit
+            param_count += 1
             units = await conn.fetch(
                 f"""
                 SELECT id, text, event_date, context, occurred_start, occurred_end, mentioned_at, document_id, chunk_id, fact_type
                 FROM {fq_table("memory_units")}
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, event_date DESC
-                LIMIT 1000
+                LIMIT ${param_count}
             """,
                 *query_params,
+                limit,
             )
 
             # Get links, filtering to only include links between units of the selected agent
@@ -2442,7 +2458,7 @@ class MemoryEngine(MemoryEngineInterface):
                 }
             )
 
-        return {"nodes": nodes, "edges": edges, "table_rows": table_rows, "total_units": len(units)}
+        return {"nodes": nodes, "edges": edges, "table_rows": table_rows, "total_units": total_count, "limit": limit}
 
     async def list_memory_units(
         self,

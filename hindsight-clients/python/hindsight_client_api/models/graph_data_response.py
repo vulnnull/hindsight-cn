@@ -30,7 +30,8 @@ class GraphDataResponse(BaseModel):
     edges: List[Dict[str, Any]]
     table_rows: List[Dict[str, Any]]
     total_units: StrictInt
-    __properties: ClassVar[List[str]] = ["nodes", "edges", "table_rows", "total_units"]
+    limit: StrictInt
+    __properties: ClassVar[List[str]] = ["nodes", "edges", "table_rows", "total_units", "limit"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -86,7 +87,8 @@ class GraphDataResponse(BaseModel):
             "nodes": obj.get("nodes"),
             "edges": obj.get("edges"),
             "table_rows": obj.get("table_rows"),
-            "total_units": obj.get("total_units")
+            "total_units": obj.get("total_units"),
+            "limit": obj.get("limit")
         })
         return _obj
 

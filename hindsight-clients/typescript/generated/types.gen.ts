@@ -570,6 +570,10 @@ export type GraphDataResponse = {
    * Total Units
    */
   total_units: number;
+  /**
+   * Limit
+   */
+  limit: number;
 };
 
 /**
@@ -1123,6 +1127,10 @@ export type GetGraphData = {
      * Type
      */
     type?: string | null;
+    /**
+     * Limit
+     */
+    limit?: number;
   };
   url: "/v1/default/banks/{bank_id}/graph";
 };

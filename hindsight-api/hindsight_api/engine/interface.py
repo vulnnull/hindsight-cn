@@ -289,6 +289,7 @@ class MemoryEngineInterface(ABC):
         bank_id: str,
         *,
         fact_type: str | None = None,
+        limit: int = 1000,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
         """
@@ -297,10 +298,11 @@ class MemoryEngineInterface(ABC):
         Args:
             bank_id: The memory bank ID.
             fact_type: Filter by fact type.
+            limit: Maximum number of items to return (default: 1000).
             request_context: Request context for authentication.
 
         Returns:
-            Dict with nodes, edges, table_rows, total_units.
+            Dict with nodes, edges, table_rows, total_units, limit.
         """
         ...
 

@@ -12,12 +12,15 @@ export async function GET(request: NextRequest) {
 
     // Get optional query parameters
     const type = searchParams.get("type") || searchParams.get("fact_type") || undefined;
+    const limitParam = searchParams.get("limit");
+    const limit = limitParam ? parseInt(limitParam, 10) : undefined;
 
     const response = await sdk.getGraph({
       client: lowLevelClient,
       path: { bank_id: bankId },
       query: {
         type: type,
+        limit: limit,
       },
     });
 

@@ -43,7 +43,7 @@ Marcus felt anxious about the upcoming interview.
         context = "Personal journal entry"
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             context=context,
@@ -75,7 +75,7 @@ The music was so loud I could barely hear myself think.
         context = "Personal experience"
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             context=context,
@@ -108,7 +108,7 @@ Maybe we should reconsider the timeline.
         context = "Team discussion"
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             context=context,
@@ -141,7 +141,7 @@ I'm unable to attend the conference due to scheduling conflicts.
         context = "Personal profile discussion"
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             context=context,
@@ -173,7 +173,7 @@ Unlike last year, we're ahead of schedule.
         context = "Project review"
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             context=context,
@@ -206,7 +206,7 @@ She's enthusiastic about the opportunity.
         context = "Team meeting"
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             context=context,
@@ -239,7 +239,7 @@ I'm planning to switch careers because I'm not fulfilled in my current role.
         context = "Personal goals discussion"
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             context=context,
@@ -276,7 +276,7 @@ Family is the most important thing to her.
         context = "Personal values discussion"
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             context=context,
@@ -310,7 +310,7 @@ I prefer presenting in person rather than virtually because I can read the room 
 
         event_date = datetime(2024, 11, 13)
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=event_date,
             context=context,
@@ -366,7 +366,7 @@ I'm planning to visit Tokyo next month.
 
         event_date = datetime(2024, 11, 13)
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=event_date,
             context=context,
@@ -419,7 +419,7 @@ with a concert surrounded by music, joy and the warm summer breeze.
 
         for attempt in range(max_retries):
             try:
-                facts, _ = await extract_facts_from_text(
+                facts, _, _ = await extract_facts_from_text(
                     text=text,
                     event_date=event_date,
                     context=context,
@@ -488,7 +488,7 @@ Yesterday I went for a morning jog for the first time in a nearby park.
 
         event_date = datetime(2024, 11, 13)
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=event_date,
             context=context,
@@ -537,7 +537,7 @@ Yesterday I went for a morning jog for the first time in a nearby park.
         This morning I had coffee with Alice.
         """
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=reference_date,
             llm_config=llm_config,
@@ -567,7 +567,7 @@ Yesterday I went for a morning jog for the first time in a nearby park.
 
         text = "Alice works at Google. She loves Python programming."
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=reference_date,
             llm_config=llm_config,
@@ -594,7 +594,7 @@ Yesterday I went for a morning jog for the first time in a nearby park.
         Bob will start his vacation on April 1st.
         """
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=reference_date,
             llm_config=llm_config,
@@ -645,7 +645,7 @@ great time! Every time I see it, I can't help but smile.
 
         event_date = datetime(2023, 2, 23)
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=event_date,
             context=context,
@@ -695,7 +695,7 @@ I've learned so much from it.
         context = "Personal update"
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             context=context,
@@ -758,7 +758,7 @@ Jamie: Congratulations! I'd love to read it.
 
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=transcript,
             event_date=datetime(2024, 11, 13),
             llm_config=llm_config,
@@ -803,7 +803,7 @@ We presented our findings to the team yesterday.
 
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2024, 11, 13),
             llm_config=llm_config,
@@ -838,7 +838,7 @@ Jamie: [teasing] We'll see who's right, my Niners pick is solid.
 
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=transcript,
             event_date=datetime(2024, 11, 14),
             context=context,
@@ -897,7 +897,7 @@ so the algorithm learns to box out. See you next week!
 
         llm_config = LLMConfig.for_memory()
 
-        facts, _ = await extract_facts_from_text(
+        facts, _, _ = await extract_facts_from_text(
             text=transcript,
             event_date=datetime(2024, 11, 13),
             llm_config=llm_config,

@@ -109,10 +109,11 @@ export class ControlPlaneClient {
   /**
    * Get graph data
    */
-  async getGraph(params: { bank_id: string; type?: string }) {
+  async getGraph(params: { bank_id: string; type?: string; limit?: number }) {
     const queryParams = new URLSearchParams();
     queryParams.append("bank_id", params.bank_id);
     if (params.type) queryParams.append("type", params.type);
+    if (params.limit) queryParams.append("limit", params.limit.toString());
     return this.fetchApi(`/api/graph?${queryParams}`);
   }
 

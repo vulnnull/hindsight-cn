@@ -347,6 +347,7 @@ class MemoryApi:
         self,
         bank_id: StrictStr,
         type: Optional[StrictStr] = None,
+        limit: Optional[StrictInt] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -363,12 +364,14 @@ class MemoryApi:
     ) -> GraphDataResponse:
         """Get memory graph data
 
-        Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.
+        Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion).
 
         :param bank_id: (required)
         :type bank_id: str
         :param type:
         :type type: str
+        :param limit:
+        :type limit: int
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -396,6 +399,7 @@ class MemoryApi:
         _param = self._get_graph_serialize(
             bank_id=bank_id,
             type=type,
+            limit=limit,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -423,6 +427,7 @@ class MemoryApi:
         self,
         bank_id: StrictStr,
         type: Optional[StrictStr] = None,
+        limit: Optional[StrictInt] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -439,12 +444,14 @@ class MemoryApi:
     ) -> ApiResponse[GraphDataResponse]:
         """Get memory graph data
 
-        Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.
+        Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion).
 
         :param bank_id: (required)
         :type bank_id: str
         :param type:
         :type type: str
+        :param limit:
+        :type limit: int
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -472,6 +479,7 @@ class MemoryApi:
         _param = self._get_graph_serialize(
             bank_id=bank_id,
             type=type,
+            limit=limit,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -499,6 +507,7 @@ class MemoryApi:
         self,
         bank_id: StrictStr,
         type: Optional[StrictStr] = None,
+        limit: Optional[StrictInt] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -515,12 +524,14 @@ class MemoryApi:
     ) -> RESTResponseType:
         """Get memory graph data
 
-        Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.
+        Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion).
 
         :param bank_id: (required)
         :type bank_id: str
         :param type:
         :type type: str
+        :param limit:
+        :type limit: int
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -548,6 +559,7 @@ class MemoryApi:
         _param = self._get_graph_serialize(
             bank_id=bank_id,
             type=type,
+            limit=limit,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -570,6 +582,7 @@ class MemoryApi:
         self,
         bank_id,
         type,
+        limit,
         authorization,
         _request_auth,
         _content_type,
@@ -598,6 +611,10 @@ class MemoryApi:
         if type is not None:
             
             _query_params.append(('type', type))
+            
+        if limit is not None:
+            
+            _query_params.append(('limit', limit))
             
         # process the header parameters
         if authorization is not None:

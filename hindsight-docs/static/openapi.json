@@ -59,7 +59,7 @@
           "Memory"
         ],
         "summary": "Get memory graph data",
-        "description": "Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion). Limited to 1000 most recent items.",
+        "description": "Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion).",
         "operationId": "get_graph",
         "parameters": [
           {
@@ -85,6 +85,16 @@
                 }
               ],
               "title": "Type"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1000,
+              "title": "Limit"
             }
           },
           {
@@ -2504,6 +2514,10 @@
           "total_units": {
             "type": "integer",
             "title": "Total Units"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
           }
         },
         "type": "object",
@@ -2511,7 +2525,8 @@
           "nodes",
           "edges",
           "table_rows",
-          "total_units"
+          "total_units",
+          "limit"
         ],
         "title": "GraphDataResponse",
         "description": "Response model for graph data endpoint.",
@@ -2524,6 +2539,7 @@
               "weight": 0.8
             }
           ],
+          "limit": 1000,
           "nodes": [
             {
               "id": "1",
