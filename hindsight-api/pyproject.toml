@@ -123,6 +123,9 @@ ignore = [
     "F821",   # undefined name (forward references in type hints)
 ]
 
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

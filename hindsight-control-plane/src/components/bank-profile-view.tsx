@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   RefreshCw,
   Save,
   Brain,
@@ -26,6 +37,7 @@ import {
   Link2,
   FolderOpen,
   Activity,
+  Trash2,
 } from "lucide-react";
 
 interface DispositionTraits {
@@ -158,13 +170,18 @@ function DispositionEditor({
 }
 
 export function BankProfileView() {
-  const { currentBank } = useBank();
+  const router = useRouter();
+  const { currentBank, setCurrentBank, loadBanks } = useBank();
   const [profile, setProfile] = useState<BankProfile | null>(null);
   const [stats, setStats] = useState<BankStats | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
+
+  // Delete state
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Edit state
   const [editBackground, setEditBackground] = useState("");
@@ -224,6 +241,24 @@ export function BankProfileView() {
       setEditDisposition(profile.disposition);
     }
     setEditMode(false);
+  };
+
+  const handleDeleteBank = async () => {
+    if (!currentBank) return;
+
+    setIsDeleting(true);
+    try {
+      await client.deleteBank(currentBank);
+      setShowDeleteDialog(false);
+      setCurrentBank(null);
+      await loadBanks();
+      router.push("/");
+    } catch (error) {
+      console.error("Error deleting bank:", error);
+      alert("Error deleting bank: " + (error as Error).message);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   useEffect(() => {
@@ -295,6 +330,10 @@ export function BankProfileView() {
               </Button>
               <Button onClick={() => setEditMode(true)} size="sm">
                 Edit Profile
+              </Button>
+              <Button onClick={() => setShowDeleteDialog(true)} variant="destructive" size="sm">
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Bank
               </Button>
             </>
           )}
@@ -547,6 +586,53 @@ export function BankProfileView() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Memory Bank</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  Are you sure you want to delete the memory bank{" "}
+                  <span className="font-semibold text-foreground">{currentBank}</span>?
+                </p>
+                <p className="text-red-600 dark:text-red-400 font-medium">
+                  This action cannot be undone. All memories, entities, documents, and the bank
+                  profile will be permanently deleted.
+                </p>
+                {stats && (
+                  <p>
+                    This will delete {stats.total_nodes} memories, {stats.total_documents}{" "}
+                    documents, and {stats.total_links} links.
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteBank}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Bank
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

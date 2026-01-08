@@ -184,6 +184,19 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Delete an entire memory bank and all its data
+   */
+  async deleteBank(bankId: string) {
+    return this.fetchApi<{
+      success: boolean;
+      message: string;
+      deleted_count: number;
+    }>(`/api/banks/${bankId}`, {
+      method: "DELETE",
+    });
+  }
+
+  /**
    * Get chunk
    */
   async getChunk(chunkId: string) {

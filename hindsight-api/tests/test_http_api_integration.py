@@ -288,8 +288,9 @@ async def test_full_api_workflow(api_client, test_bank_id):
     # 10. Clean Up
     # ================================================================
 
-    # Note: No delete bank endpoint in API, so test data remains in DB
-    # Using timestamped bank IDs prevents conflicts between test runs
+    # Clean up the test bank (delete bank endpoint is tested separately)
+    response = await api_client.delete(f"/v1/default/banks/{test_bank_id}")
+    assert response.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -486,6 +487,87 @@ async def test_document_deletion_with_slashes_in_id(api_client):
     finally:
         # Cleanup - delete the bank
         await api_client.delete(f"/v1/default/banks/{test_bank_id}")
+
+
+@pytest.mark.asyncio
+async def test_delete_bank(api_client):
+    """Test delete bank endpoint.
+
+    Workflow:
+    1. Create a bank by storing memories
+    2. Verify bank exists with data
+    3. Delete the bank
+    4. Verify bank and all data is deleted
+    """
+    test_bank_id = f"delete_bank_test_{datetime.now().timestamp()}"
+
+    # 1. Create bank by storing memories with a document
+    response = await api_client.post(
+        f"/v1/default/banks/{test_bank_id}/memories",
+        json={
+            "items": [
+                {
+                    "content": "Alice is a software engineer at TechCorp.",
+                    "context": "team info",
+                    "document_id": "team-doc-1",
+                },
+                {
+                    "content": "Bob is the CTO and leads the engineering team.",
+                    "context": "team info",
+                    "document_id": "team-doc-1",
+                },
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    # 2. Verify bank exists with data
+    # Check profile
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/profile")
+    assert response.status_code == 200
+
+    # Check stats show data exists
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/stats")
+    assert response.status_code == 200
+    stats = response.json()
+    assert stats["total_nodes"] > 0
+
+    # Check documents exist
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/documents")
+    assert response.status_code == 200
+    assert len(response.json()["items"]) > 0
+
+    # Check bank is in list
+    response = await api_client.get("/v1/default/banks")
+    assert response.status_code == 200
+    bank_ids = [b["bank_id"] for b in response.json()["banks"]]
+    assert test_bank_id in bank_ids
+
+    # 3. Delete the bank
+    response = await api_client.delete(f"/v1/default/banks/{test_bank_id}")
+    assert response.status_code == 200
+    delete_result = response.json()
+    assert delete_result["success"] is True
+    assert delete_result["deleted_count"] > 0
+    assert "deleted successfully" in delete_result["message"]
+
+    # 4. Verify bank and all data is deleted
+    # Bank should not be in list
+    response = await api_client.get("/v1/default/banks")
+    assert response.status_code == 200
+    bank_ids = [b["bank_id"] for b in response.json()["banks"]]
+    assert test_bank_id not in bank_ids
+
+    # Stats should show zero data (profile auto-creates empty bank)
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/stats")
+    assert response.status_code == 200
+    stats = response.json()
+    assert stats["total_nodes"] == 0
+    assert stats["total_documents"] == 0
+
+    # Clean up the auto-created empty bank
+    await api_client.delete(f"/v1/default/banks/{test_bank_id}")
 
 
 @pytest.mark.asyncio
