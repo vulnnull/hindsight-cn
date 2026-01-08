@@ -90,11 +90,13 @@ export HINDSIGHT_API_LLM_MODEL=your-model-name
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local`, `tei`, or `openai` | `local` |
+| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local`, `tei`, `openai`, or `cohere` | `local` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL` | Model for local provider | `BAAI/bge-small-en-v1.5` |
 | `HINDSIGHT_API_EMBEDDINGS_TEI_URL` | TEI server URL | - |
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY` | OpenAI API key (falls back to `HINDSIGHT_API_LLM_API_KEY`) | - |
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL` | OpenAI embedding model | `text-embedding-3-small` |
+| `HINDSIGHT_API_COHERE_API_KEY` | Cohere API key (shared for embeddings and reranker) | - |
+| `HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL` | Cohere embedding model | `embed-english-v3.0` |
 
 ```bash
 # Local (default) - uses SentenceTransformers
@@ -109,6 +111,11 @@ export HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=text-embedding-3-small  # 1536 dime
 # TEI - HuggingFace Text Embeddings Inference (recommended for production)
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=tei
 export HINDSIGHT_API_EMBEDDINGS_TEI_URL=http://localhost:8080
+
+# Cohere - cloud-based embeddings
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=cohere
+export HINDSIGHT_API_COHERE_API_KEY=your-api-key
+export HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL=embed-english-v3.0  # 1024 dimensions
 ```
 
 #### Embedding Dimensions
@@ -131,9 +138,10 @@ Supported OpenAI embedding dimensions:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local` or `tei` | `local` |
+| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, or `cohere` | `local` |
 | `HINDSIGHT_API_RERANKER_LOCAL_MODEL` | Model for local provider | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `HINDSIGHT_API_RERANKER_TEI_URL` | TEI server URL | - |
+| `HINDSIGHT_API_RERANKER_COHERE_MODEL` | Cohere rerank model | `rerank-english-v3.0` |
 
 ```bash
 # Local (default) - uses SentenceTransformers CrossEncoder
@@ -143,6 +151,11 @@ export HINDSIGHT_API_RERANKER_LOCAL_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 # TEI - for high-performance inference
 export HINDSIGHT_API_RERANKER_PROVIDER=tei
 export HINDSIGHT_API_RERANKER_TEI_URL=http://localhost:8081
+
+# Cohere - cloud-based reranking
+export HINDSIGHT_API_RERANKER_PROVIDER=cohere
+export HINDSIGHT_API_COHERE_API_KEY=your-api-key  # shared with embeddings
+export HINDSIGHT_API_RERANKER_COHERE_MODEL=rerank-english-v3.0
 ```
 
 ### Server

@@ -13,8 +13,11 @@ from abc import ABC, abstractmethod
 import httpx
 
 from ..config import (
+    DEFAULT_RERANKER_COHERE_MODEL,
     DEFAULT_RERANKER_LOCAL_MODEL,
     DEFAULT_RERANKER_PROVIDER,
+    ENV_COHERE_API_KEY,
+    ENV_RERANKER_COHERE_MODEL,
     ENV_RERANKER_LOCAL_MODEL,
     ENV_RERANKER_PROVIDER,
     ENV_RERANKER_TEI_URL,
@@ -278,6 +281,96 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
         return all_scores
 
 
+class CohereCrossEncoder(CrossEncoderModel):
+    """
+    Cohere cross-encoder implementation using the Cohere Rerank API.
+
+    Supports rerank-english-v3.0 and rerank-multilingual-v3.0 models.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_RERANKER_COHERE_MODEL,
+        timeout: float = 60.0,
+    ):
+        """
+        Initialize Cohere cross-encoder client.
+
+        Args:
+            api_key: Cohere API key
+            model: Cohere rerank model name (default: rerank-english-v3.0)
+            timeout: Request timeout in seconds (default: 60.0)
+        """
+        self.api_key = api_key
+        self.model = model
+        self.timeout = timeout
+        self._client = None
+
+    @property
+    def provider_name(self) -> str:
+        return "cohere"
+
+    async def initialize(self) -> None:
+        """Initialize the Cohere client."""
+        if self._client is not None:
+            return
+
+        try:
+            import cohere
+        except ImportError:
+            raise ImportError("cohere is required for CohereCrossEncoder. Install it with: pip install cohere")
+
+        logger.info(f"Reranker: initializing Cohere provider with model {self.model}")
+        self._client = cohere.Client(api_key=self.api_key, timeout=self.timeout)
+        logger.info("Reranker: Cohere provider initialized")
+
+    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """
+        Score query-document pairs using the Cohere Rerank API.
+
+        Args:
+            pairs: List of (query, document) tuples to score
+
+        Returns:
+            List of relevance scores
+        """
+        if self._client is None:
+            raise RuntimeError("Reranker not initialized. Call initialize() first.")
+
+        if not pairs:
+            return []
+
+        # Group pairs by query for efficient batching
+        # Cohere rerank expects one query with multiple documents
+        query_groups: dict[str, list[tuple[int, str]]] = {}
+        for idx, (query, text) in enumerate(pairs):
+            if query not in query_groups:
+                query_groups[query] = []
+            query_groups[query].append((idx, text))
+
+        all_scores = [0.0] * len(pairs)
+
+        for query, indexed_texts in query_groups.items():
+            texts = [text for _, text in indexed_texts]
+            indices = [idx for idx, _ in indexed_texts]
+
+            response = self._client.rerank(
+                query=query,
+                documents=texts,
+                model=self.model,
+                return_documents=False,
+            )
+
+            # Map scores back to original positions
+            for result in response.results:
+                original_idx = result.index
+                score = result.relevance_score
+                all_scores[indices[original_idx]] = score
+
+        return all_scores
+
+
 def create_cross_encoder_from_env() -> CrossEncoderModel:
     """
     Create a CrossEncoderModel instance based on environment variables.
@@ -298,5 +391,11 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
         model = os.environ.get(ENV_RERANKER_LOCAL_MODEL)
         model_name = model or DEFAULT_RERANKER_LOCAL_MODEL
         return LocalSTCrossEncoder(model_name=model_name)
+    elif provider == "cohere":
+        api_key = os.environ.get(ENV_COHERE_API_KEY)
+        if not api_key:
+            raise ValueError(f"{ENV_COHERE_API_KEY} is required when {ENV_RERANKER_PROVIDER} is 'cohere'")
+        model = os.environ.get(ENV_RERANKER_COHERE_MODEL, DEFAULT_RERANKER_COHERE_MODEL)
+        return CohereCrossEncoder(api_key=api_key, model=model)
     else:
-        raise ValueError(f"Unknown reranker provider: {provider}. Supported: 'local', 'tei'")
+        raise ValueError(f"Unknown reranker provider: {provider}. Supported: 'local', 'tei', 'cohere'")

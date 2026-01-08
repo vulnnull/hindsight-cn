@@ -16,9 +16,12 @@ from abc import ABC, abstractmethod
 import httpx
 
 from ..config import (
+    DEFAULT_EMBEDDINGS_COHERE_MODEL,
     DEFAULT_EMBEDDINGS_LOCAL_MODEL,
     DEFAULT_EMBEDDINGS_OPENAI_MODEL,
     DEFAULT_EMBEDDINGS_PROVIDER,
+    ENV_COHERE_API_KEY,
+    ENV_EMBEDDINGS_COHERE_MODEL,
     ENV_EMBEDDINGS_LOCAL_MODEL,
     ENV_EMBEDDINGS_OPENAI_API_KEY,
     ENV_EMBEDDINGS_OPENAI_MODEL,
@@ -409,6 +412,123 @@ class OpenAIEmbeddings(Embeddings):
         return all_embeddings
 
 
+class CohereEmbeddings(Embeddings):
+    """
+    Cohere embeddings implementation using the Cohere API.
+
+    Supports embed-english-v3.0 (1024 dims) and embed-multilingual-v3.0 (1024 dims).
+
+    The embedding dimension is auto-detected from the model at initialization.
+    """
+
+    # Known dimensions for Cohere embedding models
+    MODEL_DIMENSIONS = {
+        "embed-english-v3.0": 1024,
+        "embed-multilingual-v3.0": 1024,
+        "embed-english-light-v3.0": 384,
+        "embed-multilingual-light-v3.0": 384,
+        "embed-english-v2.0": 4096,
+        "embed-multilingual-v2.0": 768,
+    }
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_EMBEDDINGS_COHERE_MODEL,
+        batch_size: int = 96,
+        timeout: float = 60.0,
+        input_type: str = "search_document",
+    ):
+        """
+        Initialize Cohere embeddings client.
+
+        Args:
+            api_key: Cohere API key
+            model: Cohere embedding model name (default: embed-english-v3.0)
+            batch_size: Maximum batch size for embedding requests (default: 96, Cohere's limit)
+            timeout: Request timeout in seconds (default: 60.0)
+            input_type: Input type for embeddings (default: search_document).
+                       Options: search_document, search_query, classification, clustering
+        """
+        self.api_key = api_key
+        self.model = model
+        self.batch_size = batch_size
+        self.timeout = timeout
+        self.input_type = input_type
+        self._client = None
+        self._dimension: int | None = None
+
+    @property
+    def provider_name(self) -> str:
+        return "cohere"
+
+    @property
+    def dimension(self) -> int:
+        if self._dimension is None:
+            raise RuntimeError("Embeddings not initialized. Call initialize() first.")
+        return self._dimension
+
+    async def initialize(self) -> None:
+        """Initialize the Cohere client and detect dimension."""
+        if self._client is not None:
+            return
+
+        try:
+            import cohere
+        except ImportError:
+            raise ImportError("cohere is required for CohereEmbeddings. Install it with: pip install cohere")
+
+        logger.info(f"Embeddings: initializing Cohere provider with model {self.model}")
+        self._client = cohere.Client(api_key=self.api_key, timeout=self.timeout)
+
+        # Try to get dimension from known models, otherwise do a test embedding
+        if self.model in self.MODEL_DIMENSIONS:
+            self._dimension = self.MODEL_DIMENSIONS[self.model]
+        else:
+            # Do a test embedding to detect dimension
+            response = self._client.embed(
+                texts=["test"],
+                model=self.model,
+                input_type=self.input_type,
+            )
+            if response.embeddings:
+                self._dimension = len(response.embeddings[0])
+
+        logger.info(f"Embeddings: Cohere provider initialized (model: {self.model}, dim: {self._dimension})")
+
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        """
+        Generate embeddings using the Cohere API.
+
+        Args:
+            texts: List of text strings to encode
+
+        Returns:
+            List of embedding vectors
+        """
+        if self._client is None:
+            raise RuntimeError("Embeddings not initialized. Call initialize() first.")
+
+        if not texts:
+            return []
+
+        all_embeddings = []
+
+        # Process in batches
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i : i + self.batch_size]
+
+            response = self._client.embed(
+                texts=batch,
+                model=self.model,
+                input_type=self.input_type,
+            )
+
+            all_embeddings.extend(response.embeddings)
+
+        return all_embeddings
+
+
 def create_embeddings_from_env() -> Embeddings:
     """
     Create an Embeddings instance based on environment variables.
@@ -439,5 +559,11 @@ def create_embeddings_from_env() -> Embeddings:
             )
         model = os.environ.get(ENV_EMBEDDINGS_OPENAI_MODEL, DEFAULT_EMBEDDINGS_OPENAI_MODEL)
         return OpenAIEmbeddings(api_key=api_key, model=model)
+    elif provider == "cohere":
+        api_key = os.environ.get(ENV_COHERE_API_KEY)
+        if not api_key:
+            raise ValueError(f"{ENV_COHERE_API_KEY} is required when {ENV_EMBEDDINGS_PROVIDER} is 'cohere'")
+        model = os.environ.get(ENV_EMBEDDINGS_COHERE_MODEL, DEFAULT_EMBEDDINGS_COHERE_MODEL)
+        return CohereEmbeddings(api_key=api_key, model=model)
     else:
-        raise ValueError(f"Unknown embeddings provider: {provider}. Supported: 'local', 'tei', 'openai'")
+        raise ValueError(f"Unknown embeddings provider: {provider}. Supported: 'local', 'tei', 'openai', 'cohere'")

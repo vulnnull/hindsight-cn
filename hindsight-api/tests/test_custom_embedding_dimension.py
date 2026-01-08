@@ -14,8 +14,8 @@ from datetime import datetime
 from sqlalchemy import create_engine, text
 
 from hindsight_api import MemoryEngine, RequestContext
-from hindsight_api.engine.embeddings import LocalSTEmbeddings, OpenAIEmbeddings
-from hindsight_api.engine.cross_encoder import LocalSTCrossEncoder
+from hindsight_api.engine.embeddings import LocalSTEmbeddings, OpenAIEmbeddings, CohereEmbeddings
+from hindsight_api.engine.cross_encoder import LocalSTCrossEncoder, CohereCrossEncoder
 from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer
 from hindsight_api.extensions import TenantExtension, TenantContext
 from hindsight_api.migrations import run_migrations, ensure_embedding_dimension
@@ -419,6 +419,180 @@ class TestOpenAIEmbeddings:
 
             assert recall_result is not None
             assert len(recall_result.results) > 0
+
+        finally:
+            try:
+                if memory._pool and not memory._pool._closing:
+                    await memory.close()
+            except Exception:
+                pass
+
+
+# =============================================================================
+# Cohere Embeddings Tests
+# =============================================================================
+
+
+def has_cohere_api_key() -> bool:
+    """Check if Cohere API key is available."""
+    return bool(os.environ.get("COHERE_API_KEY"))
+
+
+def get_cohere_api_key() -> str:
+    """Get Cohere API key from environment."""
+    return os.environ.get("COHERE_API_KEY", "")
+
+
+@pytest.fixture(scope="module")
+def cohere_embeddings():
+    """Create Cohere embeddings instance."""
+    if not has_cohere_api_key():
+        pytest.skip("Cohere API key not available (set COHERE_API_KEY)")
+
+    embeddings = CohereEmbeddings(
+        api_key=get_cohere_api_key(),
+        model="embed-english-v3.0",
+    )
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(embeddings.initialize())
+    finally:
+        loop.close()
+    return embeddings
+
+
+@pytest.fixture(scope="module")
+def cohere_cross_encoder():
+    """Create Cohere cross-encoder instance."""
+    if not has_cohere_api_key():
+        pytest.skip("Cohere API key not available (set COHERE_API_KEY)")
+
+    cross_encoder = CohereCrossEncoder(
+        api_key=get_cohere_api_key(),
+        model="rerank-english-v3.0",
+    )
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(cross_encoder.initialize())
+    finally:
+        loop.close()
+    return cross_encoder
+
+
+@pytest.fixture(scope="module")
+def cohere_test_schema(pg0_db_url, worker_id, cohere_embeddings):
+    """Create an isolated schema for Cohere embedding tests."""
+    schema_name = get_test_schema("test_cohere_embed", worker_id)
+    create_isolated_schema(pg0_db_url, schema_name, dimension=cohere_embeddings.dimension)
+    yield pg0_db_url, schema_name
+    drop_schema(pg0_db_url, schema_name)
+
+
+class TestCohereEmbeddings:
+    """Tests for Cohere embeddings provider."""
+
+    def test_cohere_embeddings_initialization(self, cohere_embeddings):
+        """Test that Cohere embeddings initializes correctly."""
+        assert cohere_embeddings.dimension == 1024
+        assert cohere_embeddings.provider_name == "cohere"
+
+    def test_cohere_embeddings_encode(self, cohere_embeddings):
+        """Test that Cohere embeddings can encode text."""
+        texts = ["Hello, world!", "This is a test."]
+        embeddings = cohere_embeddings.encode(texts)
+
+        assert len(embeddings) == 2
+        assert len(embeddings[0]) == 1024
+        assert len(embeddings[1]) == 1024
+        assert all(isinstance(x, float) for x in embeddings[0])
+
+
+class TestCohereCrossEncoder:
+    """Tests for Cohere cross-encoder/reranker."""
+
+    def test_cohere_cross_encoder_initialization(self, cohere_cross_encoder):
+        """Test that Cohere cross-encoder initializes correctly."""
+        assert cohere_cross_encoder.provider_name == "cohere"
+
+    def test_cohere_cross_encoder_predict(self, cohere_cross_encoder):
+        """Test that Cohere cross-encoder can score pairs."""
+        pairs = [
+            ("What is the capital of France?", "Paris is the capital of France."),
+            ("What is the capital of France?", "The Eiffel Tower is in Paris."),
+            ("What is the capital of France?", "Python is a programming language."),
+        ]
+        scores = cohere_cross_encoder.predict(pairs)
+
+        assert len(scores) == 3
+        assert all(isinstance(s, float) for s in scores)
+        # The first result should be most relevant
+        assert scores[0] > scores[2], "Direct answer should score higher than unrelated text"
+
+
+class TestCohereIntegration:
+    """Integration tests for Cohere embeddings with memory engine."""
+
+    @pytest.mark.asyncio
+    async def test_cohere_embeddings_retain_recall(
+        self,
+        cohere_test_schema,
+        cohere_embeddings,
+        cohere_cross_encoder,
+        query_analyzer,
+        request_context,
+    ):
+        """Test retain and recall operations with Cohere embeddings."""
+        db_url, schema_name = cohere_test_schema
+        test_bank_id = f"cohere_test_{datetime.now().timestamp()}"
+
+        memory = MemoryEngine(
+            db_url=db_url,
+            memory_llm_provider=os.getenv("HINDSIGHT_API_LLM_PROVIDER", "groq"),
+            memory_llm_api_key=os.getenv("HINDSIGHT_API_LLM_API_KEY"),
+            memory_llm_model=os.getenv("HINDSIGHT_API_LLM_MODEL", "openai/gpt-oss-120b"),
+            memory_llm_base_url=os.getenv("HINDSIGHT_API_LLM_BASE_URL") or None,
+            embeddings=cohere_embeddings,
+            cross_encoder=cohere_cross_encoder,
+            query_analyzer=query_analyzer,
+            pool_min_size=1,
+            pool_max_size=3,
+            run_migrations=False,
+            tenant_extension=SchemaTenantExtension(schema_name),
+        )
+
+        try:
+            await memory.initialize()
+
+            # Store some memories
+            await memory.retain_async(
+                bank_id=test_bank_id,
+                content="Alice works as a software engineer at Google.",
+                context="career discussion",
+                request_context=request_context,
+            )
+
+            await memory.retain_async(
+                bank_id=test_bank_id,
+                content="Bob is a data scientist specializing in machine learning.",
+                context="team introductions",
+                request_context=request_context,
+            )
+
+            # Recall memories
+            result = await memory.recall_async(
+                bank_id=test_bank_id,
+                query="Who works in technology?",
+                request_context=request_context,
+            )
+
+            assert result is not None
+            assert len(result.results) > 0
+
+            memory_texts = [m.text for m in result.results]
+            assert any(
+                "Alice" in text or "Bob" in text or "software" in text or "data scientist" in text
+                for text in memory_texts
+            ), f"Expected to find relevant memories, got: {memory_texts}"
 
         finally:
             try:
