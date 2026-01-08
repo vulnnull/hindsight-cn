@@ -1187,7 +1187,7 @@ def _register_routes(app: FastAPI):
 
             # Run recall with tracing (record metrics)
             with metrics.record_operation(
-                "recall", bank_id=bank_id, budget=request.budget.value, max_tokens=request.max_tokens
+                "recall", bank_id=bank_id, source="api", budget=request.budget.value, max_tokens=request.max_tokens
             ):
                 core_result = await app.state.memory.recall_async(
                     bank_id=bank_id,
@@ -1285,7 +1285,7 @@ def _register_routes(app: FastAPI):
 
         try:
             # Use the memory system's reflect_async method (record metrics)
-            with metrics.record_operation("reflect", bank_id=bank_id, budget=request.budget.value):
+            with metrics.record_operation("reflect", bank_id=bank_id, source="api", budget=request.budget.value):
                 core_result = await app.state.memory.reflect_async(
                     bank_id=bank_id,
                     query=request.query,
@@ -2048,7 +2048,7 @@ def _register_routes(app: FastAPI):
                 )
             else:
                 # Synchronous processing: wait for completion (record metrics)
-                with metrics.record_operation("retain", bank_id=bank_id):
+                with metrics.record_operation("retain", bank_id=bank_id, source="api"):
                     result, usage = await app.state.memory.retain_batch_async(
                         bank_id=bank_id, contents=contents, request_context=request_context, return_usage=True
                     )

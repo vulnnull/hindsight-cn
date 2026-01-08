@@ -209,7 +209,7 @@ class EntityResolver:
         # This handles duplicates via ON CONFLICT and returns all IDs
         if entities_to_create:
             # Group entities by canonical name (lowercase) to handle duplicates within batch
-            # For duplicates, we only insert once and reuse the ID
+            # For duplicates, we only insert once and reuse the ID, but track the count
             unique_entities = {}  # lowercase_name -> (entity_data, event_date, [indices])
             for idx, entity_data, event_date in entities_to_create:
                 name_lower = entity_data["text"].lower()
@@ -223,29 +223,32 @@ class EntityResolver:
             # Use a single query with unnest for speed
             entity_names = []
             entity_dates = []
+            entity_counts = []  # Track how many times each entity appears in this batch
             indices_map = []  # Maps result index -> list of original indices
 
             for name_lower, (entity_data, event_date, indices) in unique_entities.items():
                 entity_names.append(entity_data["text"])
                 entity_dates.append(event_date)
+                entity_counts.append(len(indices))  # Count of occurrences in this batch
                 indices_map.append(indices)
 
             # Batch INSERT ... ON CONFLICT with RETURNING
-            # This is much faster than individual inserts
+            # Uses the batch count for mention_count instead of always 1
             rows = await conn.fetch(
                 f"""
                 INSERT INTO {fq_table("entities")} (bank_id, canonical_name, first_seen, last_seen, mention_count)
-                SELECT $1, name, event_date, event_date, 1
-                FROM unnest($2::text[], $3::timestamptz[]) AS t(name, event_date)
+                SELECT $1, name, event_date, event_date, cnt
+                FROM unnest($2::text[], $3::timestamptz[], $4::int[]) AS t(name, event_date, cnt)
                 ON CONFLICT (bank_id, LOWER(canonical_name))
                 DO UPDATE SET
-                    mention_count = {fq_table("entities")}.mention_count + 1,
+                    mention_count = {fq_table("entities")}.mention_count + EXCLUDED.mention_count,
                     last_seen = EXCLUDED.last_seen
                 RETURNING id
                 """,
                 bank_id,
                 entity_names,
                 entity_dates,
+                entity_counts,
             )
 
             # Map returned IDs back to original indices

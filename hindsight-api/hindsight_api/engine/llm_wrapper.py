@@ -209,8 +209,10 @@ class LLMProvider:
             OutputTooLongError: If output exceeds token limits.
             Exception: Re-raises API errors after retries exhausted.
         """
+        queue_start_time = time.time()
         async with _global_llm_semaphore:
             start_time = time.time()
+            semaphore_wait_time = start_time - queue_start_time
 
             # Handle Mock provider (for testing)
             if self.provider == "mock":
@@ -231,7 +233,9 @@ class LLMProvider:
                     max_backoff,
                     skip_validation,
                     start_time,
+                    scope,
                     return_usage,
+                    semaphore_wait_time,
                 )
 
             # Handle Anthropic provider separately
@@ -245,7 +249,9 @@ class LLMProvider:
                     max_backoff,
                     skip_validation,
                     start_time,
+                    scope,
                     return_usage,
+                    semaphore_wait_time,
                 )
 
             # Handle Ollama with native API for structured output (better schema enforcement)
@@ -260,7 +266,9 @@ class LLMProvider:
                     max_backoff,
                     skip_validation,
                     start_time,
+                    scope,
                     return_usage,
+                    semaphore_wait_time,
                 )
 
             call_params = {
@@ -435,10 +443,11 @@ class LLMProvider:
                         if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details:
                             cached_tokens = getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
                         cache_info = f", cached_tokens={cached_tokens}" if cached_tokens > 0 else ""
+                        wait_info = f", wait={semaphore_wait_time:.3f}s" if semaphore_wait_time > 0.1 else ""
                         logger.info(
-                            f"slow llm call: model={self.provider}/{self.model}, "
+                            f"slow llm call: scope={scope}, model={self.provider}/{self.model}, "
                             f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
-                            f"total_tokens={total_tokens}{cache_info}, time={duration:.3f}s, ratio out/in={ratio:.2f}"
+                            f"total_tokens={total_tokens}{cache_info}, time={duration:.3f}s{wait_info}, ratio out/in={ratio:.2f}"
                         )
 
                     if return_usage:
@@ -506,7 +515,9 @@ class LLMProvider:
         max_backoff: float,
         skip_validation: bool,
         start_time: float,
+        scope: str = "memory",
         return_usage: bool = False,
+        semaphore_wait_time: float = 0.0,
     ) -> Any:
         """Handle Anthropic-specific API calls."""
         from anthropic import APIConnectionError, APIStatusError, RateLimitError
@@ -590,7 +601,7 @@ class LLMProvider:
                 metrics.record_llm_call(
                     provider=self.provider,
                     model=self.model,
-                    scope="memory",
+                    scope=scope,
                     duration=duration,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -599,10 +610,11 @@ class LLMProvider:
 
                 # Log slow calls
                 if duration > 10.0:
+                    wait_info = f", wait={semaphore_wait_time:.3f}s" if semaphore_wait_time > 0.1 else ""
                     logger.info(
-                        f"slow llm call: scope=memory, model={self.provider}/{self.model}, "
+                        f"slow llm call: scope={scope}, model={self.provider}/{self.model}, "
                         f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
-                        f"time={duration:.3f}s"
+                        f"time={duration:.3f}s{wait_info}"
                     )
 
                 if return_usage:
@@ -666,7 +678,9 @@ class LLMProvider:
         max_backoff: float,
         skip_validation: bool,
         start_time: float,
+        scope: str = "memory",
         return_usage: bool = False,
+        semaphore_wait_time: float = 0.0,
     ) -> Any:
         """
         Call Ollama using native API with JSON schema enforcement.
@@ -753,7 +767,7 @@ class LLMProvider:
                     metrics.record_llm_call(
                         provider=self.provider,
                         model=self.model,
-                        scope="memory",
+                        scope=scope,
                         duration=duration,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
@@ -816,7 +830,9 @@ class LLMProvider:
         max_backoff: float,
         skip_validation: bool,
         start_time: float,
+        scope: str = "memory",
         return_usage: bool = False,
+        semaphore_wait_time: float = 0.0,
     ) -> Any:
         """Handle Gemini-specific API calls."""
         # Convert OpenAI-style messages to Gemini format
@@ -907,7 +923,7 @@ class LLMProvider:
                 metrics.record_llm_call(
                     provider=self.provider,
                     model=self.model,
-                    scope="memory",
+                    scope=scope,
                     duration=duration,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -916,10 +932,11 @@ class LLMProvider:
 
                 # Log slow calls
                 if duration > 10.0 and input_tokens > 0:
+                    wait_info = f", wait={semaphore_wait_time:.3f}s" if semaphore_wait_time > 0.1 else ""
                     logger.info(
-                        f"slow llm call: scope=memory, model={self.provider}/{self.model}, "
+                        f"slow llm call: scope={scope}, model={self.provider}/{self.model}, "
                         f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
-                        f"time={duration:.3f}s"
+                        f"time={duration:.3f}s{wait_info}"
                     )
 
                 if return_usage:

@@ -479,14 +479,18 @@ async def create_temporal_links_batch_per_fact(
 
         if links:
             insert_start = time_mod.time()
-            await conn.executemany(
-                f"""
-                INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
-                """,
-                links,
-            )
+            # Batch inserts to avoid timeout on large batches
+            BATCH_SIZE = 1000
+            for batch_start in range(0, len(links), BATCH_SIZE):
+                batch = links[batch_start : batch_start + BATCH_SIZE]
+                await conn.executemany(
+                    f"""
+                    INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
+                    """,
+                    batch,
+                )
             _log(log_buffer, f"      [7.4] Insert {len(links)} temporal links: {time_mod.time() - insert_start:.3f}s")
 
         return len(links)
@@ -644,14 +648,18 @@ async def create_semantic_links_batch(
 
         if all_links:
             insert_start = time_mod.time()
-            await conn.executemany(
-                f"""
-                INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
-                """,
-                all_links,
-            )
+            # Batch inserts to avoid timeout on large batches
+            BATCH_SIZE = 1000
+            for batch_start in range(0, len(all_links), BATCH_SIZE):
+                batch = all_links[batch_start : batch_start + BATCH_SIZE]
+                await conn.executemany(
+                    f"""
+                    INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
+                    """,
+                    batch,
+                )
             _log(
                 log_buffer, f"      [8.3] Insert {len(all_links)} semantic links: {time_mod.time() - insert_start:.3f}s"
             )

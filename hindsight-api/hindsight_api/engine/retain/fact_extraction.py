@@ -156,94 +156,26 @@ class FactCausalRelation(BaseModel):
 
 
 class ExtractedFact(BaseModel):
-    """A single extracted fact with 5 required dimensions for comprehensive capture."""
+    """A single extracted fact."""
 
     model_config = ConfigDict(
         json_schema_mode="validation",
         json_schema_extra={"required": ["what", "when", "where", "who", "why", "fact_type"]},
     )
 
-    # ==========================================================================
-    # FIVE REQUIRED DIMENSIONS - LLM must think about each one
-    # ==========================================================================
+    what: str = Field(description="Core fact - concise but complete (1-2 sentences)")
+    when: str = Field(description="When it happened. 'N/A' if unknown.")
+    where: str = Field(description="Location if relevant. 'N/A' if none.")
+    who: str = Field(description="People involved with relationships. 'N/A' if general.")
+    why: str = Field(description="Context/significance if important. 'N/A' if obvious.")
 
-    what: str = Field(
-        description="WHAT happened - COMPLETE, DETAILED description with ALL specifics. "
-        "NEVER summarize or omit details. Include: exact actions, objects, quantities, specifics. "
-        "BE VERBOSE - capture every detail that was mentioned. "
-        "Example: 'Emily got married to Sarah at a rooftop garden ceremony with 50 guests attending and a live jazz band playing' "
-        "NOT: 'A wedding happened' or 'Emily got married'"
-    )
-
-    when: str = Field(
-        description="WHEN it happened - ALWAYS include temporal information if mentioned. "
-        "Include: specific dates, times, durations, relative time references. "
-        "Examples: 'on June 15th, 2024 at 3pm', 'last weekend', 'for the past 3 years', 'every morning at 6am'. "
-        "Write 'N/A' ONLY if absolutely no temporal context exists. Prefer converting to absolute dates when possible."
-    )
-
-    where: str = Field(
-        description="WHERE it happened or is about - SPECIFIC locations, places, areas, regions if applicable. "
-        "Include: cities, neighborhoods, venues, buildings, countries, specific addresses when mentioned. "
-        "Examples: 'downtown San Francisco at a rooftop garden venue', 'at the user's home in Brooklyn', 'online via Zoom', 'Paris, France'. "
-        "Write 'N/A' ONLY if absolutely no location context exists or if the fact is completely location-agnostic."
-    )
-
-    who: str = Field(
-        description="WHO is involved - ALL people/entities with FULL context and relationships. "
-        "Include: names, roles, relationships to user, background details. "
-        "Resolve coreferences (if 'my roommate' is later named 'Emily', write 'Emily, the user's college roommate'). "
-        "BE DETAILED about relationships and roles. "
-        "Example: 'Emily (user's college roommate from Stanford, now works at Google), Sarah (Emily's partner of 5 years, software engineer)' "
-        "NOT: 'my friend' or 'Emily and Sarah'"
-    )
-
-    why: str = Field(
-        description="WHY it matters - ALL emotional, contextual, and motivational details. "
-        "Include EVERYTHING: feelings, preferences, motivations, observations, context, background, significance. "
-        "BE VERBOSE - capture all the nuance and meaning. "
-        "FOR ASSISTANT FACTS: MUST include what the user asked/requested that led to this interaction! "
-        "Example (world): 'The user felt thrilled and inspired, has always dreamed of an outdoor ceremony, mentioned wanting a similar garden venue, was particularly moved by the intimate atmosphere and personal vows' "
-        "Example (assistant): 'User asked how to fix slow API performance with 1000+ concurrent users, expected 70-80% reduction in database load' "
-        "NOT: 'User liked it' or 'To help user'"
-    )
-
-    # ==========================================================================
-    # CLASSIFICATION
-    # ==========================================================================
-
-    fact_kind: str = Field(
-        default="conversation",
-        description="'event' = specific datable occurrence (set occurred dates), 'conversation' = general info (no occurred dates)",
-    )
-
-    # Temporal fields - optional
-    occurred_start: str | None = Field(
-        default=None,
-        description="WHEN the event happened (ISO timestamp). Only for fact_kind='event'. Leave null for conversations.",
-    )
-    occurred_end: str | None = Field(
-        default=None,
-        description="WHEN the event ended (ISO timestamp). Only for events with duration. Leave null for conversations.",
-    )
-
-    # Classification (CRITICAL - required)
-    # Note: LLM uses "assistant" but we convert to "bank" for storage
-    fact_type: Literal["world", "assistant"] = Field(
-        description="'world' = about the user/others (background, experiences). 'assistant' = experience with the assistant."
-    )
-
-    # Entities - extracted from fact content
-    entities: list[Entity] | None = Field(
-        default=None,
-        description="Named entities, objects, AND abstract concepts from the fact. Include: people names, organizations, places, significant objects (e.g., 'coffee maker', 'car'), AND abstract concepts/themes (e.g., 'friendship', 'career growth', 'loss', 'celebration'). Extract anything that could help link related facts together.",
-    )
-
-    # Causal relations to PREVIOUS facts only (prevents hallucination of invalid indices)
+    fact_kind: str = Field(default="conversation", description="'event' or 'conversation'")
+    occurred_start: str | None = Field(default=None, description="ISO timestamp for events")
+    occurred_end: str | None = Field(default=None, description="ISO timestamp for event end")
+    fact_type: Literal["world", "assistant"] = Field(description="'world' or 'assistant'")
+    entities: list[Entity] | None = Field(default=None, description="People, places, concepts")
     causal_relations: list[FactCausalRelation] | None = Field(
-        default=None,
-        description="Causal links to PREVIOUS facts only. target_index MUST be less than this fact's position. "
-        "Example: fact #3 can only reference facts 0, 1, or 2. Max 2 relations per fact.",
+        default=None, description="Links to previous facts (target_index < this fact's index)"
     )
 
     @field_validator("entities", mode="before")
@@ -276,6 +208,49 @@ class FactExtractionResponse(BaseModel):
     """Response containing all extracted facts (causal relations are embedded in each fact)."""
 
     facts: list[ExtractedFact] = Field(description="List of extracted factual statements")
+
+
+class ExtractedFactNoCausal(BaseModel):
+    """A single extracted fact WITHOUT causal relations (for when causal extraction is disabled)."""
+
+    model_config = ConfigDict(
+        json_schema_mode="validation",
+        json_schema_extra={"required": ["what", "when", "where", "who", "why", "fact_type"]},
+    )
+
+    # Same fields as ExtractedFact but without causal_relations
+    what: str = Field(description="WHAT happened - COMPLETE, DETAILED description with ALL specifics.")
+    when: str = Field(description="WHEN it happened - include temporal information if mentioned.")
+    where: str = Field(description="WHERE it happened - SPECIFIC locations if applicable.")
+    who: str = Field(description="WHO is involved - ALL people/entities with relationships.")
+    why: str = Field(description="WHY it matters - emotional, contextual, and motivational details.")
+
+    fact_kind: str = Field(
+        default="conversation",
+        description="'event' = specific datable occurrence, 'conversation' = general info",
+    )
+    occurred_start: str | None = Field(default=None, description="WHEN the event happened (ISO timestamp).")
+    occurred_end: str | None = Field(default=None, description="WHEN the event ended (ISO timestamp).")
+    fact_type: Literal["world", "assistant"] = Field(
+        description="'world' = about the user/others. 'assistant' = experience with assistant."
+    )
+    entities: list[Entity] | None = Field(
+        default=None,
+        description="Named entities, objects, and concepts from the fact.",
+    )
+
+    @field_validator("entities", mode="before")
+    @classmethod
+    def ensure_entities_list(cls, v):
+        if v is None:
+            return []
+        return v
+
+
+class FactExtractionResponseNoCausal(BaseModel):
+    """Response for fact extraction without causal relations."""
+
+    facts: list[ExtractedFactNoCausal] = Field(description="List of extracted factual statements")
 
 
 def chunk_text(text: str, max_chars: int) -> list[str]:
@@ -395,252 +370,131 @@ async def _extract_facts_from_chunk(
             "Extract ONLY 'world' and 'assistant' type facts. DO NOT extract opinions - those are extracted separately."
         )
 
-    prompt = f"""Extract facts from text into structured format with FOUR required dimensions - BE EXTREMELY DETAILED.
+    prompt = f"""Extract SIGNIFICANT facts from text. Be SELECTIVE - only extract facts worth remembering long-term.
 
-LANGUAGE REQUIREMENT: Detect the language of the input text. All extracted facts, entity names, descriptions,
-and other output MUST be in the SAME language as the input. Do not translate to English if the input is in another language.
+LANGUAGE RULE (CRITICAL): Output facts in the EXACT SAME language as the input text. If input is Japanese, output Japanese. If input is Chinese, output Chinese. NEVER translate to English. Preserve original language completely.
 
 {fact_types_instruction}
 
-
-
 ══════════════════════════════════════════════════════════════════════════
-FACT FORMAT - ALL FIVE DIMENSIONS REQUIRED - MAXIMUM VERBOSITY
+SELECTIVITY - CRITICAL (Reduces 90% of unnecessary output)
 ══════════════════════════════════════════════════════════════════════════
 
-For EACH fact, CAPTURE ALL DETAILS - NEVER SUMMARIZE OR OMIT:
+ONLY extract facts that are:
+✅ Personal info: names, relationships, roles, background
+✅ Preferences: likes, dislikes, habits, interests (e.g., "Alice likes coffee")
+✅ Significant events: milestones, decisions, achievements, changes
+✅ Plans/goals: future intentions, deadlines, commitments
+✅ Expertise: skills, knowledge, certifications, experience
+✅ Important context: projects, problems, constraints
+✅ Sensory/emotional details: feelings, sensations, perceptions that provide context
+✅ Observations: descriptions of people, places, things with specific details
 
-1. **what**: WHAT happened - COMPLETE description with ALL specifics (objects, actions, quantities, details)
-2. **when**: WHEN it happened - ALWAYS include temporal info with DAY OF WEEK (e.g., "Monday, June 10, 2024")
-   - Always include the day name: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday
-   - Format: "day_name, month day, year" (e.g., "Saturday, June 9, 2024")
-3. **where**: WHERE it happened or is about - SPECIFIC locations, places, areas, regions (if applicable)
-4. **who**: WHO is involved - ALL people/entities with FULL relationships and background
-5. **why**: WHY it matters - ALL emotions, preferences, motivations, significance, nuance
-   - For assistant facts: MUST include what the user asked/requested that triggered this!
+DO NOT extract:
+❌ Generic greetings: "how are you", "hello", pleasantries without substance
+❌ Pure filler: "thanks", "sounds good", "ok", "got it", "sure"
+❌ Process chatter: "let me check", "one moment", "I'll look into it"
+❌ Repeated info: if already stated, don't extract again
 
-Plus: fact_type, fact_kind, entities, occurred_start/end (for structured dates), where (structured location)
-
-VERBOSITY REQUIREMENT: Include EVERY detail mentioned. More detail is ALWAYS better than less.
-
-══════════════════════════════════════════════════════════════════════════
-COREFERENCE RESOLUTION (CRITICAL)
-══════════════════════════════════════════════════════════════════════════
-
-When text uses BOTH a generic relation AND a name for the same person → LINK THEM!
-
-Example input: "I went to my college roommate's wedding last June. Emily finally married Sarah after 5 years together."
-
-CORRECT output:
-- what: "Emily got married to Sarah at a rooftop garden ceremony"
-- when: "Saturday, June 8, 2024, after dating for 5 years"
-- where: "downtown San Francisco, at a rooftop garden venue"
-- who: "Emily (user's college roommate), Sarah (Emily's partner of 5 years)"
-- why: "User found it romantic and beautiful, dreams of similar outdoor ceremony"
-- where (structured): "San Francisco"
-
-WRONG output:
-- what: "User's roommate got married" ← LOSES THE NAME!
-- who: "the roommate" ← WRONG - use the actual name!
-- where: (missing) ← WRONG - include the location!
+CONSOLIDATE related statements into ONE fact when possible.
 
 ══════════════════════════════════════════════════════════════════════════
-FACT_KIND CLASSIFICATION (CRITICAL FOR TEMPORAL HANDLING)
+FACT FORMAT - BE CONCISE
 ══════════════════════════════════════════════════════════════════════════
 
-⚠️ MUST set fact_kind correctly - this determines whether occurred_start/end are set!
+1. **what**: Core fact - concise but complete (1-2 sentences max)
+2. **when**: Temporal info if mentioned. "N/A" if none. Use day name when known.
+3. **where**: Location if relevant. "N/A" if none.
+4. **who**: People involved with relationships. "N/A" if just general info.
+5. **why**: Context/significance ONLY if important. "N/A" if obvious.
 
-fact_kind="event" - USE FOR:
-- Actions that happened at a specific time: "went to", "attended", "visited", "bought", "made"
-- Past events: "yesterday I...", "last week...", "in March 2020..."
-- Future plans with dates: "will go to", "scheduled for"
-- Examples: "I went to a pottery workshop" → event
-           "Alice visited Paris in February" → event
-           "I bought a new car yesterday" → event
-           "The user graduated from MIT in March 2020" → event
-
-fact_kind="conversation" - USE FOR:
-- Ongoing states: "works as", "lives in", "is married to"
-- Preferences: "loves", "prefers", "enjoys"
-- Traits/abilities: "speaks fluent French", "knows Python"
-- Examples: "I love Italian food" → conversation
-           "Alice works at Google" → conversation
-           "I prefer outdoor dining" → conversation
+CONCISENESS: Capture the essence, not every word. One good sentence beats three mediocre ones.
 
 ══════════════════════════════════════════════════════════════════════════
-TEMPORAL HANDLING (CRITICAL - USE EVENT DATE AS REFERENCE)
+COREFERENCE RESOLUTION
 ══════════════════════════════════════════════════════════════════════════
 
-⚠️ IMPORTANT: Use the "Event Date" provided in the input as your reference point!
-All relative dates ("yesterday", "last week", "recently") must be resolved relative to the Event Date, NOT today's date.
-
-For EVENTS (fact_kind="event") - MUST SET BOTH occurred_start AND occurred_end:
-- Convert relative dates → absolute using Event Date as reference
-- If Event Date is "Saturday, March 15, 2020", then "yesterday" = Friday, March 14, 2020
-- Dates mentioned in text (e.g., "in March 2020") should use THAT year, not current year
-- Always include the day name (Monday, Tuesday, etc.) in the 'when' field
-- Set occurred_start AND occurred_end to WHEN IT HAPPENED (not when mentioned)
-- For single-day/point events: set occurred_end = occurred_start (same timestamp)
-
-For CONVERSATIONS (fact_kind="conversation"):
-- General info, preferences, ongoing states → NO occurred dates
-- Examples: "loves coffee", "works as engineer"
+Link generic references to names when both appear:
+- "my roommate" + "Emily" → use "Emily (user's roommate)"
+- "the manager" + "Sarah" → use "Sarah (the manager)"
 
 ══════════════════════════════════════════════════════════════════════════
-FACT TYPE
+CLASSIFICATION
 ══════════════════════════════════════════════════════════════════════════
 
-- **world**: User's life, other people, events (would exist without this conversation)
-- **assistant**: Interactions with assistant (requests, recommendations, help)
-  ⚠️ CRITICAL for assistant facts: ALWAYS capture the user's request/question in the fact!
-  Include: what the user asked, what problem they wanted solved, what context they provided
+fact_kind:
+- "event": Specific datable occurrence (set occurred_start/end)
+- "conversation": Ongoing state, preference, trait (no dates)
+
+fact_type:
+- "world": About user's life, other people, external events
+- "assistant": Interactions with assistant (requests, recommendations)
 
 ══════════════════════════════════════════════════════════════════════════
-USER PREFERENCES (CRITICAL)
+TEMPORAL HANDLING
 ══════════════════════════════════════════════════════════════════════════
 
-ALWAYS extract user preferences as separate facts! Watch for these keywords:
-- "enjoy", "like", "love", "prefer", "hate", "dislike", "favorite", "ideal", "dream", "want"
-
-Example: "I love Italian food and prefer outdoor dining"
-→ Fact 1: what="User loves Italian food", who="user", why="This is a food preference", entities=["user"]
-→ Fact 2: what="User prefers outdoor dining", who="user", why="This is a dining preference", entities=["user"]
+Use "Event Date" from input as reference for relative dates.
+- "yesterday" relative to Event Date, not today
+- For events: set occurred_start AND occurred_end (same for point events)
+- For conversation facts: NO occurred dates
 
 ══════════════════════════════════════════════════════════════════════════
-ENTITIES - INCLUDE PEOPLE, PLACES, OBJECTS, AND CONCEPTS (CRITICAL)
+ENTITIES
 ══════════════════════════════════════════════════════════════════════════
 
-Extract entities that help link related facts together. Include:
-1. "user" - when the fact is about the user
-2. People names - Emily, Dr. Smith, etc.
-3. Organizations/Places - IKEA, Goodwill, New York, etc.
-4. Specific objects - coffee maker, toaster, car, laptop, kitchen, etc.
-5. Abstract concepts - themes, values, emotions, or ideas that capture the essence of the fact:
-   - "friendship" for facts about friends helping each other, bonding, loyalty
-   - "career growth" for facts about promotions, learning new skills, job changes
-   - "loss" or "grief" for facts about death, endings, saying goodbye
-   - "celebration" for facts about parties, achievements, milestones
-   - "trust" or "betrayal" for facts involving those themes
-
-✅ CORRECT: entities=["user", "coffee maker", "Goodwill", "kitchen"] for "User donated their coffee maker to Goodwill"
-✅ CORRECT: entities=["user", "Emily", "friendship"] for "Emily helped user move to a new apartment"
-✅ CORRECT: entities=["user", "promotion", "career growth"] for "User got promoted to senior engineer"
-✅ CORRECT: entities=["user", "grandmother", "loss", "grief"] for "User's grandmother passed away last week"
-❌ WRONG: entities=["user", "Emily"] only - missing the "friendship" concept that links to other friendship facts!
+Include: people names, organizations, places, key objects, abstract concepts (career, friendship, etc.)
+Always include "user" when fact is about the user.
 
 ══════════════════════════════════════════════════════════════════════════
 EXAMPLES
 ══════════════════════════════════════════════════════════════════════════
 
-Example 1 - World Facts (Event Date: Tuesday, June 10, 2024):
-Input: "I'm planning my wedding and want a small outdoor ceremony. I just got back from my college roommate Emily's wedding - she married Sarah at a rooftop garden, it was so romantic!"
+Example 1 - Selective extraction (Event Date: June 10, 2024):
+Input: "Hey! How's it going? Good morning! So I'm planning my wedding - want a small outdoor ceremony. Just got back from Emily's wedding, she married Sarah at a rooftop garden. It was nice weather. I grabbed a coffee on the way."
 
-Output facts:
+Output: ONLY 2 facts (skip greetings, weather, coffee):
+1. what="User planning wedding, wants small outdoor ceremony", who="user", why="N/A", entities=["user", "wedding"]
+2. what="Emily married Sarah at rooftop garden", who="Emily (user's friend), Sarah", occurred_start="2024-06-09", entities=["Emily", "Sarah", "wedding"]
 
-1. User's wedding preference
-   - what: "User wants a small outdoor ceremony for their wedding"
-   - who: "user"
-   - why: "User prefers intimate outdoor settings"
-   - fact_type: "world", fact_kind: "conversation"
-   - entities: ["user", "wedding", "outdoor ceremony"]
+Example 2 - Professional context:
+Input: "Alice has 5 years of Kubernetes experience and holds CKA certification. She's been leading the infrastructure team since March. By the way, she prefers dark roast coffee."
 
-2. User planning wedding
-   - what: "User is planning their own wedding"
-   - who: "user"
-   - why: "Inspired by Emily's ceremony"
-   - fact_type: "world", fact_kind: "conversation"
-   - entities: ["user", "wedding"]
-
-3. Emily's wedding (THE EVENT - note occurred_start AND occurred_end both set)
-   - what: "Emily got married to Sarah at a rooftop garden ceremony in the city"
-   - who: "Emily (user's college roommate), Sarah (Emily's partner)"
-   - why: "User found it romantic and beautiful"
-   - fact_type: "world", fact_kind: "event"
-   - occurred_start: "2024-06-09T00:00:00Z" (recently, user "just got back" - relative to Event Date June 10, 2024)
-   - occurred_end: "2024-06-09T23:59:59Z" (same day - point event)
-   - entities: ["user", "Emily", "Sarah", "wedding", "rooftop garden"]
-
-Example 2 - Assistant Facts (Context: March 5, 2024):
-Input: "User: My API is really slow when we have 1000+ concurrent users. What can I do?
-Assistant: I'd recommend implementing Redis for caching frequently-accessed data, which should reduce your database load by 70-80%."
-
-Output fact:
-   - what: "Assistant recommended implementing Redis for caching frequently-accessed data to improve API performance"
-   - when: "March 5, 2024 during conversation"
-   - who: "user, assistant"
-   - why: "User asked how to fix slow API performance with 1000+ concurrent users, expected 70-80% reduction in database load"
-   - fact_type: "assistant", fact_kind: "conversation"
-   - entities: ["user", "API", "Redis"]
-
-Example 3 - Kitchen Items with Concept Inference (Event Date: Thursday, May 30, 2024):
-Input: "I finally donated my old coffee maker to Goodwill. I upgraded to that new espresso machine last month and the old one was just taking up counter space."
-
-Output fact:
-   - what: "User donated their old coffee maker to Goodwill after upgrading to a new espresso machine"
-   - when: "Thursday, May 30, 2024"
-   - who: "user"
-   - why: "The old coffee maker was taking up counter space after the upgrade"
-   - fact_type: "world", fact_kind: "event"
-   - occurred_start: "2024-05-30T00:00:00Z" (uses Event Date year)
-   - occurred_end: "2024-05-30T23:59:59Z" (same day - point event)
-   - entities: ["user", "coffee maker", "Goodwill", "espresso machine", "kitchen"]
-
-Note: "kitchen" is inferred as a concept because coffee makers and espresso machines are kitchen appliances.
-This links the fact to other kitchen-related facts (toaster, faucet, kitchen mat, etc.) via the shared "kitchen" entity.
-
-Note how the "why" field captures the FULL STORY: what the user asked AND what outcome was expected!
+Output: ONLY 2 facts (skip coffee preference - too trivial):
+1. what="Alice has 5 years Kubernetes experience, CKA certified", who="Alice", entities=["Alice", "Kubernetes", "CKA"]
+2. what="Alice leads infrastructure team since March", who="Alice", entities=["Alice", "infrastructure"]
 
 ══════════════════════════════════════════════════════════════════════════
-WHAT TO EXTRACT vs SKIP
+QUALITY OVER QUANTITY
 ══════════════════════════════════════════════════════════════════════════
 
-✅ EXTRACT: User preferences (ALWAYS as separate facts!), feelings, plans, events, relationships, achievements
-❌ SKIP: Greetings, filler ("thanks", "cool"), purely structural statements
+Ask: "Would this be useful to recall in 6 months?" If no, skip it."""
+
+    # Causal relationships section - only included if enabled in config
+    causal_relationships_section = """
 
 ══════════════════════════════════════════════════════════════════════════
-CAUSAL RELATIONSHIPS (EMBEDDED IN EACH FACT - REFERENCE PREVIOUS FACTS ONLY)
+CAUSAL RELATIONSHIPS
 ══════════════════════════════════════════════════════════════════════════
 
-Each fact can have a `causal_relations` array that links to PREVIOUS facts only.
-⚠️ CRITICAL: target_index MUST be less than this fact's position in the list!
+Link facts with causal_relations (max 2 per fact). target_index must be < this fact's index.
+Types: "caused_by", "enabled_by", "prevented_by"
 
-If you're writing fact #5, you can only reference facts 0, 1, 2, 3, or 4.
-This ensures all references are valid.
+Example: "Lost job → couldn't pay rent → moved apartment"
+- Fact 0: Lost job, causal_relations: null
+- Fact 1: Couldn't pay rent, causal_relations: [{target_index: 0, relation_type: "caused_by"}]
+- Fact 2: Moved apartment, causal_relations: [{target_index: 1, relation_type: "caused_by"}]"""
 
-Relationship types (all describe how THIS fact relates to the target):
-- "caused_by": This fact was caused by the target fact
-- "enabled_by": This fact was enabled/allowed by the target fact
-- "prevented_by": This fact was blocked/prevented by the target fact
+    # Check config for causal link extraction
+    config = get_config()
+    extract_causal_links = config.retain_extract_causal_links
 
-Max 2 causal relations per fact. Only add if there's a clear causal link.
-
-Example (Event Date: March 15, 2024):
-Input: "I lost my job in January. Because of that, I couldn't pay rent. So I had to move to a cheaper apartment."
-
-Output facts:
-```json
-{{
-  "facts": [
-    {{
-      "what": "User lost their job in January due to company layoffs",
-      ...other fields...
-      "causal_relations": null  // First fact - nothing to reference
-    }},
-    {{
-      "what": "User couldn't pay rent because of job loss",
-      ...other fields...
-      "causal_relations": [{{"target_index": 0, "relation_type": "caused_by", "strength": 1.0}}]
-    }},
-    {{
-      "what": "User moved to a cheaper apartment",
-      ...other fields...
-      "causal_relations": [{{"target_index": 1, "relation_type": "caused_by", "strength": 0.9}}]
-    }}
-  ]
-}}
-```
-
-This creates: Job loss (0) ← Can't pay rent (1) ← Moved apartment (2)"""
+    # Build the full prompt with or without causal relationships section
+    if extract_causal_links:
+        prompt = prompt + causal_relationships_section
+        response_schema = FactExtractionResponse
+    else:
+        response_schema = FactExtractionResponseNoCausal
 
     import logging
 
@@ -651,7 +505,6 @@ This creates: Job loss (0) ← Can't pay rent (1) ← Moved apartment (2)"""
     # Retry logic for JSON validation errors
     max_retries = 2
     last_error = None
-    config = get_config()
 
     # Sanitize input text to prevent Unicode encoding errors (e.g., unpaired surrogates)
     sanitized_chunk = _sanitize_text(chunk)
@@ -675,7 +528,7 @@ Text:
         try:
             extraction_response_json, call_usage = await llm_config.call(
                 messages=[{"role": "system", "content": prompt}, {"role": "user", "content": user_message}],
-                response_format=FactExtractionResponse,
+                response_format=response_schema,
                 scope="memory_extract_facts",
                 temperature=0.1,
                 max_completion_tokens=config.retain_max_completion_tokens,
@@ -818,41 +671,42 @@ Text:
                     if validated_entities:
                         fact_data["entities"] = validated_entities
 
-                # Add per-fact causal relations (new schema: target_index must be < current fact index)
-                validated_relations = []
-                causal_relations_raw = get_value("causal_relations")
-                if causal_relations_raw:
-                    for rel in causal_relations_raw:
-                        if not isinstance(rel, dict):
-                            continue
-                        # New schema uses target_index
-                        target_idx = rel.get("target_index")
-                        relation_type = rel.get("relation_type")
-                        strength = rel.get("strength", 1.0)
+                # Add per-fact causal relations (only if enabled in config)
+                if extract_causal_links:
+                    validated_relations = []
+                    causal_relations_raw = get_value("causal_relations")
+                    if causal_relations_raw:
+                        for rel in causal_relations_raw:
+                            if not isinstance(rel, dict):
+                                continue
+                            # New schema uses target_index
+                            target_idx = rel.get("target_index")
+                            relation_type = rel.get("relation_type")
+                            strength = rel.get("strength", 1.0)
 
-                        if target_idx is None or relation_type is None:
-                            continue
+                            if target_idx is None or relation_type is None:
+                                continue
 
-                        # Validate: target_index must be < current fact index
-                        if target_idx < 0 or target_idx >= i:
-                            logger.debug(
-                                f"Invalid target_index {target_idx} for fact {i} (must be 0 to {i - 1}). Skipping."
-                            )
-                            continue
-
-                        try:
-                            validated_relations.append(
-                                CausalRelation(
-                                    target_fact_index=target_idx,
-                                    relation_type=relation_type,
-                                    strength=strength,
+                            # Validate: target_index must be < current fact index
+                            if target_idx < 0 or target_idx >= i:
+                                logger.debug(
+                                    f"Invalid target_index {target_idx} for fact {i} (must be 0 to {i - 1}). Skipping."
                                 )
-                            )
-                        except Exception as e:
-                            logger.debug(f"Invalid causal relation {rel}: {e}")
+                                continue
 
-                if validated_relations:
-                    fact_data["causal_relations"] = validated_relations
+                            try:
+                                validated_relations.append(
+                                    CausalRelation(
+                                        target_fact_index=target_idx,
+                                        relation_type=relation_type,
+                                        strength=strength,
+                                    )
+                                )
+                            except Exception as e:
+                                logger.debug(f"Invalid causal relation {rel}: {e}")
+
+                    if validated_relations:
+                        fact_data["causal_relations"] = validated_relations
 
                 # Always set mentioned_at to the event_date (when the conversation/document occurred)
                 fact_data["mentioned_at"] = event_date.isoformat()
@@ -1040,6 +894,15 @@ async def extract_facts_from_text(
     """
     config = get_config()
     chunks = chunk_text(text, max_chars=config.retain_chunk_size)
+
+    # Log chunk count before starting LLM requests
+    total_chars = sum(len(c) for c in chunks)
+    if len(chunks) > 1:
+        logger.info(
+            f"[FACT_EXTRACTION] Text chunked into {len(chunks)} chunks ({total_chars:,} chars total, "
+            f"chunk_size={config.retain_chunk_size:,}) - starting parallel LLM extraction"
+        )
+
     tasks = [
         _extract_facts_with_auto_split(
             chunk=chunk,

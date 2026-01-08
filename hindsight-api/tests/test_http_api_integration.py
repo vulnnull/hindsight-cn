@@ -663,11 +663,14 @@ async def test_async_retain_parallel(api_client):
     test_bank_id = f"async_parallel_test_{datetime.now().timestamp()}"
     num_documents = 5
 
-    # Prepare multiple documents to retain
+    # Prepare multiple documents to retain with realistic names
+    # Using realistic names instead of generic Person0, Company0 to ensure LLM extracts facts
+    people = ["Alice Smith", "Bob Johnson", "Carol Williams", "David Brown", "Emily Davis"]
+    companies = ["TechCorp", "DataSoft", "CloudBase", "NetWorks", "InfoSys"]
     documents = [
         {
-            "content": f"Document {i}: This is test content about Person{i} who works at Company{i}.",
-            "context": f"test document {i}",
+            "content": f"{people[i]} is a software engineer who works at {companies[i]} and specializes in Python development.",
+            "context": f"employee profile {i}",
             "document_id": f"doc_{i}"
         }
         for i in range(num_documents)
