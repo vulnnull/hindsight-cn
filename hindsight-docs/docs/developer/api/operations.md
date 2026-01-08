@@ -30,6 +30,67 @@ Support for external streaming platforms like Kafka for scale-out processing is 
 | **access_count_update** | After `recall` | Tracks which memories are accessed for relevance scoring |
 | **regenerate_observations** | Bank profile update | Regenerates entity observations when disposition changes |
 
+## Async Retain Example
+
+When retaining large batches of memories, use `async=true` to process in the background. The response includes an `operation_id` that you can use to poll for completion.
+
+### 1. Submit async retain request
+
+```bash
+curl -X POST "http://localhost:8000/v1/default/banks/my-bank/memories" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {"content": "Alice joined Google in 2023"},
+      {"content": "Bob prefers Python over JavaScript"}
+    ],
+    "async": true
+  }'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "bank_id": "my-bank",
+  "items_count": 2,
+  "async": true,
+  "operation_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### 2. Poll for operation status
+
+```bash
+curl "http://localhost:8000/v1/default/banks/my-bank/operations"
+```
+
+Response:
+```json
+{
+  "bank_id": "my-bank",
+  "operations": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "task_type": "retain",
+      "items_count": 2,
+      "document_id": null,
+      "created_at": "2024-01-15T10:30:00Z",
+      "status": "completed",
+      "error_message": null
+    }
+  ]
+}
+```
+
+### Operation Status Values
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Operation is queued and waiting to be processed |
+| `completed` | Operation finished successfully |
+| `failed` | Operation failed (check `error_message` for details) |
+
 ## Next Steps
 
 - [**Documents**](./documents) — Track document sources

@@ -3524,6 +3524,18 @@
             "title": "Async",
             "description": "Whether the operation was processed asynchronously"
           },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id",
+            "description": "Operation ID for tracking async operations. Use GET /v1/default/banks/{bank_id}/operations to list operations and find this ID. Only present when async=true."
+          },
           "usage": {
             "anyOf": [
               {

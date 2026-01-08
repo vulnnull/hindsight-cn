@@ -381,6 +381,10 @@ class RetainResponse(BaseModel):
     is_async: bool = Field(
         alias="async", serialization_alias="async", description="Whether the operation was processed asynchronously"
     )
+    operation_id: str | None = Field(
+        default=None,
+        description="Operation ID for tracking async operations. Use GET /v1/default/banks/{bank_id}/operations to list operations and find this ID. Only present when async=true.",
+    )
     usage: TokenUsage | None = Field(
         default=None,
         description="Token usage metrics for LLM calls during fact extraction (only present for synchronous operations)",
@@ -2034,6 +2038,7 @@ def _register_routes(app: FastAPI):
                         "bank_id": bank_id,
                         "items_count": result["items_count"],
                         "async": True,
+                        "operation_id": result["operation_id"],
                     }
                 )
             else:

@@ -1019,6 +1019,12 @@ export type RetainResponse = {
    */
   async: boolean;
   /**
+   * Operation Id
+   *
+   * Operation ID for tracking async operations. Use GET /v1/default/banks/{bank_id}/operations to list operations and find this ID. Only present when async=true.
+   */
+  operation_id?: string | null;
+  /**
    * Token usage metrics for LLM calls during fact extraction (only present for synchronous operations)
    */
   usage?: TokenUsage | null;

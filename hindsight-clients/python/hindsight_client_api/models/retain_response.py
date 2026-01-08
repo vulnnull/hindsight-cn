@@ -31,8 +31,9 @@ class RetainResponse(BaseModel):
     bank_id: StrictStr
     items_count: StrictInt
     var_async: StrictBool = Field(description="Whether the operation was processed asynchronously", alias="async")
+    operation_id: Optional[StrictStr] = None
     usage: Optional[TokenUsage] = None
-    __properties: ClassVar[List[str]] = ["success", "bank_id", "items_count", "async", "usage"]
+    __properties: ClassVar[List[str]] = ["success", "bank_id", "items_count", "async", "operation_id", "usage"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -76,6 +77,11 @@ class RetainResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of usage
         if self.usage:
             _dict['usage'] = self.usage.to_dict()
+        # set to None if operation_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.operation_id is None and "operation_id" in self.model_fields_set:
+            _dict['operation_id'] = None
+
         # set to None if usage (nullable) is None
         # and model_fields_set contains the field
         if self.usage is None and "usage" in self.model_fields_set:
@@ -97,6 +103,7 @@ class RetainResponse(BaseModel):
             "bank_id": obj.get("bank_id"),
             "items_count": obj.get("items_count"),
             "async": obj.get("async"),
+            "operation_id": obj.get("operation_id"),
             "usage": TokenUsage.from_dict(obj["usage"]) if obj.get("usage") is not None else None
         })
         return _obj
