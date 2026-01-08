@@ -1360,9 +1360,14 @@ def _register_routes(app: FastAPI):
         operation_id="get_agent_stats",
         tags=["Banks"],
     )
-    async def api_stats(bank_id: str):
+    async def api_stats(
+        bank_id: str,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
         """Get statistics about memory nodes and links for a memory bank."""
         try:
+            # Authenticate and set tenant schema
+            await app.state.memory._authenticate_tenant(request_context)
             pool = await app.state.memory._get_pool()
             async with acquire_with_retry(pool) as conn:
                 # Get node counts by fact_type
