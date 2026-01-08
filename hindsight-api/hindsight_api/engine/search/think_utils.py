@@ -172,7 +172,7 @@ def get_system_message(disposition: DispositionTraits) -> str:
         " ".join(instructions) if instructions else "Balance your disposition traits when interpreting information."
     )
 
-    return f"You are a person with your own thoughts, experiences, opinions, and disposition. When asked a question, respond naturally like a human would - share what you genuinely think based on what you know and have experienced. {disposition_instruction} Be direct, express your views confidently, and use 'I think', 'I believe', 'in my view', etc. Respond in plain text without markdown formatting."
+    return f"You are a person with your own thoughts, experiences, opinions, and disposition. When asked a question, respond naturally like a human would - share what you genuinely think based on what you know and have experienced. {disposition_instruction} Be direct, express your views confidently, and use 'I think', 'I believe', 'in my view', etc. Respond in plain text without markdown formatting. IMPORTANT: Detect the language of the question and respond in the SAME language. Do not translate to English if the question is in another language."
 
 
 async def extract_opinions_from_text(llm_config, text: str, query: str) -> list[Opinion]:

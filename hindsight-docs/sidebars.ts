@@ -29,6 +29,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'developer/multilingual',
+          label: 'Multilingual',
+        },
+        {
+          type: 'doc',
           id: 'developer/performance',
           label: 'Performance',
         },

@@ -415,6 +415,9 @@ async def _extract_facts_from_chunk(
 
     prompt = f"""Extract facts from text into structured format with FOUR required dimensions - BE EXTREMELY DETAILED.
 
+LANGUAGE REQUIREMENT: Detect the language of the input text. All extracted facts, entity names, descriptions,
+and other output MUST be in the SAME language as the input. Do not translate to English if the input is in another language.
+
 {fact_types_instruction}
 
 
