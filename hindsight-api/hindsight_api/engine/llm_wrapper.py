@@ -400,13 +400,17 @@ class LLMProvider:
                     output_tokens = usage.completion_tokens or 0 if usage else 0
                     total_tokens = usage.total_tokens or 0 if usage else 0
 
-                    if usage:
-                        get_metrics_collector().record_tokens(
-                            operation=scope,
-                            bank_id="llm",
-                            input_tokens=input_tokens,
-                            output_tokens=output_tokens,
-                        )
+                    # Record LLM metrics
+                    metrics = get_metrics_collector()
+                    metrics.record_llm_call(
+                        provider=self.provider,
+                        model=self.model,
+                        scope=scope,
+                        duration=duration,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        success=True,
+                    )
 
                     # Log slow calls
                     if duration > 10.0 and usage:
@@ -559,24 +563,28 @@ class LLMProvider:
                 else:
                     result = content
 
-                # Record token usage metrics
+                # Record metrics and log slow calls
                 duration = time.time() - start_time
                 input_tokens = response.usage.input_tokens or 0 if response.usage else 0
                 output_tokens = response.usage.output_tokens or 0 if response.usage else 0
                 total_tokens = input_tokens + output_tokens
 
-                if response.usage:
-                    get_metrics_collector().record_tokens(
-                        operation="memory",
-                        bank_id="llm",
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                    )
+                # Record LLM metrics
+                metrics = get_metrics_collector()
+                metrics.record_llm_call(
+                    provider=self.provider,
+                    model=self.model,
+                    scope="memory",
+                    duration=duration,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    success=True,
+                )
 
                 # Log slow calls
-                if duration > 10.0 and response.usage:
+                if duration > 10.0:
                     logger.info(
-                        f"slow llm call: model={self.provider}/{self.model}, "
+                        f"slow llm call: scope=memory, model={self.provider}/{self.model}, "
                         f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
                         f"time={duration:.3f}s"
                     )
@@ -719,18 +727,22 @@ class LLMProvider:
 
                     # Extract token usage from Ollama response
                     # Ollama returns prompt_eval_count (input) and eval_count (output)
+                    duration = time.time() - start_time
                     input_tokens = result.get("prompt_eval_count", 0) or 0
                     output_tokens = result.get("eval_count", 0) or 0
                     total_tokens = input_tokens + output_tokens
 
-                    # Record to metrics
-                    if input_tokens > 0 or output_tokens > 0:
-                        get_metrics_collector().record_tokens(
-                            operation="memory",
-                            bank_id="llm",
-                            input_tokens=input_tokens,
-                            output_tokens=output_tokens,
-                        )
+                    # Record LLM metrics
+                    metrics = get_metrics_collector()
+                    metrics.record_llm_call(
+                        provider=self.provider,
+                        model=self.model,
+                        scope="memory",
+                        duration=duration,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        success=True,
+                    )
 
                     # Validate against Pydantic model or return raw JSON
                     if skip_validation:
@@ -865,7 +877,7 @@ class LLMProvider:
                 else:
                     result = content
 
-                # Record token usage metrics
+                # Record metrics and log slow calls
                 duration = time.time() - start_time
                 input_tokens = 0
                 output_tokens = 0
@@ -873,20 +885,26 @@ class LLMProvider:
                     usage = response.usage_metadata
                     input_tokens = usage.prompt_token_count or 0
                     output_tokens = usage.candidates_token_count or 0
-                    get_metrics_collector().record_tokens(
-                        operation="memory",
-                        bank_id="llm",
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                    )
 
-                    # Log slow calls
-                    if duration > 10.0:
-                        logger.info(
-                            f"slow llm call: model={self.provider}/{self.model}, "
-                            f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
-                            f"time={duration:.3f}s"
-                        )
+                # Record LLM metrics
+                metrics = get_metrics_collector()
+                metrics.record_llm_call(
+                    provider=self.provider,
+                    model=self.model,
+                    scope="memory",
+                    duration=duration,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    success=True,
+                )
+
+                # Log slow calls
+                if duration > 10.0 and input_tokens > 0:
+                    logger.info(
+                        f"slow llm call: scope=memory, model={self.provider}/{self.model}, "
+                        f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
+                        f"time={duration:.3f}s"
+                    )
 
                 if return_usage:
                     token_usage = TokenUsage(

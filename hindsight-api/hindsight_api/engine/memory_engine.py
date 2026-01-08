@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from ..config import get_config
+from ..metrics import get_metrics_collector
 
 # Context variable for current schema (async-safe, per-task isolation)
 _current_schema: contextvars.ContextVar[str] = contextvars.ContextVar("current_schema", default="public")
@@ -3162,16 +3163,20 @@ Guidelines:
 
         # Steps 1-3: Run multi-fact-type search (12-way retrieval: 4 methods × 3 fact types)
         recall_start = time.time()
-        search_result = await self.recall_async(
-            bank_id=bank_id,
-            query=query,
-            budget=budget,
-            max_tokens=4096,
-            enable_trace=False,
-            fact_type=["experience", "world", "opinion"],
-            include_entities=True,
-            request_context=request_context,
-        )
+        metrics = get_metrics_collector()
+        with metrics.record_operation(
+            "recall", bank_id=bank_id, source="reflect", budget=budget.value if budget else None
+        ):
+            search_result = await self.recall_async(
+                bank_id=bank_id,
+                query=query,
+                budget=budget,
+                max_tokens=4096,
+                enable_trace=False,
+                fact_type=["experience", "world", "opinion"],
+                include_entities=True,
+                request_context=request_context,
+            )
         recall_time = time.time() - recall_start
 
         all_results = search_result.results

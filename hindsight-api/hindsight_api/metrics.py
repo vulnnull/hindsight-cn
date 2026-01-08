@@ -5,6 +5,7 @@ This module provides metrics for:
 - Operation latency (retain, recall, reflect) with percentiles
 - Token usage (input/output) per operation
 - Per-bank granularity via labels
+- LLM call latency and token usage with scope dimension
 """
 
 import logging
@@ -14,7 +15,53 @@ from contextlib import contextmanager
 from opentelemetry import metrics
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
 from opentelemetry.sdk.resources import Resource
+
+# Custom bucket boundaries for operation duration (in seconds)
+# Fine granularity in 0-30s range where most operations complete
+DURATION_BUCKETS = (0.1, 0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 60.0, 120.0)
+
+# LLM duration buckets (finer granularity for faster LLM calls)
+LLM_DURATION_BUCKETS = (0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0)
+
+
+def get_token_bucket(token_count: int) -> str:
+    """
+    Convert a token count to a bucket label for use as a dimension.
+
+    This allows analyzing token usage patterns without high-cardinality issues.
+
+    Buckets:
+    - "0-100": Very small requests/responses
+    - "100-500": Small requests/responses
+    - "500-1k": Medium requests/responses
+    - "1k-5k": Large requests/responses
+    - "5k-10k": Very large requests/responses
+    - "10k-50k": Huge requests/responses
+    - "50k+": Extremely large requests/responses
+
+    Args:
+        token_count: Number of tokens
+
+    Returns:
+        Bucket label string
+    """
+    if token_count < 100:
+        return "0-100"
+    elif token_count < 500:
+        return "100-500"
+    elif token_count < 1000:
+        return "500-1k"
+    elif token_count < 5000:
+        return "1k-5k"
+    elif token_count < 10000:
+        return "5k-10k"
+    elif token_count < 50000:
+        return "10k-50k"
+    else:
+        return "50k+"
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +95,22 @@ def initialize_metrics(service_name: str = "hindsight-api", service_version: str
     # Create Prometheus metric reader
     prometheus_reader = PrometheusMetricReader()
 
-    # Create meter provider with Prometheus exporter
-    provider = MeterProvider(resource=resource, metric_readers=[prometheus_reader])
+    # Create view with custom bucket boundaries for duration histogram
+    duration_view = View(
+        instrument_name="hindsight.operation.duration",
+        aggregation=ExplicitBucketHistogramAggregation(boundaries=DURATION_BUCKETS),
+    )
+
+    # Create view with custom bucket boundaries for LLM duration histogram
+    llm_duration_view = View(
+        instrument_name="hindsight.llm.duration",
+        aggregation=ExplicitBucketHistogramAggregation(boundaries=LLM_DURATION_BUCKETS),
+    )
+
+    # Create meter provider with Prometheus exporter and custom views
+    provider = MeterProvider(
+        resource=resource, metric_readers=[prometheus_reader], views=[duration_view, llm_duration_view]
+    )
 
     # Set the global meter provider
     metrics.set_meter_provider(provider)
@@ -71,20 +132,39 @@ class MetricsCollectorBase:
     """Base class for metrics collectors."""
 
     @contextmanager
-    def record_operation(self, operation: str, bank_id: str, budget: str | None = None, max_tokens: int | None = None):
-        """Context manager to record operation duration and status."""
-        raise NotImplementedError
-
-    def record_tokens(
+    def record_operation(
         self,
         operation: str,
         bank_id: str,
-        input_tokens: int = 0,
-        output_tokens: int = 0,
+        source: str = "api",
         budget: str | None = None,
         max_tokens: int | None = None,
     ):
-        """Record token usage for an operation."""
+        """Context manager to record operation duration and status."""
+        raise NotImplementedError
+
+    def record_llm_call(
+        self,
+        provider: str,
+        model: str,
+        scope: str,
+        duration: float,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        success: bool = True,
+    ):
+        """
+        Record metrics for an LLM call.
+
+        Args:
+            provider: LLM provider name (openai, anthropic, gemini, groq, ollama, lmstudio)
+            model: Model name
+            scope: Scope identifier (e.g., "memory", "reflect", "entity_observation")
+            duration: Call duration in seconds
+            input_tokens: Number of input/prompt tokens
+            output_tokens: Number of output/completion tokens
+            success: Whether the call was successful
+        """
         raise NotImplementedError
 
 
@@ -92,20 +172,28 @@ class NoOpMetricsCollector(MetricsCollectorBase):
     """No-op metrics collector that does nothing. Used when metrics are disabled."""
 
     @contextmanager
-    def record_operation(self, operation: str, bank_id: str, budget: str | None = None, max_tokens: int | None = None):
-        """No-op context manager."""
-        yield
-
-    def record_tokens(
+    def record_operation(
         self,
         operation: str,
         bank_id: str,
-        input_tokens: int = 0,
-        output_tokens: int = 0,
+        source: str = "api",
         budget: str | None = None,
         max_tokens: int | None = None,
     ):
-        """No-op token recording."""
+        """No-op context manager."""
+        yield
+
+    def record_llm_call(
+        self,
+        provider: str,
+        model: str,
+        scope: str,
+        duration: float,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        success: bool = True,
+    ):
+        """No-op LLM call recording."""
         pass
 
 
@@ -125,33 +213,52 @@ class MetricsCollector(MetricsCollectorBase):
             name="hindsight.operation.duration", description="Duration of Hindsight operations in seconds", unit="s"
         )
 
-        # Token usage counters
-        self.tokens_input = self.meter.create_counter(
-            name="hindsight.tokens.input", description="Number of input tokens consumed", unit="tokens"
-        )
-
-        self.tokens_output = self.meter.create_counter(
-            name="hindsight.tokens.output", description="Number of output tokens generated", unit="tokens"
-        )
-
         # Operation counter (success/failure)
         self.operation_total = self.meter.create_counter(
             name="hindsight.operation.total", description="Total number of operations executed", unit="operations"
         )
 
+        # LLM call latency histogram (in seconds)
+        # Records duration of LLM API calls with provider, model, and scope dimensions
+        self.llm_duration = self.meter.create_histogram(
+            name="hindsight.llm.duration", description="Duration of LLM API calls in seconds", unit="s"
+        )
+
+        # LLM token usage counters with bucket labels
+        self.llm_tokens_input = self.meter.create_counter(
+            name="hindsight.llm.tokens.input", description="Number of input tokens for LLM calls", unit="tokens"
+        )
+
+        self.llm_tokens_output = self.meter.create_counter(
+            name="hindsight.llm.tokens.output", description="Number of output tokens from LLM calls", unit="tokens"
+        )
+
+        # LLM call counter (success/failure)
+        self.llm_calls_total = self.meter.create_counter(
+            name="hindsight.llm.calls.total", description="Total number of LLM API calls", unit="calls"
+        )
+
     @contextmanager
-    def record_operation(self, operation: str, bank_id: str, budget: str | None = None, max_tokens: int | None = None):
+    def record_operation(
+        self,
+        operation: str,
+        bank_id: str,
+        source: str = "api",
+        budget: str | None = None,
+        max_tokens: int | None = None,
+    ):
         """
         Context manager to record operation duration and status.
 
         Usage:
-            with metrics.record_operation("recall", bank_id="user123", budget="mid", max_tokens=4096):
+            with metrics.record_operation("recall", bank_id="user123", source="api", budget="mid", max_tokens=4096):
                 # ... perform operation
                 pass
 
         Args:
-            operation: Operation name (retain, recall, reflect)
+            operation: Operation name (retain, recall, reflect, entity_observation)
             bank_id: Memory bank ID
+            source: Source of the operation (api, reflect, internal)
             budget: Optional budget level (low, mid, high)
             max_tokens: Optional max tokens for the operation
         """
@@ -159,6 +266,7 @@ class MetricsCollector(MetricsCollectorBase):
         attributes = {
             "operation": operation,
             "bank_id": bank_id,
+            "source": source,
         }
         if budget:
             attributes["budget"] = budget
@@ -181,40 +289,56 @@ class MetricsCollector(MetricsCollectorBase):
             # Record operation count
             self.operation_total.add(1, attributes)
 
-    def record_tokens(
+    def record_llm_call(
         self,
-        operation: str,
-        bank_id: str,
+        provider: str,
+        model: str,
+        scope: str,
+        duration: float,
         input_tokens: int = 0,
         output_tokens: int = 0,
-        budget: str | None = None,
-        max_tokens: int | None = None,
+        success: bool = True,
     ):
         """
-        Record token usage for an operation.
+        Record metrics for an LLM call.
 
         Args:
-            operation: Operation name (retain, recall, reflect)
-            bank_id: Memory bank ID
-            input_tokens: Number of input tokens
-            output_tokens: Number of output tokens
-            budget: Optional budget level
-            max_tokens: Optional max tokens for the operation
+            provider: LLM provider name (openai, anthropic, gemini, groq, ollama, lmstudio)
+            model: Model name
+            scope: Scope identifier (e.g., "memory", "reflect", "entity_observation")
+            duration: Call duration in seconds
+            input_tokens: Number of input/prompt tokens
+            output_tokens: Number of output/completion tokens
+            success: Whether the call was successful
         """
-        attributes = {
-            "operation": operation,
-            "bank_id": bank_id,
+        # Base attributes for all metrics
+        base_attributes = {
+            "provider": provider,
+            "model": model,
+            "scope": scope,
+            "success": str(success).lower(),
         }
-        if budget:
-            attributes["budget"] = budget
-        if max_tokens:
-            attributes["max_tokens"] = str(max_tokens)
 
+        # Record duration
+        self.llm_duration.record(duration, base_attributes)
+
+        # Record call count
+        self.llm_calls_total.add(1, base_attributes)
+
+        # Record tokens with bucket labels for cardinality control
         if input_tokens > 0:
-            self.tokens_input.add(input_tokens, attributes)
+            input_attributes = {
+                **base_attributes,
+                "token_bucket": get_token_bucket(input_tokens),
+            }
+            self.llm_tokens_input.add(input_tokens, input_attributes)
 
         if output_tokens > 0:
-            self.tokens_output.add(output_tokens, attributes)
+            output_attributes = {
+                **base_attributes,
+                "token_bucket": get_token_bucket(output_tokens),
+            }
+            self.llm_tokens_output.add(output_tokens, output_attributes)
 
 
 # Global metrics collector instance (defaults to no-op)

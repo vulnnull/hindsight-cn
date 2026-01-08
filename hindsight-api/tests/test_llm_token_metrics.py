@@ -9,8 +9,6 @@ from hindsight_api.metrics import (
     MetricsCollector,
     NoOpMetricsCollector,
     get_metrics_collector,
-    initialize_metrics,
-    create_metrics_collector,
 )
 
 
@@ -20,16 +18,16 @@ def get_groq_api_key() -> str | None:
 
 
 @pytest.mark.asyncio
-async def test_token_metrics_recorded_for_groq():
+async def test_llm_metrics_recorded_for_groq():
     """
-    Test that token metrics are recorded when making LLM calls via Groq.
+    Test that LLM metrics are recorded when making LLM calls via Groq.
     Uses openai/gpt-oss-20b as recommended by Hindsight.
     """
     api_key = get_groq_api_key()
     if not api_key:
         pytest.skip("Skipping: GROQ_API_KEY not set")
 
-    # Create a mock metrics collector to track record_tokens calls
+    # Create a mock metrics collector to track record_llm_call calls
     mock_collector = MagicMock(spec=MetricsCollector)
 
     with patch("hindsight_api.engine.llm_wrapper.get_metrics_collector", return_value=mock_collector):
@@ -50,30 +48,35 @@ async def test_token_metrics_recorded_for_groq():
             scope="test_metrics",
         )
 
-        # Verify record_tokens was called - this is the main test
-        assert mock_collector.record_tokens.called, "record_tokens should have been called"
+        # Verify record_llm_call was called - this is the main test
+        assert mock_collector.record_llm_call.called, "record_llm_call should have been called"
 
         # Get the call arguments
-        call_kwargs = mock_collector.record_tokens.call_args.kwargs
+        call_kwargs = mock_collector.record_llm_call.call_args.kwargs
 
         # Verify the call had correct structure
-        assert call_kwargs["operation"] == "test_metrics", f"Expected operation='test_metrics', got {call_kwargs}"
-        assert call_kwargs["bank_id"] == "llm", f"Expected bank_id='llm', got {call_kwargs}"
+        assert call_kwargs["provider"] == "groq", f"Expected provider='groq', got {call_kwargs}"
+        assert call_kwargs["model"] == "openai/gpt-oss-20b", f"Expected model='openai/gpt-oss-20b', got {call_kwargs}"
+        assert call_kwargs["scope"] == "test_metrics", f"Expected scope='test_metrics', got {call_kwargs}"
+        assert call_kwargs["duration"] > 0, f"Expected duration > 0, got {call_kwargs['duration']}"
         assert call_kwargs["input_tokens"] > 0, f"Expected input_tokens > 0, got {call_kwargs['input_tokens']}"
-        # Output tokens may be 0 for some edge cases, but input should always be > 0
         assert call_kwargs["output_tokens"] >= 0, f"Expected output_tokens >= 0, got {call_kwargs['output_tokens']}"
+        assert call_kwargs["success"] is True, f"Expected success=True, got {call_kwargs['success']}"
 
-        print(f"\nToken metrics recorded:")
-        print(f"  operation: {call_kwargs['operation']}")
+        print(f"\nLLM metrics recorded:")
+        print(f"  provider: {call_kwargs['provider']}")
+        print(f"  model: {call_kwargs['model']}")
+        print(f"  scope: {call_kwargs['scope']}")
+        print(f"  duration: {call_kwargs['duration']:.3f}s")
         print(f"  input_tokens: {call_kwargs['input_tokens']}")
         print(f"  output_tokens: {call_kwargs['output_tokens']}")
         print(f"  response: {response}")
 
 
 @pytest.mark.asyncio
-async def test_token_metrics_recorded_for_structured_output():
+async def test_llm_metrics_recorded_for_structured_output():
     """
-    Test that token metrics are recorded for structured output (JSON) calls.
+    Test that LLM metrics are recorded for structured output (JSON) calls.
     """
     api_key = get_groq_api_key()
     if not api_key:
@@ -108,14 +111,14 @@ async def test_token_metrics_recorded_for_structured_output():
         assert response.greeting is not None
         assert response.language is not None
 
-        # Verify record_tokens was called
-        assert mock_collector.record_tokens.called, "record_tokens should have been called"
+        # Verify record_llm_call was called
+        assert mock_collector.record_llm_call.called, "record_llm_call should have been called"
 
-        call_kwargs = mock_collector.record_tokens.call_args.kwargs
+        call_kwargs = mock_collector.record_llm_call.call_args.kwargs
         assert call_kwargs["input_tokens"] > 0
         assert call_kwargs["output_tokens"] > 0
 
-        print(f"\nStructured output token metrics:")
+        print(f"\nStructured output LLM metrics:")
         print(f"  greeting: {response.greeting}")
         print(f"  language: {response.language}")
         print(f"  input_tokens: {call_kwargs['input_tokens']}")
