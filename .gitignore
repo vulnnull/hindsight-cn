@@ -5,7 +5,8 @@ build/
 dist/
 wheels/
 *.egg-info
-
+.mcp.json
+.osgrep
 # Virtual environments
 .venv
 
@@ -42,3 +43,7 @@ hindsight-dev/benchmarks/locomo/results/
 hindsight-dev/benchmarks/longmemeval/results/
 hindsight-cli/target
 hindsight-clients/rust/target
+.claude
+whats-next.md
+TASK.md
+CHANGELOG.md
