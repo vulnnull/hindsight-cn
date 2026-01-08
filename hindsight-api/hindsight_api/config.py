@@ -25,6 +25,17 @@ ENV_LLM_MAX_CONCURRENT = "HINDSIGHT_API_LLM_MAX_CONCURRENT"
 ENV_LLM_TIMEOUT = "HINDSIGHT_API_LLM_TIMEOUT"
 ENV_LLM_GROQ_SERVICE_TIER = "HINDSIGHT_API_LLM_GROQ_SERVICE_TIER"
 
+# Per-operation LLM configuration (optional, falls back to global LLM config)
+ENV_RETAIN_LLM_PROVIDER = "HINDSIGHT_API_RETAIN_LLM_PROVIDER"
+ENV_RETAIN_LLM_API_KEY = "HINDSIGHT_API_RETAIN_LLM_API_KEY"
+ENV_RETAIN_LLM_MODEL = "HINDSIGHT_API_RETAIN_LLM_MODEL"
+ENV_RETAIN_LLM_BASE_URL = "HINDSIGHT_API_RETAIN_LLM_BASE_URL"
+
+ENV_REFLECT_LLM_PROVIDER = "HINDSIGHT_API_REFLECT_LLM_PROVIDER"
+ENV_REFLECT_LLM_API_KEY = "HINDSIGHT_API_REFLECT_LLM_API_KEY"
+ENV_REFLECT_LLM_MODEL = "HINDSIGHT_API_REFLECT_LLM_MODEL"
+ENV_REFLECT_LLM_BASE_URL = "HINDSIGHT_API_REFLECT_LLM_BASE_URL"
+
 ENV_EMBEDDINGS_PROVIDER = "HINDSIGHT_API_EMBEDDINGS_PROVIDER"
 ENV_EMBEDDINGS_LOCAL_MODEL = "HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL"
 ENV_EMBEDDINGS_TEI_URL = "HINDSIGHT_API_EMBEDDINGS_TEI_URL"
@@ -127,13 +138,24 @@ class HindsightConfig:
     # Database
     database_url: str
 
-    # LLM
+    # LLM (default, used as fallback for per-operation config)
     llm_provider: str
     llm_api_key: str | None
     llm_model: str
     llm_base_url: str | None
     llm_max_concurrent: int
     llm_timeout: float
+
+    # Per-operation LLM configuration (None = use default LLM config)
+    retain_llm_provider: str | None
+    retain_llm_api_key: str | None
+    retain_llm_model: str | None
+    retain_llm_base_url: str | None
+
+    reflect_llm_provider: str | None
+    reflect_llm_api_key: str | None
+    reflect_llm_model: str | None
+    reflect_llm_base_url: str | None
 
     # Embeddings
     embeddings_provider: str
@@ -181,6 +203,15 @@ class HindsightConfig:
             llm_base_url=os.getenv(ENV_LLM_BASE_URL) or None,
             llm_max_concurrent=int(os.getenv(ENV_LLM_MAX_CONCURRENT, str(DEFAULT_LLM_MAX_CONCURRENT))),
             llm_timeout=float(os.getenv(ENV_LLM_TIMEOUT, str(DEFAULT_LLM_TIMEOUT))),
+            # Per-operation LLM config (None = use default)
+            retain_llm_provider=os.getenv(ENV_RETAIN_LLM_PROVIDER) or None,
+            retain_llm_api_key=os.getenv(ENV_RETAIN_LLM_API_KEY) or None,
+            retain_llm_model=os.getenv(ENV_RETAIN_LLM_MODEL) or None,
+            retain_llm_base_url=os.getenv(ENV_RETAIN_LLM_BASE_URL) or None,
+            reflect_llm_provider=os.getenv(ENV_REFLECT_LLM_PROVIDER) or None,
+            reflect_llm_api_key=os.getenv(ENV_REFLECT_LLM_API_KEY) or None,
+            reflect_llm_model=os.getenv(ENV_REFLECT_LLM_MODEL) or None,
+            reflect_llm_base_url=os.getenv(ENV_REFLECT_LLM_BASE_URL) or None,
             # Embeddings
             embeddings_provider=os.getenv(ENV_EMBEDDINGS_PROVIDER, DEFAULT_EMBEDDINGS_PROVIDER),
             embeddings_local_model=os.getenv(ENV_EMBEDDINGS_LOCAL_MODEL, DEFAULT_EMBEDDINGS_LOCAL_MODEL),
@@ -251,6 +282,14 @@ class HindsightConfig:
         """Log the current configuration (without sensitive values)."""
         logger.info(f"Database: {self.database_url}")
         logger.info(f"LLM: provider={self.llm_provider}, model={self.llm_model}")
+        if self.retain_llm_provider or self.retain_llm_model:
+            retain_provider = self.retain_llm_provider or self.llm_provider
+            retain_model = self.retain_llm_model or self.llm_model
+            logger.info(f"LLM (retain): provider={retain_provider}, model={retain_model}")
+        if self.reflect_llm_provider or self.reflect_llm_model:
+            reflect_provider = self.reflect_llm_provider or self.llm_provider
+            reflect_model = self.reflect_llm_model or self.llm_model
+            logger.info(f"LLM (reflect): provider={reflect_provider}, model={reflect_model}")
         logger.info(f"Embeddings: provider={self.embeddings_provider}")
         logger.info(f"Reranker: provider={self.reranker_provider}")
         logger.info(f"Graph retriever: {self.graph_retriever}")

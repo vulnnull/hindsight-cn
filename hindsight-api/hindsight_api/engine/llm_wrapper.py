@@ -88,9 +88,13 @@ class LLMProvider:
         self.groq_service_tier = groq_service_tier or os.getenv(ENV_LLM_GROQ_SERVICE_TIER, "auto")
 
         # Validate provider
-        valid_providers = ["openai", "groq", "ollama", "gemini", "anthropic", "lmstudio"]
+        valid_providers = ["openai", "groq", "ollama", "gemini", "anthropic", "lmstudio", "mock"]
         if self.provider not in valid_providers:
             raise ValueError(f"Invalid LLM provider: {self.provider}. Must be one of: {', '.join(valid_providers)}")
+
+        # Mock provider tracking (for testing)
+        self._mock_calls: list[dict] = []
+        self._mock_response: Any = None
 
         # Set default base URLs
         if not self.base_url:
@@ -101,8 +105,8 @@ class LLMProvider:
             elif self.provider == "lmstudio":
                 self.base_url = "http://localhost:1234/v1"
 
-        # Validate API key (not needed for ollama or lmstudio)
-        if self.provider not in ("ollama", "lmstudio") and not self.api_key:
+        # Validate API key (not needed for ollama, lmstudio, or mock)
+        if self.provider not in ("ollama", "lmstudio", "mock") and not self.api_key:
             raise ValueError(f"API key not found for {self.provider}")
 
         # Get timeout config (set HINDSIGHT_API_LLM_TIMEOUT for local LLMs that need longer timeouts)
@@ -113,7 +117,10 @@ class LLMProvider:
         self._gemini_client = None
         self._anthropic_client = None
 
-        if self.provider == "gemini":
+        if self.provider == "mock":
+            # Mock provider - no client needed
+            pass
+        elif self.provider == "gemini":
             self._gemini_client = genai.Client(api_key=self.api_key)
         elif self.provider == "anthropic":
             from anthropic import AsyncAnthropic
@@ -204,6 +211,15 @@ class LLMProvider:
         """
         async with _global_llm_semaphore:
             start_time = time.time()
+
+            # Handle Mock provider (for testing)
+            if self.provider == "mock":
+                return await self._call_mock(
+                    messages,
+                    response_format,
+                    scope,
+                    return_usage,
+                )
 
             # Handle Gemini provider separately
             if self.provider == "gemini":
@@ -953,6 +969,61 @@ class LLMProvider:
         if last_exception:
             raise last_exception
         raise RuntimeError("Gemini call failed after all retries")
+
+    async def _call_mock(
+        self,
+        messages: list[dict[str, str]],
+        response_format: Any | None,
+        scope: str,
+        return_usage: bool,
+    ) -> Any:
+        """
+        Handle mock provider calls for testing.
+
+        Records the call and returns a configurable mock response.
+        """
+        # Record the call for test verification
+        call_record = {
+            "provider": self.provider,
+            "model": self.model,
+            "messages": messages,
+            "response_format": response_format.__name__
+            if response_format and hasattr(response_format, "__name__")
+            else str(response_format),
+            "scope": scope,
+        }
+        self._mock_calls.append(call_record)
+        logger.debug(f"Mock LLM call recorded: scope={scope}, model={self.model}")
+
+        # Return mock response
+        if self._mock_response is not None:
+            result = self._mock_response
+        elif response_format is not None:
+            # Try to create a minimal valid instance of the response format
+            try:
+                # For Pydantic models, try to create with minimal valid data
+                result = {"mock": True}
+            except Exception:
+                result = {"mock": True}
+        else:
+            result = "mock response"
+
+        if return_usage:
+            token_usage = TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15)
+            return result, token_usage
+        return result
+
+    def set_mock_response(self, response: Any) -> None:
+        """Set the response to return from mock calls."""
+        self._mock_response = response
+
+    def get_mock_calls(self) -> list[dict]:
+        """Get the list of recorded mock calls."""
+        return self._mock_calls
+
+    def clear_mock_calls(self) -> None:
+        """Clear the recorded mock calls."""
+        self._mock_calls = []
 
     @classmethod
     def for_memory(cls) -> "LLMProvider":

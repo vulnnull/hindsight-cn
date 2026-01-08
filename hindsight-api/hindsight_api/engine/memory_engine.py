@@ -203,6 +203,15 @@ class MemoryEngine(MemoryEngineInterface):
         memory_llm_api_key: str | None = None,
         memory_llm_model: str | None = None,
         memory_llm_base_url: str | None = None,
+        # Per-operation LLM config (optional, falls back to memory_llm_* params)
+        retain_llm_provider: str | None = None,
+        retain_llm_api_key: str | None = None,
+        retain_llm_model: str | None = None,
+        retain_llm_base_url: str | None = None,
+        reflect_llm_provider: str | None = None,
+        reflect_llm_api_key: str | None = None,
+        reflect_llm_model: str | None = None,
+        reflect_llm_base_url: str | None = None,
         embeddings: Embeddings | None = None,
         cross_encoder: CrossEncoderModel | None = None,
         query_analyzer: QueryAnalyzer | None = None,
@@ -228,6 +237,14 @@ class MemoryEngine(MemoryEngineInterface):
             memory_llm_api_key: API key for the LLM provider. Defaults to HINDSIGHT_API_LLM_API_KEY env var.
             memory_llm_model: Model name. Defaults to HINDSIGHT_API_LLM_MODEL env var.
             memory_llm_base_url: Base URL for the LLM API. Defaults based on provider.
+            retain_llm_provider: LLM provider for retain operations. Falls back to memory_llm_provider.
+            retain_llm_api_key: API key for retain LLM. Falls back to memory_llm_api_key.
+            retain_llm_model: Model for retain operations. Falls back to memory_llm_model.
+            retain_llm_base_url: Base URL for retain LLM. Falls back to memory_llm_base_url.
+            reflect_llm_provider: LLM provider for reflect operations. Falls back to memory_llm_provider.
+            reflect_llm_api_key: API key for reflect LLM. Falls back to memory_llm_api_key.
+            reflect_llm_model: Model for reflect operations. Falls back to memory_llm_model.
+            reflect_llm_base_url: Base URL for reflect LLM. Falls back to memory_llm_base_url.
             embeddings: Embeddings implementation. If not provided, created from env vars.
             cross_encoder: Cross-encoder model. If not provided, created from env vars.
             query_analyzer: Query analyzer implementation. If not provided, uses DateparserQueryAnalyzer.
@@ -260,8 +277,8 @@ class MemoryEngine(MemoryEngineInterface):
         db_url = db_url or config.database_url
         memory_llm_provider = memory_llm_provider or config.llm_provider
         memory_llm_api_key = memory_llm_api_key or config.llm_api_key
-        # Ollama doesn't require an API key
-        if not memory_llm_api_key and memory_llm_provider != "ollama":
+        # Ollama and mock don't require an API key
+        if not memory_llm_api_key and memory_llm_provider not in ("ollama", "mock"):
             raise ValueError("LLM API key is required. Set HINDSIGHT_API_LLM_API_KEY environment variable.")
         memory_llm_model = memory_llm_model or config.llm_model
         memory_llm_base_url = memory_llm_base_url or config.get_llm_base_url() or None
@@ -310,7 +327,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             self.query_analyzer = DateparserQueryAnalyzer()
 
-        # Initialize LLM configuration
+        # Initialize LLM configuration (default, used as fallback)
         self._llm_config = LLMConfig(
             provider=memory_llm_provider,
             api_key=memory_llm_api_key,
@@ -321,6 +338,49 @@ class MemoryEngine(MemoryEngineInterface):
         # Store client and model for convenience (deprecated: use _llm_config.call() instead)
         self._llm_client = self._llm_config._client
         self._llm_model = self._llm_config.model
+
+        # Initialize per-operation LLM configs (fall back to default if not specified)
+        # Retain LLM config - for fact extraction (benefits from strong structured output)
+        retain_provider = retain_llm_provider or config.retain_llm_provider or memory_llm_provider
+        retain_api_key = retain_llm_api_key or config.retain_llm_api_key or memory_llm_api_key
+        retain_model = retain_llm_model or config.retain_llm_model or memory_llm_model
+        retain_base_url = retain_llm_base_url or config.retain_llm_base_url or memory_llm_base_url
+        # Apply provider-specific base URL defaults for retain
+        if retain_base_url is None:
+            if retain_provider.lower() == "groq":
+                retain_base_url = "https://api.groq.com/openai/v1"
+            elif retain_provider.lower() == "ollama":
+                retain_base_url = "http://localhost:11434/v1"
+            else:
+                retain_base_url = ""
+
+        self._retain_llm_config = LLMConfig(
+            provider=retain_provider,
+            api_key=retain_api_key,
+            base_url=retain_base_url,
+            model=retain_model,
+        )
+
+        # Reflect LLM config - for think/observe operations (can use lighter models)
+        reflect_provider = reflect_llm_provider or config.reflect_llm_provider or memory_llm_provider
+        reflect_api_key = reflect_llm_api_key or config.reflect_llm_api_key or memory_llm_api_key
+        reflect_model = reflect_llm_model or config.reflect_llm_model or memory_llm_model
+        reflect_base_url = reflect_llm_base_url or config.reflect_llm_base_url or memory_llm_base_url
+        # Apply provider-specific base URL defaults for reflect
+        if reflect_base_url is None:
+            if reflect_provider.lower() == "groq":
+                reflect_base_url = "https://api.groq.com/openai/v1"
+            elif reflect_provider.lower() == "ollama":
+                reflect_base_url = "http://localhost:11434/v1"
+            else:
+                reflect_base_url = ""
+
+        self._reflect_llm_config = LLMConfig(
+            provider=reflect_provider,
+            api_key=reflect_api_key,
+            base_url=reflect_base_url,
+            model=reflect_model,
+        )
 
         # Initialize cross-encoder reranker (cached for performance)
         self._cross_encoder_reranker = CrossEncoderReranker(cross_encoder=cross_encoder)
@@ -609,9 +669,27 @@ class MemoryEngine(MemoryEngineInterface):
             await loop.run_in_executor(None, self.query_analyzer.load)
 
         async def verify_llm():
-            """Verify LLM connection is working."""
+            """Verify LLM connections are working for all unique configs."""
             if not self._skip_llm_verification:
+                # Verify default config
                 await self._llm_config.verify_connection()
+                # Verify retain config if different from default
+                retain_is_different = (
+                    self._retain_llm_config.provider != self._llm_config.provider
+                    or self._retain_llm_config.model != self._llm_config.model
+                )
+                if retain_is_different:
+                    await self._retain_llm_config.verify_connection()
+                # Verify reflect config if different from default and retain
+                reflect_is_different = (
+                    self._reflect_llm_config.provider != self._llm_config.provider
+                    or self._reflect_llm_config.model != self._llm_config.model
+                ) and (
+                    self._reflect_llm_config.provider != self._retain_llm_config.provider
+                    or self._reflect_llm_config.model != self._retain_llm_config.model
+                )
+                if reflect_is_different:
+                    await self._reflect_llm_config.verify_connection()
 
         # Build list of initialization tasks
         init_tasks = [
@@ -1175,7 +1253,7 @@ class MemoryEngine(MemoryEngineInterface):
             return await orchestrator.retain_batch(
                 pool=pool,
                 embeddings_model=self.embeddings,
-                llm_config=self._llm_config,
+                llm_config=self._retain_llm_config,
                 entity_resolver=self.entity_resolver,
                 task_backend=self._task_backend,
                 format_date_fn=self._format_readable_date,
@@ -2822,7 +2900,7 @@ Guidelines:
 - Small changes in confidence are normal; large jumps should be rare"""
 
         try:
-            result = await self._llm_config.call(
+            result = await self._reflect_llm_config.call(
                 messages=[
                     {"role": "system", "content": "You evaluate and update opinions based on new information."},
                     {"role": "user", "content": evaluation_prompt},
@@ -2932,7 +3010,7 @@ Guidelines:
                     return
 
                 # Use cached LLM config
-                if self._llm_config is None:
+                if self._reflect_llm_config is None:
                     logger.error("[REINFORCE] LLM config not available, skipping opinion reinforcement")
                     return
 
@@ -3077,7 +3155,9 @@ Guidelines:
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
-        return await bank_utils.merge_bank_background(pool, self._llm_config, bank_id, new_info, update_disposition)
+        return await bank_utils.merge_bank_background(
+            pool, self._reflect_llm_config, bank_id, new_info, update_disposition
+        )
 
     async def list_banks(
         self,
@@ -3137,7 +3217,7 @@ Guidelines:
                 - structured_output: Optional dict if response_schema was provided
         """
         # Use cached LLM config
-        if self._llm_config is None:
+        if self._reflect_llm_config is None:
             raise ValueError("Memory LLM API key not set. Set HINDSIGHT_API_LLM_API_KEY environment variable.")
 
         # Authenticate tenant and set schema in context (for fq_table())
@@ -3232,7 +3312,7 @@ Guidelines:
             response_format = JsonSchemaWrapper(response_schema)
 
         llm_start = time.time()
-        llm_result, usage = await self._llm_config.call(
+        llm_result, usage = await self._reflect_llm_config.call(
             messages=messages,
             scope="memory_reflect",
             max_completion_tokens=max_tokens,
@@ -3318,7 +3398,9 @@ Guidelines:
         """
         try:
             # Extract opinions from the answer
-            new_opinions = await think_utils.extract_opinions_from_text(self._llm_config, text=answer_text, query=query)
+            new_opinions = await think_utils.extract_opinions_from_text(
+                self._reflect_llm_config, text=answer_text, query=query
+            )
 
             # Store new opinions
             if new_opinions:
@@ -3569,7 +3651,9 @@ Guidelines:
             )
 
         # Step 3: Extract observations using LLM (no personality)
-        observations = await observation_utils.extract_observations_from_facts(self._llm_config, entity_name, facts)
+        observations = await observation_utils.extract_observations_from_facts(
+            self._reflect_llm_config, entity_name, facts
+        )
 
         if not observations:
             return []
