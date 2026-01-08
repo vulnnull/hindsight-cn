@@ -37,11 +37,7 @@ After searching for weeks, I finally found a cheaper apartment in Brooklyn.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text,
-            event_date=datetime(2024, 3, 15),
-            context=context,
-            llm_config=llm_config,
-            agent_name="TestUser"
+            text=text, event_date=datetime(2024, 3, 15), context=context, llm_config=llm_config, agent_name="TestUser"
         )
 
         assert len(facts) >= 3, f"Should extract at least 3 facts from the causal chain. Got {len(facts)}"
@@ -51,24 +47,28 @@ After searching for weeks, I finally found a cheaper apartment in Brooklyn.
         for i, fact in enumerate(facts):
             if fact.causal_relations:
                 for rel in fact.causal_relations:
-                    all_causal_relations.append({
-                        "from_fact_index": i,
-                        "to_fact_index": rel.target_fact_index,
-                        "relation_type": rel.relation_type,
-                        "strength": rel.strength,
-                        "from_fact_text": fact.fact[:50],
-                    })
+                    all_causal_relations.append(
+                        {
+                            "from_fact_index": i,
+                            "to_fact_index": rel.target_fact_index,
+                            "relation_type": rel.relation_type,
+                            "strength": rel.strength,
+                            "from_fact_text": fact.fact[:50],
+                        }
+                    )
 
         # Verify that ALL causal relation indices are valid
+        # New constraint: target_index must be < from_fact_index (can only reference PREVIOUS facts)
         num_facts = len(facts)
         invalid_relations = []
         for rel in all_causal_relations:
-            if rel["to_fact_index"] < 0 or rel["to_fact_index"] >= num_facts:
+            # Must be non-negative and less than the current fact's index
+            if rel["to_fact_index"] < 0 or rel["to_fact_index"] >= rel["from_fact_index"]:
                 invalid_relations.append(rel)
 
         assert len(invalid_relations) == 0, (
             f"Found {len(invalid_relations)} causal relations with invalid indices! "
-            f"Valid range is 0-{num_facts - 1}. "
+            f"Each target_fact_index must be < from_fact_index (can only reference previous facts). "
             f"Invalid relations: {invalid_relations}"
         )
 
@@ -78,8 +78,8 @@ After searching for weeks, I finally found a cheaper apartment in Brooklyn.
             f"Got {len(all_causal_relations)}: {all_causal_relations}"
         )
 
-        # Verify relation types are valid
-        valid_types = {"causes", "caused_by", "enables", "prevents"}
+        # Verify relation types are valid (passive only - facts reference PREVIOUS facts)
+        valid_types = {"caused_by", "enabled_by", "prevented_by"}
         for rel in all_causal_relations:
             assert rel["relation_type"] in valid_types, (
                 f"Invalid relation_type '{rel['relation_type']}'. Must be one of {valid_types}"
@@ -106,23 +106,18 @@ The renovation took three months and cost $15,000.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text,
-            event_date=datetime(2024, 6, 1),
-            context=context,
-            llm_config=llm_config,
-            agent_name="TestUser"
+            text=text, event_date=datetime(2024, 6, 1), context=context, llm_config=llm_config, agent_name="TestUser"
         )
 
         assert len(facts) >= 4, f"Should extract at least 4 facts. Got {len(facts)}"
 
-        # Validate all causal relation indices
-        num_facts = len(facts)
+        # Validate all causal relation indices (must reference PREVIOUS facts only)
         for i, fact in enumerate(facts):
             if fact.causal_relations:
                 for rel in fact.causal_relations:
-                    assert 0 <= rel.target_fact_index < num_facts, (
+                    assert 0 <= rel.target_fact_index < i, (
                         f"Fact {i} has causal relation to invalid index {rel.target_fact_index}. "
-                        f"Valid range is 0-{num_facts - 1}. "
+                        f"Must reference previous facts only (valid range: 0 to {i - 1}). "
                         f"Fact text: {fact.fact[:80]}..."
                     )
 
@@ -141,11 +136,7 @@ Machine learning fascinated me so much that I changed my career to data science.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text,
-            event_date=datetime(2024, 1, 1),
-            context=context,
-            llm_config=llm_config,
-            agent_name="TestUser"
+            text=text, event_date=datetime(2024, 1, 1), context=context, llm_config=llm_config, agent_name="TestUser"
         )
 
         # Check no fact references itself
@@ -153,8 +144,7 @@ Machine learning fascinated me so much that I changed my career to data science.
             if fact.causal_relations:
                 for rel in fact.causal_relations:
                     assert rel.target_fact_index != i, (
-                        f"Fact {i} has a self-referencing causal relation! "
-                        f"Fact text: {fact.fact}"
+                        f"Fact {i} has a self-referencing causal relation! Fact text: {fact.fact}"
                     )
 
     @pytest.mark.asyncio
@@ -173,22 +163,16 @@ The new role enabled me to lead a team of engineers.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text,
-            event_date=datetime(2024, 2, 15),
-            context=context,
-            llm_config=llm_config,
-            agent_name="TestUser"
+            text=text, event_date=datetime(2024, 2, 15), context=context, llm_config=llm_config, agent_name="TestUser"
         )
 
-        num_facts = len(facts)
-
-        # Validate all indices
+        # Validate all indices (must reference PREVIOUS facts only)
         for i, fact in enumerate(facts):
             if fact.causal_relations:
                 for rel in fact.causal_relations:
-                    assert 0 <= rel.target_fact_index < num_facts, (
+                    assert 0 <= rel.target_fact_index < i, (
                         f"Invalid target_fact_index {rel.target_fact_index} in fact {i}. "
-                        f"Valid range: 0-{num_facts - 1}"
+                        f"Must reference previous facts only (valid range: 0 to {i - 1})"
                     )
 
     @pytest.mark.asyncio
@@ -206,11 +190,7 @@ Reduced spending somewhat affected local businesses.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text,
-            event_date=datetime(2024, 4, 1),
-            context=context,
-            llm_config=llm_config,
-            agent_name="TestUser"
+            text=text, event_date=datetime(2024, 4, 1), context=context, llm_config=llm_config, agent_name="TestUser"
         )
 
         for i, fact in enumerate(facts):

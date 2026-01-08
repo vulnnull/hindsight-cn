@@ -193,6 +193,7 @@ def main():
             observation_min_facts=config.observation_min_facts,
             observation_top_entities=config.observation_top_entities,
             retain_max_completion_tokens=config.retain_max_completion_tokens,
+            retain_chunk_size=config.retain_chunk_size,
             skip_llm_verification=config.skip_llm_verification,
             lazy_reranker=config.lazy_reranker,
             run_migrations_on_startup=config.run_migrations_on_startup,

@@ -111,52 +111,44 @@ class Fact(BaseModel):
 
 
 class CausalRelation(BaseModel):
-    """Causal relationship between facts (legacy - embedded in each fact)."""
+    """Causal relationship from this fact to a previous fact (stored format)."""
 
-    target_fact_index: int = Field(
-        description="Index of the related fact in the facts array (0-based). "
-        "This creates a directed causal link to another fact in the extraction."
-    )
-    relation_type: Literal["causes", "caused_by", "enables", "prevents"] = Field(
-        description="Type of causal relationship: "
-        "'causes' = this fact directly causes the target fact, "
-        "'caused_by' = this fact was caused by the target fact, "
-        "'enables' = this fact enables/allows the target fact, "
-        "'prevents' = this fact prevents/blocks the target fact"
+    target_fact_index: int = Field(description="Index of the related fact in the facts array (0-based).")
+    relation_type: Literal["caused_by", "enabled_by", "prevented_by"] = Field(
+        description="How this fact relates to the target: "
+        "'caused_by' = this fact was caused by the target, "
+        "'enabled_by' = this fact was enabled by the target, "
+        "'prevented_by' = this fact was prevented by the target"
     )
     strength: float = Field(
-        description="Strength of causal relationship (0.0 to 1.0). "
-        "1.0 = direct/strong causation, 0.5 = moderate, 0.3 = weak/indirect",
+        description="Strength of relationship (0.0 to 1.0)",
         ge=0.0,
         le=1.0,
         default=1.0,
     )
 
 
-class TopLevelCausalRelation(BaseModel):
+class FactCausalRelation(BaseModel):
     """
-    Causal relationship between two facts (top-level schema).
+    Causal relationship from this fact to a PREVIOUS fact (embedded in each fact).
 
-    This is the preferred format - defined AFTER all facts are extracted,
-    allowing the LLM to see the full list of facts before specifying relationships.
+    Uses index-based references but ONLY allows referencing facts that appear
+    BEFORE this fact in the list. This prevents hallucination of invalid indices.
     """
 
-    from_fact_index: int = Field(
-        description="Index of the source fact (0-based). The fact that causes/enables/prevents."
+    target_index: int = Field(
+        description="Index of the PREVIOUS fact this relates to (0-based). "
+        "MUST be less than this fact's position in the list. "
+        "Example: if this is fact #5, target_index can only be 0, 1, 2, 3, or 4."
     )
-    to_fact_index: int = Field(
-        description="Index of the target fact (0-based). The fact that is caused/enabled/prevented."
-    )
-    relation_type: Literal["causes", "caused_by", "enables", "prevents"] = Field(
-        description="Type of causal relationship: "
-        "'causes' = source fact directly causes the target fact, "
-        "'caused_by' = source fact was caused by the target fact, "
-        "'enables' = source fact enables/allows the target fact, "
-        "'prevents' = source fact prevents/blocks the target fact"
+    relation_type: Literal["caused_by", "enabled_by", "prevented_by"] = Field(
+        description="How this fact relates to the target fact: "
+        "'caused_by' = this fact was caused by the target fact, "
+        "'enabled_by' = this fact was enabled by the target fact, "
+        "'prevented_by' = this fact was blocked/prevented by the target fact"
     )
     strength: float = Field(
-        description="Strength of causal relationship (0.0 to 1.0). "
-        "1.0 = direct/strong causation, 0.5 = moderate, 0.3 = weak/indirect",
+        description="Strength of relationship (0.0 to 1.0). 1.0 = strong, 0.5 = moderate",
         ge=0.0,
         le=1.0,
         default=1.0,
@@ -246,22 +238,18 @@ class ExtractedFact(BaseModel):
         default=None,
         description="Named entities, objects, AND abstract concepts from the fact. Include: people names, organizations, places, significant objects (e.g., 'coffee maker', 'car'), AND abstract concepts/themes (e.g., 'friendship', 'career growth', 'loss', 'celebration'). Extract anything that could help link related facts together.",
     )
-    causal_relations: list[CausalRelation] | None = Field(
-        default=None, description="Causal links to other facts. Can be null."
+
+    # Causal relations to PREVIOUS facts only (prevents hallucination of invalid indices)
+    causal_relations: list[FactCausalRelation] | None = Field(
+        default=None,
+        description="Causal links to PREVIOUS facts only. target_index MUST be less than this fact's position. "
+        "Example: fact #3 can only reference facts 0, 1, or 2. Max 2 relations per fact.",
     )
 
     @field_validator("entities", mode="before")
     @classmethod
     def ensure_entities_list(cls, v):
         """Ensure entities is always a list (convert None to empty list)."""
-        if v is None:
-            return []
-        return v
-
-    @field_validator("causal_relations", mode="before")
-    @classmethod
-    def ensure_causal_relations_list(cls, v):
-        """Ensure causal_relations is always a list (convert None to empty list)."""
         if v is None:
             return []
         return v
@@ -285,15 +273,9 @@ class ExtractedFact(BaseModel):
 
 
 class FactExtractionResponse(BaseModel):
-    """Response containing all extracted facts and their causal relationships."""
+    """Response containing all extracted facts (causal relations are embedded in each fact)."""
 
     facts: list[ExtractedFact] = Field(description="List of extracted factual statements")
-    causal_relationships: list[TopLevelCausalRelation] | None = Field(
-        default=None,
-        description="Causal relationships between facts. Define these AFTER listing all facts. "
-        "Each relationship specifies from_fact_index -> to_fact_index with a relation type. "
-        "Indices must be valid (0 to N-1 where N is the number of facts).",
-    )
 
 
 def chunk_text(text: str, max_chars: int) -> list[str]:
@@ -616,50 +598,49 @@ WHAT TO EXTRACT vs SKIP
 ❌ SKIP: Greetings, filler ("thanks", "cool"), purely structural statements
 
 ══════════════════════════════════════════════════════════════════════════
-CAUSAL RELATIONSHIPS (CRITICAL - DEFINE AFTER ALL FACTS)
+CAUSAL RELATIONSHIPS (EMBEDDED IN EACH FACT - REFERENCE PREVIOUS FACTS ONLY)
 ══════════════════════════════════════════════════════════════════════════
 
-⚠️ IMPORTANT: Causal relationships are defined at the TOP LEVEL, AFTER listing all facts!
+Each fact can have a `causal_relations` array that links to PREVIOUS facts only.
+⚠️ CRITICAL: target_index MUST be less than this fact's position in the list!
 
-The `causal_relationships` array goes at the root of your response (NOT inside each fact).
-This allows you to see all facts first before defining how they relate.
+If you're writing fact #5, you can only reference facts 0, 1, 2, 3, or 4.
+This ensures all references are valid.
 
-Format:
-```json
-{{
-  "facts": [...all your extracted facts...],
-  "causal_relationships": [
-    {{"from_fact_index": 0, "to_fact_index": 1, "relation_type": "causes", "strength": 0.9}},
-    {{"from_fact_index": 1, "to_fact_index": 2, "relation_type": "enables", "strength": 0.7}}
-  ]
-}}
-```
+Relationship types (all describe how THIS fact relates to the target):
+- "caused_by": This fact was caused by the target fact
+- "enabled_by": This fact was enabled/allowed by the target fact
+- "prevented_by": This fact was blocked/prevented by the target fact
 
-Relationship types:
-- "causes": Fact A directly causes Fact B (A → B)
-- "caused_by": Fact A was caused by Fact B (A ← B)
-- "enables": Fact A enables/allows Fact B to happen
-- "prevents": Fact A prevents/blocks Fact B from happening
-
-⚠️ INDEX VALIDATION: If you extract N facts (indices 0 to N-1), both from_fact_index and to_fact_index MUST be in range [0, N-1].
+Max 2 causal relations per fact. Only add if there's a clear causal link.
 
 Example (Event Date: March 15, 2024):
 Input: "I lost my job in January. Because of that, I couldn't pay rent. So I had to move to a cheaper apartment."
 
-Facts extracted:
-- Fact 0: "User lost their job in January due to layoffs"
-- Fact 1: "User couldn't pay rent because of job loss"
-- Fact 2: "User moved to a cheaper apartment"
-
-Causal relationships (at root level):
+Output facts:
 ```json
-"causal_relationships": [
-  {{"from_fact_index": 0, "to_fact_index": 1, "relation_type": "causes", "strength": 1.0}},
-  {{"from_fact_index": 1, "to_fact_index": 2, "relation_type": "causes", "strength": 0.9}}
-]
+{{
+  "facts": [
+    {{
+      "what": "User lost their job in January due to company layoffs",
+      ...other fields...
+      "causal_relations": null  // First fact - nothing to reference
+    }},
+    {{
+      "what": "User couldn't pay rent because of job loss",
+      ...other fields...
+      "causal_relations": [{{"target_index": 0, "relation_type": "caused_by", "strength": 1.0}}]
+    }},
+    {{
+      "what": "User moved to a cheaper apartment",
+      ...other fields...
+      "causal_relations": [{{"target_index": 1, "relation_type": "caused_by", "strength": 0.9}}]
+    }}
+  ]
+}}
 ```
 
-This creates a chain: Job loss (0) → Can't pay rent (1) → Moved to cheaper apartment (2)"""
+This creates: Job loss (0) ← Can't pay rent (1) ← Moved apartment (2)"""
 
     import logging
 
@@ -722,8 +703,6 @@ Text:
                     return [], usage
 
             raw_facts = extraction_response_json.get("facts", [])
-            # Get top-level causal relationships (new schema)
-            top_level_causal_relations = extraction_response_json.get("causal_relationships", [])
 
             if not raw_facts:
                 logger.debug(
@@ -734,47 +713,6 @@ Text:
                     f"context: {context if context else 'none'}, "
                     f"text: {chunk}"
                 )
-
-            # Build a map from fact index to causal relations (from top-level field)
-            # This converts from_fact_index -> [{target_fact_index, relation_type, strength}]
-            causal_relations_by_fact: dict[int, list[dict]] = {}
-            if top_level_causal_relations:
-                num_facts = len(raw_facts)
-                for rel in top_level_causal_relations:
-                    if not isinstance(rel, dict):
-                        continue
-                    from_idx = rel.get("from_fact_index")
-                    to_idx = rel.get("to_fact_index")
-                    relation_type = rel.get("relation_type")
-                    strength = rel.get("strength", 1.0)
-
-                    # Validate indices
-                    if from_idx is None or to_idx is None or relation_type is None:
-                        logger.warning(f"Skipping malformed top-level causal relation: {rel}")
-                        continue
-                    if from_idx < 0 or from_idx >= num_facts:
-                        logger.warning(
-                            f"Invalid from_fact_index {from_idx} in top-level causal relation "
-                            f"(valid range: 0-{num_facts - 1}). Skipping."
-                        )
-                        continue
-                    if to_idx < 0 or to_idx >= num_facts:
-                        logger.warning(
-                            f"Invalid to_fact_index {to_idx} in top-level causal relation "
-                            f"(valid range: 0-{num_facts - 1}). Skipping."
-                        )
-                        continue
-
-                    # Add to the map for the from_fact_index
-                    if from_idx not in causal_relations_by_fact:
-                        causal_relations_by_fact[from_idx] = []
-                    causal_relations_by_fact[from_idx].append(
-                        {
-                            "target_fact_index": to_idx,
-                            "relation_type": relation_type,
-                            "strength": strength,
-                        }
-                    )
 
             for i, llm_fact in enumerate(raw_facts):
                 # Skip non-dict entries but track them for retry
@@ -880,37 +818,38 @@ Text:
                     if validated_entities:
                         fact_data["entities"] = validated_entities
 
-                # Add causal relations from both sources:
-                # 1. Top-level causal_relationships (preferred, new schema)
-                # 2. Per-fact causal_relations (legacy, for backward compatibility)
+                # Add per-fact causal relations (new schema: target_index must be < current fact index)
                 validated_relations = []
+                causal_relations_raw = get_value("causal_relations")
+                if causal_relations_raw:
+                    for rel in causal_relations_raw:
+                        if not isinstance(rel, dict):
+                            continue
+                        # New schema uses target_index
+                        target_idx = rel.get("target_index")
+                        relation_type = rel.get("relation_type")
+                        strength = rel.get("strength", 1.0)
 
-                # First, add relations from top-level (already validated above)
-                if i in causal_relations_by_fact:
-                    for rel in causal_relations_by_fact[i]:
+                        if target_idx is None or relation_type is None:
+                            continue
+
+                        # Validate: target_index must be < current fact index
+                        if target_idx < 0 or target_idx >= i:
+                            logger.debug(
+                                f"Invalid target_index {target_idx} for fact {i} (must be 0 to {i - 1}). Skipping."
+                            )
+                            continue
+
                         try:
-                            validated_relations.append(CausalRelation.model_validate(rel))
-                        except Exception as e:
-                            logger.warning(f"Invalid top-level causal relation for fact {i}: {rel}: {e}")
-
-                # Then, add any legacy per-fact relations (with index validation)
-                legacy_causal_relations = get_value("causal_relations")
-                if legacy_causal_relations:
-                    num_facts = len(raw_facts)
-                    for rel in legacy_causal_relations:
-                        if isinstance(rel, dict) and "target_fact_index" in rel and "relation_type" in rel:
-                            target_idx = rel.get("target_fact_index")
-                            # Validate target index for legacy format too
-                            if target_idx is not None and 0 <= target_idx < num_facts:
-                                try:
-                                    validated_relations.append(CausalRelation.model_validate(rel))
-                                except Exception as e:
-                                    logger.warning(f"Invalid causal relation {rel}: {e}")
-                            else:
-                                logger.warning(
-                                    f"Invalid target_fact_index {target_idx} in per-fact causal relation "
-                                    f"from fact {i} (valid range: 0-{num_facts - 1}). Skipping."
+                            validated_relations.append(
+                                CausalRelation(
+                                    target_fact_index=target_idx,
+                                    relation_type=relation_type,
+                                    strength=strength,
                                 )
+                            )
+                        except Exception as e:
+                            logger.debug(f"Invalid causal relation {rel}: {e}")
 
                 if validated_relations:
                     fact_data["causal_relations"] = validated_relations
@@ -1099,7 +1038,8 @@ async def extract_facts_from_text(
         - chunks: List of tuples (chunk_text, fact_count) for each chunk
         - usage: Aggregated token usage across all LLM calls
     """
-    chunks = chunk_text(text, max_chars=3000)
+    config = get_config()
+    chunks = chunk_text(text, max_chars=config.retain_chunk_size)
     tasks = [
         _extract_facts_with_auto_split(
             chunk=chunk,
