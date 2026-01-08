@@ -14,7 +14,6 @@ dependencies = [
     "openai>=1.0.0",
     "pydantic>=2.0.0",
     "rich>=13.0.0",
-    "sentence-transformers>=3.0.0,<3.3.0",
     "langchain-text-splitters>=0.3.0",
     "fastapi[standard]>=0.120.3",
     "uvicorn>=0.38.0",
@@ -24,8 +23,6 @@ dependencies = [
     "pgvector>=0.4.1",
     "greenlet>=3.2.4",
     "psycopg2-binary>=2.9.11",
-    "transformers>=4.30.0,<4.46.0",
-    "torch>=2.0.0",
     "tiktoken>=0.12.0",
     "httpx>=0.27.0",
     "fastmcp>=2.3.0",
@@ -40,6 +37,10 @@ dependencies = [
     "anthropic>=0.40.0",
     "typer>=0.9.0",
     "cohere>=5.0.0",
+    # Local ML models for embeddings/reranking - can be excluded in Docker with INCLUDE_LOCAL_MODELS=false
+    "sentence-transformers>=3.0.0,<3.3.0",
+    "transformers>=4.30.0,<4.46.0",
+    "torch>=2.0.0",
 ]
 
 [project.optional-dependencies]
