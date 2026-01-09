@@ -198,6 +198,7 @@ def main():
             retain_chunk_size=config.retain_chunk_size,
             retain_extract_causal_links=config.retain_extract_causal_links,
             retain_extraction_mode=config.retain_extraction_mode,
+            retain_observations_async=config.retain_observations_async,
             skip_llm_verification=config.skip_llm_verification,
             lazy_reranker=config.lazy_reranker,
             run_migrations_on_startup=config.run_migrations_on_startup,
@@ -205,8 +206,9 @@ def main():
             db_pool_max_size=config.db_pool_max_size,
             db_command_timeout=config.db_command_timeout,
             db_acquire_timeout=config.db_acquire_timeout,
-            task_batch_size=config.task_batch_size,
-            task_batch_interval=config.task_batch_interval,
+            task_backend=config.task_backend,
+            task_backend_memory_batch_size=config.task_backend_memory_batch_size,
+            task_backend_memory_batch_interval=config.task_backend_memory_batch_interval,
         )
     config.configure_logging()
     if not args.daemon:

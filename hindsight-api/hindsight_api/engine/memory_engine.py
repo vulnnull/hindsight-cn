@@ -150,7 +150,7 @@ from .retain import bank_utils, embedding_utils
 from .retain.types import RetainContentDict
 from .search import observation_utils, think_utils
 from .search.reranking import CrossEncoderReranker
-from .task_backend import AsyncIOQueueBackend, TaskBackend
+from .task_backend import AsyncIOQueueBackend, NoopTaskBackend, TaskBackend
 
 
 class Budget(str, Enum):
@@ -257,8 +257,8 @@ class MemoryEngine(MemoryEngineInterface):
             db_command_timeout: PostgreSQL command timeout in seconds. Defaults to HINDSIGHT_API_DB_COMMAND_TIMEOUT.
             db_acquire_timeout: Connection acquisition timeout in seconds. Defaults to HINDSIGHT_API_DB_ACQUIRE_TIMEOUT.
             task_backend: Custom task backend. If not provided, uses AsyncIOQueueBackend.
-            task_batch_size: Background task batch size. Defaults to HINDSIGHT_API_TASK_BATCH_SIZE.
-            task_batch_interval: Background task batch interval in seconds. Defaults to HINDSIGHT_API_TASK_BATCH_INTERVAL.
+            task_batch_size: Background task batch size. Defaults to HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_SIZE.
+            task_batch_interval: Background task batch interval in seconds. Defaults to HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_INTERVAL.
             run_migrations: Whether to run database migrations during initialize(). Default: True
             operation_validator: Optional extension to validate operations before execution.
                                 If provided, retain/recall/reflect operations will be validated.
@@ -396,11 +396,17 @@ class MemoryEngine(MemoryEngineInterface):
         self._cross_encoder_reranker = CrossEncoderReranker(cross_encoder=cross_encoder)
 
         # Initialize task backend
-        _task_batch_size = task_batch_size if task_batch_size is not None else config.task_batch_size
-        _task_batch_interval = task_batch_interval if task_batch_interval is not None else config.task_batch_interval
-        self._task_backend = task_backend or AsyncIOQueueBackend(
-            batch_size=_task_batch_size, batch_interval=_task_batch_interval
-        )
+        if task_backend:
+            self._task_backend = task_backend
+        elif config.task_backend == "noop":
+            self._task_backend = NoopTaskBackend()
+        else:
+            # Default to memory (AsyncIOQueueBackend)
+            _task_batch_size = task_batch_size if task_batch_size is not None else config.task_backend_memory_batch_size
+            _task_batch_interval = (
+                task_batch_interval if task_batch_interval is not None else config.task_backend_memory_batch_interval
+            )
+            self._task_backend = AsyncIOQueueBackend(batch_size=_task_batch_size, batch_interval=_task_batch_interval)
 
         # Backpressure mechanism: limit concurrent searches to prevent overwhelming the database
         # Limit concurrent searches to prevent connection pool exhaustion
@@ -1605,19 +1611,38 @@ class MemoryEngine(MemoryEngineInterface):
             step_start = time.time()
             query_embedding_str = str(query_embedding)
 
-            from .search.retrieval import retrieve_parallel
+            from .search.retrieval import get_default_graph_retriever, retrieve_parallel
+            from .search.temporal_extraction import extract_temporal_constraint
 
             # Track each retrieval start time
             retrieval_start = time.time()
 
+            # Pre-extract temporal constraint once (shared across all fact types)
+            tc_start = time.time()
+            temporal_constraint = extract_temporal_constraint(
+                query, reference_date=question_date, analyzer=self.query_analyzer
+            )
+            tc_duration = time.time() - tc_start
+
             # Run retrieval for each fact type in parallel
+            # MPFP does lazy edge loading internally, no need to pre-load adjacency
             retrieval_tasks = [
                 retrieve_parallel(
-                    pool, query, query_embedding_str, bank_id, ft, thinking_budget, question_date, self.query_analyzer
+                    pool,
+                    query,
+                    query_embedding_str,
+                    bank_id,
+                    ft,
+                    thinking_budget,
+                    question_date,
+                    self.query_analyzer,
+                    temporal_constraint=temporal_constraint,
                 )
                 for ft in fact_type
             ]
+            parallel_start = time.time()
             all_retrievals = await asyncio.gather(*retrieval_tasks)
+            parallel_duration = time.time() - parallel_start
 
             # Combine all results from all fact types and aggregate timings
             semantic_results = []
@@ -1625,6 +1650,7 @@ class MemoryEngine(MemoryEngineInterface):
             graph_results = []
             temporal_results = []
             aggregated_timings = {"semantic": 0.0, "bm25": 0.0, "graph": 0.0, "temporal": 0.0}
+            all_mpfp_timings = []
 
             detected_temporal_constraint = None
             for idx, retrieval_result in enumerate(all_retrievals):
@@ -1645,6 +1671,8 @@ class MemoryEngine(MemoryEngineInterface):
                 # Capture temporal constraint (same across all fact types)
                 if retrieval_result.temporal_constraint:
                     detected_temporal_constraint = retrieval_result.temporal_constraint
+                # Collect MPFP timings
+                all_mpfp_timings.extend(retrieval_result.mpfp_timings)
 
             # If no temporal results from any fact type, set to None
             if not temporal_results:
@@ -1663,8 +1691,7 @@ class MemoryEngine(MemoryEngineInterface):
             retrieval_duration = time.time() - retrieval_start
 
             step_duration = time.time() - step_start
-            total_retrievals = len(fact_type) * (4 if temporal_results else 3)
-            # Format per-method timings
+            # Format per-method timings (these are the actual parallel retrieval times)
             timing_parts = [
                 f"semantic={len(semantic_results)}({aggregated_timings['semantic']:.3f}s)",
                 f"bm25={len(bm25_results)}({aggregated_timings['bm25']:.3f}s)",
@@ -1676,8 +1703,10 @@ class MemoryEngine(MemoryEngineInterface):
                 temporal_count = len(temporal_results) if temporal_results else 0
                 timing_parts.append(f"temporal={temporal_count}({aggregated_timings['temporal']:.3f}s)")
                 temporal_info = f" | temporal_range={start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}"
+            # Only tc is sequential setup now (adjacency loads in parallel with retrieval)
+            setup_info = f", tc={tc_duration:.3f}s" if tc_duration > 0.01 else ""
             log_buffer.append(
-                f"  [2] {total_retrievals}-way retrieval ({len(fact_type)} fact_types): {', '.join(timing_parts)} in {step_duration:.3f}s{temporal_info}"
+                f"  [2] Parallel retrieval ({len(fact_type)} fact_types): {', '.join(timing_parts)} in {parallel_duration:.3f}s{setup_info}{temporal_info}"
             )
 
             # Record retrieval results for tracer - per fact type
@@ -1831,9 +1860,6 @@ class MemoryEngine(MemoryEngineInterface):
 
                 # Re-sort by combined score
                 scored_results.sort(key=lambda x: x.weight, reverse=True)
-                log_buffer.append(
-                    "  [4.6] Combined scoring: cross_encoder(0.6) + rrf(0.2) + temporal(0.1) + recency(0.1)"
-                )
 
             # Add reranked results to tracer AFTER combined scoring (so normalized values are included)
             if tracer:
@@ -1852,7 +1878,6 @@ class MemoryEngine(MemoryEngineInterface):
             # Step 5: Truncate to thinking_budget * 2 for token filtering
             rerank_limit = thinking_budget * 2
             top_scored = scored_results[:rerank_limit]
-            log_buffer.append(f"  [5] Truncated to top {len(top_scored)} results")
 
             # Step 6: Token budget filtering
             step_start = time.time()
@@ -1867,7 +1892,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             step_duration = time.time() - step_start
             log_buffer.append(
-                f"  [6] Token filtering: {len(top_scored)} results, {total_tokens}/{max_tokens} tokens in {step_duration:.3f}s"
+                f"  [5] Token filtering: {len(top_scored)} results, {total_tokens}/{max_tokens} tokens in {step_duration:.3f}s"
             )
 
             if tracer:
@@ -1901,7 +1926,6 @@ class MemoryEngine(MemoryEngineInterface):
             visited_ids = list(set([sr.id for sr in scored_results[:50]]))  # Top 50
             if visited_ids:
                 await self._task_backend.submit_task({"type": "access_count_update", "node_ids": visited_ids})
-                log_buffer.append(f"  [7] Queued access count updates for {len(visited_ids)} nodes")
 
             # Log fact_type distribution in results
             fact_type_counts = {}
@@ -1934,6 +1958,7 @@ class MemoryEngine(MemoryEngineInterface):
                 top_results_dicts.append(result_dict)
 
             # Get entities for each fact if include_entities is requested
+            step_start = time.time()
             fact_entity_map = {}  # unit_id -> list of (entity_id, entity_name)
             if include_entities and top_scored:
                 unit_ids = [uuid.UUID(sr.id) for sr in top_scored]
@@ -1955,6 +1980,7 @@ class MemoryEngine(MemoryEngineInterface):
                             fact_entity_map[unit_id].append(
                                 {"entity_id": str(row["entity_id"]), "canonical_name": row["canonical_name"]}
                             )
+            entity_map_duration = time.time() - step_start
 
             # Convert results to MemoryFact objects
             memory_facts = []
@@ -1981,6 +2007,7 @@ class MemoryEngine(MemoryEngineInterface):
                 )
 
             # Fetch entity observations if requested
+            step_start = time.time()
             entities_dict = None
             total_entity_tokens = 0
             total_chunk_tokens = 0
@@ -2001,7 +2028,13 @@ class MemoryEngine(MemoryEngineInterface):
                                 entities_ordered.append((entity_id, entity_name))
                                 seen_entity_ids.add(entity_id)
 
-                # Fetch observations for each entity (respect token budget, in order)
+                # Fetch all observations in a single batched query
+                entity_ids = [eid for eid, _ in entities_ordered]
+                all_observations = await self.get_entity_observations_batch(
+                    bank_id, entity_ids, limit_per_entity=5, request_context=request_context
+                )
+
+                # Build entities_dict respecting token budget, in relevance order
                 entities_dict = {}
                 encoding = _get_tiktoken_encoding()
 
@@ -2009,9 +2042,7 @@ class MemoryEngine(MemoryEngineInterface):
                     if total_entity_tokens >= max_entity_tokens:
                         break
 
-                    observations = await self.get_entity_observations(
-                        bank_id, entity_id, limit=5, request_context=request_context
-                    )
+                    observations = all_observations.get(entity_id, [])
 
                     # Calculate tokens for this entity's observations
                     entity_tokens = 0
@@ -2029,8 +2060,10 @@ class MemoryEngine(MemoryEngineInterface):
                             entity_id=entity_id, canonical_name=entity_name, observations=included_observations
                         )
                         total_entity_tokens += entity_tokens
+            entity_obs_duration = time.time() - step_start
 
             # Fetch chunks if requested
+            step_start = time.time()
             chunks_dict = None
             if include_chunks and top_scored:
                 from .response_models import ChunkInfo
@@ -2090,6 +2123,12 @@ class MemoryEngine(MemoryEngineInterface):
                                 chunk_text=chunk_text, chunk_index=row["chunk_index"], truncated=False
                             )
                             total_chunk_tokens += chunk_tokens
+            chunks_duration = time.time() - step_start
+
+            # Log entity/chunk fetch timing (only if any enrichment was requested)
+            log_buffer.append(
+                f"  [6] Response enrichment: entity_map={entity_map_duration:.3f}s, entity_obs={entity_obs_duration:.3f}s, chunks={chunks_duration:.3f}s"
+            )
 
             # Finalize trace if enabled
             trace_dict = None
@@ -3484,6 +3523,64 @@ Guidelines:
                 mentioned_at = row["mentioned_at"].isoformat() if row["mentioned_at"] else None
                 observations.append(EntityObservation(text=row["text"], mentioned_at=mentioned_at))
             return observations
+
+    async def get_entity_observations_batch(
+        self,
+        bank_id: str,
+        entity_ids: list[str],
+        *,
+        limit_per_entity: int = 5,
+        request_context: "RequestContext",
+    ) -> dict[str, list[Any]]:
+        """
+        Get observations for multiple entities in a single query.
+
+        Args:
+            bank_id: bank IDentifier
+            entity_ids: List of entity UUIDs to get observations for
+            limit_per_entity: Maximum observations per entity
+            request_context: Request context for authentication.
+
+        Returns:
+            Dict mapping entity_id -> list of EntityObservation objects
+        """
+        if not entity_ids:
+            return {}
+
+        await self._authenticate_tenant(request_context)
+        pool = await self._get_pool()
+        async with acquire_with_retry(pool) as conn:
+            # Use window function to limit observations per entity
+            rows = await conn.fetch(
+                f"""
+                WITH ranked AS (
+                    SELECT
+                        ue.entity_id,
+                        mu.text,
+                        mu.mentioned_at,
+                        ROW_NUMBER() OVER (PARTITION BY ue.entity_id ORDER BY mu.mentioned_at DESC) as rn
+                    FROM {fq_table("memory_units")} mu
+                    JOIN {fq_table("unit_entities")} ue ON mu.id = ue.unit_id
+                    WHERE mu.bank_id = $1
+                      AND mu.fact_type = 'observation'
+                      AND ue.entity_id = ANY($2::uuid[])
+                )
+                SELECT entity_id, text, mentioned_at
+                FROM ranked
+                WHERE rn <= $3
+                ORDER BY entity_id, rn
+                """,
+                bank_id,
+                [uuid.UUID(eid) for eid in entity_ids],
+                limit_per_entity,
+            )
+
+            result: dict[str, list[Any]] = {eid: [] for eid in entity_ids}
+            for row in rows:
+                entity_id = str(row["entity_id"])
+                mentioned_at = row["mentioned_at"].isoformat() if row["mentioned_at"] else None
+                result[entity_id].append(EntityObservation(text=row["text"], mentioned_at=mentioned_at))
+            return result
 
     async def list_entities(
         self,

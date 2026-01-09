@@ -11,6 +11,21 @@ from typing import Any
 
 
 @dataclass
+class MPFPTimings:
+    """Timing breakdown for a single MPFP retrieval call."""
+
+    fact_type: str
+    adjacency_query: float = 0.0
+    adjacency_process: float = 0.0
+    edge_count: int = 0
+    traverse: float = 0.0
+    pattern_count: int = 0
+    fusion: float = 0.0
+    fetch: float = 0.0
+    result_count: int = 0
+
+
+@dataclass
 class RetrievalResult:
     """
     Result from a single retrieval method (semantic, BM25, graph, or temporal).

@@ -107,8 +107,8 @@ mkdir -p "$GRAFANA_PROV_DIR/dashboards"
 mkdir -p "$GRAFANA_DIR/dashboards"
 mkdir -p "$GRAFANA_DIR/data"
 
-# Copy dashboards
-cp "$SCRIPT_DIR/grafana/dashboards/"*.json "$GRAFANA_DIR/dashboards/"
+# Copy dashboards from project root monitoring directory
+cp "$PROJECT_ROOT/monitoring/grafana/dashboards/"*.json "$GRAFANA_DIR/dashboards/"
 
 # Create Grafana datasource config
 cat > "$GRAFANA_PROV_DIR/datasources/prometheus.yaml" <<EOF
@@ -181,6 +181,7 @@ echo ""
 echo "  Dashboards:"
 echo "    - Hindsight Operations"
 echo "    - Hindsight LLM Metrics"
+echo "    - Hindsight API Service"
 echo ""
 echo "=================================="
 echo ""

@@ -6,11 +6,18 @@ This module provides metrics for:
 - Token usage (input/output) per operation
 - Per-bank granularity via labels
 - LLM call latency and token usage with scope dimension
+- HTTP request metrics (latency, count by endpoint/method/status)
+- Process metrics (CPU, memory, file descriptors, threads)
+- Database connection pool metrics
 """
 
 import logging
+import os
+import resource
+import threading
 import time
 from contextlib import contextmanager
+from typing import TYPE_CHECKING, Callable
 
 from opentelemetry import metrics
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
@@ -18,12 +25,18 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
 from opentelemetry.sdk.resources import Resource
 
+if TYPE_CHECKING:
+    import asyncpg
+
 # Custom bucket boundaries for operation duration (in seconds)
 # Fine granularity in 0-30s range where most operations complete
 DURATION_BUCKETS = (0.1, 0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 60.0, 120.0)
 
 # LLM duration buckets (finer granularity for faster LLM calls)
 LLM_DURATION_BUCKETS = (0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0)
+
+# HTTP request duration buckets (millisecond-level for fast endpoints)
+HTTP_DURATION_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0)
 
 
 def get_token_bucket(token_count: int) -> str:
@@ -107,9 +120,17 @@ def initialize_metrics(service_name: str = "hindsight-api", service_version: str
         aggregation=ExplicitBucketHistogramAggregation(boundaries=LLM_DURATION_BUCKETS),
     )
 
+    # Create view with custom bucket boundaries for HTTP request duration histogram
+    http_duration_view = View(
+        instrument_name="hindsight.http.duration",
+        aggregation=ExplicitBucketHistogramAggregation(boundaries=HTTP_DURATION_BUCKETS),
+    )
+
     # Create meter provider with Prometheus exporter and custom views
     provider = MeterProvider(
-        resource=resource, metric_readers=[prometheus_reader], views=[duration_view, llm_duration_view]
+        resource=resource,
+        metric_readers=[prometheus_reader],
+        views=[duration_view, llm_duration_view, http_duration_view],
     )
 
     # Set the global meter provider
@@ -167,6 +188,15 @@ class MetricsCollectorBase:
         """
         raise NotImplementedError
 
+    @contextmanager
+    def record_http_request(self, method: str, endpoint: str, status_code_getter: Callable[[], int]):
+        """Context manager to record HTTP request metrics."""
+        raise NotImplementedError
+
+    def set_db_pool(self, pool: "asyncpg.Pool"):
+        """Set the database pool for metrics collection."""
+        pass
+
 
 class NoOpMetricsCollector(MetricsCollectorBase):
     """No-op metrics collector that does nothing. Used when metrics are disabled."""
@@ -195,6 +225,11 @@ class NoOpMetricsCollector(MetricsCollectorBase):
     ):
         """No-op LLM call recording."""
         pass
+
+    @contextmanager
+    def record_http_request(self, method: str, endpoint: str, status_code_getter: Callable[[], int]):
+        """No-op HTTP request recording."""
+        yield
 
 
 class MetricsCollector(MetricsCollectorBase):
@@ -237,6 +272,27 @@ class MetricsCollector(MetricsCollectorBase):
         self.llm_calls_total = self.meter.create_counter(
             name="hindsight.llm.calls.total", description="Total number of LLM API calls", unit="calls"
         )
+
+        # HTTP request metrics
+        self.http_request_duration = self.meter.create_histogram(
+            name="hindsight.http.duration", description="Duration of HTTP requests in seconds", unit="s"
+        )
+
+        self.http_requests_total = self.meter.create_counter(
+            name="hindsight.http.requests.total", description="Total number of HTTP requests", unit="requests"
+        )
+
+        self.http_requests_in_progress = self.meter.create_up_down_counter(
+            name="hindsight.http.requests.in_progress",
+            description="Number of HTTP requests in progress",
+            unit="requests",
+        )
+
+        # Process metrics (observable gauges - collected on scrape)
+        self._setup_process_metrics()
+
+        # DB pool metrics holder (set via set_db_pool)
+        self._db_pool: "asyncpg.Pool | None" = None
 
     @contextmanager
     def record_operation(
@@ -339,6 +395,196 @@ class MetricsCollector(MetricsCollectorBase):
                 "token_bucket": get_token_bucket(output_tokens),
             }
             self.llm_tokens_output.add(output_tokens, output_attributes)
+
+    @contextmanager
+    def record_http_request(self, method: str, endpoint: str, status_code_getter: Callable[[], int]):
+        """
+        Context manager to record HTTP request metrics.
+
+        Usage:
+            status_code = [200]  # Use list for mutability
+            with metrics.record_http_request("GET", "/api/banks", lambda: status_code[0]):
+                # ... handle request
+                status_code[0] = response.status_code
+
+        Args:
+            method: HTTP method (GET, POST, etc.)
+            endpoint: Request endpoint path
+            status_code_getter: Callable that returns the status code after request completes
+        """
+        start_time = time.time()
+        base_attributes = {"method": method, "endpoint": endpoint}
+
+        # Track in-progress
+        self.http_requests_in_progress.add(1, base_attributes)
+
+        try:
+            yield
+        finally:
+            duration = time.time() - start_time
+            status_code = status_code_getter()
+            status_class = f"{status_code // 100}xx"
+
+            attributes = {
+                **base_attributes,
+                "status_code": str(status_code),
+                "status_class": status_class,
+            }
+
+            # Record duration and count
+            self.http_request_duration.record(duration, attributes)
+            self.http_requests_total.add(1, attributes)
+
+            # Decrement in-progress
+            self.http_requests_in_progress.add(-1, base_attributes)
+
+    def _setup_process_metrics(self):
+        """Set up observable gauges for process metrics."""
+
+        def get_cpu_times(_options):
+            """Get process CPU times."""
+            try:
+                rusage = resource.getrusage(resource.RUSAGE_SELF)
+                yield metrics.Observation(rusage.ru_utime, {"type": "user"})
+                yield metrics.Observation(rusage.ru_stime, {"type": "system"})
+            except Exception:
+                pass
+
+        def get_memory_usage(_options):
+            """Get process memory usage in bytes."""
+            try:
+                rusage = resource.getrusage(resource.RUSAGE_SELF)
+                # ru_maxrss is in kilobytes on Linux, bytes on macOS
+                max_rss = rusage.ru_maxrss
+                if os.uname().sysname == "Linux":
+                    max_rss *= 1024  # Convert KB to bytes
+                yield metrics.Observation(max_rss, {"type": "rss_max"})
+            except Exception:
+                pass
+
+        def get_open_file_descriptors(_options):
+            """Get number of open file descriptors."""
+            try:
+                # Try to count open FDs by checking /proc on Linux
+                if os.path.exists("/proc/self/fd"):
+                    count = len(os.listdir("/proc/self/fd"))
+                    yield metrics.Observation(count)
+                else:
+                    # Fallback: use resource limits
+                    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+                    yield metrics.Observation(soft, {"limit": "soft"})
+            except Exception:
+                pass
+
+        def get_thread_count(_options):
+            """Get number of active threads."""
+            try:
+                yield metrics.Observation(threading.active_count())
+            except Exception:
+                pass
+
+        # Create observable gauges
+        self.meter.create_observable_gauge(
+            name="hindsight.process.cpu.seconds",
+            callbacks=[get_cpu_times],
+            description="Process CPU time in seconds",
+            unit="s",
+        )
+
+        self.meter.create_observable_gauge(
+            name="hindsight.process.memory.bytes",
+            callbacks=[get_memory_usage],
+            description="Process memory usage in bytes",
+            unit="By",
+        )
+
+        self.meter.create_observable_gauge(
+            name="hindsight.process.open_fds",
+            callbacks=[get_open_file_descriptors],
+            description="Number of open file descriptors",
+            unit="{fds}",
+        )
+
+        self.meter.create_observable_gauge(
+            name="hindsight.process.threads",
+            callbacks=[get_thread_count],
+            description="Number of active threads",
+            unit="{threads}",
+        )
+
+    def set_db_pool(self, pool: "asyncpg.Pool"):
+        """
+        Set the database pool for metrics collection.
+
+        Args:
+            pool: asyncpg connection pool instance
+        """
+        self._db_pool = pool
+        self._setup_db_pool_metrics()
+
+    def _setup_db_pool_metrics(self):
+        """Set up observable gauges for database pool metrics."""
+
+        def get_pool_size(_options):
+            """Get current pool size."""
+            if self._db_pool is not None:
+                try:
+                    yield metrics.Observation(self._db_pool.get_size())
+                except Exception:
+                    pass
+
+        def get_pool_free_size(_options):
+            """Get number of free connections in pool."""
+            if self._db_pool is not None:
+                try:
+                    yield metrics.Observation(self._db_pool.get_idle_size())
+                except Exception:
+                    pass
+
+        def get_pool_min_size(_options):
+            """Get pool minimum size."""
+            if self._db_pool is not None:
+                try:
+                    yield metrics.Observation(self._db_pool.get_min_size())
+                except Exception:
+                    pass
+
+        def get_pool_max_size(_options):
+            """Get pool maximum size."""
+            if self._db_pool is not None:
+                try:
+                    yield metrics.Observation(self._db_pool.get_max_size())
+                except Exception:
+                    pass
+
+        # Create observable gauges for pool metrics
+        self.meter.create_observable_gauge(
+            name="hindsight.db.pool.size",
+            callbacks=[get_pool_size],
+            description="Current number of connections in the pool",
+            unit="{connections}",
+        )
+
+        self.meter.create_observable_gauge(
+            name="hindsight.db.pool.idle",
+            callbacks=[get_pool_free_size],
+            description="Number of idle connections in the pool",
+            unit="{connections}",
+        )
+
+        self.meter.create_observable_gauge(
+            name="hindsight.db.pool.min",
+            callbacks=[get_pool_min_size],
+            description="Minimum pool size",
+            unit="{connections}",
+        )
+
+        self.meter.create_observable_gauge(
+            name="hindsight.db.pool.max",
+            callbacks=[get_pool_max_size],
+            description="Maximum pool size",
+            unit="{connections}",
+        )
 
 
 # Global metrics collector instance (defaults to no-op)

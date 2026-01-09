@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 
 from ..db_utils import acquire_with_retry
 from ..memory_engine import fq_table
-from .types import RetrievalResult
+from .types import MPFPTimings, RetrievalResult
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,8 @@ class GraphRetriever(ABC):
         query_text: str | None = None,
         semantic_seeds: list[RetrievalResult] | None = None,
         temporal_seeds: list[RetrievalResult] | None = None,
-    ) -> list[RetrievalResult]:
+        adjacency=None,  # TypedAdjacency, optional pre-loaded graph
+    ) -> tuple[list[RetrievalResult], MPFPTimings | None]:
         """
         Retrieve relevant facts via graph traversal.
 
@@ -55,9 +56,10 @@ class GraphRetriever(ABC):
             query_text: Original query text (optional, for some strategies)
             semantic_seeds: Pre-computed semantic entry points (from semantic retrieval)
             temporal_seeds: Pre-computed temporal entry points (from temporal retrieval)
+            adjacency: Pre-loaded typed adjacency graph (optional, for MPFP)
 
         Returns:
-            List of RetrievalResult objects with activation scores set
+            Tuple of (List of RetrievalResult with activation scores, optional timing info)
         """
         pass
 
@@ -111,7 +113,8 @@ class BFSGraphRetriever(GraphRetriever):
         query_text: str | None = None,
         semantic_seeds: list[RetrievalResult] | None = None,
         temporal_seeds: list[RetrievalResult] | None = None,
-    ) -> list[RetrievalResult]:
+        adjacency=None,  # Not used by BFS
+    ) -> tuple[list[RetrievalResult], MPFPTimings | None]:
         """
         Retrieve facts using BFS spreading activation.
 
@@ -122,11 +125,12 @@ class BFSGraphRetriever(GraphRetriever):
         4. Return visited nodes up to budget
 
         Note: BFS finds its own entry points via embedding search.
-        The semantic_seeds and temporal_seeds parameters are accepted
+        The semantic_seeds, temporal_seeds, and adjacency parameters are accepted
         for interface compatibility but not used.
         """
         async with acquire_with_retry(pool) as conn:
-            return await self._retrieve_with_conn(conn, query_embedding_str, bank_id, fact_type, budget)
+            results = await self._retrieve_with_conn(conn, query_embedding_str, bank_id, fact_type, budget)
+            return results, None
 
     async def _retrieve_with_conn(
         self,

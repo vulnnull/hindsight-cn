@@ -957,6 +957,12 @@ def create_app(
             await memory.initialize()
             logging.info("Memory system initialized")
 
+            # Set up DB pool metrics after memory initialization
+            metrics_collector = get_metrics_collector()
+            if memory._pool is not None and hasattr(metrics_collector, "set_db_pool"):
+                metrics_collector.set_db_pool(memory._pool)
+                logging.info("DB pool metrics configured")
+
         # Call HTTP extension startup hook
         if http_extension:
             await http_extension.on_startup()
@@ -992,6 +998,30 @@ def create_app(
     # IMPORTANT: Set memory on app.state immediately, don't wait for lifespan
     # This is required for mounted sub-applications where lifespan may not fire
     app.state.memory = memory
+
+    # Add HTTP metrics middleware
+    @app.middleware("http")
+    async def http_metrics_middleware(request, call_next):
+        """Record HTTP request metrics."""
+        # Normalize endpoint path to reduce cardinality
+        # Replace UUIDs and numeric IDs with placeholders
+        import re
+
+        from starlette.requests import Request
+
+        path = request.url.path
+        # Replace UUIDs
+        path = re.sub(r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "/{id}", path)
+        # Replace numeric IDs
+        path = re.sub(r"/\d+(?=/|$)", "/{id}", path)
+
+        status_code = [500]  # Default to 500, will be updated
+        metrics_collector = get_metrics_collector()
+
+        with metrics_collector.record_http_request(request.method, path, lambda: status_code[0]):
+            response = await call_next(request)
+            status_code[0] = response.status_code
+            return response
 
     # Register all routes
     _register_routes(app)

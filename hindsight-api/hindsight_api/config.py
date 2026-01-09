@@ -48,6 +48,7 @@ ENV_RERANKER_COHERE_MODEL = "HINDSIGHT_API_RERANKER_COHERE_MODEL"
 
 ENV_RERANKER_PROVIDER = "HINDSIGHT_API_RERANKER_PROVIDER"
 ENV_RERANKER_LOCAL_MODEL = "HINDSIGHT_API_RERANKER_LOCAL_MODEL"
+ENV_RERANKER_LOCAL_MAX_CONCURRENT = "HINDSIGHT_API_RERANKER_LOCAL_MAX_CONCURRENT"
 ENV_RERANKER_TEI_URL = "HINDSIGHT_API_RERANKER_TEI_URL"
 ENV_RERANKER_TEI_BATCH_SIZE = "HINDSIGHT_API_RERANKER_TEI_BATCH_SIZE"
 ENV_RERANKER_TEI_MAX_CONCURRENT = "HINDSIGHT_API_RERANKER_TEI_MAX_CONCURRENT"
@@ -69,6 +70,7 @@ ENV_RETAIN_MAX_COMPLETION_TOKENS = "HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS"
 ENV_RETAIN_CHUNK_SIZE = "HINDSIGHT_API_RETAIN_CHUNK_SIZE"
 ENV_RETAIN_EXTRACT_CAUSAL_LINKS = "HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS"
 ENV_RETAIN_EXTRACTION_MODE = "HINDSIGHT_API_RETAIN_EXTRACTION_MODE"
+ENV_RETAIN_OBSERVATIONS_ASYNC = "HINDSIGHT_API_RETAIN_OBSERVATIONS_ASYNC"
 
 # Optimization flags
 ENV_SKIP_LLM_VERIFICATION = "HINDSIGHT_API_SKIP_LLM_VERIFICATION"
@@ -84,8 +86,9 @@ ENV_DB_COMMAND_TIMEOUT = "HINDSIGHT_API_DB_COMMAND_TIMEOUT"
 ENV_DB_ACQUIRE_TIMEOUT = "HINDSIGHT_API_DB_ACQUIRE_TIMEOUT"
 
 # Background task processing
-ENV_TASK_BATCH_SIZE = "HINDSIGHT_API_TASK_BATCH_SIZE"
-ENV_TASK_BATCH_INTERVAL = "HINDSIGHT_API_TASK_BATCH_INTERVAL"
+ENV_TASK_BACKEND = "HINDSIGHT_API_TASK_BACKEND"
+ENV_TASK_BACKEND_MEMORY_BATCH_SIZE = "HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_SIZE"
+ENV_TASK_BACKEND_MEMORY_BATCH_INTERVAL = "HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_INTERVAL"
 
 # Default values
 DEFAULT_DATABASE_URL = "pg0"
@@ -101,6 +104,7 @@ DEFAULT_EMBEDDING_DIMENSION = 384
 
 DEFAULT_RERANKER_PROVIDER = "local"
 DEFAULT_RERANKER_LOCAL_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+DEFAULT_RERANKER_LOCAL_MAX_CONCURRENT = 4  # Limit concurrent CPU-bound reranking to prevent thrashing
 DEFAULT_RERANKER_TEI_BATCH_SIZE = 128
 DEFAULT_RERANKER_TEI_MAX_CONCURRENT = 8
 
@@ -111,7 +115,7 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8888
 DEFAULT_LOG_LEVEL = "info"
 DEFAULT_MCP_ENABLED = True
-DEFAULT_GRAPH_RETRIEVER = "bfs"  # Options: "bfs", "mpfp"
+DEFAULT_GRAPH_RETRIEVER = "mpfp"  # Options: "mpfp", "bfs"
 DEFAULT_MCP_LOCAL_BANK_ID = "mcp"
 
 # Observation thresholds
@@ -124,6 +128,7 @@ DEFAULT_RETAIN_CHUNK_SIZE = 3000  # Max chars per chunk for fact extraction
 DEFAULT_RETAIN_EXTRACT_CAUSAL_LINKS = True  # Extract causal links between facts
 DEFAULT_RETAIN_EXTRACTION_MODE = "concise"  # Extraction mode: "concise" or "verbose"
 RETAIN_EXTRACTION_MODES = ("concise", "verbose")  # Allowed extraction modes
+DEFAULT_RETAIN_OBSERVATIONS_ASYNC = False  # Run observation generation async (after retain completes)
 
 # Database migrations
 DEFAULT_RUN_MIGRATIONS_ON_STARTUP = True
@@ -135,8 +140,9 @@ DEFAULT_DB_COMMAND_TIMEOUT = 60  # seconds
 DEFAULT_DB_ACQUIRE_TIMEOUT = 30  # seconds
 
 # Background task processing
-DEFAULT_TASK_BATCH_SIZE = 10
-DEFAULT_TASK_BATCH_INTERVAL = 1.0  # seconds
+DEFAULT_TASK_BACKEND = "memory"  # Options: "memory", "noop"
+DEFAULT_TASK_BACKEND_MEMORY_BATCH_SIZE = 10
+DEFAULT_TASK_BACKEND_MEMORY_BATCH_INTERVAL = 1.0  # seconds
 
 # Default MCP tool descriptions (can be customized via env vars)
 DEFAULT_MCP_RETAIN_DESCRIPTION = """Store important information to long-term memory.
@@ -230,6 +236,7 @@ class HindsightConfig:
     retain_chunk_size: int
     retain_extract_causal_links: bool
     retain_extraction_mode: str
+    retain_observations_async: bool
 
     # Optimization flags
     skip_llm_verification: bool
@@ -245,8 +252,9 @@ class HindsightConfig:
     db_acquire_timeout: int
 
     # Background task processing
-    task_batch_size: int
-    task_batch_interval: float
+    task_backend: str
+    task_backend_memory_batch_size: int
+    task_backend_memory_batch_interval: float
 
     @classmethod
     def from_env(cls) -> "HindsightConfig":
@@ -309,6 +317,10 @@ class HindsightConfig:
             retain_extraction_mode=_validate_extraction_mode(
                 os.getenv(ENV_RETAIN_EXTRACTION_MODE, DEFAULT_RETAIN_EXTRACTION_MODE)
             ),
+            retain_observations_async=os.getenv(
+                ENV_RETAIN_OBSERVATIONS_ASYNC, str(DEFAULT_RETAIN_OBSERVATIONS_ASYNC)
+            ).lower()
+            == "true",
             # Database migrations
             run_migrations_on_startup=os.getenv(ENV_RUN_MIGRATIONS_ON_STARTUP, "true").lower() == "true",
             # Database connection pool
@@ -317,8 +329,13 @@ class HindsightConfig:
             db_command_timeout=int(os.getenv(ENV_DB_COMMAND_TIMEOUT, str(DEFAULT_DB_COMMAND_TIMEOUT))),
             db_acquire_timeout=int(os.getenv(ENV_DB_ACQUIRE_TIMEOUT, str(DEFAULT_DB_ACQUIRE_TIMEOUT))),
             # Background task processing
-            task_batch_size=int(os.getenv(ENV_TASK_BATCH_SIZE, str(DEFAULT_TASK_BATCH_SIZE))),
-            task_batch_interval=float(os.getenv(ENV_TASK_BATCH_INTERVAL, str(DEFAULT_TASK_BATCH_INTERVAL))),
+            task_backend=os.getenv(ENV_TASK_BACKEND, DEFAULT_TASK_BACKEND),
+            task_backend_memory_batch_size=int(
+                os.getenv(ENV_TASK_BACKEND_MEMORY_BATCH_SIZE, str(DEFAULT_TASK_BACKEND_MEMORY_BATCH_SIZE))
+            ),
+            task_backend_memory_batch_interval=float(
+                os.getenv(ENV_TASK_BACKEND_MEMORY_BATCH_INTERVAL, str(DEFAULT_TASK_BACKEND_MEMORY_BATCH_INTERVAL))
+            ),
         )
 
     def get_llm_base_url(self) -> str:

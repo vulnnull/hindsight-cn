@@ -10,17 +10,20 @@ import asyncio
 import logging
 import os
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
 from ..config import (
     DEFAULT_RERANKER_COHERE_MODEL,
+    DEFAULT_RERANKER_LOCAL_MAX_CONCURRENT,
     DEFAULT_RERANKER_LOCAL_MODEL,
     DEFAULT_RERANKER_PROVIDER,
     DEFAULT_RERANKER_TEI_BATCH_SIZE,
     DEFAULT_RERANKER_TEI_MAX_CONCURRENT,
     ENV_COHERE_API_KEY,
     ENV_RERANKER_COHERE_MODEL,
+    ENV_RERANKER_LOCAL_MAX_CONCURRENT,
     ENV_RERANKER_LOCAL_MODEL,
     ENV_RERANKER_PROVIDER,
     ENV_RERANKER_TEI_BATCH_SIZE,
@@ -78,25 +81,34 @@ class LocalSTCrossEncoder(CrossEncoderModel):
     - Fast inference (~80ms for 100 pairs on CPU)
     - Small model (80MB)
     - Trained for passage re-ranking
+
+    Uses a dedicated thread pool to limit concurrent CPU-bound work.
     """
 
-    def __init__(self, model_name: str | None = None):
+    # Shared executor across all instances (one model loaded anyway)
+    _executor: ThreadPoolExecutor | None = None
+    _max_concurrent: int = 4  # Limit concurrent CPU-bound reranking calls
+
+    def __init__(self, model_name: str | None = None, max_concurrent: int = 4):
         """
         Initialize local SentenceTransformers cross-encoder.
 
         Args:
             model_name: Name of the CrossEncoder model to use.
                        Default: cross-encoder/ms-marco-MiniLM-L-6-v2
+            max_concurrent: Maximum concurrent reranking calls (default: 2).
+                           Higher values may cause CPU thrashing under load.
         """
         self.model_name = model_name or DEFAULT_RERANKER_LOCAL_MODEL
         self._model = None
+        LocalSTCrossEncoder._max_concurrent = max_concurrent
 
     @property
     def provider_name(self) -> str:
         return "local"
 
     async def initialize(self) -> None:
-        """Load the cross-encoder model."""
+        """Load the cross-encoder model and initialize the executor."""
         if self._model is not None:
             return
 
@@ -108,13 +120,29 @@ class LocalSTCrossEncoder(CrossEncoderModel):
                 "Install it with: pip install sentence-transformers"
             )
 
+        # Note: We use CPU even when GPU/MPS is available because:
+        # 1. The reranker model (MiniLM) is tiny (~22M params)
+        # 2. Batch sizes are small (~100-200 pairs)
+        # 3. Data transfer overhead to GPU outweighs compute benefit
+        # 4. CPU inference is actually faster for this workload
         logger.info(f"Reranker: initializing local provider with model {self.model_name}")
         self._model = CrossEncoder(self.model_name)
-        logger.info("Reranker: local provider initialized")
+
+        # Initialize shared executor (limited workers naturally limits concurrency)
+        if LocalSTCrossEncoder._executor is None:
+            LocalSTCrossEncoder._executor = ThreadPoolExecutor(
+                max_workers=LocalSTCrossEncoder._max_concurrent,
+                thread_name_prefix="reranker",
+            )
+            logger.info(f"Reranker: local provider initialized (max_concurrent={LocalSTCrossEncoder._max_concurrent})")
+        else:
+            logger.info("Reranker: local provider initialized (using existing executor)")
 
     async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
         Score query-document pairs for relevance.
+
+        Uses a dedicated thread pool with limited workers to prevent CPU thrashing.
 
         Args:
             pairs: List of (query, document) tuples to score
@@ -125,9 +153,12 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         if self._model is None:
             raise RuntimeError("Reranker not initialized. Call initialize() first.")
 
-        # Run CPU-bound inference in thread pool to avoid blocking event loop
+        # Use dedicated executor - limited workers naturally limits concurrency
         loop = asyncio.get_event_loop()
-        scores = await loop.run_in_executor(None, lambda: self._model.predict(pairs, show_progress_bar=False))
+        scores = await loop.run_in_executor(
+            LocalSTCrossEncoder._executor,
+            lambda: self._model.predict(pairs, show_progress_bar=False),
+        )
         return scores.tolist() if hasattr(scores, "tolist") else list(scores)
 
 
@@ -301,8 +332,7 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
         semaphore = asyncio.Semaphore(self.max_concurrent)
 
         tasks = [
-            self._rerank_query_group(self._async_client, semaphore, query, texts)
-            for query, _, texts in tasks_info
+            self._rerank_query_group(self._async_client, semaphore, query, texts) for query, _, texts in tasks_info
         ]
         results = await asyncio.gather(*tasks)
 
@@ -449,7 +479,10 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
     elif provider == "local":
         model = os.environ.get(ENV_RERANKER_LOCAL_MODEL)
         model_name = model or DEFAULT_RERANKER_LOCAL_MODEL
-        return LocalSTCrossEncoder(model_name=model_name)
+        max_concurrent = int(
+            os.environ.get(ENV_RERANKER_LOCAL_MAX_CONCURRENT, str(DEFAULT_RERANKER_LOCAL_MAX_CONCURRENT))
+        )
+        return LocalSTCrossEncoder(model_name=model_name, max_concurrent=max_concurrent)
     elif provider == "cohere":
         api_key = os.environ.get(ENV_COHERE_API_KEY)
         if not api_key:

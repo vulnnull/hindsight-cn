@@ -133,8 +133,8 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
-          id: 'developer/metrics',
-          label: 'Metrics',
+          id: 'developer/monitoring',
+          label: 'Monitoring',
         },
         {
           type: 'doc',

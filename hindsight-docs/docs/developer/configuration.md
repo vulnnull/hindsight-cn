@@ -189,7 +189,10 @@ Supported OpenAI embedding dimensions:
 |----------|-------------|---------|
 | `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, or `cohere` | `local` |
 | `HINDSIGHT_API_RERANKER_LOCAL_MODEL` | Model for local provider | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+| `HINDSIGHT_API_RERANKER_LOCAL_MAX_CONCURRENT` | Max concurrent local reranking (prevents CPU thrashing under load) | `4` |
 | `HINDSIGHT_API_RERANKER_TEI_URL` | TEI server URL | - |
+| `HINDSIGHT_API_RERANKER_TEI_BATCH_SIZE` | Batch size for TEI reranking | `128` |
+| `HINDSIGHT_API_RERANKER_TEI_MAX_CONCURRENT` | Max concurrent TEI reranking requests | `8` |
 | `HINDSIGHT_API_RERANKER_COHERE_MODEL` | Cohere rerank model | `rerank-english-v3.0` |
 
 ```bash
@@ -264,6 +267,7 @@ Controls the retain (memory ingestion) pipeline.
 | `HINDSIGHT_API_RETAIN_CHUNK_SIZE` | Max characters per chunk for fact extraction. Larger chunks extract fewer LLM calls but may lose context. | `3000` |
 | `HINDSIGHT_API_RETAIN_EXTRACTION_MODE` | Fact extraction mode: `concise` (selective, fewer high-quality facts) or `verbose` (detailed, more facts) | `concise` |
 | `HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS` | Extract causal relationships between facts | `true` |
+| `HINDSIGHT_API_RETAIN_OBSERVATIONS_ASYNC` | Run entity observation generation asynchronously (after retain completes) | `false` |
 
 #### Extraction Modes
 
@@ -293,8 +297,9 @@ Controls background task processing for async operations like opinion formation 
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_TASK_BATCH_SIZE` | Max tasks to process in one batch | `10` |
-| `HINDSIGHT_API_TASK_BATCH_INTERVAL` | Interval between batch processing in seconds | `1.0` |
+| `HINDSIGHT_API_TASK_BACKEND` | Task backend implementation: `memory` (in-process queue) or `noop` (discard tasks, useful for tests) | `memory` |
+| `HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_SIZE` | Max tasks to process in one batch (memory backend only) | `10` |
+| `HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_INTERVAL` | Interval between batch processing in seconds (memory backend only) | `1.0` |
 
 ### Performance Optimization
 

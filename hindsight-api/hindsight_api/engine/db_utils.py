@@ -83,11 +83,22 @@ async def acquire_with_retry(pool: asyncpg.Pool, max_retries: int = DEFAULT_MAX_
     Yields:
         An asyncpg connection
     """
+    import time
+
+    start = time.time()
 
     async def acquire():
         return await pool.acquire()
 
     conn = await retry_with_backoff(acquire, max_retries=max_retries)
+    acquire_time = time.time() - start
+
+    # Log slow connection acquisitions (indicates pool contention)
+    if acquire_time > 0.05:  # 50ms threshold
+        pool_size = pool.get_size()
+        pool_free = pool.get_idle_size()
+        logger.warning(f"[DB POOL] Slow acquire: {acquire_time:.3f}s | size={pool_size}, idle={pool_free}")
+
     try:
         yield conn
     finally:

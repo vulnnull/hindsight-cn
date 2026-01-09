@@ -19,7 +19,7 @@ from ..db_utils import acquire_with_retry
 from ..memory_engine import fq_table
 from .graph_retrieval import BFSGraphRetriever, GraphRetriever
 from .mpfp_retrieval import MPFPGraphRetriever
-from .types import RetrievalResult
+from .types import MPFPTimings, RetrievalResult
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ class ParallelRetrievalResult:
     temporal: list[RetrievalResult] | None
     timings: dict[str, float] = field(default_factory=dict)
     temporal_constraint: tuple | None = None  # (start_date, end_date)
+    mpfp_timings: list[MPFPTimings] = field(default_factory=list)  # MPFP sub-step timings per fact type
 
 
 # Default graph retriever instance (can be overridden)
@@ -260,94 +261,101 @@ async def retrieve_temporal(
         ep_result.temporal_proximity = temporal_proximity
         results.append(ep_result)
 
-    # Spread through temporal links
-    queue = [
-        (RetrievalResult.from_db_row(dict(ep)), ep["similarity"], 1.0) for ep in entry_points
-    ]  # (unit, semantic_sim, temporal_score)
+    # Spread through temporal links using BATCHED neighbor fetching
+    # Map node_id -> (semantic_sim, temporal_score) for propagation
+    node_scores = {str(ep["id"]): (ep["similarity"], 1.0) for ep in entry_points}
+    frontier = list(node_scores.keys())  # Current batch of nodes to expand
     budget_remaining = budget - len(entry_points)
+    batch_size = 20  # Process this many nodes per DB query
 
-    while queue and budget_remaining > 0:
-        current, semantic_sim, temporal_score = queue.pop(0)
-        current_id = current.id
+    while frontier and budget_remaining > 0:
+        # Take a batch from frontier
+        batch_ids = frontier[:batch_size]
+        frontier = frontier[batch_size:]
 
-        # Get neighbors via temporal and causal links
-        if budget_remaining > 0:
-            neighbors = await conn.fetch(
-                f"""
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding, mu.fact_type, mu.document_id, mu.chunk_id,
-                       ml.weight, ml.link_type,
-                       1 - (mu.embedding <=> $1::vector) AS similarity
-                FROM {fq_table("memory_links")} ml
-                JOIN {fq_table("memory_units")} mu ON ml.to_unit_id = mu.id
-                WHERE ml.from_unit_id = $2
-                  AND ml.link_type IN ('temporal', 'causes', 'caused_by', 'enables', 'prevents')
-                  AND ml.weight >= 0.1
-                  AND mu.fact_type = $3
-                  AND mu.embedding IS NOT NULL
-                  AND (1 - (mu.embedding <=> $1::vector)) >= $4
-                ORDER BY ml.weight DESC
-                LIMIT 10
-                """,
-                query_emb_str,
-                current.id,
-                fact_type,
-                semantic_threshold,
-            )
+        # Batch fetch all neighbors for this batch of nodes
+        neighbors = await conn.fetch(
+            f"""
+            SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding, mu.fact_type, mu.document_id, mu.chunk_id,
+                   ml.weight, ml.link_type, ml.from_unit_id,
+                   1 - (mu.embedding <=> $1::vector) AS similarity
+            FROM {fq_table("memory_links")} ml
+            JOIN {fq_table("memory_units")} mu ON ml.to_unit_id = mu.id
+            WHERE ml.from_unit_id = ANY($2::uuid[])
+              AND ml.link_type IN ('temporal', 'causes', 'caused_by', 'enables', 'prevents')
+              AND ml.weight >= 0.1
+              AND mu.fact_type = $3
+              AND mu.embedding IS NOT NULL
+              AND (1 - (mu.embedding <=> $1::vector)) >= $4
+            ORDER BY ml.weight DESC
+            LIMIT $5
+            """,
+            query_emb_str,
+            batch_ids,
+            fact_type,
+            semantic_threshold,
+            batch_size * 10,  # Allow up to 10 neighbors per node in batch
+        )
 
-            for n in neighbors:
-                neighbor_id = str(n["id"])
-                if neighbor_id in visited:
-                    continue
+        for n in neighbors:
+            neighbor_id = str(n["id"])
+            if neighbor_id in visited:
+                continue
 
-                visited.add(neighbor_id)
-                budget_remaining -= 1
+            visited.add(neighbor_id)
+            budget_remaining -= 1
 
-                # Calculate temporal score for neighbor using best available date
-                neighbor_best_date = None
-                if n["occurred_start"] is not None and n["occurred_end"] is not None:
-                    neighbor_best_date = n["occurred_start"] + (n["occurred_end"] - n["occurred_start"]) / 2
-                elif n["occurred_start"] is not None:
-                    neighbor_best_date = n["occurred_start"]
-                elif n["occurred_end"] is not None:
-                    neighbor_best_date = n["occurred_end"]
-                elif n["mentioned_at"] is not None:
-                    neighbor_best_date = n["mentioned_at"]
+            # Get parent's scores for propagation
+            parent_id = str(n["from_unit_id"])
+            _, parent_temporal_score = node_scores.get(parent_id, (0.5, 0.5))
 
-                if neighbor_best_date:
-                    days_from_mid = abs((neighbor_best_date - mid_date).total_seconds() / 86400)
-                    neighbor_temporal_proximity = (
-                        1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
-                    )
-                else:
-                    neighbor_temporal_proximity = 0.3  # Lower score if no temporal data
+            # Calculate temporal score for neighbor using best available date
+            neighbor_best_date = None
+            if n["occurred_start"] is not None and n["occurred_end"] is not None:
+                neighbor_best_date = n["occurred_start"] + (n["occurred_end"] - n["occurred_start"]) / 2
+            elif n["occurred_start"] is not None:
+                neighbor_best_date = n["occurred_start"]
+            elif n["occurred_end"] is not None:
+                neighbor_best_date = n["occurred_end"]
+            elif n["mentioned_at"] is not None:
+                neighbor_best_date = n["mentioned_at"]
 
-                # Boost causal links (same as graph retrieval)
-                link_type = n["link_type"]
-                if link_type in ("causes", "caused_by"):
-                    causal_boost = 2.0
-                elif link_type in ("enables", "prevents"):
-                    causal_boost = 1.5
-                else:
-                    causal_boost = 1.0
+            if neighbor_best_date:
+                days_from_mid = abs((neighbor_best_date - mid_date).total_seconds() / 86400)
+                neighbor_temporal_proximity = (
+                    1.0 - min(days_from_mid / (total_days / 2), 1.0) if total_days > 0 else 1.0
+                )
+            else:
+                neighbor_temporal_proximity = 0.3  # Lower score if no temporal data
 
-                # Propagate temporal score through links (decay, with causal boost)
-                propagated_temporal = temporal_score * n["weight"] * causal_boost * 0.7
+            # Boost causal links (same as graph retrieval)
+            link_type = n["link_type"]
+            if link_type in ("causes", "caused_by"):
+                causal_boost = 2.0
+            elif link_type in ("enables", "prevents"):
+                causal_boost = 1.5
+            else:
+                causal_boost = 1.0
 
-                # Combined temporal score
-                combined_temporal = max(neighbor_temporal_proximity, propagated_temporal)
+            # Propagate temporal score through links (decay, with causal boost)
+            propagated_temporal = parent_temporal_score * n["weight"] * causal_boost * 0.7
 
-                # Create RetrievalResult with temporal scores
-                neighbor_result = RetrievalResult.from_db_row(dict(n))
-                neighbor_result.temporal_score = combined_temporal
-                neighbor_result.temporal_proximity = neighbor_temporal_proximity
-                results.append(neighbor_result)
+            # Combined temporal score
+            combined_temporal = max(neighbor_temporal_proximity, propagated_temporal)
 
-                # Add to queue for further spreading
-                if budget_remaining > 0 and combined_temporal > 0.2:
-                    queue.append((neighbor_result, n["similarity"], combined_temporal))
+            # Create RetrievalResult with temporal scores
+            neighbor_result = RetrievalResult.from_db_row(dict(n))
+            neighbor_result.temporal_score = combined_temporal
+            neighbor_result.temporal_proximity = neighbor_temporal_proximity
+            results.append(neighbor_result)
 
-                if budget_remaining <= 0:
-                    break
+            # Track scores for propagation and add to frontier
+            if budget_remaining > 0 and combined_temporal > 0.2:
+                node_scores[neighbor_id] = (n["similarity"], combined_temporal)
+                frontier.append(neighbor_id)
+
+            if budget_remaining <= 0:
+                break
 
     return results
 
@@ -362,6 +370,7 @@ async def retrieve_parallel(
     question_date: datetime | None = None,
     query_analyzer: Optional["QueryAnalyzer"] = None,
     graph_retriever: GraphRetriever | None = None,
+    temporal_constraint: tuple | None = None,  # Pre-extracted temporal constraint
 ) -> ParallelRetrievalResult:
     """
     Run 3-way or 4-way parallel retrieval (adds temporal if detected).
@@ -376,34 +385,36 @@ async def retrieve_parallel(
         question_date: Optional date when question was asked (for temporal filtering)
         query_analyzer: Query analyzer to use (defaults to TransformerQueryAnalyzer)
         graph_retriever: Graph retrieval strategy (defaults to configured retriever)
+        temporal_constraint: Pre-extracted temporal constraint (optional)
 
     Returns:
         ParallelRetrievalResult with semantic, bm25, graph, temporal results and timings
     """
-    from .temporal_extraction import extract_temporal_constraint
+    # Extract temporal constraint if not pre-provided
+    if temporal_constraint is None:
+        from .temporal_extraction import extract_temporal_constraint
 
-    temporal_constraint = extract_temporal_constraint(query_text, reference_date=question_date, analyzer=query_analyzer)
+        temporal_constraint = extract_temporal_constraint(
+            query_text, reference_date=question_date, analyzer=query_analyzer
+        )
 
     retriever = graph_retriever or get_default_graph_retriever()
 
     if retriever.name == "mpfp":
         return await _retrieve_parallel_mpfp(
-            pool, query_text, query_embedding_str, bank_id, fact_type, thinking_budget, temporal_constraint, retriever
+            pool,
+            query_text,
+            query_embedding_str,
+            bank_id,
+            fact_type,
+            thinking_budget,
+            temporal_constraint,
+            retriever,
         )
     else:
         return await _retrieve_parallel_bfs(
             pool, query_text, query_embedding_str, bank_id, fact_type, thinking_budget, temporal_constraint, retriever
         )
-
-
-@dataclass
-class _SemanticGraphResult:
-    """Internal result from semantic→graph chain."""
-
-    semantic: list[RetrievalResult]
-    graph: list[RetrievalResult]
-    semantic_time: float
-    graph_time: float
 
 
 @dataclass
@@ -425,46 +436,24 @@ async def _retrieve_parallel_mpfp(
     retriever: GraphRetriever,
 ) -> ParallelRetrievalResult:
     """
-    MPFP retrieval with optimized parallelization.
+    MPFP retrieval with true parallelization.
 
-    Runs 2-3 parallel task chains:
-    - Task 1: Semantic → Graph (chained, graph uses semantic seeds)
-    - Task 2: BM25 (independent)
-    - Task 3: Temporal (if constraint detected)
+    All methods run independently in parallel:
+    - Semantic: vector similarity search
+    - BM25: keyword search
+    - Graph: MPFP traversal (does its own semantic seeds internally)
+    - Temporal: date-range search (if constraint detected)
+
+    Graph does its own semantic query for seeds, avoiding chain dependency.
     """
     import time
 
-    async def run_semantic_then_graph() -> _SemanticGraphResult:
-        """Chain: semantic retrieval → graph retrieval (using semantic as seeds)."""
+    async def run_semantic() -> _TimedResult:
+        """Independent semantic retrieval."""
         start = time.time()
         async with acquire_with_retry(pool) as conn:
-            semantic = await retrieve_semantic(conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget)
-        semantic_time = time.time() - start
-
-        # Get temporal seeds if needed (quick query, part of this chain)
-        temporal_seeds = None
-        if temporal_constraint:
-            tc_start, tc_end = temporal_constraint
-            async with acquire_with_retry(pool) as conn:
-                temporal_seeds = await _get_temporal_entry_points(
-                    conn, query_embedding_str, bank_id, fact_type, tc_start, tc_end, limit=20
-                )
-
-        # Run graph with seeds
-        start = time.time()
-        graph = await retriever.retrieve(
-            pool=pool,
-            query_embedding_str=query_embedding_str,
-            bank_id=bank_id,
-            fact_type=fact_type,
-            budget=thinking_budget,
-            query_text=query_text,
-            semantic_seeds=semantic,
-            temporal_seeds=temporal_seeds,
-        )
-        graph_time = time.time() - start
-
-        return _SemanticGraphResult(semantic, graph, semantic_time, graph_time)
+            results = await retrieve_semantic(conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget)
+        return _TimedResult(results, time.time() - start)
 
     async def run_bm25() -> _TimedResult:
         """Independent BM25 retrieval."""
@@ -473,8 +462,34 @@ async def _retrieve_parallel_mpfp(
             results = await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget)
         return _TimedResult(results, time.time() - start)
 
+    async def run_graph() -> tuple[list[RetrievalResult], float, MPFPTimings | None]:
+        """Independent graph retrieval - does its own semantic seeds."""
+        start = time.time()
+
+        # Get temporal seeds if needed (graph uses them for temporal patterns)
+        temporal_seeds = None
+        if temporal_constraint:
+            tc_start, tc_end = temporal_constraint
+            async with acquire_with_retry(pool) as conn:
+                temporal_seeds = await _get_temporal_entry_points(
+                    conn, query_embedding_str, bank_id, fact_type, tc_start, tc_end, limit=20
+                )
+
+        # MPFP does its own semantic seeds via _find_semantic_seeds
+        results, mpfp_timing = await retriever.retrieve(
+            pool=pool,
+            query_embedding_str=query_embedding_str,
+            bank_id=bank_id,
+            fact_type=fact_type,
+            budget=thinking_budget,
+            query_text=query_text,
+            semantic_seeds=None,  # Let MPFP find its own seeds
+            temporal_seeds=temporal_seeds,
+        )
+        return results, time.time() - start, mpfp_timing
+
     async def run_temporal(tc_start, tc_end) -> _TimedResult:
-        """Temporal retrieval (uses its own entry point finding)."""
+        """Independent temporal retrieval."""
         start = time.time()
         async with acquire_with_retry(pool) as conn:
             results = await retrieve_temporal(
@@ -489,43 +504,49 @@ async def _retrieve_parallel_mpfp(
             )
         return _TimedResult(results, time.time() - start)
 
-    # Run parallel task chains
+    # Run all methods in parallel (no chain dependencies)
     if temporal_constraint:
         tc_start, tc_end = temporal_constraint
-        sg_result, bm25_result, temporal_result = await asyncio.gather(
-            run_semantic_then_graph(),
+        semantic_result, bm25_result, graph_result, temporal_result = await asyncio.gather(
+            run_semantic(),
             run_bm25(),
+            run_graph(),
             run_temporal(tc_start, tc_end),
         )
+        graph_results, graph_time, mpfp_timing = graph_result
         return ParallelRetrievalResult(
-            semantic=sg_result.semantic,
+            semantic=semantic_result.results,
             bm25=bm25_result.results,
-            graph=sg_result.graph,
+            graph=graph_results,
             temporal=temporal_result.results,
             timings={
-                "semantic": sg_result.semantic_time,
-                "graph": sg_result.graph_time,
+                "semantic": semantic_result.time,
                 "bm25": bm25_result.time,
+                "graph": graph_time,
                 "temporal": temporal_result.time,
             },
             temporal_constraint=temporal_constraint,
+            mpfp_timings=[mpfp_timing] if mpfp_timing else [],
         )
     else:
-        sg_result, bm25_result = await asyncio.gather(
-            run_semantic_then_graph(),
+        semantic_result, bm25_result, graph_result = await asyncio.gather(
+            run_semantic(),
             run_bm25(),
+            run_graph(),
         )
+        graph_results, graph_time, mpfp_timing = graph_result
         return ParallelRetrievalResult(
-            semantic=sg_result.semantic,
+            semantic=semantic_result.results,
             bm25=bm25_result.results,
-            graph=sg_result.graph,
+            graph=graph_results,
             temporal=None,
             timings={
-                "semantic": sg_result.semantic_time,
-                "graph": sg_result.graph_time,
+                "semantic": semantic_result.time,
                 "bm25": bm25_result.time,
+                "graph": graph_time,
             },
             temporal_constraint=None,
+            mpfp_timings=[mpfp_timing] if mpfp_timing else [],
         )
 
 
@@ -633,7 +654,7 @@ async def _retrieve_parallel_bfs(
 
     async def run_graph() -> _TimedResult:
         start = time.time()
-        results = await retriever.retrieve(
+        results, _ = await retriever.retrieve(
             pool=pool,
             query_embedding_str=query_embedding_str,
             bank_id=bank_id,

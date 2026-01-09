@@ -121,6 +121,29 @@ class SyncTaskBackend(TaskBackend):
         logger.debug("SyncTaskBackend shutdown")
 
 
+class NoopTaskBackend(TaskBackend):
+    """
+    No-op task backend that discards all tasks.
+
+    This is useful for tests where background task execution is not needed
+    and would only slow down the test suite.
+    """
+
+    async def initialize(self):
+        """No-op."""
+        self._initialized = True
+        logger.debug("NoopTaskBackend initialized")
+
+    async def submit_task(self, task_dict: dict[str, Any]):
+        """Discard the task (do nothing)."""
+        pass
+
+    async def shutdown(self):
+        """No-op."""
+        self._initialized = False
+        logger.debug("NoopTaskBackend shutdown")
+
+
 class AsyncIOQueueBackend(TaskBackend):
     """
     Task backend implementation using asyncio queues.
