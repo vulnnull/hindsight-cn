@@ -20,7 +20,7 @@ from hindsight_api.engine.search.mpfp_retrieval import (
     MPFPGraphRetriever,
     PatternResult,
     SeedNode,
-    load_edges_for_frontier,
+    load_all_edges_for_frontier,
     mpfp_traverse_async,
     rrf_fusion,
 )
@@ -36,32 +36,32 @@ class TestEdgeCache:
         neighbors = cache.get_neighbors("semantic", "node-1")
         assert neighbors == []
 
-    def test_is_loaded_false_for_uncached(self):
-        """is_loaded should return False for nodes not yet loaded."""
+    def test_is_fully_loaded_false_for_uncached(self):
+        """is_fully_loaded should return False for nodes not yet loaded."""
         cache = EdgeCache()
-        assert cache.is_loaded("semantic", "node-1") is False
+        assert cache.is_fully_loaded("node-1") is False
 
-    def test_add_edges_marks_as_loaded(self):
-        """Adding edges should mark nodes as loaded."""
+    def test_add_all_edges_marks_as_fully_loaded(self):
+        """Adding edges should mark nodes as fully loaded."""
         cache = EdgeCache()
 
-        edges = {
-            "node-1": [EdgeTarget("node-2", 0.8), EdgeTarget("node-3", 0.6)],
+        edges_by_type = {
+            "semantic": {"node-1": [EdgeTarget("node-2", 0.8), EdgeTarget("node-3", 0.6)]},
         }
-        cache.add_edges("semantic", edges, ["node-1", "node-4"])  # node-4 has no edges
+        cache.add_all_edges(edges_by_type, ["node-1", "node-4"])  # node-4 has no edges
 
-        assert cache.is_loaded("semantic", "node-1") is True
-        assert cache.is_loaded("semantic", "node-4") is True  # Marked even with no edges
-        assert cache.is_loaded("semantic", "node-2") is False  # Target, not source
+        assert cache.is_fully_loaded("node-1") is True
+        assert cache.is_fully_loaded("node-4") is True  # Marked even with no edges
+        assert cache.is_fully_loaded("node-2") is False  # Target, not source
 
     def test_get_neighbors_returns_added_edges(self):
-        """get_neighbors should return edges after add_edges."""
+        """get_neighbors should return edges after add_all_edges."""
         cache = EdgeCache()
 
-        edges = {
-            "node-1": [EdgeTarget("node-2", 0.8), EdgeTarget("node-3", 0.6)],
+        edges_by_type = {
+            "semantic": {"node-1": [EdgeTarget("node-2", 0.8), EdgeTarget("node-3", 0.6)]},
         }
-        cache.add_edges("semantic", edges, ["node-1"])
+        cache.add_all_edges(edges_by_type, ["node-1"])
 
         neighbors = cache.get_neighbors("semantic", "node-1")
         assert len(neighbors) == 2
@@ -69,28 +69,30 @@ class TestEdgeCache:
         assert neighbors[0].weight == 0.8
 
     def test_get_uncached_filters_loaded_nodes(self):
-        """get_uncached should only return nodes not yet loaded."""
+        """get_uncached should only return nodes not yet fully loaded."""
         cache = EdgeCache()
 
-        # Load some nodes
-        cache.add_edges("semantic", {"node-1": []}, ["node-1", "node-2"])
+        # Load some nodes (all edge types)
+        cache.add_all_edges({"semantic": {"node-1": []}}, ["node-1", "node-2"])
 
         # Check uncached
-        uncached = cache.get_uncached("semantic", ["node-1", "node-2", "node-3", "node-4"])
+        uncached = cache.get_uncached(["node-1", "node-2", "node-3", "node-4"])
         assert set(uncached) == {"node-3", "node-4"}
 
     def test_get_normalized_neighbors_normalizes_weights(self):
         """get_normalized_neighbors should normalize weights to sum to 1."""
         cache = EdgeCache()
 
-        edges = {
-            "node-1": [
-                EdgeTarget("node-2", 0.8),
-                EdgeTarget("node-3", 0.4),
-                EdgeTarget("node-4", 0.2),
-            ],
+        edges_by_type = {
+            "semantic": {
+                "node-1": [
+                    EdgeTarget("node-2", 0.8),
+                    EdgeTarget("node-3", 0.4),
+                    EdgeTarget("node-4", 0.2),
+                ],
+            },
         }
-        cache.add_edges("semantic", edges, ["node-1"])
+        cache.add_all_edges(edges_by_type, ["node-1"])
 
         # Get top 2, normalized
         neighbors = cache.get_normalized_neighbors("semantic", "node-1", top_k=2)
@@ -111,8 +113,11 @@ class TestEdgeCache:
         """Different edge types should be stored separately."""
         cache = EdgeCache()
 
-        cache.add_edges("semantic", {"node-1": [EdgeTarget("node-2", 0.8)]}, ["node-1"])
-        cache.add_edges("temporal", {"node-1": [EdgeTarget("node-3", 0.5)]}, ["node-1"])
+        edges_by_type = {
+            "semantic": {"node-1": [EdgeTarget("node-2", 0.8)]},
+            "temporal": {"node-1": [EdgeTarget("node-3", 0.5)]},
+        }
+        cache.add_all_edges(edges_by_type, ["node-1"])
 
         semantic_neighbors = cache.get_neighbors("semantic", "node-1")
         temporal_neighbors = cache.get_neighbors("temporal", "node-1")
@@ -198,7 +203,6 @@ class TestMPFPTraverseAsync:
 
         result = await mpfp_traverse_async(
             pool=None,  # Not used when no seeds
-            bank_id="test",
             seeds=[],
             pattern=["semantic"],
             config=config,
@@ -213,19 +217,18 @@ class TestMPFPTraverseAsync:
         cache = EdgeCache()
         config = MPFPConfig(alpha=0.15, threshold=1e-6)
 
-        # Pre-populate cache with empty edges for seed
-        cache.add_edges("semantic", {}, ["seed-1"])
+        # Pre-populate cache with empty edges for seed (marks as fully loaded)
+        cache.add_all_edges({}, ["seed-1"])
 
         seeds = [SeedNode("seed-1", 1.0)]
 
         with patch(
-            "hindsight_api.engine.search.mpfp_retrieval.load_edges_for_frontier",
+            "hindsight_api.engine.search.mpfp_retrieval.load_all_edges_for_frontier",
             new_callable=AsyncMock,
             return_value={},
         ):
             result = await mpfp_traverse_async(
                 pool=MagicMock(),
-                bank_id="test",
                 seeds=seeds,
                 pattern=["semantic"],
                 config=config,
@@ -244,24 +247,25 @@ class TestMPFPTraverseAsync:
 
         seeds = [SeedNode("seed-1", 1.0)]
 
-        # Mock edge loading
-        async def mock_load_edges(pool, bank_id, edge_type, node_ids):
+        # Mock edge loading (returns all edge types at once)
+        async def mock_load_all_edges(pool, node_ids):
             if "seed-1" in node_ids:
                 return {
-                    "seed-1": [
-                        EdgeTarget("neighbor-1", 0.8),
-                        EdgeTarget("neighbor-2", 0.4),
-                    ]
+                    "semantic": {
+                        "seed-1": [
+                            EdgeTarget("neighbor-1", 0.8),
+                            EdgeTarget("neighbor-2", 0.4),
+                        ]
+                    }
                 }
             return {}
 
         with patch(
-            "hindsight_api.engine.search.mpfp_retrieval.load_edges_for_frontier",
-            side_effect=mock_load_edges,
+            "hindsight_api.engine.search.mpfp_retrieval.load_all_edges_for_frontier",
+            side_effect=mock_load_all_edges,
         ):
             result = await mpfp_traverse_async(
                 pool=MagicMock(),
-                bank_id="test",
                 seeds=seeds,
                 pattern=["semantic"],
                 config=config,
@@ -287,22 +291,21 @@ class TestMPFPTraverseAsync:
 
         seeds = [SeedNode("seed-1", 1.0)]
 
-        # Mock edge loading for two hops
-        async def mock_load_edges(pool, bank_id, edge_type, node_ids):
-            edges = {}
+        # Mock edge loading for two hops (returns all edge types at once)
+        async def mock_load_all_edges(pool, node_ids):
+            edges: dict[str, dict[str, list[EdgeTarget]]] = {"semantic": {}}
             if "seed-1" in node_ids:
-                edges["seed-1"] = [EdgeTarget("hop1-node", 1.0)]
+                edges["semantic"]["seed-1"] = [EdgeTarget("hop1-node", 1.0)]
             if "hop1-node" in node_ids:
-                edges["hop1-node"] = [EdgeTarget("hop2-node", 1.0)]
+                edges["semantic"]["hop1-node"] = [EdgeTarget("hop2-node", 1.0)]
             return edges
 
         with patch(
-            "hindsight_api.engine.search.mpfp_retrieval.load_edges_for_frontier",
-            side_effect=mock_load_edges,
+            "hindsight_api.engine.search.mpfp_retrieval.load_all_edges_for_frontier",
+            side_effect=mock_load_all_edges,
         ):
             result = await mpfp_traverse_async(
                 pool=MagicMock(),
-                bank_id="test",
                 seeds=seeds,
                 pattern=["semantic", "semantic"],  # Two hops
                 config=config,
@@ -320,27 +323,26 @@ class TestMPFPTraverseAsync:
         cache = EdgeCache()
         config = MPFPConfig(alpha=0.15, threshold=1e-6)
 
-        # Pre-load cache
-        cache.add_edges("semantic", {"seed-1": [EdgeTarget("neighbor-1", 1.0)]}, ["seed-1"])
+        # Pre-load cache (marks seed-1 as fully loaded)
+        cache.add_all_edges({"semantic": {"seed-1": [EdgeTarget("neighbor-1", 1.0)]}}, ["seed-1"])
 
         seeds = [SeedNode("seed-1", 1.0)]
 
         load_mock = AsyncMock(return_value={})
 
         with patch(
-            "hindsight_api.engine.search.mpfp_retrieval.load_edges_for_frontier",
+            "hindsight_api.engine.search.mpfp_retrieval.load_all_edges_for_frontier",
             load_mock,
         ):
             await mpfp_traverse_async(
                 pool=MagicMock(),
-                bank_id="test",
                 seeds=seeds,
                 pattern=["semantic"],
                 config=config,
                 cache=cache,
             )
 
-        # Should not call load_edges_for_frontier since seed-1 is already cached
+        # Should not call load_all_edges_for_frontier since seed-1 is already cached
         load_mock.assert_not_called()
 
 

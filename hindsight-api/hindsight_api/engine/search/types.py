@@ -15,14 +15,15 @@ class MPFPTimings:
     """Timing breakdown for a single MPFP retrieval call."""
 
     fact_type: str
-    adjacency_query: float = 0.0
-    adjacency_process: float = 0.0
-    edge_count: int = 0
-    traverse: float = 0.0
-    pattern_count: int = 0
-    fusion: float = 0.0
-    fetch: float = 0.0
-    result_count: int = 0
+    edge_count: int = 0  # Total edges loaded
+    db_queries: int = 0  # Number of DB queries for edge loading
+    edge_load_time: float = 0.0  # Time spent loading edges from DB
+    traverse: float = 0.0  # Total traversal time (includes edge loading)
+    pattern_count: int = 0  # Number of patterns executed
+    fusion: float = 0.0  # Time for RRF fusion
+    fetch: float = 0.0  # Time to fetch memory unit details
+    seeds_time: float = 0.0  # Time to find semantic seeds (if fallback used)
+    result_count: int = 0  # Number of results returned
 
 
 @dataclass

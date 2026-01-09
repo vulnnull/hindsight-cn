@@ -1709,6 +1709,19 @@ class MemoryEngine(MemoryEngineInterface):
                 f"  [2] Parallel retrieval ({len(fact_type)} fact_types): {', '.join(timing_parts)} in {parallel_duration:.3f}s{setup_info}{temporal_info}"
             )
 
+            # Log MPFP timing breakdown if available
+            if all_mpfp_timings:
+                mpfp_total = all_mpfp_timings[0]  # Take first fact type's timing as representative
+                mpfp_parts = [
+                    f"db_queries={mpfp_total.db_queries}",
+                    f"edge_load={mpfp_total.edge_load_time:.3f}s",
+                    f"edges={mpfp_total.edge_count}",
+                    f"patterns={mpfp_total.pattern_count}",
+                ]
+                if mpfp_total.seeds_time > 0.01:
+                    mpfp_parts.append(f"seeds={mpfp_total.seeds_time:.3f}s")
+                log_buffer.append(f"      [MPFP] {', '.join(mpfp_parts)}")
+
             # Record retrieval results for tracer - per fact type
             if tracer:
                 # Convert RetrievalResult to old tuple format for tracer
@@ -2337,9 +2350,10 @@ class MemoryEngine(MemoryEngineInterface):
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
-            # Ensure connection is not in read-only mode (can happen with connection poolers)
-            await conn.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE")
             async with conn.transaction():
+                # Ensure transaction is not in read-only mode (can happen with connection poolers)
+                # Using SET LOCAL so it only affects this transaction, not the session
+                await conn.execute("SET LOCAL transaction_read_only TO off")
                 try:
                     if fact_type:
                         # Delete only memories of a specific fact type

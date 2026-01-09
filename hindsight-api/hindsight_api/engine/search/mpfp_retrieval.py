@@ -48,12 +48,16 @@ class EdgeCache:
 
     Grows per-hop as edges are loaded for frontier nodes.
     Shared across patterns to avoid redundant loads.
+    Loads ALL edge types at once to minimize DB queries.
     """
 
     # edge_type -> from_node_id -> list of EdgeTarget
     graphs: dict[str, dict[str, list[EdgeTarget]]] = field(default_factory=dict)
-    # Track which (edge_type, node_id) have been loaded
-    _loaded: set[tuple[str, str]] = field(default_factory=set)
+    # Track which nodes have been fully loaded (all edge types)
+    _fully_loaded: set[str] = field(default_factory=set)
+    # Timing stats
+    db_queries: int = 0
+    edge_load_time: float = 0.0
 
     def get_neighbors(self, edge_type: str, node_id: str) -> list[EdgeTarget]:
         """Get neighbors for a node via a specific edge type."""
@@ -71,32 +75,30 @@ class EdgeCache:
 
         return [EdgeTarget(node_id=n.node_id, weight=n.weight / total) for n in neighbors]
 
-    def is_loaded(self, edge_type: str, node_id: str) -> bool:
-        """Check if edges for this node+type have been loaded."""
-        return (edge_type, node_id) in self._loaded
+    def is_fully_loaded(self, node_id: str) -> bool:
+        """Check if all edges for this node have been loaded."""
+        return node_id in self._fully_loaded
 
-    def get_uncached(self, edge_type: str, node_ids: list[str]) -> list[str]:
-        """Get node IDs that haven't been loaded yet for this edge type."""
-        return [n for n in node_ids if not self.is_loaded(edge_type, n)]
+    def get_uncached(self, node_ids: list[str]) -> list[str]:
+        """Get node IDs that haven't been fully loaded yet."""
+        return [n for n in node_ids if not self.is_fully_loaded(n)]
 
-    def add_edges(self, edge_type: str, edges: dict[str, list[EdgeTarget]], all_queried: list[str]):
+    def add_all_edges(self, edges_by_type: dict[str, dict[str, list[EdgeTarget]]], all_queried: list[str]):
         """
-        Add loaded edges to the cache.
+        Add loaded edges to the cache (all edge types at once).
 
         Args:
-            edge_type: Type of edges
-            edges: Dict mapping from_node_id -> list of EdgeTarget
-            all_queried: All node IDs that were queried (marks them as loaded even if no edges)
+            edges_by_type: Dict mapping edge_type -> from_node_id -> list of EdgeTarget
+            all_queried: All node IDs that were queried (marks them as fully loaded)
         """
-        if edge_type not in self.graphs:
-            self.graphs[edge_type] = {}
+        for edge_type, edges in edges_by_type.items():
+            if edge_type not in self.graphs:
+                self.graphs[edge_type] = {}
+            for node_id, neighbors in edges.items():
+                self.graphs[edge_type][node_id] = neighbors
 
-        for node_id, neighbors in edges.items():
-            self.graphs[edge_type][node_id] = neighbors
-
-        # Mark all queried nodes as loaded (even if they have no edges)
-        for node_id in all_queried:
-            self._loaded.add((edge_type, node_id))
+        # Mark all queried nodes as fully loaded (even if they have no edges)
+        self._fully_loaded.update(all_queried)
 
 
 @dataclass
@@ -148,23 +150,19 @@ class SeedNode:
 # -----------------------------------------------------------------------------
 
 
-async def load_edges_for_frontier(
+async def load_all_edges_for_frontier(
     pool,
-    bank_id: str,
-    edge_type: str,
     node_ids: list[str],
-) -> dict[str, list[EdgeTarget]]:
+) -> dict[str, dict[str, list[EdgeTarget]]]:
     """
-    Load edges for specific frontier nodes only.
+    Load ALL edge types for frontier nodes in one query.
 
     Args:
         pool: Database connection pool
-        bank_id: Memory bank ID
-        edge_type: Type of edges to load
         node_ids: Frontier node IDs to load edges for
 
     Returns:
-        Dict mapping from_node_id -> list of EdgeTarget
+        Dict mapping edge_type -> from_node_id -> list of EdgeTarget
     """
     if not node_ids:
         return {}
@@ -172,25 +170,26 @@ async def load_edges_for_frontier(
     async with acquire_with_retry(pool) as conn:
         rows = await conn.fetch(
             f"""
-            SELECT ml.from_unit_id, ml.to_unit_id, ml.weight
+            SELECT ml.from_unit_id, ml.to_unit_id, ml.link_type, ml.weight
             FROM {fq_table("memory_links")} ml
             WHERE ml.from_unit_id = ANY($1::uuid[])
-              AND ml.link_type = $2
               AND ml.weight >= 0.1
-            ORDER BY ml.from_unit_id, ml.weight DESC
+            ORDER BY ml.from_unit_id, ml.link_type, ml.weight DESC
             """,
             node_ids,
-            edge_type,
         )
 
-    result: dict[str, list[EdgeTarget]] = defaultdict(list)
+    # Group by edge_type -> from_node -> neighbors
+    result: dict[str, dict[str, list[EdgeTarget]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
+        edge_type = row["link_type"]
         from_id = str(row["from_unit_id"])
         to_id = str(row["to_unit_id"])
         weight = row["weight"]
-        result[from_id].append(EdgeTarget(node_id=to_id, weight=weight))
+        result[edge_type][from_id].append(EdgeTarget(node_id=to_id, weight=weight))
 
-    return dict(result)
+    # Convert nested defaultdicts to regular dicts
+    return {edge_type: dict(edges) for edge_type, edges in result.items()}
 
 
 # -----------------------------------------------------------------------------
@@ -200,7 +199,6 @@ async def load_edges_for_frontier(
 
 async def mpfp_traverse_async(
     pool,
-    bank_id: str,
     seeds: list[SeedNode],
     pattern: list[str],
     config: MPFPConfig,
@@ -209,11 +207,10 @@ async def mpfp_traverse_async(
     """
     Async Forward Push traversal with lazy edge loading.
 
-    Loads edges on-demand per hop, only for frontier nodes.
+    Loads ALL edge types per hop to minimize DB queries.
 
     Args:
         pool: Database connection pool
-        bank_id: Memory bank ID
         seeds: Entry point nodes with initial scores
         pattern: Sequence of edge types to follow
         config: Algorithm parameters
@@ -242,13 +239,18 @@ async def mpfp_traverse_async(
         if not active_nodes:
             break
 
-        # Find nodes that need edge loading
-        uncached = cache.get_uncached(edge_type, active_nodes)
+        # Find nodes that need edge loading (all edge types at once)
+        uncached = cache.get_uncached(active_nodes)
 
-        # Batch load edges for uncached nodes
+        # Batch load ALL edges for uncached nodes (one query for all edge types)
         if uncached:
-            edges = await load_edges_for_frontier(pool, bank_id, edge_type, uncached)
-            cache.add_edges(edge_type, edges, uncached)
+            import time
+
+            load_start = time.time()
+            edges_by_type = await load_all_edges_for_frontier(pool, uncached)
+            cache.edge_load_time += time.time() - load_start
+            cache.db_queries += 1
+            cache.add_all_edges(edges_by_type, uncached)
 
         # Propagate mass
         next_frontier: dict[str, float] = {}
@@ -406,7 +408,9 @@ class MPFPGraphRetriever(GraphRetriever):
 
         # If no semantic seeds provided, fall back to finding our own
         if not semantic_seed_nodes:
+            seeds_start = time.time()
             semantic_seed_nodes = await self._find_semantic_seeds(pool, query_embedding_str, bank_id, fact_type)
+            timings.seeds_time = time.time() - seeds_start
 
         # Collect all pattern jobs
         pattern_jobs = []
@@ -432,13 +436,15 @@ class MPFPGraphRetriever(GraphRetriever):
         # Run all patterns in parallel (each does lazy edge loading)
         step_start = time.time()
         pattern_tasks = [
-            mpfp_traverse_async(pool, bank_id, seeds, pattern, self.config, cache) for seeds, pattern in pattern_jobs
+            mpfp_traverse_async(pool, seeds, pattern, self.config, cache) for seeds, pattern in pattern_jobs
         ]
         pattern_results = await asyncio.gather(*pattern_tasks)
         timings.traverse = time.time() - step_start
 
-        # Count edges loaded
+        # Record edge loading stats from cache
         timings.edge_count = sum(len(neighbors) for g in cache.graphs.values() for neighbors in g.values())
+        timings.db_queries = cache.db_queries
+        timings.edge_load_time = cache.edge_load_time
 
         # Fuse results
         step_start = time.time()
