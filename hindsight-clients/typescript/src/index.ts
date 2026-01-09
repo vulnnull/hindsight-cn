@@ -79,6 +79,16 @@ export class HindsightClient {
     }
 
     /**
+     * Validates the API response and throws an error if the request failed.
+     */
+    private validateResponse<T>(response: { data?: T; error?: unknown }, operation: string): T {
+        if (!response.data) {
+            throw new Error(`${operation} failed: ${JSON.stringify(response.error || 'Unknown error')}`);
+        }
+        return response.data;
+    }
+
+    /**
      * Retain a single memory for a bank.
      */
     async retain(
@@ -126,7 +136,7 @@ export class HindsightClient {
             body: { items: [item], async: options?.async },
         });
 
-        return response.data!;
+        return this.validateResponse(response, 'retain');
     }
 
     /**
@@ -160,7 +170,7 @@ export class HindsightClient {
             },
         });
 
-        return response.data!;
+        return this.validateResponse(response, 'retainBatch');
     }
 
     /**
@@ -198,11 +208,7 @@ export class HindsightClient {
             },
         });
 
-        if (!response.data) {
-            throw new Error(`API returned no data: ${JSON.stringify(response.error || 'Unknown error')}`);
-        }
-
-        return response.data;
+        return this.validateResponse(response, 'recall');
     }
 
     /**
@@ -223,7 +229,7 @@ export class HindsightClient {
             },
         });
 
-        return response.data!;
+        return this.validateResponse(response, 'reflect');
     }
 
     /**
@@ -244,7 +250,7 @@ export class HindsightClient {
             },
         });
 
-        return response.data!;
+        return this.validateResponse(response, 'listMemories');
     }
 
     /**
@@ -264,7 +270,7 @@ export class HindsightClient {
             },
         });
 
-        return response.data!;
+        return this.validateResponse(response, 'createBank');
     }
 
     /**
@@ -276,7 +282,7 @@ export class HindsightClient {
             path: { bank_id: bankId },
         });
 
-        return response.data!;
+        return this.validateResponse(response, 'getBankProfile');
     }
 }
 
