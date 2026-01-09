@@ -1778,7 +1778,7 @@ class MemoryEngine(MemoryEngineInterface):
             await reranker_instance.ensure_initialized()
 
             # Rerank using cross-encoder
-            scored_results = reranker_instance.rerank(query, merged_candidates)
+            scored_results = await reranker_instance.rerank(query, merged_candidates)
 
             step_duration = time.time() - step_start
             log_buffer.append(f"  [4] Reranking: {len(scored_results)} candidates scored in {step_duration:.3f}s")

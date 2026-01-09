@@ -6,6 +6,7 @@ Provides an interface for reranking with different backends.
 Configuration via environment variables - see hindsight_api.config for all env var names.
 """
 
+import asyncio
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -16,10 +17,14 @@ from ..config import (
     DEFAULT_RERANKER_COHERE_MODEL,
     DEFAULT_RERANKER_LOCAL_MODEL,
     DEFAULT_RERANKER_PROVIDER,
+    DEFAULT_RERANKER_TEI_BATCH_SIZE,
+    DEFAULT_RERANKER_TEI_MAX_CONCURRENT,
     ENV_COHERE_API_KEY,
     ENV_RERANKER_COHERE_MODEL,
     ENV_RERANKER_LOCAL_MODEL,
     ENV_RERANKER_PROVIDER,
+    ENV_RERANKER_TEI_BATCH_SIZE,
+    ENV_RERANKER_TEI_MAX_CONCURRENT,
     ENV_RERANKER_TEI_URL,
 )
 
@@ -50,7 +55,7 @@ class CrossEncoderModel(ABC):
         pass
 
     @abstractmethod
-    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+    async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
         Score query-document pairs for relevance.
 
@@ -107,7 +112,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         self._model = CrossEncoder(self.model_name)
         logger.info("Reranker: local provider initialized")
 
-    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+    async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
         Score query-document pairs for relevance.
 
@@ -119,7 +124,10 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         """
         if self._model is None:
             raise RuntimeError("Reranker not initialized. Call initialize() first.")
-        scores = self._model.predict(pairs, show_progress_bar=False)
+
+        # Run CPU-bound inference in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        scores = await loop.run_in_executor(None, lambda: self._model.predict(pairs, show_progress_bar=False))
         return scores.tolist() if hasattr(scores, "tolist") else list(scores)
 
 
@@ -131,13 +139,16 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
     See: https://github.com/huggingface/text-embeddings-inference
 
     Note: The TEI server must be running a cross-encoder/reranker model.
+
+    Requests are made in parallel with configurable batch size and max concurrency (backpressure).
     """
 
     def __init__(
         self,
         base_url: str,
         timeout: float = 30.0,
-        batch_size: int = 32,
+        batch_size: int = DEFAULT_RERANKER_TEI_BATCH_SIZE,
+        max_concurrent: int = DEFAULT_RERANKER_TEI_MAX_CONCURRENT,
         max_retries: int = 3,
         retry_delay: float = 0.5,
     ):
@@ -147,79 +158,167 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
         Args:
             base_url: Base URL of the TEI server (e.g., "http://localhost:8080")
             timeout: Request timeout in seconds (default: 30.0)
-            batch_size: Maximum batch size for rerank requests (default: 32)
+            batch_size: Maximum batch size for rerank requests (default: 128)
+            max_concurrent: Maximum concurrent requests for backpressure (default: 8)
             max_retries: Maximum number of retries for failed requests (default: 3)
             retry_delay: Initial delay between retries in seconds, doubles each retry (default: 0.5)
         """
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.batch_size = batch_size
+        self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self._client: httpx.Client | None = None
+        self._async_client: httpx.AsyncClient | None = None
         self._model_id: str | None = None
 
     @property
     def provider_name(self) -> str:
         return "tei"
 
-    def _request_with_retry(self, method: str, url: str, **kwargs) -> httpx.Response:
-        """Make an HTTP request with automatic retries on transient errors."""
-        import time
-
+    async def _async_request_with_retry(
+        self,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+        method: str,
+        url: str,
+        **kwargs,
+    ) -> httpx.Response:
+        """Make an async HTTP request with automatic retries on transient errors and semaphore for backpressure."""
         last_error = None
         delay = self.retry_delay
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                if method == "GET":
-                    response = self._client.get(url, **kwargs)
-                else:
-                    response = self._client.post(url, **kwargs)
-                response.raise_for_status()
-                return response
-            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as e:
-                last_error = e
-                if attempt < self.max_retries:
-                    logger.warning(
-                        f"TEI request failed (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s..."
-                    )
-                    time.sleep(delay)
-                    delay *= 2  # Exponential backoff
-            except httpx.HTTPStatusError as e:
-                # Retry on 5xx server errors
-                if e.response.status_code >= 500 and attempt < self.max_retries:
+        async with semaphore:
+            for attempt in range(self.max_retries + 1):
+                try:
+                    if method == "GET":
+                        response = await client.get(url, **kwargs)
+                    else:
+                        response = await client.post(url, **kwargs)
+                    response.raise_for_status()
+                    return response
+                except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as e:
                     last_error = e
-                    logger.warning(
-                        f"TEI server error (attempt {attempt + 1}/{self.max_retries + 1}): {e}. Retrying in {delay}s..."
-                    )
-                    time.sleep(delay)
-                    delay *= 2
-                else:
-                    raise
+                    if attempt < self.max_retries:
+                        logger.warning(
+                            f"TEI request failed (attempt {attempt + 1}/{self.max_retries + 1}): {e}. "
+                            f"Retrying in {delay}s..."
+                        )
+                        await asyncio.sleep(delay)
+                        delay *= 2  # Exponential backoff
+                except httpx.HTTPStatusError as e:
+                    # Retry on 5xx server errors
+                    if e.response.status_code >= 500 and attempt < self.max_retries:
+                        last_error = e
+                        logger.warning(
+                            f"TEI server error (attempt {attempt + 1}/{self.max_retries + 1}): {e}. "
+                            f"Retrying in {delay}s..."
+                        )
+                        await asyncio.sleep(delay)
+                        delay *= 2
+                    else:
+                        raise
 
         raise last_error
 
     async def initialize(self) -> None:
         """Initialize the HTTP client and verify server connectivity."""
-        if self._client is not None:
+        if self._async_client is not None:
             return
 
-        logger.info(f"Reranker: initializing TEI provider at {self.base_url}")
-        self._client = httpx.Client(timeout=self.timeout)
+        logger.info(
+            f"Reranker: initializing TEI provider at {self.base_url} "
+            f"(batch_size={self.batch_size}, max_concurrent={self.max_concurrent})"
+        )
+        self._async_client = httpx.AsyncClient(timeout=self.timeout)
 
         # Verify server is reachable and get model info
+        # Use a temporary semaphore for initialization
+        init_semaphore = asyncio.Semaphore(1)
         try:
-            response = self._request_with_retry("GET", f"{self.base_url}/info")
+            response = await self._async_request_with_retry(
+                self._async_client, init_semaphore, "GET", f"{self.base_url}/info"
+            )
             info = response.json()
             self._model_id = info.get("model_id", "unknown")
             logger.info(f"Reranker: TEI provider initialized (model: {self._model_id})")
         except httpx.HTTPError as e:
+            self._async_client = None
             raise RuntimeError(f"Failed to connect to TEI server at {self.base_url}: {e}")
 
-    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+    async def _rerank_query_group(
+        self,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+        query: str,
+        texts: list[str],
+    ) -> list[tuple[int, float]]:
+        """Rerank a single query group and return list of (original_index, score) tuples."""
+        try:
+            response = await self._async_request_with_retry(
+                client,
+                semaphore,
+                "POST",
+                f"{self.base_url}/rerank",
+                json={
+                    "query": query,
+                    "texts": texts,
+                    "return_text": False,
+                },
+            )
+            results = response.json()
+            # TEI returns results sorted by score descending, with original index
+            return [(result["index"], result["score"]) for result in results]
+        except httpx.HTTPError as e:
+            raise RuntimeError(f"TEI rerank request failed: {e}")
+
+    async def _predict_async(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """Async implementation of predict that runs requests in parallel with backpressure."""
+        if not pairs:
+            return []
+
+        # Group all pairs by query
+        query_groups: dict[str, list[tuple[int, str]]] = {}
+        for idx, (query, text) in enumerate(pairs):
+            if query not in query_groups:
+                query_groups[query] = []
+            query_groups[query].append((idx, text))
+
+        # Split each query group into batches
+        tasks_info: list[tuple[str, list[int], list[str]]] = []  # (query, indices, texts)
+        for query, indexed_texts in query_groups.items():
+            indices = [idx for idx, _ in indexed_texts]
+            texts = [text for _, text in indexed_texts]
+
+            # Split into batches
+            for i in range(0, len(texts), self.batch_size):
+                batch_indices = indices[i : i + self.batch_size]
+                batch_texts = texts[i : i + self.batch_size]
+                tasks_info.append((query, batch_indices, batch_texts))
+
+        # Run all requests in parallel with semaphore for backpressure
+        all_scores = [0.0] * len(pairs)
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+
+        tasks = [
+            self._rerank_query_group(self._async_client, semaphore, query, texts)
+            for query, _, texts in tasks_info
+        ]
+        results = await asyncio.gather(*tasks)
+
+        # Map scores back to original positions
+        for (_, indices, _), result_scores in zip(tasks_info, results):
+            for original_idx_in_batch, score in result_scores:
+                global_idx = indices[original_idx_in_batch]
+                all_scores[global_idx] = score
+
+        return all_scores
+
+    async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
         Score query-document pairs using the remote TEI reranker.
+
+        Requests are made in parallel with configurable backpressure.
 
         Args:
             pairs: List of (query, document) tuples to score
@@ -227,58 +326,10 @@ class RemoteTEICrossEncoder(CrossEncoderModel):
         Returns:
             List of relevance scores
         """
-        if self._client is None:
+        if self._async_client is None:
             raise RuntimeError("Reranker not initialized. Call initialize() first.")
 
-        if not pairs:
-            return []
-
-        all_scores = []
-
-        # Process in batches
-        for i in range(0, len(pairs), self.batch_size):
-            batch = pairs[i : i + self.batch_size]
-
-            # TEI rerank endpoint expects query and texts separately
-            # All pairs in a batch should have the same query for optimal performance
-            # but we handle mixed queries by making separate requests per unique query
-            query_groups: dict[str, list[tuple[int, str]]] = {}
-            for idx, (query, text) in enumerate(batch):
-                if query not in query_groups:
-                    query_groups[query] = []
-                query_groups[query].append((idx, text))
-
-            batch_scores = [0.0] * len(batch)
-
-            for query, indexed_texts in query_groups.items():
-                texts = [text for _, text in indexed_texts]
-                indices = [idx for idx, _ in indexed_texts]
-
-                try:
-                    response = self._request_with_retry(
-                        "POST",
-                        f"{self.base_url}/rerank",
-                        json={
-                            "query": query,
-                            "texts": texts,
-                            "return_text": False,
-                        },
-                    )
-                    results = response.json()
-
-                    # TEI returns results sorted by score descending, with original index
-                    for result in results:
-                        original_idx = result["index"]
-                        score = result["score"]
-                        # Map back to batch position
-                        batch_scores[indices[original_idx]] = score
-
-                except httpx.HTTPError as e:
-                    raise RuntimeError(f"TEI rerank request failed: {e}")
-
-            all_scores.extend(batch_scores)
-
-        return all_scores
+        return await self._predict_async(pairs)
 
 
 class CohereCrossEncoder(CrossEncoderModel):
@@ -325,7 +376,7 @@ class CohereCrossEncoder(CrossEncoderModel):
         self._client = cohere.Client(api_key=self.api_key, timeout=self.timeout)
         logger.info("Reranker: Cohere provider initialized")
 
-    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+    async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
         Score query-document pairs using the Cohere Rerank API.
 
@@ -341,6 +392,12 @@ class CohereCrossEncoder(CrossEncoderModel):
         if not pairs:
             return []
 
+        # Run sync Cohere API calls in thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._predict_sync, pairs)
+
+    def _predict_sync(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """Synchronous predict implementation for Cohere API."""
         # Group pairs by query for efficient batching
         # Cohere rerank expects one query with multiple documents
         query_groups: dict[str, list[tuple[int, str]]] = {}
@@ -386,7 +443,9 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
         url = os.environ.get(ENV_RERANKER_TEI_URL)
         if not url:
             raise ValueError(f"{ENV_RERANKER_TEI_URL} is required when {ENV_RERANKER_PROVIDER} is 'tei'")
-        return RemoteTEICrossEncoder(base_url=url)
+        batch_size = int(os.environ.get(ENV_RERANKER_TEI_BATCH_SIZE, str(DEFAULT_RERANKER_TEI_BATCH_SIZE)))
+        max_concurrent = int(os.environ.get(ENV_RERANKER_TEI_MAX_CONCURRENT, str(DEFAULT_RERANKER_TEI_MAX_CONCURRENT)))
+        return RemoteTEICrossEncoder(base_url=url, batch_size=batch_size, max_concurrent=max_concurrent)
     elif provider == "local":
         model = os.environ.get(ENV_RERANKER_LOCAL_MODEL)
         model_name = model or DEFAULT_RERANKER_LOCAL_MODEL

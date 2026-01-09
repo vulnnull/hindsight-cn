@@ -514,14 +514,15 @@ class TestCohereCrossEncoder:
         """Test that Cohere cross-encoder initializes correctly."""
         assert cohere_cross_encoder.provider_name == "cohere"
 
-    def test_cohere_cross_encoder_predict(self, cohere_cross_encoder):
+    @pytest.mark.asyncio
+    async def test_cohere_cross_encoder_predict(self, cohere_cross_encoder):
         """Test that Cohere cross-encoder can score pairs."""
         pairs = [
             ("What is the capital of France?", "Paris is the capital of France."),
             ("What is the capital of France?", "The Eiffel Tower is in Paris."),
             ("What is the capital of France?", "Python is a programming language."),
         ]
-        scores = cohere_cross_encoder.predict(pairs)
+        scores = await cohere_cross_encoder.predict(pairs)
 
         assert len(scores) == 3
         assert all(isinstance(s, float) for s in scores)

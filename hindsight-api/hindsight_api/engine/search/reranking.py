@@ -44,7 +44,7 @@ class CrossEncoderReranker:
             await cross_encoder.initialize()
         self._initialized = True
 
-    def rerank(self, query: str, candidates: list[MergedCandidate]) -> list[ScoredResult]:
+    async def rerank(self, query: str, candidates: list[MergedCandidate]) -> list[ScoredResult]:
         """
         Rerank candidates using cross-encoder scores.
 
@@ -85,7 +85,7 @@ class CrossEncoderReranker:
             pairs.append([query, doc_text])
 
         # Get cross-encoder scores
-        scores = self.cross_encoder.predict(pairs)
+        scores = await self.cross_encoder.predict(pairs)
 
         # Normalize scores using sigmoid to [0, 1] range
         # Cross-encoder returns logits which can be negative

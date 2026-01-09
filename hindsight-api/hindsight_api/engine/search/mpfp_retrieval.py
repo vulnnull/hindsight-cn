@@ -288,7 +288,6 @@ class MPFPGraphRetriever(GraphRetriever):
             config: Algorithm configuration (uses defaults if None)
         """
         self.config = config or MPFPConfig()
-        self._adjacency_cache: dict[str, TypedAdjacency] = {}
 
     @property
     def name(self) -> str:

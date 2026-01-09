@@ -49,6 +49,8 @@ ENV_RERANKER_COHERE_MODEL = "HINDSIGHT_API_RERANKER_COHERE_MODEL"
 ENV_RERANKER_PROVIDER = "HINDSIGHT_API_RERANKER_PROVIDER"
 ENV_RERANKER_LOCAL_MODEL = "HINDSIGHT_API_RERANKER_LOCAL_MODEL"
 ENV_RERANKER_TEI_URL = "HINDSIGHT_API_RERANKER_TEI_URL"
+ENV_RERANKER_TEI_BATCH_SIZE = "HINDSIGHT_API_RERANKER_TEI_BATCH_SIZE"
+ENV_RERANKER_TEI_MAX_CONCURRENT = "HINDSIGHT_API_RERANKER_TEI_MAX_CONCURRENT"
 
 ENV_HOST = "HINDSIGHT_API_HOST"
 ENV_PORT = "HINDSIGHT_API_PORT"
@@ -99,6 +101,8 @@ DEFAULT_EMBEDDING_DIMENSION = 384
 
 DEFAULT_RERANKER_PROVIDER = "local"
 DEFAULT_RERANKER_LOCAL_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+DEFAULT_RERANKER_TEI_BATCH_SIZE = 128
+DEFAULT_RERANKER_TEI_MAX_CONCURRENT = 8
 
 DEFAULT_EMBEDDINGS_COHERE_MODEL = "embed-english-v3.0"
 DEFAULT_RERANKER_COHERE_MODEL = "rerank-english-v3.0"
@@ -205,6 +209,8 @@ class HindsightConfig:
     reranker_provider: str
     reranker_local_model: str
     reranker_tei_url: str | None
+    reranker_tei_batch_size: int
+    reranker_tei_max_concurrent: int
 
     # Server
     host: str
@@ -272,6 +278,10 @@ class HindsightConfig:
             reranker_provider=os.getenv(ENV_RERANKER_PROVIDER, DEFAULT_RERANKER_PROVIDER),
             reranker_local_model=os.getenv(ENV_RERANKER_LOCAL_MODEL, DEFAULT_RERANKER_LOCAL_MODEL),
             reranker_tei_url=os.getenv(ENV_RERANKER_TEI_URL),
+            reranker_tei_batch_size=int(os.getenv(ENV_RERANKER_TEI_BATCH_SIZE, str(DEFAULT_RERANKER_TEI_BATCH_SIZE))),
+            reranker_tei_max_concurrent=int(
+                os.getenv(ENV_RERANKER_TEI_MAX_CONCURRENT, str(DEFAULT_RERANKER_TEI_MAX_CONCURRENT))
+            ),
             # Server
             host=os.getenv(ENV_HOST, DEFAULT_HOST),
             port=int(os.getenv(ENV_PORT, DEFAULT_PORT)),

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { sdk, lowLevelClient } from "@/lib/hindsight-client";
+import { createClient, createConfig, sdk } from "@vectorize-io/hindsight-client";
+
+const HEALTH_CHECK_TIMEOUT_MS = 3000;
 
 export async function GET() {
   const status: {
@@ -15,19 +17,37 @@ export async function GET() {
     service: "hindsight-control-plane",
   };
 
-  // Check dataplane connectivity
+  // Check dataplane connectivity with a short timeout
   const dataplaneUrl = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || "http://localhost:8888";
   try {
-    await sdk.listBanks({ client: lowLevelClient });
-    status.dataplane = {
-      status: "connected",
-      url: dataplaneUrl,
-    };
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+
+    const healthClient = createClient(
+      createConfig({
+        baseUrl: dataplaneUrl,
+        signal: controller.signal,
+      })
+    );
+
+    try {
+      await sdk.listBanks({ client: healthClient });
+      status.dataplane = {
+        status: "connected",
+        url: dataplaneUrl,
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } catch (error) {
+    let errorMessage = error instanceof Error ? error.message : String(error);
+    if (error instanceof Error && error.name === "AbortError") {
+      errorMessage = `Request timed out after ${HEALTH_CHECK_TIMEOUT_MS}ms`;
+    }
     status.dataplane = {
       status: "disconnected",
       url: dataplaneUrl,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
     };
   }
 
