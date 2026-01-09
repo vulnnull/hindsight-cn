@@ -66,6 +66,7 @@ ENV_OBSERVATION_TOP_ENTITIES = "HINDSIGHT_API_OBSERVATION_TOP_ENTITIES"
 ENV_RETAIN_MAX_COMPLETION_TOKENS = "HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS"
 ENV_RETAIN_CHUNK_SIZE = "HINDSIGHT_API_RETAIN_CHUNK_SIZE"
 ENV_RETAIN_EXTRACT_CAUSAL_LINKS = "HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS"
+ENV_RETAIN_EXTRACTION_MODE = "HINDSIGHT_API_RETAIN_EXTRACTION_MODE"
 
 # Optimization flags
 ENV_SKIP_LLM_VERIFICATION = "HINDSIGHT_API_SKIP_LLM_VERIFICATION"
@@ -117,6 +118,8 @@ DEFAULT_OBSERVATION_TOP_ENTITIES = 5  # Max entities to process per retain batch
 DEFAULT_RETAIN_MAX_COMPLETION_TOKENS = 64000  # Max tokens for fact extraction LLM call
 DEFAULT_RETAIN_CHUNK_SIZE = 3000  # Max chars per chunk for fact extraction
 DEFAULT_RETAIN_EXTRACT_CAUSAL_LINKS = True  # Extract causal links between facts
+DEFAULT_RETAIN_EXTRACTION_MODE = "concise"  # Extraction mode: "concise" or "verbose"
+RETAIN_EXTRACTION_MODES = ("concise", "verbose")  # Allowed extraction modes
 
 # Database migrations
 DEFAULT_RUN_MIGRATIONS_ON_STARTUP = True
@@ -153,6 +156,18 @@ Use this tool PROACTIVELY to:
 
 # Default embedding dimension (used by initial migration, adjusted at runtime)
 EMBEDDING_DIMENSION = DEFAULT_EMBEDDING_DIMENSION
+
+
+def _validate_extraction_mode(mode: str) -> str:
+    """Validate and normalize extraction mode."""
+    mode_lower = mode.lower()
+    if mode_lower not in RETAIN_EXTRACTION_MODES:
+        logger.warning(
+            f"Invalid extraction mode '{mode}', must be one of {RETAIN_EXTRACTION_MODES}. "
+            f"Defaulting to '{DEFAULT_RETAIN_EXTRACTION_MODE}'."
+        )
+        return DEFAULT_RETAIN_EXTRACTION_MODE
+    return mode_lower
 
 
 @dataclass
@@ -208,6 +223,7 @@ class HindsightConfig:
     retain_max_completion_tokens: int
     retain_chunk_size: int
     retain_extract_causal_links: bool
+    retain_extraction_mode: str
 
     # Optimization flags
     skip_llm_verification: bool
@@ -280,6 +296,9 @@ class HindsightConfig:
                 ENV_RETAIN_EXTRACT_CAUSAL_LINKS, str(DEFAULT_RETAIN_EXTRACT_CAUSAL_LINKS)
             ).lower()
             == "true",
+            retain_extraction_mode=_validate_extraction_mode(
+                os.getenv(ENV_RETAIN_EXTRACTION_MODE, DEFAULT_RETAIN_EXTRACTION_MODE)
+            ),
             # Database migrations
             run_migrations_on_startup=os.getenv(ENV_RUN_MIGRATIONS_ON_STARTUP, "true").lower() == "true",
             # Database connection pool

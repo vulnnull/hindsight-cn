@@ -210,6 +210,98 @@ class FactExtractionResponse(BaseModel):
     facts: list[ExtractedFact] = Field(description="List of extracted factual statements")
 
 
+class ExtractedFactVerbose(BaseModel):
+    """A single extracted fact with verbose field descriptions for detailed extraction."""
+
+    model_config = ConfigDict(
+        json_schema_mode="validation",
+        json_schema_extra={"required": ["what", "when", "where", "who", "why", "fact_type"]},
+    )
+
+    what: str = Field(
+        description="WHAT happened - COMPLETE, DETAILED description with ALL specifics. "
+        "NEVER summarize or omit details. Include: exact actions, objects, quantities, specifics. "
+        "BE VERBOSE - capture every detail that was mentioned. "
+        "Example: 'Emily got married to Sarah at a rooftop garden ceremony with 50 guests attending and a live jazz band playing' "
+        "NOT: 'A wedding happened' or 'Emily got married'"
+    )
+
+    when: str = Field(
+        description="WHEN it happened - ALWAYS include temporal information if mentioned. "
+        "Include: specific dates, times, durations, relative time references. "
+        "Examples: 'on June 15th, 2024 at 3pm', 'last weekend', 'for the past 3 years', 'every morning at 6am'. "
+        "Write 'N/A' ONLY if absolutely no temporal context exists. Prefer converting to absolute dates when possible."
+    )
+
+    where: str = Field(
+        description="WHERE it happened or is about - SPECIFIC locations, places, areas, regions if applicable. "
+        "Include: cities, neighborhoods, venues, buildings, countries, specific addresses when mentioned. "
+        "Examples: 'downtown San Francisco at a rooftop garden venue', 'at the user's home in Brooklyn', 'online via Zoom', 'Paris, France'. "
+        "Write 'N/A' ONLY if absolutely no location context exists or if the fact is completely location-agnostic."
+    )
+
+    who: str = Field(
+        description="WHO is involved - ALL people/entities with FULL context and relationships. "
+        "Include: names, roles, relationships to user, background details. "
+        "Resolve coreferences (if 'my roommate' is later named 'Emily', write 'Emily, the user's college roommate'). "
+        "BE DETAILED about relationships and roles. "
+        "Example: 'Emily (user's college roommate from Stanford, now works at Google), Sarah (Emily's partner of 5 years, software engineer)' "
+        "NOT: 'my friend' or 'Emily and Sarah'"
+    )
+
+    why: str = Field(
+        description="WHY it matters - ALL emotional, contextual, and motivational details. "
+        "Include EVERYTHING: feelings, preferences, motivations, observations, context, background, significance. "
+        "BE VERBOSE - capture all the nuance and meaning. "
+        "FOR ASSISTANT FACTS: MUST include what the user asked/requested that led to this interaction! "
+        "Example (world): 'The user felt thrilled and inspired, has always dreamed of an outdoor ceremony, mentioned wanting a similar garden venue, was particularly moved by the intimate atmosphere and personal vows' "
+        "Example (assistant): 'User asked how to fix slow API performance with 1000+ concurrent users, expected 70-80% reduction in database load' "
+        "NOT: 'User liked it' or 'To help user'"
+    )
+
+    fact_kind: str = Field(
+        default="conversation",
+        description="'event' = specific datable occurrence (set occurred dates), 'conversation' = general info (no occurred dates)",
+    )
+
+    occurred_start: str | None = Field(
+        default=None,
+        description="WHEN the event happened (ISO timestamp). Only for fact_kind='event'. Leave null for conversations.",
+    )
+    occurred_end: str | None = Field(
+        default=None,
+        description="WHEN the event ended (ISO timestamp). Only for events with duration. Leave null for conversations.",
+    )
+
+    fact_type: Literal["world", "assistant"] = Field(
+        description="'world' = about the user/others (background, experiences). 'assistant' = experience with the assistant."
+    )
+
+    entities: list[Entity] | None = Field(
+        default=None,
+        description="Named entities, objects, AND abstract concepts from the fact. Include: people names, organizations, places, significant objects (e.g., 'coffee maker', 'car'), AND abstract concepts/themes (e.g., 'friendship', 'career growth', 'loss', 'celebration'). Extract anything that could help link related facts together.",
+    )
+
+    causal_relations: list[FactCausalRelation] | None = Field(
+        default=None,
+        description="Causal links to PREVIOUS facts only. target_index MUST be less than this fact's position. "
+        "Example: fact #3 can only reference facts 0, 1, or 2. Max 2 relations per fact.",
+    )
+
+    @field_validator("entities", mode="before")
+    @classmethod
+    def ensure_entities_list(cls, v):
+        if v is None:
+            return []
+        return v
+
+
+class FactExtractionResponseVerbose(BaseModel):
+    """Response for verbose fact extraction."""
+
+    facts: list[ExtractedFactVerbose] = Field(description="List of extracted factual statements")
+
+
 class ExtractedFactNoCausal(BaseModel):
     """A single extracted fact WITHOUT causal relations (for when causal extraction is disabled)."""
 
@@ -342,35 +434,12 @@ def _chunk_conversation(turns: list[dict], max_chars: int) -> list[str]:
     return chunks if chunks else [json.dumps(turns, ensure_ascii=False)]
 
 
-async def _extract_facts_from_chunk(
-    chunk: str,
-    chunk_index: int,
-    total_chunks: int,
-    event_date: datetime,
-    context: str,
-    llm_config: "LLMConfig",
-    agent_name: str = None,
-    extract_opinions: bool = False,
-) -> tuple[list[dict[str, str]], TokenUsage]:
-    """
-    Extract facts from a single chunk (internal helper for parallel processing).
+# =============================================================================
+# FACT EXTRACTION PROMPTS
+# =============================================================================
 
-    Note: event_date parameter is kept for backward compatibility but not used in prompt.
-    The LLM extracts temporal information from the context string instead.
-    """
-    memory_bank_context = f"\n- Your name: {agent_name}" if agent_name and extract_opinions else ""
-
-    # Determine which fact types to extract based on the flag
-    # Note: We use "assistant" in the prompt but convert to "bank" for storage
-    if extract_opinions:
-        # Opinion extraction uses a separate prompt (not this one)
-        fact_types_instruction = "Extract ONLY 'opinion' type facts (formed opinions, beliefs, and perspectives). DO NOT extract 'world' or 'assistant' facts."
-    else:
-        fact_types_instruction = (
-            "Extract ONLY 'world' and 'assistant' type facts. DO NOT extract opinions - those are extracted separately."
-        )
-
-    prompt = f"""Extract SIGNIFICANT facts from text. Be SELECTIVE - only extract facts worth remembering long-term.
+# Concise extraction prompt (default) - selective, high-quality facts
+CONCISE_FACT_EXTRACTION_PROMPT = """Extract SIGNIFICANT facts from text. Be SELECTIVE - only extract facts worth remembering long-term.
 
 LANGUAGE RULE (CRITICAL): Output facts in the EXACT SAME language as the input text. If input is Japanese, output Japanese. If input is Chinese, output Chinese. NEVER translate to English. Preserve original language completely.
 
@@ -470,8 +539,123 @@ QUALITY OVER QUANTITY
 
 Ask: "Would this be useful to recall in 6 months?" If no, skip it."""
 
-    # Causal relationships section - only included if enabled in config
-    causal_relationships_section = """
+
+# Verbose extraction prompt - detailed, comprehensive facts (legacy mode)
+VERBOSE_FACT_EXTRACTION_PROMPT = """Extract facts from text into structured format with FIVE required dimensions - BE EXTREMELY DETAILED.
+
+LANGUAGE REQUIREMENT: Detect the language of the input text. All extracted facts, entity names, descriptions,
+and other output MUST be in the SAME language as the input. Do not translate to English if the input is in another language.
+
+{fact_types_instruction}
+
+══════════════════════════════════════════════════════════════════════════
+FACT FORMAT - ALL FIVE DIMENSIONS REQUIRED - MAXIMUM VERBOSITY
+══════════════════════════════════════════════════════════════════════════
+
+For EACH fact, CAPTURE ALL DETAILS - NEVER SUMMARIZE OR OMIT:
+
+1. **what**: WHAT happened - COMPLETE description with ALL specifics (objects, actions, quantities, details)
+2. **when**: WHEN it happened - ALWAYS include temporal info with DAY OF WEEK (e.g., "Monday, June 10, 2024")
+   - Always include the day name: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday
+   - Format: "day_name, month day, year" (e.g., "Saturday, June 9, 2024")
+3. **where**: WHERE it happened or is about - SPECIFIC locations, places, areas, regions (if applicable)
+4. **who**: WHO is involved - ALL people/entities with FULL relationships and background
+5. **why**: WHY it matters - ALL emotions, preferences, motivations, significance, nuance
+   - For assistant facts: MUST include what the user asked/requested that triggered this!
+
+Plus: fact_type, fact_kind, entities, occurred_start/end (for structured dates), where (structured location)
+
+VERBOSITY REQUIREMENT: Include EVERY detail mentioned. More detail is ALWAYS better than less.
+
+══════════════════════════════════════════════════════════════════════════
+COREFERENCE RESOLUTION (CRITICAL)
+══════════════════════════════════════════════════════════════════════════
+
+When text uses BOTH a generic relation AND a name for the same person → LINK THEM!
+
+Example input: "I went to my college roommate's wedding last June. Emily finally married Sarah after 5 years together."
+
+CORRECT output:
+- what: "Emily got married to Sarah at a rooftop garden ceremony"
+- when: "Saturday, June 8, 2024, after dating for 5 years"
+- where: "downtown San Francisco, at a rooftop garden venue"
+- who: "Emily (user's college roommate), Sarah (Emily's partner of 5 years)"
+- why: "User found it romantic and beautiful, dreams of similar outdoor ceremony"
+- where (structured): "San Francisco"
+
+WRONG output:
+- what: "User's roommate got married" ← LOSES THE NAME!
+- who: "the roommate" ← WRONG - use the actual name!
+- where: (missing) ← WRONG - include the location!
+
+══════════════════════════════════════════════════════════════════════════
+FACT_KIND CLASSIFICATION (CRITICAL FOR TEMPORAL HANDLING)
+══════════════════════════════════════════════════════════════════════════
+
+⚠️ MUST set fact_kind correctly - this determines whether occurred_start/end are set!
+
+fact_kind="event" - USE FOR:
+- Actions that happened at a specific time: "went to", "attended", "visited", "bought", "made"
+- Past events: "yesterday I...", "last week...", "in March 2020..."
+- Future plans with dates: "will go to", "scheduled for"
+- Examples: "I went to a pottery workshop" → event
+           "Alice visited Paris in February" → event
+           "I bought a new car yesterday" → event
+           "The user graduated from MIT in March 2020" → event
+
+fact_kind="conversation" - USE FOR:
+- Ongoing states: "works as", "lives in", "is married to"
+- Preferences: "loves", "prefers", "enjoys"
+- Traits/abilities: "speaks fluent French", "knows Python"
+- Examples: "I love Italian food" → conversation
+           "Alice works at Google" → conversation
+           "I prefer outdoor dining" → conversation
+
+══════════════════════════════════════════════════════════════════════════
+TEMPORAL HANDLING (CRITICAL - USE EVENT DATE AS REFERENCE)
+══════════════════════════════════════════════════════════════════════════
+
+⚠️ IMPORTANT: Use the "Event Date" provided in the input as your reference point!
+All relative dates ("yesterday", "last week", "recently") must be resolved relative to the Event Date, NOT today's date.
+
+For EVENTS (fact_kind="event") - MUST SET BOTH occurred_start AND occurred_end:
+- Convert relative dates → absolute using Event Date as reference
+- If Event Date is "Saturday, March 15, 2020", then "yesterday" = Friday, March 14, 2020
+- Dates mentioned in text (e.g., "in March 2020") should use THAT year, not current year
+- Always include the day name (Monday, Tuesday, etc.) in the 'when' field
+- Set occurred_start AND occurred_end to WHEN IT HAPPENED (not when mentioned)
+- For single-day/point events: set occurred_end = occurred_start (same timestamp)
+
+For CONVERSATIONS (fact_kind="conversation"):
+- General info, preferences, ongoing states → NO occurred dates
+- Examples: "loves coffee", "works as engineer"
+
+══════════════════════════════════════════════════════════════════════════
+FACT TYPE
+══════════════════════════════════════════════════════════════════════════
+
+- **world**: User's life, other people, events (would exist without this conversation)
+- **assistant**: Interactions with assistant (requests, recommendations, help)
+  ⚠️ CRITICAL for assistant facts: ALWAYS capture the user's request/question in the fact!
+  Include: what the user asked, what problem they wanted solved, what context they provided
+
+══════════════════════════════════════════════════════════════════════════
+ENTITIES - EXTRACT EVERYTHING
+══════════════════════════════════════════════════════════════════════════
+
+Extract ALL of the following from the fact:
+- People names (Emily, Alice, Dr. Smith)
+- Organizations (Google, MIT, local coffee shop)
+- Places (San Francisco, Brooklyn, Paris)
+- Significant objects mentioned (coffee maker, new car, wedding dress)
+- Abstract concepts/themes (friendship, career growth, loss, celebration)
+
+ALWAYS include "user" when fact is about the user.
+Extract anything that could help link related facts together."""
+
+
+# Causal relationships section - appended when causal extraction is enabled
+CAUSAL_RELATIONSHIPS_SECTION = """
 
 ══════════════════════════════════════════════════════════════════════════
 CAUSAL RELATIONSHIPS
@@ -485,14 +669,57 @@ Example: "Lost job → couldn't pay rent → moved apartment"
 - Fact 1: Couldn't pay rent, causal_relations: [{target_index: 0, relation_type: "caused_by"}]
 - Fact 2: Moved apartment, causal_relations: [{target_index: 1, relation_type: "caused_by"}]"""
 
-    # Check config for causal link extraction
+
+async def _extract_facts_from_chunk(
+    chunk: str,
+    chunk_index: int,
+    total_chunks: int,
+    event_date: datetime,
+    context: str,
+    llm_config: "LLMConfig",
+    agent_name: str = None,
+    extract_opinions: bool = False,
+) -> tuple[list[dict[str, str]], TokenUsage]:
+    """
+    Extract facts from a single chunk (internal helper for parallel processing).
+
+    Note: event_date parameter is kept for backward compatibility but not used in prompt.
+    The LLM extracts temporal information from the context string instead.
+    """
+    memory_bank_context = f"\n- Your name: {agent_name}" if agent_name and extract_opinions else ""
+
+    # Determine which fact types to extract based on the flag
+    # Note: We use "assistant" in the prompt but convert to "bank" for storage
+    if extract_opinions:
+        # Opinion extraction uses a separate prompt (not this one)
+        fact_types_instruction = "Extract ONLY 'opinion' type facts (formed opinions, beliefs, and perspectives). DO NOT extract 'world' or 'assistant' facts."
+    else:
+        fact_types_instruction = (
+            "Extract ONLY 'world' and 'assistant' type facts. DO NOT extract opinions - those are extracted separately."
+        )
+
+    # Check config for extraction mode and causal link extraction
     config = get_config()
+    extraction_mode = config.retain_extraction_mode
     extract_causal_links = config.retain_extract_causal_links
 
+    # Select base prompt based on extraction mode
+    if extraction_mode == "verbose":
+        base_prompt = VERBOSE_FACT_EXTRACTION_PROMPT
+    else:
+        base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
+
+    # Format the prompt with fact types instruction
+    prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
+
     # Build the full prompt with or without causal relationships section
+    # Select appropriate response schema based on extraction mode and causal links
     if extract_causal_links:
-        prompt = prompt + causal_relationships_section
-        response_schema = FactExtractionResponse
+        prompt = prompt + CAUSAL_RELATIONSHIPS_SECTION
+        if extraction_mode == "verbose":
+            response_schema = FactExtractionResponseVerbose
+        else:
+            response_schema = FactExtractionResponse
     else:
         response_schema = FactExtractionResponseNoCausal
 
@@ -898,7 +1125,7 @@ async def extract_facts_from_text(
     # Log chunk count before starting LLM requests
     total_chars = sum(len(c) for c in chunks)
     if len(chunks) > 1:
-        logger.info(
+        logger.debug(
             f"[FACT_EXTRACTION] Text chunked into {len(chunks)} chunks ({total_chars:,} chars total, "
             f"chunk_size={config.retain_chunk_size:,}) - starting parallel LLM extraction"
         )
