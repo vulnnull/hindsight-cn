@@ -16,7 +16,7 @@ pub fn list(
         None
     };
 
-    let response = client.list_entities(bank_id, Some(limit), verbose)?;
+    let response = client.list_entities(bank_id, Some(limit), None, verbose)?;
 
     if let Some(mut sp) = spinner {
         sp.finish();

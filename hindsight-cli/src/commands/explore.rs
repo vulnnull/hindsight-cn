@@ -283,7 +283,7 @@ impl App {
     }
 
     fn load_entities(&mut self, bank_id: &str) -> Result<()> {
-        let response = self.client.list_entities(bank_id, Some(100), false)?;
+        let response = self.client.list_entities(bank_id, Some(100), None, false)?;
         self.entities = response.items;
 
         if !self.entities.is_empty() && self.entities_state.selected().is_none() {

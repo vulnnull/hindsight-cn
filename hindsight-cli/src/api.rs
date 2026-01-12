@@ -241,9 +241,9 @@ impl ApiClient {
         })
     }
 
-    pub fn list_entities(&self, bank_id: &str, limit: Option<i64>, _verbose: bool) -> Result<types::EntityListResponse> {
+    pub fn list_entities(&self, bank_id: &str, limit: Option<i64>, offset: Option<i64>, _verbose: bool) -> Result<types::EntityListResponse> {
         self.runtime.block_on(async {
-            let response = self.client.list_entities(bank_id, limit, None).await?;
+            let response = self.client.list_entities(bank_id, limit, offset, None).await?;
             Ok(response.into_inner())
         })
     }
