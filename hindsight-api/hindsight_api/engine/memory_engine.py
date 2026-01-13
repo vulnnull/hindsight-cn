@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..config import get_config
 from ..metrics import get_metrics_collector
+from .db_budget import budgeted_operation
 
 # Context variable for current schema (async-safe, per-task isolation)
 _current_schema: contextvars.ContextVar[str] = contextvars.ContextVar("current_schema", default="public")
@@ -1609,38 +1610,40 @@ class MemoryEngine(MemoryEngineInterface):
                 tracer.record_query_embedding(query_embedding)
                 tracer.add_phase_metric("generate_query_embedding", step_duration)
 
-            # Step 2: N*4-Way Parallel Retrieval (N fact types × 4 retrieval methods)
+            # Step 2: Optimized parallel retrieval using batched queries
+            # - Semantic + BM25 combined in 1 CTE query for ALL fact types
+            # - Graph runs per fact type (complex traversal)
+            # - Temporal runs per fact type (if constraint detected)
             step_start = time.time()
             query_embedding_str = str(query_embedding)
 
-            from .search.retrieval import get_default_graph_retriever, retrieve_parallel
+            from .search.retrieval import (
+                get_default_graph_retriever,
+                retrieve_all_fact_types_parallel,
+            )
 
             # Track each retrieval start time
             retrieval_start = time.time()
 
-            # Temporal extraction now runs IN PARALLEL with other retrievals inside retrieve_parallel
-            # This prevents slow dateparser from blocking semantic/BM25/graph retrieval
-            tc_duration = 0.0  # Will be tracked inside temporal retrieval timing
-
-            # Run retrieval for each fact type in parallel
-            # Each retrieve_parallel uses ~4 connections, so 3 fact types = ~12 concurrent connections
-            retrieval_tasks = [
-                retrieve_parallel(
-                    pool,
+            # Run optimized retrieval with connection budget
+            config = get_config()
+            async with budgeted_operation(
+                max_connections=config.recall_connection_budget,
+                operation_id=f"recall-{recall_id}",
+            ) as op:
+                budgeted_pool = op.wrap_pool(pool)
+                parallel_start = time.time()
+                multi_result = await retrieve_all_fact_types_parallel(
+                    budgeted_pool,
                     query,
                     query_embedding_str,
                     bank_id,
-                    ft,
+                    fact_type,  # Pass all fact types at once
                     thinking_budget,
                     question_date,
                     self.query_analyzer,
-                    temporal_constraint=None,  # Extracted in parallel inside retrieve_parallel
                 )
-                for ft in fact_type
-            ]
-            parallel_start = time.time()
-            all_retrievals = await asyncio.gather(*retrieval_tasks)
-            parallel_duration = time.time() - parallel_start
+                parallel_duration = time.time() - parallel_start
 
             # Combine all results from all fact types and aggregate timings
             semantic_results = []
@@ -1657,12 +1660,15 @@ class MemoryEngine(MemoryEngineInterface):
             all_mpfp_timings = []
 
             detected_temporal_constraint = None
-            max_conn_wait = 0.0
-            for idx, retrieval_result in enumerate(all_retrievals):
+            max_conn_wait = multi_result.max_conn_wait
+            for ft in fact_type:
+                retrieval_result = multi_result.results_by_fact_type.get(ft)
+                if not retrieval_result:
+                    continue
+
                 # Log fact types in this retrieval batch
-                ft_name = fact_type[idx] if idx < len(fact_type) else "unknown"
                 logger.debug(
-                    f"[RECALL {recall_id}] Fact type '{ft_name}': semantic={len(retrieval_result.semantic)}, bm25={len(retrieval_result.bm25)}, graph={len(retrieval_result.graph)}, temporal={len(retrieval_result.temporal) if retrieval_result.temporal else 0}"
+                    f"[RECALL {recall_id}] Fact type '{ft}': semantic={len(retrieval_result.semantic)}, bm25={len(retrieval_result.bm25)}, graph={len(retrieval_result.graph)}, temporal={len(retrieval_result.temporal) if retrieval_result.temporal else 0}"
                 )
 
                 semantic_results.extend(retrieval_result.semantic)
@@ -1678,8 +1684,6 @@ class MemoryEngine(MemoryEngineInterface):
                     detected_temporal_constraint = retrieval_result.temporal_constraint
                 # Collect MPFP timings
                 all_mpfp_timings.extend(retrieval_result.mpfp_timings)
-                # Track max connection wait
-                max_conn_wait = max(max_conn_wait, retrieval_result.max_conn_wait)
 
             # If no temporal results from any fact type, set to None
             if not temporal_results:
@@ -1711,10 +1715,8 @@ class MemoryEngine(MemoryEngineInterface):
                 temporal_count = len(temporal_results) if temporal_results else 0
                 timing_parts.append(f"temporal={temporal_count}({aggregated_timings['temporal']:.3f}s)")
                 temporal_info = f" | temporal_range={start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}"
-            # Only tc is sequential setup now (adjacency loads in parallel with retrieval)
-            setup_info = f", tc={tc_duration:.3f}s" if tc_duration > 0.01 else ""
             log_buffer.append(
-                f"  [2] Parallel retrieval ({len(fact_type)} fact_types): {', '.join(timing_parts)} in {parallel_duration:.3f}s{setup_info}{temporal_info}"
+                f"  [2] Parallel retrieval ({len(fact_type)} fact_types): {', '.join(timing_parts)} in {parallel_duration:.3f}s{temporal_info}"
             )
 
             # Log graph retriever timing breakdown if available
@@ -1751,8 +1753,10 @@ class MemoryEngine(MemoryEngineInterface):
                     return [(r.id, r.__dict__) for r in results]
 
                 # Add retrieval results per fact type (to show parallel execution in UI)
-                for idx, rr in enumerate(all_retrievals):
-                    ft_name = fact_type[idx] if idx < len(fact_type) else "unknown"
+                for ft_name in fact_type:
+                    rr = multi_result.results_by_fact_type.get(ft_name)
+                    if not rr:
+                        continue
 
                     # Add semantic retrieval results for this fact type
                     tracer.add_retrieval_results(

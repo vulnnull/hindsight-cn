@@ -200,6 +200,7 @@ def main():
             graph_retriever=config.graph_retriever,
             mpfp_top_k_neighbors=config.mpfp_top_k_neighbors,
             recall_max_concurrent=config.recall_max_concurrent,
+            recall_connection_budget=config.recall_connection_budget,
             observation_min_facts=config.observation_min_facts,
             observation_top_entities=config.observation_top_entities,
             retain_max_completion_tokens=config.retain_max_completion_tokens,

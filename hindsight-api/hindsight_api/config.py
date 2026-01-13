@@ -64,6 +64,7 @@ ENV_MCP_ENABLED = "HINDSIGHT_API_MCP_ENABLED"
 ENV_GRAPH_RETRIEVER = "HINDSIGHT_API_GRAPH_RETRIEVER"
 ENV_MPFP_TOP_K_NEIGHBORS = "HINDSIGHT_API_MPFP_TOP_K_NEIGHBORS"
 ENV_RECALL_MAX_CONCURRENT = "HINDSIGHT_API_RECALL_MAX_CONCURRENT"
+ENV_RECALL_CONNECTION_BUDGET = "HINDSIGHT_API_RECALL_CONNECTION_BUDGET"
 ENV_MCP_LOCAL_BANK_ID = "HINDSIGHT_API_MCP_LOCAL_BANK_ID"
 ENV_MCP_INSTRUCTIONS = "HINDSIGHT_API_MCP_INSTRUCTIONS"
 
@@ -128,6 +129,7 @@ DEFAULT_MCP_ENABLED = True
 DEFAULT_GRAPH_RETRIEVER = "link_expansion"  # Options: "link_expansion", "mpfp", "bfs"
 DEFAULT_MPFP_TOP_K_NEIGHBORS = 20  # Fan-out limit per node in MPFP graph traversal
 DEFAULT_RECALL_MAX_CONCURRENT = 32  # Max concurrent recall operations per worker
+DEFAULT_RECALL_CONNECTION_BUDGET = 4  # Max concurrent DB connections per recall operation
 DEFAULT_MCP_LOCAL_BANK_ID = "mcp"
 
 # Observation thresholds
@@ -241,6 +243,7 @@ class HindsightConfig:
     graph_retriever: str
     mpfp_top_k_neighbors: int
     recall_max_concurrent: int
+    recall_connection_budget: int
 
     # Observation thresholds
     observation_min_facts: int
@@ -315,6 +318,9 @@ class HindsightConfig:
             graph_retriever=os.getenv(ENV_GRAPH_RETRIEVER, DEFAULT_GRAPH_RETRIEVER),
             mpfp_top_k_neighbors=int(os.getenv(ENV_MPFP_TOP_K_NEIGHBORS, str(DEFAULT_MPFP_TOP_K_NEIGHBORS))),
             recall_max_concurrent=int(os.getenv(ENV_RECALL_MAX_CONCURRENT, str(DEFAULT_RECALL_MAX_CONCURRENT))),
+            recall_connection_budget=int(
+                os.getenv(ENV_RECALL_CONNECTION_BUDGET, str(DEFAULT_RECALL_CONNECTION_BUDGET))
+            ),
             # Optimization flags
             skip_llm_verification=os.getenv(ENV_SKIP_LLM_VERIFICATION, "false").lower() == "true",
             lazy_reranker=os.getenv(ENV_LAZY_RERANKER, "false").lower() == "true",
