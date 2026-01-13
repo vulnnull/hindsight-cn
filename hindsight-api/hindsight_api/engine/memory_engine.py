@@ -3783,7 +3783,7 @@ Guidelines:
                 SELECT id, canonical_name, mention_count, first_seen, last_seen, metadata
                 FROM {fq_table("entities")}
                 WHERE bank_id = $1
-                ORDER BY mention_count DESC, last_seen DESC
+                ORDER BY mention_count DESC, last_seen DESC, id ASC
                 LIMIT $2 OFFSET $3
                 """,
                 bank_id,
