@@ -17,18 +17,23 @@ import httpx
 
 from ..config import (
     DEFAULT_EMBEDDINGS_COHERE_MODEL,
+    DEFAULT_EMBEDDINGS_LITELLM_MODEL,
     DEFAULT_EMBEDDINGS_LOCAL_MODEL,
     DEFAULT_EMBEDDINGS_OPENAI_MODEL,
     DEFAULT_EMBEDDINGS_PROVIDER,
+    DEFAULT_LITELLM_API_BASE,
     ENV_COHERE_API_KEY,
     ENV_EMBEDDINGS_COHERE_BASE_URL,
     ENV_EMBEDDINGS_COHERE_MODEL,
+    ENV_EMBEDDINGS_LITELLM_MODEL,
     ENV_EMBEDDINGS_LOCAL_MODEL,
     ENV_EMBEDDINGS_OPENAI_API_KEY,
     ENV_EMBEDDINGS_OPENAI_BASE_URL,
     ENV_EMBEDDINGS_OPENAI_MODEL,
     ENV_EMBEDDINGS_PROVIDER,
     ENV_EMBEDDINGS_TEI_URL,
+    ENV_LITELLM_API_BASE,
+    ENV_LITELLM_API_KEY,
     ENV_LLM_API_KEY,
 )
 
@@ -549,6 +554,123 @@ class CohereEmbeddings(Embeddings):
         return all_embeddings
 
 
+class LiteLLMEmbeddings(Embeddings):
+    """
+    LiteLLM embeddings implementation using LiteLLM proxy's /embeddings endpoint.
+
+    LiteLLM provides a unified interface for multiple embedding providers.
+    The proxy exposes an OpenAI-compatible /embeddings endpoint.
+    See: https://docs.litellm.ai/docs/embedding/supported_embedding
+
+    Supported providers via LiteLLM:
+    - OpenAI (text-embedding-3-small, text-embedding-ada-002, etc.)
+    - Cohere (embed-english-v3.0, etc.) - prefix with cohere/
+    - Vertex AI (textembedding-gecko, etc.) - prefix with vertex_ai/
+    - HuggingFace, Mistral, Voyage AI, etc.
+
+    The embedding dimension is auto-detected from the model at initialization.
+    """
+
+    def __init__(
+        self,
+        api_base: str = DEFAULT_LITELLM_API_BASE,
+        api_key: str | None = None,
+        model: str = DEFAULT_EMBEDDINGS_LITELLM_MODEL,
+        batch_size: int = 100,
+        timeout: float = 60.0,
+    ):
+        """
+        Initialize LiteLLM embeddings client.
+
+        Args:
+            api_base: Base URL of the LiteLLM proxy (default: http://localhost:4000)
+            api_key: API key for the LiteLLM proxy (optional, depends on proxy config)
+            model: Embedding model name (default: text-embedding-3-small)
+                   Use provider prefix for non-OpenAI models (e.g., cohere/embed-english-v3.0)
+            batch_size: Maximum batch size for embedding requests (default: 100)
+            timeout: Request timeout in seconds (default: 60.0)
+        """
+        self.api_base = api_base.rstrip("/")
+        self.api_key = api_key
+        self.model = model
+        self.batch_size = batch_size
+        self.timeout = timeout
+        self._client: httpx.Client | None = None
+        self._dimension: int | None = None
+
+    @property
+    def provider_name(self) -> str:
+        return "litellm"
+
+    @property
+    def dimension(self) -> int:
+        if self._dimension is None:
+            raise RuntimeError("Embeddings not initialized. Call initialize() first.")
+        return self._dimension
+
+    async def initialize(self) -> None:
+        """Initialize the HTTP client and detect embedding dimension."""
+        if self._client is not None:
+            return
+
+        logger.info(f"Embeddings: initializing LiteLLM provider at {self.api_base} with model {self.model}")
+
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        self._client = httpx.Client(timeout=self.timeout, headers=headers)
+
+        # Do a test embedding to detect dimension
+        try:
+            response = self._client.post(
+                f"{self.api_base}/embeddings",
+                json={"model": self.model, "input": ["test"]},
+            )
+            response.raise_for_status()
+            result = response.json()
+            if result.get("data") and len(result["data"]) > 0:
+                self._dimension = len(result["data"][0]["embedding"])
+            logger.info(f"Embeddings: LiteLLM provider initialized (model: {self.model}, dim: {self._dimension})")
+        except httpx.HTTPError as e:
+            raise RuntimeError(f"Failed to connect to LiteLLM proxy at {self.api_base}: {e}")
+
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        """
+        Generate embeddings using the LiteLLM proxy.
+
+        Args:
+            texts: List of text strings to encode
+
+        Returns:
+            List of embedding vectors
+        """
+        if self._client is None:
+            raise RuntimeError("Embeddings not initialized. Call initialize() first.")
+
+        if not texts:
+            return []
+
+        all_embeddings = []
+
+        # Process in batches
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i : i + self.batch_size]
+
+            response = self._client.post(
+                f"{self.api_base}/embeddings",
+                json={"model": self.model, "input": batch},
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            # Sort by index to ensure correct order
+            batch_embeddings = sorted(result["data"], key=lambda x: x["index"])
+            all_embeddings.extend([e["embedding"] for e in batch_embeddings])
+
+        return all_embeddings
+
+
 def create_embeddings_from_env() -> Embeddings:
     """
     Create an Embeddings instance based on environment variables.
@@ -587,5 +709,12 @@ def create_embeddings_from_env() -> Embeddings:
         model = os.environ.get(ENV_EMBEDDINGS_COHERE_MODEL, DEFAULT_EMBEDDINGS_COHERE_MODEL)
         base_url = os.environ.get(ENV_EMBEDDINGS_COHERE_BASE_URL) or None
         return CohereEmbeddings(api_key=api_key, model=model, base_url=base_url)
+    elif provider == "litellm":
+        api_base = os.environ.get(ENV_LITELLM_API_BASE, DEFAULT_LITELLM_API_BASE)
+        api_key = os.environ.get(ENV_LITELLM_API_KEY)
+        model = os.environ.get(ENV_EMBEDDINGS_LITELLM_MODEL, DEFAULT_EMBEDDINGS_LITELLM_MODEL)
+        return LiteLLMEmbeddings(api_base=api_base, api_key=api_key, model=model)
     else:
-        raise ValueError(f"Unknown embeddings provider: {provider}. Supported: 'local', 'tei', 'openai', 'cohere'")
+        raise ValueError(
+            f"Unknown embeddings provider: {provider}. Supported: 'local', 'tei', 'openai', 'cohere', 'litellm'"
+        )

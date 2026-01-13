@@ -139,7 +139,7 @@ export HINDSIGHT_API_REFLECT_LLM_MODEL=llama-3.3-70b-versatile
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local`, `tei`, `openai`, or `cohere` | `local` |
+| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local`, `tei`, `openai`, `cohere`, or `litellm` | `local` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL` | Model for local provider | `BAAI/bge-small-en-v1.5` |
 | `HINDSIGHT_API_EMBEDDINGS_TEI_URL` | TEI server URL | - |
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY` | OpenAI API key (falls back to `HINDSIGHT_API_LLM_API_KEY`) | - |
@@ -148,6 +148,9 @@ export HINDSIGHT_API_REFLECT_LLM_MODEL=llama-3.3-70b-versatile
 | `HINDSIGHT_API_COHERE_API_KEY` | Cohere API key (shared for embeddings and reranker) | - |
 | `HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL` | Cohere embedding model | `embed-english-v3.0` |
 | `HINDSIGHT_API_EMBEDDINGS_COHERE_BASE_URL` | Custom base URL for Cohere-compatible API (e.g., Azure-hosted) | - |
+| `HINDSIGHT_API_LITELLM_API_BASE` | LiteLLM proxy base URL (shared for embeddings and reranker) | `http://localhost:4000` |
+| `HINDSIGHT_API_LITELLM_API_KEY` | LiteLLM proxy API key (optional, depends on proxy config) | - |
+| `HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL` | LiteLLM embedding model (use provider prefix, e.g., `cohere/embed-english-v3.0`) | `text-embedding-3-small` |
 
 ```bash
 # Local (default) - uses SentenceTransformers
@@ -179,6 +182,12 @@ export HINDSIGHT_API_EMBEDDINGS_PROVIDER=cohere
 export HINDSIGHT_API_COHERE_API_KEY=your-azure-api-key
 export HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL=embed-english-v3.0
 export HINDSIGHT_API_EMBEDDINGS_COHERE_BASE_URL=https://your-azure-cohere-endpoint.com
+
+# LiteLLM proxy - unified gateway for multiple providers
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=litellm
+export HINDSIGHT_API_LITELLM_API_BASE=http://localhost:4000
+export HINDSIGHT_API_LITELLM_API_KEY=your-litellm-key  # optional
+export HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL=text-embedding-3-small  # or cohere/embed-english-v3.0
 ```
 
 #### Embedding Dimensions
@@ -201,7 +210,7 @@ Supported OpenAI embedding dimensions:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, or `cohere` | `local` |
+| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, `cohere`, `flashrank`, `litellm`, or `rrf` | `local` |
 | `HINDSIGHT_API_RERANKER_LOCAL_MODEL` | Model for local provider | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `HINDSIGHT_API_RERANKER_LOCAL_MAX_CONCURRENT` | Max concurrent local reranking (prevents CPU thrashing under load) | `4` |
 | `HINDSIGHT_API_RERANKER_TEI_URL` | TEI server URL | - |
@@ -209,6 +218,7 @@ Supported OpenAI embedding dimensions:
 | `HINDSIGHT_API_RERANKER_TEI_MAX_CONCURRENT` | Max concurrent TEI reranking requests | `8` |
 | `HINDSIGHT_API_RERANKER_COHERE_MODEL` | Cohere rerank model | `rerank-english-v3.0` |
 | `HINDSIGHT_API_RERANKER_COHERE_BASE_URL` | Custom base URL for Cohere-compatible API (e.g., Azure-hosted) | - |
+| `HINDSIGHT_API_RERANKER_LITELLM_MODEL` | LiteLLM rerank model (use provider prefix, e.g., `cohere/rerank-english-v3.0`) | `cohere/rerank-english-v3.0` |
 
 ```bash
 # Local (default) - uses SentenceTransformers CrossEncoder
@@ -229,7 +239,20 @@ export HINDSIGHT_API_RERANKER_PROVIDER=cohere
 export HINDSIGHT_API_COHERE_API_KEY=your-azure-api-key
 export HINDSIGHT_API_RERANKER_COHERE_MODEL=rerank-english-v3.0
 export HINDSIGHT_API_RERANKER_COHERE_BASE_URL=https://your-azure-cohere-endpoint.com
+
+# LiteLLM proxy - unified gateway for multiple reranking providers
+export HINDSIGHT_API_RERANKER_PROVIDER=litellm
+export HINDSIGHT_API_LITELLM_API_BASE=http://localhost:4000
+export HINDSIGHT_API_LITELLM_API_KEY=your-litellm-key  # optional
+export HINDSIGHT_API_RERANKER_LITELLM_MODEL=cohere/rerank-english-v3.0  # or voyage/rerank-2, together_ai/...
 ```
+
+LiteLLM supports multiple reranking providers via the `/rerank` endpoint:
+- Cohere (`cohere/rerank-english-v3.0`, `cohere/rerank-multilingual-v3.0`)
+- Together AI (`together_ai/...`)
+- Voyage AI (`voyage/rerank-2`)
+- Jina AI (`jina_ai/...`)
+- AWS Bedrock (`bedrock/...`)
 
 ### Authentication
 
