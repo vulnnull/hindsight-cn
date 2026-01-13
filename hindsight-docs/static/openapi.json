@@ -249,6 +249,72 @@
         }
       }
     },
+    "/v1/default/banks/{bank_id}/memories/{memory_id}": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "Get memory unit",
+        "description": "Get a single memory unit by ID with all its metadata including entities and tags.",
+        "operationId": "get_memory",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/default/banks/{bank_id}/memories/recall": {
       "post": {
         "tags": [
@@ -927,6 +993,107 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DeleteDocumentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/tags": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "List tags",
+        "description": "List all unique tags in a memory bank with usage counts. Supports wildcard search using '*' (e.g., 'user:*', '*-fred', 'tag*-2'). Case-insensitive.",
+        "operationId": "list_tags",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Wildcard pattern to filter tags (e.g., 'user:*' for user:alice, '*-admin' for role-admin). Use '*' as wildcard. Case-insensitive.",
+              "title": "Q"
+            },
+            "description": "Wildcard pattern to filter tags (e.g., 'user:*' for user:alice, '*-admin' for role-admin). Use '*' as wildcard. Case-insensitive."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Maximum number of tags to return",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Maximum number of tags to return"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Offset for pagination",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Offset for pagination"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTagsResponse"
                 }
               }
             }
@@ -2219,6 +2386,14 @@
           "memory_unit_count": {
             "type": "integer",
             "title": "Memory Unit Count"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "description": "Tags associated with this document"
           }
         },
         "type": "object",
@@ -2240,6 +2415,10 @@
           "id": "session_1",
           "memory_unit_count": 15,
           "original_text": "Full document text here...",
+          "tags": [
+            "user_a",
+            "session_123"
+          ],
           "updated_at": "2024-01-15T10:30:00Z"
         }
       },
@@ -2752,6 +2931,57 @@
           "total": 150
         }
       },
+      "ListTagsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TagItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "ListTagsResponse",
+        "description": "Response model for list tags endpoint.",
+        "example": {
+          "items": [
+            {
+              "count": 42,
+              "tag": "user:alice"
+            },
+            {
+              "count": 15,
+              "tag": "user:bob"
+            },
+            {
+              "count": 8,
+              "tag": "session:abc123"
+            }
+          ],
+          "limit": 100,
+          "offset": 0,
+          "total": 25
+        }
+      },
       "MemoryItem": {
         "properties": {
           "content": {
@@ -2821,6 +3051,21 @@
             ],
             "title": "Entities",
             "description": "Optional entities to combine with auto-extracted entities."
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Optional tags for visibility scoping. Memories with tags can be filtered during recall."
           }
         },
         "type": "object",
@@ -2846,6 +3091,10 @@
             "channel": "engineering",
             "source": "slack"
           },
+          "tags": [
+            "user_a",
+            "user_b"
+          ],
           "timestamp": "2024-01-15T10:30:00Z"
         }
       },
@@ -2999,6 +3248,33 @@
           "include": {
             "$ref": "#/components/schemas/IncludeOptions",
             "description": "Options for including additional data (entities are included by default)"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Filter memories by tags. If not specified, all memories are returned."
+          },
+          "tags_match": {
+            "type": "string",
+            "enum": [
+              "any",
+              "all",
+              "any_strict",
+              "all_strict"
+            ],
+            "title": "Tags Match",
+            "description": "How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).",
+            "default": "any"
           }
         },
         "type": "object",
@@ -3017,6 +3293,10 @@
           "max_tokens": 4096,
           "query": "What did Alice say about machine learning?",
           "query_timestamp": "2023-05-30T23:40:00",
+          "tags": [
+            "user_a"
+          ],
+          "tags_match": "any",
           "trace": true,
           "types": [
             "world",
@@ -3238,6 +3518,20 @@
               }
             ],
             "title": "Chunk Id"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
           }
         },
         "type": "object",
@@ -3262,6 +3556,10 @@
           },
           "occurred_end": "2024-01-15T10:30:00Z",
           "occurred_start": "2024-01-15T10:30:00Z",
+          "tags": [
+            "user_a",
+            "user_b"
+          ],
           "text": "Alice works at Google on the AI team",
           "type": "world"
         }
@@ -3404,6 +3702,33 @@
             ],
             "title": "Response Schema",
             "description": "Optional JSON Schema for structured output. When provided, the response will include a 'structured_output' field with the LLM response parsed according to this schema."
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Filter memories by tags during reflection. If not specified, all memories are considered."
+          },
+          "tags_match": {
+            "type": "string",
+            "enum": [
+              "any",
+              "all",
+              "any_strict",
+              "all_strict"
+            ],
+            "title": "Tags Match",
+            "description": "How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).",
+            "default": "any"
           }
         },
         "type": "object",
@@ -3437,7 +3762,11 @@
               "key_points"
             ],
             "type": "object"
-          }
+          },
+          "tags": [
+            "user_a"
+          ],
+          "tags_match": "any"
         }
       },
       "ReflectResponse": {
@@ -3527,6 +3856,21 @@
             "title": "Async",
             "description": "If true, process asynchronously in background. If false, wait for completion (default: false)",
             "default": false
+          },
+          "document_tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Tags",
+            "description": "Tags applied to all items in this request. These are merged with any item-level tags."
           }
         },
         "type": "object",
@@ -3537,6 +3881,10 @@
         "description": "Request model for retain endpoint.",
         "example": {
           "async": false,
+          "document_tags": [
+            "user_a",
+            "user_b"
+          ],
           "items": [
             {
               "content": "Alice works at Google",
@@ -3614,6 +3962,27 @@
             "total_tokens": 600
           }
         }
+      },
+      "TagItem": {
+        "properties": {
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "description": "The tag value"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Number of memories with this tag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tag",
+          "count"
+        ],
+        "title": "TagItem",
+        "description": "Single tag with usage count."
       },
       "TokenUsage": {
         "properties": {

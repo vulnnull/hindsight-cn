@@ -151,6 +151,7 @@ from .retain import bank_utils, embedding_utils
 from .retain.types import RetainContentDict
 from .search import observation_utils, think_utils
 from .search.reranking import CrossEncoderReranker
+from .search.tags import TagsMatch
 from .task_backend import AsyncIOQueueBackend, NoopTaskBackend, TaskBackend
 
 
@@ -1059,6 +1060,7 @@ class MemoryEngine(MemoryEngineInterface):
         document_id: str | None = None,
         fact_type_override: str | None = None,
         confidence_score: float | None = None,
+        document_tags: list[str] | None = None,
         return_usage: bool = False,
     ):
         """
@@ -1191,6 +1193,7 @@ class MemoryEngine(MemoryEngineInterface):
                     is_first_batch=i == 1,  # Only upsert on first batch
                     fact_type_override=fact_type_override,
                     confidence_score=confidence_score,
+                    document_tags=document_tags,
                 )
                 all_results.extend(sub_results)
                 total_usage = total_usage + sub_usage
@@ -1209,6 +1212,7 @@ class MemoryEngine(MemoryEngineInterface):
                 is_first_batch=True,
                 fact_type_override=fact_type_override,
                 confidence_score=confidence_score,
+                document_tags=document_tags,
             )
 
         # Call post-operation hook if validator is configured
@@ -1243,6 +1247,7 @@ class MemoryEngine(MemoryEngineInterface):
         is_first_batch: bool = True,
         fact_type_override: str | None = None,
         confidence_score: float | None = None,
+        document_tags: list[str] | None = None,
     ) -> tuple[list[list[str]], "TokenUsage"]:
         """
         Internal method for batch processing without chunking logic.
@@ -1259,6 +1264,7 @@ class MemoryEngine(MemoryEngineInterface):
             is_first_batch: Whether this is the first batch (for chunked operations, only delete on first batch)
             fact_type_override: Override fact type for all facts
             confidence_score: Confidence score for opinions
+            document_tags: Tags applied to all items in this batch
 
         Returns:
             Tuple of (unit ID lists, token usage for fact extraction)
@@ -1283,6 +1289,7 @@ class MemoryEngine(MemoryEngineInterface):
                 is_first_batch=is_first_batch,
                 fact_type_override=fact_type_override,
                 confidence_score=confidence_score,
+                document_tags=document_tags,
             )
 
     def recall(
@@ -1341,6 +1348,8 @@ class MemoryEngine(MemoryEngineInterface):
         include_chunks: bool = False,
         max_chunk_tokens: int = 8192,
         request_context: "RequestContext",
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
     ) -> RecallResultModel:
         """
         Recall memories using N*4-way parallel retrieval (N fact types × 4 retrieval methods).
@@ -1366,6 +1375,8 @@ class MemoryEngine(MemoryEngineInterface):
             max_entity_tokens: Maximum tokens for entity observations (default 500)
             include_chunks: Whether to include raw chunks in the response
             max_chunk_tokens: Maximum tokens for chunks (default 8192)
+            tags: Optional list of tags for visibility filtering (OR matching - returns
+                  memories that have at least one matching tag)
 
         Returns:
             RecallResultModel containing:
@@ -1438,6 +1449,8 @@ class MemoryEngine(MemoryEngineInterface):
                         max_chunk_tokens,
                         request_context,
                         semaphore_wait=semaphore_wait,
+                        tags=tags,
+                        tags_match=tags_match,
                     )
                     break  # Success - exit retry loop
                 except Exception as e:
@@ -1556,6 +1569,8 @@ class MemoryEngine(MemoryEngineInterface):
         max_chunk_tokens: int = 8192,
         request_context: "RequestContext" = None,
         semaphore_wait: float = 0.0,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
     ) -> RecallResultModel:
         """
         Search implementation with modular retrieval and reranking.
@@ -1585,7 +1600,9 @@ class MemoryEngine(MemoryEngineInterface):
         # Initialize tracer if requested
         from .search.tracer import SearchTracer
 
-        tracer = SearchTracer(query, thinking_budget, max_tokens) if enable_trace else None
+        tracer = (
+            SearchTracer(query, thinking_budget, max_tokens, tags=tags, tags_match=tags_match) if enable_trace else None
+        )
         if tracer:
             tracer.start()
 
@@ -1595,8 +1612,9 @@ class MemoryEngine(MemoryEngineInterface):
         # Buffer logs for clean output in concurrent scenarios
         recall_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
         log_buffer = []
+        tags_info = f", tags={tags}, tags_match={tags_match}" if tags else ""
         log_buffer.append(
-            f"[RECALL {recall_id}] Query: '{query[:50]}...' (budget={thinking_budget}, max_tokens={max_tokens})"
+            f"[RECALL {recall_id}] Query: '{query[:50]}...' (budget={thinking_budget}, max_tokens={max_tokens}{tags_info})"
         )
 
         try:
@@ -1642,6 +1660,8 @@ class MemoryEngine(MemoryEngineInterface):
                     thinking_budget,
                     question_date,
                     self.query_analyzer,
+                    tags=tags,
+                    tags_match=tags_match,
                 )
                 parallel_duration = time.time() - parallel_start
 
@@ -1746,6 +1766,11 @@ class MemoryEngine(MemoryEngineInterface):
                             f"edges={hd.get('edges_loaded', 0)}"
                         )
 
+            # Record temporal constraint in tracer if detected
+            if tracer and detected_temporal_constraint:
+                start_dt, end_dt = detected_temporal_constraint
+                tracer.record_temporal_constraint(start_dt, end_dt)
+
             # Record retrieval results for tracer - per fact type
             if tracer:
                 # Convert RetrievalResult to old tuple format for tracer
@@ -1788,14 +1813,22 @@ class MemoryEngine(MemoryEngineInterface):
                         fact_type=ft_name,
                     )
 
-                    # Add temporal retrieval results for this fact type (even if empty, to show it ran)
-                    if rr.temporal is not None:
+                    # Add temporal retrieval results for this fact type
+                    # Show temporal even with 0 results if constraint was detected
+                    if rr.temporal is not None or rr.temporal_constraint is not None:
+                        temporal_metadata = {"budget": thinking_budget}
+                        if rr.temporal_constraint:
+                            start_dt, end_dt = rr.temporal_constraint
+                            temporal_metadata["constraint"] = {
+                                "start": start_dt.isoformat() if start_dt else None,
+                                "end": end_dt.isoformat() if end_dt else None,
+                            }
                         tracer.add_retrieval_results(
                             method_name="temporal",
-                            results=to_tuple_format(rr.temporal),
+                            results=to_tuple_format(rr.temporal or []),
                             duration_seconds=rr.timings.get("temporal", 0.0),
                             score_field="temporal_score",
-                            metadata={"budget": thinking_budget},
+                            metadata=temporal_metadata,
                             fact_type=ft_name,
                         )
 
@@ -2055,6 +2088,7 @@ class MemoryEngine(MemoryEngineInterface):
                         mentioned_at=result_dict.get("mentioned_at"),
                         document_id=result_dict.get("document_id"),
                         chunk_id=result_dict.get("chunk_id"),
+                        tags=result_dict.get("tags"),
                     )
                 )
 
@@ -2270,11 +2304,11 @@ class MemoryEngine(MemoryEngineInterface):
             doc = await conn.fetchrow(
                 f"""
                 SELECT d.id, d.bank_id, d.original_text, d.content_hash,
-                       d.created_at, d.updated_at, COUNT(mu.id) as unit_count
+                       d.created_at, d.updated_at, d.tags, COUNT(mu.id) as unit_count
                 FROM {fq_table("documents")} d
                 LEFT JOIN {fq_table("memory_units")} mu ON mu.document_id = d.id
                 WHERE d.id = $1 AND d.bank_id = $2
-                GROUP BY d.id, d.bank_id, d.original_text, d.content_hash, d.created_at, d.updated_at
+                GROUP BY d.id, d.bank_id, d.original_text, d.content_hash, d.created_at, d.updated_at, d.tags
                 """,
                 document_id,
                 bank_id,
@@ -2291,6 +2325,7 @@ class MemoryEngine(MemoryEngineInterface):
                 "memory_unit_count": doc["unit_count"],
                 "created_at": doc["created_at"].isoformat() if doc["created_at"] else None,
                 "updated_at": doc["updated_at"].isoformat() if doc["updated_at"] else None,
+                "tags": list(doc["tags"]) if doc["tags"] else [],
             }
 
     async def delete_document(
@@ -2778,6 +2813,68 @@ class MemoryEngine(MemoryEngineInterface):
                 )
 
             return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+    async def get_memory_unit(
+        self,
+        bank_id: str,
+        memory_id: str,
+        request_context: "RequestContext",
+    ):
+        """
+        Get a single memory unit by ID.
+
+        Args:
+            bank_id: Bank ID
+            memory_id: Memory unit ID
+            request_context: Request context for authentication.
+
+        Returns:
+            Dict with memory unit data or None if not found
+        """
+        await self._authenticate_tenant(request_context)
+        pool = await self._get_pool()
+        async with acquire_with_retry(pool) as conn:
+            # Get the memory unit
+            row = await conn.fetchrow(
+                f"""
+                SELECT id, text, context, event_date, occurred_start, occurred_end,
+                       mentioned_at, fact_type, document_id, chunk_id, tags
+                FROM {fq_table("memory_units")}
+                WHERE id = $1 AND bank_id = $2
+                """,
+                memory_id,
+                bank_id,
+            )
+
+            if not row:
+                return None
+
+            # Get entity information
+            entities_rows = await conn.fetch(
+                f"""
+                SELECT e.canonical_name
+                FROM {fq_table("unit_entities")} ue
+                JOIN {fq_table("entities")} e ON ue.entity_id = e.id
+                WHERE ue.unit_id = $1
+                """,
+                row["id"],
+            )
+            entities = [r["canonical_name"] for r in entities_rows]
+
+            return {
+                "id": str(row["id"]),
+                "text": row["text"],
+                "context": row["context"] if row["context"] else "",
+                "date": row["event_date"].isoformat() if row["event_date"] else "",
+                "type": row["fact_type"],
+                "mentioned_at": row["mentioned_at"].isoformat() if row["mentioned_at"] else None,
+                "occurred_start": row["occurred_start"].isoformat() if row["occurred_start"] else None,
+                "occurred_end": row["occurred_end"].isoformat() if row["occurred_end"] else None,
+                "entities": entities,
+                "document_id": row["document_id"] if row["document_id"] else None,
+                "chunk_id": str(row["chunk_id"]) if row["chunk_id"] else None,
+                "tags": row["tags"] if row["tags"] else [],
+            }
 
     async def list_documents(
         self,
@@ -3302,6 +3399,8 @@ Guidelines:
         max_tokens: int = 4096,
         response_schema: dict | None = None,
         request_context: "RequestContext",
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
     ) -> ReflectResult:
         """
         Reflect and formulate an answer using bank identity, world facts, and opinions.
@@ -3369,6 +3468,8 @@ Guidelines:
                 fact_type=["experience", "world", "opinion"],
                 include_entities=True,
                 request_context=request_context,
+                tags=tags,
+                tags_match=tags_match,
             )
         recall_time = time.time() - recall_start
 
@@ -3716,6 +3817,85 @@ Guidelines:
                 )
             return {
                 "items": entities,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+
+    async def list_tags(
+        self,
+        bank_id: str,
+        *,
+        pattern: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """
+        List all unique tags for a bank with usage counts.
+
+        Use this to discover available tags or expand wildcard patterns.
+        Supports '*' as wildcard for flexible matching (case-insensitive):
+        - 'user:*' matches user:alice, user:bob
+        - '*-admin' matches role-admin, super-admin
+        - 'env*-prod' matches env-prod, environment-prod
+
+        Args:
+            bank_id: Bank identifier
+            pattern: Wildcard pattern to filter tags (use '*' as wildcard, case-insensitive)
+            limit: Maximum number of tags to return
+            offset: Offset for pagination
+            request_context: Request context for authentication.
+
+        Returns:
+            Dict with items (list of {tag, count}), total, limit, offset
+        """
+        await self._authenticate_tenant(request_context)
+        pool = await self._get_pool()
+        async with acquire_with_retry(pool) as conn:
+            # Build pattern filter if provided (convert * to % for ILIKE)
+            pattern_clause = ""
+            params: list[Any] = [bank_id]
+            if pattern:
+                # Convert wildcard pattern: * -> % for SQL ILIKE
+                sql_pattern = pattern.replace("*", "%")
+                pattern_clause = "AND tag ILIKE $2"
+                params.append(sql_pattern)
+
+            # Get total count of distinct tags matching pattern
+            total_row = await conn.fetchrow(
+                f"""
+                SELECT COUNT(DISTINCT tag) as total
+                FROM {fq_table("memory_units")}, unnest(tags) AS tag
+                WHERE bank_id = $1 AND tags IS NOT NULL AND tags != '{{}}'
+                {pattern_clause}
+                """,
+                *params,
+            )
+            total = total_row["total"] if total_row else 0
+
+            # Get paginated tags with counts, ordered by frequency
+            limit_param = len(params) + 1
+            offset_param = len(params) + 2
+            params.extend([limit, offset])
+
+            rows = await conn.fetch(
+                f"""
+                SELECT tag, COUNT(*) as count
+                FROM {fq_table("memory_units")}, unnest(tags) AS tag
+                WHERE bank_id = $1 AND tags IS NOT NULL AND tags != '{{}}'
+                {pattern_clause}
+                GROUP BY tag
+                ORDER BY count DESC, tag ASC
+                LIMIT ${limit_param} OFFSET ${offset_param}
+                """,
+                *params,
+            )
+
+            items = [{"tag": row["tag"], "count": row["count"]} for row in rows]
+
+            return {
+                "items": items,
                 "total": total,
                 "limit": limit,
                 "offset": offset,
@@ -4365,6 +4545,7 @@ Guidelines:
         contents: list[dict[str, Any]],
         *,
         request_context: "RequestContext",
+        document_tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Submit a batch retain operation to run asynchronously."""
         await self._authenticate_tenant(request_context)
@@ -4388,14 +4569,16 @@ Guidelines:
             )
 
         # Submit task to background queue
-        await self._task_backend.submit_task(
-            {
-                "type": "batch_retain",
-                "operation_id": str(operation_id),
-                "bank_id": bank_id,
-                "contents": contents,
-            }
-        )
+        task_payload = {
+            "type": "batch_retain",
+            "operation_id": str(operation_id),
+            "bank_id": bank_id,
+            "contents": contents,
+        }
+        if document_tags:
+            task_payload["document_tags"] = document_tags
+
+        await self._task_backend.submit_task(task_payload)
 
         logger.info(f"Retain task queued for bank_id={bank_id}, {len(contents)} items, operation_id={operation_id}")
 

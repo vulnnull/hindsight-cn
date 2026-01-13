@@ -377,6 +377,12 @@ export type DocumentResponse = {
    * Memory Unit Count
    */
   memory_unit_count: number;
+  /**
+   * Tags
+   *
+   * Tags associated with this document
+   */
+  tags?: Array<string>;
 };
 
 /**
@@ -667,6 +673,30 @@ export type ListMemoryUnitsResponse = {
 };
 
 /**
+ * ListTagsResponse
+ *
+ * Response model for list tags endpoint.
+ */
+export type ListTagsResponse = {
+  /**
+   * Items
+   */
+  items: Array<TagItem>;
+  /**
+   * Total
+   */
+  total: number;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+};
+
+/**
  * MemoryItem
  *
  * Single memory item for retain.
@@ -702,6 +732,12 @@ export type MemoryItem = {
    * Optional entities to combine with auto-extracted entities.
    */
   entities?: Array<EntityInput> | null;
+  /**
+   * Tags
+   *
+   * Optional tags for visibility scoping. Memories with tags can be filtered during recall.
+   */
+  tags?: Array<string> | null;
 };
 
 /**
@@ -791,6 +827,18 @@ export type RecallRequest = {
    * Options for including additional data (entities are included by default)
    */
   include?: IncludeOptions;
+  /**
+   * Tags
+   *
+   * Filter memories by tags. If not specified, all memories are returned.
+   */
+  tags?: Array<string> | null;
+  /**
+   * Tags Match
+   *
+   * How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).
+   */
+  tags_match?: "any" | "all" | "any_strict" | "all_strict";
 };
 
 /**
@@ -879,6 +927,10 @@ export type RecallResult = {
    * Chunk Id
    */
   chunk_id?: string | null;
+  /**
+   * Tags
+   */
+  tags?: Array<string> | null;
 };
 
 /**
@@ -958,6 +1010,18 @@ export type ReflectRequest = {
   response_schema?: {
     [key: string]: unknown;
   } | null;
+  /**
+   * Tags
+   *
+   * Filter memories by tags during reflection. If not specified, all memories are considered.
+   */
+  tags?: Array<string> | null;
+  /**
+   * Tags Match
+   *
+   * How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).
+   */
+  tags_match?: "any" | "all" | "any_strict" | "all_strict";
 };
 
 /**
@@ -1004,6 +1068,12 @@ export type RetainRequest = {
    * If true, process asynchronously in background. If false, wait for completion (default: false)
    */
   async?: boolean;
+  /**
+   * Document Tags
+   *
+   * Tags applied to all items in this request. These are merged with any item-level tags.
+   */
+  document_tags?: Array<string> | null;
 };
 
 /**
@@ -1040,6 +1110,26 @@ export type RetainResponse = {
    * Token usage metrics for LLM calls during fact extraction (only present for synchronous operations)
    */
   usage?: TokenUsage | null;
+};
+
+/**
+ * TagItem
+ *
+ * Single tag with usage count.
+ */
+export type TagItem = {
+  /**
+   * Tag
+   *
+   * The tag value
+   */
+  tag: string;
+  /**
+   * Count
+   *
+   * Number of memories with this tag
+   */
+  count: number;
 };
 
 /**
@@ -1224,6 +1314,44 @@ export type ListMemoriesResponses = {
 
 export type ListMemoriesResponse =
   ListMemoriesResponses[keyof ListMemoriesResponses];
+
+export type GetMemoryData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Memory Id
+     */
+    memory_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/memories/{memory_id}";
+};
+
+export type GetMemoryErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetMemoryError = GetMemoryErrors[keyof GetMemoryErrors];
+
+export type GetMemoryResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
 
 export type RecallMemoriesData = {
   body: RecallRequest;
@@ -1631,6 +1759,61 @@ export type GetDocumentResponses = {
 
 export type GetDocumentResponse =
   GetDocumentResponses[keyof GetDocumentResponses];
+
+export type ListTagsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: {
+    /**
+     * Q
+     *
+     * Wildcard pattern to filter tags (e.g., 'user:*' for user:alice, '*-admin' for role-admin). Use '*' as wildcard. Case-insensitive.
+     */
+    q?: string | null;
+    /**
+     * Limit
+     *
+     * Maximum number of tags to return
+     */
+    limit?: number;
+    /**
+     * Offset
+     *
+     * Offset for pagination
+     */
+    offset?: number;
+  };
+  url: "/v1/default/banks/{bank_id}/tags";
+};
+
+export type ListTagsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListTagsError = ListTagsErrors[keyof ListTagsErrors];
+
+export type ListTagsResponses = {
+  /**
+   * Successful Response
+   */
+  200: ListTagsResponse;
+};
+
+export type ListTagsResponse2 = ListTagsResponses[keyof ListTagsResponses];
 
 export type GetChunkData = {
   body?: never;

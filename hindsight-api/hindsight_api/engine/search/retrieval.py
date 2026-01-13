@@ -20,6 +20,7 @@ from ..memory_engine import fq_table
 from .graph_retrieval import BFSGraphRetriever, GraphRetriever
 from .link_expansion_retrieval import LinkExpansionRetriever
 from .mpfp_retrieval import MPFPGraphRetriever
+from .tags import TagsMatch, build_tags_where_clause_simple
 from .types import MPFPTimings, RetrievalResult
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,12 @@ def set_default_graph_retriever(retriever: GraphRetriever) -> None:
 
 
 async def retrieve_semantic(
-    conn, query_emb_str: str, bank_id: str, fact_type: str, limit: int
+    conn,
+    query_emb_str: str,
+    bank_id: str,
+    fact_type: str,
+    limit: int,
+    tags: list[str] | None = None,
 ) -> list[RetrievalResult]:
     """
     Semantic retrieval via vector similarity.
@@ -96,31 +102,44 @@ async def retrieve_semantic(
         agent_id: bank ID
         fact_type: Fact type to filter
         limit: Maximum results to return
+        tags: Optional list of tags for visibility filtering (OR matching)
 
     Returns:
         List of RetrievalResult objects
     """
+    from .tags import TagsMatch, build_tags_where_clause_simple
+
+    tags_clause = build_tags_where_clause_simple(tags, 5)
+    params = [query_emb_str, bank_id, fact_type, limit]
+    if tags:
+        params.append(tags)
+
     results = await conn.fetch(
         f"""
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                1 - (embedding <=> $1::vector) AS similarity
         FROM {fq_table("memory_units")}
         WHERE bank_id = $2
           AND embedding IS NOT NULL
           AND fact_type = $3
           AND (1 - (embedding <=> $1::vector)) >= 0.3
+          {tags_clause}
         ORDER BY embedding <=> $1::vector
         LIMIT $4
         """,
-        query_emb_str,
-        bank_id,
-        fact_type,
-        limit,
+        *params,
     )
     return [RetrievalResult.from_db_row(dict(r)) for r in results]
 
 
-async def retrieve_bm25(conn, query_text: str, bank_id: str, fact_type: str, limit: int) -> list[RetrievalResult]:
+async def retrieve_bm25(
+    conn,
+    query_text: str,
+    bank_id: str,
+    fact_type: str,
+    limit: int,
+    tags: list[str] | None = None,
+) -> list[RetrievalResult]:
     """
     BM25 keyword retrieval via full-text search.
 
@@ -130,11 +149,14 @@ async def retrieve_bm25(conn, query_text: str, bank_id: str, fact_type: str, lim
         agent_id: bank ID
         fact_type: Fact type to filter
         limit: Maximum results to return
+        tags: Optional list of tags for visibility filtering (OR matching)
 
     Returns:
         List of RetrievalResult objects
     """
     import re
+
+    from .tags import TagsMatch, build_tags_where_clause_simple
 
     # Sanitize query text: remove special characters that have meaning in tsquery
     # Keep only alphanumeric characters and spaces
@@ -151,21 +173,24 @@ async def retrieve_bm25(conn, query_text: str, bank_id: str, fact_type: str, lim
     # This prevents empty results when some terms are missing
     query_tsquery = " | ".join(tokens)
 
+    tags_clause = build_tags_where_clause_simple(tags, 5)
+    params = [query_tsquery, bank_id, fact_type, limit]
+    if tags:
+        params.append(tags)
+
     results = await conn.fetch(
         f"""
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                ts_rank_cd(search_vector, to_tsquery('english', $1)) AS bm25_score
         FROM {fq_table("memory_units")}
         WHERE bank_id = $2
           AND fact_type = $3
           AND search_vector @@ to_tsquery('english', $1)
+          {tags_clause}
         ORDER BY bm25_score DESC
         LIMIT $4
         """,
-        query_tsquery,
-        bank_id,
-        fact_type,
-        limit,
+        *params,
     )
     return [RetrievalResult.from_db_row(dict(r)) for r in results]
 
@@ -177,6 +202,8 @@ async def retrieve_semantic_bm25_combined(
     bank_id: str,
     fact_types: list[str],
     limit: int,
+    tags: list[str] | None = None,
+    tags_match: TagsMatch = "any",
 ) -> dict[str, tuple[list[RetrievalResult], list[RetrievalResult]]]:
     """
     Combined semantic + BM25 retrieval for multiple fact types in a single query.
@@ -203,10 +230,14 @@ async def retrieve_semantic_bm25_combined(
 
     # If no valid tokens for BM25, just run semantic
     if not tokens:
+        tags_clause = build_tags_where_clause_simple(tags, 5, match=tags_match)
+        params = [query_emb_str, bank_id, fact_types, limit]
+        if tags:
+            params.append(tags)
         results = await conn.fetch(
             f"""
             WITH semantic_ranked AS (
-                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                        1 - (embedding <=> $1::vector) AS similarity,
                        NULL::float AS bm25_score,
                        'semantic' AS source,
@@ -216,16 +247,14 @@ async def retrieve_semantic_bm25_combined(
                   AND embedding IS NOT NULL
                   AND fact_type = ANY($3)
                   AND (1 - (embedding <=> $1::vector)) >= 0.3
+                  {tags_clause}
             )
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                    similarity, bm25_score, source
             FROM semantic_ranked
             WHERE rn <= $4
             """,
-            query_emb_str,
-            bank_id,
-            fact_types,
-            limit,
+            *params,
         )
         # Group by fact_type
         result_dict: dict[str, tuple[list[RetrievalResult], list[RetrievalResult]]] = {
@@ -241,12 +270,18 @@ async def retrieve_semantic_bm25_combined(
 
     query_tsquery = " | ".join(tokens)
 
+    # Build tags clause - param 6 if tags provided
+    tags_clause = build_tags_where_clause_simple(tags, 6, match=tags_match)
+    params = [query_emb_str, bank_id, fact_types, limit, query_tsquery]
+    if tags:
+        params.append(tags)
+
     # Combined CTE query for both semantic and BM25 across all fact types
     # Uses window functions to limit per fact_type per method
     results = await conn.fetch(
         f"""
         WITH semantic_ranked AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                    1 - (embedding <=> $1::vector) AS similarity,
                    NULL::float AS bm25_score,
                    'semantic' AS source,
@@ -256,9 +291,10 @@ async def retrieve_semantic_bm25_combined(
               AND embedding IS NOT NULL
               AND fact_type = ANY($3)
               AND (1 - (embedding <=> $1::vector)) >= 0.3
+              {tags_clause}
         ),
         bm25_ranked AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                    NULL::float AS similarity,
                    ts_rank_cd(search_vector, to_tsquery('english', $5)) AS bm25_score,
                    'bm25' AS source,
@@ -267,14 +303,15 @@ async def retrieve_semantic_bm25_combined(
             WHERE bank_id = $2
               AND fact_type = ANY($3)
               AND search_vector @@ to_tsquery('english', $5)
+              {tags_clause}
         ),
         semantic AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                    similarity, bm25_score, source
             FROM semantic_ranked WHERE rn <= $4
         ),
         bm25 AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                    similarity, bm25_score, source
             FROM bm25_ranked WHERE rn <= $4
         )
@@ -282,11 +319,7 @@ async def retrieve_semantic_bm25_combined(
         UNION ALL
         SELECT * FROM bm25
         """,
-        query_emb_str,
-        bank_id,
-        fact_types,
-        limit,
-        query_tsquery,
+        *params,
     )
 
     # Group results by fact_type and source
@@ -313,6 +346,8 @@ async def retrieve_temporal_combined(
     end_date: datetime,
     budget: int,
     semantic_threshold: float = 0.1,
+    tags: list[str] | None = None,
+    tags_match: TagsMatch = "any",
 ) -> dict[str, list[RetrievalResult]]:
     """
     Temporal retrieval for multiple fact types in a single query.
@@ -341,11 +376,17 @@ async def retrieve_temporal_combined(
     if end_date.tzinfo is None:
         end_date = end_date.replace(tzinfo=UTC)
 
+    # Build tags clause
+    tags_clause = build_tags_where_clause_simple(tags, 7, match=tags_match)
+    params = [query_emb_str, bank_id, fact_types, start_date, end_date, semantic_threshold]
+    if tags:
+        params.append(tags)
+
     # Batch query: Get entry points for ALL fact types at once with window function
     entry_points = await conn.fetch(
         f"""
         WITH ranked_entries AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                    1 - (embedding <=> $1::vector) AS similarity,
                    ROW_NUMBER() OVER (PARTITION BY fact_type ORDER BY COALESCE(occurred_start, mentioned_at, occurred_end) DESC, embedding <=> $1::vector) AS rn
             FROM {fq_table("memory_units")}
@@ -363,17 +404,13 @@ async def retrieve_temporal_combined(
                   (occurred_end IS NOT NULL AND occurred_end BETWEEN $4 AND $5)
               )
               AND (1 - (embedding <=> $1::vector)) >= $6
+              {tags_clause}
         )
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, similarity
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags, similarity
         FROM ranked_entries
         WHERE rn <= 10
         """,
-        query_emb_str,
-        bank_id,
-        fact_types,
-        start_date,
-        end_date,
-        semantic_threshold,
+        *params,
     )
 
     if not entry_points:
@@ -436,13 +473,20 @@ async def retrieve_temporal_combined(
         budget_remaining = budget - len(ft_entry_points)
         batch_size = 20
 
+        # Build tags clause for spreading (use param 6 since 1-5 are used)
+        spreading_tags_clause = build_tags_where_clause_simple(tags, 6, table_alias="mu.", match=tags_match)
+
         while frontier and budget_remaining > 0:
             batch_ids = frontier[:batch_size]
             frontier = frontier[batch_size:]
 
+            spreading_params = [query_emb_str, batch_ids, ft, semantic_threshold, batch_size * 10]
+            if tags:
+                spreading_params.append(tags)
+
             neighbors = await conn.fetch(
                 f"""
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding, mu.fact_type, mu.document_id, mu.chunk_id,
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
                        ml.weight, ml.link_type, ml.from_unit_id,
                        1 - (mu.embedding <=> $1::vector) AS similarity
                 FROM {fq_table("memory_links")} ml
@@ -453,14 +497,11 @@ async def retrieve_temporal_combined(
                   AND mu.fact_type = $3
                   AND mu.embedding IS NOT NULL
                   AND (1 - (mu.embedding <=> $1::vector)) >= $4
+                  {spreading_tags_clause}
                 ORDER BY ml.weight DESC
                 LIMIT $5
                 """,
-                query_emb_str,
-                batch_ids,
-                ft,
-                semantic_threshold,
-                batch_size * 10,
+                *spreading_params,
             )
 
             for n in neighbors:
@@ -529,6 +570,7 @@ async def retrieve_temporal(
     end_date: datetime,
     budget: int,
     semantic_threshold: float = 0.1,
+    tags: list[str] | None = None,
 ) -> list[RetrievalResult]:
     """
     Temporal retrieval with spreading activation.
@@ -547,6 +589,7 @@ async def retrieve_temporal(
         end_date: End of time range
         budget: Node budget for spreading
         semantic_threshold: Minimum semantic similarity to include
+        tags: Optional list of tags for visibility filtering (OR matching)
 
     Returns:
         List of RetrievalResult objects with temporal scores
@@ -558,9 +601,16 @@ async def retrieve_temporal(
     if end_date.tzinfo is None:
         end_date = end_date.replace(tzinfo=UTC)
 
+    from .tags import TagsMatch, build_tags_where_clause_simple
+
+    tags_clause = build_tags_where_clause_simple(tags, 7)
+    params = [query_emb_str, bank_id, fact_type, start_date, end_date, semantic_threshold]
+    if tags:
+        params.append(tags)
+
     entry_points = await conn.fetch(
         f"""
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id,
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
                1 - (embedding <=> $1::vector) AS similarity
         FROM {fq_table("memory_units")}
         WHERE bank_id = $2
@@ -580,15 +630,11 @@ async def retrieve_temporal(
               (occurred_end IS NOT NULL AND occurred_end BETWEEN $4 AND $5)
           )
           AND (1 - (embedding <=> $1::vector)) >= $6
+          {tags_clause}
         ORDER BY COALESCE(occurred_start, mentioned_at, occurred_end) DESC, (embedding <=> $1::vector) ASC
         LIMIT 10
         """,
-        query_emb_str,
-        bank_id,
-        fact_type,
-        start_date,
-        end_date,
-        semantic_threshold,
+        *params,
     )
 
     if not entry_points:
@@ -740,6 +786,7 @@ async def retrieve_parallel(
     query_analyzer: Optional["QueryAnalyzer"] = None,
     graph_retriever: GraphRetriever | None = None,
     temporal_constraint: tuple | None = None,  # Pre-extracted temporal constraint
+    tags: list[str] | None = None,  # Visibility scope tags for filtering
 ) -> ParallelRetrievalResult:
     """
     Run 3-way or 4-way parallel retrieval (adds temporal if detected).
@@ -755,6 +802,7 @@ async def retrieve_parallel(
         query_analyzer: Query analyzer to use (defaults to TransformerQueryAnalyzer)
         graph_retriever: Graph retrieval strategy (defaults to configured retriever)
         temporal_constraint: Pre-extracted temporal constraint (optional)
+        tags: Optional list of tags for visibility filtering (OR matching)
 
     Returns:
         ParallelRetrievalResult with semantic, bm25, graph, temporal results and timings
@@ -775,6 +823,7 @@ async def retrieve_parallel(
             retriever,
             question_date,
             query_analyzer,
+            tags=tags,
         )
     else:
         # For BFS, extract temporal constraint upfront (legacy path)
@@ -785,7 +834,15 @@ async def retrieve_parallel(
                 query_text, reference_date=question_date, analyzer=query_analyzer
             )
         return await _retrieve_parallel_bfs(
-            pool, query_text, query_embedding_str, bank_id, fact_type, thinking_budget, temporal_constraint, retriever
+            pool,
+            query_text,
+            query_embedding_str,
+            bank_id,
+            fact_type,
+            thinking_budget,
+            temporal_constraint,
+            retriever,
+            tags=tags,
         )
 
 
@@ -809,6 +866,7 @@ async def _retrieve_parallel_mpfp(
     retriever: GraphRetriever,
     question_date: datetime | None = None,
     query_analyzer=None,
+    tags: list[str] | None = None,
 ) -> ParallelRetrievalResult:
     """
     MPFP retrieval with true parallelization.
@@ -830,7 +888,9 @@ async def _retrieve_parallel_mpfp(
         acquire_start = time.time()
         async with acquire_with_retry(pool) as conn:
             conn_wait = time.time() - acquire_start
-            results = await retrieve_semantic(conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget)
+            results = await retrieve_semantic(
+                conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget, tags=tags
+            )
         return _TimedResult(results, time.time() - start, conn_wait)
 
     async def run_bm25() -> _TimedResult:
@@ -839,7 +899,7 @@ async def _retrieve_parallel_mpfp(
         acquire_start = time.time()
         async with acquire_with_retry(pool) as conn:
             conn_wait = time.time() - acquire_start
-            results = await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget)
+            results = await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget, tags=tags)
         return _TimedResult(results, time.time() - start, conn_wait)
 
     async def run_graph() -> tuple[list[RetrievalResult], float, MPFPTimings | None]:
@@ -857,6 +917,7 @@ async def _retrieve_parallel_mpfp(
             query_text=query_text,
             semantic_seeds=None,  # Let MPFP find its own seeds
             temporal_seeds=None,  # Don't wait for temporal extraction
+            tags=tags,
         )
         return results, time.time() - start, mpfp_timing
 
@@ -1028,6 +1089,7 @@ async def _retrieve_parallel_bfs(
     thinking_budget: int,
     temporal_constraint: tuple | None,
     retriever: GraphRetriever,
+    tags: list[str] | None = None,
 ) -> ParallelRetrievalResult:
     """BFS retrieval: all methods run in parallel (original behavior)."""
     import time
@@ -1035,13 +1097,15 @@ async def _retrieve_parallel_bfs(
     async def run_semantic() -> _TimedResult:
         start = time.time()
         async with acquire_with_retry(pool) as conn:
-            results = await retrieve_semantic(conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget)
+            results = await retrieve_semantic(
+                conn, query_embedding_str, bank_id, fact_type, limit=thinking_budget, tags=tags
+            )
         return _TimedResult(results, time.time() - start)
 
     async def run_bm25() -> _TimedResult:
         start = time.time()
         async with acquire_with_retry(pool) as conn:
-            results = await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget)
+            results = await retrieve_bm25(conn, query_text, bank_id, fact_type, limit=thinking_budget, tags=tags)
         return _TimedResult(results, time.time() - start)
 
     async def run_graph() -> _TimedResult:
@@ -1053,6 +1117,7 @@ async def _retrieve_parallel_bfs(
             fact_type=fact_type,
             budget=thinking_budget,
             query_text=query_text,
+            tags=tags,
         )
         return _TimedResult(results, time.time() - start)
 
@@ -1068,6 +1133,7 @@ async def _retrieve_parallel_bfs(
                 tc_end,
                 budget=thinking_budget,
                 semantic_threshold=0.1,
+                tags=tags,
             )
         return _TimedResult(results, time.time() - start)
 
@@ -1122,6 +1188,8 @@ async def retrieve_all_fact_types_parallel(
     question_date: datetime | None = None,
     query_analyzer: Optional["QueryAnalyzer"] = None,
     graph_retriever: GraphRetriever | None = None,
+    tags: list[str] | None = None,
+    tags_match: TagsMatch = "any",
 ) -> MultiFactTypeRetrievalResult:
     """
     Optimized retrieval for multiple fact types using batched queries.
@@ -1171,7 +1239,14 @@ async def retrieve_all_fact_types_parallel(
 
         # Semantic + BM25 combined
         semantic_bm25_results = await retrieve_semantic_bm25_combined(
-            conn, query_embedding_str, query_text, bank_id, fact_types, thinking_budget
+            conn,
+            query_embedding_str,
+            query_text,
+            bank_id,
+            fact_types,
+            thinking_budget,
+            tags=tags,
+            tags_match=tags_match,
         )
         semantic_bm25_time = time.time() - semantic_bm25_start
 
@@ -1188,6 +1263,8 @@ async def retrieve_all_fact_types_parallel(
                 tc_end,
                 budget=thinking_budget,
                 semantic_threshold=0.1,
+                tags=tags,
+                tags_match=tags_match,
             )
             temporal_time = time.time() - temporal_start
 
@@ -1206,6 +1283,8 @@ async def retrieve_all_fact_types_parallel(
             query_text=query_text,
             semantic_seeds=None,
             temporal_seeds=None,
+            tags=tags,
+            tags_match=tags_match,
         )
         return ft, results, time.time() - graph_start, mpfp_timing
 
