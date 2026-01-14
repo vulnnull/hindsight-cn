@@ -220,10 +220,10 @@ After installation, verify the connection:
 
 ```bash
 # Store a test memory
-hindsight memory retain team-acme-frontend "Test memory from setup"
+hindsight memory retain team-acme-frontend "Alice works at Google as a software engineer"
 
 # Recall it
-hindsight memory recall team-acme-frontend "test"
+hindsight memory recall team-acme-frontend "Alice"
 ```
 
 ### Switching Between Banks
