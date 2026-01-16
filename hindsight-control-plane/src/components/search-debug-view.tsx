@@ -32,7 +32,7 @@ import JsonView from "react18-json-view";
 import "react18-json-view/src/style.css";
 import { MemoryDetailPanel } from "./memory-detail-panel";
 
-type FactType = "world" | "experience" | "opinion";
+type FactType = "world" | "experience";
 type Budget = "low" | "mid" | "high";
 type TagsMatch = "any" | "all" | "any_strict" | "all_strict";
 type ViewMode = "results" | "trace" | "json";
@@ -192,7 +192,7 @@ export function SearchDebugView() {
             <div className="flex items-center gap-4">
               <span className="text-sm font-medium text-muted-foreground">Types:</span>
               <div className="flex gap-3">
-                {(["world", "experience", "opinion"] as FactType[]).map((ft) => (
+                {(["world", "experience"] as FactType[]).map((ft) => (
                   <label key={ft} className="flex items-center gap-2 cursor-pointer">
                     <Checkbox
                       checked={factTypes.includes(ft)}

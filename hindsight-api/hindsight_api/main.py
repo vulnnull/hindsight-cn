@@ -221,6 +221,8 @@ def main():
             task_backend=config.task_backend,
             task_backend_memory_batch_size=config.task_backend_memory_batch_size,
             task_backend_memory_batch_interval=config.task_backend_memory_batch_interval,
+            reflect_max_iterations=config.reflect_max_iterations,
+            mental_model_refresh_concurrency=config.mental_model_refresh_concurrency,
         )
     config.configure_logging()
     if not args.daemon:

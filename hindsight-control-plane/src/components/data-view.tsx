@@ -33,7 +33,7 @@ import { Switch } from "@/components/ui/switch";
 import { MemoryDetailPanel } from "./memory-detail-panel";
 import { Graph2D, convertHindsightGraphData, GraphNode } from "./graph-2d";
 
-type FactType = "world" | "experience" | "opinion";
+type FactType = "world" | "experience";
 type ViewMode = "graph" | "table" | "timeline";
 
 interface DataViewProps {

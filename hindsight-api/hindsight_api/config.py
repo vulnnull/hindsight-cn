@@ -76,6 +76,7 @@ ENV_RECALL_MAX_CONCURRENT = "HINDSIGHT_API_RECALL_MAX_CONCURRENT"
 ENV_RECALL_CONNECTION_BUDGET = "HINDSIGHT_API_RECALL_CONNECTION_BUDGET"
 ENV_MCP_LOCAL_BANK_ID = "HINDSIGHT_API_MCP_LOCAL_BANK_ID"
 ENV_MCP_INSTRUCTIONS = "HINDSIGHT_API_MCP_INSTRUCTIONS"
+ENV_MENTAL_MODEL_REFRESH_CONCURRENCY = "HINDSIGHT_API_MENTAL_MODEL_REFRESH_CONCURRENCY"
 
 # Observation thresholds
 ENV_OBSERVATION_MIN_FACTS = "HINDSIGHT_API_OBSERVATION_MIN_FACTS"
@@ -105,6 +106,9 @@ ENV_DB_ACQUIRE_TIMEOUT = "HINDSIGHT_API_DB_ACQUIRE_TIMEOUT"
 ENV_TASK_BACKEND = "HINDSIGHT_API_TASK_BACKEND"
 ENV_TASK_BACKEND_MEMORY_BATCH_SIZE = "HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_SIZE"
 ENV_TASK_BACKEND_MEMORY_BATCH_INTERVAL = "HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_INTERVAL"
+
+# Reflect agent settings
+ENV_REFLECT_MAX_ITERATIONS = "HINDSIGHT_API_REFLECT_MAX_ITERATIONS"
 
 # Default values
 DEFAULT_DATABASE_URL = "pg0"
@@ -145,6 +149,7 @@ DEFAULT_MPFP_TOP_K_NEIGHBORS = 20  # Fan-out limit per node in MPFP graph traver
 DEFAULT_RECALL_MAX_CONCURRENT = 32  # Max concurrent recall operations per worker
 DEFAULT_RECALL_CONNECTION_BUDGET = 4  # Max concurrent DB connections per recall operation
 DEFAULT_MCP_LOCAL_BANK_ID = "mcp"
+DEFAULT_MENTAL_MODEL_REFRESH_CONCURRENCY = 8  # Max concurrent mental model refreshes
 
 # Observation thresholds
 DEFAULT_OBSERVATION_MIN_FACTS = 5  # Min facts required to generate entity observations
@@ -171,6 +176,9 @@ DEFAULT_DB_ACQUIRE_TIMEOUT = 30  # seconds
 DEFAULT_TASK_BACKEND = "memory"  # Options: "memory", "noop"
 DEFAULT_TASK_BACKEND_MEMORY_BATCH_SIZE = 10
 DEFAULT_TASK_BACKEND_MEMORY_BATCH_INTERVAL = 1.0  # seconds
+
+# Reflect agent settings
+DEFAULT_REFLECT_MAX_ITERATIONS = 10  # Max tool call iterations before forcing response
 
 # Default MCP tool descriptions (can be customized via env vars)
 DEFAULT_MCP_RETAIN_DESCRIPTION = """Store important information to long-term memory.
@@ -261,6 +269,7 @@ class HindsightConfig:
     mpfp_top_k_neighbors: int
     recall_max_concurrent: int
     recall_connection_budget: int
+    mental_model_refresh_concurrency: int
 
     # Observation thresholds
     observation_min_facts: int
@@ -290,6 +299,9 @@ class HindsightConfig:
     task_backend: str
     task_backend_memory_batch_size: int
     task_backend_memory_batch_interval: float
+
+    # Reflect agent settings
+    reflect_max_iterations: int
 
     @classmethod
     def from_env(cls) -> "HindsightConfig":
@@ -341,6 +353,9 @@ class HindsightConfig:
             recall_connection_budget=int(
                 os.getenv(ENV_RECALL_CONNECTION_BUDGET, str(DEFAULT_RECALL_CONNECTION_BUDGET))
             ),
+            mental_model_refresh_concurrency=int(
+                os.getenv(ENV_MENTAL_MODEL_REFRESH_CONCURRENCY, str(DEFAULT_MENTAL_MODEL_REFRESH_CONCURRENCY))
+            ),
             # Optimization flags
             skip_llm_verification=os.getenv(ENV_SKIP_LLM_VERIFICATION, "false").lower() == "true",
             lazy_reranker=os.getenv(ENV_LAZY_RERANKER, "false").lower() == "true",
@@ -380,6 +395,8 @@ class HindsightConfig:
             task_backend_memory_batch_interval=float(
                 os.getenv(ENV_TASK_BACKEND_MEMORY_BATCH_INTERVAL, str(DEFAULT_TASK_BACKEND_MEMORY_BATCH_INTERVAL))
             ),
+            # Reflect agent settings
+            reflect_max_iterations=int(os.getenv(ENV_REFLECT_MAX_ITERATIONS, str(DEFAULT_REFLECT_MAX_ITERATIONS))),
         )
 
     def get_llm_base_url(self) -> str:

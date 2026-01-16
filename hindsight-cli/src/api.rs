@@ -117,6 +117,7 @@ impl ApiClient {
         self.runtime.block_on(async {
             let request = types::CreateBankRequest {
                 name: Some(name.to_string()),
+                mission: None,
                 background: None,
                 disposition: None,
             };
