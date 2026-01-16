@@ -169,34 +169,13 @@ As facts accumulate about an entity, Hindsight synthesizes **observations** — 
 
 ## Tagging Memories
 
-You can tag memories for filtering during recall—useful when one memory bank serves multiple users but each user should only see relevant memories.
+Tags enable visibility scoping—useful when one memory bank serves multiple users but each should only see relevant memories.
 
-```python
-# Tag memories for specific users
-client.retain(
-    bank_id="my-agent",
-    items=[
-        {
-            "content": "Alice prefers morning meetings",
-            "tags": ["user_alice"]
-        }
-    ]
-)
+- **Item tags**: Tag individual memories with specific scopes
+- **Document tags**: Apply tags to all items in a batch
+- **Tag filtering**: Filter during recall/reflect by tags
 
-# Apply tags to all items in a batch
-client.retain(
-    bank_id="my-agent",
-    document_tags=["session_123", "user_alice"],  # Applied to all items
-    items=[
-        {"content": "Alice discussed the project timeline"},
-        {"content": "Alice mentioned she needs help with Python"}
-    ]
-)
-```
-
-During recall, use `tags_match` to control matching:
-- `"any"` (default): OR matching - returns memories where **any** tag overlaps
-- `"all"`: AND matching - returns memories containing **all** specified tags
+See [Retain API](./api/retain) for code examples and [Recall API](./api/recall) for filtering options.
 
 ---
 
@@ -219,4 +198,4 @@ All stored in your isolated **memory bank**, ready for `recall()` and `reflect()
 
 - [**Recall**](./retrieval) — How multi-strategy search retrieves relevant memories
 - [**Reflect**](./reflect) — How disposition influences reasoning and opinion formation
-- [API Reference](./api/retain) — Code examples for retaining memories
+- [**Retain API**](./api/retain) — Code examples and parameters

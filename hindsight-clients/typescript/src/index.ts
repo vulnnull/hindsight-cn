@@ -102,6 +102,8 @@ export class HindsightClient {
             documentId?: string;
             async?: boolean;
             entities?: EntityInput[];
+            /** Optional list of tags for this memory */
+            tags?: string[];
         }
     ): Promise<RetainResponse> {
         const item: {
@@ -111,6 +113,7 @@ export class HindsightClient {
             metadata?: Record<string, string>;
             document_id?: string;
             entities?: EntityInput[];
+            tags?: string[];
         } = { content };
         if (options?.timestamp) {
             item.timestamp =
@@ -129,6 +132,9 @@ export class HindsightClient {
         }
         if (options?.entities) {
             item.entities = options.entities;
+        }
+        if (options?.tags) {
+            item.tags = options.tags;
         }
 
         const response = await sdk.retainMemories({
@@ -192,6 +198,10 @@ export class HindsightClient {
             maxEntityTokens?: number;
             includeChunks?: boolean;
             maxChunkTokens?: number;
+            /** Optional list of tags to filter memories by */
+            tags?: string[];
+            /** How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged). Default: 'any' */
+            tagsMatch?: 'any' | 'all' | 'any_strict' | 'all_strict';
         }
     ): Promise<RecallResponse> {
         const response = await sdk.recallMemories({
@@ -208,6 +218,8 @@ export class HindsightClient {
                     entities: options?.includeEntities ? { max_tokens: options?.maxEntityTokens ?? 500 } : undefined,
                     chunks: options?.includeChunks ? { max_tokens: options?.maxChunkTokens ?? 8192 } : undefined,
                 },
+                tags: options?.tags,
+                tags_match: options?.tagsMatch,
             },
         });
 
@@ -220,7 +232,14 @@ export class HindsightClient {
     async reflect(
         bankId: string,
         query: string,
-        options?: { context?: string; budget?: Budget }
+        options?: {
+            context?: string;
+            budget?: Budget;
+            /** Optional list of tags to filter memories by */
+            tags?: string[];
+            /** How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged). Default: 'any' */
+            tagsMatch?: 'any' | 'all' | 'any_strict' | 'all_strict';
+        }
     ): Promise<ReflectResponse> {
         const response = await sdk.reflect({
             client: this.client,
@@ -229,6 +248,8 @@ export class HindsightClient {
                 query,
                 context: options?.context,
                 budget: options?.budget || 'low',
+                tags: options?.tags,
+                tags_match: options?.tagsMatch,
             },
         });
 
