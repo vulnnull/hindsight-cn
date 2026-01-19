@@ -18,20 +18,17 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ReflectMentalModel(BaseModel):
+class ObservationInput(BaseModel):
     """
-    A mental model accessed during reflect.
+    Input model for a single observation.
     """ # noqa: E501
-    id: StrictStr = Field(description="Mental model ID")
-    name: StrictStr = Field(description="Mental model name")
-    type: StrictStr = Field(description="Mental model type: entity, concept, event")
-    subtype: StrictStr = Field(description="Mental model subtype: structural, emergent, learned, directive")
-    observations: Optional[List[StrictStr]] = None
-    __properties: ClassVar[List[str]] = ["id", "name", "type", "subtype", "observations"]
+    title: StrictStr = Field(description="Short title/header for the observation")
+    content: StrictStr = Field(description="Content of the observation")
+    __properties: ClassVar[List[str]] = ["title", "content"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -51,7 +48,7 @@ class ReflectMentalModel(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ReflectMentalModel from a JSON string"""
+        """Create an instance of ObservationInput from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,16 +69,11 @@ class ReflectMentalModel(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # set to None if observations (nullable) is None
-        # and model_fields_set contains the field
-        if self.observations is None and "observations" in self.model_fields_set:
-            _dict['observations'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ReflectMentalModel from a dict"""
+        """Create an instance of ObservationInput from a dict"""
         if obj is None:
             return None
 
@@ -89,11 +81,8 @@ class ReflectMentalModel(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "id": obj.get("id"),
-            "name": obj.get("name"),
-            "type": obj.get("type"),
-            "subtype": obj.get("subtype"),
-            "observations": obj.get("observations")
+            "title": obj.get("title"),
+            "content": obj.get("content")
         })
         return _obj
 

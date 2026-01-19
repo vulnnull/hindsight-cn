@@ -314,7 +314,7 @@ export type CreateBankRequest = {
 /**
  * CreateMentalModelRequest
  *
- * Request model for creating a pinned mental model.
+ * Request model for creating a mental model.
  */
 export type CreateMentalModelRequest = {
   /**
@@ -329,6 +329,18 @@ export type CreateMentalModelRequest = {
    * One-liner description for quick scanning
    */
   description: string;
+  /**
+   * Subtype
+   *
+   * Type of mental model: 'pinned' (observations LLM-generated) or 'directive' (observations user-provided)
+   */
+  subtype?: string;
+  /**
+   * Observations
+   *
+   * For directives only: list of user-provided observations. Required when subtype='directive'.
+   */
+  observations?: Array<ObservationInput> | null;
   /**
    * Tags
    *
@@ -831,6 +843,38 @@ export type MemoryItem = {
 };
 
 /**
+ * MentalModelFreshnessResponse
+ *
+ * Freshness information for a mental model.
+ */
+export type MentalModelFreshnessResponse = {
+  /**
+   * Is Up To Date
+   *
+   * Whether the model has been refreshed since the last memory was added
+   */
+  is_up_to_date: boolean;
+  /**
+   * Last Refresh At
+   *
+   * When the model was last refreshed (ISO format)
+   */
+  last_refresh_at: string | null;
+  /**
+   * Memories Since Refresh
+   *
+   * Number of memories added since last refresh
+   */
+  memories_since_refresh: number;
+  /**
+   * Reasons
+   *
+   * Reasons why the model needs refresh (empty if up to date). Possible values: never_refreshed, new_memories, mission_changed, disposition_changed, directives_changed
+   */
+  reasons?: Array<string>;
+};
+
+/**
  * MentalModelListResponse
  *
  * Response model for listing mental models.
@@ -845,27 +889,53 @@ export type MentalModelListResponse = {
 /**
  * MentalModelObservationResponse
  *
- * An observation within a mental model with its supporting memories.
+ * An observation within a mental model with its supporting evidence.
  */
 export type MentalModelObservationResponse = {
   /**
    * Title
    *
-   * Observation header (empty for intro)
+   * Short summary title for the observation
    */
   title: string;
   /**
-   * Text
+   * Content
    *
-   * Observation content
+   * The observation content - detailed explanation
    */
-  text: string;
+  content: string;
   /**
-   * Based On
+   * Evidence
    *
-   * Memory IDs supporting this observation
+   * Supporting evidence with quotes
    */
-  based_on?: Array<string>;
+  evidence?: Array<ObservationEvidenceResponse>;
+  /**
+   * Created At
+   *
+   * When this observation was first created (ISO format)
+   */
+  created_at: string;
+  /**
+   * Trend
+   *
+   * Computed trend: stable, strengthening, weakening, new, stale
+   */
+  trend: string;
+  /**
+   * Evidence Count
+   *
+   * Number of evidence items supporting this observation
+   */
+  evidence_count: number;
+  /**
+   * Evidence Span
+   *
+   * Time span of evidence: {from: iso_date, to: iso_date}
+   */
+  evidence_span: {
+    [key: string]: unknown;
+  };
 };
 
 /**
@@ -901,6 +971,12 @@ export type MentalModelResponse = {
    */
   observations?: Array<MentalModelObservationResponse>;
   /**
+   * Version
+   *
+   * Version number of the mental model observations
+   */
+  version?: number;
+  /**
    * Entity Id
    */
   entity_id?: string | null;
@@ -917,9 +993,71 @@ export type MentalModelResponse = {
    */
   last_updated?: string | null;
   /**
+   * Last Refresh At
+   *
+   * When observations were last refreshed (ISO format)
+   */
+  last_refresh_at?: string | null;
+  /**
+   * Freshness info (null for directive subtypes which don't need refresh)
+   */
+  freshness?: MentalModelFreshnessResponse | null;
+  /**
    * Created At
    */
   created_at: string;
+};
+
+/**
+ * ObservationEvidenceResponse
+ *
+ * A single piece of evidence supporting an observation.
+ */
+export type ObservationEvidenceResponse = {
+  /**
+   * Memory Id
+   *
+   * ID of the memory unit this evidence comes from
+   */
+  memory_id: string;
+  /**
+   * Quote
+   *
+   * Exact quote from the memory supporting the observation
+   */
+  quote: string;
+  /**
+   * Relevance
+   *
+   * Brief explanation of how this quote supports the observation
+   */
+  relevance: string;
+  /**
+   * Timestamp
+   *
+   * When the source memory was created (ISO format)
+   */
+  timestamp: string;
+};
+
+/**
+ * ObservationInput
+ *
+ * Input model for a single observation.
+ */
+export type ObservationInput = {
+  /**
+   * Title
+   *
+   * Short title/header for the observation
+   */
+  title: string;
+  /**
+   * Content
+   *
+   * Content of the observation
+   */
+  content: string;
 };
 
 /**
@@ -1270,21 +1408,15 @@ export type ReflectMentalModel = {
   /**
    * Subtype
    *
-   * Mental model subtype: structural, emergent, learned
+   * Mental model subtype: structural, emergent, learned, directive
    */
   subtype: string;
   /**
-   * Description
+   * Observations
    *
-   * Brief description
+   * Observations for directive mental models (subtype='directive')
    */
-  description: string;
-  /**
-   * Summary
-   *
-   * Full summary (when looked up in detail)
-   */
-  summary?: string | null;
+  observations?: Array<string> | null;
 };
 
 /**
@@ -1436,6 +1568,12 @@ export type ReflectTrace = {
    * LLM calls made during reflection
    */
   llm_calls?: Array<ReflectLlmCall>;
+  /**
+   * Mental Models
+   *
+   * Mental models used during reflection (includes directives with subtype='directive')
+   */
+  mental_models?: Array<ReflectMentalModel>;
 };
 
 /**
@@ -1588,6 +1726,26 @@ export type ToolCallsIncludeOptions = {
  */
 export type UpdateDispositionRequest = {
   disposition: DispositionTraits;
+};
+
+/**
+ * UpdateMentalModelRequest
+ *
+ * Request model for updating a mental model.
+ */
+export type UpdateMentalModelRequest = {
+  /**
+   * Name
+   *
+   * New name for the mental model
+   */
+  name?: string | null;
+  /**
+   * Description
+   *
+   * New description/rule text
+   */
+  description?: string | null;
 };
 
 /**
@@ -2226,6 +2384,48 @@ export type GetMentalModelResponses = {
 export type GetMentalModelResponse =
   GetMentalModelResponses[keyof GetMentalModelResponses];
 
+export type UpdateMentalModelData = {
+  body: UpdateMentalModelRequest;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Model Id
+     */
+    model_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/mental-models/{model_id}";
+};
+
+export type UpdateMentalModelErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type UpdateMentalModelError =
+  UpdateMentalModelErrors[keyof UpdateMentalModelErrors];
+
+export type UpdateMentalModelResponses = {
+  /**
+   * Successful Response
+   */
+  200: MentalModelResponse;
+};
+
+export type UpdateMentalModelResponse =
+  UpdateMentalModelResponses[keyof UpdateMentalModelResponses];
+
 export type RefreshMentalModelsData = {
   /**
    * Body
@@ -2267,7 +2467,7 @@ export type RefreshMentalModelsResponses = {
 export type RefreshMentalModelsResponse =
   RefreshMentalModelsResponses[keyof RefreshMentalModelsResponses];
 
-export type GenerateMentalModelData = {
+export type RefreshMentalModelData = {
   body?: never;
   headers?: {
     /**
@@ -2286,28 +2486,110 @@ export type GenerateMentalModelData = {
     model_id: string;
   };
   query?: never;
-  url: "/v1/default/banks/{bank_id}/mental-models/{model_id}/generate";
+  url: "/v1/default/banks/{bank_id}/mental-models/{model_id}/refresh";
 };
 
-export type GenerateMentalModelErrors = {
+export type RefreshMentalModelErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError;
 };
 
-export type GenerateMentalModelError =
-  GenerateMentalModelErrors[keyof GenerateMentalModelErrors];
+export type RefreshMentalModelError =
+  RefreshMentalModelErrors[keyof RefreshMentalModelErrors];
 
-export type GenerateMentalModelResponses = {
+export type RefreshMentalModelResponses = {
   /**
    * Successful Response
    */
   200: AsyncOperationSubmitResponse;
 };
 
-export type GenerateMentalModelResponse =
-  GenerateMentalModelResponses[keyof GenerateMentalModelResponses];
+export type RefreshMentalModelResponse =
+  RefreshMentalModelResponses[keyof RefreshMentalModelResponses];
+
+export type ListMentalModelVersionsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Model Id
+     */
+    model_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/mental-models/{model_id}/versions";
+};
+
+export type ListMentalModelVersionsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListMentalModelVersionsError =
+  ListMentalModelVersionsErrors[keyof ListMentalModelVersionsErrors];
+
+export type ListMentalModelVersionsResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
+
+export type GetMentalModelVersionData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Model Id
+     */
+    model_id: string;
+    /**
+     * Version
+     */
+    version: number;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/mental-models/{model_id}/versions/{version}";
+};
+
+export type GetMentalModelVersionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetMentalModelVersionError =
+  GetMentalModelVersionErrors[keyof GetMentalModelVersionErrors];
+
+export type GetMentalModelVersionResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
 
 export type ListDocumentsData = {
   body?: never;

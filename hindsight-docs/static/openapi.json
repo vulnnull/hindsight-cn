@@ -901,7 +901,7 @@
           "Mental Models"
         ],
         "summary": "Create mental model",
-        "description": "Create a pinned mental model. Pinned models are user-defined and persist across refreshes.",
+        "description": "Create a mental model. Supports two subtypes:\n- 'pinned' (default): User-defined topic, observations are LLM-generated on refresh\n- 'directive': User-defined hard rules, observations are provided at creation and never regenerated",
         "operationId": "create_mental_model",
         "parameters": [
           {
@@ -1096,6 +1096,82 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "Mental Models"
+        ],
+        "summary": "Update mental model",
+        "description": "Update a mental model's name and/or description. Useful for editing directives.",
+        "operationId": "update_mental_model",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMentalModelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MentalModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/default/banks/{bank_id}/mental-models/refresh": {
@@ -1174,14 +1250,14 @@
         }
       }
     },
-    "/v1/default/banks/{bank_id}/mental-models/{model_id}/generate": {
+    "/v1/default/banks/{bank_id}/mental-models/{model_id}/refresh": {
       "post": {
         "tags": [
           "Mental Models"
         ],
-        "summary": "Generate mental model content (async)",
-        "description": "Submit a background job to generate/refresh content for a specific mental model. This is useful for newly created learned models or to regenerate content for any model.",
-        "operationId": "generate_mental_model",
+        "summary": "Refresh mental model content (async)",
+        "description": "Submit a background job to refresh content for a specific mental model. This is useful for newly created learned models or to refresh content for any model.",
+        "operationId": "refresh_mental_model",
         "parameters": [
           {
             "name": "bank_id",
@@ -1226,6 +1302,147 @@
                 "schema": {
                   "$ref": "#/components/schemas/AsyncOperationSubmitResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/mental-models/{model_id}/versions": {
+      "get": {
+        "tags": [
+          "Mental Models"
+        ],
+        "summary": "List mental model version history",
+        "description": "List all saved versions of a mental model's observations, ordered by version descending.",
+        "operationId": "list_mental_model_versions",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/mental-models/{model_id}/versions/{version}": {
+      "get": {
+        "tags": [
+          "Mental Models"
+        ],
+        "summary": "Get specific mental model version",
+        "description": "Get observations from a specific version of a mental model.",
+        "operationId": "get_mental_model_version",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -2899,6 +3116,27 @@
             "title": "Description",
             "description": "One-liner description for quick scanning"
           },
+          "subtype": {
+            "type": "string",
+            "title": "Subtype",
+            "description": "Type of mental model: 'pinned' (observations LLM-generated) or 'directive' (observations user-provided)",
+            "default": "pinned"
+          },
+          "observations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ObservationInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observations",
+            "description": "For directives only: list of user-provided observations. Required when subtype='directive'."
+          },
           "tags": {
             "items": {
               "type": "string"
@@ -2914,14 +3152,27 @@
           "description"
         ],
         "title": "CreateMentalModelRequest",
-        "description": "Request model for creating a pinned mental model.",
-        "example": {
-          "description": "Key product priorities and upcoming features",
-          "name": "Product Roadmap",
-          "tags": [
-            "project-x"
-          ]
-        }
+        "description": "Request model for creating a mental model.",
+        "examples": [
+          {
+            "description": "Key product priorities and upcoming features",
+            "name": "Product Roadmap",
+            "tags": [
+              "project-x"
+            ]
+          },
+          {
+            "description": "Rules about scheduling meetings",
+            "name": "Meeting Rules",
+            "observations": [
+              {
+                "content": "Never schedule meetings before 10am",
+                "title": "Morning meetings"
+              }
+            ],
+            "subtype": "directive"
+          }
+        ]
       },
       "CreatedMentalModel": {
         "properties": {
@@ -3812,6 +4063,48 @@
           "timestamp": "2024-01-15T10:30:00Z"
         }
       },
+      "MentalModelFreshnessResponse": {
+        "properties": {
+          "is_up_to_date": {
+            "type": "boolean",
+            "title": "Is Up To Date",
+            "description": "Whether the model has been refreshed since the last memory was added"
+          },
+          "last_refresh_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Refresh At",
+            "description": "When the model was last refreshed (ISO format)"
+          },
+          "memories_since_refresh": {
+            "type": "integer",
+            "title": "Memories Since Refresh",
+            "description": "Number of memories added since last refresh"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons",
+            "description": "Reasons why the model needs refresh (empty if up to date). Possible values: never_refreshed, new_memories, mission_changed, disposition_changed, directives_changed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_up_to_date",
+          "last_refresh_at",
+          "memories_since_refresh"
+        ],
+        "title": "MentalModelFreshnessResponse",
+        "description": "Freshness information for a mental model."
+      },
       "MentalModelListResponse": {
         "properties": {
           "items": {
@@ -3834,29 +4127,54 @@
           "title": {
             "type": "string",
             "title": "Title",
-            "description": "Observation header (empty for intro)"
+            "description": "Short summary title for the observation"
           },
-          "text": {
+          "content": {
             "type": "string",
-            "title": "Text",
-            "description": "Observation content"
+            "title": "Content",
+            "description": "The observation content - detailed explanation"
           },
-          "based_on": {
+          "evidence": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ObservationEvidenceResponse"
             },
             "type": "array",
-            "title": "Based On",
-            "description": "Memory IDs supporting this observation"
+            "title": "Evidence",
+            "description": "Supporting evidence with quotes"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At",
+            "description": "When this observation was first created (ISO format)"
+          },
+          "trend": {
+            "type": "string",
+            "title": "Trend",
+            "description": "Computed trend: stable, strengthening, weakening, new, stale"
+          },
+          "evidence_count": {
+            "type": "integer",
+            "title": "Evidence Count",
+            "description": "Number of evidence items supporting this observation"
+          },
+          "evidence_span": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Evidence Span",
+            "description": "Time span of evidence: {from: iso_date, to: iso_date}"
           }
         },
         "type": "object",
         "required": [
           "title",
-          "text"
+          "content",
+          "created_at",
+          "trend",
+          "evidence_count",
+          "evidence_span"
         ],
         "title": "MentalModelObservationResponse",
-        "description": "An observation within a mental model with its supporting memories."
+        "description": "An observation within a mental model with its supporting evidence."
       },
       "MentalModelResponse": {
         "properties": {
@@ -3887,6 +4205,12 @@
             "type": "array",
             "title": "Observations",
             "description": "Structured observations with per-observation fact attribution"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Version number of the mental model observations",
+            "default": 0
           },
           "entity_id": {
             "anyOf": [
@@ -3926,6 +4250,29 @@
             ],
             "title": "Last Updated"
           },
+          "last_refresh_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Refresh At",
+            "description": "When observations were last refreshed (ISO format)"
+          },
+          "freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MentalModelFreshnessResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Freshness info (null for directive subtypes which don't need refresh)"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -3946,24 +4293,98 @@
           "bank_id": "test-bank",
           "created_at": "2024-01-10T08:00:00Z",
           "description": "Who's on the team and their roles",
+          "freshness": {
+            "is_up_to_date": true,
+            "last_refresh_at": "2024-01-15T10:30:00Z",
+            "memories_since_refresh": 0,
+            "reasons": []
+          },
           "id": "team-structure",
+          "last_refresh_at": "2024-01-15T10:30:00Z",
           "last_updated": "2024-01-15T10:30:00Z",
           "links": [],
           "name": "Team Structure",
           "observations": [
             {
-              "based_on": [
-                "uuid1"
+              "content": "The team prefers async communication over synchronous meetings",
+              "created_at": "2024-01-15T10:30:00Z",
+              "evidence": [
+                {
+                  "memory_id": "uuid1",
+                  "quote": "I prefer Slack over meetings",
+                  "relevance": "Shows async preference",
+                  "timestamp": "2024-01-10T08:00:00Z"
+                }
               ],
-              "text": "The team consists of...",
-              "title": "Overview"
+              "evidence_count": 1,
+              "evidence_span": {
+                "from": "2024-01-10T08:00:00Z",
+                "to": "2024-01-10T08:00:00Z"
+              },
+              "title": "Prefers async communication",
+              "trend": "stable"
             }
           ],
           "subtype": "structural",
           "tags": [
             "project-x"
-          ]
+          ],
+          "version": 1
         }
+      },
+      "ObservationEvidenceResponse": {
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id",
+            "description": "ID of the memory unit this evidence comes from"
+          },
+          "quote": {
+            "type": "string",
+            "title": "Quote",
+            "description": "Exact quote from the memory supporting the observation"
+          },
+          "relevance": {
+            "type": "string",
+            "title": "Relevance",
+            "description": "Brief explanation of how this quote supports the observation"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "When the source memory was created (ISO format)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memory_id",
+          "quote",
+          "relevance",
+          "timestamp"
+        ],
+        "title": "ObservationEvidenceResponse",
+        "description": "A single piece of evidence supporting an observation."
+      },
+      "ObservationInput": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Short title/header for the observation"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Content of the observation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "content"
+        ],
+        "title": "ObservationInput",
+        "description": "Input model for a single observation."
       },
       "OperationResponse": {
         "properties": {
@@ -4692,24 +5113,22 @@
           "subtype": {
             "type": "string",
             "title": "Subtype",
-            "description": "Mental model subtype: structural, emergent, learned"
+            "description": "Mental model subtype: structural, emergent, learned, directive"
           },
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "description": "Brief description"
-          },
-          "summary": {
+          "observations": {
             "anyOf": [
               {
-                "type": "string"
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Summary",
-            "description": "Full summary (when looked up in detail)"
+            "title": "Observations",
+            "description": "Observations for directive mental models (subtype='directive')"
           }
         },
         "type": "object",
@@ -4717,8 +5136,7 @@
           "id",
           "name",
           "type",
-          "subtype",
-          "description"
+          "subtype"
         ],
         "title": "ReflectMentalModel",
         "description": "A mental model accessed during reflect."
@@ -5028,6 +5446,14 @@
             "type": "array",
             "title": "Llm Calls",
             "description": "LLM calls made during reflection"
+          },
+          "mental_models": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectMentalModel"
+            },
+            "type": "array",
+            "title": "Mental Models",
+            "description": "Mental models used during reflection (includes directives with subtype='directive')"
           }
         },
         "type": "object",
@@ -5277,6 +5703,41 @@
         ],
         "title": "UpdateDispositionRequest",
         "description": "Request model for updating disposition traits."
+      },
+      "UpdateMentalModelRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "New name for the mental model"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "New description/rule text"
+          }
+        },
+        "type": "object",
+        "title": "UpdateMentalModelRequest",
+        "description": "Request model for updating a mental model.",
+        "example": {
+          "description": "Updated description with new rules",
+          "name": "Updated Name"
+        }
       },
       "ValidationError": {
         "properties": {

@@ -18,6 +18,7 @@ import {
   Settings2,
   Eye,
   EyeOff,
+  RefreshCw,
 } from "lucide-react";
 import {
   Table,
@@ -248,11 +249,9 @@ export function DataView({ factType }: DataViewProps) {
   return (
     <div>
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="text-center">
-            <div className="text-4xl mb-2">⏳</div>
-            <div className="text-sm text-muted-foreground">Loading memories...</div>
-          </div>
+        <div className="text-center py-12">
+          <RefreshCw className="w-8 h-8 mx-auto mb-3 text-muted-foreground animate-spin" />
+          <p className="text-muted-foreground">Loading memories...</p>
         </div>
       ) : data ? (
         <>

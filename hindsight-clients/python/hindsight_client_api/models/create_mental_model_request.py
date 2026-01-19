@@ -19,17 +19,20 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from hindsight_client_api.models.observation_input import ObservationInput
 from typing import Optional, Set
 from typing_extensions import Self
 
 class CreateMentalModelRequest(BaseModel):
     """
-    Request model for creating a pinned mental model.
+    Request model for creating a mental model.
     """ # noqa: E501
     name: StrictStr = Field(description="Human-readable name for the mental model")
     description: StrictStr = Field(description="One-liner description for quick scanning")
+    subtype: Optional[StrictStr] = Field(default='pinned', description="Type of mental model: 'pinned' (observations LLM-generated) or 'directive' (observations user-provided)")
+    observations: Optional[List[ObservationInput]] = None
     tags: Optional[List[StrictStr]] = Field(default=None, description="Tags for scoped visibility")
-    __properties: ClassVar[List[str]] = ["name", "description", "tags"]
+    __properties: ClassVar[List[str]] = ["name", "description", "subtype", "observations", "tags"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -70,6 +73,18 @@ class CreateMentalModelRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in observations (list)
+        _items = []
+        if self.observations:
+            for _item_observations in self.observations:
+                if _item_observations:
+                    _items.append(_item_observations.to_dict())
+            _dict['observations'] = _items
+        # set to None if observations (nullable) is None
+        # and model_fields_set contains the field
+        if self.observations is None and "observations" in self.model_fields_set:
+            _dict['observations'] = None
+
         return _dict
 
     @classmethod
@@ -84,6 +99,8 @@ class CreateMentalModelRequest(BaseModel):
         _obj = cls.model_validate({
             "name": obj.get("name"),
             "description": obj.get("description"),
+            "subtype": obj.get("subtype") if obj.get("subtype") is not None else 'pinned',
+            "observations": [ObservationInput.from_dict(_item) for _item in obj["observations"]] if obj.get("observations") is not None else None,
             "tags": obj.get("tags")
         })
         return _obj

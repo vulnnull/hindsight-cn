@@ -17,8 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from hindsight_client_api.models.mental_model_freshness_response import MentalModelFreshnessResponse
 from hindsight_client_api.models.mental_model_observation_response import MentalModelObservationResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -33,12 +34,15 @@ class MentalModelResponse(BaseModel):
     name: StrictStr
     description: StrictStr
     observations: Optional[List[MentalModelObservationResponse]] = Field(default=None, description="Structured observations with per-observation fact attribution")
+    version: Optional[StrictInt] = Field(default=0, description="Version number of the mental model observations")
     entity_id: Optional[StrictStr] = None
     links: Optional[List[StrictStr]] = None
     tags: Optional[List[StrictStr]] = None
     last_updated: Optional[StrictStr] = None
+    last_refresh_at: Optional[StrictStr] = None
+    freshness: Optional[MentalModelFreshnessResponse] = None
     created_at: StrictStr
-    __properties: ClassVar[List[str]] = ["id", "bank_id", "subtype", "name", "description", "observations", "entity_id", "links", "tags", "last_updated", "created_at"]
+    __properties: ClassVar[List[str]] = ["id", "bank_id", "subtype", "name", "description", "observations", "version", "entity_id", "links", "tags", "last_updated", "last_refresh_at", "freshness", "created_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -86,6 +90,9 @@ class MentalModelResponse(BaseModel):
                 if _item_observations:
                     _items.append(_item_observations.to_dict())
             _dict['observations'] = _items
+        # override the default output from pydantic by calling `to_dict()` of freshness
+        if self.freshness:
+            _dict['freshness'] = self.freshness.to_dict()
         # set to None if entity_id (nullable) is None
         # and model_fields_set contains the field
         if self.entity_id is None and "entity_id" in self.model_fields_set:
@@ -95,6 +102,16 @@ class MentalModelResponse(BaseModel):
         # and model_fields_set contains the field
         if self.last_updated is None and "last_updated" in self.model_fields_set:
             _dict['last_updated'] = None
+
+        # set to None if last_refresh_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.last_refresh_at is None and "last_refresh_at" in self.model_fields_set:
+            _dict['last_refresh_at'] = None
+
+        # set to None if freshness (nullable) is None
+        # and model_fields_set contains the field
+        if self.freshness is None and "freshness" in self.model_fields_set:
+            _dict['freshness'] = None
 
         return _dict
 
@@ -114,10 +131,13 @@ class MentalModelResponse(BaseModel):
             "name": obj.get("name"),
             "description": obj.get("description"),
             "observations": [MentalModelObservationResponse.from_dict(_item) for _item in obj["observations"]] if obj.get("observations") is not None else None,
+            "version": obj.get("version") if obj.get("version") is not None else 0,
             "entity_id": obj.get("entity_id"),
             "links": obj.get("links"),
             "tags": obj.get("tags"),
             "last_updated": obj.get("last_updated"),
+            "last_refresh_at": obj.get("last_refresh_at"),
+            "freshness": MentalModelFreshnessResponse.from_dict(obj["freshness"]) if obj.get("freshness") is not None else None,
             "created_at": obj.get("created_at")
         })
         return _obj

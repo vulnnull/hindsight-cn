@@ -17,19 +17,24 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from hindsight_client_api.models.observation_evidence_response import ObservationEvidenceResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
 class MentalModelObservationResponse(BaseModel):
     """
-    An observation within a mental model with its supporting memories.
+    An observation within a mental model with its supporting evidence.
     """ # noqa: E501
-    title: StrictStr = Field(description="Observation header (empty for intro)")
-    text: StrictStr = Field(description="Observation content")
-    based_on: Optional[List[StrictStr]] = Field(default=None, description="Memory IDs supporting this observation")
-    __properties: ClassVar[List[str]] = ["title", "text", "based_on"]
+    title: StrictStr = Field(description="Short summary title for the observation")
+    content: StrictStr = Field(description="The observation content - detailed explanation")
+    evidence: Optional[List[ObservationEvidenceResponse]] = Field(default=None, description="Supporting evidence with quotes")
+    created_at: StrictStr = Field(description="When this observation was first created (ISO format)")
+    trend: StrictStr = Field(description="Computed trend: stable, strengthening, weakening, new, stale")
+    evidence_count: StrictInt = Field(description="Number of evidence items supporting this observation")
+    evidence_span: Dict[str, Any] = Field(description="Time span of evidence: {from: iso_date, to: iso_date}")
+    __properties: ClassVar[List[str]] = ["title", "content", "evidence", "created_at", "trend", "evidence_count", "evidence_span"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -70,6 +75,13 @@ class MentalModelObservationResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in evidence (list)
+        _items = []
+        if self.evidence:
+            for _item_evidence in self.evidence:
+                if _item_evidence:
+                    _items.append(_item_evidence.to_dict())
+            _dict['evidence'] = _items
         return _dict
 
     @classmethod
@@ -83,8 +95,12 @@ class MentalModelObservationResponse(BaseModel):
 
         _obj = cls.model_validate({
             "title": obj.get("title"),
-            "text": obj.get("text"),
-            "based_on": obj.get("based_on")
+            "content": obj.get("content"),
+            "evidence": [ObservationEvidenceResponse.from_dict(_item) for _item in obj["evidence"]] if obj.get("evidence") is not None else None,
+            "created_at": obj.get("created_at"),
+            "trend": obj.get("trend"),
+            "evidence_count": obj.get("evidence_count"),
+            "evidence_span": obj.get("evidence_span")
         })
         return _obj
 
