@@ -544,3 +544,205 @@ class TestDeleteBank:
         # Verify bank data is deleted - memories should be gone
         memories = client.list_memories(bank_id=bank_id)
         assert memories.total == 0
+
+
+class TestMentalModels:
+    """Tests for mental model operations."""
+
+    def test_set_mission(self, client, bank_id):
+        """Test setting a bank's mission."""
+        response = client.set_mission(
+            bank_id=bank_id,
+            mission="Be a helpful PM tracking sprint progress and team capacity",
+        )
+
+        assert response is not None
+        assert response.bank_id == bank_id
+        assert response.mission == "Be a helpful PM tracking sprint progress and team capacity"
+
+    def test_create_pinned_mental_model(self, client, bank_id):
+        """Test creating a pinned mental model."""
+        # Create bank first (required for mental models)
+        client.create_bank(bank_id=bank_id)
+
+        response = client.create_mental_model(
+            bank_id=bank_id,
+            name="Product Roadmap",
+            description="Track product priorities and feature decisions",
+            subtype="pinned",
+            tags=["test"],
+        )
+
+        assert response is not None
+        assert response.name == "Product Roadmap"
+        assert response.description == "Track product priorities and feature decisions"
+        assert response.subtype == "pinned"
+
+    def test_create_directive_mental_model(self, client, bank_id):
+        """Test creating a directive mental model with observations."""
+        # Create bank first (required for mental models)
+        client.create_bank(bank_id=bank_id)
+
+        response = client.create_mental_model(
+            bank_id=bank_id,
+            name="Response Guidelines",
+            description="Rules for responding to users",
+            subtype="directive",
+            observations=[
+                {"title": "Always be polite", "content": "All responses must be courteous and professional"},
+                {"title": "Never share private info", "content": "Do not reveal internal details or user data"},
+            ],
+            tags=["test"],
+        )
+
+        assert response is not None
+        assert response.name == "Response Guidelines"
+        assert response.subtype == "directive"
+        assert response.observations is not None
+        assert len(response.observations) == 2
+
+    def test_list_mental_models(self, client, bank_id):
+        """Test listing mental models."""
+        # Create bank first (required for mental models)
+        client.create_bank(bank_id=bank_id)
+
+        # Create a model first
+        client.create_mental_model(
+            bank_id=bank_id,
+            name="Test Model",
+            description="A test mental model",
+            subtype="pinned",
+        )
+
+        response = client.list_mental_models(bank_id=bank_id)
+
+        assert response is not None
+        assert response.items is not None
+        assert len(response.items) >= 1
+
+    def test_get_mental_model(self, client, bank_id):
+        """Test getting a specific mental model."""
+        # Create bank first (required for mental models)
+        client.create_bank(bank_id=bank_id)
+
+        # Create a model first
+        created = client.create_mental_model(
+            bank_id=bank_id,
+            name="Retrieve Test Model",
+            description="A model to retrieve",
+            subtype="pinned",
+        )
+
+        response = client.get_mental_model(
+            bank_id=bank_id,
+            model_id=created.id,
+        )
+
+        assert response is not None
+        assert response.id == created.id
+        assert response.name == "Retrieve Test Model"
+
+    def test_update_mental_model(self, client, bank_id):
+        """Test updating a mental model."""
+        # Create bank first (required for mental models)
+        client.create_bank(bank_id=bank_id)
+
+        # Create a model first
+        created = client.create_mental_model(
+            bank_id=bank_id,
+            name="Update Test Model",
+            description="Original description",
+            subtype="pinned",
+        )
+
+        response = client.update_mental_model(
+            bank_id=bank_id,
+            model_id=created.id,
+            name="Updated Model Name",
+            description="Updated description",
+        )
+
+        assert response is not None
+        assert response.name == "Updated Model Name"
+        assert response.description == "Updated description"
+
+    def test_delete_mental_model(self, client, bank_id):
+        """Test deleting a mental model."""
+        # Create bank first (required for mental models)
+        client.create_bank(bank_id=bank_id)
+
+        # Create a model first
+        created = client.create_mental_model(
+            bank_id=bank_id,
+            name="Delete Test Model",
+            description="A model to delete",
+            subtype="pinned",
+        )
+
+        response = client.delete_mental_model(
+            bank_id=bank_id,
+            model_id=created.id,
+        )
+
+        assert response is not None
+        assert response.success is True
+
+    def test_refresh_mental_models(self, client, bank_id):
+        """Test refreshing all mental models (async operation)."""
+        # Set mission first (required for refresh) - this also creates the bank
+        client.set_mission(
+            bank_id=bank_id,
+            mission="Track team progress and decisions",
+        )
+
+        response = client.refresh_mental_models(
+            bank_id=bank_id,
+            tags=["test"],
+        )
+
+        assert response is not None
+        assert response.operation_id is not None
+        assert response.status == "queued"
+
+    def test_refresh_mental_model(self, client, bank_id):
+        """Test refreshing a single mental model (async operation)."""
+        # Create bank first (required for mental models)
+        client.create_bank(bank_id=bank_id)
+
+        # Create a model first
+        created = client.create_mental_model(
+            bank_id=bank_id,
+            name="Refresh Single Test",
+            description="A model to refresh individually",
+            subtype="pinned",
+        )
+
+        response = client.refresh_mental_model(
+            bank_id=bank_id,
+            model_id=created.id,
+        )
+
+        assert response is not None
+        assert response.operation_id is not None
+        assert response.status == "queued"
+
+    def test_list_mental_model_versions(self, client, bank_id):
+        """Test listing mental model versions."""
+        # Create bank first (required for mental models)
+        client.create_bank(bank_id=bank_id)
+
+        # Create a model first
+        created = client.create_mental_model(
+            bank_id=bank_id,
+            name="Versions Test Model",
+            description="A model to test version history",
+            subtype="pinned",
+        )
+
+        response = client.list_mental_model_versions(
+            bank_id=bank_id,
+            model_id=created.id,
+        )
+
+        # Newly created model should have version history
+        assert response is not None

@@ -6,11 +6,11 @@ easy-to-use interface on top of the auto-generated OpenAPI client.
 """
 
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 
 import hindsight_client_api
-from hindsight_client_api.api import memory_api, banks_api
+from hindsight_client_api.api import memory_api, banks_api, mental_models_api
 from hindsight_client_api.models import (
     recall_request,
     retain_request,
@@ -23,6 +23,9 @@ from hindsight_client_api.models.recall_result import RecallResult
 from hindsight_client_api.models.reflect_response import ReflectResponse
 from hindsight_client_api.models.list_memory_units_response import ListMemoryUnitsResponse
 from hindsight_client_api.models.bank_profile_response import BankProfileResponse
+from hindsight_client_api.models.mental_model_response import MentalModelResponse
+from hindsight_client_api.models.mental_model_list_response import MentalModelListResponse
+from hindsight_client_api.models.async_operation_submit_response import AsyncOperationSubmitResponse
 
 
 def _run_async(coro):
@@ -78,6 +81,7 @@ class Hindsight:
             self._api_client.set_default_header("Authorization", f"Bearer {api_key}")
         self._memory_api = memory_api.MemoryApi(self._api_client)
         self._banks_api = banks_api.BanksApi(self._api_client)
+        self._mental_models_api = mental_models_api.MentalModelsApi(self._api_client)
 
     def __enter__(self):
         """Context manager entry."""
@@ -331,6 +335,256 @@ class Hindsight:
         )
 
         return _run_async(self._banks_api.create_or_update_bank(bank_id, request_obj))
+
+    def set_mission(
+        self,
+        bank_id: str,
+        mission: str,
+    ) -> BankProfileResponse:
+        """
+        Set or update the mission for a memory bank.
+
+        Args:
+            bank_id: The memory bank ID
+            mission: The mission text describing the agent's purpose
+
+        Returns:
+            BankProfileResponse with updated bank profile
+        """
+        from hindsight_client_api.models import create_bank_request
+
+        request_obj = create_bank_request.CreateBankRequest(mission=mission)
+        return _run_async(self._banks_api.create_or_update_bank(bank_id, request_obj))
+
+    def list_mental_models(
+        self,
+        bank_id: str,
+        subtype: Optional[Literal["structural", "emergent", "pinned", "learned", "directive"]] = None,
+        tags: Optional[List[str]] = None,
+        tags_match: Optional[Literal["any", "all", "exact"]] = None,
+    ) -> MentalModelListResponse:
+        """
+        List mental models for a bank.
+
+        Args:
+            bank_id: The memory bank ID
+            subtype: Optional filter by subtype (structural, emergent, pinned, learned, directive)
+            tags: Optional list of tags to filter by
+            tags_match: How to match tags - 'any' (OR), 'all' (AND), or 'exact'
+
+        Returns:
+            MentalModelListResponse with list of mental models
+        """
+        return _run_async(self._mental_models_api.list_mental_models(
+            bank_id=bank_id,
+            subtype=subtype,
+            tags=tags,
+            tags_match=tags_match,
+        ))
+
+    def get_mental_model(
+        self,
+        bank_id: str,
+        model_id: str,
+    ) -> MentalModelResponse:
+        """
+        Get a specific mental model by ID.
+
+        Args:
+            bank_id: The memory bank ID
+            model_id: The mental model ID
+
+        Returns:
+            MentalModelResponse with full mental model details including observations
+        """
+        return _run_async(self._mental_models_api.get_mental_model(
+            bank_id=bank_id,
+            model_id=model_id,
+        ))
+
+    def create_mental_model(
+        self,
+        bank_id: str,
+        name: str,
+        description: str,
+        subtype: Literal["pinned", "directive"] = "pinned",
+        observations: Optional[List[Dict[str, str]]] = None,
+        tags: Optional[List[str]] = None,
+    ) -> MentalModelResponse:
+        """
+        Create a mental model.
+
+        Args:
+            bank_id: The memory bank ID
+            name: Human-readable name for the mental model
+            description: One-liner description for quick scanning
+            subtype: Type of mental model - 'pinned' (LLM-generated observations) or 'directive' (user-provided observations)
+            observations: For directives only - list of observations with 'title' and 'content' keys
+            tags: Optional list of tags for scoped visibility
+
+        Returns:
+            MentalModelResponse with created mental model
+        """
+        from hindsight_client_api.models.create_mental_model_request import CreateMentalModelRequest
+        from hindsight_client_api.models.observation_input import ObservationInput
+
+        obs_list = None
+        if observations:
+            obs_list = [ObservationInput(title=o.get("title", ""), content=o.get("content", "")) for o in observations]
+
+        request_obj = CreateMentalModelRequest(
+            name=name,
+            description=description,
+            subtype=subtype,
+            observations=obs_list,
+            tags=tags or [],
+        )
+        return _run_async(self._mental_models_api.create_mental_model(
+            bank_id=bank_id,
+            create_mental_model_request=request_obj,
+        ))
+
+    def update_mental_model(
+        self,
+        bank_id: str,
+        model_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> MentalModelResponse:
+        """
+        Update a mental model's name and/or description.
+
+        Args:
+            bank_id: The memory bank ID
+            model_id: The mental model ID
+            name: Optional new name
+            description: Optional new description
+
+        Returns:
+            MentalModelResponse with updated mental model
+        """
+        from hindsight_client_api.models.update_mental_model_request import UpdateMentalModelRequest
+
+        request_obj = UpdateMentalModelRequest(
+            name=name,
+            description=description,
+        )
+        return _run_async(self._mental_models_api.update_mental_model(
+            bank_id=bank_id,
+            model_id=model_id,
+            update_mental_model_request=request_obj,
+        ))
+
+    def delete_mental_model(
+        self,
+        bank_id: str,
+        model_id: str,
+    ):
+        """
+        Delete a mental model.
+
+        Args:
+            bank_id: The memory bank ID
+            model_id: The mental model ID
+
+        Returns:
+            DeleteResponse confirming deletion
+        """
+        return _run_async(self._mental_models_api.delete_mental_model(
+            bank_id=bank_id,
+            model_id=model_id,
+        ))
+
+    def refresh_mental_models(
+        self,
+        bank_id: str,
+        subtype: Optional[Literal["structural", "emergent", "pinned", "learned"]] = None,
+        tags: Optional[List[str]] = None,
+    ) -> AsyncOperationSubmitResponse:
+        """
+        Submit a background job to refresh mental models for a bank.
+
+        Args:
+            bank_id: The memory bank ID
+            subtype: Optional - only refresh models of this subtype
+            tags: Optional - tags to apply to newly created mental models
+
+        Returns:
+            AsyncOperationSubmitResponse with operation_id to track progress
+        """
+        from hindsight_client_api.models.refresh_mental_models_request import RefreshMentalModelsRequest
+
+        request_obj = RefreshMentalModelsRequest(
+            subtype=subtype,
+            tags=tags,
+        )
+        return _run_async(self._mental_models_api.refresh_mental_models(
+            bank_id=bank_id,
+            refresh_mental_models_request=request_obj,
+        ))
+
+    def refresh_mental_model(
+        self,
+        bank_id: str,
+        model_id: str,
+    ) -> AsyncOperationSubmitResponse:
+        """
+        Submit a background job to refresh content for a specific mental model.
+
+        Args:
+            bank_id: The memory bank ID
+            model_id: The mental model ID to refresh
+
+        Returns:
+            AsyncOperationSubmitResponse with operation_id to track progress
+        """
+        return _run_async(self._mental_models_api.refresh_mental_model(
+            bank_id=bank_id,
+            model_id=model_id,
+        ))
+
+    def list_mental_model_versions(
+        self,
+        bank_id: str,
+        model_id: str,
+    ):
+        """
+        List all saved versions of a mental model's observations.
+
+        Args:
+            bank_id: The memory bank ID
+            model_id: The mental model ID
+
+        Returns:
+            List of version objects ordered by version descending
+        """
+        return _run_async(self._mental_models_api.list_mental_model_versions(
+            bank_id=bank_id,
+            model_id=model_id,
+        ))
+
+    def get_mental_model_version(
+        self,
+        bank_id: str,
+        model_id: str,
+        version: int,
+    ):
+        """
+        Get observations from a specific version of a mental model.
+
+        Args:
+            bank_id: The memory bank ID
+            model_id: The mental model ID
+            version: The version number
+
+        Returns:
+            Version object with observations at that version
+        """
+        return _run_async(self._mental_models_api.get_mental_model_version(
+            bank_id=bank_id,
+            model_id=model_id,
+            version=version,
+        ))
 
     # Async methods (native async, no _run_async wrapper)
 

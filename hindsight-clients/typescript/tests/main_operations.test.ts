@@ -412,3 +412,186 @@ describe('TestDeleteBank', () => {
         expect(memories.total).toBe(0);
     });
 });
+
+describe('TestMentalModels', () => {
+    test('set mission', async () => {
+        const bankId = randomBankId();
+        const response = await client.setMission(
+            bankId,
+            'Be a helpful PM tracking sprint progress and team capacity'
+        );
+
+        expect(response).not.toBeNull();
+        expect(response.bank_id).toBe(bankId);
+        expect(response.mission).toBe('Be a helpful PM tracking sprint progress and team capacity');
+    });
+
+    test('create pinned mental model', async () => {
+        const bankId = randomBankId();
+        // Create bank first (required for mental models)
+        await client.createBank(bankId, {});
+
+        const response = await client.createMentalModel(bankId, {
+            name: 'Product Roadmap',
+            description: 'Track product priorities and feature decisions',
+            subtype: 'pinned',
+            tags: ['test'],
+        });
+
+        expect(response).not.toBeNull();
+        expect(response.name).toBe('Product Roadmap');
+        expect(response.description).toBe('Track product priorities and feature decisions');
+        expect(response.subtype).toBe('pinned');
+    });
+
+    test('create directive mental model', async () => {
+        const bankId = randomBankId();
+        // Create bank first (required for mental models)
+        await client.createBank(bankId, {});
+
+        const response = await client.createMentalModel(bankId, {
+            name: 'Response Guidelines',
+            description: 'Rules for responding to users',
+            subtype: 'directive',
+            observations: [
+                { title: 'Always be polite', content: 'All responses must be courteous and professional' },
+                { title: 'Never share private info', content: 'Do not reveal internal details or user data' },
+            ],
+            tags: ['test'],
+        });
+
+        expect(response).not.toBeNull();
+        expect(response.name).toBe('Response Guidelines');
+        expect(response.subtype).toBe('directive');
+        expect(response.observations).toBeDefined();
+        expect(response.observations!.length).toBe(2);
+    });
+
+    test('list mental models', async () => {
+        const bankId = randomBankId();
+        // Create bank first (required for mental models)
+        await client.createBank(bankId, {});
+
+        // Create a model first
+        await client.createMentalModel(bankId, {
+            name: 'Test Model',
+            description: 'A test mental model',
+            subtype: 'pinned',
+        });
+
+        const response = await client.listMentalModels(bankId);
+
+        expect(response).not.toBeNull();
+        expect(response.items).toBeDefined();
+        expect(response.items!.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('get mental model', async () => {
+        const bankId = randomBankId();
+        // Create bank first (required for mental models)
+        await client.createBank(bankId, {});
+
+        // Create a model first
+        const created = await client.createMentalModel(bankId, {
+            name: 'Retrieve Test Model',
+            description: 'A model to retrieve',
+            subtype: 'pinned',
+        });
+
+        const response = await client.getMentalModel(bankId, created.id);
+
+        expect(response).not.toBeNull();
+        expect(response.id).toBe(created.id);
+        expect(response.name).toBe('Retrieve Test Model');
+    });
+
+    test('update mental model', async () => {
+        const bankId = randomBankId();
+        // Create bank first (required for mental models)
+        await client.createBank(bankId, {});
+
+        // Create a model first
+        const created = await client.createMentalModel(bankId, {
+            name: 'Update Test Model',
+            description: 'Original description',
+            subtype: 'pinned',
+        });
+
+        const response = await client.updateMentalModel(bankId, created.id, {
+            name: 'Updated Model Name',
+            description: 'Updated description',
+        });
+
+        expect(response).not.toBeNull();
+        expect(response.name).toBe('Updated Model Name');
+        expect(response.description).toBe('Updated description');
+    });
+
+    test('delete mental model', async () => {
+        const bankId = randomBankId();
+        // Create bank first (required for mental models)
+        await client.createBank(bankId, {});
+
+        // Create a model first
+        const created = await client.createMentalModel(bankId, {
+            name: 'Delete Test Model',
+            description: 'A model to delete',
+            subtype: 'pinned',
+        });
+
+        // Delete should not throw
+        await expect(client.deleteMentalModel(bankId, created.id)).resolves.not.toThrow();
+    });
+
+    test('refresh mental models', async () => {
+        const bankId = randomBankId();
+
+        // Set mission first (required for refresh) - this also creates the bank
+        await client.setMission(bankId, 'Track team progress and decisions');
+
+        const response = await client.refreshMentalModels(bankId, {
+            tags: ['test'],
+        });
+
+        expect(response).not.toBeNull();
+        expect(response.operation_id).toBeDefined();
+        expect(response.status).toBe('queued');
+    });
+
+    test('refresh mental model', async () => {
+        const bankId = randomBankId();
+        // Create bank first (required for mental models)
+        await client.createBank(bankId, {});
+
+        // Create a model first
+        const created = await client.createMentalModel(bankId, {
+            name: 'Refresh Single Test',
+            description: 'A model to refresh individually',
+            subtype: 'pinned',
+        });
+
+        const response = await client.refreshMentalModel(bankId, created.id);
+
+        expect(response).not.toBeNull();
+        expect(response.operation_id).toBeDefined();
+        expect(response.status).toBe('queued');
+    });
+
+    test('list mental model versions', async () => {
+        const bankId = randomBankId();
+        // Create bank first (required for mental models)
+        await client.createBank(bankId, {});
+
+        // Create a model first
+        const created = await client.createMentalModel(bankId, {
+            name: 'Versions Test Model',
+            description: 'A model to test version history',
+            subtype: 'pinned',
+        });
+
+        const response = await client.listMentalModelVersions(bankId, created.id);
+
+        // Newly created model should have version history
+        expect(response).not.toBeNull();
+    });
+});

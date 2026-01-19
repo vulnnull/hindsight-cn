@@ -67,7 +67,7 @@ run_test_output() {
 cleanup() {
     echo ""
     echo "Cleaning up test bank..."
-    "$HINDSIGHT_CLI" bank delete "$TEST_BANK" 2>/dev/null || true
+    "$HINDSIGHT_CLI" bank delete "$TEST_BANK" -y 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -115,8 +115,32 @@ run_test "list documents" "$HINDSIGHT_CLI" document list "$TEST_BANK" || FAILED=
 # Test 14: Clear memories
 run_test "clear memories" "$HINDSIGHT_CLI" memory clear "$TEST_BANK" || FAILED=1
 
-# Test 15: Delete bank
-run_test "delete bank" "$HINDSIGHT_CLI" bank delete "$TEST_BANK" || FAILED=1
+# Test 15: Health check
+run_test_output "health check" "healthy" "$HINDSIGHT_CLI" health || FAILED=1
+
+# Test 16: List memories (new command)
+run_test "list memories" "$HINDSIGHT_CLI" memory list "$TEST_BANK" || FAILED=1
+
+# Test 17: List tags
+run_test "list tags" "$HINDSIGHT_CLI" tag list "$TEST_BANK" || FAILED=1
+
+# Test 18: List mental models
+run_test "list mental models" "$HINDSIGHT_CLI" mental-model list "$TEST_BANK" || FAILED=1
+
+# Test 19: Create mental model
+run_test "create mental model" "$HINDSIGHT_CLI" mental-model create "$TEST_BANK" "Test Model" "A test mental model" || FAILED=1
+
+# Test 20: List mental models (should have one now)
+run_test_output "list mental models with model" "Test Model" "$HINDSIGHT_CLI" mental-model list "$TEST_BANK" || FAILED=1
+
+# Test 21: Bank graph
+run_test "bank graph" "$HINDSIGHT_CLI" bank graph "$TEST_BANK" || FAILED=1
+
+# Test 22: List operations
+run_test "list operations" "$HINDSIGHT_CLI" operation list "$TEST_BANK" || FAILED=1
+
+# Test 23: Delete bank
+run_test "delete bank" "$HINDSIGHT_CLI" bank delete "$TEST_BANK" -y || FAILED=1
 
 echo ""
 if [ $FAILED -eq 0 ]; then

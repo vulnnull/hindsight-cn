@@ -47,6 +47,55 @@ pub fn list(
     }
 }
 
+/// Get the status of a specific operation
+pub fn get(
+    client: &ApiClient,
+    agent_id: &str,
+    operation_id: &str,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Fetching operation status..."))
+    } else {
+        None
+    };
+
+    let response = client.get_operation(agent_id, operation_id, verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(result) => {
+            if output_format == OutputFormat::Pretty {
+                ui::print_section_header(&format!("Operation: {}", operation_id));
+
+                use hindsight_client::types::Status;
+                let status_str = match &result.status {
+                    Status::Completed => ui::gradient_start("completed"),
+                    Status::Pending => ui::gradient_mid("pending"),
+                    Status::Failed => ui::gradient_end("failed"),
+                    Status::NotFound => ui::gradient_end("not_found"),
+                };
+
+                println!("  {} {}", ui::dim("Status:"), status_str);
+
+                if let Some(error) = &result.error_message {
+                    println!("  {} {}", ui::dim("Error:"), ui::gradient_end(error));
+                }
+
+                println!();
+            } else {
+                output::print_output(&result, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 pub fn cancel(
     client: &ApiClient,
     agent_id: &str,

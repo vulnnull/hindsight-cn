@@ -222,6 +222,226 @@ pub fn update_background(
     }
 }
 
+/// Set bank mission
+pub fn mission(
+    client: &ApiClient,
+    bank_id: &str,
+    mission_text: &str,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Setting mission..."))
+    } else {
+        None
+    };
+
+    let response = client.set_mission(bank_id, mission_text, verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(profile) => {
+            if output_format == OutputFormat::Pretty {
+                ui::print_success("Mission updated successfully");
+                println!();
+                println!("{}", profile.mission);
+            } else {
+                output::print_output(&profile, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Create a new bank
+pub fn create(
+    client: &ApiClient,
+    bank_id: &str,
+    name: Option<String>,
+    mission_text: Option<String>,
+    skepticism: Option<i64>,
+    literalism: Option<i64>,
+    empathy: Option<i64>,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Creating bank..."))
+    } else {
+        None
+    };
+
+    use hindsight_client::types;
+    use std::num::NonZeroU64;
+
+    let disposition = if skepticism.is_some() || literalism.is_some() || empathy.is_some() {
+        Some(types::DispositionTraits {
+            skepticism: NonZeroU64::new(skepticism.unwrap_or(3) as u64).unwrap(),
+            literalism: NonZeroU64::new(literalism.unwrap_or(3) as u64).unwrap(),
+            empathy: NonZeroU64::new(empathy.unwrap_or(3) as u64).unwrap(),
+        })
+    } else {
+        None
+    };
+
+    let request = types::CreateBankRequest {
+        name,
+        mission: mission_text,
+        background: None,
+        disposition,
+    };
+
+    let response = client.create_bank(bank_id, &request, verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(profile) => {
+            if output_format == OutputFormat::Pretty {
+                ui::print_success(&format!("Bank '{}' created successfully", bank_id));
+                println!();
+                ui::print_disposition(&profile);
+            } else {
+                output::print_output(&profile, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Update bank properties (partial update)
+pub fn update(
+    client: &ApiClient,
+    bank_id: &str,
+    name: Option<String>,
+    mission_text: Option<String>,
+    skepticism: Option<i64>,
+    literalism: Option<i64>,
+    empathy: Option<i64>,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    if name.is_none() && mission_text.is_none() && skepticism.is_none() && literalism.is_none() && empathy.is_none() {
+        anyhow::bail!("At least one field must be provided (--name, --mission, --skepticism, --literalism, --empathy)");
+    }
+
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Updating bank..."))
+    } else {
+        None
+    };
+
+    use hindsight_client::types;
+    use std::num::NonZeroU64;
+
+    let disposition = if skepticism.is_some() || literalism.is_some() || empathy.is_some() {
+        Some(types::DispositionTraits {
+            skepticism: NonZeroU64::new(skepticism.unwrap_or(3) as u64).unwrap(),
+            literalism: NonZeroU64::new(literalism.unwrap_or(3) as u64).unwrap(),
+            empathy: NonZeroU64::new(empathy.unwrap_or(3) as u64).unwrap(),
+        })
+    } else {
+        None
+    };
+
+    let request = types::CreateBankRequest {
+        name,
+        mission: mission_text,
+        background: None,
+        disposition,
+    };
+
+    let response = client.update_bank(bank_id, &request, verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(profile) => {
+            if output_format == OutputFormat::Pretty {
+                ui::print_success(&format!("Bank '{}' updated successfully", bank_id));
+                println!();
+                ui::print_disposition(&profile);
+            } else {
+                output::print_output(&profile, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Get memory graph data
+pub fn graph(
+    client: &ApiClient,
+    bank_id: &str,
+    type_filter: Option<String>,
+    limit: i64,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Fetching graph data..."))
+    } else {
+        None
+    };
+
+    let response = client.get_graph(bank_id, type_filter.as_deref(), Some(limit), verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(result) => {
+            if output_format == OutputFormat::Pretty {
+                ui::print_section_header(&format!("Memory Graph: {}", bank_id));
+
+                println!("  {} {}", ui::dim("Nodes:"), ui::gradient_start(&result.nodes.len().to_string()));
+                println!("  {} {}", ui::dim("Edges:"), ui::gradient_end(&result.edges.len().to_string()));
+                println!();
+
+                // Show sample of nodes
+                if !result.nodes.is_empty() {
+                    println!("{}", ui::gradient_text("─── Sample Nodes ───"));
+                    for node in result.nodes.iter().take(5) {
+                        let fact_type = node.get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let id = node.get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        println!("  {} [{}]", ui::dim(id), fact_type);
+                        if let Some(text) = node.get("text").and_then(|v| v.as_str()) {
+                            let preview: String = text.chars().take(60).collect();
+                            let ellipsis = if text.len() > 60 { "..." } else { "" };
+                            println!("    {}{}", preview, ellipsis);
+                        }
+                    }
+                    if result.nodes.len() > 5 {
+                        println!("  {} more...", ui::dim(&format!("+ {}", result.nodes.len() - 5)));
+                    }
+                    println!();
+                }
+
+                println!("{}", ui::dim("Use JSON output for full graph data: -o json"));
+            } else {
+                output::print_output(&result, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 pub fn delete(
     client: &ApiClient,
     bank_id: &str,

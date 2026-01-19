@@ -40,6 +40,10 @@ import type {
     BankProfileResponse,
     CreateBankRequest,
     Budget,
+    MentalModelResponse,
+    MentalModelListResponse,
+    AsyncOperationSubmitResponse,
+    ObservationInput,
 } from '../generated/types.gen';
 
 export interface HindsightClientOptions {
@@ -308,6 +312,176 @@ export class HindsightClient {
 
         return this.validateResponse(response, 'getBankProfile');
     }
+
+    /**
+     * Set or update the mission for a memory bank.
+     */
+    async setMission(bankId: string, mission: string): Promise<BankProfileResponse> {
+        const response = await sdk.createOrUpdateBank({
+            client: this.client,
+            path: { bank_id: bankId },
+            body: { mission },
+        });
+
+        return this.validateResponse(response, 'setMission');
+    }
+
+    /**
+     * List mental models for a bank.
+     */
+    async listMentalModels(
+        bankId: string,
+        options?: {
+            subtype?: 'structural' | 'emergent' | 'pinned' | 'learned' | 'directive';
+            tags?: string[];
+            tagsMatch?: 'any' | 'all' | 'exact';
+        }
+    ): Promise<MentalModelListResponse> {
+        const response = await sdk.listMentalModels({
+            client: this.client,
+            path: { bank_id: bankId },
+            query: {
+                subtype: options?.subtype,
+                tags: options?.tags,
+                tags_match: options?.tagsMatch,
+            },
+        });
+
+        return this.validateResponse(response, 'listMentalModels');
+    }
+
+    /**
+     * Get a specific mental model by ID.
+     */
+    async getMentalModel(bankId: string, modelId: string): Promise<MentalModelResponse> {
+        const response = await sdk.getMentalModel({
+            client: this.client,
+            path: { bank_id: bankId, model_id: modelId },
+        });
+
+        return this.validateResponse(response, 'getMentalModel');
+    }
+
+    /**
+     * Create a mental model.
+     */
+    async createMentalModel(
+        bankId: string,
+        options: {
+            name: string;
+            description: string;
+            subtype?: 'pinned' | 'directive';
+            observations?: Array<{ title: string; content: string }>;
+            tags?: string[];
+        }
+    ): Promise<MentalModelResponse> {
+        const response = await sdk.createMentalModel({
+            client: this.client,
+            path: { bank_id: bankId },
+            body: {
+                name: options.name,
+                description: options.description,
+                subtype: options.subtype,
+                observations: options.observations,
+                tags: options.tags,
+            },
+        });
+
+        return this.validateResponse(response, 'createMentalModel');
+    }
+
+    /**
+     * Update a mental model's name and/or description.
+     */
+    async updateMentalModel(
+        bankId: string,
+        modelId: string,
+        options: {
+            name?: string;
+            description?: string;
+        }
+    ): Promise<MentalModelResponse> {
+        const response = await sdk.updateMentalModel({
+            client: this.client,
+            path: { bank_id: bankId, model_id: modelId },
+            body: {
+                name: options.name,
+                description: options.description,
+            },
+        });
+
+        return this.validateResponse(response, 'updateMentalModel');
+    }
+
+    /**
+     * Delete a mental model.
+     */
+    async deleteMentalModel(bankId: string, modelId: string): Promise<void> {
+        const response = await sdk.deleteMentalModel({
+            client: this.client,
+            path: { bank_id: bankId, model_id: modelId },
+        });
+
+        this.validateResponse(response, 'deleteMentalModel');
+    }
+
+    /**
+     * Submit a background job to refresh mental models for a bank.
+     */
+    async refreshMentalModels(
+        bankId: string,
+        options?: {
+            subtype?: 'structural' | 'emergent' | 'pinned' | 'learned';
+            tags?: string[];
+        }
+    ): Promise<AsyncOperationSubmitResponse> {
+        const response = await sdk.refreshMentalModels({
+            client: this.client,
+            path: { bank_id: bankId },
+            body: {
+                subtype: options?.subtype,
+                tags: options?.tags,
+            },
+        });
+
+        return this.validateResponse(response, 'refreshMentalModels');
+    }
+
+    /**
+     * Submit a background job to refresh content for a specific mental model.
+     */
+    async refreshMentalModel(bankId: string, modelId: string): Promise<AsyncOperationSubmitResponse> {
+        const response = await sdk.refreshMentalModel({
+            client: this.client,
+            path: { bank_id: bankId, model_id: modelId },
+        });
+
+        return this.validateResponse(response, 'refreshMentalModel');
+    }
+
+    /**
+     * List all saved versions of a mental model's observations.
+     */
+    async listMentalModelVersions(bankId: string, modelId: string): Promise<unknown> {
+        const response = await sdk.listMentalModelVersions({
+            client: this.client,
+            path: { bank_id: bankId, model_id: modelId },
+        });
+
+        return this.validateResponse(response, 'listMentalModelVersions');
+    }
+
+    /**
+     * Get observations from a specific version of a mental model.
+     */
+    async getMentalModelVersion(bankId: string, modelId: string, version: number): Promise<unknown> {
+        const response = await sdk.getMentalModelVersion({
+            client: this.client,
+            path: { bank_id: bankId, model_id: modelId, version },
+        });
+
+        return this.validateResponse(response, 'getMentalModelVersion');
+    }
 }
 
 // Re-export types for convenience
@@ -323,6 +497,10 @@ export type {
     BankProfileResponse,
     CreateBankRequest,
     Budget,
+    MentalModelResponse,
+    MentalModelListResponse,
+    AsyncOperationSubmitResponse,
+    ObservationInput,
 };
 
 // Also export low-level SDK functions for advanced usage

@@ -10,7 +10,29 @@ use crate::ui;
 
 // Import types from generated client
 use hindsight_client::types::{Budget, ChunkIncludeOptions, IncludeOptions, TagsMatch};
+use serde::Deserialize;
 use serde_json;
+
+// Local types for serde_json::Value deserialization
+#[derive(Debug, Deserialize)]
+struct MemoryUnitDetail {
+    id: String,
+    text: String,
+    #[serde(rename = "type")]
+    type_: Option<String>,
+    document_id: Option<String>,
+    context: Option<String>,
+    occurred_start: Option<String>,
+    occurred_end: Option<String>,
+    entities: Option<Vec<EntityRef>>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EntityRef {
+    id: String,
+    name: String,
+}
 
 // Helper function to parse budget string to Budget enum
 fn parse_budget(budget: &str) -> Budget {
@@ -18,6 +40,183 @@ fn parse_budget(budget: &str) -> Budget {
         "low" => Budget::Low,
         "high" => Budget::High,
         _ => Budget::Mid, // Default to mid
+    }
+}
+
+/// List memory units with pagination and optional filters
+pub fn list(
+    client: &ApiClient,
+    bank_id: &str,
+    type_filter: Option<String>,
+    query: Option<String>,
+    limit: i64,
+    offset: i64,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Fetching memories..."))
+    } else {
+        None
+    };
+
+    let response = client.list_memories(
+        bank_id,
+        type_filter.as_deref(),
+        query.as_deref(),
+        Some(limit),
+        Some(offset),
+        verbose,
+    );
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(result) => {
+            if output_format == OutputFormat::Pretty {
+                ui::print_section_header(&format!("Memories: {} (showing {}-{})", bank_id, offset + 1, offset + result.items.len() as i64));
+
+                if result.items.is_empty() {
+                    println!("  {}", ui::dim("No memories found."));
+                } else {
+                    for item in &result.items {
+                        let fact_type = item.get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let type_t = match fact_type {
+                            "world" => 0.0,
+                            "experience" => 0.5,
+                            "opinion" => 1.0,
+                            _ => 0.5,
+                        };
+
+                        let id = item.get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+
+                        println!(
+                            "  {} {}",
+                            ui::gradient(&format!("[{}]", fact_type.to_uppercase()), type_t),
+                            ui::dim(id)
+                        );
+
+                        // Truncate text if too long
+                        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                            let text_preview: String = text.chars().take(100).collect();
+                            let ellipsis = if text.len() > 100 { "..." } else { "" };
+                            println!("    {}{}", text_preview, ellipsis);
+                        }
+
+                        if let Some(doc_id) = item.get("document_id").and_then(|v| v.as_str()) {
+                            println!("    {} {}", ui::dim("doc:"), ui::dim(doc_id));
+                        }
+                        println!();
+                    }
+
+                    println!("  {} {} total", ui::dim("Total:"), result.total);
+                }
+            } else {
+                output::print_output(&result, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Get a specific memory unit by ID
+pub fn get(
+    client: &ApiClient,
+    bank_id: &str,
+    memory_id: &str,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Fetching memory..."))
+    } else {
+        None
+    };
+
+    let response = client.get_memory(bank_id, memory_id, verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(value) => {
+            if output_format == OutputFormat::Pretty {
+                let result: MemoryUnitDetail = serde_json::from_value(value)
+                    .with_context(|| "Failed to parse memory response")?;
+
+                let fact_type = result.type_.as_deref().unwrap_or("unknown");
+                let type_t = match fact_type {
+                    "world" => 0.0,
+                    "experience" => 0.5,
+                    "opinion" => 1.0,
+                    _ => 0.5,
+                };
+
+                ui::print_section_header(&format!("Memory: {}", memory_id));
+
+                println!("  {} {}", ui::dim("Type:"), ui::gradient(&fact_type.to_uppercase(), type_t));
+                println!("  {} {}", ui::dim("ID:"), result.id);
+
+                if let Some(doc_id) = &result.document_id {
+                    println!("  {} {}", ui::dim("Document:"), doc_id);
+                }
+
+                if let Some(context) = &result.context {
+                    println!("  {} {}", ui::dim("Context:"), context);
+                }
+
+                println!();
+                println!("{}", ui::gradient_text("─── Content ───"));
+                println!();
+                println!("{}", result.text);
+
+                // Show temporal info if available
+                if result.occurred_start.is_some() || result.occurred_end.is_some() {
+                    println!();
+                    println!("{}", ui::gradient_text("─── Temporal ───"));
+                    if let Some(start) = &result.occurred_start {
+                        println!("  {} {}", ui::dim("Start:"), start);
+                    }
+                    if let Some(end) = &result.occurred_end {
+                        println!("  {} {}", ui::dim("End:"), end);
+                    }
+                }
+
+                // Show entities if available
+                if let Some(entities) = &result.entities {
+                    if !entities.is_empty() {
+                        println!();
+                        println!("{}", ui::gradient_text("─── Entities ───"));
+                        for entity in entities {
+                            println!("  • {} ({})", entity.name, entity.id);
+                        }
+                    }
+                }
+
+                // Show tags if available
+                if let Some(tags) = &result.tags {
+                    if !tags.is_empty() {
+                        println!();
+                        println!("{}", ui::gradient_text("─── Tags ───"));
+                        println!("  {}", tags.join(", "));
+                    }
+                }
+
+                println!();
+            } else {
+                output::print_output(&value, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
 }
 

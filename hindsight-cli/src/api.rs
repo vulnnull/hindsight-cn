@@ -316,6 +316,266 @@ impl ApiClient {
     }
 }
 
+// ============================================================================
+// Additional API methods for complete CLI coverage
+// ============================================================================
+
+impl ApiClient {
+    // --- Mental Model Methods ---
+
+    pub fn list_mental_models(
+        &self,
+        bank_id: &str,
+        subtype: Option<&str>,
+        tags: Option<Vec<String>>,
+        tags_match: Option<&str>,
+        _verbose: bool,
+    ) -> Result<types::MentalModelListResponse> {
+        self.runtime.block_on(async {
+            let tags_match_enum = match tags_match {
+                Some("all") => Some(types::TagsMatch::All),
+                Some("any_strict") => Some(types::TagsMatch::AnyStrict),
+                Some("all_strict") => Some(types::TagsMatch::AllStrict),
+                _ => Some(types::TagsMatch::Any),
+            };
+            let response = self.client.list_mental_models(
+                bank_id,
+                subtype,
+                tags.as_ref(),
+                tags_match_enum,
+                None,
+            ).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn get_mental_model(
+        &self,
+        bank_id: &str,
+        model_id: &str,
+        _verbose: bool,
+    ) -> Result<types::MentalModelResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_mental_model(bank_id, model_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn create_mental_model(
+        &self,
+        bank_id: &str,
+        request: &types::CreateMentalModelRequest,
+        _verbose: bool,
+    ) -> Result<types::MentalModelResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.create_mental_model(bank_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn delete_mental_model(
+        &self,
+        bank_id: &str,
+        model_id: &str,
+        _verbose: bool,
+    ) -> Result<types::DeleteResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.delete_mental_model(bank_id, model_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn update_mental_model(
+        &self,
+        bank_id: &str,
+        model_id: &str,
+        request: &types::UpdateMentalModelRequest,
+        _verbose: bool,
+    ) -> Result<types::MentalModelResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.update_mental_model(bank_id, model_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn refresh_mental_models(
+        &self,
+        bank_id: &str,
+        subtype: Option<&str>,
+        tags: Option<Vec<String>>,
+        _verbose: bool,
+    ) -> Result<types::AsyncOperationSubmitResponse> {
+        self.runtime.block_on(async {
+            let subtype_enum = match subtype {
+                Some("structural") => Some(types::Subtype::Structural),
+                Some("emergent") => Some(types::Subtype::Emergent),
+                Some("pinned") => Some(types::Subtype::Pinned),
+                Some("learned") => Some(types::Subtype::Learned),
+                _ => None,
+            };
+            let request = types::RefreshMentalModelsRequest {
+                subtype: subtype_enum,
+                tags,
+            };
+            let response = self.client.refresh_mental_models(bank_id, None, &request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn refresh_mental_model(
+        &self,
+        bank_id: &str,
+        model_id: &str,
+        _verbose: bool,
+    ) -> Result<types::AsyncOperationSubmitResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.refresh_mental_model(bank_id, model_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn list_mental_model_versions(
+        &self,
+        bank_id: &str,
+        model_id: &str,
+        _verbose: bool,
+    ) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.list_mental_model_versions(bank_id, model_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn get_mental_model_version(
+        &self,
+        bank_id: &str,
+        model_id: &str,
+        version: i64,
+        _verbose: bool,
+    ) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.get_mental_model_version(bank_id, model_id, version, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Memory Methods ---
+
+    pub fn get_memory(&self, bank_id: &str, memory_id: &str, _verbose: bool) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.get_memory(bank_id, memory_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Bank Methods ---
+
+    pub fn create_bank(
+        &self,
+        bank_id: &str,
+        request: &types::CreateBankRequest,
+        _verbose: bool,
+    ) -> Result<types::BankProfileResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.create_or_update_bank(bank_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn update_bank(
+        &self,
+        bank_id: &str,
+        request: &types::CreateBankRequest,
+        _verbose: bool,
+    ) -> Result<types::BankProfileResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.update_bank(bank_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn set_mission(
+        &self,
+        bank_id: &str,
+        mission: &str,
+        _verbose: bool,
+    ) -> Result<types::BankProfileResponse> {
+        self.runtime.block_on(async {
+            let request = types::CreateBankRequest {
+                name: None,
+                mission: Some(mission.to_string()),
+                background: None,
+                disposition: None,
+            };
+            let response = self.client.update_bank(bank_id, None, &request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn get_graph(
+        &self,
+        bank_id: &str,
+        type_filter: Option<&str>,
+        limit: Option<i64>,
+        _verbose: bool,
+    ) -> Result<types::GraphDataResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_graph(bank_id, limit, type_filter, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Tag Methods ---
+
+    pub fn list_tags(
+        &self,
+        bank_id: &str,
+        q: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+        _verbose: bool,
+    ) -> Result<types::ListTagsResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.list_tags(bank_id, limit, offset, q, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Chunk Methods ---
+
+    pub fn get_chunk(&self, chunk_id: &str, _verbose: bool) -> Result<types::ChunkResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_chunk(chunk_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Operation Methods ---
+
+    pub fn get_operation(&self, bank_id: &str, operation_id: &str, _verbose: bool) -> Result<types::OperationStatusResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_operation_status(bank_id, operation_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Health Methods ---
+
+    pub fn health(&self, _verbose: bool) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.health_endpoint_health_get().await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn metrics(&self, _verbose: bool) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.metrics_endpoint_metrics_get().await?;
+            Ok(response.into_inner())
+        })
+    }
+}
+
 // Re-export types from the generated client for use in commands
 pub use types::{
     BankProfileResponse,

@@ -1,6 +1,10 @@
 pub mod bank;
-pub mod memory;
+pub mod chunk;
 pub mod document;
 pub mod entity;
-pub mod operation;
 pub mod explore;
+pub mod health;
+pub mod memory;
+pub mod mental_model;
+pub mod operation;
+pub mod tag;
