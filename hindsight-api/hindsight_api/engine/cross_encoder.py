@@ -136,7 +136,12 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         # 3. Data transfer overhead to GPU outweighs compute benefit
         # 4. CPU inference is actually faster for this workload
         logger.info(f"Reranker: initializing local provider with model {self.model_name}")
-        self._model = CrossEncoder(self.model_name)
+        # Disable lazy loading (meta tensors) which causes issues with newer transformers/accelerate.
+        # Setting low_cpu_mem_usage=False and device_map=None ensures tensors are fully materialized.
+        self._model = CrossEncoder(
+            self.model_name,
+            model_kwargs={"low_cpu_mem_usage": False, "device_map": None},
+        )
 
         # Initialize shared executor (limited workers naturally limits concurrency)
         if LocalSTCrossEncoder._executor is None:
