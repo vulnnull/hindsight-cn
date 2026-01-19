@@ -7,6 +7,9 @@ requires-python = ">=3.10"
 dependencies = [
     "openai>=1.0.0",
     "hindsight-client",
+    # Transitive dependency security fixes
+    "aiohttp>=3.13.3",  # Multiple DoS vulnerabilities
+    "urllib3>=2.6.3",  # Decompression-bomb safeguards bypass
 ]
 
 [tool.uv.sources]

@@ -9,6 +9,10 @@ requires-python = ">=3.10"
 dependencies = [
     "langgraph>=0.2.0",
     "hindsight-client",
+    # Transitive dependency security fixes
+    "aiohttp>=3.13.3",  # Multiple DoS vulnerabilities
+    "langchain-core>=1.2.5",  # Serialization injection vulnerability
+    "urllib3>=2.6.3",  # Decompression-bomb safeguards bypass
 ]
 
 [tool.uv.sources]
