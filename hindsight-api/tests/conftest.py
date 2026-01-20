@@ -116,16 +116,65 @@ def llm_config():
 
 
 @pytest.fixture(scope="session")
-def embeddings():
+def embeddings(tmp_path_factory, worker_id):
+    """
+    Session-scoped embeddings fixture with filelock to prevent race conditions.
 
-    return LocalSTEmbeddings()
+    When pytest-xdist runs multiple workers in parallel, they all try to load
+    models from the HuggingFace cache simultaneously, which can cause race
+    conditions and meta tensor errors. We use a filelock to serialize model
+    initialization across workers.
+    """
+    # Get shared temp dir for coordination between xdist workers
+    if worker_id == "master":
+        root_tmp_dir = tmp_path_factory.getbasetemp()
+    else:
+        root_tmp_dir = tmp_path_factory.getbasetemp().parent
 
+    lock_file = root_tmp_dir / "embeddings_init.lock"
+
+    emb = LocalSTEmbeddings()
+
+    # Serialize model initialization across workers
+    with filelock.FileLock(str(lock_file)):
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(emb.initialize())
+        finally:
+            loop.close()
+
+    return emb
 
 
 @pytest.fixture(scope="session")
-def cross_encoder():
+def cross_encoder(tmp_path_factory, worker_id):
+    """
+    Session-scoped cross-encoder fixture with filelock to prevent race conditions.
 
-    return LocalSTCrossEncoder()
+    When pytest-xdist runs multiple workers in parallel, they all try to load
+    models from the HuggingFace cache simultaneously, which can cause race
+    conditions and meta tensor errors. We use a filelock to serialize model
+    initialization across workers.
+    """
+    # Get shared temp dir for coordination between xdist workers
+    if worker_id == "master":
+        root_tmp_dir = tmp_path_factory.getbasetemp()
+    else:
+        root_tmp_dir = tmp_path_factory.getbasetemp().parent
+
+    lock_file = root_tmp_dir / "cross_encoder_init.lock"
+
+    ce = LocalSTCrossEncoder()
+
+    # Serialize model initialization across workers
+    with filelock.FileLock(str(lock_file)):
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(ce.initialize())
+        finally:
+            loop.close()
+
+    return ce
 
 @pytest.fixture(scope="session")
 def query_analyzer():
