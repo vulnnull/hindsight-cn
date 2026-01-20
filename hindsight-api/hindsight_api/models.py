@@ -95,7 +95,6 @@ class MemoryUnit(Base):
     mentioned_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))  # When fact was mentioned
     fact_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="world")
     confidence_score: Mapped[float | None] = mapped_column(Float)
-    access_count: Mapped[int] = mapped_column(Integer, server_default="0")
     unit_metadata: Mapped[dict] = mapped_column(
         "metadata", JSONB, server_default=sql_text("'{}'::jsonb")
     )  # User-defined metadata (str->str)
@@ -131,7 +130,6 @@ class MemoryUnit(Base):
         Index("idx_memory_units_document_id", "document_id"),
         Index("idx_memory_units_event_date", "event_date", postgresql_ops={"event_date": "DESC"}),
         Index("idx_memory_units_bank_date", "bank_id", "event_date", postgresql_ops={"event_date": "DESC"}),
-        Index("idx_memory_units_access_count", "access_count", postgresql_ops={"access_count": "DESC"}),
         Index("idx_memory_units_fact_type", "fact_type"),
         Index("idx_memory_units_bank_fact_type", "bank_id", "fact_type"),
         Index(

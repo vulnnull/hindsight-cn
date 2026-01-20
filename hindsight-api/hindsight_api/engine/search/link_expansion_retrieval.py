@@ -45,7 +45,7 @@ async def _find_semantic_seeds(
     rows = await conn.fetch(
         f"""
         SELECT id, text, context, event_date, occurred_start, occurred_end,
-               mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags,
+               mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
                1 - (embedding <=> $1::vector) AS similarity
         FROM {fq_table("memory_units")}
         WHERE bank_id = $2
@@ -168,7 +168,7 @@ class LinkExpansionRetriever(GraphRetriever):
                 f"""
                 SELECT
                     mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
-                    mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding,
+                    mu.occurred_end, mu.mentioned_at, mu.embedding,
                     mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
                     COUNT(*)::float AS score
                 FROM {fq_table("unit_entities")} seed_ue
@@ -193,7 +193,7 @@ class LinkExpansionRetriever(GraphRetriever):
                 f"""
                 SELECT DISTINCT ON (mu.id)
                     mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
-                    mu.occurred_end, mu.mentioned_at, mu.access_count, mu.embedding,
+                    mu.occurred_end, mu.mentioned_at, mu.embedding,
                     mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
                     ml.weight + 1.0 AS score
                 FROM {fq_table("memory_links")} ml

@@ -136,7 +136,6 @@ class SearchTracer:
         text: str,
         context: str,
         event_date: datetime | None,
-        access_count: int,
         is_entry_point: bool,
         parent_node_id: str | None,
         link_type: Literal["temporal", "semantic", "entity"] | None,
@@ -155,7 +154,6 @@ class SearchTracer:
             text: Memory unit text
             context: Memory unit context
             event_date: When the memory occurred
-            access_count: Access count before this search
             is_entry_point: Whether this is an entry point
             parent_node_id: Node that led here (None for entry points)
             link_type: Type of link from parent
@@ -194,7 +192,6 @@ class SearchTracer:
             text=text,
             context=context,
             event_date=event_date,
-            access_count=access_count,
             is_entry_point=is_entry_point,
             parent_node_id=parent_node_id,
             link_type=link_type,

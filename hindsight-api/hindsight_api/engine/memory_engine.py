@@ -473,29 +473,6 @@ class MemoryEngine(MemoryEngineInterface):
         _current_schema.set(tenant_context.schema_name)
         return tenant_context.schema_name
 
-    async def _handle_access_count_update(self, task_dict: dict[str, Any]):
-        """
-        Handler for access count update tasks.
-
-        Args:
-            task_dict: Dict with 'node_ids' key containing list of node IDs to update
-
-        Raises:
-            Exception: Any exception from database operations (propagates to execute_task for retry)
-        """
-        node_ids = task_dict.get("node_ids", [])
-        if not node_ids:
-            return
-
-        pool = await self._get_pool()
-        # Convert string UUIDs to UUID type for faster matching
-        uuid_list = [uuid.UUID(nid) for nid in node_ids]
-        async with acquire_with_retry(pool) as conn:
-            await conn.execute(
-                f"UPDATE {fq_table('memory_units')} SET access_count = access_count + 1 WHERE id = ANY($1::uuid[])",
-                uuid_list,
-            )
-
     async def _handle_batch_retain(self, task_dict: dict[str, Any]):
         """
         Handler for batch retain tasks.
@@ -797,7 +774,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         Args:
             task_dict: Task dictionary with 'type' key and other payload data
-                      Example: {'type': 'access_count_update', 'node_ids': [...]}
+                      Example: {'type': 'batch_retain', 'bank_id': '...', 'contents': [...]}
         """
         task_type = task_dict.get("type")
         operation_id = task_dict.get("operation_id")
@@ -822,9 +799,7 @@ class MemoryEngine(MemoryEngineInterface):
                 # Continue with processing if we can't check status
 
         try:
-            if task_type == "access_count_update":
-                await self._handle_access_count_update(task_dict)
-            elif task_type == "batch_retain":
+            if task_type == "batch_retain":
                 await self._handle_batch_retain(task_dict)
             elif task_type == "refresh_mental_models":
                 await self._handle_refresh_mental_models(task_dict)
@@ -2287,7 +2262,6 @@ class MemoryEngine(MemoryEngineInterface):
                         text=sr.retrieval.text,
                         context=sr.retrieval.context or "",
                         event_date=sr.retrieval.occurred_start,
-                        access_count=sr.retrieval.access_count,
                         is_entry_point=(sr.id in [ep.node_id for ep in tracer.entry_points]),
                         parent_node_id=None,  # In parallel retrieval, there's no clear parent
                         link_type=None,
@@ -2298,18 +2272,6 @@ class MemoryEngine(MemoryEngineInterface):
                         frequency=0.0,
                         final_weight=sr.weight,
                     )
-
-            # Step 8: Queue access count updates for visited nodes
-            visited_ids = list(set([sr.id for sr in scored_results[:50]]))  # Top 50
-            if visited_ids:
-                await self._task_backend.submit_task(
-                    {
-                        "type": "access_count_update",
-                        "bank_id": bank_id,
-                        "node_ids": visited_ids,
-                    }
-                )
-                log_buffer.append(f"  [7] Queued access count updates for {len(visited_ids)} nodes")
 
             # Log fact_type distribution in results
             fact_type_counts = {}

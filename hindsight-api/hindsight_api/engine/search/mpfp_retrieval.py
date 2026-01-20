@@ -449,7 +449,7 @@ async def fetch_memory_units_by_ids(
         rows = await conn.fetch(
             f"""
             SELECT id, text, context, event_date, occurred_start, occurred_end,
-                   mentioned_at, access_count, embedding, fact_type, document_id, chunk_id, tags
+                   mentioned_at, embedding, fact_type, document_id, chunk_id, tags
             FROM {fq_table("memory_units")}
             WHERE id = ANY($1::uuid[])
               AND fact_type = $2

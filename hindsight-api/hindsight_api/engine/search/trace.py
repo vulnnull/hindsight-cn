@@ -85,7 +85,6 @@ class NodeVisit(BaseModel):
     text: str = Field(description="Memory unit text content")
     context: str = Field(description="Memory unit context")
     event_date: datetime | None = Field(default=None, description="When the memory occurred")
-    access_count: int = Field(description="Number of times accessed before this search")
 
     # How this node was reached
     is_entry_point: bool = Field(description="Whether this is an entry point")

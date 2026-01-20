@@ -124,31 +124,6 @@ def calculate_recency_weight(days_since: float, half_life_days: float = 365.0) -
     return 1.0 / (1.0 + math.log1p(normalized_age))
 
 
-def calculate_frequency_weight(access_count: int, max_boost: float = 2.0) -> float:
-    """
-    Calculate frequency weight based on access count.
-
-    Frequently accessed memories are weighted higher.
-    Uses logarithmic scaling to avoid over-weighting.
-
-    Args:
-        access_count: Number of times the memory was accessed
-        max_boost: Maximum multiplier for frequently accessed memories
-
-    Returns:
-        Weight between 1.0 and max_boost
-    """
-    import math
-
-    if access_count <= 0:
-        return 1.0
-
-    # Logarithmic scaling: log(access_count + 1) / log(10)
-    # This gives: 0 accesses = 1.0, 9 accesses ~= 1.5, 99 accesses ~= 2.0
-    normalized = math.log(access_count + 1) / math.log(10)
-    return 1.0 + min(normalized, max_boost - 1.0)
-
-
 def calculate_temporal_anchor(occurred_start: datetime, occurred_end: datetime) -> datetime:
     """
     Calculate a single temporal anchor point from a temporal range.

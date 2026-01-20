@@ -46,7 +46,6 @@ class RetrievalResult:
     mentioned_at: datetime | None = None
     document_id: str | None = None
     chunk_id: str | None = None
-    access_count: int = 0
     embedding: list[float] | None = None
     tags: list[str] | None = None  # Visibility scope tags
 
@@ -71,7 +70,6 @@ class RetrievalResult:
             mentioned_at=row.get("mentioned_at"),
             document_id=row.get("document_id"),
             chunk_id=row.get("chunk_id"),
-            access_count=row.get("access_count", 0),
             embedding=row.get("embedding"),
             tags=row.get("tags"),
             similarity=row.get("similarity"),
@@ -156,7 +154,6 @@ class ScoredResult:
             "mentioned_at": self.retrieval.mentioned_at,
             "document_id": self.retrieval.document_id,
             "chunk_id": self.retrieval.chunk_id,
-            "access_count": self.retrieval.access_count,
             "embedding": self.retrieval.embedding,
             "tags": self.retrieval.tags,
             "semantic_similarity": self.retrieval.similarity,
