@@ -67,6 +67,63 @@ api:
     # HINDSIGHT_API_LLM_API_KEY: "your-api-key"
     # HINDSIGHT_API_LLM_BASE_URL: "https://api.groq.com/openai/v1"
 
+# Worker settings (distributed task processing)
+# When enabled, dedicated worker pods process tasks and the API's internal worker is disabled
+worker:
+  enabled: false
+  replicaCount: 2
+  image:
+    repository: ghcr.io/vectorize-io/hindsight-api
+    pullPolicy: IfNotPresent
+    # tag defaults to .Values.version if not specified
+
+  service:
+    # Service for metrics scraping (headless for StatefulSet)
+    port: 8889
+    targetPort: 8889
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8889
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8889
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Worker-specific environment variables
+  env:
+    # Poll interval in milliseconds (how often to check for new tasks)
+    HINDSIGHT_API_WORKER_POLL_INTERVAL_MS: "500"
+    # Number of tasks to claim per poll cycle
+    HINDSIGHT_API_WORKER_BATCH_SIZE: "10"
+    # Max retries before marking a task as failed
+    HINDSIGHT_API_WORKER_MAX_RETRIES: "3"
+    # HTTP port for metrics/health (matches service.targetPort)
+    HINDSIGHT_API_WORKER_HTTP_PORT: "8889"
+
+  # Secret environment variables (inherited from api.secrets if not specified)
+  secrets: {}
+
 # Image settings for control plane
 controlPlane:
   enabled: true

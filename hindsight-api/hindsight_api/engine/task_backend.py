@@ -1,19 +1,28 @@
 """
-Abstract task backend for running async tasks.
+Task backend for distributed task processing.
 
-This provides an abstraction that can be adapted to different execution models:
-- AsyncIO queue (default implementation)
-- Pub/Sub architectures (future)
-- Message brokers (future)
+This provides an abstraction for task storage and execution:
+- BrokerTaskBackend: Uses PostgreSQL as broker (production)
+- SyncTaskBackend: Executes tasks immediately (testing/embedded)
 """
 
-import asyncio
+import json
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import asyncpg
 
 logger = logging.getLogger(__name__)
+
+
+def fq_table(table: str, schema: str | None = None) -> str:
+    """Get fully-qualified table name with optional schema prefix."""
+    if schema:
+        return f'"{schema}".{table}'
+    return table
 
 
 class TaskBackend(ABC):
@@ -22,10 +31,10 @@ class TaskBackend(ABC):
 
     Implementations must:
     1. Store/publish task events (as serializable dicts)
-    2. Execute tasks through a provided executor callback
+    2. Execute tasks through a provided executor callback (optional)
 
     The backend treats tasks as pure dictionaries that can be serialized
-    and sent over the network. The executor (typically MemoryEngine.execute_task)
+    and stored in the database. The executor (typically MemoryEngine.execute_task)
     receives the dict and routes it to the appropriate handler.
     """
 
@@ -46,7 +55,7 @@ class TaskBackend(ABC):
     @abstractmethod
     async def initialize(self):
         """
-        Initialize the backend (e.g., start workers, connect to broker).
+        Initialize the backend (e.g., connect to database).
         """
         pass
 
@@ -63,7 +72,7 @@ class TaskBackend(ABC):
     @abstractmethod
     async def shutdown(self):
         """
-        Shutdown the backend gracefully (e.g., stop workers, close connections).
+        Shutdown the backend gracefully.
         """
         pass
 
@@ -93,9 +102,8 @@ class SyncTaskBackend(TaskBackend):
     """
     Synchronous task backend that executes tasks immediately.
 
-    This is useful for embedded/CLI usage where we don't want background
-    workers that prevent clean exit. Tasks are executed inline rather than
-    being queued.
+    This is useful for tests and embedded/CLI usage where we don't want
+    background workers. Tasks are executed inline rather than being queued.
     """
 
     async def initialize(self):
@@ -121,221 +129,123 @@ class SyncTaskBackend(TaskBackend):
         logger.debug("SyncTaskBackend shutdown")
 
 
-class NoopTaskBackend(TaskBackend):
+class BrokerTaskBackend(TaskBackend):
     """
-    No-op task backend that discards all tasks.
+    Task backend using PostgreSQL as broker.
 
-    This is useful for tests where background task execution is not needed
-    and would only slow down the test suite.
-    """
+    submit_task() stores task_payload in async_operations table.
+    Actual polling and execution is handled separately by WorkerPoller.
 
-    async def initialize(self):
-        """No-op."""
-        self._initialized = True
-        logger.debug("NoopTaskBackend initialized")
-
-    async def submit_task(self, task_dict: dict[str, Any]):
-        """Discard the task (do nothing)."""
-        pass
-
-    async def shutdown(self):
-        """No-op."""
-        self._initialized = False
-        logger.debug("NoopTaskBackend shutdown")
-
-
-class AsyncIOQueueBackend(TaskBackend):
-    """
-    Task backend implementation using asyncio queues.
-
-    This is the default implementation that uses in-process asyncio queues
-    and a periodic consumer worker.
+    This backend is used by the API to store tasks. Workers poll
+    the database separately to claim and execute tasks.
     """
 
-    def __init__(self, batch_size: int = 10, batch_interval: float = 1.0):
+    def __init__(
+        self,
+        pool_getter: Callable[[], "asyncpg.Pool"],
+        schema: str | None = None,
+    ):
         """
-        Initialize AsyncIO queue backend.
+        Initialize the broker task backend.
 
         Args:
-            batch_size: Maximum number of tasks to process in one batch
-            batch_interval: Maximum time (seconds) to wait before processing batch
+            pool_getter: Callable that returns the asyncpg connection pool
+            schema: Database schema for multi-tenant support (optional)
         """
         super().__init__()
-        self._queue: asyncio.Queue | None = None
-        self._worker_task: asyncio.Task | None = None
-        self._shutdown_event: asyncio.Event | None = None
-        self._batch_size = batch_size
-        self._batch_interval = batch_interval
-        self._in_flight_count = 0
-        self._in_flight_lock = asyncio.Lock()
+        self._pool_getter = pool_getter
+        self._schema = schema
 
     async def initialize(self):
-        """Initialize the queue and start the worker."""
-        if self._initialized:
-            return
-
-        self._queue = asyncio.Queue()
-        self._shutdown_event = asyncio.Event()
-        self._worker_task = asyncio.create_task(self._worker())
+        """Initialize the backend."""
         self._initialized = True
-        logger.info("AsyncIOQueueBackend initialized")
+        logger.info("BrokerTaskBackend initialized")
 
     async def submit_task(self, task_dict: dict[str, Any]):
         """
-        Submit a task by putting it in the queue.
+        Store task payload in async_operations table.
+
+        The task_dict should contain an 'operation_id' if updating an existing
+        operation record, otherwise a new operation will be created.
 
         Args:
-            task_dict: Task dictionary to execute
+            task_dict: Task dictionary to store (must be JSON serializable)
         """
         if not self._initialized:
             await self.initialize()
 
-        await self._queue.put(task_dict)
+        pool = self._pool_getter()
+        operation_id = task_dict.get("operation_id")
+        task_type = task_dict.get("type", "unknown")
+        bank_id = task_dict.get("bank_id")
+        payload_json = json.dumps(task_dict)
+
+        table = fq_table("async_operations", self._schema)
+
+        if operation_id:
+            # Update existing operation with task payload
+            await pool.execute(
+                f"""
+                UPDATE {table}
+                SET task_payload = $1::jsonb, updated_at = now()
+                WHERE operation_id = $2
+                """,
+                payload_json,
+                operation_id,
+            )
+            logger.debug(f"Updated task payload for operation {operation_id}")
+        else:
+            # Insert new operation (for tasks without pre-created records)
+            # e.g., access_count_update tasks
+            import uuid
+
+            new_id = uuid.uuid4()
+            await pool.execute(
+                f"""
+                INSERT INTO {table} (operation_id, bank_id, operation_type, status, task_payload)
+                VALUES ($1, $2, $3, 'pending', $4::jsonb)
+                """,
+                new_id,
+                bank_id,
+                task_type,
+                payload_json,
+            )
+            logger.debug(f"Created new operation {new_id} for task type {task_type}")
+
+    async def shutdown(self):
+        """Shutdown the backend."""
+        self._initialized = False
+        logger.info("BrokerTaskBackend shutdown")
 
     async def wait_for_pending_tasks(self, timeout: float = 120.0):
         """
-        Wait for all pending tasks in the queue and in-flight tasks to complete.
+        Wait for pending tasks to be processed.
 
-        This is useful in tests to ensure background tasks complete before assertions.
+        In the broker model, this polls the database to check if tasks
+        for this process have been completed. This is useful in tests
+        when worker_enabled=True (API processes its own tasks).
 
         Args:
-            timeout: Maximum time to wait in seconds (default 120s for long-running tasks)
+            timeout: Maximum time to wait in seconds
         """
-        if not self._initialized or self._queue is None:
-            return
+        import asyncio
 
-        # Wait for queue to be empty AND no in-flight tasks
+        pool = self._pool_getter()
+        table = fq_table("async_operations", self._schema)
+
         start_time = asyncio.get_event_loop().time()
         while asyncio.get_event_loop().time() - start_time < timeout:
-            async with self._in_flight_lock:
-                in_flight = self._in_flight_count
+            # Check if there are any pending tasks with payloads
+            count = await pool.fetchval(
+                f"""
+                SELECT COUNT(*) FROM {table}
+                WHERE status = 'pending' AND task_payload IS NOT NULL
+                """
+            )
 
-            if self._queue.empty() and in_flight == 0:
-                # Queue is empty and no tasks in flight, we're done
+            if count == 0:
                 return
 
-            # Wait a bit before checking again
             await asyncio.sleep(0.5)
 
-    async def shutdown(self):
-        """Shutdown the worker and drain the queue."""
-        if not self._initialized:
-            return
-
-        logger.info("Shutting down AsyncIOQueueBackend...")
-
-        # Signal shutdown
-        self._shutdown_event.set()
-
-        # Cancel worker
-        if self._worker_task is not None:
-            self._worker_task.cancel()
-            try:
-                await self._worker_task
-            except asyncio.CancelledError:
-                pass  # Worker cancelled successfully
-
-        self._initialized = False
-        logger.info("AsyncIOQueueBackend shutdown complete")
-
-    async def _execute_task_with_tracking(self, task_dict: dict[str, Any]):
-        """Execute a task and track its in-flight status."""
-        async with self._in_flight_lock:
-            self._in_flight_count += 1
-        try:
-            await self._execute_task(task_dict)
-        finally:
-            async with self._in_flight_lock:
-                self._in_flight_count -= 1
-
-    async def _execute_task_no_tracking(self, task_dict: dict[str, Any]):
-        """Execute a task without in-flight tracking (tracking done at batch level)."""
-        await self._execute_task(task_dict)
-
-    def _get_queue_stats(self) -> tuple[int, dict[str, int]]:
-        """Get current queue size and bank_id distribution."""
-        queue_size = self._queue.qsize() if self._queue else 0
-        bank_distribution: dict[str, int] = {}
-
-        if queue_size > 0 and self._queue:
-            # Peek at queue items without removing them
-            # Note: This is a snapshot and may not be perfectly accurate due to concurrency
-            try:
-                # Access internal deque for logging purposes only
-                items = list(self._queue._queue)  # type: ignore[attr-defined]
-                for item in items:
-                    bank_id = item.get("bank_id", "unknown")
-                    bank_distribution[bank_id] = bank_distribution.get(bank_id, 0) + 1
-            except Exception:
-                pass  # Queue access failed, return empty distribution
-
-        return queue_size, bank_distribution
-
-    async def _worker(self):
-        """
-        Background worker that processes tasks in batches.
-
-        Collects tasks for up to batch_interval seconds or batch_size items,
-        then processes them.
-        """
-        while not self._shutdown_event.is_set():
-            try:
-                # Collect tasks for batching
-                tasks = []
-                deadline = asyncio.get_event_loop().time() + self._batch_interval
-
-                while len(tasks) < self._batch_size and asyncio.get_event_loop().time() < deadline:
-                    try:
-                        remaining_time = max(0.1, deadline - asyncio.get_event_loop().time())
-                        task_dict = await asyncio.wait_for(self._queue.get(), timeout=remaining_time)
-                        # Track task as in-flight immediately when picked up from queue
-                        # This prevents wait_for_pending_tasks from returning too early
-                        async with self._in_flight_lock:
-                            self._in_flight_count += 1
-                        tasks.append(task_dict)
-                    except TimeoutError:
-                        break
-
-                # Process batch
-                if tasks:
-                    # Log batch start with queue stats
-                    queue_size, bank_distribution = self._get_queue_stats()
-
-                    # Summarize batch by task type and bank
-                    batch_summary: dict[str, dict[str, int]] = {}
-                    for task_dict in tasks:
-                        task_type = task_dict.get("type", "unknown")
-                        bank_id = task_dict.get("bank_id", "unknown")
-                        if task_type not in batch_summary:
-                            batch_summary[task_type] = {}
-                        batch_summary[task_type][bank_id] = batch_summary[task_type].get(bank_id, 0) + 1
-
-                    # Build log message
-                    batch_parts = []
-                    for task_type, banks in sorted(batch_summary.items()):
-                        bank_str = ", ".join(f"{b}:{c}" for b, c in sorted(banks.items()))
-                        batch_parts.append(f"{task_type}[{bank_str}]")
-                    batch_str = ", ".join(batch_parts)
-
-                    if queue_size > 0:
-                        pending_str = ", ".join(f"{k}:{v}" for k, v in sorted(bank_distribution.items()))
-                        logger.info(
-                            f"Processing {len(tasks)} tasks: {batch_str} (pending={queue_size} [{pending_str}])"
-                        )
-                    else:
-                        logger.info(f"Processing {len(tasks)} tasks: {batch_str}")
-
-                    # Execute tasks concurrently (in_flight already tracked when picked up)
-                    await asyncio.gather(
-                        *[self._execute_task_no_tracking(task_dict) for task_dict in tasks], return_exceptions=True
-                    )
-
-                    # Decrement in_flight count after all tasks complete
-                    async with self._in_flight_lock:
-                        self._in_flight_count -= len(tasks)
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Worker error: {e}")
-                await asyncio.sleep(1)  # Backoff on error
+        logger.warning(f"Timeout waiting for pending tasks after {timeout}s")

@@ -244,6 +244,65 @@ def run_db_migration(
     typer.echo("Database migrations completed successfully")
 
 
+async def _decommission_worker(db_url: str, worker_id: str, schema: str = "public") -> int:
+    """Release all tasks owned by a worker, setting them back to pending status."""
+    is_pg0, instance_name, _ = parse_pg0_url(db_url)
+    if is_pg0:
+        typer.echo(f"Starting embedded PostgreSQL (instance: {instance_name})...")
+    resolved_url = await resolve_database_url(db_url)
+
+    conn = await asyncpg.connect(resolved_url)
+    try:
+        table = _fq_table("async_operations", schema)
+        result = await conn.fetch(
+            f"""
+            UPDATE {table}
+            SET status = 'pending', worker_id = NULL, claimed_at = NULL, updated_at = now()
+            WHERE worker_id = $1 AND status = 'processing'
+            RETURNING operation_id
+            """,
+            worker_id,
+        )
+        return len(result)
+    finally:
+        await conn.close()
+
+
+@app.command(name="decommission-worker")
+def decommission_worker(
+    worker_id: str = typer.Argument(..., help="Worker ID to decommission"),
+    schema: str = typer.Option("public", "--schema", "-s", help="Database schema"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Release all tasks owned by a worker (sets status back to pending).
+
+    Use this command when a worker has crashed or been removed without graceful shutdown.
+    All tasks that were being processed by the worker will be released back to the queue
+    so other workers can pick them up.
+    """
+    config = HindsightConfig.from_env()
+
+    if not config.database_url:
+        typer.echo("Error: Database URL not configured.", err=True)
+        typer.echo("Set HINDSIGHT_API_DATABASE_URL environment variable.", err=True)
+        raise typer.Exit(1)
+
+    if not yes:
+        typer.confirm(
+            f"This will release all tasks owned by worker '{worker_id}' back to pending. Continue?",
+            abort=True,
+        )
+
+    typer.echo(f"Decommissioning worker '{worker_id}' (schema: {schema})...")
+
+    count = asyncio.run(_decommission_worker(config.database_url, worker_id, schema))
+
+    if count > 0:
+        typer.echo(f"Released {count} task(s) from worker '{worker_id}'")
+    else:
+        typer.echo(f"No tasks found for worker '{worker_id}'")
+
+
 def main():
     app()
 

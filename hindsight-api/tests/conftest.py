@@ -12,6 +12,7 @@ from hindsight_api import MemoryEngine, LLMConfig, LocalSTEmbeddings, RequestCon
 
 from hindsight_api.engine.cross_encoder import LocalSTCrossEncoder
 from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer
+from hindsight_api.engine.task_backend import SyncTaskBackend
 from hindsight_api.pg0 import EmbeddedPostgres
 
 # Default pg0 instance configuration for tests
@@ -147,6 +148,7 @@ async def memory(pg0_db_url, embeddings, cross_encoder, query_analyzer):
     Uses pg0_db_url (a postgresql:// URL) directly, so MemoryEngine won't try to
     manage pg0 lifecycle - that's handled by the session-scoped pg0_db_url fixture.
     Migrations are disabled here since they're run once at session scope in pg0_db_url.
+    Uses SyncTaskBackend so async tasks execute immediately (no worker needed).
     """
     mem = MemoryEngine(
         db_url=pg0_db_url,  # Direct postgresql:// URL, not pg0://
@@ -160,6 +162,7 @@ async def memory(pg0_db_url, embeddings, cross_encoder, query_analyzer):
         pool_min_size=1,
         pool_max_size=5,
         run_migrations=False,  # Migrations already run at session scope
+        task_backend=SyncTaskBackend(),  # Execute tasks immediately in tests
     )
     await mem.initialize()
     yield mem

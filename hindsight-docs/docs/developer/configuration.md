@@ -344,15 +344,18 @@ Configuration for the local MCP server (`hindsight-local-mcp` command).
 export HINDSIGHT_API_MCP_INSTRUCTIONS="Also store every action you take, including tool calls and decisions made."
 ```
 
-### Background Tasks
+### Distributed Workers
 
-Controls background task processing for async operations like opinion formation and entity observations.
+Configuration for background task processing. By default, the API processes tasks internally. For high-throughput deployments, run dedicated workers. See [Services - Worker Service](./services#worker-service) for details.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_TASK_BACKEND` | Task backend implementation: `memory` (in-process queue) or `noop` (discard tasks, useful for tests) | `memory` |
-| `HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_SIZE` | Max tasks to process in one batch (memory backend only) | `10` |
-| `HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_INTERVAL` | Interval between batch processing in seconds (memory backend only) | `1.0` |
+| `HINDSIGHT_API_WORKER_ENABLED` | Enable internal worker in API process | `true` |
+| `HINDSIGHT_API_WORKER_ID` | Unique worker identifier | hostname |
+| `HINDSIGHT_API_WORKER_POLL_INTERVAL_MS` | Database polling interval in milliseconds | `500` |
+| `HINDSIGHT_API_WORKER_BATCH_SIZE` | Tasks to claim per poll cycle | `10` |
+| `HINDSIGHT_API_WORKER_MAX_RETRIES` | Max retries before marking task failed | `3` |
+| `HINDSIGHT_API_WORKER_HTTP_PORT` | HTTP port for worker metrics/health (worker CLI only) | `8889` |
 
 ### Performance Optimization
 

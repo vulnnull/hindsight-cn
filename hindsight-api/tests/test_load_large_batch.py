@@ -19,6 +19,7 @@ import pytest_asyncio
 from hindsight_api import MemoryEngine, LLMConfig, LocalSTEmbeddings, RequestContext
 from hindsight_api.engine.cross_encoder import LocalSTCrossEncoder
 from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer
+from hindsight_api.engine.task_backend import SyncTaskBackend
 from hindsight_api.engine.retain.fact_extraction import FactExtractionResponse, ExtractedFact
 from hindsight_api.engine.llm_wrapper import TokenUsage
 
@@ -106,6 +107,7 @@ class TestLargeBatchRetain:
             pool_max_size=10,
             run_migrations=False,
             skip_llm_verification=True,  # Skip LLM verification since we're mocking
+            task_backend=SyncTaskBackend(),  # Execute tasks immediately in tests
         )
         await mem.initialize()
         yield mem

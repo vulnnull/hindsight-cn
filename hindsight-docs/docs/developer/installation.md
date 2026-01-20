@@ -36,8 +36,6 @@ See [Models](./models) for detailed comparison and configuration.
 
 **Best for**: Quick start, development, small deployments
 
-### Single Container (Quickest)
-
 Run everything in one container with embedded PostgreSQL:
 
 ```bash
@@ -83,7 +81,19 @@ helm upgrade hindsight oci://ghcr.io/vectorize-io/charts/hindsight
 - Kubernetes cluster (GKE, EKS, AKS, or self-hosted)
 - Helm 3.8+
 
-See the [Helm chart documentation](https://github.com/vectorize-io/hindsight/tree/main/helm) for advanced configuration.
+### Distributed Workers
+
+For high-throughput deployments, enable dedicated worker pods to scale task processing independently:
+
+```bash
+helm install hindsight oci://ghcr.io/vectorize-io/charts/hindsight \
+  --set worker.enabled=true \
+  --set worker.replicaCount=3
+```
+
+See [Services - Worker Service](./services#worker-service) for configuration details and architecture.
+
+See the [Helm chart values.yaml](https://github.com/vectorize-io/hindsight/tree/main/helm/hindsight/values.yaml) for all chart options.
 
 ---
 

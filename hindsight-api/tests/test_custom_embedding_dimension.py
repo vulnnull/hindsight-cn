@@ -17,6 +17,7 @@ from hindsight_api import MemoryEngine, RequestContext
 from hindsight_api.engine.embeddings import LocalSTEmbeddings, OpenAIEmbeddings, CohereEmbeddings
 from hindsight_api.engine.cross_encoder import LocalSTCrossEncoder, CohereCrossEncoder
 from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer
+from hindsight_api.engine.task_backend import SyncTaskBackend
 from hindsight_api.extensions import TenantExtension, TenantContext
 from hindsight_api.migrations import run_migrations, ensure_embedding_dimension
 
@@ -323,6 +324,7 @@ class TestOpenAIEmbeddings:
             pool_max_size=3,
             run_migrations=False,
             tenant_extension=SchemaTenantExtension(schema_name),
+            task_backend=SyncTaskBackend(),
         )
 
         try:
@@ -392,6 +394,7 @@ class TestOpenAIEmbeddings:
             pool_max_size=3,
             run_migrations=False,
             tenant_extension=SchemaTenantExtension(schema_name),
+            task_backend=SyncTaskBackend(),
         )
 
         try:
@@ -559,6 +562,7 @@ class TestCohereIntegration:
             pool_max_size=3,
             run_migrations=False,
             tenant_extension=SchemaTenantExtension(schema_name),
+            task_backend=SyncTaskBackend(),
         )
 
         try:

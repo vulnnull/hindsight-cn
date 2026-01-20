@@ -127,6 +127,53 @@ Restore will **delete all existing data** in the target schema before importing 
 
 ---
 
+### decommission-worker
+
+Release all tasks owned by a worker, resetting them from "processing" back to "pending" status so they can be picked up by other workers.
+
+```bash
+hindsight-admin decommission-worker WORKER_ID [OPTIONS]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `WORKER_ID` | ID of the worker to decommission |
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--schema`, `-s` | Database schema | `public` |
+
+**Examples:**
+
+```bash
+# Before scaling down - release tasks from workers being removed
+hindsight-admin decommission-worker hindsight-worker-4
+hindsight-admin decommission-worker hindsight-worker-3
+
+# Release tasks from a crashed worker
+hindsight-admin decommission-worker worker-2
+
+# For a specific tenant schema
+hindsight-admin decommission-worker worker-1 --schema tenant_acme
+```
+
+**When to Use:**
+
+- **Scaling down**: Before removing worker replicas in Kubernetes
+- **Graceful removal**: When taking a worker offline for maintenance
+- **Crash recovery**: If a worker crashed while processing tasks
+- **Stuck worker**: When a worker is unresponsive
+
+:::tip Finding Worker IDs
+Worker IDs default to the hostname. In Kubernetes StatefulSets, this is the pod name (e.g., `hindsight-worker-0`). You can also set a custom ID with `HINDSIGHT_API_WORKER_ID` or `--worker-id`.
+:::
+
+---
+
 ## Environment Variables
 
 The admin CLI uses the same environment variables as the API service. The most important one is:

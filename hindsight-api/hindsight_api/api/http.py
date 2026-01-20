@@ -1408,6 +1408,16 @@ def create_app(
         Lifespan context manager for startup and shutdown events.
         Note: This only fires when running the app standalone, not when mounted.
         """
+        import asyncio
+        import socket
+
+        from hindsight_api.config import get_config
+        from hindsight_api.worker import WorkerPoller
+
+        config = get_config()
+        poller = None
+        poller_task = None
+
         # Initialize OpenTelemetry metrics
         try:
             prometheus_reader = initialize_metrics(service_name="hindsight-api", service_version="1.0.0")
@@ -1430,12 +1440,37 @@ def create_app(
                 metrics_collector.set_db_pool(memory._pool)
                 logging.info("DB pool metrics configured")
 
+        # Start worker poller if enabled (standalone mode)
+        if config.worker_enabled and memory._pool is not None:
+            worker_id = config.worker_id or socket.gethostname()
+            poller = WorkerPoller(
+                pool=memory._pool,
+                worker_id=worker_id,
+                executor=memory.execute_task,
+                poll_interval_ms=config.worker_poll_interval_ms,
+                batch_size=config.worker_batch_size,
+                max_retries=config.worker_max_retries,
+            )
+            poller_task = asyncio.create_task(poller.run())
+            logging.info(f"Worker poller started (worker_id={worker_id})")
+
         # Call HTTP extension startup hook
         if http_extension:
             await http_extension.on_startup()
             logging.info("HTTP extension started")
 
         yield
+
+        # Shutdown worker poller if running
+        if poller is not None:
+            await poller.shutdown_graceful(timeout=30.0)
+            if poller_task is not None:
+                poller_task.cancel()
+                try:
+                    await poller_task
+                except asyncio.CancelledError:
+                    pass
+            logging.info("Worker poller stopped")
 
         # Call HTTP extension shutdown hook
         if http_extension:

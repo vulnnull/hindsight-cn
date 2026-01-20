@@ -159,7 +159,7 @@ from .retain.types import RetainContentDict
 from .search import think_utils
 from .search.reranking import CrossEncoderReranker
 from .search.tags import TagsMatch
-from .task_backend import AsyncIOQueueBackend, NoopTaskBackend, TaskBackend
+from .task_backend import BrokerTaskBackend, SyncTaskBackend, TaskBackend
 
 
 class Budget(str, Enum):
@@ -229,8 +229,6 @@ class MemoryEngine(MemoryEngineInterface):
         db_command_timeout: int | None = None,
         db_acquire_timeout: int | None = None,
         task_backend: TaskBackend | None = None,
-        task_batch_size: int | None = None,
-        task_batch_interval: float | None = None,
         run_migrations: bool = True,
         operation_validator: "OperationValidatorExtension | None" = None,
         tenant_extension: "TenantExtension | None" = None,
@@ -265,9 +263,7 @@ class MemoryEngine(MemoryEngineInterface):
             pool_max_size: Maximum number of connections in the pool. Defaults to HINDSIGHT_API_DB_POOL_MAX_SIZE.
             db_command_timeout: PostgreSQL command timeout in seconds. Defaults to HINDSIGHT_API_DB_COMMAND_TIMEOUT.
             db_acquire_timeout: Connection acquisition timeout in seconds. Defaults to HINDSIGHT_API_DB_ACQUIRE_TIMEOUT.
-            task_backend: Custom task backend. If not provided, uses AsyncIOQueueBackend.
-            task_batch_size: Background task batch size. Defaults to HINDSIGHT_API_TASK_BATCH_SIZE.
-            task_batch_interval: Background task batch interval in seconds. Defaults to HINDSIGHT_API_TASK_BATCH_INTERVAL.
+            task_backend: Custom task backend. If not provided, uses BrokerTaskBackend for distributed processing.
             run_migrations: Whether to run database migrations during initialize(). Default: True
             operation_validator: Optional extension to validate operations before execution.
                                 If provided, retain/recall/reflect operations will be validated.
@@ -405,13 +401,9 @@ class MemoryEngine(MemoryEngineInterface):
         self._cross_encoder_reranker = CrossEncoderReranker(cross_encoder=cross_encoder)
 
         # Initialize task backend
-        _task_batch_size = task_batch_size if task_batch_size is not None else config.task_backend_memory_batch_size
-        _task_batch_interval = (
-            task_batch_interval if task_batch_interval is not None else config.task_backend_memory_batch_interval
-        )
-        self._task_backend = task_backend or AsyncIOQueueBackend(
-            batch_size=_task_batch_size, batch_interval=_task_batch_interval
-        )
+        # If no custom backend provided, use BrokerTaskBackend which stores tasks in PostgreSQL
+        # The pool_getter lambda will return the pool once it's initialized
+        self._task_backend = task_backend or BrokerTaskBackend(pool_getter=lambda: self._pool)
 
         # Backpressure mechanism: limit concurrent searches to prevent overwhelming the database
         # Configurable via HINDSIGHT_API_RECALL_MAX_CONCURRENT (default: 50)

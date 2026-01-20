@@ -1,17 +1,16 @@
-{{- if .Values.api.enabled }}
+{{- if .Values.worker.enabled }}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
-  name: {{ include "hindsight.fullname" . }}-api
+  name: {{ include "hindsight.fullname" . }}-worker
   labels:
-    {{- include "hindsight.api.labels" . | nindent 4 }}
+    {{- include "hindsight.worker.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.autoscaling.enabled }}
-  replicas: {{ .Values.api.replicaCount }}
-  {{- end }}
+  serviceName: {{ include "hindsight.fullname" . }}-worker
+  replicas: {{ .Values.worker.replicaCount }}
   selector:
     matchLabels:
-      {{- include "hindsight.api.selectorLabels" . | nindent 6 }}
+      {{- include "hindsight.worker.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -22,7 +21,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "hindsight.api.selectorLabels" . | nindent 8 }}
+        {{- include "hindsight.worker.selectorLabels" . | nindent 8 }}
     spec:
       {{- if .Values.serviceAccount.create }}
       serviceAccountName: {{ include "hindsight.serviceAccountName" . }}
@@ -30,14 +29,15 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-      - name: api
+      - name: worker
         securityContext:
           {{- toYaml .Values.securityContext | nindent 10 }}
-        image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Values.version }}"
-        imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+        image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag | default .Values.version }}"
+        imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+        command: ["hindsight-worker"]
         ports:
         - name: http
-          containerPort: {{ .Values.api.service.targetPort }}
+          containerPort: {{ .Values.worker.service.targetPort }}
           protocol: TCP
         {{- if .Values.existingSecret }}
         envFrom:
@@ -55,18 +55,33 @@ spec:
         {{- end }}
         - name: HINDSIGHT_API_DATABASE_URL
           value: {{ include "hindsight.databaseUrl" . | quote }}
-        {{- /* Disable internal worker when dedicated workers are enabled */}}
-        {{- if .Values.worker.enabled }}
-        - name: HINDSIGHT_API_WORKER_ENABLED
-          value: "false"
-        {{- end }}
+        {{- /* Worker ID uses pod name (StatefulSet provides stable names like worker-0, worker-1) */}}
+        - name: HINDSIGHT_API_WORKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        {{- /* Inherit LLM config from api.env */}}
         {{- range $key, $value := .Values.api.env }}
         - name: {{ $key }}
           value: {{ $value | quote }}
         {{- end }}
-        {{- /* Only use api.secrets when not using existingSecret (for chart-managed secrets) */}}
+        {{- /* Worker-specific env vars */}}
+        {{- range $key, $value := .Values.worker.env }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        {{- /* Only use secrets when not using existingSecret */}}
         {{- if not .Values.existingSecret }}
+        {{- /* Inherit secrets from api.secrets */}}
         {{- range $key, $value := .Values.api.secrets }}
+        - name: {{ $key }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "hindsight.secretName" $ }}
+              key: {{ $key }}
+        {{- end }}
+        {{- /* Worker-specific secrets (can override api.secrets) */}}
+        {{- range $key, $value := .Values.worker.secrets }}
         - name: {{ $key }}
           valueFrom:
             secretKeyRef:
@@ -75,11 +90,11 @@ spec:
         {{- end }}
         {{- end }}
         livenessProbe:
-          {{- toYaml .Values.api.livenessProbe | nindent 10 }}
+          {{- toYaml .Values.worker.livenessProbe | nindent 10 }}
         readinessProbe:
-          {{- toYaml .Values.api.readinessProbe | nindent 10 }}
+          {{- toYaml .Values.worker.readinessProbe | nindent 10 }}
         resources:
-          {{- toYaml .Values.api.resources | nindent 10 }}
+          {{- toYaml .Values.worker.resources | nindent 10 }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

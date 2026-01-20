@@ -81,6 +81,22 @@ app.kubernetes.io/component: control-plane
 {{- end }}
 
 {{/*
+Worker labels
+*/}}
+{{- define "hindsight.worker.labels" -}}
+{{ include "hindsight.labels" . }}
+app.kubernetes.io/component: worker
+{{- end }}
+
+{{/*
+Worker selector labels
+*/}}
+{{- define "hindsight.worker.selectorLabels" -}}
+{{ include "hindsight.selectorLabels" . }}
+app.kubernetes.io/component: worker
+{{- end }}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "hindsight.serviceAccountName" -}}
