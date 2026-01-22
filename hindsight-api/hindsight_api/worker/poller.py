@@ -8,6 +8,7 @@ FOR UPDATE SKIP LOCKED for safe concurrent claiming.
 import asyncio
 import json
 import logging
+import time
 import traceback
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
     import asyncpg
 
 logger = logging.getLogger(__name__)
+
+# Progress logging interval in seconds
+PROGRESS_LOG_INTERVAL = 30
 
 
 def fq_table(table: str, schema: str | None = None) -> str:
@@ -66,12 +70,18 @@ class WorkerPoller:
         self._current_tasks: set[asyncio.Task] = set()
         self._in_flight_count = 0
         self._in_flight_lock = asyncio.Lock()
+        self._last_progress_log = 0.0
+        self._tasks_completed_since_log = 0
+        self._active_banks: set[str] = set()
 
     async def claim_batch(self) -> list[tuple[str, dict[str, Any]]]:
         """
         Claim up to batch_size pending tasks atomically.
 
         Uses FOR UPDATE SKIP LOCKED to ensure no conflicts with other workers.
+
+        For consolidation tasks specifically, skips pending tasks if there's already
+        a processing consolidation for the same bank (to avoid duplicate work).
 
         Returns:
             List of tuples (operation_id, task_dict)
@@ -81,11 +91,24 @@ class WorkerPoller:
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 # Select and lock pending tasks
+                # For consolidation: skip if same bank already has one processing
                 rows = await conn.fetch(
                     f"""
                     SELECT operation_id, task_payload
-                    FROM {table}
+                    FROM {table} AS pending
                     WHERE status = 'pending' AND task_payload IS NOT NULL
+                    AND (
+                        -- Non-consolidation tasks: always claimable
+                        operation_type != 'consolidation'
+                        OR
+                        -- Consolidation: only if no other consolidation processing for same bank
+                        NOT EXISTS (
+                            SELECT 1 FROM {table} AS processing
+                            WHERE processing.bank_id = pending.bank_id
+                            AND processing.operation_type = 'consolidation'
+                            AND processing.status = 'processing'
+                        )
+                    )
                     ORDER BY created_at
                     LIMIT $1
                     FOR UPDATE SKIP LOCKED
@@ -188,6 +211,34 @@ class WorkerPoller:
             logger.error(f"Task {operation_id} failed: {e}")
             await self._retry_or_fail(operation_id, error_msg)
 
+    async def recover_own_tasks(self) -> int:
+        """
+        Recover tasks that were assigned to this worker but not completed.
+
+        This handles the case where a worker crashes while processing tasks.
+        On startup, we reset any tasks stuck in 'processing' for this worker_id
+        back to 'pending' so they can be picked up again.
+
+        Returns:
+            Number of tasks recovered
+        """
+        table = fq_table("async_operations", self._schema)
+
+        result = await self._pool.execute(
+            f"""
+            UPDATE {table}
+            SET status = 'pending', worker_id = NULL, claimed_at = NULL, updated_at = now()
+            WHERE status = 'processing' AND worker_id = $1
+            """,
+            self._worker_id,
+        )
+
+        # Parse "UPDATE N" to get count
+        count = int(result.split()[-1]) if result else 0
+        if count > 0:
+            logger.info(f"Worker {self._worker_id} recovered {count} stale tasks from previous run")
+        return count
+
     async def run(self):
         """
         Main polling loop.
@@ -195,6 +246,9 @@ class WorkerPoller:
         Continuously polls for pending tasks, claims them, and executes them
         until shutdown is signaled.
         """
+        # Recover any tasks from a previous crash before starting
+        await self.recover_own_tasks()
+
         logger.info(f"Worker {self._worker_id} starting polling loop")
 
         while not self._shutdown.is_set():
@@ -234,6 +288,9 @@ class WorkerPoller:
                     except asyncio.TimeoutError:
                         pass  # Normal timeout, continue polling
 
+                # Log progress stats periodically
+                await self._log_progress_if_due()
+
             except asyncio.CancelledError:
                 logger.info(f"Worker {self._worker_id} polling loop cancelled")
                 break
@@ -269,6 +326,72 @@ class WorkerPoller:
             await asyncio.sleep(0.5)
 
         logger.warning(f"Worker {self._worker_id} shutdown timeout after {timeout}s")
+
+    async def _log_progress_if_due(self):
+        """Log progress stats every PROGRESS_LOG_INTERVAL seconds."""
+        now = time.time()
+        if now - self._last_progress_log < PROGRESS_LOG_INTERVAL:
+            return
+
+        self._last_progress_log = now
+
+        try:
+            table = fq_table("async_operations", self._schema)
+            async with self._pool.acquire() as conn:
+                # Get global stats by status
+                stats = await conn.fetch(
+                    f"""
+                    SELECT status, COUNT(*) as count
+                    FROM {table}
+                    WHERE created_at > now() - interval '24 hours'
+                    GROUP BY status
+                    """
+                )
+
+                # Get currently processing tasks grouped by type and bank
+                processing = await conn.fetch(
+                    f"""
+                    SELECT operation_type, bank_id, COUNT(*) as count
+                    FROM {table}
+                    WHERE status = 'processing'
+                    GROUP BY operation_type, bank_id
+                    """
+                )
+
+            # Build stats dict
+            status_counts = {row["status"]: row["count"] for row in stats}
+            pending = status_counts.get("pending", 0)
+            processing_count = status_counts.get("processing", 0)
+            completed = status_counts.get("completed", 0)
+            failed = status_counts.get("failed", 0)
+
+            # Build processing breakdown
+            processing_info = []
+            banks_working = set()
+            for row in processing:
+                op_type = row["operation_type"]
+                bank_id = row["bank_id"]
+                count = row["count"]
+                banks_working.add(bank_id)
+                processing_info.append(f"{op_type}:{bank_id}({count})")
+
+            # Format log
+            async with self._in_flight_lock:
+                in_flight = self._in_flight_count
+
+            processing_str = ", ".join(processing_info[:10]) if processing_info else "none"
+            if len(processing_info) > 10:
+                processing_str += f" +{len(processing_info) - 10} more"
+
+            logger.info(
+                f"[WORKER_STATS] worker={self._worker_id} in_flight={in_flight} | "
+                f"global: pending={pending} processing={processing_count} "
+                f"completed_24h={completed} failed_24h={failed} | "
+                f"active: {processing_str}"
+            )
+
+        except Exception as e:
+            logger.debug(f"Failed to log progress stats: {e}")
 
     @property
     def worker_id(self) -> str:

@@ -9,10 +9,10 @@ import { EntitiesView } from "@/components/entities-view";
 import { ThinkView } from "@/components/think-view";
 import { SearchDebugView } from "@/components/search-debug-view";
 import { BankProfileView } from "@/components/bank-profile-view";
-import { MentalModelsView } from "@/components/mental-models-view";
+import { ReflectionsView } from "@/components/reflections-view";
 
 type NavItem = "recall" | "reflect" | "data" | "documents" | "entities" | "profile";
-type DataSubTab = "world" | "experience" | "models";
+type DataSubTab = "world" | "experience" | "models" | "reflections";
 
 export default function BankPage() {
   const params = useParams();
@@ -124,13 +124,27 @@ export default function BankPage() {
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
                     </button>
+                    <button
+                      onClick={() => handleDataSubTabChange("reflections")}
+                      className={`px-6 py-3 font-semibold text-sm transition-all relative ${
+                        subTab === "reflections"
+                          ? "text-primary"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Reflections
+                      {subTab === "reflections" && (
+                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                      )}
+                    </button>
                   </div>
                 </div>
 
                 <div>
                   {subTab === "world" && <DataView key="world" factType="world" />}
                   {subTab === "experience" && <DataView key="experience" factType="experience" />}
-                  {subTab === "models" && <MentalModelsView key="models" />}
+                  {subTab === "models" && <DataView key="models" factType="mental_model" />}
+                  {subTab === "reflections" && <ReflectionsView key="reflections" />}
                 </div>
               </div>
             )}

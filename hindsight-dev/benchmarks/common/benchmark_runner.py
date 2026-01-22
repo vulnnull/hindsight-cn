@@ -15,6 +15,8 @@ The framework supports two answer generation patterns:
 2. Integrated: Answer generator performs its own retrieval (e.g., think API)
    - Indicated by needs_external_search() returning False
    - Skips the search step for efficiency
+
+Optional --include-mental-models flag enables returning mental models in recall results.
 """
 
 import asyncio
@@ -178,6 +180,7 @@ class LLMAnswerGenerator(ABC):
         recall_result: Dict[str, Any],
         question_date: Optional[datetime] = None,
         question_type: Optional[str] = None,
+        bank_id: Optional[str] = None,
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer from retrieved memories.
@@ -187,6 +190,7 @@ class LLMAnswerGenerator(ABC):
             recall_result: Full RecallResult dict containing results, entities, chunks, and trace
             question_date: Optional date when the question was asked (for temporal context)
             question_type: Optional question category/type (e.g., 'multi-session', 'temporal-reasoning')
+            bank_id: Optional bank ID for generators that need it (e.g., ReflectAnswerGenerator)
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories_override)
@@ -418,11 +422,18 @@ class BenchmarkRunner:
             "max_session_length": max(session_lengths) if session_lengths else 0,
         }
 
-    async def ingest_conversation(self, item: Dict[str, Any], agent_id: str) -> int:
+    async def ingest_conversation(
+        self, item: Dict[str, Any], agent_id: str, wait_for_consolidation: bool = False
+    ) -> int:
         """
         Ingest conversation into memory using batch ingestion.
 
         Uses put_batch_async for maximum efficiency.
+
+        Args:
+            item: Dataset item to ingest
+            agent_id: Agent/bank ID to ingest into
+            wait_for_consolidation: If True, wait for consolidation to complete after ingestion
 
         Returns:
             Number of sessions ingested
@@ -436,7 +447,86 @@ class BenchmarkRunner:
                 request_context=RequestContext(),
             )
 
+        if wait_for_consolidation and batch_contents:
+            await self._wait_for_consolidation(agent_id)
+
         return len(batch_contents)
+
+    async def _get_pending_consolidation_count(self, bank_id: str) -> int:
+        """
+        Get the count of memories pending consolidation.
+
+        Returns:
+            Number of memories not yet consolidated into mental models
+        """
+        pool = await self.memory._get_pool()
+        from hindsight_api.engine.memory_engine import fq_table
+
+        async with pool.acquire() as conn:
+            # Check when consolidation last ran
+            last_consolidated_row = await conn.fetchrow(
+                f"""
+                SELECT MAX(created_at) as last_consolidated_at
+                FROM {fq_table("memory_units")}
+                WHERE bank_id = $1 AND fact_type = 'mental_model'
+                """,
+                bank_id,
+            )
+            last_consolidated_at = last_consolidated_row["last_consolidated_at"] if last_consolidated_row else None
+
+            if last_consolidated_at:
+                # Count memories created after last consolidation
+                result = await conn.fetchrow(
+                    f"""
+                    SELECT COUNT(*) as count
+                    FROM {fq_table("memory_units")}
+                    WHERE bank_id = $1 AND fact_type IN ('experience', 'world')
+                    AND created_at > $2
+                    """,
+                    bank_id,
+                    last_consolidated_at,
+                )
+            else:
+                # If never consolidated, count all experience/world memories
+                result = await conn.fetchrow(
+                    f"""
+                    SELECT COUNT(*) as count
+                    FROM {fq_table("memory_units")}
+                    WHERE bank_id = $1 AND fact_type IN ('experience', 'world')
+                    """,
+                    bank_id,
+                )
+            return result["count"] if result else 0
+
+    async def _wait_for_consolidation(self, bank_id: str, poll_interval: float = 2.0, timeout: float = 300.0) -> None:
+        """
+        Wait for consolidation to complete (pending_consolidation reaches 0).
+
+        Args:
+            bank_id: Bank ID to check
+            poll_interval: Seconds between polls
+            timeout: Maximum seconds to wait
+
+        Raises:
+            TimeoutError: If consolidation doesn't complete within timeout
+        """
+        import time
+
+        start_time = time.time()
+        console.print("      [yellow]Waiting for consolidation to complete...[/yellow]")
+
+        while True:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                raise TimeoutError(f"Consolidation did not complete within {timeout}s")
+
+            pending = await self._get_pending_consolidation_count(bank_id)
+            if pending == 0:
+                console.print("      [green]✓[/green] Consolidation complete")
+                return
+
+            # Still pending, wait and poll again
+            await asyncio.sleep(poll_interval)
 
     async def answer_question(
         self,
@@ -446,6 +536,8 @@ class BenchmarkRunner:
         max_tokens: int = 4096,
         question_date: Optional[datetime] = None,
         question_type: Optional[str] = None,
+        include_mental_models: bool = False,
+        only_mental_models: bool = False,
     ) -> Tuple[str, str, List[Dict], Dict[str, Dict]]:
         """
         Answer a question using memory retrieval.
@@ -457,6 +549,8 @@ class BenchmarkRunner:
             max_tokens: Maximum tokens to retrieve
             question_date: Date when the question was asked (for temporal filtering)
             question_type: Question category/type (e.g., 'multi-session', 'temporal-reasoning')
+            include_mental_models: If True, include mental models in recall results
+            only_mental_models: If True, only retrieve mental models (no facts)
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories, chunks)
@@ -471,16 +565,26 @@ class BenchmarkRunner:
             import time
 
             recall_start_time = time.time()
+            # Build fact_types based on what's requested
+            if only_mental_models:
+                # Only retrieve mental models
+                fact_types = ["mental_model"]
+            elif include_mental_models:
+                # Retrieve facts AND mental models
+                fact_types = ["world", "experience", "mental_model"]
+            else:
+                # Only retrieve facts
+                fact_types = ["world", "experience"]
             search_result = await self.memory.recall_async(
                 bank_id=agent_id,
                 query=question,
                 budget=budget,
                 max_tokens=max_tokens,
-                fact_type=["world", "experience"],
+                fact_type=fact_types,
                 question_date=question_date,
-                include_entities=True,
+                include_entities=not only_mental_models,  # Skip entities when only mental models
                 max_entity_tokens=2048,
-                include_chunks=True,
+                include_chunks=True,  # Always include chunks (mental models fetch from source memories)
                 request_context=RequestContext(),
             )
             recall_time = time.time() - recall_start_time
@@ -505,7 +609,7 @@ class BenchmarkRunner:
 
             # Generate answer using LLM - pass entire recall result
             answer, reasoning, memories_override = await self.answer_generator.generate_answer(
-                question, recall_result_dict, question_date, question_type
+                question, recall_result_dict, question_date, question_type, bank_id=agent_id
             )
 
             # Use override if provided, otherwise use the results from recall
@@ -517,10 +621,10 @@ class BenchmarkRunner:
 
             return answer, reasoning, final_memories, chunks
         else:
-            # Integrated flow: generator does its own search (e.g., think API)
+            # Integrated flow: generator does its own search (e.g., reflect API)
             # Pass empty recall result since generator doesn't need them
             answer, reasoning, memories_override = await self.answer_generator.generate_answer(
-                question, {"results": []}, question_date, question_type
+                question, {"results": []}, question_date, question_type, bank_id=agent_id
             )
 
             # Use memories from generator (should not be None for integrated mode)
@@ -537,12 +641,16 @@ class BenchmarkRunner:
         max_tokens: int,
         max_questions: Optional[int] = None,
         semaphore: asyncio.Semaphore = None,
+        include_mental_models: bool = False,
+        only_mental_models: bool = False,
     ) -> List[Dict]:
         """
         Evaluate QA task with parallel question processing.
 
         Args:
             semaphore: Semaphore to limit concurrent question processing
+            include_mental_models: If True, include mental models in recall results
+            only_mental_models: If True, only retrieve mental models (no facts)
 
         Returns:
             List of QA results
@@ -581,7 +689,14 @@ class BenchmarkRunner:
                     try:
                         # Get predicted answer, reasoning, retrieved memories, and chunks
                         predicted_answer, reasoning, retrieved_memories, chunks = await self.answer_question(
-                            agent_id, question, thinking_budget, max_tokens, question_date, category
+                            agent_id,
+                            question,
+                            thinking_budget,
+                            max_tokens,
+                            question_date,
+                            category,
+                            include_mental_models,
+                            only_mental_models,
                         )
 
                         # Remove embeddings from retrieved memories to reduce file size
@@ -760,6 +875,8 @@ class BenchmarkRunner:
         question_semaphore: asyncio.Semaphore,
         eval_semaphore_size: int = 8,
         clear_this_agent: bool = True,
+        include_mental_models: bool = False,
+        only_mental_models: bool = False,
     ) -> Dict:
         """
         Process a single item (ingest + evaluate).
@@ -767,6 +884,8 @@ class BenchmarkRunner:
         Args:
             clear_this_agent: Whether to clear this agent's data before ingesting.
                              Set to False to skip clearing (e.g., when agent_id is shared and already cleared)
+            include_mental_models: If True, include mental models in recall results and wait for consolidation after ingestion
+            only_mental_models: If True, only retrieve mental models (no facts)
 
         Returns:
             Result dict with metrics
@@ -775,23 +894,27 @@ class BenchmarkRunner:
 
         console.print(f"\n[bold blue]Item {i}/{total_items}[/bold blue] (ID: {item_id})")
 
+        step = 1
         if not skip_ingestion:
             # Clear agent data before ingesting
             if clear_this_agent:
-                console.print("  [1] Clearing previous agent data...")
+                console.print(f"  [{step}] Clearing previous agent data...")
                 await self.memory.delete_bank(agent_id, request_context=RequestContext())
                 console.print(f"      [green]✓[/green] Cleared '{agent_id}' agent data")
 
-            # Ingest conversation
-            console.print("  [2] Ingesting conversation (batch mode)...")
-            num_sessions = await self.ingest_conversation(item, agent_id)
+            # Ingest conversation (wait for consolidation if mental models are requested)
+            step += 1
+            console.print(f"  [{step}] Ingesting conversation (batch mode)...")
+            wait_for_consolidation = include_mental_models or only_mental_models
+            num_sessions = await self.ingest_conversation(item, agent_id, wait_for_consolidation=wait_for_consolidation)
             console.print(f"      [green]✓[/green] Ingested {num_sessions} sessions")
         else:
             num_sessions = -1
 
         # Evaluate QA
+        step += 1
         qa_pairs = self.dataset.get_qa_pairs(item)
-        console.print(f"  [3] Evaluating {len(qa_pairs)} QA pairs (parallel)...")
+        console.print(f"  [{step}] Evaluating {len(qa_pairs)} QA pairs (parallel)...")
         qa_results = await self.evaluate_qa_task(
             agent_id,
             qa_pairs,
@@ -800,10 +923,13 @@ class BenchmarkRunner:
             max_tokens,
             max_questions_per_item,
             question_semaphore,
+            include_mental_models,
+            only_mental_models,
         )
 
         # Calculate metrics
-        console.print("  [4] Calculating metrics...")
+        step += 1
+        console.print(f"  [{step}] Calculating metrics...")
         metrics = await self.calculate_metrics(qa_results, eval_semaphore_size)
 
         console.print(
@@ -830,6 +956,8 @@ class BenchmarkRunner:
         max_concurrent_items: int = 1,  # Max concurrent items (conversations) to process in parallel
         output_path: Optional[Path] = None,  # Path to save results incrementally
         merge_with_existing: bool = False,  # Whether to merge with existing results
+        include_mental_models: bool = False,  # If True, include mental models in recall results
+        only_mental_models: bool = False,  # If True, only retrieve mental models (no facts)
     ) -> Dict[str, Any]:
         """
         Run the full benchmark evaluation.
@@ -849,6 +977,8 @@ class BenchmarkRunner:
             separate_ingestion_phase: If True, ingest all data first, then evaluate all questions (single agent)
             filln: If True, only process items where the agent has no indexed data yet
             max_concurrent_items: Max concurrent items to process in parallel (requires clear_agent_per_item=True)
+            include_mental_models: If True, include mental models in recall results and wait for consolidation after ingestion.
+            only_mental_models: If True, only retrieve mental models (no facts). Implies waiting for consolidation.
 
         Returns:
             Dict with complete benchmark results
@@ -890,6 +1020,8 @@ class BenchmarkRunner:
                 eval_semaphore_size,
                 output_path,
                 merge_with_existing,
+                include_mental_models,
+                only_mental_models,
             )
         else:
             # Original approach: process each item independently
@@ -907,6 +1039,8 @@ class BenchmarkRunner:
                 max_concurrent_items,
                 output_path,
                 merge_with_existing,
+                include_mental_models,
+                only_mental_models,
             )
 
     async def _run_single_phase(
@@ -924,6 +1058,8 @@ class BenchmarkRunner:
         max_concurrent_items: int = 1,
         output_path: Optional[Path] = None,
         merge_with_existing: bool = False,
+        include_mental_models: bool = False,
+        only_mental_models: bool = False,
     ) -> Dict[str, Any]:
         """Original single-phase approach: process each item independently."""
         # Create semaphore for question processing
@@ -945,6 +1081,8 @@ class BenchmarkRunner:
                 max_concurrent_items,
                 output_path,
                 merge_with_existing,
+                include_mental_models,
+                only_mental_models,
             )
         else:
             # Sequential item processing (original behavior)
@@ -961,6 +1099,8 @@ class BenchmarkRunner:
                 filln,
                 output_path,
                 merge_with_existing,
+                include_mental_models,
+                only_mental_models,
             )
 
         # Calculate overall metrics
@@ -996,6 +1136,8 @@ class BenchmarkRunner:
         filln: bool,
         output_path: Optional[Path] = None,
         merge_with_existing: bool = False,
+        include_mental_models: bool = False,
+        only_mental_models: bool = False,
     ) -> List[Dict]:
         """Process items sequentially (original behavior)."""
         all_results = []
@@ -1043,6 +1185,8 @@ class BenchmarkRunner:
                 question_semaphore,
                 eval_semaphore_size,
                 clear_this_agent,
+                include_mental_models,
+                only_mental_models,
             )
 
             # Replace existing result or append new one
@@ -1074,6 +1218,8 @@ class BenchmarkRunner:
         max_concurrent_items: int,
         output_path: Optional[Path] = None,
         merge_with_existing: bool = False,
+        include_mental_models: bool = False,
+        only_mental_models: bool = False,
     ) -> List[Dict]:
         """Process items in parallel (requires unique agent IDs per item)."""
         # Load existing results if merge_with_existing is True
@@ -1118,6 +1264,8 @@ class BenchmarkRunner:
                     question_semaphore,
                     eval_semaphore_size,
                     clear_this_agent=True,  # Always clear for parallel processing
+                    include_mental_models=include_mental_models,
+                    only_mental_models=only_mental_models,
                 )
                 return result
 
@@ -1156,11 +1304,17 @@ class BenchmarkRunner:
         eval_semaphore_size: int,
         output_path: Optional[Path] = None,
         merge_with_existing: bool = False,
+        include_mental_models: bool = False,
+        only_mental_models: bool = False,
     ) -> Dict[str, Any]:
         """
         Two-phase approach: ingest all data into single agent, then evaluate all questions.
 
         More realistic scenario where agent accumulates memories over time.
+
+        Args:
+            include_mental_models: If True, include mental models in recall results and wait for consolidation
+            only_mental_models: If True, only retrieve mental models (no facts)
         """
         # Phase 1: Ingestion
         if not skip_ingestion:
@@ -1196,6 +1350,10 @@ class BenchmarkRunner:
             )
 
             console.print(f"    [green]✓[/green] Ingested {len(all_sessions)} sessions from {len(items)} items")
+
+            # Wait for consolidation if mental models are requested
+            if include_mental_models or only_mental_models:
+                await self._wait_for_consolidation(agent_id)
         else:
             console.print("\n[3] Skipping ingestion (using existing data)")
 
@@ -1222,6 +1380,8 @@ class BenchmarkRunner:
                 max_tokens,
                 max_questions_per_item,
                 question_semaphore,
+                include_mental_models,
+                only_mental_models,
             )
 
             # Calculate metrics

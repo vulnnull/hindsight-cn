@@ -75,10 +75,6 @@ enum Commands {
     #[command(subcommand)]
     Memory(MemoryCommands),
 
-    /// Manage mental models (list, get, create, update, delete, refresh, versions)
-    #[command(subcommand)]
-    MentalModel(MentalModelCommands),
-
     /// Manage documents (list, get, delete)
     #[command(subcommand)]
     Document(DocumentCommands),
@@ -98,6 +94,14 @@ enum Commands {
     /// Manage async operations (list, get, cancel)
     #[command(subcommand)]
     Operation(OperationCommands),
+
+    /// Manage reflections (user-curated summaries)
+    #[command(subcommand)]
+    Reflection(ReflectionCommands),
+
+    /// Manage directives (behavioral rules)
+    #[command(subcommand)]
+    Directive(DirectiveCommands),
 
     /// Check API health status
     Health,
@@ -505,134 +509,6 @@ enum OperationCommands {
 }
 
 #[derive(Subcommand)]
-enum MentalModelCommands {
-    /// List mental models for a bank
-    List {
-        /// Bank ID
-        bank_id: String,
-
-        /// Filter by subtype (structural, emergent, pinned, learned, directive)
-        #[arg(long)]
-        subtype: Option<String>,
-
-        /// Filter by tags
-        #[arg(long, value_delimiter = ',')]
-        tags: Option<Vec<String>>,
-
-        /// Tag matching mode (any, all, any_strict, all_strict)
-        #[arg(long, default_value = "any")]
-        tags_match: Option<String>,
-    },
-
-    /// Get a specific mental model
-    Get {
-        /// Bank ID
-        bank_id: String,
-
-        /// Mental model ID
-        model_id: String,
-    },
-
-    /// Create a new mental model (pinned or directive subtype)
-    Create {
-        /// Bank ID
-        bank_id: String,
-
-        /// Model name
-        name: String,
-
-        /// Model description
-        description: String,
-
-        /// Subtype (pinned or directive)
-        #[arg(long, default_value = "pinned")]
-        subtype: Option<String>,
-
-        /// Tags for the model
-        #[arg(long, value_delimiter = ',')]
-        tags: Option<Vec<String>>,
-
-        /// Path to JSON file containing initial observations
-        #[arg(long)]
-        observations: Option<PathBuf>,
-    },
-
-    /// Update a mental model's name or description
-    Update {
-        /// Bank ID
-        bank_id: String,
-
-        /// Mental model ID
-        model_id: String,
-
-        /// New name
-        #[arg(long)]
-        name: Option<String>,
-
-        /// New description
-        #[arg(long)]
-        description: Option<String>,
-    },
-
-    /// Delete a mental model
-    Delete {
-        /// Bank ID
-        bank_id: String,
-
-        /// Mental model ID
-        model_id: String,
-
-        /// Skip confirmation prompt
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-
-    /// Refresh all mental models (async operation)
-    RefreshAll {
-        /// Bank ID
-        bank_id: String,
-
-        /// Filter by subtype
-        #[arg(long)]
-        subtype: Option<String>,
-
-        /// Filter by tags
-        #[arg(long, value_delimiter = ',')]
-        tags: Option<Vec<String>>,
-    },
-
-    /// Refresh a specific mental model (async operation)
-    Refresh {
-        /// Bank ID
-        bank_id: String,
-
-        /// Mental model ID
-        model_id: String,
-    },
-
-    /// List version history for a mental model
-    Versions {
-        /// Bank ID
-        bank_id: String,
-
-        /// Mental model ID
-        model_id: String,
-    },
-
-    /// Get a specific version of a mental model
-    Version {
-        /// Bank ID
-        bank_id: String,
-
-        /// Mental model ID
-        model_id: String,
-
-        /// Version number
-        version: i64,
-    },
-}
-
-#[derive(Subcommand)]
 enum TagCommands {
     /// List tags in a bank
     List {
@@ -659,6 +535,131 @@ enum ChunkCommands {
     Get {
         /// Chunk ID
         chunk_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReflectionCommands {
+    /// List reflections for a bank
+    List {
+        /// Bank ID
+        bank_id: String,
+    },
+
+    /// Get a specific reflection
+    Get {
+        /// Bank ID
+        bank_id: String,
+
+        /// Reflection ID
+        reflection_id: String,
+    },
+
+    /// Create a new reflection
+    Create {
+        /// Bank ID
+        bank_id: String,
+
+        /// Reflection name
+        name: String,
+
+        /// Source query to generate the reflection from
+        source_query: String,
+    },
+
+    /// Update a reflection
+    Update {
+        /// Bank ID
+        bank_id: String,
+
+        /// Reflection ID
+        reflection_id: String,
+
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+    },
+
+    /// Delete a reflection
+    Delete {
+        /// Bank ID
+        bank_id: String,
+
+        /// Reflection ID
+        reflection_id: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// Refresh a reflection (re-run the source query)
+    Refresh {
+        /// Bank ID
+        bank_id: String,
+
+        /// Reflection ID
+        reflection_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum DirectiveCommands {
+    /// List directives for a bank
+    List {
+        /// Bank ID
+        bank_id: String,
+    },
+
+    /// Get a specific directive
+    Get {
+        /// Bank ID
+        bank_id: String,
+
+        /// Directive ID
+        directive_id: String,
+    },
+
+    /// Create a new directive
+    Create {
+        /// Bank ID
+        bank_id: String,
+
+        /// Directive name
+        name: String,
+
+        /// Directive content (the text to inject into prompts)
+        content: String,
+    },
+
+    /// Update a directive
+    Update {
+        /// Bank ID
+        bank_id: String,
+
+        /// Directive ID
+        directive_id: String,
+
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+
+        /// New content
+        #[arg(long)]
+        content: Option<String>,
+    },
+
+    /// Delete a directive
+    Delete {
+        /// Bank ID
+        bank_id: String,
+
+        /// Directive ID
+        directive_id: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 }
 
@@ -763,37 +764,6 @@ fn run() -> Result<()> {
             }
         },
 
-        // Mental Model commands
-        Commands::MentalModel(mm_cmd) => match mm_cmd {
-            MentalModelCommands::List { bank_id, subtype, tags, tags_match } => {
-                commands::mental_model::list(&client, &bank_id, subtype, tags, tags_match, verbose, output_format)
-            }
-            MentalModelCommands::Get { bank_id, model_id } => {
-                commands::mental_model::get(&client, &bank_id, &model_id, verbose, output_format)
-            }
-            MentalModelCommands::Create { bank_id, name, description, subtype, tags, observations } => {
-                commands::mental_model::create(&client, &bank_id, &name, &description, subtype, tags, observations, verbose, output_format)
-            }
-            MentalModelCommands::Update { bank_id, model_id, name, description } => {
-                commands::mental_model::update(&client, &bank_id, &model_id, name, description, verbose, output_format)
-            }
-            MentalModelCommands::Delete { bank_id, model_id, yes } => {
-                commands::mental_model::delete(&client, &bank_id, &model_id, yes, verbose, output_format)
-            }
-            MentalModelCommands::RefreshAll { bank_id, subtype, tags } => {
-                commands::mental_model::refresh_all(&client, &bank_id, subtype, tags, verbose, output_format)
-            }
-            MentalModelCommands::Refresh { bank_id, model_id } => {
-                commands::mental_model::refresh(&client, &bank_id, &model_id, verbose, output_format)
-            }
-            MentalModelCommands::Versions { bank_id, model_id } => {
-                commands::mental_model::versions(&client, &bank_id, &model_id, verbose, output_format)
-            }
-            MentalModelCommands::Version { bank_id, model_id, version } => {
-                commands::mental_model::version(&client, &bank_id, &model_id, version, verbose, output_format)
-            }
-        },
-
         // Document commands
         Commands::Document(doc_cmd) => match doc_cmd {
             DocumentCommands::List { bank_id, query, limit, offset } => {
@@ -844,6 +814,47 @@ fn run() -> Result<()> {
             }
             OperationCommands::Cancel { bank_id, operation_id } => {
                 commands::operation::cancel(&client, &bank_id, &operation_id, verbose, output_format)
+            }
+        },
+
+        // Reflection commands
+        Commands::Reflection(ref_cmd) => match ref_cmd {
+            ReflectionCommands::List { bank_id } => {
+                commands::reflection::list(&client, &bank_id, verbose, output_format)
+            }
+            ReflectionCommands::Get { bank_id, reflection_id } => {
+                commands::reflection::get(&client, &bank_id, &reflection_id, verbose, output_format)
+            }
+            ReflectionCommands::Create { bank_id, name, source_query } => {
+                commands::reflection::create(&client, &bank_id, &name, &source_query, verbose, output_format)
+            }
+            ReflectionCommands::Update { bank_id, reflection_id, name } => {
+                commands::reflection::update(&client, &bank_id, &reflection_id, name, verbose, output_format)
+            }
+            ReflectionCommands::Delete { bank_id, reflection_id, yes } => {
+                commands::reflection::delete(&client, &bank_id, &reflection_id, yes, verbose, output_format)
+            }
+            ReflectionCommands::Refresh { bank_id, reflection_id } => {
+                commands::reflection::refresh(&client, &bank_id, &reflection_id, verbose, output_format)
+            }
+        },
+
+        // Directive commands
+        Commands::Directive(dir_cmd) => match dir_cmd {
+            DirectiveCommands::List { bank_id } => {
+                commands::directive::list(&client, &bank_id, verbose, output_format)
+            }
+            DirectiveCommands::Get { bank_id, directive_id } => {
+                commands::directive::get(&client, &bank_id, &directive_id, verbose, output_format)
+            }
+            DirectiveCommands::Create { bank_id, name, content } => {
+                commands::directive::create(&client, &bank_id, &name, &content, verbose, output_format)
+            }
+            DirectiveCommands::Update { bank_id, directive_id, name, content } => {
+                commands::directive::update(&client, &bank_id, &directive_id, name, content, verbose, output_format)
+            }
+            DirectiveCommands::Delete { bank_id, directive_id, yes } => {
+                commands::directive::delete(&client, &bank_id, &directive_id, yes, verbose, output_format)
             }
         },
     };

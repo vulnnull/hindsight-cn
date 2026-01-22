@@ -21,6 +21,8 @@ TABLES = [
     "documents",
     "chunks",
     "async_operations",
+    "directives",
+    "reflections",
 ]
 
 # Files to scan for SQL queries

@@ -754,17 +754,14 @@ async def create_causal_links_batch(
         causal_relations_per_fact: List of causal relations for each fact.
             Each element is a list of dicts with:
             - target_fact_index: Index into unit_ids for the target fact
-            - relation_type: "causes", "caused_by", "enables", or "prevents"
+            - relation_type: "caused_by"
             - strength: Float in [0.0, 1.0] representing relationship strength
 
     Returns:
         Number of causal links created
 
-    Causal link types:
-    - "causes": This fact directly causes the target fact (forward causation)
-    - "caused_by": This fact was caused by the target fact (backward causation)
-    - "enables": This fact enables/allows the target fact (enablement)
-    - "prevents": This fact prevents/blocks the target fact (prevention)
+    Causal link type:
+    - "caused_by": This fact was caused by the target fact
     """
     if not unit_ids or not causal_relations_per_fact:
         return 0
@@ -787,8 +784,8 @@ async def create_causal_links_batch(
                 relation_type = relation["relation_type"]
                 strength = relation.get("strength", 1.0)
 
-                # Validate relation_type - must match database constraint
-                valid_types = {"causes", "caused_by", "enables", "prevents"}
+                # Validate relation_type - only "caused_by" is supported (DB constraint)
+                valid_types = {"caused_by"}
                 if relation_type not in valid_types:
                     logger.error(
                         f"Invalid relation_type '{relation_type}' (type: {type(relation_type).__name__}) "

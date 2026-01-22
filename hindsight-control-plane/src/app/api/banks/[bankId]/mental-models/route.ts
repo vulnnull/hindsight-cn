@@ -1,42 +1,22 @@
 import { NextResponse } from "next/server";
 import { sdk, lowLevelClient } from "@/lib/hindsight-client";
 
-const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || "http://localhost:8888";
-
 export async function GET(request: Request, { params }: { params: Promise<{ bankId: string }> }) {
   try {
     const { bankId } = await params;
-    const { searchParams } = new URL(request.url);
-    const subtype = searchParams.get("subtype");
 
     if (!bankId) {
       return NextResponse.json({ error: "bank_id is required" }, { status: 400 });
     }
 
-    // If subtype is specified, call the dataplane API directly with the query param
-    if (subtype) {
-      const response = await fetch(
-        `${DATAPLANE_URL}/v1/default/banks/${bankId}/mental-models?subtype=${subtype}`,
-        { method: "GET" }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("API error listing mental models:", errorText);
-        return NextResponse.json(
-          { error: "Failed to list mental models" },
-          { status: response.status }
-        );
-      }
-
-      const data = await response.json();
-      return NextResponse.json(data, { status: 200 });
-    }
-
-    // Default: use SDK which excludes directives
-    const response = await sdk.listMentalModels({
+    // Note: tags filtering is not supported by the list_memories API endpoint
+    const response = await sdk.listMemories({
       client: lowLevelClient,
       path: { bank_id: bankId },
+      query: {
+        type: "mental_model",
+        limit: 1000,
+      },
     });
 
     if (response.error) {
@@ -44,14 +24,31 @@ export async function GET(request: Request, { params }: { params: Promise<{ bank
       return NextResponse.json({ error: "Failed to list mental models" }, { status: 500 });
     }
 
-    return NextResponse.json(response.data, { status: 200 });
+    // Transform list memories response to mental models format
+    const items = (response.data?.items || []).map((item) => ({
+      id: item.id,
+      bank_id: bankId,
+      text: item.text,
+      proof_count: 1,
+      history: [],
+      tags: item.tags || [],
+      source_memory_ids: [],
+      source_memories: [],
+      created_at: item.date,
+      updated_at: item.date,
+    }));
+
+    return NextResponse.json({ items }, { status: 200 });
   } catch (error) {
     console.error("Error listing mental models:", error);
     return NextResponse.json({ error: "Failed to list mental models" }, { status: 500 });
   }
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ bankId: string }> }) {
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ bankId: string }> }
+) {
   try {
     const { bankId } = await params;
 
@@ -59,30 +56,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ ban
       return NextResponse.json({ error: "bank_id is required" }, { status: 400 });
     }
 
-    const body = await request.json();
-
-    // Call the dataplane API directly since SDK may not have the new endpoint yet
-    const response = await fetch(`${DATAPLANE_URL}/v1/default/banks/${bankId}/mental-models`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
+    const response = await sdk.clearMentalModels({
+      client: lowLevelClient,
+      path: { bank_id: bankId },
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("API error creating mental model:", errorText);
-      return NextResponse.json(
-        { error: errorText || "Failed to create mental model" },
-        { status: response.status }
-      );
+    if (response.error) {
+      console.error("API error clearing mental models:", response.error);
+      return NextResponse.json({ error: "Failed to clear mental models" }, { status: 500 });
     }
 
-    const data = await response.json();
-    return NextResponse.json(data, { status: 201 });
+    return NextResponse.json(response.data, { status: 200 });
   } catch (error) {
-    console.error("Error creating mental model:", error);
-    return NextResponse.json({ error: "Failed to create mental model" }, { status: 500 });
+    console.error("Error clearing mental models:", error);
+    return NextResponse.json({ error: "Failed to clear mental models" }, { status: 500 });
   }
 }

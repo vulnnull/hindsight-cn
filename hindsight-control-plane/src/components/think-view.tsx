@@ -106,20 +106,18 @@ export function ThinkView() {
       const existingDirective = directives.items?.find((d) => d.name === FEEDBACK_DIRECTIVE_NAME);
 
       if (existingDirective) {
-        // Append to existing directive description
-        const newDescription = existingDirective.description
-          ? `${existingDirective.description}\n${feedback.trim()}`
+        // Append to existing directive content
+        const newContent = existingDirective.content
+          ? `${existingDirective.content}\n${feedback.trim()}`
           : feedback.trim();
-        await client.updateMentalModel(currentBank, existingDirective.id, {
-          description: newDescription,
+        await client.updateDirective(currentBank, existingDirective.id, {
+          content: newContent,
         });
       } else {
-        // Create new directive with observation
-        await client.createMentalModel(currentBank, {
+        // Create new directive
+        await client.createDirective(currentBank, {
           name: FEEDBACK_DIRECTIVE_NAME,
-          description: "User feedback for improving responses",
-          subtype: "directive",
-          observations: [{ title: "Feedback", content: feedback.trim() }],
+          content: feedback.trim(),
         });
       }
 

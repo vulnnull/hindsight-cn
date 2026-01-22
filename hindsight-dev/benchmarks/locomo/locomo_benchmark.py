@@ -16,7 +16,12 @@ import pydantic
 from hindsight_api.engine.llm_wrapper import LLMConfig
 from openai import AsyncOpenAI
 
-from benchmarks.common.benchmark_runner import BenchmarkDataset, BenchmarkRunner, LLMAnswerEvaluator, LLMAnswerGenerator
+from benchmarks.common.benchmark_runner import (
+    BenchmarkDataset,
+    BenchmarkRunner,
+    LLMAnswerEvaluator,
+    LLMAnswerGenerator,
+)
 
 
 class LoComoDataset(BenchmarkDataset):
@@ -117,6 +122,7 @@ class LoComoAnswerGenerator(LLMAnswerGenerator):
         recall_result: Dict[str, Any],
         question_date: Optional[datetime] = None,
         question_type: Optional[str] = None,
+        bank_id: Optional[str] = None,
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer from retrieved memories using Groq.
@@ -208,6 +214,7 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
         recall_result: Dict[str, Any],
         question_date: Optional[datetime] = None,
         question_type: Optional[str] = None,
+        bank_id: Optional[str] = None,
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
         Generate answer using the integrated think API.
@@ -220,6 +227,7 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
             recall_result: Not used (empty dict), as think does its own retrieval
             question_date: Date when the question was asked (currently not used by think API)
             question_type: Question category (unused in think API)
+            bank_id: Not used - think API uses self.agent_id from constructor
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories)
@@ -270,6 +278,8 @@ async def run_benchmark(
     max_questions_per_conv: int = None,
     skip_ingestion: bool = False,
     use_think: bool = False,
+    include_mental_models: bool = False,
+    only_mental_models: bool = False,
     conversation: str = None,
     api_url: str = None,
     max_concurrent_questions_override: int = None,
@@ -284,6 +294,8 @@ async def run_benchmark(
         max_questions_per_conv: Maximum questions per conversation (None for all)
         skip_ingestion: Whether to skip ingestion and use existing data
         use_think: Whether to use the think API instead of search + LLM
+        include_mental_models: If True, include mental models in recall results and wait for consolidation after ingestion.
+        only_mental_models: If True, only retrieve mental models (no facts). Implies waiting for consolidation.
         conversation: Specific conversation ID to run (e.g., "conv-26")
         api_url: Optional API URL to connect to (default: use local memory)
         only_failed: If True, only run conversations that have failed questions (is_correct=False)
@@ -349,11 +361,16 @@ async def run_benchmark(
 
         memory = await create_memory_engine()
 
+    # Select answer generator based on mode
+    from hindsight_api.engine.memory_engine import Budget
+
     if use_think:
+        console.print("[blue]Mode: think (using think API)[/blue]")
         answer_generator = LoComoThinkAnswerGenerator(memory=memory, agent_id="locomo", thinking_budget=500)
         max_concurrent_questions = max_concurrent_questions_override or 4
         eval_semaphore_size = 4
     else:
+        console.print("[blue]Mode: recall+LLM (traditional)[/blue]")
         answer_generator = LoComoAnswerGenerator()
         # Reduced from 32 to 10 to match search semaphore limit
         # Prevents "too many connections" errors
@@ -386,7 +403,14 @@ async def run_benchmark(
         dataset.load = filtered_load
 
     # Determine output filename based on mode
-    suffix = "_think" if use_think else ""
+    if use_think:
+        suffix = "_think"
+    elif only_mental_models:
+        suffix = "_only_mental_models"
+    elif include_mental_models:
+        suffix = "_mental_models"
+    else:
+        suffix = ""
     results_filename = f"benchmark_results{suffix}.json"
     output_path = Path(__file__).parent / "results" / results_filename
 
@@ -395,6 +419,15 @@ async def run_benchmark(
 
     # Merge with existing results if running a specific conversation or using filters
     merge_with_existing = conversation is not None or only_failed or only_invalid
+
+    # Each conversation gets its own isolated bank
+    separate_ingestion = False
+    clear_per_item = True  # Use unique agent ID per conversation
+    if include_mental_models or only_mental_models:
+        # Mental models requires more time due to consolidation, limit parallelism
+        concurrent_items = 2
+    else:
+        concurrent_items = 3  # Process up to 3 conversations in parallel
 
     # Run benchmark with parallel conversation processing
     # Each conversation gets its own agent ID (locomo_conv-26, locomo_conv-30, etc.)
@@ -410,10 +443,13 @@ async def run_benchmark(
         max_concurrent_questions=max_concurrent_questions,
         eval_semaphore_size=eval_semaphore_size,
         specific_item=conversation,
-        clear_agent_per_item=True,  # Use unique agent ID per conversation
-        max_concurrent_items=3,  # Process up to 3 conversations in parallel
+        separate_ingestion_phase=separate_ingestion,
+        clear_agent_per_item=clear_per_item,
+        max_concurrent_items=concurrent_items,
         output_path=output_path,  # Save results incrementally
         merge_with_existing=merge_with_existing,
+        include_mental_models=include_mental_models,  # Include mental models in recall results
+        only_mental_models=only_mental_models,  # Only retrieve mental models (no facts)
     )
 
     # Display results (final save already happened incrementally)
@@ -421,12 +457,16 @@ async def run_benchmark(
     console.print(f"\n[green]✓[/green] Results saved incrementally to {output_path}")
 
     # Generate markdown table
-    generate_markdown_table(results, use_think)
+    generate_markdown_table(
+        results, use_think=use_think, include_mental_models=include_mental_models, only_mental_models=only_mental_models
+    )
 
     return results
 
 
-def generate_markdown_table(results: dict, use_think: bool = False):
+def generate_markdown_table(
+    results: dict, use_think: bool = False, include_mental_models: bool = False, only_mental_models: bool = False
+):
     """
     Generate a markdown table with benchmark results.
 
@@ -444,7 +484,14 @@ def generate_markdown_table(results: dict, use_think: bool = False):
 
     # Build markdown content
     lines = []
-    mode_str = " (Think Mode)" if use_think else ""
+    if use_think:
+        mode_str = " (Think Mode)"
+    elif only_mental_models:
+        mode_str = " (Only Mental Models Mode)"
+    elif include_mental_models:
+        mode_str = " (Mental Models Mode)"
+    else:
+        mode_str = ""
     lines.append(f"# LoComo Benchmark Results{mode_str}")
     lines.append("")
 
@@ -495,7 +542,14 @@ def generate_markdown_table(results: dict, use_think: bool = False):
         )
 
     # Write to file with suffix
-    suffix = "_think" if use_think else ""
+    if use_think:
+        suffix = "_think"
+    elif only_mental_models:
+        suffix = "_only_mental_models"
+    elif include_mental_models:
+        suffix = "_mental_models"
+    else:
+        suffix = ""
     output_file = Path(__file__).parent / "results" / f"results_table{suffix}.md"
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text("\n".join(lines))
@@ -538,6 +592,16 @@ if __name__ == "__main__":
         action="store_true",
         help="Only run conversations that have invalid questions (is_invalid=True). Requires existing results file.",
     )
+    parser.add_argument(
+        "--include-mental-models",
+        action="store_true",
+        help="Include mental models in recall results. This waits for consolidation to complete after ingestion and includes mental models in the recall response.",
+    )
+    parser.add_argument(
+        "--only-mental-models",
+        action="store_true",
+        help="Only retrieve mental models (no facts). This waits for consolidation to complete after ingestion and only returns mental models.",
+    )
 
     args = parser.parse_args()
 
@@ -551,6 +615,8 @@ if __name__ == "__main__":
             max_questions_per_conv=args.max_questions,
             skip_ingestion=args.skip_ingestion,
             use_think=args.use_think,
+            include_mental_models=args.include_mental_models,
+            only_mental_models=args.only_mental_models,
             conversation=args.conversation,
             api_url=args.api_url,
             max_concurrent_questions_override=args.max_concurrent_questions,

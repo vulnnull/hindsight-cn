@@ -257,7 +257,6 @@ from hindsight_api.extensions import (
     RetainContext,
     RecallContext,
     ReflectContext,
-    RefreshMentalModelContext,
 )
 
 
@@ -288,7 +287,4 @@ class MockOperationValidator(OperationValidatorExtension):
         return ValidationResult.accept()
 
     async def validate_reflect(self, ctx: ReflectContext) -> ValidationResult:
-        return ValidationResult.accept()
-
-    async def validate_refresh_mental_model(self, ctx: RefreshMentalModelContext) -> ValidationResult:
         return ValidationResult.accept()

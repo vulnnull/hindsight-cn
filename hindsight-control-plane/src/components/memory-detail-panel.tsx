@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Copy, Check, X, Loader2 } from "lucide-react";
 import { DocumentChunkModal } from "./document-chunk-modal";
+import { MemoryDetailModal } from "./memory-detail-modal";
 import { client } from "@/lib/api";
 
 interface MemoryDetailPanelProps {
@@ -26,8 +27,10 @@ export function MemoryDetailPanel({
   const [modalId, setModalId] = useState<string | null>(null);
   const [fullMemory, setFullMemory] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [sourceMemoryModalId, setSourceMemoryModalId] = useState<string | null>(null);
 
   // Fetch full memory data when panel opens
+  // For mental models, use getMentalModel to get source memories
   useEffect(() => {
     const memoryId = memory?.id || memory?.node_id;
     if (!memoryId || !bankId) {
@@ -35,9 +38,19 @@ export function MemoryDetailPanel({
       return;
     }
 
+    const isMentalModel = memory?.fact_type === "mental_model" || memory?.type === "mental_model";
+
     setLoading(true);
-    client
-      .getMemory(memoryId, bankId)
+
+    const fetchPromise = isMentalModel
+      ? client.getMentalModel(bankId, memoryId).then((data) => ({
+          ...data,
+          fact_type: "mental_model",
+          type: "mental_model",
+        }))
+      : client.getMemory(memoryId, bankId);
+
+    fetchPromise
       .then((data) => {
         setFullMemory(data);
       })
@@ -49,7 +62,7 @@ export function MemoryDetailPanel({
       .finally(() => {
         setLoading(false);
       });
-  }, [memory?.id, memory?.node_id, bankId]);
+  }, [memory?.id, memory?.node_id, memory?.fact_type, memory?.type, bankId]);
 
   // Use full memory data if available, otherwise fall back to the partial data passed in
   const displayMemory = fullMemory || memory;
@@ -202,6 +215,67 @@ export function MemoryDetailPanel({
                 </div>
               )}
 
+              {/* Source Memories (for mental models) */}
+              {displayMemory.source_memories && displayMemory.source_memories.length > 0 && (
+                <div className="border-t border-border pt-5">
+                  <div className="text-xs font-bold text-muted-foreground uppercase mb-3">
+                    Source Memories ({displayMemory.source_memories.length})
+                  </div>
+                  <div className="space-y-3">
+                    {displayMemory.source_memories.map((source: any, i: number) => (
+                      <div
+                        key={source.id || i}
+                        className="p-4 bg-muted/50 rounded-lg border border-border/50"
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs flex-shrink-0 ${
+                              source.type === "experience"
+                                ? "bg-green-500/10 text-green-600"
+                                : "bg-blue-500/10 text-blue-600"
+                            }`}
+                          >
+                            {source.type}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={() => setSourceMemoryModalId(source.id)}
+                          >
+                            View
+                          </Button>
+                        </div>
+                        <p className="text-sm text-foreground mb-3">{source.text}</p>
+                        {source.context && (
+                          <p className="text-xs text-muted-foreground mb-3 italic">
+                            Context: {source.context}
+                          </p>
+                        )}
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="p-2 bg-background/50 rounded">
+                            <div className="text-muted-foreground mb-0.5">Occurred</div>
+                            <div className="font-medium">
+                              {source.occurred_start
+                                ? new Date(source.occurred_start).toLocaleString()
+                                : "N/A"}
+                            </div>
+                          </div>
+                          <div className="p-2 bg-background/50 rounded">
+                            <div className="text-muted-foreground mb-0.5">Mentioned</div>
+                            <div className="font-medium">
+                              {source.mentioned_at
+                                ? new Date(source.mentioned_at).toLocaleString()
+                                : "N/A"}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* ID */}
               {memoryId && (
                 <div className="p-4 bg-muted/50 rounded-lg">
@@ -259,6 +333,12 @@ export function MemoryDetailPanel({
         {modalType && modalId && (
           <DocumentChunkModal type={modalType} id={modalId} onClose={closeModal} />
         )}
+
+        {/* Source Memory Modal */}
+        <MemoryDetailModal
+          memoryId={sourceMemoryModalId}
+          onClose={() => setSourceMemoryModalId(null)}
+        />
       </>
     );
   }

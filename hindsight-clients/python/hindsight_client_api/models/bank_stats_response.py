@@ -17,8 +17,8 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -36,7 +36,10 @@ class BankStatsResponse(BaseModel):
     links_breakdown: Dict[str, Dict[str, StrictInt]]
     pending_operations: StrictInt
     failed_operations: StrictInt
-    __properties: ClassVar[List[str]] = ["bank_id", "total_nodes", "total_links", "total_documents", "nodes_by_fact_type", "links_by_link_type", "links_by_fact_type", "links_breakdown", "pending_operations", "failed_operations"]
+    last_consolidated_at: Optional[StrictStr] = None
+    pending_consolidation: Optional[StrictInt] = Field(default=0, description="Number of memories not yet processed into mental models")
+    total_mental_models: Optional[StrictInt] = Field(default=0, description="Total number of mental models")
+    __properties: ClassVar[List[str]] = ["bank_id", "total_nodes", "total_links", "total_documents", "nodes_by_fact_type", "links_by_link_type", "links_by_fact_type", "links_breakdown", "pending_operations", "failed_operations", "last_consolidated_at", "pending_consolidation", "total_mental_models"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -77,6 +80,11 @@ class BankStatsResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # set to None if last_consolidated_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.last_consolidated_at is None and "last_consolidated_at" in self.model_fields_set:
+            _dict['last_consolidated_at'] = None
+
         return _dict
 
     @classmethod
@@ -98,7 +106,10 @@ class BankStatsResponse(BaseModel):
             "links_by_fact_type": obj.get("links_by_fact_type"),
             "links_breakdown": obj.get("links_breakdown"),
             "pending_operations": obj.get("pending_operations"),
-            "failed_operations": obj.get("failed_operations")
+            "failed_operations": obj.get("failed_operations"),
+            "last_consolidated_at": obj.get("last_consolidated_at"),
+            "pending_consolidation": obj.get("pending_consolidation") if obj.get("pending_consolidation") is not None else 0,
+            "total_mental_models": obj.get("total_mental_models") if obj.get("total_mental_models") is not None else 0
         })
         return _obj
 

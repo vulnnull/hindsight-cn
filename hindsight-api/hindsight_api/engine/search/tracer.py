@@ -330,8 +330,8 @@ class SearchTracer:
                 RetrievalResult(
                     rank=rank,
                     node_id=doc_id,
-                    text=data.get("text", ""),
-                    context=data.get("context", ""),
+                    text=data.get("text") or "",
+                    context=data.get("context") or "",
                     event_date=data.get("event_date"),
                     fact_type=data.get("fact_type") or fact_type,
                     score=score,

@@ -173,7 +173,7 @@ pub fn print_think_response(response: &ReflectResponse) {
     println!();
 
     if let Some(based_on) = &response.based_on {
-        let count = based_on.memories.len() + based_on.mental_models.len();
+        let count = based_on.memories.len();
         if count > 0 {
             println!("{}", dim(&format!("Based on {} memory units", count)));
         }

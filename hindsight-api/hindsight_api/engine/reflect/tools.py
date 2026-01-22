@@ -1,15 +1,16 @@
 """
 Tool implementations for the reflect agent.
+
+Implements hierarchical retrieval:
+1. search_reflections - User-curated summaries (highest quality)
+2. search_mental_models - Consolidated knowledge with freshness
+3. recall - Raw facts as ground truth
 """
 
 import logging
-import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
-
-from .models import MentalModelInput
-from .observations import Observation, ObservationEvidence, Trend
 
 if TYPE_CHECKING:
     from asyncpg import Connection
@@ -19,156 +20,216 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-def generate_model_id(name: str) -> str:
-    """Generate a stable ID from mental model name."""
-    # Normalize: lowercase, replace spaces/special chars with hyphens
-    normalized = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    # Truncate to reasonable length
-    return normalized[:50]
+# Mental model is considered stale if not updated in this many days
+STALE_THRESHOLD_DAYS = 7
 
 
-def _parse_observations(observations_raw: list) -> list[Observation]:
-    """Parse raw observation dicts into typed Observation models."""
-    observations: list[Observation] = []
-    for obs in observations_raw:
-        if not isinstance(obs, dict):
-            continue
-
-        try:
-            parsed = Observation(
-                title=obs.get("title", ""),
-                content=obs.get("content", ""),
-                evidence=[
-                    ObservationEvidence(
-                        memory_id=ev.get("memory_id", ""),
-                        quote=ev.get("quote", ""),
-                        relevance=ev.get("relevance", ""),
-                        timestamp=ev.get("timestamp"),
-                    )
-                    for ev in obs.get("evidence", [])
-                    if isinstance(ev, dict)
-                ],
-                created_at=obs.get("created_at"),
-            )
-            observations.append(parsed)
-        except Exception as e:
-            logger.warning(f"Failed to parse observation: {e}")
-            continue
-
-    return observations
-
-
-async def tool_lookup(
+async def tool_search_reflections(
     conn: "Connection",
     bank_id: str,
-    model_id: str | None = None,
+    query: str,
+    query_embedding: list[float],
+    max_results: int = 5,
     tags: list[str] | None = None,
     tags_match: str = "any",
+    exclude_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """
-    List or get mental models.
+    Search user-curated reflections by semantic similarity.
+
+    Reflections are high-quality, manually created summaries about specific topics.
+    They should be searched FIRST as they represent the most reliable synthesized knowledge.
 
     Args:
         conn: Database connection
         bank_id: Bank identifier
-        model_id: Optional specific model ID to get (if None, lists all)
-        tags: Optional tags to filter models (when listing)
+        query: Search query (for logging/tracing)
+        query_embedding: Pre-computed embedding for semantic search
+        max_results: Maximum number of reflections to return
+        tags: Optional tags to filter reflections
         tags_match: How to match tags - "any" (OR), "all" (AND)
+        exclude_ids: Optional list of reflection IDs to exclude (e.g., when refreshing a reflection)
 
     Returns:
-        Dict with either a list of models or a single model's details
+        Dict with matching reflections including content and freshness info
     """
-    if model_id:
-        # Get specific mental model with full details including observations
-        row = await conn.fetchrow(
-            """
-            SELECT id, subtype, name, description, observations, entity_id, last_updated
-            FROM mental_models
-            WHERE id = $1 AND bank_id = $2
-            """,
-            model_id,
-            bank_id,
-        )
-        if row:
-            # Parse observations JSON
-            obs_data = row["observations"] or {"observations": []}
-            if isinstance(obs_data, str):
-                import json
+    from ..memory_engine import fq_table
 
-                obs_data = json.loads(obs_data)
-            observations_raw = obs_data.get("observations", []) if isinstance(obs_data, dict) else obs_data
+    # Build filters dynamically
+    filters = ""
+    params: list[Any] = [bank_id, str(query_embedding), max_results]
+    next_param = 4
 
-            # Parse observations into typed models
-            observations = _parse_observations(observations_raw)
-
-            return {
-                "found": True,
-                "model": {
-                    "id": row["id"],
-                    "subtype": row["subtype"],
-                    "name": row["name"],
-                    "description": row["description"],
-                    "observations": observations,
-                    "entity_id": str(row["entity_id"]) if row["entity_id"] else None,
-                    "last_updated": row["last_updated"].isoformat() if row["last_updated"] else None,
-                },
-            }
-        return {"found": False, "model_id": model_id}
-    else:
-        # List mental models (compact: id, name, description only)
-        # Full observations are retrieved via get_mental_model(model_id)
-        # NOTE: Directives (subtype='directive') are excluded from listing -
-        # they are injected into the system prompt, not discoverable via tools
-        # Filter by tags if provided
-        if tags:
-            if tags_match == "all":
-                # All tags must match
-                rows = await conn.fetch(
-                    """
-                    SELECT id, subtype, name, description
-                    FROM mental_models
-                    WHERE bank_id = $1 AND tags @> $2::varchar[] AND subtype != 'directive'
-                    ORDER BY last_updated DESC NULLS LAST, created_at DESC
-                    """,
-                    bank_id,
-                    tags,
-                )
-            else:
-                # Any tag matches (OR) - default
-                rows = await conn.fetch(
-                    """
-                    SELECT id, subtype, name, description
-                    FROM mental_models
-                    WHERE bank_id = $1 AND tags && $2::varchar[] AND subtype != 'directive'
-                    ORDER BY last_updated DESC NULLS LAST, created_at DESC
-                    """,
-                    bank_id,
-                    tags,
-                )
+    if tags:
+        if tags_match == "all":
+            filters += f" AND tags @> ${next_param}::varchar[]"
         else:
-            rows = await conn.fetch(
-                """
-                SELECT id, subtype, name, description
-                FROM mental_models
-                WHERE bank_id = $1 AND subtype != 'directive'
-                ORDER BY last_updated DESC NULLS LAST, created_at DESC
+            filters += f" AND (tags && ${next_param}::varchar[] OR tags IS NULL OR tags = '{{}}')"
+        params.append(tags)
+        next_param += 1
+
+    if exclude_ids:
+        filters += f" AND id != ALL(${next_param}::uuid[])"
+        params.append(exclude_ids)
+        next_param += 1
+
+    # Search reflections by embedding similarity
+    rows = await conn.fetch(
+        f"""
+        SELECT
+            id, name, content, reflect_response,
+            tags, created_at, last_refreshed_at,
+            1 - (embedding <=> $2::vector) as relevance
+        FROM {fq_table("reflections")}
+        WHERE bank_id = $1 AND embedding IS NOT NULL {filters}
+        ORDER BY embedding <=> $2::vector
+        LIMIT $3
+        """,
+        *params,
+    )
+
+    now = datetime.now(timezone.utc)
+    reflections = []
+
+    for row in rows:
+        last_refreshed_at = row["last_refreshed_at"]
+        if last_refreshed_at and last_refreshed_at.tzinfo is None:
+            last_refreshed_at = last_refreshed_at.replace(tzinfo=timezone.utc)
+
+        # Calculate freshness
+        is_stale = False
+        if last_refreshed_at:
+            age = now - last_refreshed_at
+            is_stale = age > timedelta(days=STALE_THRESHOLD_DAYS)
+
+        reflections.append(
+            {
+                "id": str(row["id"]),
+                "name": row["name"],
+                "content": row["content"],
+                "reflect_response": row["reflect_response"],
+                "tags": row["tags"] or [],
+                "relevance": round(row["relevance"], 4),
+                "updated_at": last_refreshed_at.isoformat() if last_refreshed_at else None,
+                "is_stale": is_stale,
+            }
+        )
+
+    return {
+        "query": query,
+        "count": len(reflections),
+        "reflections": reflections,
+    }
+
+
+async def tool_search_mental_models(
+    memory_engine: "MemoryEngine",
+    bank_id: str,
+    query: str,
+    request_context: "RequestContext",
+    max_tokens: int = 5000,
+    tags: list[str] | None = None,
+    tags_match: str = "any",
+    last_consolidated_at: datetime | None = None,
+    pending_consolidation: int = 0,
+) -> dict[str, Any]:
+    """
+    Search consolidated mental models using recall with include_mental_models.
+
+    Mental models are auto-generated from memories. Returns freshness info
+    so the agent knows if it should also verify with recall().
+
+    Args:
+        memory_engine: Memory engine instance
+        bank_id: Bank identifier
+        query: Search query
+        request_context: Request context for authentication
+        max_tokens: Maximum tokens for results (default 5000)
+        tags: Optional tags to filter models
+        tags_match: How to match tags - "any" (OR), "all" (AND)
+        last_consolidated_at: When consolidation last ran (for staleness check)
+        pending_consolidation: Number of memories waiting to be consolidated
+
+    Returns:
+        Dict with matching mental models including freshness info
+    """
+    from ..memory_engine import fq_table
+
+    # Use recall to search mental models (they come back in results field when fact_type=["mental_model"])
+    result = await memory_engine.recall_async(
+        bank_id=bank_id,
+        query=query,
+        fact_type=["mental_model"],  # Only retrieve mental models
+        max_tokens=max_tokens,  # Token budget controls how many mental models are returned
+        enable_trace=False,
+        request_context=request_context,
+        tags=tags,
+        tags_match=tags_match,
+        _connection_budget=1,
+        _quiet=True,
+    )
+
+    mental_models = []
+
+    # When fact_type=["mental_model"], results come back in `results` field as MemoryFact objects
+    # We need to fetch additional fields (proof_count, source_memory_ids) from the database
+    if result.results:
+        mm_ids = [m.id for m in result.results]
+
+        # Fetch proof_count and source_memory_ids for these mental models
+        pool = await memory_engine._get_pool()
+        async with pool.acquire() as conn:
+            mm_rows = await conn.fetch(
+                f"""
+                SELECT id, proof_count, source_memory_ids
+                FROM {fq_table("memory_units")}
+                WHERE id = ANY($1::uuid[])
                 """,
-                bank_id,
+                mm_ids,
+            )
+            mm_data = {str(row["id"]): row for row in mm_rows}
+
+        for m in result.results:
+            # Get additional data from DB lookup
+            extra = mm_data.get(m.id, {})
+            proof_count = extra.get("proof_count", 1) if extra else 1
+            source_ids = extra.get("source_memory_ids", []) if extra else []
+            # Convert UUIDs to strings
+            source_memory_ids = [str(sid) for sid in (source_ids or [])]
+
+            # Determine staleness
+            is_stale = False
+            staleness_reason = None
+            if pending_consolidation > 0:
+                is_stale = True
+                staleness_reason = f"{pending_consolidation} memories pending consolidation"
+
+            mental_models.append(
+                {
+                    "id": str(m.id),
+                    "text": m.text,
+                    "proof_count": proof_count,
+                    "source_memory_ids": source_memory_ids,
+                    "tags": m.tags or [],
+                    "is_stale": is_stale,
+                    "staleness_reason": staleness_reason,
+                }
             )
 
-        return {
-            "count": len(rows),
-            "models": [
-                {
-                    "id": row["id"],
-                    "subtype": row["subtype"],
-                    "name": row["name"],
-                    "description": row["description"],
-                }
-                for row in rows
-            ],
-        }
+    # Return freshness info (more understandable than raw pending_consolidation count)
+    if pending_consolidation == 0:
+        freshness = "up_to_date"
+    elif pending_consolidation < 10:
+        freshness = "slightly_stale"
+    else:
+        freshness = "stale"
+
+    return {
+        "query": query,
+        "count": len(mental_models),
+        "mental_models": mental_models,
+        "freshness": freshness,
+    }
 
 
 async def tool_recall(
@@ -184,6 +245,9 @@ async def tool_recall(
 ) -> dict[str, Any]:
     """
     Search memories using TEMPR retrieval.
+
+    This is the ground truth - raw facts and experiences.
+    Use when reflections/mental models don't exist, are stale, or need verification.
 
     Args:
         memory_engine: Memory engine instance
@@ -202,13 +266,14 @@ async def tool_recall(
     result = await memory_engine.recall_async(
         bank_id=bank_id,
         query=query,
-        fact_type=["experience", "world"],  # Exclude opinions
+        fact_type=["experience", "world"],  # Exclude opinions and mental_models
         max_tokens=max_tokens,
         enable_trace=False,
         request_context=request_context,
         tags=tags,
         tags_match=tags_match,
         _connection_budget=connection_budget,
+        _quiet=True,  # Suppress logging for internal operations
     )
 
     memories = []
@@ -230,85 +295,6 @@ async def tool_recall(
     }
 
 
-async def tool_learn(
-    conn: "Connection",
-    bank_id: str,
-    input: MentalModelInput,
-    tags: list[str] | None = None,
-) -> dict[str, Any]:
-    """
-    Create a mental model placeholder with subtype='learned'.
-
-    The agent only specifies name and description - actual observations are generated
-    in the background via refresh, similar to pinned models.
-
-    Args:
-        conn: Database connection
-        bank_id: Bank identifier
-        input: Mental model input data (name, description, optional entity_id)
-        tags: Tags to apply to new mental models (from reflect context)
-
-    Returns:
-        Dict with created model info including model_id for background generation
-    """
-    model_id = generate_model_id(input.name)
-
-    # Parse entity_id if provided
-    entity_uuid = None
-    if input.entity_id:
-        try:
-            entity_uuid = uuid.UUID(input.entity_id)
-        except ValueError:
-            logger.warning(f"Invalid entity_id format: {input.entity_id}")
-
-    # Check if model exists
-    existing = await conn.fetchrow(
-        "SELECT id FROM mental_models WHERE id = $1 AND bank_id = $2",
-        model_id,
-        bank_id,
-    )
-
-    if existing:
-        # Update description only - observations will be regenerated
-        await conn.execute(
-            """
-            UPDATE mental_models SET
-                description = $3,
-                entity_id = $4
-            WHERE id = $1 AND bank_id = $2
-            """,
-            model_id,
-            bank_id,
-            input.description,
-            entity_uuid,
-        )
-        status = "updated"
-    else:
-        # Insert new model placeholder - observations will be generated in background
-        await conn.execute(
-            """
-            INSERT INTO mental_models (id, bank_id, subtype, name, description, observations, entity_id, tags, created_at)
-            VALUES ($1, $2, 'learned', $3, $4, '{}'::jsonb, $5, $6, NOW())
-            """,
-            model_id,
-            bank_id,
-            input.name,
-            input.description,
-            entity_uuid,
-            tags or [],
-        )
-        status = "created"
-
-    logger.info(f"[REFLECT] Mental model '{model_id}' {status} in bank {bank_id} - pending background generation")
-
-    return {
-        "status": status,
-        "model_id": model_id,
-        "name": input.name,
-        "pending_generation": True,
-    }
-
-
 async def tool_expand(
     conn: "Connection",
     bank_id: str,
@@ -327,6 +313,8 @@ async def tool_expand(
     Returns:
         Dict with results array, each containing memory, chunk, and optionally document data
     """
+    from ..memory_engine import fq_table
+
     if not memory_ids:
         return {"error": "memory_ids is required and must not be empty"}
 
@@ -344,9 +332,9 @@ async def tool_expand(
 
     # Batch fetch all memory units
     memories = await conn.fetch(
-        """
+        f"""
         SELECT id, text, chunk_id, document_id, fact_type, context
-        FROM memory_units
+        FROM {fq_table("memory_units")}
         WHERE id = ANY($1) AND bank_id = $2
         """,
         valid_uuids,
@@ -363,9 +351,9 @@ async def tool_expand(
     chunk_map: dict[str, Any] = {}
     if chunk_ids:
         chunks = await conn.fetch(
-            """
+            f"""
             SELECT chunk_id, chunk_text, chunk_index, document_id
-            FROM chunks
+            FROM {fq_table("chunks")}
             WHERE chunk_id = ANY($1)
             """,
             chunk_ids,
@@ -385,9 +373,9 @@ async def tool_expand(
     all_doc_ids = list(doc_ids_from_chunks | doc_ids_direct)
     if all_doc_ids:
         docs = await conn.fetch(
-            """
+            f"""
             SELECT id, original_text, metadata, retain_params
-            FROM documents
+            FROM {fq_table("documents")}
             WHERE id = ANY($1) AND bank_id = $2
             """,
             all_doc_ids,

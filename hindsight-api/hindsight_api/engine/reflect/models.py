@@ -104,11 +104,15 @@ class ReflectAgentResult(BaseModel):
     )
     iterations: int = Field(default=0, description="Number of iterations taken")
     tools_called: int = Field(default=0, description="Total number of tool calls made")
-    mental_models_created: list[str] = Field(default_factory=list, description="IDs of mental models created/updated")
     tool_trace: list[ToolCall] = Field(default_factory=list, description="Trace of all tool calls made")
     llm_trace: list[LLMCall] = Field(default_factory=list, description="Trace of all LLM calls made")
     used_memory_ids: list[str] = Field(default_factory=list, description="Validated memory IDs actually used in answer")
-    used_model_ids: list[str] = Field(default_factory=list, description="Validated model IDs actually used in answer")
+    used_reflection_ids: list[str] = Field(
+        default_factory=list, description="Validated reflection IDs actually used in answer"
+    )
+    used_mental_model_ids: list[str] = Field(
+        default_factory=list, description="Validated mental model IDs actually used in answer"
+    )
     directives_applied: list[DirectiveInfo] = Field(
         default_factory=list, description="Directive mental models that affected this reflection"
     )

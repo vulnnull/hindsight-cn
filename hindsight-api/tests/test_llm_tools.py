@@ -241,23 +241,26 @@ class TestReflectToolSchemas:
         tools = get_reflect_tools()
 
         tool_names = [t["function"]["name"] for t in tools]
-        assert "list_mental_models" in tool_names
-        assert "get_mental_model" in tool_names
+        assert "search_reflections" in tool_names
+        assert "search_mental_models" in tool_names
         assert "recall" in tool_names
-        assert "learn" in tool_names
         assert "expand" in tool_names
         assert "done" in tool_names
 
-    def test_get_reflect_tools_without_learn(self):
-        """Test getting reflect tools without learn."""
+    def test_get_reflect_tools_with_directives(self):
+        """Test getting reflect tools with directive rules."""
         from hindsight_api.engine.reflect.tools_schema import get_reflect_tools
 
-        tools = get_reflect_tools(enable_learn=False)
+        tools = get_reflect_tools(directive_rules=["Always respond in French"])
 
         tool_names = [t["function"]["name"] for t in tools]
-        assert "learn" not in tool_names
         assert "recall" in tool_names
         assert "done" in tool_names
+
+        # Done tool should have directive_compliance field when directives are present
+        done_tool = next(t for t in tools if t["function"]["name"] == "done")
+        params = done_tool["function"]["parameters"]["properties"]
+        assert "directive_compliance" in params
 
     def test_get_reflect_tools_answer_mode(self):
         """Test getting reflect tools with answer output mode."""
@@ -270,7 +273,8 @@ class TestReflectToolSchemas:
 
         assert "answer" in params
         assert "memory_ids" in params
-        assert "model_ids" in params
+        assert "mental_model_ids" in params
+        assert "reflection_ids" in params
 
 
 class TestLLMToolCallResult:

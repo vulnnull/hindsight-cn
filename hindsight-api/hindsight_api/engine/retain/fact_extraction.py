@@ -114,11 +114,8 @@ class CausalRelation(BaseModel):
     """Causal relationship from this fact to a previous fact (stored format)."""
 
     target_fact_index: int = Field(description="Index of the related fact in the facts array (0-based).")
-    relation_type: Literal["caused_by", "enabled_by", "prevented_by"] = Field(
-        description="How this fact relates to the target: "
-        "'caused_by' = this fact was caused by the target, "
-        "'enabled_by' = this fact was enabled by the target, "
-        "'prevented_by' = this fact was prevented by the target"
+    relation_type: Literal["caused_by"] = Field(
+        description="How this fact relates to the target: 'caused_by' = this fact was caused by the target"
     )
     strength: float = Field(
         description="Strength of relationship (0.0 to 1.0)",
@@ -141,11 +138,8 @@ class FactCausalRelation(BaseModel):
         "MUST be less than this fact's position in the list. "
         "Example: if this is fact #5, target_index can only be 0, 1, 2, 3, or 4."
     )
-    relation_type: Literal["caused_by", "enabled_by", "prevented_by"] = Field(
-        description="How this fact relates to the target fact: "
-        "'caused_by' = this fact was caused by the target fact, "
-        "'enabled_by' = this fact was enabled by the target fact, "
-        "'prevented_by' = this fact was blocked/prevented by the target fact"
+    relation_type: Literal["caused_by"] = Field(
+        description="How this fact relates to the target fact: 'caused_by' = this fact was caused by the target fact"
     )
     strength: float = Field(
         description="Strength of relationship (0.0 to 1.0). 1.0 = strong, 0.5 = moderate",
@@ -662,7 +656,7 @@ CAUSAL RELATIONSHIPS
 ══════════════════════════════════════════════════════════════════════════
 
 Link facts with causal_relations (max 2 per fact). target_index must be < this fact's index.
-Types: "caused_by", "enabled_by", "prevented_by"
+Type: "caused_by" (this fact was caused by the target fact)
 
 Example: "Lost job → couldn't pay rent → moved apartment"
 - Fact 0: Lost job, causal_relations: null
@@ -823,7 +817,8 @@ Text:
 
                 # Critical field: fact_type
                 # LLM uses "assistant" but we convert to "experience" for storage
-                fact_type = llm_fact.get("fact_type")
+                original_fact_type = llm_fact.get("fact_type")
+                fact_type = original_fact_type
 
                 # Convert "assistant" → "experience" for storage
                 if fact_type == "assistant":
@@ -840,7 +835,10 @@ Text:
                     else:
                         # Default to 'world' if we can't determine
                         fact_type = "world"
-                        logger.warning(f"Fact {i}: defaulting to fact_type='world'")
+                        logger.warning(
+                            f"Fact {i}: defaulting to fact_type='world' "
+                            f"(original fact_type={original_fact_type!r}, fact_kind={fact_kind!r})"
+                        )
 
                 # Get fact_kind for temporal handling (but don't store it)
                 fact_kind = llm_fact.get("fact_kind", "conversation")

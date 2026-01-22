@@ -2,36 +2,62 @@
 Tool schema definitions for the reflect agent.
 
 These are OpenAI-format tool definitions used with native tool calling.
+The reflect agent uses a hierarchical retrieval strategy:
+1. search_reflections - User-curated summaries (highest quality, if applicable)
+2. search_mental_models - Consolidated knowledge with freshness awareness
+3. recall - Raw facts (world/experience) as ground truth fallback
 """
 
 # Tool definitions in OpenAI format
-TOOL_LIST_MENTAL_MODELS = {
+
+TOOL_SEARCH_REFLECTIONS = {
     "type": "function",
     "function": {
-        "name": "list_mental_models",
-        "description": "List all available mental models - your synthesized knowledge about entities, concepts, and events. Returns an array of models with id, name, and description.",
+        "name": "search_reflections",
+        "description": (
+            "Search user-curated reflections (summaries). These are high-quality, manually created "
+            "summaries about specific topics. Use FIRST when the question might be covered by an "
+            "existing reflection. Returns reflections with their content and last refresh time."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {},
-            "required": [],
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query to find relevant reflections",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of reflections to return (default 5)",
+                },
+            },
+            "required": ["query"],
         },
     },
 }
 
-TOOL_GET_MENTAL_MODEL = {
+TOOL_SEARCH_MENTAL_MODELS = {
     "type": "function",
     "function": {
-        "name": "get_mental_model",
-        "description": "Get full details of a specific mental model including all observations and memory references.",
+        "name": "search_mental_models",
+        "description": (
+            "Search consolidated mental models (auto-generated knowledge). These are automatically "
+            "synthesized from memories. Returns models with freshness info (updated_at, is_stale). "
+            "If a model is STALE, you should ALSO use recall() to verify with current facts."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "model_id": {
+                "query": {
                     "type": "string",
-                    "description": "ID of the mental model (from list_mental_models results)",
+                    "description": "Search query to find relevant mental models",
+                },
+                "max_tokens": {
+                    "type": "integer",
+                    "description": "Maximum tokens for results (default 5000). Use higher values for broader searches.",
                 },
             },
-            "required": ["model_id"],
+            "required": ["query"],
         },
     },
 }
@@ -40,7 +66,12 @@ TOOL_RECALL = {
     "type": "function",
     "function": {
         "name": "recall",
-        "description": "Search memories using semantic + temporal retrieval. Returns relevant memories from experience and world knowledge, each with an 'id' you can reference.",
+        "description": (
+            "Search raw memories (facts and experiences). This is the ground truth data. "
+            "Use when: (1) no reflections/mental models exist, (2) mental models are stale, "
+            "(3) you need specific details not in synthesized knowledge. "
+            "Returns individual memory facts with their timestamps."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -54,28 +85,6 @@ TOOL_RECALL = {
                 },
             },
             "required": ["query"],
-        },
-    },
-}
-
-TOOL_LEARN = {
-    "type": "function",
-    "function": {
-        "name": "learn",
-        "description": "Create a new mental model to track an important recurring topic. Use when you discover a person, project, concept, or pattern that appears frequently and would benefit from synthesized knowledge. The model content will be generated automatically.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Human-readable name (e.g., 'Project Alpha', 'John Smith', 'Product Strategy')",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "What to track and synthesize (e.g., 'Track goals, milestones, blockers, and key decisions for Project Alpha')",
-                },
-            },
-            "required": ["name", "description"],
         },
     },
 }
@@ -121,7 +130,12 @@ TOOL_DONE_ANSWER = {
                     "items": {"type": "string"},
                     "description": "Array of memory IDs that support your answer (put IDs here, NOT in answer text)",
                 },
-                "model_ids": {
+                "reflection_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Array of reflection IDs that support your answer",
+                },
+                "mental_model_ids": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Array of mental model IDs that support your answer",
@@ -143,8 +157,6 @@ def _build_done_tool_with_directives(directive_rules: list[str]) -> dict:
     Args:
         directive_rules: List of directive rule strings
     """
-    from typing import Any, cast
-
     # Build rules list for description
     rules_list = "\n".join(f"  {i + 1}. {rule}" for i, rule in enumerate(directive_rules))
 
@@ -169,7 +181,12 @@ def _build_done_tool_with_directives(directive_rules: list[str]) -> dict:
                         "items": {"type": "string"},
                         "description": "Array of memory IDs that support your answer (put IDs here, NOT in answer text)",
                     },
-                    "model_ids": {
+                    "reflection_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Array of reflection IDs that support your answer",
+                    },
+                    "mental_model_ids": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Array of mental model IDs that support your answer",
@@ -185,29 +202,28 @@ def _build_done_tool_with_directives(directive_rules: list[str]) -> dict:
     }
 
 
-def get_reflect_tools(enable_learn: bool = True, directive_rules: list[str] | None = None) -> list[dict]:
+def get_reflect_tools(directive_rules: list[str] | None = None) -> list[dict]:
     """
     Get the list of tools for the reflect agent.
 
+    The tools support a hierarchical retrieval strategy:
+    1. search_reflections - User-curated summaries (try first)
+    2. search_mental_models - Consolidated knowledge with freshness
+    3. recall - Raw facts as ground truth
+
     Args:
-        enable_learn: Whether to include the learn tool
         directive_rules: Optional list of directive rule strings. If provided,
                         the done() tool will require directive compliance confirmation.
 
     Returns:
         List of tool definitions in OpenAI format
     """
-    tools = []
-
-    # Include mental model tools for lookup
-    tools.append(TOOL_LIST_MENTAL_MODELS)
-    tools.append(TOOL_GET_MENTAL_MODEL)
-    tools.append(TOOL_RECALL)
-
-    if enable_learn:
-        tools.append(TOOL_LEARN)
-
-    tools.append(TOOL_EXPAND)
+    tools = [
+        TOOL_SEARCH_REFLECTIONS,
+        TOOL_SEARCH_MENTAL_MODELS,
+        TOOL_RECALL,
+        TOOL_EXPAND,
+    ]
 
     # Use directive-aware done tool if directives are present
     if directive_rules:

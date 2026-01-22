@@ -86,10 +86,10 @@ class CausalRelation:
     """
     Causal relationship between facts.
 
-    Represents how one fact causes, enables, or prevents another.
+    Represents how one fact was caused by another.
     """
 
-    relation_type: str  # "causes", "enables", "prevents", "caused_by"
+    relation_type: str  # "caused_by"
     target_fact_index: int  # Index of the target fact in the batch
     strength: float = 1.0  # Strength of the causal relationship
 

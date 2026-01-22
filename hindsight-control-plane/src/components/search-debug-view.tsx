@@ -32,7 +32,7 @@ import JsonView from "react18-json-view";
 import "react18-json-view/src/style.css";
 import { MemoryDetailPanel } from "./memory-detail-panel";
 
-type FactType = "world" | "experience";
+type FactType = "world" | "experience" | "mental_model";
 type Budget = "low" | "mid" | "high";
 type TagsMatch = "any" | "all" | "any_strict" | "all_strict";
 type ViewMode = "results" | "trace" | "json";
@@ -55,6 +55,7 @@ export function SearchDebugView() {
   const [results, setResults] = useState<any[] | null>(null);
   const [entities, setEntities] = useState<any[] | null>(null);
   const [chunks, setChunks] = useState<any[] | null>(null);
+  const [mentalModels, setMentalModels] = useState<any[] | null>(null);
   const [trace, setTrace] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("results");
@@ -102,10 +103,13 @@ export function SearchDebugView() {
       return;
     }
 
-    if (!query || factTypes.length === 0) {
-      if (factTypes.length === 0) {
-        alert("Please select at least one fact type");
-      }
+    if (!query) {
+      return;
+    }
+
+    // Must select at least one type
+    if (factTypes.length === 0) {
+      alert("Please select at least one type (World, Experience, or Mental Models)");
       return;
     }
 
@@ -138,6 +142,7 @@ export function SearchDebugView() {
       setResults(data.results || []);
       setEntities(data.entities || null);
       setChunks(data.chunks || null);
+      setMentalModels(data.mental_models || null);
       setTrace(data.trace || null);
       setViewMode("results");
     } catch (error) {
@@ -201,6 +206,13 @@ export function SearchDebugView() {
                     <span className="text-sm capitalize">{ft}</span>
                   </label>
                 ))}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={factTypes.includes("mental_model")}
+                    onCheckedChange={() => toggleFactType("mental_model")}
+                  />
+                  <span className="text-sm">Mental Models</span>
+                </label>
               </div>
             </div>
 
@@ -347,55 +359,90 @@ export function SearchDebugView() {
 
           {/* Results View */}
           {viewMode === "results" && (
-            <div className="space-y-3">
-              {results.length === 0 ? (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center py-12">
-                    <Search className="h-12 w-12 text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground">No memories found for this query.</p>
+            <div className="space-y-4">
+              {/* Mental Models Section */}
+              {mentalModels && mentalModels.length > 0 && (
+                <Card className="border-orange-500/30 bg-orange-500/5">
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Database className="h-4 w-4 text-orange-500" />
+                      <span>Mental Models</span>
+                      <span className="text-xs text-muted-foreground">({mentalModels.length})</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-0 space-y-2">
+                    {mentalModels.map((mm: any, idx: number) => (
+                      <div
+                        key={mm.id || idx}
+                        className="p-3 bg-background rounded-lg border border-orange-500/20"
+                      >
+                        <p className="text-sm text-foreground">{mm.text}</p>
+                        <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+                          <span className="px-2 py-0.5 rounded bg-orange-500/10 text-orange-600">
+                            Mental Model
+                          </span>
+                          <span>Proof count: {mm.proof_count || 1}</span>
+                          <span>Relevance: {(mm.relevance || 0).toFixed(3)}</span>
+                        </div>
+                      </div>
+                    ))}
                   </CardContent>
                 </Card>
-              ) : (
-                results.map((result: any, idx: number) => {
-                  const visit = trace?.visits?.find((v: any) => v.node_id === result.id);
-                  const score = visit ? visit.weights.final_weight : result.score || 0;
-
-                  return (
-                    <Card
-                      key={idx}
-                      className="cursor-pointer hover:border-primary/50 transition-colors"
-                      onClick={() => setSelectedMemory(result)}
-                    >
-                      <CardContent className="py-4">
-                        <div className="flex items-start gap-4">
-                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                            <span className="text-sm font-semibold text-primary">{idx + 1}</span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-foreground">{result.text}</p>
-                            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                              <span className="px-2 py-0.5 rounded bg-muted capitalize">
-                                {result.type || "world"}
-                              </span>
-                              {result.context && (
-                                <span className="truncate max-w-xs">{result.context}</span>
-                              )}
-                              {result.occurred_start && (
-                                <span>{new Date(result.occurred_start).toLocaleDateString()}</span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex-shrink-0 text-right">
-                            <div className="text-sm font-semibold">{score.toFixed(3)}</div>
-                            <div className="text-xs text-muted-foreground">score</div>
-                          </div>
-                          <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })
               )}
+
+              {/* Memories Section */}
+              <div className="space-y-3">
+                {results.length === 0 && (!mentalModels || mentalModels.length === 0) ? (
+                  <Card>
+                    <CardContent className="flex flex-col items-center justify-center py-12">
+                      <Search className="h-12 w-12 text-muted-foreground mb-4" />
+                      <p className="text-muted-foreground">No memories found for this query.</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  results.map((result: any, idx: number) => {
+                    const visit = trace?.visits?.find((v: any) => v.node_id === result.id);
+                    const score = visit ? visit.weights.final_weight : result.score || 0;
+
+                    return (
+                      <Card
+                        key={idx}
+                        className="cursor-pointer hover:border-primary/50 transition-colors"
+                        onClick={() => setSelectedMemory(result)}
+                      >
+                        <CardContent className="py-4">
+                          <div className="flex items-start gap-4">
+                            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                              <span className="text-sm font-semibold text-primary">{idx + 1}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-foreground">{result.text}</p>
+                              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                <span className="px-2 py-0.5 rounded bg-muted capitalize">
+                                  {result.type || "world"}
+                                </span>
+                                {result.context && (
+                                  <span className="truncate max-w-xs">{result.context}</span>
+                                )}
+                                {result.occurred_start && (
+                                  <span>
+                                    {new Date(result.occurred_start).toLocaleDateString()}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex-shrink-0 text-right">
+                              <div className="text-sm font-semibold">{score.toFixed(3)}</div>
+                              <div className="text-xs text-muted-foreground">score</div>
+                            </div>
+                            <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })
+                )}
+              </div>
             </div>
           )}
 
@@ -963,6 +1010,7 @@ export function SearchDebugView() {
                       results,
                       ...(entities && { entities }),
                       ...(chunks && { chunks }),
+                      ...(mentalModels && { mental_models: mentalModels }),
                       trace,
                     }}
                     collapsed={2}
