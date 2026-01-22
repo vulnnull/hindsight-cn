@@ -132,36 +132,25 @@ class LocalSTCrossEncoder(CrossEncoderModel):
 
         logger.info(f"Reranker: initializing local provider with model {self.model_name}")
 
-        # Determine device and device_map based on hardware and installed packages.
-        # When accelerate is installed but no GPU/MPS is available, transformers can
-        # incorrectly use lazy loading (meta tensors) which fails on .to(device).
-        # We use device_map="cpu" in that case to force direct CPU loading.
+        # Determine device based on hardware availability.
+        # We always set low_cpu_mem_usage=False to prevent lazy loading (meta tensors)
+        # which can cause issues when accelerate is installed but no GPU is available.
+        # Note: We do NOT use device_map because CrossEncoder internally calls .to(device)
+        # after loading, which conflicts with accelerate's device_map handling.
         import torch
-
-        try:
-            import accelerate  # type: ignore[import-not-found]  # noqa: F401
-
-            accelerate_available = True
-        except ImportError:
-            accelerate_available = False
 
         # Check for GPU (CUDA) or Apple Silicon (MPS)
         has_gpu = torch.cuda.is_available() or (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
 
         if has_gpu:
             device = None  # Let sentence-transformers auto-detect GPU/MPS
-            device_map = None
-        elif accelerate_available:
-            device = "cpu"
-            device_map = "cpu"  # Force direct CPU loading to avoid meta tensors
         else:
             device = "cpu"
-            device_map = None
 
         self._model = CrossEncoder(
             self.model_name,
             device=device,
-            model_kwargs={"low_cpu_mem_usage": False, "device_map": device_map},
+            model_kwargs={"low_cpu_mem_usage": False},
         )
 
         # Initialize shared executor (limited workers naturally limits concurrency)
