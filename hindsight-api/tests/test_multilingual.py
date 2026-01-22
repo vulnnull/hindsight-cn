@@ -276,6 +276,165 @@ async def test_retain_japanese_content(memory, request_context):
 
 
 @pytest.mark.asyncio
+async def test_english_content_stays_english(memory, request_context):
+    """
+    Test that English content is NOT incorrectly translated to Japanese or Chinese.
+
+    This test specifically catches the bug where the language instruction in the
+    CONCISE extraction prompt mentioned Japanese/Chinese explicitly, which primed
+    the LLM to sometimes output facts in those languages even for English input.
+
+    See: https://github.com/vectorize-io/hindsight/issues/181
+    """
+    bank_id = f"test_english_retain_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # English content about a developer
+        english_content = """
+        John Smith is a software engineer at TechCorp in Seattle.
+        He specializes in machine learning and has been working on
+        recommendation systems for the past three years.
+        Last month, he launched a new feature that improved click-through rates by 25%.
+        He prefers working in Python and uses PyTorch for model training.
+        """
+
+        unit_ids = await memory.retain_async(
+            bank_id=bank_id,
+            content=english_content,
+            context="Team profile",
+            event_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
+            request_context=request_context,
+        )
+
+        logger.info(f"Retained {len(unit_ids)} facts from English content")
+        assert len(unit_ids) > 0, "Should have extracted facts from English content"
+
+        # Recall with English query
+        result = await memory.recall_async(
+            bank_id=bank_id,
+            query="Tell me about John Smith",
+            budget=Budget.MID,
+            max_tokens=1000,
+            fact_type=["world"],
+            request_context=request_context,
+        )
+
+        assert len(result.results) > 0, "Should recall facts about John Smith"
+
+        # Verify facts are NOT in Japanese or Chinese
+        for fact in result.results:
+            logger.info(f"Fact: {fact.text}")
+
+            # Count Japanese characters (hiragana, katakana)
+            japanese_chars = sum(
+                1 for char in fact.text
+                if ("\u3040" <= char <= "\u309f") or ("\u30a0" <= char <= "\u30ff")
+            )
+
+            # Count Chinese/CJK characters (excluding those also used in Japanese)
+            # Note: Kanji/CJK ideographs overlap between Chinese and Japanese
+            cjk_chars = sum(1 for char in fact.text if "\u4e00" <= char <= "\u9fff")
+
+            # For English input, there should be minimal CJK characters
+            # Allow for occasional edge cases (e.g., proper nouns) but not full translation
+            total_chars = len(fact.text)
+            cjk_ratio = cjk_chars / max(total_chars, 1)
+
+            assert cjk_ratio < 0.1, (
+                f"English content was incorrectly translated to CJK language! "
+                f"CJK ratio: {cjk_ratio:.1%}, Japanese chars: {japanese_chars}, CJK chars: {cjk_chars}. "
+                f"Fact: {fact.text}"
+            )
+
+        logger.info("English content test passed - facts stayed in English")
+
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_italian_content_stays_italian(memory, request_context):
+    """
+    Test that Italian content is NOT incorrectly translated to Japanese or Chinese.
+
+    Similar to the English test, this catches the bug where non-CJK languages
+    could be incorrectly translated due to biased language instruction.
+
+    See: https://github.com/vectorize-io/hindsight/issues/181
+    """
+    bank_id = f"test_italian_retain_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Italian content about a chef
+        italian_content = """
+        Marco Rossi è uno chef italiano che lavora in un ristorante a Milano.
+        È specializzato nella cucina toscana e ha vinto tre premi gastronomici.
+        Il mese scorso ha aperto un nuovo ristorante nel centro della città.
+        Preferisce usare ingredienti freschi e locali per i suoi piatti.
+        """
+
+        unit_ids = await memory.retain_async(
+            bank_id=bank_id,
+            content=italian_content,
+            context="Profilo dello chef",
+            event_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
+            request_context=request_context,
+        )
+
+        logger.info(f"Retained {len(unit_ids)} facts from Italian content")
+        assert len(unit_ids) > 0, "Should have extracted facts from Italian content"
+
+        # Recall with Italian query
+        result = await memory.recall_async(
+            bank_id=bank_id,
+            query="Dimmi di Marco Rossi",  # "Tell me about Marco Rossi"
+            budget=Budget.MID,
+            max_tokens=1000,
+            fact_type=["world"],
+            request_context=request_context,
+        )
+
+        assert len(result.results) > 0, "Should recall facts about Marco Rossi"
+
+        # Verify facts are NOT in Japanese or Chinese - should stay in Italian
+        for fact in result.results:
+            logger.info(f"Fact: {fact.text}")
+
+            # Count CJK characters
+            cjk_chars = sum(1 for char in fact.text if "\u4e00" <= char <= "\u9fff")
+            japanese_chars = sum(
+                1 for char in fact.text
+                if ("\u3040" <= char <= "\u309f") or ("\u30a0" <= char <= "\u30ff")
+            )
+
+            total_chars = len(fact.text)
+            cjk_ratio = (cjk_chars + japanese_chars) / max(total_chars, 1)
+
+            assert cjk_ratio < 0.1, (
+                f"Italian content was incorrectly translated to CJK language! "
+                f"CJK ratio: {cjk_ratio:.1%}. Fact: {fact.text}"
+            )
+
+        # Verify facts contain Italian words (basic sanity check)
+        all_text = " ".join(f.text for f in result.results).lower()
+        italian_indicators = ["marco", "rossi", "chef", "ristorante", "milano", "cucina", "italiano", "italiana"]
+        has_italian = any(word in all_text for word in italian_indicators)
+
+        # Allow English translation as acceptable (not ideal but not the bug)
+        english_indicators = ["chef", "restaurant", "milan", "italian", "cooking"]
+        has_english = any(word in all_text for word in english_indicators)
+
+        assert has_italian or has_english, (
+            f"Expected facts to be in Italian or English, but got neither. Facts: {all_text}"
+        )
+
+        logger.info("Italian content test passed - facts not translated to CJK")
+
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
 async def test_mixed_language_entities(memory, request_context):
     """
     Test that entity extraction works correctly with mixed language content.

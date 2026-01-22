@@ -441,7 +441,7 @@ def _chunk_conversation(turns: list[dict], max_chars: int) -> list[str]:
 # Concise extraction prompt (default) - selective, high-quality facts
 CONCISE_FACT_EXTRACTION_PROMPT = """Extract SIGNIFICANT facts from text. Be SELECTIVE - only extract facts worth remembering long-term.
 
-LANGUAGE RULE (CRITICAL): Output facts in the EXACT SAME language as the input text. If input is Japanese, output Japanese. If input is Chinese, output Chinese. NEVER translate to English. Preserve original language completely.
+LANGUAGE REQUIREMENT: Detect the language of the input text. All extracted facts, entity names, descriptions, and other output MUST be in the SAME language as the input. Do not translate to another language.
 
 {fact_types_instruction}
 
