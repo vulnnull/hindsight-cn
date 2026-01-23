@@ -436,6 +436,7 @@ async def run_reflect_agent(
                     {
                         "role": "tool",
                         "tool_call_id": done_call.id,
+                        "name": done_call.name,  # Required by Gemini
                         "content": json.dumps(
                             {
                                 "error": "You must search for information first. Use search_reflections(), search_mental_models(), or recall() before providing your final answer."
@@ -535,6 +536,7 @@ async def run_reflect_agent(
                     {
                         "role": "tool",
                         "tool_call_id": tc.id,
+                        "name": tc.name,  # Required by Gemini
                         "content": json.dumps(output, default=str),
                     }
                 )
