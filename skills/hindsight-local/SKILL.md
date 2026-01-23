@@ -1,5 +1,5 @@
 ---
-name: hindsight
+name: hindsight-local
 description: Store user preferences, learnings from tasks, and procedure outcomes. Use to remember what works and recall context before new tasks. (user)
 ---
 
