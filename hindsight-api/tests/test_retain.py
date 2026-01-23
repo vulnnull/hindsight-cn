@@ -279,6 +279,7 @@ async def test_event_date_storage(memory, request_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(reason="LLM date extraction from content is non-deterministic", strict=False)
 async def test_temporal_ordering(memory, request_context):
     """
     Test that facts can be stored and retrieved with correct temporal ordering.

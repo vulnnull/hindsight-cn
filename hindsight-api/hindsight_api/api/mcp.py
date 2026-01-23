@@ -1,4 +1,4 @@
-"""Hindsight MCP Server implementation using FastMCP."""
+"""Hindsight MCP Server implementation using FastMCP (HTTP transport)."""
 
 import json
 import logging
@@ -8,8 +8,7 @@ from contextvars import ContextVar
 from fastmcp import FastMCP
 
 from hindsight_api import MemoryEngine
-from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES
-from hindsight_api.models import RequestContext
+from hindsight_api.mcp_tools import MCPToolsConfig, register_mcp_tools
 
 # Configure logging from HINDSIGHT_API_LOG_LEVEL environment variable
 _log_level_str = os.environ.get("HINDSIGHT_API_LOG_LEVEL", "info").lower()
@@ -52,194 +51,15 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
     # Use stateless_http=True for Claude Code compatibility
     mcp = FastMCP("hindsight-mcp-server", stateless_http=True)
 
-    @mcp.tool()
-    async def retain(
-        content: str,
-        context: str = "general",
-        async_processing: bool = True,
-        bank_id: str | None = None,
-    ) -> str:
-        """
-        Store important information to long-term memory.
+    # Configure and register tools using shared module
+    config = MCPToolsConfig(
+        bank_id_resolver=get_current_bank_id,
+        include_bank_id_param=True,  # HTTP MCP supports multi-bank via parameter
+        tools=None,  # All tools
+        retain_fire_and_forget=False,  # HTTP MCP supports sync/async modes
+    )
 
-        Use this tool PROACTIVELY whenever the user shares:
-        - Personal facts, preferences, or interests
-        - Important events or milestones
-        - User history, experiences, or background
-        - Decisions, opinions, or stated preferences
-        - Goals, plans, or future intentions
-        - Relationships or people mentioned
-        - Work context, projects, or responsibilities
-
-        Args:
-            content: The fact/memory to store (be specific and include relevant details)
-            context: Category for the memory (e.g., 'preferences', 'work', 'hobbies', 'family'). Default: 'general'
-            async_processing: If True, queue for background processing and return immediately. If False, wait for completion. Default: True
-            bank_id: Optional bank to store in (defaults to session bank). Use for cross-bank operations.
-        """
-        try:
-            target_bank = bank_id or get_current_bank_id()
-            if target_bank is None:
-                return "Error: No bank_id configured"
-            contents = [{"content": content, "context": context}]
-            if async_processing:
-                # Queue for background processing and return immediately
-                result = await memory.submit_async_retain(
-                    bank_id=target_bank, contents=contents, request_context=RequestContext()
-                )
-                return f"Memory queued for background processing (operation_id: {result.get('operation_id', 'N/A')})"
-            else:
-                # Wait for completion
-                await memory.retain_batch_async(
-                    bank_id=target_bank,
-                    contents=contents,
-                    request_context=RequestContext(),
-                )
-                return f"Memory stored successfully in bank '{target_bank}'"
-        except Exception as e:
-            logger.error(f"Error storing memory: {e}", exc_info=True)
-            return f"Error: {str(e)}"
-
-    @mcp.tool()
-    async def recall(query: str, max_tokens: int = 4096, bank_id: str | None = None) -> str:
-        """
-        Search memories to provide personalized, context-aware responses.
-
-        Use this tool PROACTIVELY to:
-        - Check user's preferences before making suggestions
-        - Recall user's history to provide continuity
-        - Remember user's goals and context
-        - Personalize responses based on past interactions
-
-        Args:
-            query: Natural language search query (e.g., "user's food preferences", "what projects is user working on")
-            max_tokens: Maximum tokens in the response (default: 4096)
-            bank_id: Optional bank to search in (defaults to session bank). Use for cross-bank operations.
-        """
-        try:
-            target_bank = bank_id or get_current_bank_id()
-            if target_bank is None:
-                return "Error: No bank_id configured"
-            from hindsight_api.engine.memory_engine import Budget
-
-            recall_result = await memory.recall_async(
-                bank_id=target_bank,
-                query=query,
-                fact_type=list(VALID_RECALL_FACT_TYPES),
-                budget=Budget.HIGH,
-                max_tokens=max_tokens,
-                request_context=RequestContext(),
-            )
-
-            # Use model's JSON serialization
-            return recall_result.model_dump_json(indent=2)
-        except Exception as e:
-            logger.error(f"Error searching: {e}", exc_info=True)
-            return f'{{"error": "{e}", "results": []}}'
-
-    @mcp.tool()
-    async def reflect(query: str, context: str | None = None, budget: str = "low", bank_id: str | None = None) -> str:
-        """
-        Generate thoughtful analysis by synthesizing stored memories with the bank's personality.
-
-        WHEN TO USE THIS TOOL:
-        Use reflect when you need reasoned analysis, not just fact retrieval. This tool
-        thinks through the question using everything the bank knows and its personality traits.
-
-        EXAMPLES OF GOOD QUERIES:
-        - "What patterns have emerged in how I approach debugging?"
-        - "Based on my past decisions, what architectural style do I prefer?"
-        - "What might be the best approach for this problem given what you know about me?"
-        - "How should I prioritize these tasks based on my goals?"
-
-        HOW IT DIFFERS FROM RECALL:
-        - recall: Returns raw facts matching your search (fast lookup)
-        - reflect: Reasons across memories to form a synthesized answer (deeper analysis)
-
-        Use recall for "what did I say about X?" and reflect for "what should I do about X?"
-
-        Args:
-            query: The question or topic to reflect on
-            context: Optional context about why this reflection is needed
-            budget: Search budget - 'low', 'mid', or 'high' (default: 'low')
-            bank_id: Optional bank to reflect in (defaults to session bank). Use for cross-bank operations.
-        """
-        try:
-            target_bank = bank_id or get_current_bank_id()
-            if target_bank is None:
-                return "Error: No bank_id configured"
-            from hindsight_api.engine.memory_engine import Budget
-
-            # Map string budget to enum
-            budget_map = {"low": Budget.LOW, "mid": Budget.MID, "high": Budget.HIGH}
-            budget_enum = budget_map.get(budget.lower(), Budget.LOW)
-
-            reflect_result = await memory.reflect_async(
-                bank_id=target_bank,
-                query=query,
-                budget=budget_enum,
-                context=context,
-                request_context=RequestContext(),
-            )
-
-            return reflect_result.model_dump_json(indent=2)
-        except Exception as e:
-            logger.error(f"Error reflecting: {e}", exc_info=True)
-            return f'{{"error": "{e}", "text": ""}}'
-
-    @mcp.tool()
-    async def list_banks() -> str:
-        """
-        List all available memory banks.
-
-        Use this tool to discover what memory banks exist in the system.
-        Each bank is an isolated memory store (like a separate "brain").
-
-        Returns:
-            JSON list of banks with their IDs, names, dispositions, and missions.
-        """
-        try:
-            banks = await memory.list_banks(request_context=RequestContext())
-            return json.dumps({"banks": banks}, indent=2)
-        except Exception as e:
-            logger.error(f"Error listing banks: {e}", exc_info=True)
-            return f'{{"error": "{e}", "banks": []}}'
-
-    @mcp.tool()
-    async def create_bank(bank_id: str, name: str | None = None, mission: str | None = None) -> str:
-        """
-        Create a new memory bank or get an existing one.
-
-        Memory banks are isolated stores - each one is like a separate "brain" for a user/agent.
-        Banks are auto-created with default settings if they don't exist.
-
-        Args:
-            bank_id: Unique identifier for the bank (e.g., 'user-123', 'agent-alpha')
-            name: Optional human-friendly name for the bank
-            mission: Optional mission describing who the agent is and what they're trying to accomplish
-        """
-        try:
-            # get_bank_profile auto-creates bank if it doesn't exist
-            profile = await memory.get_bank_profile(bank_id, request_context=RequestContext())
-
-            # Update name/mission if provided
-            if name is not None or mission is not None:
-                await memory.update_bank(
-                    bank_id,
-                    name=name,
-                    mission=mission,
-                    request_context=RequestContext(),
-                )
-                # Fetch updated profile
-                profile = await memory.get_bank_profile(bank_id, request_context=RequestContext())
-
-            # Serialize disposition if it's a Pydantic model
-            if "disposition" in profile and hasattr(profile["disposition"], "model_dump"):
-                profile["disposition"] = profile["disposition"].model_dump()
-            return json.dumps(profile, indent=2)
-        except Exception as e:
-            logger.error(f"Error creating bank: {e}", exc_info=True)
-            return f'{{"error": "{e}"}}'
+    register_mcp_tools(mcp, memory, config)
 
     return mcp
 

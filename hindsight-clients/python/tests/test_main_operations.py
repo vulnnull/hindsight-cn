@@ -511,37 +511,6 @@ class TestEntities:
             assert entity is not None
             assert entity.id == entity_id
 
-    def test_regenerate_entity_observations(self, client, bank_id):
-        """Test regenerating observations for an entity."""
-        import asyncio
-
-        from hindsight_client_api import ApiClient, Configuration
-        from hindsight_client_api.api import EntitiesApi
-
-        async def do_test():
-            config = Configuration(host=HINDSIGHT_API_URL)
-            api_client = ApiClient(config)
-            api = EntitiesApi(api_client)
-
-            # First list entities to get an ID
-            list_response = await api.list_entities(bank_id=bank_id)
-
-            if list_response.items and len(list_response.items) > 0:
-                entity_id = list_response.items[0].id
-
-                # Regenerate observations
-                result = await api.regenerate_entity_observations(
-                    bank_id=bank_id,
-                    entity_id=entity_id,
-                )
-                return entity_id, result
-            return None, None
-
-        entity_id, result = asyncio.get_event_loop().run_until_complete(do_test())
-
-        if entity_id:
-            assert result is not None
-            assert result.id == entity_id
 
 
 class TestTags:

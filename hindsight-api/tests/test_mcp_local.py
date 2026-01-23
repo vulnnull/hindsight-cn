@@ -62,9 +62,9 @@ async def test_local_mcp_server_recall(mock_memory):
     tools = mcp_server._tool_manager._tools
     assert "recall" in tools
 
-    # Call recall with new params
+    # Call recall
     recall_tool = tools["recall"]
-    result = await recall_tool.fn(query="test query", max_tokens=2048, budget="mid")
+    result = await recall_tool.fn(query="test query", max_tokens=2048)
 
     # Result is a dict
     assert isinstance(result, dict)
@@ -75,7 +75,7 @@ async def test_local_mcp_server_recall(mock_memory):
     assert call_kwargs["bank_id"] == "test-bank"
     assert call_kwargs["query"] == "test query"
     assert call_kwargs["max_tokens"] == 2048
-    assert call_kwargs["budget"] == Budget.MID
+    assert call_kwargs["budget"] == Budget.HIGH
 
 
 @pytest.mark.asyncio
@@ -141,7 +141,7 @@ async def test_local_mcp_server_recall_error_handling(mock_memory):
 
 @pytest.mark.asyncio
 async def test_local_mcp_server_recall_with_defaults(mock_memory):
-    """Test that recall uses default max_tokens and budget."""
+    """Test that recall uses default max_tokens and HIGH budget."""
     from hindsight_api.mcp_local import create_local_mcp_server
     from hindsight_api.engine.memory_engine import Budget
 
@@ -159,4 +159,54 @@ async def test_local_mcp_server_recall_with_defaults(mock_memory):
 
     call_kwargs = mock_memory.recall_async.call_args.kwargs
     assert call_kwargs["max_tokens"] == 4096
-    assert call_kwargs["budget"] == Budget.LOW
+    assert call_kwargs["budget"] == Budget.HIGH
+
+
+@pytest.mark.asyncio
+async def test_local_mcp_server_retain_with_timestamp(mock_memory):
+    """Test that retain passes timestamp as event_date."""
+    from datetime import datetime, timezone
+    from hindsight_api.mcp_local import create_local_mcp_server
+
+    mcp_server = create_local_mcp_server("test-bank", memory=mock_memory)
+
+    tools = mcp_server._tool_manager._tools
+    retain_tool = tools["retain"]
+
+    # Call retain with timestamp
+    result = await retain_tool.fn(
+        content="test content", context="test_context", timestamp="2024-01-15T10:30:00Z"
+    )
+
+    assert result["status"] == "accepted"
+
+    # Wait for background task
+    await asyncio.sleep(0.1)
+
+    call_kwargs = mock_memory.retain_batch_async.call_args.kwargs
+    contents = call_kwargs["contents"]
+    assert len(contents) == 1
+    assert contents[0]["content"] == "test content"
+    assert contents[0]["context"] == "test_context"
+    assert "event_date" in contents[0]
+    assert contents[0]["event_date"] == datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_local_mcp_server_retain_with_invalid_timestamp(mock_memory):
+    """Test that retain rejects invalid timestamp format."""
+    from hindsight_api.mcp_local import create_local_mcp_server
+
+    mcp_server = create_local_mcp_server("test-bank", memory=mock_memory)
+
+    tools = mcp_server._tool_manager._tools
+    retain_tool = tools["retain"]
+
+    # Call retain with invalid timestamp
+    result = await retain_tool.fn(content="test content", timestamp="not-a-date")
+
+    assert result["status"] == "error"
+    assert "Invalid timestamp format" in result["message"]
+
+    # Verify retain_batch_async was NOT called
+    mock_memory.retain_batch_async.assert_not_called()

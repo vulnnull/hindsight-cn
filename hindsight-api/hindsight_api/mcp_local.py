@@ -44,7 +44,6 @@ import os
 import sys
 
 from mcp.server.fastmcp import FastMCP
-from mcp.types import Icon
 
 from hindsight_api.config import (
     DEFAULT_MCP_LOCAL_BANK_ID,
@@ -53,6 +52,7 @@ from hindsight_api.config import (
     ENV_MCP_INSTRUCTIONS,
     ENV_MCP_LOCAL_BANK_ID,
 )
+from hindsight_api.mcp_tools import MCPToolsConfig, register_mcp_tools
 
 # Configure logging - default to warning to avoid polluting stderr during MCP init
 # MCP clients interpret stderr output as errors, so we suppress INFO logs by default
@@ -85,9 +85,6 @@ def create_local_mcp_server(bank_id: str, memory=None) -> FastMCP:
     """
     # Import here to avoid slow startup if just checking --help
     from hindsight_api import MemoryEngine
-    from hindsight_api.engine.memory_engine import Budget
-    from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES
-    from hindsight_api.models import RequestContext
 
     # Create memory engine with pg0 embedded database if not provided
     if memory is None:
@@ -105,55 +102,17 @@ def create_local_mcp_server(bank_id: str, memory=None) -> FastMCP:
 
     mcp = FastMCP("hindsight")
 
-    @mcp.tool(description=retain_description)
-    async def retain(content: str, context: str = "general") -> dict:
-        """
-        Args:
-            content: The fact/memory to store (be specific and include relevant details)
-            context: Category for the memory (e.g., 'preferences', 'work', 'hobbies', 'family'). Default: 'general'
-        """
-        import asyncio
+    # Configure and register tools using shared module
+    config = MCPToolsConfig(
+        bank_id_resolver=lambda: bank_id,
+        include_bank_id_param=False,  # Local MCP uses fixed bank_id
+        tools={"retain", "recall"},  # Local MCP only has retain and recall
+        retain_description=retain_description,
+        recall_description=recall_description,
+        retain_fire_and_forget=True,  # Local MCP uses fire-and-forget pattern
+    )
 
-        async def _retain():
-            try:
-                await memory.retain_batch_async(
-                    bank_id=bank_id,
-                    contents=[{"content": content, "context": context}],
-                    request_context=RequestContext(),
-                )
-            except Exception as e:
-                logger.error(f"Error storing memory: {e}", exc_info=True)
-
-        # Fire and forget - don't block on memory storage
-        asyncio.create_task(_retain())
-        return {"status": "accepted", "message": "Memory storage initiated"}
-
-    @mcp.tool(description=recall_description)
-    async def recall(query: str, max_tokens: int = 4096, budget: str = "low") -> dict:
-        """
-        Args:
-            query: Natural language search query (e.g., "user's food preferences", "what projects is user working on")
-            max_tokens: Maximum tokens to return in results (default: 4096)
-            budget: Search budget level - "low", "mid", or "high" (default: "low")
-        """
-        try:
-            # Map string budget to enum
-            budget_map = {"low": Budget.LOW, "mid": Budget.MID, "high": Budget.HIGH}
-            budget_enum = budget_map.get(budget.lower(), Budget.LOW)
-
-            search_result = await memory.recall_async(
-                bank_id=bank_id,
-                query=query,
-                fact_type=list(VALID_RECALL_FACT_TYPES),
-                budget=budget_enum,
-                max_tokens=max_tokens,
-                request_context=RequestContext(),
-            )
-
-            return search_result.model_dump()
-        except Exception as e:
-            logger.error(f"Error searching: {e}", exc_info=True)
-            return {"error": str(e), "results": []}
+    register_mcp_tools(mcp, memory, config)
 
     return mcp
 
