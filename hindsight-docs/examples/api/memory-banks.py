@@ -23,7 +23,7 @@ client = Hindsight(base_url=HINDSIGHT_URL)
 client.create_bank(
     bank_id="my-bank",
     name="Research Assistant",
-    background="I am a research assistant specializing in machine learning",
+    mission="I am a research assistant specializing in machine learning",
     disposition={
         "skepticism": 4,
         "literalism": 3,
@@ -33,15 +33,15 @@ client.create_bank(
 # [/docs:create-bank]
 
 
-# [docs:bank-background]
+# [docs:bank-mission]
 client.create_bank(
     bank_id="financial-advisor",
     name="Financial Advisor",
-    background="""I am a conservative financial advisor with 20 years of experience.
+    mission="""I am a conservative financial advisor with 20 years of experience.
     I prioritize capital preservation over aggressive growth.
     I have seen multiple market crashes and believe in diversification."""
 )
-# [/docs:bank-background]
+# [/docs:bank-mission]
 
 
 # =============================================================================

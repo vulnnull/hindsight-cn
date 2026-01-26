@@ -54,7 +54,7 @@ response = client.reflect(
 client.create_bank(
     bank_id="cautious-advisor",
     name="Cautious Advisor",
-    background="I am a risk-aware financial advisor",
+    mission="I am a risk-aware financial advisor",
     disposition={
         "skepticism": 5,   # Very skeptical of claims
         "literalism": 4,   # Focuses on exact requirements

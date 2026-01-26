@@ -139,7 +139,7 @@ class TestReflect:
         """Setup: Store some test memories and bank background."""
         client.create_bank(
             bank_id=bank_id,
-            background="I am a helpful AI assistant interested in technology and science.",
+            mission="I am a helpful AI assistant interested in technology and science.",
         )
 
         client.retain_batch(
@@ -261,7 +261,7 @@ class TestEndToEndWorkflow:
         # 1. Create bank
         client.create_bank(
             bank_id=workflow_bank_id,
-            background="I am a software engineer who loves Python programming.",
+            mission="I am a software engineer who loves Python programming.",
         )
 
         # 2. Store memories
@@ -666,7 +666,7 @@ class TestDeleteBank:
         # Create bank with some data
         client.create_bank(
             bank_id=bank_id,
-            background="This bank will be deleted",
+            mission="This bank will be deleted",
         )
         client.retain(
             bank_id=bank_id,
