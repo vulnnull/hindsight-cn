@@ -85,15 +85,20 @@ class TestConfiguration:
         assert defaults.fact_types == ["world", "opinion"]
         assert defaults.document_id == "doc-123"
 
-    def test_is_configured_without_bank_id(self):
-        """Test is_configured returns False without bank_id."""
-        configure(hindsight_api_url="http://localhost:8888")
-        assert is_configured() is False
+    def test_is_configured_with_defaults(self):
+        """Test is_configured returns True with default bank_id."""
+        configure()  # Uses default bank_id="default"
+        assert is_configured() is True
 
-    def test_is_configured_with_bank_id(self):
-        """Test is_configured returns True with bank_id."""
+    def test_is_configured_with_bank_id_in_defaults(self):
+        """Test is_configured returns True with bank_id in defaults."""
         configure(hindsight_api_url="http://localhost:8888")
         set_defaults(bank_id="test-agent")
+        assert is_configured() is True
+
+    def test_is_configured_with_explicit_bank_id(self):
+        """Test is_configured returns True with explicit bank_id."""
+        configure(bank_id="test-agent")
         assert is_configured() is True
 
     def test_reset_config(self):

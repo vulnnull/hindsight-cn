@@ -15,9 +15,15 @@ This module provides a clean API for configuring Hindsight integration:
 4. set_bank_mission() - Set the mission for a memory bank (for mental models)
 """
 
+import os
 from typing import Optional, List, Any, Dict
 from dataclasses import dataclass, field
 from enum import Enum
+
+# Default Hindsight API URL (production)
+DEFAULT_HINDSIGHT_API_URL = "https://api.hindsight.vectorize.io"
+DEFAULT_BANK_ID = "default"
+HINDSIGHT_API_KEY_ENV = "HINDSIGHT_API_KEY"
 
 
 class MemoryInjectionMode(str, Enum):
@@ -37,7 +43,11 @@ class HindsightConfig:
 
     Attributes:
         hindsight_api_url: URL of the Hindsight API server
-        api_key: Optional API key for Hindsight authentication
+            (default: https://api.hindsight.vectorize.io)
+        bank_id: Memory bank ID for memory operations (default: "default").
+            For multi-user support, use different bank_ids per user (e.g., f"user-{user_id}")
+        api_key: API key for Hindsight authentication. If not provided,
+            reads from HINDSIGHT_API_KEY environment variable.
         store_conversations: Whether to store conversations to Hindsight
         inject_memories: Whether to inject relevant memories into prompts
         injection_mode: How to inject memories (system_message or prepend_user)
@@ -47,7 +57,8 @@ class HindsightConfig:
             If False (default), storage runs in background thread for better performance.
     """
 
-    hindsight_api_url: str = "http://localhost:8888"
+    hindsight_api_url: str = DEFAULT_HINDSIGHT_API_URL
+    bank_id: str = DEFAULT_BANK_ID
     api_key: Optional[str] = None
     store_conversations: bool = True
     inject_memories: bool = True
@@ -102,8 +113,11 @@ _global_defaults: Optional[HindsightDefaults] = None
 
 
 def configure(
-    hindsight_api_url: str = "http://localhost:8888",
+    hindsight_api_url: Optional[str] = None,
+    bank_id: Optional[str] = None,
     api_key: Optional[str] = None,
+    background: Optional[str] = None,
+    bank_name: Optional[str] = None,
     store_conversations: bool = True,
     inject_memories: bool = True,
     injection_mode: MemoryInjectionMode = MemoryInjectionMode.SYSTEM_MESSAGE,
@@ -116,9 +130,20 @@ def configure(
     This sets up settings that typically don't change during a session.
     For per-call settings like bank_id, use set_defaults() or per-call kwargs.
 
+    With sensible defaults, you can use minimal configuration:
+
+        configure()  # Just set HINDSIGHT_API_KEY env var
+        enable()
+
     Args:
         hindsight_api_url: URL of the Hindsight API server
-        api_key: Optional API key for Hindsight authentication
+            (default: https://api.hindsight.vectorize.io)
+        bank_id: Memory bank ID for memory operations (default: "default").
+            For multi-user support, use different bank_ids per user (e.g., f"user-{user_id}")
+        api_key: API key for Hindsight authentication. If not provided,
+            reads from HINDSIGHT_API_KEY environment variable.
+        background: Instructions guiding what Hindsight should learn and remember.
+        bank_name: Optional display name for the bank.
         store_conversations: Whether to store conversations to Hindsight
         inject_memories: Whether to inject relevant memories into prompts
         injection_mode: How to inject memories into the prompt
@@ -132,20 +157,30 @@ def configure(
         The configured HindsightConfig instance
 
     Example:
-        >>> from hindsight_litellm import configure, set_defaults, enable
+        >>> from hindsight_litellm import configure, enable
+        >>>
+        >>> # Minimal usage - just set HINDSIGHT_API_KEY env var
+        >>> configure()
+        >>> enable()
+        >>>
+        >>> # Or with custom settings
         >>> configure(
-        ...     hindsight_api_url="http://localhost:8888",
-        ...     api_key="your-api-key",
-        ...     verbose=True,
+        ...     bank_id="user-123",  # Per-user bank for multi-user support
+        ...     background="Remember user preferences and past interactions.",
         ... )
-        >>> set_defaults(bank_id="user-123")
-        >>> enable()  # Start memory integration
+        >>> enable()
     """
     global _global_config
 
+    # Apply defaults
+    resolved_api_url = hindsight_api_url or DEFAULT_HINDSIGHT_API_URL
+    resolved_bank_id = bank_id or DEFAULT_BANK_ID
+    resolved_api_key = api_key or os.environ.get(HINDSIGHT_API_KEY_ENV)
+
     _global_config = HindsightConfig(
-        hindsight_api_url=hindsight_api_url,
-        api_key=api_key,
+        hindsight_api_url=resolved_api_url,
+        bank_id=resolved_bank_id,
+        api_key=resolved_api_key,
         store_conversations=store_conversations,
         inject_memories=inject_memories,
         injection_mode=injection_mode,
@@ -153,6 +188,17 @@ def configure(
         verbose=verbose,
         sync_storage=sync_storage,
     )
+
+    # If background or bank_name is provided, create/update the bank
+    if background or bank_name:
+        _create_or_update_bank(
+            hindsight_api_url=resolved_api_url,
+            bank_id=resolved_bank_id,
+            name=bank_name,
+            mission=background,
+            verbose=verbose,
+            api_key=resolved_api_key,
+        )
 
     return _global_config
 
@@ -244,6 +290,7 @@ def _create_or_update_bank(
     name: Optional[str] = None,
     mission: Optional[str] = None,
     verbose: bool = False,
+    api_key: Optional[str] = None,
 ) -> None:
     """Create or update a memory bank with the given configuration.
 
@@ -257,7 +304,7 @@ def _create_or_update_bank(
     try:
         from hindsight_client import Hindsight
 
-        client = Hindsight(hindsight_api_url)
+        client = Hindsight(base_url=hindsight_api_url, api_key=api_key)
         client.create_bank(
             bank_id=bank_id,
             name=name,
@@ -305,8 +352,10 @@ def is_configured() -> bool:
     """Check if Hindsight has been configured with a valid bank_id.
 
     Returns:
-        True if configure() has been called and a bank_id is set in defaults
+        True if configure() has been called and a bank_id is set
     """
+    if _global_config is not None and _global_config.bank_id:
+        return True
     return (
         _global_config is not None
         and _global_defaults is not None

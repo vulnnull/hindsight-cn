@@ -324,7 +324,7 @@ class Hindsight:
         self,
         bank_id: str,
         name: str | None = None,
-        background: str | None = None,
+        mission: str | None = None,
         disposition: dict[str, float] | None = None,
     ) -> BankProfileResponse:
         """Create or update a memory bank.
