@@ -1492,6 +1492,13 @@ dependencies = [
     { name = "streamlit" },
 ]
 
+[package.optional-dependencies]
+test = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "python-dotenv" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "ruff" },
@@ -1501,12 +1508,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "hindsight-api", editable = "hindsight-api" },
+    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
+    { name = "python-dotenv", marker = "extra == 'test'", specifier = ">=1.0.0" },
     { name = "python-fasthtml", specifier = ">=0.12.33" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "streamlit", specifier = ">=1.51.0" },
 ]
+provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [
