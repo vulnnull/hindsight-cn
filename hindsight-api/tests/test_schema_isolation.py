@@ -11,8 +11,8 @@ import uuid
 import pytest
 import pytest_asyncio
 
-from hindsight_api.extensions import RequestContext, TenantContext, TenantExtension
 from hindsight_api.engine.memory_engine import _current_schema, fq_table
+from hindsight_api.extensions import RequestContext, TenantContext, TenantExtension
 from hindsight_api.migrations import run_migrations
 
 
@@ -51,6 +51,11 @@ class MultiSchemaTestTenantExtension(TenantExtension):
         from hindsight_api.extensions import AuthenticationError
 
         raise AuthenticationError(f"Unknown API key: {context.api_key}")
+
+    async def list_tenants(self) -> list:
+        from hindsight_api.extensions.tenant import Tenant
+
+        return [Tenant(schema=schema) for schema in self.valid_schemas]
 
 
 async def drop_schema(conn, schema_name: str) -> None:

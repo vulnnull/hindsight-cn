@@ -222,6 +222,10 @@ class MemoryEngine(MemoryEngineInterface):
         reflect_llm_api_key: str | None = None,
         reflect_llm_model: str | None = None,
         reflect_llm_base_url: str | None = None,
+        consolidation_llm_provider: str | None = None,
+        consolidation_llm_api_key: str | None = None,
+        consolidation_llm_model: str | None = None,
+        consolidation_llm_base_url: str | None = None,
         embeddings: Embeddings | None = None,
         cross_encoder: CrossEncoderModel | None = None,
         query_analyzer: QueryAnalyzer | None = None,
@@ -257,6 +261,10 @@ class MemoryEngine(MemoryEngineInterface):
             reflect_llm_api_key: API key for reflect LLM. Falls back to memory_llm_api_key.
             reflect_llm_model: Model for reflect operations. Falls back to memory_llm_model.
             reflect_llm_base_url: Base URL for reflect LLM. Falls back to memory_llm_base_url.
+            consolidation_llm_provider: LLM provider for consolidation operations. Falls back to memory_llm_provider.
+            consolidation_llm_api_key: API key for consolidation LLM. Falls back to memory_llm_api_key.
+            consolidation_llm_model: Model for consolidation operations. Falls back to memory_llm_model.
+            consolidation_llm_base_url: Base URL for consolidation LLM. Falls back to memory_llm_base_url.
             embeddings: Embeddings implementation. If not provided, created from env vars.
             cross_encoder: Cross-encoder model. If not provided, created from env vars.
             query_analyzer: Query analyzer implementation. If not provided, uses DateparserQueryAnalyzer.
@@ -396,6 +404,27 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=reflect_api_key,
             base_url=reflect_base_url,
             model=reflect_model,
+        )
+
+        # Consolidation LLM config - for mental model consolidation (can use efficient models)
+        consolidation_provider = consolidation_llm_provider or config.consolidation_llm_provider or memory_llm_provider
+        consolidation_api_key = consolidation_llm_api_key or config.consolidation_llm_api_key or memory_llm_api_key
+        consolidation_model = consolidation_llm_model or config.consolidation_llm_model or memory_llm_model
+        consolidation_base_url = consolidation_llm_base_url or config.consolidation_llm_base_url or memory_llm_base_url
+        # Apply provider-specific base URL defaults for consolidation
+        if consolidation_base_url is None:
+            if consolidation_provider.lower() == "groq":
+                consolidation_base_url = "https://api.groq.com/openai/v1"
+            elif consolidation_provider.lower() == "ollama":
+                consolidation_base_url = "http://localhost:11434/v1"
+            else:
+                consolidation_base_url = ""
+
+        self._consolidation_llm_config = LLMConfig(
+            provider=consolidation_provider,
+            api_key=consolidation_api_key,
+            base_url=consolidation_base_url,
+            model=consolidation_model,
         )
 
         # Initialize cross-encoder reranker (cached for performance)
@@ -584,7 +613,10 @@ class MemoryEngine(MemoryEngineInterface):
                 ]
                 for fact_type, facts in reflect_result.based_on.items()
             },
-            "mental_models": [],  # Mental models are included in based_on["mental-models"]
+            # Extract mental models from based_on["mental-models"] for easy UI access
+            "mental_models": [
+                {"id": str(fact.id), "text": fact.text} for fact in reflect_result.based_on.get("mental-models", [])
+            ],
         }
 
         # Update the reflection with the generated content and reflect_response
@@ -597,6 +629,79 @@ class MemoryEngine(MemoryEngineInterface):
         )
 
         logger.info(f"[CREATE_REFLECTION_TASK] Completed for bank_id={bank_id}, reflection_id={reflection_id}")
+
+    async def _handle_refresh_reflection(self, task_dict: dict[str, Any]):
+        """
+        Handler for refresh_reflection tasks.
+
+        Re-runs the source query through reflect and updates the reflection content.
+
+        Args:
+            task_dict: Dict with 'bank_id', 'reflection_id', 'operation_id'
+
+        Raises:
+            ValueError: If required fields are missing
+            Exception: Any exception from reflect/update (propagates to execute_task for retry)
+        """
+        bank_id = task_dict.get("bank_id")
+        reflection_id = task_dict.get("reflection_id")
+
+        if not bank_id or not reflection_id:
+            raise ValueError("bank_id and reflection_id are required for refresh_reflection task")
+
+        logger.info(f"[REFRESH_REFLECTION_TASK] Starting for bank_id={bank_id}, reflection_id={reflection_id}")
+
+        from hindsight_api.models import RequestContext
+
+        internal_context = RequestContext()
+
+        # Get the current reflection to get source_query
+        reflection = await self.get_reflection(bank_id, reflection_id, request_context=internal_context)
+        if not reflection:
+            raise ValueError(f"Reflection {reflection_id} not found in bank {bank_id}")
+
+        source_query = reflection["source_query"]
+
+        # Run reflect to generate new content, excluding the reflection being refreshed
+        reflect_result = await self.reflect_async(
+            bank_id=bank_id,
+            query=source_query,
+            request_context=internal_context,
+            exclude_reflection_ids=[reflection_id],
+        )
+
+        generated_content = reflect_result.text or "No content generated"
+
+        # Build reflect_response payload to store
+        reflect_response = {
+            "text": reflect_result.text,
+            "based_on": {
+                fact_type: [
+                    {
+                        "id": str(fact.id),
+                        "text": fact.text,
+                        "type": fact_type,
+                    }
+                    for fact in facts
+                ]
+                for fact_type, facts in reflect_result.based_on.items()
+            },
+            # Extract mental models from based_on["mental-models"] for easy UI access
+            "mental_models": [
+                {"id": str(fact.id), "text": fact.text} for fact in reflect_result.based_on.get("mental-models", [])
+            ],
+        }
+
+        # Update the reflection with the generated content and reflect_response
+        await self.update_reflection(
+            bank_id=bank_id,
+            reflection_id=reflection_id,
+            content=generated_content,
+            reflect_response=reflect_response,
+            request_context=internal_context,
+        )
+
+        logger.info(f"[REFRESH_REFLECTION_TASK] Completed for bank_id={bank_id}, reflection_id={reflection_id}")
 
     async def execute_task(self, task_dict: dict[str, Any]):
         """
@@ -638,6 +743,8 @@ class MemoryEngine(MemoryEngineInterface):
                 await self._handle_consolidation(task_dict)
             elif task_type == "create_reflection":
                 await self._handle_create_reflection(task_dict)
+            elif task_type == "refresh_reflection":
+                await self._handle_refresh_reflection(task_dict)
             else:
                 logger.error(f"Unknown task type: {task_type}")
                 # Don't retry unknown task types
@@ -792,6 +899,23 @@ class MemoryEngine(MemoryEngineInterface):
                 )
                 if reflect_is_different:
                     await self._reflect_llm_config.verify_connection()
+                # Verify consolidation config if different from all others
+                consolidation_is_different = (
+                    (
+                        self._consolidation_llm_config.provider != self._llm_config.provider
+                        or self._consolidation_llm_config.model != self._llm_config.model
+                    )
+                    and (
+                        self._consolidation_llm_config.provider != self._retain_llm_config.provider
+                        or self._consolidation_llm_config.model != self._retain_llm_config.model
+                    )
+                    and (
+                        self._consolidation_llm_config.provider != self._reflect_llm_config.provider
+                        or self._consolidation_llm_config.model != self._reflect_llm_config.model
+                    )
+                )
+                if consolidation_is_different:
+                    await self._consolidation_llm_config.verify_connection()
 
         # Build list of initialization tasks
         init_tasks = [
@@ -2995,11 +3119,11 @@ class MemoryEngine(MemoryEngineInterface):
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
-            # Get the memory unit
+            # Get the memory unit (include source_memory_ids for mental models)
             row = await conn.fetchrow(
                 f"""
                 SELECT id, text, context, event_date, occurred_start, occurred_end,
-                       mentioned_at, fact_type, document_id, chunk_id, tags
+                       mentioned_at, fact_type, document_id, chunk_id, tags, source_memory_ids
                 FROM {fq_table("memory_units")}
                 WHERE id = $1 AND bank_id = $2
                 """,
@@ -3022,7 +3146,7 @@ class MemoryEngine(MemoryEngineInterface):
             )
             entities = [r["canonical_name"] for r in entities_rows]
 
-            return {
+            result = {
                 "id": str(row["id"]),
                 "text": row["text"],
                 "context": row["context"] if row["context"] else "",
@@ -3036,6 +3160,35 @@ class MemoryEngine(MemoryEngineInterface):
                 "chunk_id": str(row["chunk_id"]) if row["chunk_id"] else None,
                 "tags": row["tags"] if row["tags"] else [],
             }
+
+            # For mental models, include source_memory_ids and fetch source_memories
+            if row["fact_type"] == "mental_model" and row["source_memory_ids"]:
+                source_ids = row["source_memory_ids"]
+                result["source_memory_ids"] = [str(sid) for sid in source_ids]
+
+                # Fetch source memories
+                source_rows = await conn.fetch(
+                    f"""
+                    SELECT id, text, fact_type, context, occurred_start, mentioned_at
+                    FROM {fq_table("memory_units")}
+                    WHERE id = ANY($1::uuid[])
+                    ORDER BY mentioned_at DESC NULLS LAST
+                    """,
+                    source_ids,
+                )
+                result["source_memories"] = [
+                    {
+                        "id": str(r["id"]),
+                        "text": r["text"],
+                        "type": r["fact_type"],
+                        "context": r["context"],
+                        "occurred_start": r["occurred_start"].isoformat() if r["occurred_start"] else None,
+                        "mentioned_at": r["mentioned_at"].isoformat() if r["mentioned_at"] else None,
+                    }
+                    for r in source_rows
+                ]
+
+            return result
 
     async def list_documents(
         self,
@@ -3671,13 +3824,22 @@ class MemoryEngine(MemoryEngineInterface):
             DirectiveRef(id=d.id, name=d.name, rules=d.rules) for d in agent_result.directives_applied
         ]
 
+        # Convert agent usage to TokenUsage format
+        from hindsight_api.engine.response_models import TokenUsage
+
+        usage = TokenUsage(
+            input_tokens=agent_result.usage.input_tokens,
+            output_tokens=agent_result.usage.output_tokens,
+            total_tokens=agent_result.usage.total_tokens,
+        )
+
         # Return response (compatible with existing API)
         result = ReflectResult(
             text=agent_result.text,
             based_on=based_on,
             new_opinions=[],  # Learnings stored as mental models
             structured_output=agent_result.structured_output,
-            usage=None,  # Token tracking not yet implemented for agentic loop
+            usage=usage,
             tool_trace=tool_trace_result,
             llm_trace=llm_trace_result,
             directives_applied=directives_applied_result,
@@ -5648,5 +5810,42 @@ class MemoryEngine(MemoryEngineInterface):
                 "max_tokens": max_tokens,
             },
             result_metadata={"reflection_id": reflection_id, "name": name, "source_query": source_query},
+            dedupe_by_bank=False,
+        )
+
+    async def submit_async_refresh_reflection(
+        self,
+        bank_id: str,
+        reflection_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """Submit an async reflection refresh operation.
+
+        This schedules a background task to re-run the source query and update the content.
+
+        Args:
+            bank_id: Bank identifier
+            reflection_id: Reflection UUID to refresh
+            request_context: Request context for authentication
+
+        Returns:
+            Dict with operation_id
+        """
+        await self._authenticate_tenant(request_context)
+
+        # Verify reflection exists
+        reflection = await self.get_reflection(bank_id, reflection_id, request_context=request_context)
+        if not reflection:
+            raise ValueError(f"Reflection {reflection_id} not found in bank {bank_id}")
+
+        return await self._submit_async_operation(
+            bank_id=bank_id,
+            operation_type="refresh_reflection",
+            task_type="refresh_reflection",
+            task_payload={
+                "reflection_id": reflection_id,
+            },
+            result_metadata={"reflection_id": reflection_id, "name": reflection["name"]},
             dedupe_by_bank=False,
         )

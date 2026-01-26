@@ -1205,7 +1205,7 @@
           "Reflections"
         ],
         "summary": "Refresh reflection",
-        "description": "Re-run the source query through reflect and update the content.",
+        "description": "Submit an async task to re-run the source query through reflect and update the content.",
         "operationId": "refresh_reflection",
         "parameters": [
           {
@@ -1249,7 +1249,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReflectionResponse"
+                  "$ref": "#/components/schemas/AsyncOperationSubmitResponse"
                 }
               }
             }
@@ -2980,6 +2980,29 @@
           "update_disposition": true
         }
       },
+      "AsyncOperationSubmitResponse": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation_id",
+          "status"
+        ],
+        "title": "AsyncOperationSubmitResponse",
+        "description": "Response model for submitting an async operation.",
+        "example": {
+          "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+          "status": "queued"
+        }
+      },
       "BackgroundResponse": {
         "properties": {
           "mission": {
@@ -3427,39 +3450,21 @@
       },
       "ConsolidationResponse": {
         "properties": {
-          "status": {
+          "operation_id": {
             "type": "string",
-            "title": "Status",
-            "description": "Status of the consolidation (completed or queued)"
+            "title": "Operation Id",
+            "description": "ID of the async consolidation operation"
           },
-          "processed": {
-            "type": "integer",
-            "title": "Processed",
-            "description": "Number of memories processed"
-          },
-          "created": {
-            "type": "integer",
-            "title": "Created",
-            "description": "Number of mental models created"
-          },
-          "updated": {
-            "type": "integer",
-            "title": "Updated",
-            "description": "Number of mental models updated"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Human-readable summary"
+          "deduplicated": {
+            "type": "boolean",
+            "title": "Deduplicated",
+            "description": "True if an existing pending task was reused",
+            "default": false
           }
         },
         "type": "object",
         "required": [
-          "status",
-          "processed",
-          "created",
-          "updated",
-          "message"
+          "operation_id"
         ],
         "title": "ConsolidationResponse",
         "description": "Response model for consolidation trigger endpoint."

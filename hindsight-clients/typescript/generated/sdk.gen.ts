@@ -455,7 +455,7 @@ export const updateReflection = <ThrowOnError extends boolean = false>(
 /**
  * Refresh reflection
  *
- * Re-run the source query through reflect and update the content.
+ * Submit an async task to re-run the source query through reflect and update the content.
  */
 export const refreshReflection = <ThrowOnError extends boolean = false>(
   options: Options<RefreshReflectionData, ThrowOnError>,

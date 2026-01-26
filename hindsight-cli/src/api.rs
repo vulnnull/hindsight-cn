@@ -485,7 +485,7 @@ impl ApiClient {
         })
     }
 
-    pub fn refresh_reflection(&self, bank_id: &str, reflection_id: &str, _verbose: bool) -> Result<types::ReflectionResponse> {
+    pub fn refresh_reflection(&self, bank_id: &str, reflection_id: &str, _verbose: bool) -> Result<types::AsyncOperationSubmitResponse> {
         self.runtime.block_on(async {
             let response = self.client.refresh_reflection(bank_id, reflection_id, None).await?;
             Ok(response.into_inner())

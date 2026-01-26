@@ -9,18 +9,18 @@ Includes tests for:
 
 import asyncio
 import os
-import pytest
 from datetime import datetime
+
+import pytest
 from sqlalchemy import create_engine, text
 
 from hindsight_api import MemoryEngine, RequestContext
-from hindsight_api.engine.embeddings import LocalSTEmbeddings, OpenAIEmbeddings, CohereEmbeddings
-from hindsight_api.engine.cross_encoder import LocalSTCrossEncoder, CohereCrossEncoder
+from hindsight_api.engine.cross_encoder import CohereCrossEncoder, LocalSTCrossEncoder
+from hindsight_api.engine.embeddings import CohereEmbeddings, LocalSTEmbeddings, OpenAIEmbeddings
 from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer
 from hindsight_api.engine.task_backend import SyncTaskBackend
-from hindsight_api.extensions import TenantExtension, TenantContext
-from hindsight_api.migrations import run_migrations, ensure_embedding_dimension
-
+from hindsight_api.extensions import TenantContext, TenantExtension
+from hindsight_api.migrations import ensure_embedding_dimension, run_migrations
 
 # =============================================================================
 # Shared Utilities
@@ -35,6 +35,11 @@ class SchemaTenantExtension(TenantExtension):
 
     async def authenticate(self, request_context: RequestContext) -> TenantContext:
         return TenantContext(schema_name=self.schema_name)
+
+    async def list_tenants(self) -> list:
+        from hindsight_api.extensions.tenant import Tenant
+
+        return [Tenant(schema=self.schema_name)]
 
 
 def get_test_schema(prefix: str, worker_id: str) -> str:

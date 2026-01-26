@@ -1,4 +1,4 @@
-"""Operation Validator Extension for validating retain/recall/reflect operations."""
+"""Operation Validator Extension for validating retain/recall/reflect/consolidate operations."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -98,6 +98,19 @@ class ReflectContext:
 
 
 # =============================================================================
+# Consolidation Pre-operation Context
+# =============================================================================
+
+
+@dataclass
+class ConsolidateContext:
+    """Context for a consolidation operation validation (pre-operation)."""
+
+    bank_id: str
+    request_context: "RequestContext"
+
+
+# =============================================================================
 # Post-operation Contexts (includes results)
 # =============================================================================
 
@@ -164,9 +177,28 @@ class ReflectResultContext:
     error: str | None = None
 
 
+# =============================================================================
+# Consolidation Post-operation Context
+# =============================================================================
+
+
+@dataclass
+class ConsolidateResult:
+    """Result context for post-consolidation hook."""
+
+    bank_id: str
+    request_context: "RequestContext"
+    # Result
+    processed: int = 0
+    created: int = 0
+    updated: int = 0
+    success: bool = True
+    error: str | None = None
+
+
 class OperationValidatorExtension(Extension, ABC):
     """
-    Validates and hooks into retain/recall/reflect operations.
+    Validates and hooks into retain/recall/reflect/consolidate operations.
 
     This extension allows implementing custom logic such as:
     - Rate limiting (pre-operation)
@@ -185,9 +217,13 @@ class OperationValidatorExtension(Extension, ABC):
         -> config = {"max_requests": "100"}
 
     Hook execution order:
-        1. validate_retain/validate_recall/validate_reflect (pre-operation)
+        1. validate_* (pre-operation)
         2. [operation executes]
-        3. on_retain_complete/on_recall_complete/on_reflect_complete (post-operation)
+        3. on_*_complete (post-operation)
+
+    Supported operations:
+        - retain, recall, reflect (core memory operations)
+        - consolidate (mental models consolidation)
     """
 
     # =========================================================================
@@ -321,6 +357,47 @@ class OperationValidatorExtension(Extension, ABC):
             result: Result context containing:
                 - All original operation parameters
                 - result: ReflectResult (if success)
+                - success: Whether the operation succeeded
+                - error: Error message (if failed)
+        """
+        pass
+
+    # =========================================================================
+    # Consolidation - Pre-operation validation hook (optional - override to implement)
+    # =========================================================================
+
+    async def validate_consolidate(self, ctx: ConsolidateContext) -> ValidationResult:
+        """
+        Validate a consolidation operation before execution.
+
+        Override to implement custom validation logic for consolidation.
+
+        Args:
+            ctx: Context containing:
+                - bank_id: Bank identifier
+                - request_context: Request context with auth info
+
+        Returns:
+            ValidationResult indicating whether the operation is allowed.
+        """
+        return ValidationResult.accept()
+
+    # =========================================================================
+    # Consolidation - Post-operation hook (optional - override to implement)
+    # =========================================================================
+
+    async def on_consolidate_complete(self, result: ConsolidateResult) -> None:
+        """
+        Called after a consolidation operation completes (success or failure).
+
+        Override to implement post-operation logic such as usage tracking or audit logging.
+
+        Args:
+            result: Result context containing:
+                - bank_id: Bank identifier
+                - processed: Number of memories processed
+                - created: Number of mental models created
+                - updated: Number of mental models updated
                 - success: Whether the operation succeeded
                 - error: Error message (if failed)
         """

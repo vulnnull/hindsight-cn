@@ -541,13 +541,46 @@ function ReflectionDetailPanel({
     if (!currentBank) return;
 
     setRefreshing(true);
+    const originalRefreshedAt = reflection.last_refreshed_at;
+
     try {
-      const updated = await client.refreshReflection(currentBank, reflection.id);
-      onRefreshed(updated);
+      // Submit the refresh task
+      await client.refreshReflection(currentBank, reflection.id);
+
+      // Poll until last_refreshed_at changes
+      const pollInterval = 1000; // 1 second
+      const maxAttempts = 120; // 2 minutes max
+      let attempts = 0;
+
+      const poll = async (): Promise<void> => {
+        attempts++;
+        try {
+          const updated = await client.getReflection(currentBank, reflection.id);
+          if (updated.last_refreshed_at !== originalRefreshedAt) {
+            // Refresh complete
+            onRefreshed(updated);
+            setRefreshing(false);
+            return;
+          }
+          if (attempts >= maxAttempts) {
+            // Timeout
+            setRefreshing(false);
+            alert("Refresh is taking longer than expected. Check the operations list for status.");
+            return;
+          }
+          // Continue polling
+          setTimeout(poll, pollInterval);
+        } catch (error) {
+          console.error("Error polling reflection:", error);
+          setRefreshing(false);
+        }
+      };
+
+      // Start polling after a short delay
+      setTimeout(poll, pollInterval);
     } catch (error) {
       console.error("Error refreshing reflection:", error);
       alert("Error refreshing: " + (error as Error).message);
-    } finally {
       setRefreshing(false);
     }
   };

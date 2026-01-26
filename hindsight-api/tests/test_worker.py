@@ -162,6 +162,11 @@ class TestWorkerPoller:
         claimed = await poller.claim_batch()
         assert len(claimed) == 3
 
+        # ClaimedTask objects have operation_id, task_dict, schema attributes
+        for task in claimed:
+            assert task.operation_id is not None
+            assert task.task_dict is not None
+
         # Verify tasks are marked as processing with worker_id
         rows = await pool.fetch(
             "SELECT status, worker_id FROM async_operations WHERE bank_id = $1",
@@ -206,6 +211,7 @@ class TestWorkerPoller:
     async def test_execute_task_marks_completed(self, pool, clean_operations):
         """Test that successful task execution marks task as completed."""
         from hindsight_api.worker import WorkerPoller
+        from hindsight_api.worker.poller import ClaimedTask
 
         # Create a pending task
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
@@ -234,7 +240,8 @@ class TestWorkerPoller:
 
         # Execute the task
         task_dict = json.loads(payload)
-        await poller.execute_task(str(op_id), task_dict)
+        claimed_task = ClaimedTask(operation_id=str(op_id), task_dict=task_dict, schema=None)
+        await poller.execute_task(claimed_task)
 
         assert len(executed) == 1
 
@@ -250,6 +257,7 @@ class TestWorkerPoller:
     async def test_execute_task_retries_on_failure(self, pool, clean_operations):
         """Test that failed task execution triggers retry mechanism."""
         from hindsight_api.worker import WorkerPoller
+        from hindsight_api.worker.poller import ClaimedTask
 
         # Create a pending task with retry_count=0
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
@@ -277,7 +285,8 @@ class TestWorkerPoller:
 
         # Execute (should fail and retry)
         task_dict = json.loads(payload)
-        await poller.execute_task(str(op_id), task_dict)
+        claimed_task = ClaimedTask(operation_id=str(op_id), task_dict=task_dict, schema=None)
+        await poller.execute_task(claimed_task)
 
         # Verify task is back to pending with incremented retry_count
         row = await pool.fetchrow(
@@ -292,6 +301,7 @@ class TestWorkerPoller:
     async def test_execute_task_fails_after_max_retries(self, pool, clean_operations):
         """Test that task is marked failed after exceeding max retries."""
         from hindsight_api.worker import WorkerPoller
+        from hindsight_api.worker.poller import ClaimedTask
 
         # Create a task that has already used all retries
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
@@ -319,7 +329,8 @@ class TestWorkerPoller:
 
         # Execute (should fail permanently)
         task_dict = json.loads(payload)
-        await poller.execute_task(str(op_id), task_dict)
+        claimed_task = ClaimedTask(operation_id=str(op_id), task_dict=task_dict, schema=None)
+        await poller.execute_task(claimed_task)
 
         # Verify task is marked as failed
         row = await pool.fetchrow(
@@ -384,9 +395,8 @@ class TestWorkerPoller:
 
         # Should only claim the consolidation for the other bank
         assert len(claimed) == 1
-        claimed_op_id, claimed_payload = claimed[0]
-        assert claimed_op_id == str(other_op_id)
-        assert claimed_payload["bank_id"] == other_bank_id
+        assert claimed[0].operation_id == str(other_op_id)
+        assert claimed[0].task_dict["bank_id"] == other_bank_id
 
         # Verify the pending consolidation for first bank is still pending
         row = await pool.fetchrow(
@@ -437,8 +447,7 @@ class TestWorkerPoller:
 
         # Should claim the retain task (non-consolidation tasks are unaffected)
         assert len(claimed) == 1
-        claimed_op_id, _ = claimed[0]
-        assert claimed_op_id == str(retain_op_id)
+        assert claimed[0].operation_id == str(retain_op_id)
 
 
 class TestWorkerRecovery:
@@ -601,7 +610,7 @@ class TestConcurrentWorkers:
                 batch_size=5,  # Each worker tries to claim 5
             )
             claimed = await poller.claim_batch()
-            workers_claimed[worker_id] = [op_id for op_id, _ in claimed]
+            workers_claimed[worker_id] = [task.operation_id for task in claimed]
 
         # Run all workers concurrently
         await asyncio.gather(
@@ -825,3 +834,186 @@ class TestSyncTaskBackend:
 
         # Should not raise, error is logged
         await backend.submit_task({"type": "test"})
+
+
+class TestDynamicTenantDiscovery:
+    """Tests for dynamic tenant discovery via TenantExtension."""
+
+    @pytest.mark.asyncio
+    async def test_poller_discovers_tenants_dynamically(self, pool, clean_operations):
+        """Test that poller calls list_tenants() on each poll cycle."""
+        from hindsight_api.extensions.tenant import Tenant, TenantExtension
+        from hindsight_api.worker import WorkerPoller
+
+        # Create a mock tenant extension that tracks calls
+        class MockTenantExtension(TenantExtension):
+            def __init__(self):
+                self.list_tenants_calls = 0
+                self.tenants_to_return: list[Tenant] = [Tenant(schema="public")]
+
+            async def authenticate(self, context):
+                raise NotImplementedError("Not used in this test")
+
+            async def list_tenants(self) -> list[Tenant]:
+                self.list_tenants_calls += 1
+                return self.tenants_to_return
+
+        mock_extension = MockTenantExtension()
+
+        # Create pending tasks in public schema
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        for i in range(2):
+            op_id = uuid.uuid4()
+            payload = json.dumps({"type": "test_task", "index": i, "bank_id": bank_id})
+            await pool.execute(
+                """
+                INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+                VALUES ($1, $2, 'test', 'pending', $3::jsonb)
+                """,
+                op_id,
+                bank_id,
+                payload,
+            )
+
+        poller = WorkerPoller(
+            pool=pool,
+            worker_id="test-worker-1",
+            executor=lambda x: None,
+            batch_size=10,
+            tenant_extension=mock_extension,
+        )
+
+        # First claim_batch should call list_tenants
+        claimed1 = await poller.claim_batch()
+        assert mock_extension.list_tenants_calls == 1
+        assert len(claimed1) == 2
+
+        # Add more tasks
+        for i in range(2):
+            op_id = uuid.uuid4()
+            payload = json.dumps({"type": "test_task", "index": i + 10, "bank_id": bank_id})
+            await pool.execute(
+                """
+                INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+                VALUES ($1, $2, 'test', 'pending', $3::jsonb)
+                """,
+                op_id,
+                bank_id,
+                payload,
+            )
+
+        # Second claim_batch should call list_tenants again
+        claimed2 = await poller.claim_batch()
+        assert mock_extension.list_tenants_calls == 2
+        assert len(claimed2) == 2
+
+    @pytest.mark.asyncio
+    async def test_poller_picks_up_new_tenants_without_restart(self, pool, clean_operations):
+        """Test that new tenants are discovered on subsequent poll cycles."""
+        from hindsight_api.extensions.tenant import Tenant, TenantExtension
+        from hindsight_api.worker import WorkerPoller
+
+        class DynamicTenantExtension(TenantExtension):
+            def __init__(self):
+                # Start with just public
+                self.tenants: list[Tenant] = [Tenant(schema="public")]
+                self.list_tenants_calls = 0
+
+            async def authenticate(self, context):
+                raise NotImplementedError("Not used in this test")
+
+            async def list_tenants(self) -> list[Tenant]:
+                self.list_tenants_calls += 1
+                return self.tenants
+
+        dynamic_extension = DynamicTenantExtension()
+
+        # Create a task in public schema
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        op_id = uuid.uuid4()
+        payload = json.dumps({"type": "test_task", "bank_id": bank_id})
+        await pool.execute(
+            """
+            INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+            VALUES ($1, $2, 'test', 'pending', $3::jsonb)
+            """,
+            op_id,
+            bank_id,
+            payload,
+        )
+
+        poller = WorkerPoller(
+            pool=pool,
+            worker_id="test-worker-1",
+            executor=lambda x: None,
+            batch_size=10,
+            tenant_extension=dynamic_extension,
+        )
+
+        # First poll - only public schema
+        claimed1 = await poller.claim_batch()
+        assert len(claimed1) == 1
+        assert claimed1[0].schema is None  # public is represented as None
+        assert dynamic_extension.list_tenants_calls == 1
+
+        # Simulate tenant list changing (but we won't add a non-existent schema)
+        # In real world, the schema would be created before list_tenants returns it
+        # Here we just verify that list_tenants is called again
+
+        # Add another task to public
+        op_id2 = uuid.uuid4()
+        payload2 = json.dumps({"type": "test_task", "bank_id": bank_id})
+        await pool.execute(
+            """
+            INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+            VALUES ($1, $2, 'test', 'pending', $3::jsonb)
+            """,
+            op_id2,
+            bank_id,
+            payload2,
+        )
+
+        # Second poll - list_tenants should be called again
+        claimed2 = await poller.claim_batch()
+        assert len(claimed2) == 1
+        assert dynamic_extension.list_tenants_calls == 2  # Called again on second poll
+
+        # Third poll with no tasks - still calls list_tenants
+        claimed3 = await poller.claim_batch()
+        assert len(claimed3) == 0
+        assert dynamic_extension.list_tenants_calls == 3  # Called again even with no tasks
+
+    @pytest.mark.asyncio
+    async def test_poller_without_tenant_extension_uses_public(self, pool, clean_operations):
+        """Test that poller uses public schema when no tenant extension is configured."""
+        from hindsight_api.worker import WorkerPoller
+
+        # Create pending tasks
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        for i in range(3):
+            op_id = uuid.uuid4()
+            payload = json.dumps({"type": "test_task", "index": i, "bank_id": bank_id})
+            await pool.execute(
+                """
+                INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+                VALUES ($1, $2, 'test', 'pending', $3::jsonb)
+                """,
+                op_id,
+                bank_id,
+                payload,
+            )
+
+        # No tenant_extension provided
+        poller = WorkerPoller(
+            pool=pool,
+            worker_id="test-worker-1",
+            executor=lambda x: None,
+            batch_size=10,
+        )
+
+        claimed = await poller.claim_batch()
+        assert len(claimed) == 3
+
+        # All tasks should have schema=None (public)
+        for task in claimed:
+            assert task.schema is None

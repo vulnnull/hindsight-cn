@@ -261,11 +261,8 @@ export class ControlPlaneClient {
    */
   async triggerConsolidation(bankId: string) {
     return this.fetchApi<{
-      status: string;
-      processed: number;
-      created: number;
-      updated: number;
-      message: string;
+      operation_id: string;
+      deduplicated: boolean;
     }>(`/api/banks/${bankId}/consolidate`, {
       method: "POST",
     });
@@ -658,23 +655,11 @@ export class ControlPlaneClient {
   }
 
   /**
-   * Refresh a reflection (re-run source query)
+   * Refresh a reflection (re-run source query) - async operation
    */
   async refreshReflection(bankId: string, reflectionId: string) {
     return this.fetchApi<{
-      id: string;
-      bank_id: string;
-      name: string;
-      source_query: string;
-      content: string;
-      tags: string[];
-      last_refreshed_at: string;
-      created_at: string;
-      reflect_response?: {
-        text: string;
-        based_on: Record<string, Array<{ id: string; text: string; type: string }>>;
-        mental_models?: Array<{ id: string; text: string }>;
-      };
+      operation_id: string;
     }>(`/api/banks/${bankId}/reflections/${reflectionId}/refresh`, {
       method: "POST",
     });

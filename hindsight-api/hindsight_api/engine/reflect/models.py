@@ -85,6 +85,8 @@ class LLMCall(BaseModel):
 
     scope: str = Field(description="Call scope: agent_1, agent_2, final, etc.")
     duration_ms: int = Field(description="Execution time in milliseconds")
+    input_tokens: int = Field(default=0, description="Input tokens used")
+    output_tokens: int = Field(default=0, description="Output tokens used")
 
 
 class DirectiveInfo(BaseModel):
@@ -93,6 +95,14 @@ class DirectiveInfo(BaseModel):
     id: str = Field(description="Directive mental model ID")
     name: str = Field(description="Directive name")
     rules: list[str] = Field(default_factory=list, description="Directive rules/observations that were applied")
+
+
+class TokenUsageSummary(BaseModel):
+    """Total token usage across all LLM calls."""
+
+    input_tokens: int = Field(default=0, description="Total input tokens used")
+    output_tokens: int = Field(default=0, description="Total output tokens used")
+    total_tokens: int = Field(default=0, description="Total tokens (input + output)")
 
 
 class ReflectAgentResult(BaseModel):
@@ -106,6 +116,9 @@ class ReflectAgentResult(BaseModel):
     tools_called: int = Field(default=0, description="Total number of tool calls made")
     tool_trace: list[ToolCall] = Field(default_factory=list, description="Trace of all tool calls made")
     llm_trace: list[LLMCall] = Field(default_factory=list, description="Trace of all LLM calls made")
+    usage: TokenUsageSummary = Field(
+        default_factory=TokenUsageSummary, description="Total token usage across all LLM calls"
+    )
     used_memory_ids: list[str] = Field(default_factory=list, description="Validated memory IDs actually used in answer")
     used_reflection_ids: list[str] = Field(
         default_factory=list, description="Validated reflection IDs actually used in answer"

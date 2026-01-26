@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import { useRouter } from "next/navigation";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
+import { useFeatures } from "@/lib/features-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -212,6 +213,8 @@ function DispositionEditor({
 export function BankProfileView() {
   const router = useRouter();
   const { currentBank, setCurrentBank, loadBanks } = useBank();
+  const { features } = useFeatures();
+  const mentalModelsEnabled = features?.mental_models ?? false;
   const [profile, setProfile] = useState<BankProfile | null>(null);
   const [stats, setStats] = useState<BankStats | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -391,12 +394,10 @@ export function BankProfileView() {
 
     setIsConsolidating(true);
     try {
-      const result = await client.triggerConsolidation(currentBank);
+      await client.triggerConsolidation(currentBank);
+      // Reload to show the new operation in the list
       await loadData();
-      alert(
-        result.message ||
-          `Consolidation completed: ${result.created} created, ${result.updated} updated`
-      );
+      await loadOperations();
     } catch (error) {
       console.error("Error triggering consolidation:", error);
       alert("Error triggering consolidation: " + (error as Error).message);
@@ -534,20 +535,32 @@ export function BankProfileView() {
                   Edit Profile
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleTriggerConsolidation} disabled={isConsolidating}>
+                <DropdownMenuItem
+                  onClick={handleTriggerConsolidation}
+                  disabled={isConsolidating || !mentalModelsEnabled}
+                  title={!mentalModelsEnabled ? "Mental models feature is not enabled" : undefined}
+                >
                   {isConsolidating ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   ) : (
                     <Brain className="w-4 h-4 mr-2" />
                   )}
                   {isConsolidating ? "Consolidating..." : "Run Consolidation"}
+                  {!mentalModelsEnabled && (
+                    <span className="ml-auto text-xs text-muted-foreground">Off</span>
+                  )}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setShowClearMentalModelsDialog(true)}
+                  disabled={!mentalModelsEnabled}
                   className="text-amber-600 dark:text-amber-400 focus:text-amber-700 dark:focus:text-amber-300"
+                  title={!mentalModelsEnabled ? "Mental models feature is not enabled" : undefined}
                 >
                   <Trash2 className="w-4 h-4 mr-2" />
                   Clear Mental Models
+                  {!mentalModelsEnabled && (
+                    <span className="ml-auto text-xs text-muted-foreground">Off</span>
+                  )}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -649,12 +662,28 @@ export function BankProfileView() {
               {stats.nodes_by_fact_type?.experience || 0}
             </p>
           </div>
-          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-center">
-            <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wide">
+          <div
+            className={`rounded-xl p-4 text-center ${
+              mentalModelsEnabled
+                ? "bg-amber-500/10 border border-amber-500/20"
+                : "bg-muted/50 border border-muted"
+            }`}
+            title={!mentalModelsEnabled ? "Mental models feature is not enabled" : undefined}
+          >
+            <p
+              className={`text-xs font-semibold uppercase tracking-wide ${
+                mentalModelsEnabled ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+              }`}
+            >
               Mental Models
+              {!mentalModelsEnabled && <span className="ml-1 normal-case">(Off)</span>}
             </p>
-            <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
-              {stats.total_mental_models || 0}
+            <p
+              className={`text-2xl font-bold mt-1 ${
+                mentalModelsEnabled ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+              }`}
+            >
+              {mentalModelsEnabled ? stats.total_mental_models || 0 : "—"}
             </p>
           </div>
           <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-4 text-center">

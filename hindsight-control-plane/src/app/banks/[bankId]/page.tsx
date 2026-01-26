@@ -10,6 +10,7 @@ import { ThinkView } from "@/components/think-view";
 import { SearchDebugView } from "@/components/search-debug-view";
 import { BankProfileView } from "@/components/bank-profile-view";
 import { ReflectionsView } from "@/components/reflections-view";
+import { useFeatures } from "@/lib/features-context";
 
 type NavItem = "recall" | "reflect" | "data" | "documents" | "entities" | "profile";
 type DataSubTab = "world" | "experience" | "models" | "reflections";
@@ -18,10 +19,12 @@ export default function BankPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { features } = useFeatures();
 
   const bankId = params.bankId as string;
   const view = (searchParams.get("view") || "profile") as NavItem;
   const subTab = (searchParams.get("subTab") || "world") as DataSubTab;
+  const mentalModelsEnabled = features?.mental_models ?? false;
 
   const handleTabChange = (tab: NavItem) => {
     router.push(`/banks/${bankId}?view=${tab}`);
@@ -120,6 +123,11 @@ export default function BankPage() {
                       }`}
                     >
                       Mental Models
+                      {!mentalModelsEnabled && (
+                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                          Off
+                        </span>
+                      )}
                       {subTab === "models" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -143,7 +151,40 @@ export default function BankPage() {
                 <div>
                   {subTab === "world" && <DataView key="world" factType="world" />}
                   {subTab === "experience" && <DataView key="experience" factType="experience" />}
-                  {subTab === "models" && <DataView key="models" factType="mental_model" />}
+                  {subTab === "models" &&
+                    (mentalModelsEnabled ? (
+                      <DataView key="models" factType="mental_model" />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-16 text-center">
+                        <div className="text-muted-foreground mb-2">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="48"
+                            height="48"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z" />
+                            <path d="M12 8v4" />
+                            <path d="M12 16h.01" />
+                          </svg>
+                        </div>
+                        <h3 className="text-lg font-semibold text-foreground mb-1">
+                          Mental Models Not Enabled
+                        </h3>
+                        <p className="text-sm text-muted-foreground max-w-md">
+                          Mental models consolidation is disabled on this server. Set{" "}
+                          <code className="px-1 py-0.5 bg-muted rounded text-xs">
+                            HINDSIGHT_API_ENABLE_MENTAL_MODELS=true
+                          </code>{" "}
+                          to enable.
+                        </p>
+                      </div>
+                    ))}
                   {subTab === "reflections" && <ReflectionsView key="reflections" />}
                 </div>
               </div>

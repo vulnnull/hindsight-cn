@@ -233,7 +233,7 @@ pub fn refresh(
     output_format: OutputFormat,
 ) -> Result<()> {
     let spinner = if output_format == OutputFormat::Pretty {
-        Some(ui::create_spinner("Refreshing reflection..."))
+        Some(ui::create_spinner("Submitting reflection refresh..."))
     } else {
         None
     };
@@ -245,13 +245,17 @@ pub fn refresh(
     }
 
     match response {
-        Ok(reflection) => {
+        Ok(operation) => {
             if output_format == OutputFormat::Pretty {
-                ui::print_success(&format!("Reflection '{}' refreshed successfully", reflection_id));
+                ui::print_success(&format!(
+                    "Reflection refresh submitted. Operation ID: {}",
+                    operation.operation_id
+                ));
+                println!("  {} {}", ui::dim("Status:"), operation.status);
                 println!();
-                print_reflection_detail(&reflection);
+                println!("{}", ui::dim("Use 'hindsight operations get' to check the operation status."));
             } else {
-                output::print_output(&reflection, output_format)?;
+                output::print_output(&operation, output_format)?;
             }
             Ok(())
         }

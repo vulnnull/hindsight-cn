@@ -1,6 +1,6 @@
 """Built-in tenant extension implementations."""
 
-from hindsight_api.extensions.tenant import AuthenticationError, TenantContext, TenantExtension
+from hindsight_api.extensions.tenant import AuthenticationError, Tenant, TenantContext, TenantExtension
 from hindsight_api.models import RequestContext
 
 
@@ -31,3 +31,7 @@ class ApiKeyTenantExtension(TenantExtension):
         if context.api_key != self.expected_api_key:
             raise AuthenticationError("Invalid API key")
         return TenantContext(schema_name="public")
+
+    async def list_tenants(self) -> list[Tenant]:
+        """Return public schema for single-tenant setup."""
+        return [Tenant(schema="public")]

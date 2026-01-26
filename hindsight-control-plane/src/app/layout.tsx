@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { BankProvider } from "@/lib/bank-context";
+import { FeaturesProvider } from "@/lib/features-context";
 import { ThemeProvider } from "@/lib/theme-context";
 
 export const metadata: Metadata = {
@@ -20,7 +21,9 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className="bg-background text-foreground">
         <ThemeProvider>
-          <BankProvider>{children}</BankProvider>
+          <FeaturesProvider>
+            <BankProvider>{children}</BankProvider>
+          </FeaturesProvider>
         </ThemeProvider>
       </body>
     </html>

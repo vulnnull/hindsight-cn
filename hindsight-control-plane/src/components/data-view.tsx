@@ -616,10 +616,24 @@ export function DataView({ factType }: DataViewProps) {
                             <Table className="table-fixed">
                               <TableHeader>
                                 <TableRow className="bg-muted/50">
-                                  <TableHead className="w-[45%]">Memory</TableHead>
-                                  <TableHead className="w-[20%]">Entities</TableHead>
-                                  <TableHead className="w-[15%]">Occurred</TableHead>
-                                  <TableHead className="w-[15%]">Mentioned</TableHead>
+                                  <TableHead
+                                    className={factType === "mental_model" ? "w-[55%]" : "w-[45%]"}
+                                  >
+                                    {factType === "mental_model" ? "Mental Model" : "Memory"}
+                                  </TableHead>
+                                  {factType === "mental_model" ? (
+                                    <>
+                                      <TableHead className="w-[10%]">Sources</TableHead>
+                                      <TableHead className="w-[15%]">Created</TableHead>
+                                      <TableHead className="w-[15%]">Mentioned</TableHead>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <TableHead className="w-[20%]">Entities</TableHead>
+                                      <TableHead className="w-[15%]">Occurred</TableHead>
+                                      <TableHead className="w-[15%]">Mentioned</TableHead>
+                                    </>
+                                  )}
                                   <TableHead className="w-[5%]"></TableHead>
                                 </TableRow>
                               </TableHeader>
@@ -633,6 +647,12 @@ export function DataView({ factType }: DataViewProps) {
                                     : null;
                                   const mentionedDisplay = row.mentioned_at
                                     ? new Date(row.mentioned_at).toLocaleDateString("en-US", {
+                                        month: "short",
+                                        day: "numeric",
+                                      })
+                                    : null;
+                                  const createdDisplay = row.created_at
+                                    ? new Date(row.created_at).toLocaleDateString("en-US", {
                                         month: "short",
                                         day: "numeric",
                                       })
@@ -656,40 +676,62 @@ export function DataView({ factType }: DataViewProps) {
                                           </div>
                                         )}
                                       </TableCell>
-                                      <TableCell className="py-2">
-                                        {row.entities ? (
-                                          <div className="flex gap-1 flex-wrap">
-                                            {row.entities
-                                              .split(", ")
-                                              .slice(0, 2)
-                                              .map((entity: string, i: number) => (
-                                                <span
-                                                  key={i}
-                                                  className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium"
-                                                >
-                                                  {entity}
-                                                </span>
-                                              ))}
-                                            {row.entities.split(", ").length > 2 && (
-                                              <span className="text-[10px] text-muted-foreground">
-                                                +{row.entities.split(", ").length - 2}
+                                      {factType === "mental_model" ? (
+                                        <>
+                                          <TableCell className="text-xs py-2 text-foreground text-center">
+                                            {row.proof_count || 1}
+                                          </TableCell>
+                                          <TableCell className="text-xs py-2 text-foreground">
+                                            {createdDisplay || (
+                                              <span className="text-muted-foreground">-</span>
+                                            )}
+                                          </TableCell>
+                                          <TableCell className="text-xs py-2 text-foreground">
+                                            {mentionedDisplay || (
+                                              <span className="text-muted-foreground">-</span>
+                                            )}
+                                          </TableCell>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <TableCell className="py-2">
+                                            {row.entities ? (
+                                              <div className="flex gap-1 flex-wrap">
+                                                {row.entities
+                                                  .split(", ")
+                                                  .slice(0, 2)
+                                                  .map((entity: string, i: number) => (
+                                                    <span
+                                                      key={i}
+                                                      className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium"
+                                                    >
+                                                      {entity}
+                                                    </span>
+                                                  ))}
+                                                {row.entities.split(", ").length > 2 && (
+                                                  <span className="text-[10px] text-muted-foreground">
+                                                    +{row.entities.split(", ").length - 2}
+                                                  </span>
+                                                )}
+                                              </div>
+                                            ) : (
+                                              <span className="text-xs text-muted-foreground">
+                                                -
                                               </span>
                                             )}
-                                          </div>
-                                        ) : (
-                                          <span className="text-xs text-muted-foreground">-</span>
-                                        )}
-                                      </TableCell>
-                                      <TableCell className="text-xs py-2 text-foreground">
-                                        {occurredDisplay || (
-                                          <span className="text-muted-foreground">-</span>
-                                        )}
-                                      </TableCell>
-                                      <TableCell className="text-xs py-2 text-foreground">
-                                        {mentionedDisplay || (
-                                          <span className="text-muted-foreground">-</span>
-                                        )}
-                                      </TableCell>
+                                          </TableCell>
+                                          <TableCell className="text-xs py-2 text-foreground">
+                                            {occurredDisplay || (
+                                              <span className="text-muted-foreground">-</span>
+                                            )}
+                                          </TableCell>
+                                          <TableCell className="text-xs py-2 text-foreground">
+                                            {mentionedDisplay || (
+                                              <span className="text-muted-foreground">-</span>
+                                            )}
+                                          </TableCell>
+                                        </>
+                                      )}
                                       <TableCell className="py-2">
                                         <Button
                                           onClick={(e) => {

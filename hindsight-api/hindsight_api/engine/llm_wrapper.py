@@ -647,7 +647,13 @@ class LLMProvider:
                         success=True,
                     )
 
-                    return LLMToolCallResult(content=content, tool_calls=tool_calls, finish_reason=finish_reason)
+                    return LLMToolCallResult(
+                        content=content,
+                        tool_calls=tool_calls,
+                        finish_reason=finish_reason,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                    )
 
                 except APIConnectionError as e:
                     last_exception = e
@@ -797,6 +803,10 @@ class LLMProvider:
                 content = "".join(content_parts) if content_parts else None
                 finish_reason = "tool_calls" if tool_calls else "stop"
 
+                # Extract token usage
+                input_tokens = response.usage.input_tokens or 0
+                output_tokens = response.usage.output_tokens or 0
+
                 # Record metrics
                 metrics = get_metrics_collector()
                 metrics.record_llm_call(
@@ -804,12 +814,18 @@ class LLMProvider:
                     model=self.model,
                     scope=scope,
                     duration=time.time() - start_time,
-                    input_tokens=response.usage.input_tokens or 0,
-                    output_tokens=response.usage.output_tokens or 0,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
                     success=True,
                 )
 
-                return LLMToolCallResult(content=content, tool_calls=tool_calls, finish_reason=finish_reason)
+                return LLMToolCallResult(
+                    content=content,
+                    tool_calls=tool_calls,
+                    finish_reason=finish_reason,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
 
             except (APIConnectionError, APIStatusError) as e:
                 if isinstance(e, APIStatusError) and e.status_code in (401, 403):
@@ -930,7 +946,13 @@ class LLMProvider:
                     success=True,
                 )
 
-                return LLMToolCallResult(content=content, tool_calls=tool_calls, finish_reason=finish_reason)
+                return LLMToolCallResult(
+                    content=content,
+                    tool_calls=tool_calls,
+                    finish_reason=finish_reason,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
 
             except genai_errors.APIError as e:
                 if e.code in (401, 403):

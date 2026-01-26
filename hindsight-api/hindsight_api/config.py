@@ -39,6 +39,11 @@ ENV_REFLECT_LLM_API_KEY = "HINDSIGHT_API_REFLECT_LLM_API_KEY"
 ENV_REFLECT_LLM_MODEL = "HINDSIGHT_API_REFLECT_LLM_MODEL"
 ENV_REFLECT_LLM_BASE_URL = "HINDSIGHT_API_REFLECT_LLM_BASE_URL"
 
+ENV_CONSOLIDATION_LLM_PROVIDER = "HINDSIGHT_API_CONSOLIDATION_LLM_PROVIDER"
+ENV_CONSOLIDATION_LLM_API_KEY = "HINDSIGHT_API_CONSOLIDATION_LLM_API_KEY"
+ENV_CONSOLIDATION_LLM_MODEL = "HINDSIGHT_API_CONSOLIDATION_LLM_MODEL"
+ENV_CONSOLIDATION_LLM_BASE_URL = "HINDSIGHT_API_CONSOLIDATION_LLM_BASE_URL"
+
 ENV_EMBEDDINGS_PROVIDER = "HINDSIGHT_API_EMBEDDINGS_PROVIDER"
 ENV_EMBEDDINGS_LOCAL_MODEL = "HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL"
 ENV_EMBEDDINGS_TEI_URL = "HINDSIGHT_API_EMBEDDINGS_TEI_URL"
@@ -293,6 +298,11 @@ class HindsightConfig:
     reflect_llm_model: str | None
     reflect_llm_base_url: str | None
 
+    consolidation_llm_provider: str | None
+    consolidation_llm_api_key: str | None
+    consolidation_llm_model: str | None
+    consolidation_llm_base_url: str | None
+
     # Embeddings
     embeddings_provider: str
     embeddings_local_model: str
@@ -385,6 +395,10 @@ class HindsightConfig:
             reflect_llm_api_key=os.getenv(ENV_REFLECT_LLM_API_KEY) or None,
             reflect_llm_model=os.getenv(ENV_REFLECT_LLM_MODEL) or None,
             reflect_llm_base_url=os.getenv(ENV_REFLECT_LLM_BASE_URL) or None,
+            consolidation_llm_provider=os.getenv(ENV_CONSOLIDATION_LLM_PROVIDER) or None,
+            consolidation_llm_api_key=os.getenv(ENV_CONSOLIDATION_LLM_API_KEY) or None,
+            consolidation_llm_model=os.getenv(ENV_CONSOLIDATION_LLM_MODEL) or None,
+            consolidation_llm_base_url=os.getenv(ENV_CONSOLIDATION_LLM_BASE_URL) or None,
             # Embeddings
             embeddings_provider=os.getenv(ENV_EMBEDDINGS_PROVIDER, DEFAULT_EMBEDDINGS_PROVIDER),
             embeddings_local_model=os.getenv(ENV_EMBEDDINGS_LOCAL_MODEL, DEFAULT_EMBEDDINGS_LOCAL_MODEL),
@@ -531,6 +545,10 @@ class HindsightConfig:
             reflect_provider = self.reflect_llm_provider or self.llm_provider
             reflect_model = self.reflect_llm_model or self.llm_model
             logger.info(f"LLM (reflect): provider={reflect_provider}, model={reflect_model}")
+        if self.consolidation_llm_provider or self.consolidation_llm_model:
+            consolidation_provider = self.consolidation_llm_provider or self.llm_provider
+            consolidation_model = self.consolidation_llm_model or self.llm_model
+            logger.info(f"LLM (consolidation): provider={consolidation_provider}, model={consolidation_model}")
         logger.info(f"Embeddings: provider={self.embeddings_provider}")
         logger.info(f"Reranker: provider={self.reranker_provider}")
         logger.info(f"Graph retriever: {self.graph_retriever}")

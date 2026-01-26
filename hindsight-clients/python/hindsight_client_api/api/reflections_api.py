@@ -19,6 +19,7 @@ from typing_extensions import Annotated
 from pydantic import Field, StrictStr, field_validator
 from typing import Any, List, Optional
 from typing_extensions import Annotated
+from hindsight_client_api.models.async_operation_submit_response import AsyncOperationSubmitResponse
 from hindsight_client_api.models.create_reflection_request import CreateReflectionRequest
 from hindsight_client_api.models.create_reflection_response import CreateReflectionResponse
 from hindsight_client_api.models.reflection_list_response import ReflectionListResponse
@@ -1300,10 +1301,10 @@ class ReflectionsApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ReflectionResponse:
+    ) -> AsyncOperationSubmitResponse:
         """Refresh reflection
 
-        Re-run the source query through reflect and update the content.
+        Submit an async task to re-run the source query through reflect and update the content.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1344,7 +1345,7 @@ class ReflectionsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ReflectionResponse",
+            '200': "AsyncOperationSubmitResponse",
             '422': "HTTPValidationError",
         }
         response_data = await self.api_client.call_api(
@@ -1376,10 +1377,10 @@ class ReflectionsApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[ReflectionResponse]:
+    ) -> ApiResponse[AsyncOperationSubmitResponse]:
         """Refresh reflection
 
-        Re-run the source query through reflect and update the content.
+        Submit an async task to re-run the source query through reflect and update the content.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1420,7 +1421,7 @@ class ReflectionsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ReflectionResponse",
+            '200': "AsyncOperationSubmitResponse",
             '422': "HTTPValidationError",
         }
         response_data = await self.api_client.call_api(
@@ -1455,7 +1456,7 @@ class ReflectionsApi:
     ) -> RESTResponseType:
         """Refresh reflection
 
-        Re-run the source query through reflect and update the content.
+        Submit an async task to re-run the source query through reflect and update the content.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1496,7 +1497,7 @@ class ReflectionsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ReflectionResponse",
+            '200': "AsyncOperationSubmitResponse",
             '422': "HTTPValidationError",
         }
         response_data = await self.api_client.call_api(

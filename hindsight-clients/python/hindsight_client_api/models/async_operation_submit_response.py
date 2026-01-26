@@ -17,18 +17,18 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, StrictStr
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ConsolidationResponse(BaseModel):
+class AsyncOperationSubmitResponse(BaseModel):
     """
-    Response model for consolidation trigger endpoint.
+    Response model for submitting an async operation.
     """ # noqa: E501
-    operation_id: StrictStr = Field(description="ID of the async consolidation operation")
-    deduplicated: Optional[StrictBool] = Field(default=False, description="True if an existing pending task was reused")
-    __properties: ClassVar[List[str]] = ["operation_id", "deduplicated"]
+    operation_id: StrictStr
+    status: StrictStr
+    __properties: ClassVar[List[str]] = ["operation_id", "status"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -48,7 +48,7 @@ class ConsolidationResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ConsolidationResponse from a JSON string"""
+        """Create an instance of AsyncOperationSubmitResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,7 +73,7 @@ class ConsolidationResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ConsolidationResponse from a dict"""
+        """Create an instance of AsyncOperationSubmitResponse from a dict"""
         if obj is None:
             return None
 
@@ -82,7 +82,7 @@ class ConsolidationResponse(BaseModel):
 
         _obj = cls.model_validate({
             "operation_id": obj.get("operation_id"),
-            "deduplicated": obj.get("deduplicated") if obj.get("deduplicated") is not None else False
+            "status": obj.get("status")
         })
         return _obj
 

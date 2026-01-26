@@ -38,19 +38,11 @@ export function MemoryDetailPanel({
       return;
     }
 
-    const isMentalModel = memory?.fact_type === "mental_model" || memory?.type === "mental_model";
-
     setLoading(true);
 
-    const fetchPromise = isMentalModel
-      ? client.getMentalModel(bankId, memoryId).then((data) => ({
-          ...data,
-          fact_type: "mental_model",
-          type: "mental_model",
-        }))
-      : client.getMemory(memoryId, bankId);
-
-    fetchPromise
+    // Use getMemory for all memory types - it now returns source_memories for mental models
+    client
+      .getMemory(memoryId, bankId)
       .then((data) => {
         setFullMemory(data);
       })
@@ -66,6 +58,8 @@ export function MemoryDetailPanel({
 
   // Use full memory data if available, otherwise fall back to the partial data passed in
   const displayMemory = fullMemory || memory;
+  const isMentalModel =
+    displayMemory?.fact_type === "mental_model" || displayMemory?.type === "mental_model";
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -133,8 +127,8 @@ export function MemoryDetailPanel({
                 </div>
               </div>
 
-              {/* Context */}
-              {displayMemory.context && (
+              {/* Context (not shown for mental models) */}
+              {displayMemory.context && !isMentalModel && (
                 <div className="p-4 bg-muted/50 rounded-lg">
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
                     Context
@@ -520,6 +514,49 @@ export function MemoryDetailPanel({
                 )}
               </div>
             )}
+
+            {/* Source Memories (for mental models) */}
+            {displayMemory.source_memories && displayMemory.source_memories.length > 0 && (
+              <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
+                <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-2`}>
+                  Source Memories ({displayMemory.source_memories.length})
+                </div>
+                <div className="space-y-2">
+                  {displayMemory.source_memories.map((source: any, i: number) => (
+                    <div
+                      key={source.id || i}
+                      className="p-2 bg-background/50 rounded border border-border/50"
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] flex-shrink-0 ${
+                            source.type === "experience"
+                              ? "bg-green-500/10 text-green-600"
+                              : "bg-blue-500/10 text-blue-600"
+                          }`}
+                        >
+                          {source.type}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-5 text-[10px] px-2"
+                          onClick={() => setSourceMemoryModalId(source.id)}
+                        >
+                          View
+                        </Button>
+                      </div>
+                      <p className={`${textSize} mb-1`}>{source.text}</p>
+                      {source.context && (
+                        <p className="text-[10px] text-muted-foreground italic">
+                          Context: {source.context}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -528,6 +565,12 @@ export function MemoryDetailPanel({
       {modalType && modalId && (
         <DocumentChunkModal type={modalType} id={modalId} onClose={closeModal} />
       )}
+
+      {/* Source Memory Modal */}
+      <MemoryDetailModal
+        memoryId={sourceMemoryModalId}
+        onClose={() => setSourceMemoryModalId(null)}
+      />
     </>
   );
 }

@@ -10,10 +10,11 @@ Uses hierarchical retrieval:
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from .models import DirectiveInfo, LLMCall, ReflectAgentResult, ToolCall
+from .models import DirectiveInfo, LLMCall, ReflectAgentResult, TokenUsageSummary, ToolCall
 from .prompts import FINAL_SYSTEM_PROMPT, _extract_directive_rules, build_final_prompt, build_system_prompt_for_tools
 from .tools_schema import get_reflect_tools
 
@@ -77,12 +78,27 @@ def _is_done_tool(name: str) -> bool:
     return _normalize_tool_name(name) == "done"
 
 
+# Pattern to match done() call as text - handles done({...}) with nested JSON
+_DONE_CALL_PATTERN = re.compile(r"done\s*\(\s*\{.*$", re.DOTALL)
+
+
+def _clean_answer_text(text: str) -> str:
+    """Clean up answer text by removing any done() tool call syntax.
+
+    Some LLMs output the done() call as text instead of a proper tool call.
+    This strips out patterns like: done({"answer": "...", ...})
+    """
+    # Remove done() call pattern from the end of the text
+    cleaned = _DONE_CALL_PATTERN.sub("", text).strip()
+    return cleaned if cleaned else text
+
+
 async def _generate_structured_output(
     answer: str,
     response_schema: dict,
     llm_config: "LLMProvider",
     reflect_id: str,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, int, int]:
     """Generate structured output from an answer using the provided JSON schema.
 
     Args:
@@ -92,7 +108,8 @@ async def _generate_structured_output(
         reflect_id: Reflect ID for logging
 
     Returns:
-        Structured output dict if successful, None otherwise
+        Tuple of (structured_output, input_tokens, output_tokens).
+        structured_output is None if generation fails.
     """
     try:
         from typing import Any as TypingAny
@@ -149,7 +166,7 @@ Return ONLY a valid JSON object that matches this exact schema. Pay special atte
 
 Do not include any explanation, only the JSON object."""
 
-        structured_result = await llm_config.call(
+        structured_result, usage = await llm_config.call(
             messages=[
                 {
                     "role": "system",
@@ -160,6 +177,7 @@ Do not include any explanation, only the JSON object."""
             response_format=DynamicModel,
             scope="reflect_structured",
             skip_validation=True,  # We'll handle the dict ourselves
+            return_usage=True,
         )
 
         # Convert to dict
@@ -172,11 +190,11 @@ Do not include any explanation, only the JSON object."""
             structured_output = json.loads(str(structured_result))
 
         logger.info(f"[REFLECT {reflect_id}] Generated structured output with {len(structured_output)} fields")
-        return structured_output
+        return structured_output, usage.input_tokens, usage.output_tokens
 
     except Exception as e:
         logger.warning(f"[REFLECT {reflect_id}] Failed to generate structured output: {e}")
-        return None
+        return None, 0, 0
 
 
 async def run_reflect_agent(
@@ -246,13 +264,32 @@ async def run_reflect_agent(
     llm_trace: list[dict[str, Any]] = []
     context_history: list[dict[str, Any]] = []  # For final prompt fallback
 
+    # Token usage tracking - accumulate across all LLM calls
+    total_input_tokens = 0
+    total_output_tokens = 0
+
     # Track available IDs for validation (prevents hallucinated citations)
     available_memory_ids: set[str] = set()
     available_reflection_ids: set[str] = set()
     available_mental_model_ids: set[str] = set()
 
     def _get_llm_trace() -> list[LLMCall]:
-        return [LLMCall(scope=c["scope"], duration_ms=c["duration_ms"]) for c in llm_trace]
+        return [
+            LLMCall(
+                scope=c["scope"],
+                duration_ms=c["duration_ms"],
+                input_tokens=c.get("input_tokens", 0),
+                output_tokens=c.get("output_tokens", 0),
+            )
+            for c in llm_trace
+        ]
+
+    def _get_usage() -> TokenUsageSummary:
+        return TokenUsageSummary(
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            total_tokens=total_input_tokens + total_output_tokens,
+        )
 
     def _log_completion(answer: str, iterations: int, forced: bool = False):
         elapsed_ms = int((time.time() - start_time) * 1000)
@@ -286,21 +323,36 @@ async def run_reflect_agent(
             # Force text response on last iteration - no tools
             prompt = build_final_prompt(query, context_history, bank_profile, context)
             llm_start = time.time()
-            response = await llm_config.call(
+            response, usage = await llm_config.call(
                 messages=[
                     {"role": "system", "content": FINAL_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
                 scope="reflect_agent_final",
                 max_completion_tokens=max_tokens,
+                return_usage=True,
             )
-            llm_trace.append({"scope": "final", "duration_ms": int((time.time() - llm_start) * 1000)})
-            answer = response.strip()
+            llm_duration = int((time.time() - llm_start) * 1000)
+            total_input_tokens += usage.input_tokens
+            total_output_tokens += usage.output_tokens
+            llm_trace.append(
+                {
+                    "scope": "final",
+                    "duration_ms": llm_duration,
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                }
+            )
+            answer = _clean_answer_text(response.strip())
 
             # Generate structured output if schema provided
             structured_output = None
             if response_schema and answer:
-                structured_output = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
+                structured_output, struct_in, struct_out = await _generate_structured_output(
+                    answer, response_schema, llm_config, reflect_id
+                )
+                total_input_tokens += struct_in
+                total_output_tokens += struct_out
 
             _log_completion(answer, iteration + 1, forced=True)
             return ReflectAgentResult(
@@ -310,6 +362,7 @@ async def run_reflect_agent(
                 tools_called=total_tools_called,
                 tool_trace=tool_trace,
                 llm_trace=_get_llm_trace(),
+                usage=_get_usage(),
                 directives_applied=directives_applied,
             )
 
@@ -324,7 +377,16 @@ async def run_reflect_agent(
                 tool_choice="required" if iteration == 0 else "auto",  # Force tool use on first iteration
             )
             llm_duration = int((time.time() - llm_start) * 1000)
-            llm_trace.append({"scope": f"agent_{iteration + 1}", "duration_ms": llm_duration})
+            total_input_tokens += result.input_tokens
+            total_output_tokens += result.output_tokens
+            llm_trace.append(
+                {
+                    "scope": f"agent_{iteration + 1}",
+                    "duration_ms": llm_duration,
+                    "input_tokens": result.input_tokens,
+                    "output_tokens": result.output_tokens,
+                }
+            )
 
         except Exception as e:
             err_duration = int((time.time() - llm_start) * 1000)
@@ -338,21 +400,36 @@ async def run_reflect_agent(
                 continue
             prompt = build_final_prompt(query, context_history, bank_profile, context)
             llm_start = time.time()
-            response = await llm_config.call(
+            response, usage = await llm_config.call(
                 messages=[
                     {"role": "system", "content": FINAL_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
                 scope="reflect_agent_final",
                 max_completion_tokens=max_tokens,
+                return_usage=True,
             )
-            llm_trace.append({"scope": "final", "duration_ms": int((time.time() - llm_start) * 1000)})
-            answer = response.strip()
+            llm_duration = int((time.time() - llm_start) * 1000)
+            total_input_tokens += usage.input_tokens
+            total_output_tokens += usage.output_tokens
+            llm_trace.append(
+                {
+                    "scope": "final",
+                    "duration_ms": llm_duration,
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                }
+            )
+            answer = _clean_answer_text(response.strip())
 
             # Generate structured output if schema provided
             structured_output = None
             if response_schema and answer:
-                structured_output = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
+                structured_output, struct_in, struct_out = await _generate_structured_output(
+                    answer, response_schema, llm_config, reflect_id
+                )
+                total_input_tokens += struct_in
+                total_output_tokens += struct_out
 
             _log_completion(answer, iteration + 1, forced=True)
             return ReflectAgentResult(
@@ -362,20 +439,23 @@ async def run_reflect_agent(
                 tools_called=total_tools_called,
                 tool_trace=tool_trace,
                 llm_trace=_get_llm_trace(),
+                usage=_get_usage(),
                 directives_applied=directives_applied,
             )
 
         # No tool calls - LLM wants to respond with text
         if not result.tool_calls:
             if result.content:
-                answer = result.content.strip()
+                answer = _clean_answer_text(result.content.strip())
 
                 # Generate structured output if schema provided
                 structured_output = None
                 if response_schema and answer:
-                    structured_output = await _generate_structured_output(
+                    structured_output, struct_in, struct_out = await _generate_structured_output(
                         answer, response_schema, llm_config, reflect_id
                     )
+                    total_input_tokens += struct_in
+                    total_output_tokens += struct_out
 
                 _log_completion(answer, iteration + 1)
                 return ReflectAgentResult(
@@ -385,26 +465,42 @@ async def run_reflect_agent(
                     tools_called=total_tools_called,
                     tool_trace=tool_trace,
                     llm_trace=_get_llm_trace(),
+                    usage=_get_usage(),
                     directives_applied=directives_applied,
                 )
             # Empty response, force final
             prompt = build_final_prompt(query, context_history, bank_profile, context)
             llm_start = time.time()
-            response = await llm_config.call(
+            response, usage = await llm_config.call(
                 messages=[
                     {"role": "system", "content": FINAL_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
                 scope="reflect_agent_final",
                 max_completion_tokens=max_tokens,
+                return_usage=True,
             )
-            llm_trace.append({"scope": "final", "duration_ms": int((time.time() - llm_start) * 1000)})
-            answer = response.strip()
+            llm_duration = int((time.time() - llm_start) * 1000)
+            total_input_tokens += usage.input_tokens
+            total_output_tokens += usage.output_tokens
+            llm_trace.append(
+                {
+                    "scope": "final",
+                    "duration_ms": llm_duration,
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                }
+            )
+            answer = _clean_answer_text(response.strip())
 
             # Generate structured output if schema provided
             structured_output = None
             if response_schema and answer:
-                structured_output = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
+                structured_output, struct_in, struct_out = await _generate_structured_output(
+                    answer, response_schema, llm_config, reflect_id
+                )
+                total_input_tokens += struct_in
+                total_output_tokens += struct_out
 
             _log_completion(answer, iteration + 1, forced=True)
             return ReflectAgentResult(
@@ -414,6 +510,7 @@ async def run_reflect_agent(
                 tools_called=total_tools_called,
                 tool_trace=tool_trace,
                 llm_trace=_get_llm_trace(),
+                usage=_get_usage(),
                 directives_applied=directives_applied,
             )
 
@@ -456,6 +553,7 @@ async def run_reflect_agent(
                 total_tools_called,
                 tool_trace,
                 _get_llm_trace(),
+                _get_usage(),
                 _log_completion,
                 reflect_id,
                 directives_applied=directives_applied,
@@ -577,6 +675,7 @@ async def run_reflect_agent(
         tools_called=total_tools_called,
         tool_trace=tool_trace,
         llm_trace=_get_llm_trace(),
+        usage=_get_usage(),
         directives_applied=directives_applied,
     )
 
@@ -602,6 +701,7 @@ async def _process_done_tool(
     total_tools_called: int,
     tool_trace: list[ToolCall],
     llm_trace: list[LLMCall],
+    usage: TokenUsageSummary,
     log_completion: Callable,
     reflect_id: str,
     directives_applied: list[DirectiveInfo],
@@ -622,8 +722,17 @@ async def _process_done_tool(
 
     # Generate structured output if schema provided
     structured_output = None
+    final_usage = usage
     if response_schema and llm_config and answer:
-        structured_output = await _generate_structured_output(answer, response_schema, llm_config, reflect_id)
+        structured_output, struct_in, struct_out = await _generate_structured_output(
+            answer, response_schema, llm_config, reflect_id
+        )
+        # Add structured output tokens to usage
+        final_usage = TokenUsageSummary(
+            input_tokens=usage.input_tokens + struct_in,
+            output_tokens=usage.output_tokens + struct_out,
+            total_tokens=usage.total_tokens + struct_in + struct_out,
+        )
 
     log_completion(answer, iterations)
     return ReflectAgentResult(
@@ -633,6 +742,7 @@ async def _process_done_tool(
         tools_called=total_tools_called,
         tool_trace=tool_trace,
         llm_trace=llm_trace,
+        usage=final_usage,
         used_memory_ids=used_memory_ids,
         used_reflection_ids=used_reflection_ids,
         used_mental_model_ids=used_mental_model_ids,

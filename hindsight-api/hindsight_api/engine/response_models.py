@@ -28,6 +28,8 @@ class LLMToolCallResult(BaseModel):
     content: str | None = Field(default=None, description="Text content if any")
     tool_calls: list[LLMToolCall] = Field(default_factory=list, description="Tool calls requested by the LLM")
     finish_reason: str | None = Field(default=None, description="Reason the LLM stopped: 'stop', 'tool_calls', etc.")
+    input_tokens: int = Field(default=0, description="Input tokens used in this call")
+    output_tokens: int = Field(default=0, description="Output tokens used in this call")
 
 
 class ToolCallTrace(BaseModel):

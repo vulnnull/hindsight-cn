@@ -28,6 +28,18 @@ class TenantContext:
     schema_name: str
 
 
+@dataclass
+class Tenant:
+    """
+    Represents a tenant for worker discovery.
+
+    Used by list_tenants() to return tenant information including
+    the PostgreSQL schema name for database operations.
+    """
+
+    schema: str
+
+
 class TenantExtension(Extension, ABC):
     """
     Extension for multi-tenancy and API key authentication.
@@ -59,5 +71,19 @@ class TenantExtension(Extension, ABC):
 
         Raises:
             AuthenticationError: If authentication fails.
+        """
+        ...
+
+    @abstractmethod
+    async def list_tenants(self) -> list[Tenant]:
+        """
+        List all tenants that should be processed by workers.
+
+        This method is used by the worker to discover all tenants that need
+        task polling. Workers will poll for pending tasks in each tenant's schema.
+
+        Returns:
+            List of Tenant objects containing schema information.
+            For single-tenant setups, return [Tenant(schema="public")].
         """
         ...

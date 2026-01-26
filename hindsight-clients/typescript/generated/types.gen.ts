@@ -25,6 +25,22 @@ export type AddBackgroundRequest = {
 };
 
 /**
+ * AsyncOperationSubmitResponse
+ *
+ * Response model for submitting an async operation.
+ */
+export type AsyncOperationSubmitResponse = {
+  /**
+   * Operation Id
+   */
+  operation_id: string;
+  /**
+   * Status
+   */
+  status: string;
+};
+
+/**
  * BackgroundResponse
  *
  * Response model for background update. Deprecated: use MissionResponse instead.
@@ -295,35 +311,17 @@ export type ChunkResponse = {
  */
 export type ConsolidationResponse = {
   /**
-   * Status
+   * Operation Id
    *
-   * Status of the consolidation (completed or queued)
+   * ID of the async consolidation operation
    */
-  status: string;
+  operation_id: string;
   /**
-   * Processed
+   * Deduplicated
    *
-   * Number of memories processed
+   * True if an existing pending task was reused
    */
-  processed: number;
-  /**
-   * Created
-   *
-   * Number of mental models created
-   */
-  created: number;
-  /**
-   * Updated
-   *
-   * Number of mental models updated
-   */
-  updated: number;
-  /**
-   * Message
-   *
-   * Human-readable summary
-   */
-  message: string;
+  deduplicated?: boolean;
 };
 
 /**
@@ -2486,7 +2484,7 @@ export type RefreshReflectionResponses = {
   /**
    * Successful Response
    */
-  200: ReflectionResponse;
+  200: AsyncOperationSubmitResponse;
 };
 
 export type RefreshReflectionResponse =
