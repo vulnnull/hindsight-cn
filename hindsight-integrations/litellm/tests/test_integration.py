@@ -1,8 +1,6 @@
 """Integration tests for hindsight-litellm."""
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from typing import List, Dict, Any
 
 from hindsight_litellm import (
     configure,
@@ -15,8 +13,6 @@ from hindsight_litellm import (
     get_config,
     is_configured,
     reset_config,
-    HindsightConfig,
-    HindsightDefaults,
     MemoryInjectionMode,
 )
 from hindsight_litellm.callbacks import HindsightCallback
@@ -129,11 +125,12 @@ class TestEnableDisable:
         with pytest.raises(RuntimeError, match="not configured"):
             enable()
 
-    def test_enable_without_bank_id_raises(self):
-        """Test enable raises error without bank_id."""
+    def test_enable_with_default_bank_id_works(self):
+        """Test enable works with default bank_id (no explicit bank_id required)."""
         configure(hindsight_api_url="http://localhost:8888")
-        with pytest.raises(RuntimeError, match="bank_id not set"):
-            enable()
+        # Should work - configure() provides default bank_id="default"
+        enable()
+        assert is_enabled() is True
 
     def test_enable_sets_enabled_flag(self):
         """Test enable sets the enabled flag."""
@@ -209,7 +206,10 @@ class TestCallback:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "What's in this image?"},
-                    {"type": "image_url", "image_url": {"url": "http://example.com/img.png"}},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "http://example.com/img.png"},
+                    },
                 ],
             },
         ]
@@ -294,7 +294,9 @@ class TestCallback:
         ]
         memory_context = "# Relevant Memories\n1. User is John"
 
-        result = callback._inject_memories_into_messages(messages, memory_context, config)
+        result = callback._inject_memories_into_messages(
+            messages, memory_context, config
+        )
 
         assert len(result) == 2
         assert result[0]["role"] == "system"
@@ -319,7 +321,9 @@ class TestCallback:
         ]
         memory_context = "# Relevant Memories\n1. User is John"
 
-        result = callback._inject_memories_into_messages(messages, memory_context, config)
+        result = callback._inject_memories_into_messages(
+            messages, memory_context, config
+        )
 
         assert len(result) == 2
         assert result[0]["role"] == "system"
@@ -343,7 +347,9 @@ class TestCallback:
         ]
         memory_context = "# Relevant Memories\n1. User is John"
 
-        result = callback._inject_memories_into_messages(messages, memory_context, config)
+        result = callback._inject_memories_into_messages(
+            messages, memory_context, config
+        )
 
         assert len(result) == 1
         assert result[0]["role"] == "user"
@@ -522,6 +528,7 @@ class TestFactTypes:
         defaults = set_defaults(bank_id="test-agent")
 
         assert defaults.fact_types is None
+
 
 class TestSetDefaults:
     """Tests for set_defaults functionality."""

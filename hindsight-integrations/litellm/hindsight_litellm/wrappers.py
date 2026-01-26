@@ -10,16 +10,19 @@ integration with native client libraries.
 import logging
 import os
 import threading
-from typing import Any, Dict, List, Optional, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
-# Default Hindsight API URL (production)
-DEFAULT_HINDSIGHT_API_URL = "https://api.hindsight.vectorize.io"
-DEFAULT_BANK_ID = "default"
-HINDSIGHT_API_KEY_ENV = "HINDSIGHT_API_KEY"
-
-from .config import get_config, get_defaults, is_configured, HindsightConfig
-
+from .config import (
+    DEFAULT_BANK_ID,
+    DEFAULT_HINDSIGHT_API_URL,
+    HINDSIGHT_API_KEY_ENV,
+    HindsightCallSettings,
+    _merge_call_settings as _merge_settings,
+    get_config,
+    get_defaults,
+)
 
 # Background thread support for async retain
 _retain_errors: List[Exception] = []
@@ -36,6 +39,7 @@ def _get_client(api_url: str, api_key: Optional[str] = None):
     calls causes asyncio context issues.
     """
     from hindsight_client import Hindsight
+
     return Hindsight(base_url=api_url, api_key=api_key, timeout=30.0)
 
 
@@ -47,6 +51,7 @@ def _close_client():
 @dataclass
 class RecallResult:
     """A single memory recall result."""
+
     text: str
     fact_type: str
     weight: float
@@ -59,6 +64,7 @@ class RecallResult:
 @dataclass
 class RecallDebugInfo:
     """Debug information from a recall operation."""
+
     query: str
     bank_id: str
     budget: str
@@ -71,6 +77,7 @@ class RecallDebugInfo:
 @dataclass
 class RecallResponse:
     """Response from a recall operation, including results and optional debug info."""
+
     results: List[RecallResult]
     debug: Optional[RecallDebugInfo] = None
 
@@ -104,7 +111,7 @@ def recall(
         query: The query string to search memories for
         bank_id: Override the configured bank_id. For multi-user support,
             use different bank_ids per user (e.g., f"user-{user_id}")
-        fact_types: Filter by fact types (world, agent, opinion, observation)
+        fact_types: Filter by fact types (world, experience, mental_model)
         budget: Recall budget level (low, mid, high) - controls how many memories are returned
         max_tokens: Maximum tokens for memory context
         hindsight_api_url: Override the configured API URL
@@ -125,7 +132,6 @@ def recall(
         >>> for m in memories:
         ...     print(f"- [{m.fact_type}] {m.text}")
         - [world] User is building a FastAPI project
-        - [opinion] User prefers Python over JavaScript
         >>>
         >>> # With verbose mode, access debug info
         >>> configure(bank_id="my-agent", verbose=True)
@@ -166,24 +172,30 @@ def recall(
         recall_results = []
         if results:
             for r in results:
-                if hasattr(r, 'text'):
+                if hasattr(r, "text"):
                     # Object with attributes
-                    fact_type = getattr(r, 'type', None) or getattr(r, 'fact_type', 'unknown')
-                    recall_results.append(RecallResult(
-                        text=r.text,
-                        fact_type=fact_type,
-                        weight=getattr(r, 'weight', 0.0),
-                        metadata=getattr(r, 'metadata', None),
-                    ))
+                    fact_type = getattr(r, "type", None) or getattr(
+                        r, "fact_type", "unknown"
+                    )
+                    recall_results.append(
+                        RecallResult(
+                            text=r.text,
+                            fact_type=fact_type,
+                            weight=getattr(r, "weight", 0.0),
+                            metadata=getattr(r, "metadata", None),
+                        )
+                    )
                 elif isinstance(r, dict):
                     # Dict from API response - API returns 'type' not 'fact_type'
-                    fact_type = r.get('type') or r.get('fact_type', 'unknown')
-                    recall_results.append(RecallResult(
-                        text=r.get('text', str(r)),
-                        fact_type=fact_type,
-                        weight=r.get('weight', 0.0),
-                        metadata=r.get('metadata'),
-                    ))
+                    fact_type = r.get("type") or r.get("fact_type", "unknown")
+                    recall_results.append(
+                        RecallResult(
+                            text=r.get("text", str(r)),
+                            fact_type=fact_type,
+                            weight=r.get("weight", 0.0),
+                            metadata=r.get("metadata"),
+                        )
+                    )
 
         # Include debug info if verbose
         debug_info = None
@@ -227,6 +239,7 @@ async def arecall(
     See recall() for full documentation.
     """
     import asyncio
+
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None,
@@ -237,13 +250,14 @@ async def arecall(
             budget=budget,
             max_tokens=max_tokens,
             hindsight_api_url=hindsight_api_url,
-        )
+        ),
     )
 
 
 @dataclass
 class ReflectDebugInfo:
     """Debug information from a reflect operation."""
+
     query: str
     bank_id: str
     budget: str
@@ -254,6 +268,7 @@ class ReflectDebugInfo:
 @dataclass
 class ReflectResult:
     """Result from a reflect operation."""
+
     text: str
     based_on: Optional[Dict[str, List[Any]]] = None
     debug: Optional[ReflectDebugInfo] = None
@@ -329,8 +344,8 @@ def reflect(
         result = client.reflect(**reflect_kwargs)
 
         # Convert to ReflectResult
-        text = result.text if hasattr(result, 'text') else str(result)
-        based_on = getattr(result, 'based_on', None)
+        text = result.text if hasattr(result, "text") else str(result)
+        based_on = getattr(result, "based_on", None)
 
         # Include debug info if verbose
         debug_info = None
@@ -372,6 +387,7 @@ async def areflect(
     See reflect() for full documentation.
     """
     import asyncio
+
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None,
@@ -382,17 +398,19 @@ async def areflect(
             context=context,
             response_schema=response_schema,
             hindsight_api_url=hindsight_api_url,
-        )
+        ),
     )
 
 
 @dataclass
 class RetainDebugInfo:
     """Debug information from a retain operation."""
+
     content: str
     bank_id: str
     context: Optional[str]
     document_id: Optional[str]
+    tags: Optional[List[str]]
     metadata: Optional[Dict[str, str]]
     api_url: str
 
@@ -400,6 +418,7 @@ class RetainDebugInfo:
 @dataclass
 class RetainResult:
     """Result from a retain operation."""
+
     success: bool
     items_count: int = 0
     debug: Optional[RetainDebugInfo] = None
@@ -414,6 +433,7 @@ def _retain_sync(
     target_bank_id: str,
     context: Optional[str],
     target_document_id: Optional[str],
+    tags: Optional[List[str]],
     metadata: Optional[Dict[str, str]],
     verbose: bool,
     api_key: Optional[str] = None,
@@ -424,18 +444,23 @@ def _retain_sync(
         # Create fresh client for this operation
         client = _get_client(api_url, api_key)
 
+        # Build retain kwargs
+        retain_kwargs = {
+            "bank_id": target_bank_id,
+            "content": content,
+            "context": context,
+            "document_id": target_document_id,
+            "metadata": metadata,
+        }
+        if tags:
+            retain_kwargs["tags"] = tags
+
         # Call retain API
-        result = client.retain(
-            bank_id=target_bank_id,
-            content=content,
-            context=context,
-            document_id=target_document_id,
-            metadata=metadata,
-        )
+        result = client.retain(**retain_kwargs)
 
         # Check success
-        success = getattr(result, 'success', True)
-        items_count = getattr(result, 'items_count', 1)
+        success = getattr(result, "success", True)
+        items_count = getattr(result, "items_count", 1)
 
         # Include debug info if verbose
         debug_info = None
@@ -446,6 +471,7 @@ def _retain_sync(
                 bank_id=target_bank_id,
                 context=context,
                 document_id=target_document_id,
+                tags=tags,
                 metadata=metadata,
                 api_url=api_url,
             )
@@ -472,6 +498,7 @@ def _retain_background(
     target_bank_id: str,
     context: Optional[str],
     target_document_id: Optional[str],
+    tags: Optional[List[str]],
     metadata: Optional[Dict[str, str]],
     verbose: bool,
     api_key: Optional[str] = None,
@@ -485,6 +512,7 @@ def _retain_background(
             target_bank_id=target_bank_id,
             context=context,
             target_document_id=target_document_id,
+            tags=tags,
             metadata=metadata,
             verbose=verbose,
             api_key=api_key,
@@ -523,6 +551,7 @@ def retain(
     bank_id: Optional[str] = None,
     context: Optional[str] = None,
     document_id: Optional[str] = None,
+    tags: Optional[List[str]] = None,
     metadata: Optional[Dict[str, str]] = None,
     hindsight_api_url: Optional[str] = None,
     sync: bool = False,
@@ -539,6 +568,7 @@ def retain(
             use different bank_ids per user (e.g., f"user-{user_id}")
         context: Context description for the memory (e.g., "customer_feedback")
         document_id: Optional document ID for grouping related memories
+        tags: Tags for visibility scoping (e.g., ["user:alice", "session:123"])
         metadata: Optional key-value metadata to attach to the memory
         hindsight_api_url: Override the configured API URL
         sync: If True, block until storage completes. If False (default),
@@ -573,6 +603,7 @@ def retain(
     api_url = hindsight_api_url or (config.hindsight_api_url if config else None)
     target_bank_id = bank_id or (defaults.bank_id if defaults else None)
     target_document_id = document_id or (defaults.document_id if defaults else None)
+    target_tags = tags or (defaults.tags if defaults else None)
     verbose = config.verbose if config else False
 
     if not api_url or not target_bank_id:
@@ -590,6 +621,7 @@ def retain(
             target_bank_id=target_bank_id,
             context=context,
             target_document_id=target_document_id,
+            tags=target_tags,
             metadata=metadata,
             verbose=verbose,
             api_key=api_key,
@@ -604,6 +636,7 @@ def retain(
                 target_bank_id,
                 context,
                 target_document_id,
+                target_tags,
                 metadata,
                 verbose,
                 api_key,
@@ -620,6 +653,7 @@ async def aretain(
     bank_id: Optional[str] = None,
     context: Optional[str] = None,
     document_id: Optional[str] = None,
+    tags: Optional[List[str]] = None,
     metadata: Optional[Dict[str, str]] = None,
     hindsight_api_url: Optional[str] = None,
 ) -> RetainResult:
@@ -628,6 +662,7 @@ async def aretain(
     See retain() for full documentation.
     """
     import asyncio
+
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None,
@@ -636,9 +671,10 @@ async def aretain(
             bank_id=bank_id,
             context=context,
             document_id=document_id,
+            tags=tags,
             metadata=metadata,
             hindsight_api_url=hindsight_api_url,
-        )
+        ),
     )
 
 
@@ -646,7 +682,8 @@ class HindsightOpenAI:
     """Wrapper for OpenAI client with Hindsight memory integration.
 
     This wraps the native OpenAI client to automatically inject memories
-    and store conversations.
+    and store conversations. All settings can be overridden per-call using
+    hindsight_* kwargs.
 
     Example:
         >>> from openai import OpenAI
@@ -655,51 +692,55 @@ class HindsightOpenAI:
         >>> client = OpenAI()
         >>> wrapped = wrap_openai(client, bank_id="my-agent")
         >>>
+        >>> # Use default settings
         >>> response = wrapped.chat.completions.create(
         ...     model="gpt-4",
         ...     messages=[{"role": "user", "content": "What do you know about me?"}]
+        ... )
+        >>>
+        >>> # Override settings per-call
+        >>> response = wrapped.chat.completions.create(
+        ...     model="gpt-4",
+        ...     messages=[{"role": "user", "content": "Hello"}],
+        ...     hindsight_bank_id="other-user",  # Different bank for this call
+        ...     hindsight_budget="high",          # Higher recall budget
+        ...     hindsight_inject_memories=False,  # Skip memory injection
         ... )
     """
 
     def __init__(
         self,
         client: Any,
-        bank_id: str,
-        hindsight_api_url: str = "http://localhost:8888",
+        hindsight_api_url: str,
         api_key: Optional[str] = None,
-        session_id: Optional[str] = None,
-        store_conversations: bool = True,
-        inject_memories: bool = True,
-        max_memories: Optional[int] = None,
-        budget: str = "mid",
-        verbose: bool = False,
+        default_settings: Optional[HindsightCallSettings] = None,
+        **setting_kwargs,
     ):
         """Initialize the wrapped OpenAI client.
 
         Args:
             client: The OpenAI client instance to wrap
-            bank_id: Memory bank ID for memory operations. For multi-user support,
-                use different bank_ids per user (e.g., f"user-{user_id}")
-            hindsight_api_url: URL of the Hindsight API server
-            api_key: Optional API key for Hindsight authentication
-            session_id: Session identifier for conversation grouping
-            store_conversations: Whether to store conversations
-            inject_memories: Whether to inject relevant memories
-            max_memories: Maximum number of memories to inject (None = no limit)
-            budget: Budget level for memory recall (low, mid, high)
-            verbose: Enable verbose logging
+            hindsight_api_url: URL of the Hindsight API server (required, connection-level)
+            api_key: API key for Hindsight authentication (connection-level)
+            default_settings: Default settings for all calls (alternative to kwargs)
+            **setting_kwargs: Default values for any HindsightCallSettings field
+                (e.g., bank_id="my-bank", budget="high", verbose=True)
         """
         self._client = client
-        self._bank_id = bank_id
         self._api_url = hindsight_api_url
         self._api_key = api_key
-        self._session_id = session_id
-        self._store_conversations = store_conversations
-        self._inject_memories = inject_memories
-        self._max_memories = max_memories
-        self._budget = budget
-        self._verbose = verbose
         self._hindsight_client = None
+
+        # Build default settings from kwargs or use provided settings
+        if default_settings is not None:
+            self._default_settings = default_settings
+        else:
+            # Filter kwargs to only valid HindsightCallSettings fields
+            valid_fields = {f.name for f in fields(HindsightCallSettings)}
+            settings_kwargs = {
+                k: v for k, v in setting_kwargs.items() if k in valid_fields
+            }
+            self._default_settings = HindsightCallSettings(**settings_kwargs)
 
         # Create wrapped chat.completions interface
         self.chat = _WrappedChat(self)
@@ -708,6 +749,7 @@ class HindsightOpenAI:
         """Get or create the Hindsight client."""
         if self._hindsight_client is None:
             from hindsight_client import Hindsight
+
             self._hindsight_client = Hindsight(
                 base_url=self._api_url,
                 api_key=self._api_key,
@@ -715,72 +757,236 @@ class HindsightOpenAI:
             )
         return self._hindsight_client
 
-    def _recall_memories(self, query: str) -> str:
+    def _recall_memories(self, query: str, settings: HindsightCallSettings) -> str:
         """Recall and format memories for injection."""
-        if not self._inject_memories:
+        if not settings.inject_memories:
+            return ""
+
+        if not settings.bank_id:
+            if settings.verbose:
+                logger.warning("No bank_id configured, skipping memory recall")
             return ""
 
         try:
             client = self._get_hindsight_client()
-            results = client.recall(
-                bank_id=self._bank_id,
-                query=query,
-                budget=self._budget,
-                max_tokens=self._max_memories * 200 if self._max_memories else 4096,
-            )
+
+            recall_kwargs = {
+                "bank_id": settings.bank_id,
+                "query": query,
+                "budget": settings.budget,
+                "max_tokens": settings.max_memory_tokens,
+                "trace": settings.trace,
+                "include_entities": settings.include_entities,
+            }
+            if settings.fact_types:
+                recall_kwargs["types"] = settings.fact_types
+            if settings.recall_tags:
+                recall_kwargs["tags"] = settings.recall_tags
+                recall_kwargs["tags_match"] = settings.recall_tags_match
+
+            results = client.recall(**recall_kwargs)
 
             if not results:
                 return ""
 
-            results_to_use = results[:self._max_memories] if self._max_memories else results
+            results_to_use = (
+                results[: settings.max_memories] if settings.max_memories else results
+            )
             memory_lines = []
             for i, r in enumerate(results_to_use, 1):
-                text = r.text if hasattr(r, 'text') else str(r)
-                fact_type = r.fact_type if hasattr(r, 'fact_type') else 'memory'
-                memory_lines.append(f"{i}. [{fact_type.upper()}] {text}")
+                text = r.text if hasattr(r, "text") else str(r)
+                fact_type = getattr(r, "type", None) or getattr(
+                    r, "fact_type", "memory"
+                )
+
+                # Build memory line with available context
+                line_parts = [f"{i}. [{fact_type.upper()}]"]
+
+                # Add temporal context if available
+                occurred_start = getattr(r, "occurred_start", None)
+                occurred_end = getattr(r, "occurred_end", None)
+                mentioned_at = getattr(r, "mentioned_at", None)
+
+                if occurred_start and occurred_end and occurred_start != occurred_end:
+                    line_parts.append(f"(occurred: {occurred_start} to {occurred_end})")
+                elif occurred_start:
+                    line_parts.append(f"(occurred: {occurred_start})")
+                elif mentioned_at:
+                    line_parts.append(f"(mentioned: {mentioned_at})")
+
+                # Add source context if available
+                context = getattr(r, "context", None)
+                if context:
+                    line_parts.append(f"[source: {context}]")
+
+                # Add the main text
+                line_parts.append(text)
+
+                # Add metadata if available
+                metadata = getattr(r, "metadata", None)
+                if metadata:
+                    meta_str = ", ".join(f"{k}={v}" for k, v in metadata.items())
+                    line_parts.append(f"({meta_str})")
+
+                memory_lines.append(" ".join(line_parts))
 
             if not memory_lines:
                 return ""
 
+            current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
             return (
-                "# Relevant Memories\n"
-                "The following information from memory may be relevant:\n\n"
+                f"# Relevant Memories\n"
+                f"Current date/time: {current_time}\n"
+                f"The following information from memory may be relevant:\n\n"
                 + "\n".join(memory_lines)
             )
 
         except Exception as e:
-            if self._verbose:
+            if settings.verbose:
                 logger.warning(f"Failed to recall memories: {e}")
             return ""
 
-    def _store_conversation(self, user_input: str, assistant_output: str, model: str):
-        """Store the conversation to Hindsight."""
-        if not self._store_conversations:
+    def _reflect_memories(self, query: str, settings: HindsightCallSettings) -> str:
+        """Use reflect API for disposition-aware memory retrieval."""
+        if not settings.inject_memories:
+            return ""
+
+        if not settings.bank_id:
+            if settings.verbose:
+                logger.warning("No bank_id configured, skipping reflect")
+            return ""
+
+        try:
+            client = self._get_hindsight_client()
+
+            reflect_kwargs = {
+                "bank_id": settings.bank_id,
+                "query": query,
+                "budget": settings.budget,
+            }
+            if settings.reflect_context:
+                reflect_kwargs["context"] = settings.reflect_context
+            if settings.reflect_response_schema:
+                reflect_kwargs["response_schema"] = settings.reflect_response_schema
+            if settings.recall_tags:
+                reflect_kwargs["tags"] = settings.recall_tags
+                reflect_kwargs["tags_match"] = settings.recall_tags_match
+
+            result = client.reflect(**reflect_kwargs)
+
+            if not result:
+                return ""
+
+            text = result.text if hasattr(result, "text") else str(result)
+            if not text:
+                return ""
+
+            current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            return f"# Relevant Context from Memory\nCurrent date/time: {current_time}\n{text}"
+
+        except Exception as e:
+            if settings.verbose:
+                logger.warning(f"Failed to reflect: {e}")
+            return ""
+
+    def _get_document_content(
+        self, bank_id: str, document_id: str
+    ) -> Optional[str]:
+        """Fetch existing document content using the low-level API.
+
+        Returns:
+            The document's original_text, or None if not found.
+        """
+        import asyncio
+
+        from hindsight_client_api.api import documents_api
+
+        try:
+            client = self._get_hindsight_client()
+            docs_api = documents_api.DocumentsApi(client._api_client)
+
+            async def _fetch():
+                try:
+                    doc = await docs_api.get_document(bank_id, document_id)
+                    return doc.original_text if doc else None
+                except Exception as e:
+                    if "404" in str(e) or "Not Found" in str(e):
+                        return None
+                    raise
+
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            return loop.run_until_complete(_fetch())
+        except Exception as e:
+            logger.debug(f"Failed to fetch document: {e}")
+            return None
+
+    def _store_conversation(
+        self,
+        user_input: str,
+        assistant_output: str,
+        model: str,
+        settings: HindsightCallSettings,
+    ):
+        """Store the conversation to Hindsight.
+
+        If session_id (effective_document_id) is set, accumulates the full
+        conversation in a single document for better context learning.
+        """
+        if not settings.store_conversations:
+            return
+
+        if not settings.bank_id:
+            if settings.verbose:
+                logger.warning("No bank_id configured, skipping conversation storage")
             return
 
         try:
             client = self._get_hindsight_client()
-            conversation_text = f"USER: {user_input}\n\nASSISTANT: {assistant_output}"
+            new_exchange = f"USER: {user_input}\n\nASSISTANT: {assistant_output}"
+
+            # If document_id is set, fetch existing content and append
+            conversation_text = new_exchange
+            if settings.effective_document_id:
+                existing_content = self._get_document_content(
+                    settings.bank_id, settings.effective_document_id
+                )
+                if existing_content:
+                    conversation_text = f"{existing_content}\n\n{new_exchange}"
+                    if settings.verbose:
+                        logger.debug(
+                            f"Appending to existing document: {settings.effective_document_id}"
+                        )
 
             metadata = {
                 "source": "openai-wrapper",
                 "model": model,
             }
-            if self._session_id:
-                metadata["session_id"] = self._session_id
 
-            client.retain(
-                bank_id=self._bank_id,
-                content=conversation_text,
-                context=f"conversation:openai:{model}",
-                metadata=metadata,
-            )
+            retain_kwargs = {
+                "bank_id": settings.bank_id,
+                "content": conversation_text,
+                "context": f"conversation:openai:{model}",
+                "metadata": metadata,
+            }
+            if settings.effective_document_id:
+                retain_kwargs["document_id"] = settings.effective_document_id
+            if settings.tags:
+                retain_kwargs["tags"] = settings.tags
 
-            if self._verbose:
-                logger.info(f"Stored conversation to Hindsight")
+            client.retain(**retain_kwargs)
+
+            if settings.verbose:
+                logger.info(
+                    f"Stored conversation to Hindsight bank: {settings.bank_id}"
+                )
 
         except Exception as e:
-            if self._verbose:
+            if settings.verbose:
                 logger.warning(f"Failed to store conversation: {e}")
 
     # Proxy other attributes to the underlying client
@@ -803,30 +1009,65 @@ class _WrappedCompletions:
         self._wrapper = wrapper
 
     def create(self, **kwargs) -> Any:
-        """Create a chat completion with memory integration."""
-        messages = list(kwargs.get("messages", []))
-        model = kwargs.get("model", "gpt-4")
+        """Create a chat completion with memory integration.
 
-        # Extract user query
-        user_query = None
-        for msg in reversed(messages):
-            if msg.get("role") == "user":
-                content = msg.get("content")
-                if isinstance(content, str):
-                    user_query = content
-                    break
+        Supports per-call overrides via hindsight_* kwargs:
+        - hindsight_bank_id: Override memory bank
+        - hindsight_budget: Override recall budget (low/mid/high)
+        - hindsight_inject_memories: Override whether to inject memories
+        - hindsight_store_conversations: Override whether to store
+        - hindsight_query: Custom query for memory recall
+        - hindsight_use_reflect: Use reflect API instead of recall
+        - And all other HindsightCallSettings fields...
+        """
+        # Merge default settings with per-call overrides
+        settings = _merge_settings(self._wrapper._default_settings, kwargs)
+
+        # Remove hindsight_* kwargs before passing to OpenAI
+        openai_kwargs = {
+            k: v for k, v in kwargs.items() if not k.startswith("hindsight_")
+        }
+
+        messages = list(openai_kwargs.get("messages", []))
+        model = openai_kwargs.get("model", "gpt-4")
+
+        # Extract user query (use custom query if provided, else extract from messages)
+        user_query = settings.query
+        if not user_query:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        user_query = content
+                        break
+                    elif isinstance(content, list):
+                        # Handle structured content (e.g., vision messages)
+                        for item in content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                user_query = item.get("text", "")
+                                break
+                        if user_query:
+                            break
 
         # Inject memories
-        if user_query and self._wrapper._inject_memories:
-            memory_context = self._wrapper._recall_memories(user_query)
+        if user_query and settings.inject_memories:
+            # Use reflect or recall based on settings
+            if settings.use_reflect:
+                memory_context = self._wrapper._reflect_memories(user_query, settings)
+            else:
+                memory_context = self._wrapper._recall_memories(user_query, settings)
+
             if memory_context:
+                if settings.verbose:
+                    logger.debug(f"Injecting memories into prompt:\n{memory_context}")
+
                 # Find system message and append, or prepend new one
                 found_system = False
                 for i, msg in enumerate(messages):
                     if msg.get("role") == "system":
                         messages[i] = {
                             **msg,
-                            "content": f"{msg.get('content', '')}\n\n{memory_context}"
+                            "content": f"{msg.get('content', '')}\n\n{memory_context}",
                         }
                         found_system = True
                         break
@@ -834,17 +1075,19 @@ class _WrappedCompletions:
                 if not found_system:
                     messages.insert(0, {"role": "system", "content": memory_context})
 
-                kwargs["messages"] = messages
+                openai_kwargs["messages"] = messages
 
         # Make the actual API call
-        response = self._wrapper._client.chat.completions.create(**kwargs)
+        response = self._wrapper._client.chat.completions.create(**openai_kwargs)
 
         # Store conversation
-        if user_query and self._wrapper._store_conversations:
+        if user_query and settings.store_conversations:
             if response.choices and response.choices[0].message:
                 assistant_output = response.choices[0].message.content or ""
                 if assistant_output:
-                    self._wrapper._store_conversation(user_query, assistant_output, model)
+                    self._wrapper._store_conversation(
+                        user_query, assistant_output, model, settings
+                    )
 
         return response
 
@@ -853,7 +1096,8 @@ class HindsightAnthropic:
     """Wrapper for Anthropic client with Hindsight memory integration.
 
     This wraps the native Anthropic client to automatically inject memories
-    and store conversations.
+    and store conversations. All settings can be overridden per-call using
+    hindsight_* kwargs.
 
     Example:
         >>> from anthropic import Anthropic
@@ -862,52 +1106,56 @@ class HindsightAnthropic:
         >>> client = Anthropic()
         >>> wrapped = wrap_anthropic(client, bank_id="my-agent")
         >>>
+        >>> # Use default settings
         >>> response = wrapped.messages.create(
-        ...     model="claude-3-5-sonnet-20241022",
+        ...     model="claude-sonnet-4-20250514",
         ...     max_tokens=1024,
         ...     messages=[{"role": "user", "content": "What do you know about me?"}]
+        ... )
+        >>>
+        >>> # Override settings per-call
+        >>> response = wrapped.messages.create(
+        ...     model="claude-sonnet-4-20250514",
+        ...     max_tokens=1024,
+        ...     messages=[{"role": "user", "content": "Hello"}],
+        ...     hindsight_bank_id="other-user",  # Different bank
+        ...     hindsight_budget="high",          # More memories
         ... )
     """
 
     def __init__(
         self,
         client: Any,
-        bank_id: str,
-        hindsight_api_url: str = "http://localhost:8888",
+        hindsight_api_url: str,
         api_key: Optional[str] = None,
-        session_id: Optional[str] = None,
-        store_conversations: bool = True,
-        inject_memories: bool = True,
-        max_memories: Optional[int] = None,
-        budget: str = "mid",
-        verbose: bool = False,
+        default_settings: Optional[HindsightCallSettings] = None,
+        **setting_kwargs,
     ):
         """Initialize the wrapped Anthropic client.
 
         Args:
             client: The Anthropic client instance to wrap
-            bank_id: Memory bank ID for memory operations. For multi-user support,
-                use different bank_ids per user (e.g., f"user-{user_id}")
-            hindsight_api_url: URL of the Hindsight API server
-            api_key: Optional API key for Hindsight authentication
-            session_id: Session identifier for conversation grouping
-            store_conversations: Whether to store conversations
-            inject_memories: Whether to inject relevant memories
-            max_memories: Maximum number of memories to inject (None = no limit)
-            budget: Budget level for memory recall (low, mid, high)
-            verbose: Enable verbose logging
+            hindsight_api_url: URL of the Hindsight API server (required, connection-level)
+            api_key: API key for Hindsight authentication (connection-level)
+            default_settings: Default settings for all calls (alternative to kwargs)
+            **setting_kwargs: Default values for any HindsightCallSettings field
+                (e.g., bank_id="my-bank", budget="high", verbose=True)
         """
         self._client = client
-        self._bank_id = bank_id
         self._api_url = hindsight_api_url
         self._api_key = api_key
-        self._session_id = session_id
-        self._store_conversations = store_conversations
-        self._inject_memories = inject_memories
-        self._max_memories = max_memories
-        self._budget = budget
-        self._verbose = verbose
         self._hindsight_client = None
+
+        # Build default settings from kwargs or use provided settings
+        if default_settings is not None:
+            self._default_settings = default_settings
+        else:
+            # Filter kwargs to only valid HindsightCallSettings fields
+            valid_fields = {f.name for f in fields(HindsightCallSettings)}
+            settings_kwargs = {
+                k: v for k, v in setting_kwargs.items() if k in valid_fields
+            }
+            self._default_settings = HindsightCallSettings(**settings_kwargs)
 
         # Create wrapped messages interface
         self.messages = _WrappedAnthropicMessages(self)
@@ -916,6 +1164,7 @@ class HindsightAnthropic:
         """Get or create the Hindsight client."""
         if self._hindsight_client is None:
             from hindsight_client import Hindsight
+
             self._hindsight_client = Hindsight(
                 base_url=self._api_url,
                 api_key=self._api_key,
@@ -923,72 +1172,236 @@ class HindsightAnthropic:
             )
         return self._hindsight_client
 
-    def _recall_memories(self, query: str) -> str:
+    def _recall_memories(self, query: str, settings: HindsightCallSettings) -> str:
         """Recall and format memories for injection."""
-        if not self._inject_memories:
+        if not settings.inject_memories:
+            return ""
+
+        if not settings.bank_id:
+            if settings.verbose:
+                logger.warning("No bank_id configured, skipping memory recall")
             return ""
 
         try:
             client = self._get_hindsight_client()
-            results = client.recall(
-                bank_id=self._bank_id,
-                query=query,
-                budget=self._budget,
-                max_tokens=self._max_memories * 200 if self._max_memories else 4096,
-            )
+
+            recall_kwargs = {
+                "bank_id": settings.bank_id,
+                "query": query,
+                "budget": settings.budget,
+                "max_tokens": settings.max_memory_tokens,
+                "trace": settings.trace,
+                "include_entities": settings.include_entities,
+            }
+            if settings.fact_types:
+                recall_kwargs["types"] = settings.fact_types
+            if settings.recall_tags:
+                recall_kwargs["tags"] = settings.recall_tags
+                recall_kwargs["tags_match"] = settings.recall_tags_match
+
+            results = client.recall(**recall_kwargs)
 
             if not results:
                 return ""
 
-            results_to_use = results[:self._max_memories] if self._max_memories else results
+            results_to_use = (
+                results[: settings.max_memories] if settings.max_memories else results
+            )
             memory_lines = []
             for i, r in enumerate(results_to_use, 1):
-                text = r.text if hasattr(r, 'text') else str(r)
-                fact_type = r.fact_type if hasattr(r, 'fact_type') else 'memory'
-                memory_lines.append(f"{i}. [{fact_type.upper()}] {text}")
+                text = r.text if hasattr(r, "text") else str(r)
+                fact_type = getattr(r, "type", None) or getattr(
+                    r, "fact_type", "memory"
+                )
+
+                # Build memory line with available context
+                line_parts = [f"{i}. [{fact_type.upper()}]"]
+
+                # Add temporal context if available
+                occurred_start = getattr(r, "occurred_start", None)
+                occurred_end = getattr(r, "occurred_end", None)
+                mentioned_at = getattr(r, "mentioned_at", None)
+
+                if occurred_start and occurred_end and occurred_start != occurred_end:
+                    line_parts.append(f"(occurred: {occurred_start} to {occurred_end})")
+                elif occurred_start:
+                    line_parts.append(f"(occurred: {occurred_start})")
+                elif mentioned_at:
+                    line_parts.append(f"(mentioned: {mentioned_at})")
+
+                # Add source context if available
+                context = getattr(r, "context", None)
+                if context:
+                    line_parts.append(f"[source: {context}]")
+
+                # Add the main text
+                line_parts.append(text)
+
+                # Add metadata if available
+                metadata = getattr(r, "metadata", None)
+                if metadata:
+                    meta_str = ", ".join(f"{k}={v}" for k, v in metadata.items())
+                    line_parts.append(f"({meta_str})")
+
+                memory_lines.append(" ".join(line_parts))
 
             if not memory_lines:
                 return ""
 
+            current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
             return (
-                "# Relevant Memories\n"
-                "The following information from memory may be relevant:\n\n"
+                f"# Relevant Memories\n"
+                f"Current date/time: {current_time}\n"
+                f"The following information from memory may be relevant:\n\n"
                 + "\n".join(memory_lines)
             )
 
         except Exception as e:
-            if self._verbose:
+            if settings.verbose:
                 logger.warning(f"Failed to recall memories: {e}")
             return ""
 
-    def _store_conversation(self, user_input: str, assistant_output: str, model: str):
-        """Store the conversation to Hindsight."""
-        if not self._store_conversations:
+    def _reflect_memories(self, query: str, settings: HindsightCallSettings) -> str:
+        """Use reflect API for disposition-aware memory retrieval."""
+        if not settings.inject_memories:
+            return ""
+
+        if not settings.bank_id:
+            if settings.verbose:
+                logger.warning("No bank_id configured, skipping reflect")
+            return ""
+
+        try:
+            client = self._get_hindsight_client()
+
+            reflect_kwargs = {
+                "bank_id": settings.bank_id,
+                "query": query,
+                "budget": settings.budget,
+            }
+            if settings.reflect_context:
+                reflect_kwargs["context"] = settings.reflect_context
+            if settings.reflect_response_schema:
+                reflect_kwargs["response_schema"] = settings.reflect_response_schema
+            if settings.recall_tags:
+                reflect_kwargs["tags"] = settings.recall_tags
+                reflect_kwargs["tags_match"] = settings.recall_tags_match
+
+            result = client.reflect(**reflect_kwargs)
+
+            if not result:
+                return ""
+
+            text = result.text if hasattr(result, "text") else str(result)
+            if not text:
+                return ""
+
+            current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            return f"# Relevant Context from Memory\nCurrent date/time: {current_time}\n{text}"
+
+        except Exception as e:
+            if settings.verbose:
+                logger.warning(f"Failed to reflect: {e}")
+            return ""
+
+    def _get_document_content(
+        self, bank_id: str, document_id: str
+    ) -> Optional[str]:
+        """Fetch existing document content using the low-level API.
+
+        Returns:
+            The document's original_text, or None if not found.
+        """
+        import asyncio
+
+        from hindsight_client_api.api import documents_api
+
+        try:
+            client = self._get_hindsight_client()
+            docs_api = documents_api.DocumentsApi(client._api_client)
+
+            async def _fetch():
+                try:
+                    doc = await docs_api.get_document(bank_id, document_id)
+                    return doc.original_text if doc else None
+                except Exception as e:
+                    if "404" in str(e) or "Not Found" in str(e):
+                        return None
+                    raise
+
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            return loop.run_until_complete(_fetch())
+        except Exception as e:
+            logger.debug(f"Failed to fetch document: {e}")
+            return None
+
+    def _store_conversation(
+        self,
+        user_input: str,
+        assistant_output: str,
+        model: str,
+        settings: HindsightCallSettings,
+    ):
+        """Store the conversation to Hindsight.
+
+        If session_id (effective_document_id) is set, accumulates the full
+        conversation in a single document for better context learning.
+        """
+        if not settings.store_conversations:
+            return
+
+        if not settings.bank_id:
+            if settings.verbose:
+                logger.warning("No bank_id configured, skipping conversation storage")
             return
 
         try:
             client = self._get_hindsight_client()
-            conversation_text = f"USER: {user_input}\n\nASSISTANT: {assistant_output}"
+            new_exchange = f"USER: {user_input}\n\nASSISTANT: {assistant_output}"
+
+            # If document_id is set, fetch existing content and append
+            conversation_text = new_exchange
+            if settings.effective_document_id:
+                existing_content = self._get_document_content(
+                    settings.bank_id, settings.effective_document_id
+                )
+                if existing_content:
+                    conversation_text = f"{existing_content}\n\n{new_exchange}"
+                    if settings.verbose:
+                        logger.debug(
+                            f"Appending to existing document: {settings.effective_document_id}"
+                        )
 
             metadata = {
                 "source": "anthropic-wrapper",
                 "model": model,
             }
-            if self._session_id:
-                metadata["session_id"] = self._session_id
 
-            client.retain(
-                bank_id=self._bank_id,
-                content=conversation_text,
-                context=f"conversation:anthropic:{model}",
-                metadata=metadata,
-            )
+            retain_kwargs = {
+                "bank_id": settings.bank_id,
+                "content": conversation_text,
+                "context": f"conversation:anthropic:{model}",
+                "metadata": metadata,
+            }
+            if settings.effective_document_id:
+                retain_kwargs["document_id"] = settings.effective_document_id
+            if settings.tags:
+                retain_kwargs["tags"] = settings.tags
 
-            if self._verbose:
-                logger.info(f"Stored conversation to Hindsight")
+            client.retain(**retain_kwargs)
+
+            if settings.verbose:
+                logger.info(
+                    f"Stored conversation to Hindsight bank: {settings.bank_id}"
+                )
 
         except Exception as e:
-            if self._verbose:
+            if settings.verbose:
                 logger.warning(f"Failed to store conversation: {e}")
 
     # Proxy other attributes to the underlying client
@@ -1003,90 +1416,121 @@ class _WrappedAnthropicMessages:
         self._wrapper = wrapper
 
     def create(self, **kwargs) -> Any:
-        """Create a message with memory integration."""
-        messages = list(kwargs.get("messages", []))
-        model = kwargs.get("model", "claude-3-5-sonnet-20241022")
-        system = kwargs.get("system", "")
+        """Create a message with memory integration.
 
-        # Extract user query
-        user_query = None
-        for msg in reversed(messages):
-            if msg.get("role") == "user":
-                content = msg.get("content")
-                if isinstance(content, str):
-                    user_query = content
-                    break
-                elif isinstance(content, list):
-                    # Handle structured content
-                    for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            user_query = item.get("text", "")
-                            break
-                    if user_query:
+        Supports per-call overrides via hindsight_* kwargs:
+        - hindsight_bank_id: Override memory bank
+        - hindsight_budget: Override recall budget (low/mid/high)
+        - hindsight_inject_memories: Override whether to inject memories
+        - hindsight_store_conversations: Override whether to store
+        - hindsight_query: Custom query for memory recall
+        - hindsight_use_reflect: Use reflect API instead of recall
+        - And all other HindsightCallSettings fields...
+        """
+        # Merge default settings with per-call overrides
+        settings = _merge_settings(self._wrapper._default_settings, kwargs)
+
+        # Remove hindsight_* kwargs before passing to Anthropic
+        anthropic_kwargs = {
+            k: v for k, v in kwargs.items() if not k.startswith("hindsight_")
+        }
+
+        messages = list(anthropic_kwargs.get("messages", []))
+        model = anthropic_kwargs.get("model", "claude-sonnet-4-20250514")
+        system = anthropic_kwargs.get("system", "")
+
+        # Extract user query (use custom query if provided, else extract from messages)
+        user_query = settings.query
+        if not user_query:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        user_query = content
                         break
+                    elif isinstance(content, list):
+                        # Handle structured content
+                        for item in content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                user_query = item.get("text", "")
+                                break
+                        if user_query:
+                            break
 
         # Inject memories into system prompt
-        if user_query and self._wrapper._inject_memories:
-            memory_context = self._wrapper._recall_memories(user_query)
+        if user_query and settings.inject_memories:
+            # Use reflect or recall based on settings
+            if settings.use_reflect:
+                memory_context = self._wrapper._reflect_memories(user_query, settings)
+            else:
+                memory_context = self._wrapper._recall_memories(user_query, settings)
+
             if memory_context:
+                if settings.verbose:
+                    logger.debug(f"Injecting memories into prompt:\n{memory_context}")
+
                 if system:
-                    kwargs["system"] = f"{system}\n\n{memory_context}"
+                    anthropic_kwargs["system"] = f"{system}\n\n{memory_context}"
                 else:
-                    kwargs["system"] = memory_context
+                    anthropic_kwargs["system"] = memory_context
 
         # Make the actual API call
-        response = self._wrapper._client.messages.create(**kwargs)
+        response = self._wrapper._client.messages.create(**anthropic_kwargs)
 
         # Store conversation
-        if user_query and self._wrapper._store_conversations:
+        if user_query and settings.store_conversations:
             if response.content:
                 assistant_output = ""
                 for block in response.content:
-                    if hasattr(block, 'text'):
+                    if hasattr(block, "text"):
                         assistant_output += block.text
                 if assistant_output:
-                    self._wrapper._store_conversation(user_query, assistant_output, model)
+                    self._wrapper._store_conversation(
+                        user_query, assistant_output, model, settings
+                    )
 
         return response
 
 
 def wrap_openai(
     client: Any,
-    bank_id: Optional[str] = None,
     hindsight_api_url: Optional[str] = None,
     api_key: Optional[str] = None,
-    session_id: Optional[str] = None,
-    store_conversations: bool = True,
-    inject_memories: bool = True,
-    max_memories: Optional[int] = None,
-    budget: str = "mid",
-    verbose: bool = False,
+    mission: Optional[str] = None,
+    bank_name: Optional[str] = None,
+    **settings_kwargs,
 ) -> HindsightOpenAI:
     """Wrap an OpenAI client with Hindsight memory integration.
 
     This creates a wrapped client that automatically injects memories
     and stores conversations when making chat completion calls.
 
-    With sensible defaults, you can use it with minimal configuration:
-
-        client = wrap_openai(OpenAI())
-
-    Just set the HINDSIGHT_API_KEY environment variable and you're ready to go.
+    All settings can be overridden per-call using hindsight_* kwargs.
 
     Args:
         client: The OpenAI client instance to wrap
-        bank_id: Memory bank ID (default: "default"). For multi-user support,
-            use different bank_ids per user (e.g., f"user-{user_id}")
         hindsight_api_url: URL of the Hindsight API server
             (default: https://api.hindsight.vectorize.io)
         api_key: API key for Hindsight authentication. If not provided,
             reads from HINDSIGHT_API_KEY environment variable.
-        session_id: Session identifier for conversation grouping
-        store_conversations: Whether to store conversations (default: True)
-        inject_memories: Whether to inject relevant memories (default: True)
-        max_memories: Maximum number of memories to inject (None = no limit)
-        budget: Budget level for memory recall (low, mid, high)
-        verbose: Enable verbose logging
+        mission: Instructions guiding what Hindsight should learn and remember
+            (used for mental model generation). If provided, creates/updates the bank.
+        bank_name: Optional display name for the bank.
+        **settings_kwargs: Default values for any HindsightCallSettings field:
+            - bank_id: Memory bank ID (default: "default")
+            - document_id: Document ID for conversation grouping
+            - session_id: Session identifier for metadata
+            - store_conversations: Whether to store conversations (default: True)
+            - inject_memories: Whether to inject memories (default: True)
+            - budget: Recall budget level - low/mid/high (default: "mid")
+            - fact_types: Filter by fact types (world/experience/mental_model)
+            - max_memories: Max memories to inject (None = no limit)
+            - max_memory_tokens: Max tokens for memory context (default: 4096)
+            - use_reflect: Use reflect API instead of recall (default: False)
+            - reflect_context: Context for reflect reasoning
+            - reflect_response_schema: JSON Schema for structured reflect output
+            - query: Custom query for memory recall (default: extract from message)
+            - verbose: Enable verbose logging (default: False)
 
     Returns:
         Wrapped OpenAI client with memory integration
@@ -1095,70 +1539,98 @@ def wrap_openai(
         >>> from openai import OpenAI
         >>> from hindsight_litellm import wrap_openai
         >>>
-        >>> # Minimal usage - just set HINDSIGHT_API_KEY env var
-        >>> client = wrap_openai(OpenAI())
+        >>> # With mission for mental models
+        >>> client = wrap_openai(
+        ...     OpenAI(),
+        ...     bank_id="my-agent",
+        ...     mission="Remember user preferences and past interactions.",
+        ... )
         >>>
+        >>> # Use default settings
         >>> response = client.chat.completions.create(
         ...     model="gpt-4o-mini",
         ...     messages=[{"role": "user", "content": "What do you know about me?"}]
         ... )
+        >>>
+        >>> # Override per-call
+        >>> response = client.chat.completions.create(
+        ...     model="gpt-4o-mini",
+        ...     messages=[{"role": "user", "content": "Hello"}],
+        ...     hindsight_bank_id="other-user",  # Different bank
+        ...     hindsight_budget="high",          # More memories
+        ... )
     """
-    # Apply defaults
-    resolved_bank_id = bank_id or DEFAULT_BANK_ID
+    # Apply connection-level defaults
     resolved_api_url = hindsight_api_url or DEFAULT_HINDSIGHT_API_URL
     resolved_api_key = api_key or os.environ.get(HINDSIGHT_API_KEY_ENV)
 
+    # Apply default bank_id if not provided
+    if "bank_id" not in settings_kwargs:
+        settings_kwargs["bank_id"] = DEFAULT_BANK_ID
+
+    # Create/update bank if mission or bank_name is provided
+    if mission or bank_name:
+        try:
+            from hindsight_client import Hindsight
+
+            hs_client = Hindsight(base_url=resolved_api_url, api_key=resolved_api_key)
+            hs_client.create_bank(
+                bank_id=settings_kwargs["bank_id"],
+                name=bank_name,
+                mission=mission,
+            )
+            hs_client.close()
+        except Exception as e:
+            if settings_kwargs.get("verbose"):
+                logger.warning(f"Failed to create/update bank: {e}")
+
     return HindsightOpenAI(
         client=client,
-        bank_id=resolved_bank_id,
         hindsight_api_url=resolved_api_url,
         api_key=resolved_api_key,
-        session_id=session_id,
-        store_conversations=store_conversations,
-        inject_memories=inject_memories,
-        max_memories=max_memories,
-        budget=budget,
-        verbose=verbose,
+        **settings_kwargs,
     )
 
 
 def wrap_anthropic(
     client: Any,
-    bank_id: Optional[str] = None,
     hindsight_api_url: Optional[str] = None,
     api_key: Optional[str] = None,
-    session_id: Optional[str] = None,
-    store_conversations: bool = True,
-    inject_memories: bool = True,
-    max_memories: Optional[int] = None,
-    budget: str = "mid",
-    verbose: bool = False,
+    mission: Optional[str] = None,
+    bank_name: Optional[str] = None,
+    **settings_kwargs,
 ) -> HindsightAnthropic:
     """Wrap an Anthropic client with Hindsight memory integration.
 
     This creates a wrapped client that automatically injects memories
     and stores conversations when making message calls.
 
-    With sensible defaults, you can use it with minimal configuration:
-
-        client = wrap_anthropic(Anthropic())
-
-    Just set the HINDSIGHT_API_KEY environment variable and you're ready to go.
+    All settings can be overridden per-call using hindsight_* kwargs.
 
     Args:
         client: The Anthropic client instance to wrap
-        bank_id: Memory bank ID (default: "default"). For multi-user support,
-            use different bank_ids per user (e.g., f"user-{user_id}")
         hindsight_api_url: URL of the Hindsight API server
             (default: https://api.hindsight.vectorize.io)
         api_key: API key for Hindsight authentication. If not provided,
             reads from HINDSIGHT_API_KEY environment variable.
-        session_id: Session identifier for conversation grouping
-        store_conversations: Whether to store conversations (default: True)
-        inject_memories: Whether to inject relevant memories (default: True)
-        max_memories: Maximum number of memories to inject (None = no limit)
-        budget: Budget level for memory recall (low, mid, high)
-        verbose: Enable verbose logging
+        mission: Instructions guiding what Hindsight should learn and remember
+            (used for mental model generation). If provided, creates/updates the bank.
+        bank_name: Optional display name for the bank.
+        **settings_kwargs: Default values for any HindsightCallSettings field:
+            - bank_id: Memory bank ID (default: "default")
+            - document_id: Document ID for conversation grouping
+            - session_id: Session identifier for metadata
+            - store_conversations: Whether to store conversations (default: True)
+            - inject_memories: Whether to inject memories (default: True)
+            - budget: Recall budget level - low/mid/high (default: "mid")
+            - fact_types: Filter by fact types (world/experience/mental_model)
+            - max_memories: Max memories to inject (None = no limit)
+            - max_memory_tokens: Max tokens for memory context (default: 4096)
+            - use_reflect: Use reflect API instead of recall (default: False)
+            - reflect_context: Context for reflect reasoning
+            - reflect_response_schema: JSON Schema for structured reflect output
+            - query: Custom query for memory recall (default: extract from message)
+            - verbose: Enable verbose logging (default: False)
 
     Returns:
         Wrapped Anthropic client with memory integration
@@ -1167,29 +1639,56 @@ def wrap_anthropic(
         >>> from anthropic import Anthropic
         >>> from hindsight_litellm import wrap_anthropic
         >>>
-        >>> # Minimal usage - just set HINDSIGHT_API_KEY env var
-        >>> client = wrap_anthropic(Anthropic())
+        >>> # With mission for mental models
+        >>> client = wrap_anthropic(
+        ...     Anthropic(),
+        ...     bank_id="my-agent",
+        ...     mission="Remember user preferences and past interactions.",
+        ... )
         >>>
+        >>> # Use default settings
         >>> response = client.messages.create(
         ...     model="claude-sonnet-4-20250514",
         ...     max_tokens=1024,
         ...     messages=[{"role": "user", "content": "What do you know about me?"}]
         ... )
+        >>>
+        >>> # Override per-call
+        >>> response = client.messages.create(
+        ...     model="claude-sonnet-4-20250514",
+        ...     max_tokens=1024,
+        ...     messages=[{"role": "user", "content": "Hello"}],
+        ...     hindsight_bank_id="other-user",  # Different bank
+        ...     hindsight_budget="high",          # More memories
+        ... )
     """
-    # Apply defaults
-    resolved_bank_id = bank_id or DEFAULT_BANK_ID
+    # Apply connection-level defaults
     resolved_api_url = hindsight_api_url or DEFAULT_HINDSIGHT_API_URL
     resolved_api_key = api_key or os.environ.get(HINDSIGHT_API_KEY_ENV)
 
+    # Apply default bank_id if not provided
+    if "bank_id" not in settings_kwargs:
+        settings_kwargs["bank_id"] = DEFAULT_BANK_ID
+
+    # Create/update bank if mission or bank_name is provided
+    if mission or bank_name:
+        try:
+            from hindsight_client import Hindsight
+
+            hs_client = Hindsight(base_url=resolved_api_url, api_key=resolved_api_key)
+            hs_client.create_bank(
+                bank_id=settings_kwargs["bank_id"],
+                name=bank_name,
+                mission=mission,
+            )
+            hs_client.close()
+        except Exception as e:
+            if settings_kwargs.get("verbose"):
+                logger.warning(f"Failed to create/update bank: {e}")
+
     return HindsightAnthropic(
         client=client,
-        bank_id=resolved_bank_id,
         hindsight_api_url=resolved_api_url,
         api_key=resolved_api_key,
-        session_id=session_id,
-        store_conversations=store_conversations,
-        inject_memories=inject_memories,
-        max_memories=max_memories,
-        budget=budget,
-        verbose=verbose,
+        **settings_kwargs,
     )
