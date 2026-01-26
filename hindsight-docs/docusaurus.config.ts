@@ -181,7 +181,7 @@ const config: Config = {
       items: [
         {
           type: 'doc',
-          docId: 'developer/index',
+          docId: 'developer/installation',
           position: 'left',
           label: 'Developer',
           className: 'navbar-item-developer',
@@ -224,6 +224,11 @@ const config: Config = {
           position: 'right',
         },
         {
+          href: 'https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg',
+          position: 'right',
+          label: 'Community',
+        },
+        {
           href: 'https://github.com/vectorize-io/hindsight',
           position: 'right',
           className: 'header-github-link',
@@ -242,6 +247,10 @@ const config: Config = {
               to: '/',
             },
             {
+              label: 'Developer Guide',
+              to: '/developer/installation',
+            },
+            {
               label: 'SDKs',
               to: '/sdks/python',
             },
@@ -252,16 +261,37 @@ const config: Config = {
           ],
         },
         {
-          title: 'More',
+          title: 'Resources',
+          items: [
+            {
+              label: 'Cookbook',
+              to: '/cookbook',
+            },
+            {
+              label: 'Changelog',
+              to: '/changelog',
+            },
+            {
+              label: 'Hindsight Cloud',
+              href: 'https://vectorize.io/hindsight/cloud',
+            },
+          ],
+        },
+        {
+          title: 'Community',
           items: [
             {
               label: 'GitHub',
               href: 'https://github.com/vectorize-io/hindsight',
             },
+            {
+              label: 'Slack',
+              href: 'https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg',
+            },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Hindsight.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Vectorize, Inc.`,
     },
     prism: {
       theme: prismThemes.github,

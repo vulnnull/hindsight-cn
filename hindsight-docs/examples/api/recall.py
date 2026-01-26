@@ -39,18 +39,11 @@ response = client.recall(
     budget="high",
     max_tokens=8000,
     trace=True,
-    include_entities=True,
-    max_entity_tokens=500
 )
 
 # Access results
 for r in response.results:
     print(f"- {r.text}")
-
-# Access entity observations (if include_entities=True)
-if response.entities:
-    for entity_id, entity in response.entities.items():
-        print(f"Entity: {entity.canonical_name}")
 # [/docs:recall-with-options]
 
 
@@ -74,14 +67,31 @@ experience = client.recall(
 # [/docs:recall-experience-only]
 
 
-# [docs:recall-opinions-only]
-# Only opinions (formed beliefs)
-opinions = client.recall(
+# [docs:recall-mental-models-only]
+# Only mental models (consolidated knowledge)
+mental_models = client.recall(
     bank_id="my-bank",
-    query="What do I think about Python?",
-    types=["opinion"]
+    query="What patterns have I learned?",
+    types=["mental_model"]
 )
-# [/docs:recall-opinions-only]
+# [/docs:recall-mental-models-only]
+
+
+# [docs:recall-with-mental-models]
+# Include mental models in recall
+results = client.recall(
+    bank_id="my-bank",
+    query="What programming languages does Alice prefer?",
+    types=["world", "experience", "mental_model"]
+)
+
+# Mental models only
+models = client.recall(
+    bank_id="my-bank",
+    query="What patterns have I learned?",
+    types=["mental_model"]
+)
+# [/docs:recall-with-mental-models]
 
 
 # [docs:recall-token-budget]
@@ -93,18 +103,6 @@ results = client.recall(bank_id="my-bank", query="Alice's email", max_tokens=500
 # [/docs:recall-token-budget]
 
 
-# [docs:recall-include-entities]
-response = client.recall(
-    bank_id="my-bank",
-    query="What does Alice do?",
-    max_tokens=4096,              # Budget for memories
-    include_entities=True,
-    max_entity_tokens=1000        # Budget for entity observations
-)
-
-# Access the additional context
-entities = response.entities or []
-# [/docs:recall-include-entities]
 
 
 # [docs:recall-budget-levels]

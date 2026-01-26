@@ -5547,15 +5547,6 @@
                 "text": "I discussed AI applications last week",
                 "type": "experience"
               }
-            ],
-            "mental_models": [
-              {
-                "description": "Understanding of AI capabilities",
-                "id": "mm-1",
-                "name": "AI Technology",
-                "subtype": "structural",
-                "type": "concept"
-              }
             ]
           },
           "structured_output": {
@@ -5571,6 +5562,14 @@
               {
                 "duration_ms": 1200,
                 "scope": "agent_1"
+              }
+            ],
+            "mental_models": [
+              {
+                "id": "mm-1",
+                "name": "AI Technology",
+                "subtype": "structural",
+                "type": "concept"
               }
             ],
             "tool_calls": [

@@ -73,7 +73,7 @@ The `source` label allows distinguishing between:
 **Labels:**
 - `provider`: LLM provider (`openai`, `anthropic`, `gemini`, `groq`, `ollama`, `lmstudio`)
 - `model`: Model name (e.g., `gpt-4`, `claude-3-sonnet`)
-- `scope`: What the LLM call is for (`memory`, `reflect`, `entity_observation`, `answer`)
+- `scope`: What the LLM call is for (`memory`, `reflect`, `consolidation`, `answer`)
 - `success`: Whether the call succeeded (`true`, `false`)
 - `token_bucket`: Token count bucket for cardinality control (`0-100`, `100-500`, `500-1k`, `1k-5k`, `5k-10k`, `10k-50k`, `50k+`)
 

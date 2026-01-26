@@ -169,15 +169,10 @@ Use consistent naming patterns for tags:
 
 Use the list tags API to discover existing tags, useful for UI autocomplete or wildcard expansion:
 
-```python
-# List all tags in a bank
-tags = client.list_tags(bank_id="my-bank")
-for tag in tags.items:
-    print(f"{tag.tag}: {tag.count} memories")
-
-# Search with wildcards (* matches any characters)
-user_tags = client.list_tags(bank_id="my-bank", q="user:*")
-admin_tags = client.list_tags(bank_id="my-bank", q="*-admin")
-```
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={retainPy} section="retain-list-tags" language="python" />
+</TabItem>
+</Tabs>
 
 See [Recall API](./recall#filter-by-tags) for filtering memories by tags during retrieval.

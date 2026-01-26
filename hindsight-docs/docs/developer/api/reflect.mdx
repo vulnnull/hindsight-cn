@@ -4,15 +4,14 @@ sidebar_position: 3
 
 # Reflect
 
-Generate disposition-aware responses using retrieved memories.
+Generate disposition-aware responses using an agentic reasoning loop.
 
-When you call **reflect**, Hindsight performs a multi-step reasoning process:
-1. **Recalls** relevant memories from the bank based on your query
+When you call **reflect**, Hindsight runs an **agentic loop** that:
+1. **Autonomously searches** for relevant information using multiple tools
 2. **Applies** the bank's disposition traits to shape the reasoning style
-3. **Generates** a contextual answer grounded in the retrieved facts
-4. **Forms opinions** in the background based on the reasoning (available in subsequent calls)
+3. **Generates** a grounded answer with citations to the sources used
 
-The response includes the generated answer along with the facts that were used, providing full transparency into how the answer was derived.
+The agent has access to hierarchical retrieval tools (reflections → mental models → raw facts) and decides what information it needs to answer your query.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -24,7 +23,7 @@ import reflectMjs from '!!raw-loader!@site/examples/api/reflect.mjs';
 import reflectSh from '!!raw-loader!@site/examples/api/reflect.sh';
 
 :::info How Reflect Works
-Learn about disposition-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
+Learn about disposition-driven reasoning in the [Reflect Architecture](/developer/reflect) guide.
 :::
 
 :::tip Prerequisites
@@ -50,21 +49,41 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | string | required | Question or prompt |
-| `budget` | string | "low" | Budget level: `low`, `mid`, `high` |
-| `context` | string | None | Additional context for the query |
-| `max_tokens` | int | 4096 | Maximum tokens for the response |
+| `budget` | string | "low" | Budget level: `low`, `mid`, `high` (see below) |
+| `max_tokens` | int | 4096 | Maximum tokens for the final response |
 | `response_schema` | object | None | JSON Schema for [structured output](#structured-output) |
 | `tags` | list | None | Filter memories by tags during reflection |
 | `tags_match` | string | "any" | How to match tags: `any`, `all`, `any_strict`, `all_strict` |
+| `trace` | bool | false | Include detailed agent trace in response |
+
+### Budget
+
+The `budget` parameter controls how thoroughly the agent searches for information:
+
+| Budget | Iterations | Use Case |
+|--------|------------|----------|
+| `low` | 0.5x base | Quick answers, simple lookups |
+| `mid` | 1x base | Balanced exploration |
+| `high` | 2x base | Complex questions, comprehensive analysis |
+
+Higher budgets allow the agent more iterations to search reflections, mental models, and raw facts before generating a response. Use `high` for questions that require synthesizing information from multiple sources.
+
+### Max Tokens
+
+The `max_tokens` parameter limits the length of the final generated response. This does not affect how much the agent can retrieve during the agentic loop — only the final answer length.
 
 ### Response Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `text` | string | The generated answer text |
-| `based_on` | array | Facts used to generate the response |
+| `used_memory_ids` | array | Memory IDs cited by the agent |
+| `used_reflection_ids` | array | Reflection IDs cited by the agent |
+| `used_mental_model_ids` | array | Mental model IDs cited by the agent |
 | `structured_output` | object | Parsed structured output (when `response_schema` provided) |
-| `usage` | TokenUsage | Token usage metrics for the LLM call |
+| `iterations` | int | Number of agent loop iterations |
+| `tools_called` | int | Total number of tool calls made |
+| `usage` | TokenUsage | Token usage metrics |
 
 The `usage` field contains:
 - `input_tokens`: Number of input/prompt tokens consumed
@@ -79,35 +98,6 @@ The `usage` field contains:
 <CodeSnippet code={reflectMjs} section="reflect-with-params" language="javascript" />
 </TabItem>
 </Tabs>
-
-## The Role of Context
-
-The `context` parameter steers how the reflection is performed without impacting the memory recall. It provides situational information that helps shape the reasoning and response.
-
-**How context is used:**
-- **Shapes reasoning**: Helps understand the situation when formulating an answer
-- **Disambiguates intent**: Clarifies what aspect of the query matters most
-- **Does not affect recall**: The same memories are retrieved regardless of context
-
-<Tabs>
-<TabItem value="python" label="Python">
-<CodeSnippet code={reflectPy} section="reflect-with-context" language="python" />
-</TabItem>
-<TabItem value="node" label="Node.js">
-<CodeSnippet code={reflectMjs} section="reflect-with-context" language="javascript" />
-</TabItem>
-</Tabs>
-
-## Opinion Formation
-
-When reflect reasons about a question, it may form new **opinions** based on the evidence in the memory bank. These opinions are created in the background and become available in subsequent `reflect` and `recall` calls.
-
-**Why opinions matter:**
-- **Consistent thinking**: Opinions ensure the memory bank maintains a coherent perspective over time
-- **Evolving viewpoints**: As more information is retained, opinions can be refined or updated
-- **Grounded reasoning**: Opinions are always derived from factual evidence in the memory bank
-
-Opinions are stored as a special memory type and are automatically retrieved when relevant to future queries. This creates a natural evolution of the bank's perspective, similar to how humans form and refine their views based on accumulated experience.
 
 ## Disposition Influence
 
@@ -128,23 +118,20 @@ The bank's disposition affects reflect responses:
 </TabItem>
 </Tabs>
 
-## Using Sources
+## Citations
 
-The `based_on` field shows which memories informed the response:
+The agent cites which sources it used to generate the response:
 
-<Tabs>
-<TabItem value="python" label="Python">
-<CodeSnippet code={reflectPy} section="reflect-sources" language="python" />
-</TabItem>
-<TabItem value="node" label="Node.js">
-<CodeSnippet code={reflectMjs} section="reflect-sources" language="javascript" />
-</TabItem>
-</Tabs>
+- `used_memory_ids` — Raw memory facts that were retrieved and cited
+- `used_reflection_ids` — User-curated reflections that were used
+- `used_mental_model_ids` — Consolidated mental models that were used
+
+**Important:** Only IDs that were actually retrieved during the agent loop can be cited. The agent validates citations to prevent hallucinated references.
 
 This enables:
-- **Transparency** — users see why the bank said something
-- **Verification** — check if the response is grounded in facts
-- **Debugging** — understand retrieval quality
+- **Transparency** — users see exactly which sources informed the answer
+- **Verification** — check if the response is grounded in actual memories
+- **Debugging** — use `trace=True` for detailed tool call logs
 
 ## Structured Output
 
@@ -154,86 +141,13 @@ The easiest way to define a schema is using **Pydantic models**:
 
 <Tabs>
 <TabItem value="python" label="Python">
-
-```python
-from pydantic import BaseModel
-from hindsight_client import Hindsight
-
-# Define your response structure with Pydantic
-class HiringRecommendation(BaseModel):
-    recommendation: str
-    confidence: str  # "low", "medium", "high"
-    key_factors: list[str]
-    risks: list[str] = []
-
-with Hindsight() as client:
-    response = client.reflect(
-        bank_id="hiring-team",
-        query="Should we hire Alice for the ML team lead position?",
-        response_schema=HiringRecommendation.model_json_schema(),
-    )
-
-    # Parse structured output into Pydantic model
-    result = HiringRecommendation.model_validate(response.structured_output)
-    print(f"Recommendation: {result.recommendation}")
-    print(f"Confidence: {result.confidence}")
-    print(f"Key factors: {result.key_factors}")
-```
-
+<CodeSnippet code={reflectPy} section="reflect-structured-output" language="python" />
 </TabItem>
 <TabItem value="node" label="Node.js">
-
-```javascript
-import { Hindsight } from "@anthropic-ai/hindsight";
-
-const client = new Hindsight();
-
-// Define JSON schema directly
-const responseSchema = {
-  type: "object",
-  properties: {
-    recommendation: { type: "string" },
-    confidence: { type: "string", enum: ["low", "medium", "high"] },
-    key_factors: { type: "array", items: { type: "string" } },
-    risks: { type: "array", items: { type: "string" } },
-  },
-  required: ["recommendation", "confidence", "key_factors"],
-};
-
-const response = await client.reflect({
-  bankId: "hiring-team",
-  query: "Should we hire Alice for the ML team lead position?",
-  responseSchema: responseSchema,
-});
-
-// Structured output
-console.log(response.structuredOutput.recommendation);
-console.log(response.structuredOutput.keyFactors);
-```
-
+<CodeSnippet code={reflectMjs} section="reflect-structured-output" language="javascript" />
 </TabItem>
 <TabItem value="cli" label="CLI">
-
-First, create a JSON schema file `schema.json`:
-```json
-{
-  "type": "object",
-  "properties": {
-    "recommendation": {"type": "string"},
-    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
-    "key_factors": {"type": "array", "items": {"type": "string"}}
-  },
-  "required": ["recommendation", "confidence", "key_factors"]
-}
-```
-
-Then use the `--schema` flag:
-```bash
-hindsight memory reflect hiring-team \
-  "Should we hire Alice for the ML team lead position?" \
-  --schema schema.json
-```
-
+<CodeSnippet code={reflectSh} section="reflect-structured-output" language="bash" />
 </TabItem>
 </Tabs>
 

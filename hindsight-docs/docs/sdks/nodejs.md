@@ -83,7 +83,7 @@ for (const r of response.results) {
 
 // With options
 const response = await client.recall('my-bank', 'What does Alice do?', {
-    types: ['world', 'opinion'],  // Filter by fact type
+    types: ['world', 'mental_model'],  // Filter by fact type
     maxTokens: 4096,
     budget: 'high',  // 'low', 'mid', or 'high'
 });
@@ -107,7 +107,7 @@ console.log(answer.text);       // Generated response
 ```typescript
 await client.createBank('my-bank', {
     name: 'Assistant',
-    background: 'I am a helpful AI assistant',
+    mission: "You're a helpful AI assistant - keep track of user preferences and conversation history.",
     disposition: {
         skepticism: 3,   // 1-5: trusting to skeptical
         literalism: 3,   // 1-5: flexible to literal

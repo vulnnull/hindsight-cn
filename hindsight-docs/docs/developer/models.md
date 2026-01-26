@@ -16,7 +16,7 @@ All local models (embedding, cross-encoder) are automatically downloaded from Hu
 
 ## LLM
 
-Used for fact extraction, entity resolution, opinion generation, and answer synthesis.
+Used for fact extraction, entity resolution, mental model consolidation, and answer synthesis.
 
 **Supported providers:** OpenAI, Anthropic, Gemini, Groq, Ollama, LM Studio, and **any OpenAI-compatible API**
 

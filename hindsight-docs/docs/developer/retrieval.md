@@ -110,11 +110,11 @@ After the four strategies run, results are **fused together**:
 
 ## Why Multiple Strategies?
 
-Consider the query: **"What did Alice think about Python last spring?"**
+Consider the query: **"What did Alice say about Python last spring?"**
 
-- **Semantic** finds facts about Alice's opinions on programming
+- **Semantic** finds facts about Alice's views on programming
 - **Keyword** ensures "Python" is actually mentioned
-- **Graph** connects Alice → opinions → programming languages
+- **Graph** connects Alice → programming languages → related entities
 - **Temporal** filters to "last spring" timeframe
 
 The **fusion** of all four gives you exactly what you're looking for, even though no single strategy would suffice.
@@ -133,18 +133,13 @@ Hindsight is built for AI agents, not humans. Traditional search systems return 
 **Parameters you control:**
 - `max_tokens`: How much memory content to return (default: 4096 tokens)
 - `budget`: Search depth level (low, mid, high)
-- `types`: Filter by world, experience, opinion, or all
+- `types`: Filter by world, experience, mental_model, or all
 - `tags`: Filter memories by visibility tags
 - `tags_match`: How to match tags (see [Recall API](./api/recall) for all options)
 
-### Expanding Context: Chunks and Entity Observations
+### Expanding Context: Chunks
 
-Memories are distilled facts—concise but sometimes missing nuance. When your agent needs deeper context, you can optionally retrieve the source material and related knowledge:
-
-| Option | Parameters | When to Use |
-|--------|------------|-------------|
-| **Chunks** | `include_chunks`, `max_chunk_tokens` | Need exact quotes, original phrasing, or surrounding context |
-| **Entity Observations** | `include_entities`, `max_entity_tokens` | Need broader knowledge about people/things mentioned in results |
+Memories are distilled facts—concise but sometimes missing nuance. When your agent needs deeper context, you can optionally retrieve the source material:
 
 **Chunks** return the raw text that generated each memory—useful when the distilled fact loses important nuance:
 
@@ -155,22 +150,7 @@ Chunk:  "Alice mentioned she prefers Python over JavaScript, mainly because
          frontend work and she's been learning TypeScript lately."
 ```
 
-**Entity Observations** pull in related facts about entities mentioned in your results. If a memory mentions "Alice", you automatically get her role, skills, and other relevant context—without needing a separate query:
-
-```
-Query: "What programming languages does Alice like?"
-Memory: "Alice prefers Python over JavaScript"
-Entity Observations (Alice):
-  - "Alice is a senior data scientist at Google"
-  - "Alice specializes in machine learning"
-  - "Alice has been learning TypeScript"
-```
-
-**When to include them:**
-- **Chunks**: When generating responses that need verbatim quotes or when context matters (e.g., "What exactly did Alice say about the project?")
-- **Entity Observations**: When building complete profiles or when the conversation might reference multiple aspects of an entity (e.g., "Tell me about Alice's work")
-
-Each has its own token budget, giving you precise control over total context size.
+Use `include_chunks=True` with `max_chunk_tokens` to control the token budget for chunks. This is useful when generating responses that need verbatim quotes or when context matters (e.g., "What exactly did Alice say about the project?").
 
 ---
 

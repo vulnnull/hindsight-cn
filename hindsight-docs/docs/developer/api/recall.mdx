@@ -42,12 +42,12 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | string | required | Natural language query |
-| `types` | list | all | Filter: `world`, `experience`, `opinion` |
+| `types` | list | all | Filter: `world`, `experience`, `mental_model` |
 | `budget` | string | "mid" | Budget level: `low`, `mid`, `high` |
 | `max_tokens` | int | 4096 | Token budget for results |
 | `trace` | bool | false | Enable trace output for debugging |
-| `include_entities` | bool | false | Include entity observations |
-| `max_entity_tokens` | int | 500 | Token budget for entity observations |
+| `include_chunks` | bool | false | Include raw text chunks that generated the memories |
+| `max_chunk_tokens` | int | 500 | Token budget for chunks |
 | `tags` | list | None | Filter memories by tags (see [Tag Filtering](#filter-by-tags)) |
 | `tags_match` | string | "any" | How to match tags: `any`, `all`, `any_strict`, `all_strict` |
 
@@ -68,18 +68,15 @@ Recall specific memory types:
 <TabItem value="python" label="Python">
 <CodeSnippet code={recallPy} section="recall-world-only" language="python" />
 <CodeSnippet code={recallPy} section="recall-experience-only" language="python" />
-<CodeSnippet code={recallPy} section="recall-opinions-only" language="python" />
+<CodeSnippet code={recallPy} section="recall-mental-models-only" language="python" />
 </TabItem>
 <TabItem value="cli" label="CLI">
 <CodeSnippet code={recallSh} section="recall-fact-type" language="bash" />
 </TabItem>
 </Tabs>
 
-:::warning About Opinions
-Opinions are beliefs formed during [reflect](/developer/api/reflect) operations. Unlike world facts and experience, opinions are subjective interpretations and may not represent objective truth. Depending on your use case:
-- **Exclude opinions** (`types=["world", "experience"]`) when you need factual, verifiable information
-- **Include opinions** when you want the agent's perspective or formed beliefs
-- **Use opinions alone** (`types=["opinion"]`) only when specifically asking about the agent's views
+:::tip About Mental Models
+Mental models are consolidated knowledge synthesized from multiple facts. They capture patterns, preferences, and learnings that the memory bank has built up over time. Mental models are automatically created in the background after retain operations.
 :::
 
 ## Token Budget Management
@@ -95,23 +92,6 @@ The `max_tokens` parameter lets you control how much of your agent's context bud
 </Tabs>
 
 This design means you never have to guess whether 10 results or 50 results will fit your context. Just specify the token budget and Hindsight returns as many relevant memories as will fit.
-
-## Include Related Context
-
-Beyond the core memory results, you can optionally retrieve additional context—each with its own token budget:
-
-| Option | Parameter | Description |
-|--------|-----------|-------------|
-| **Chunks** | `include_chunks`, `max_chunk_tokens` | Raw text chunks that generated the memories |
-| **Entity Observations** | `include_entities`, `max_entity_tokens` | Related observations about entities mentioned in results |
-
-<Tabs>
-<TabItem value="python" label="Python">
-<CodeSnippet code={recallPy} section="recall-include-entities" language="python" />
-</TabItem>
-</Tabs>
-
-This gives your agent richer context while maintaining precise control over total token consumption.
 
 ## Budget Levels
 

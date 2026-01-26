@@ -301,15 +301,6 @@ For advanced authentication (JWT, OAuth, multi-tenant schemas), implement a cust
 - **`mpfp`**: Multi-Path Fact Propagation - iterative graph traversal with activation spreading. More thorough but slower.
 - **`bfs`**: Breadth-first search from seed facts. Simple but less effective for large graphs.
 
-### Entity Observations
-
-Controls when the system generates entity observations (summaries about entities mentioned in retained content).
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `HINDSIGHT_API_OBSERVATION_MIN_FACTS` | Minimum facts about an entity before generating observations | `5` |
-| `HINDSIGHT_API_OBSERVATION_TOP_ENTITIES` | Max entities to process per retain batch | `5` |
-
 ### Retain
 
 Controls the retain (memory ingestion) pipeline.
@@ -320,7 +311,6 @@ Controls the retain (memory ingestion) pipeline.
 | `HINDSIGHT_API_RETAIN_CHUNK_SIZE` | Max characters per chunk for fact extraction. Larger chunks extract fewer LLM calls but may lose context. | `3000` |
 | `HINDSIGHT_API_RETAIN_EXTRACTION_MODE` | Fact extraction mode: `concise` (selective, fewer high-quality facts) or `verbose` (detailed, more facts) | `concise` |
 | `HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS` | Extract causal relationships between facts | `true` |
-| `HINDSIGHT_API_RETAIN_OBSERVATIONS_ASYNC` | Run entity observation generation asynchronously (after retain completes) | `false` |
 
 #### Extraction Modes
 

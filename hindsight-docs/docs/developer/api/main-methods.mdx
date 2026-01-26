@@ -89,7 +89,7 @@ hindsight recall my-bank "Tell me about Alice" -v
 
 ## Reflect: Reason with Disposition
 
-Generate disposition-aware responses that form opinions based on evidence.
+Generate disposition-aware responses using memories and mental models.
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -104,7 +104,7 @@ Generate disposition-aware responses that form opinions based on evidence.
 # Basic reflect
 hindsight reflect my-bank "Should we adopt TypeScript for our backend?"
 
-# Verbose output (shows sources and opinions)
+# Verbose output (shows sources and mental models)
 hindsight reflect my-bank "What are Alice's strengths for the team lead role?" -v
 
 # With higher reasoning budget
@@ -114,7 +114,7 @@ hindsight reflect my-bank "Analyze our tech stack" --budget high
 </TabItem>
 </Tabs>
 
-**What happens:** Memories are recalled, bank disposition is loaded, LLM reasons through evidence, new opinions are formed and stored.
+**What happens:** Memories and mental models are recalled, bank disposition is applied, and the LLM reasons through the evidence to generate a response.
 
 **See:** [Reflect Details](./reflect) for disposition configuration.
 
@@ -126,9 +126,9 @@ hindsight reflect my-bank "Analyze our tech stack" --budget high
 |---------|--------|--------|---------|
 | **Purpose** | Store information | Find information | Reason about information |
 | **Input** | Raw text/documents | Search query | Question/prompt |
-| **Output** | Memory IDs | Ranked facts | Reasoned response + opinions |
+| **Output** | Memory IDs | Ranked facts + mental models | Reasoned response |
 | **Uses LLM** | Yes (extraction) | No | Yes (generation) |
-| **Forms opinions** | No | No | Yes |
+| **Uses mental models** | No | Yes | Yes |
 | **Disposition** | No | No | Yes |
 
 ---
@@ -137,5 +137,5 @@ hindsight reflect my-bank "Analyze our tech stack" --budget high
 
 - [**Retain**](./retain) — Advanced options for storing memories
 - [**Recall**](./recall) — Tuning search quality and performance
-- [**Reflect**](./reflect) — Configuring disposition and opinions
+- [**Reflect**](./reflect) — Configuring disposition
 - [**Memory Banks**](./memory-banks) — Managing memory bank disposition

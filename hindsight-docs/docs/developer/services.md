@@ -16,7 +16,7 @@ hindsight-api        # Default port: 8888
 
 The API service is stateless and can be horizontally scaled behind a load balancer. All state is stored in PostgreSQL.
 
-By default, the API also processes background tasks (opinion formation, entity observations) internally. For high-throughput deployments, you can disable this and run dedicated workers instead.
+By default, the API also processes background tasks (mental model consolidation) internally. For high-throughput deployments, you can disable this and run dedicated workers instead.
 
 ## Worker Service
 

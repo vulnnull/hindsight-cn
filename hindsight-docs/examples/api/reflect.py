@@ -92,6 +92,30 @@ response = client.reflect(
 # [/docs:reflect-with-tags]
 
 
+# [docs:reflect-structured-output]
+from pydantic import BaseModel
+
+# Define your response structure with Pydantic
+class HiringRecommendation(BaseModel):
+    recommendation: str
+    confidence: str  # "low", "medium", "high"
+    key_factors: list[str]
+    risks: list[str] = []
+
+response = client.reflect(
+    bank_id="hiring-team",
+    query="Should we hire Alice for the ML team lead position?",
+    response_schema=HiringRecommendation.model_json_schema(),
+)
+
+# Parse structured output into Pydantic model
+result = HiringRecommendation.model_validate(response.structured_output)
+print(f"Recommendation: {result.recommendation}")
+print(f"Confidence: {result.confidence}")
+print(f"Key factors: {result.key_factors}")
+# [/docs:reflect-structured-output]
+
+
 # =============================================================================
 # Cleanup (not shown in docs)
 # =============================================================================

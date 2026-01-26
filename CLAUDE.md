@@ -7,8 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Hindsight is an agent memory system that provides long-term memory for AI agents using biomimetic data structures. Memories are organized as:
 - **World facts**: General knowledge ("The sky is blue")
 - **Experience facts**: Personal experiences ("I visited Paris in 2023")
-- **Opinion facts**: Beliefs with confidence scores ("Paris is beautiful" - 0.9 confidence)
-- **Observations**: Complex mental models derived from reflection
+- **Mental models**: Consolidated knowledge synthesized from facts ("User prefers functional programming patterns")
 
 ## Development Commands
 
@@ -101,7 +100,7 @@ cd hindsight-control-plane && npm run dev
 Main operations:
 - **Retain**: Store memories, extracts facts/entities/relationships
 - **Recall**: Retrieve memories via 4 parallel strategies (semantic, BM25, graph, temporal) + reranking
-- **Reflect**: Deep analysis forming new opinions/observations (disposition-aware)
+- **Reflect**: Disposition-aware reasoning using memories and mental models
 
 ### Database
 PostgreSQL with pgvector. Schema managed via Alembic migrations in `hindsight-api/hindsight_api/alembic/`. Migrations run automatically on API startup.

@@ -595,15 +595,6 @@ class ReflectResponse(BaseModel):
                         {"id": "123", "text": "AI is used in healthcare", "type": "world"},
                         {"id": "456", "text": "I discussed AI applications last week", "type": "experience"},
                     ],
-                    "mental_models": [
-                        {
-                            "id": "mm-1",
-                            "name": "AI Technology",
-                            "type": "concept",
-                            "subtype": "structural",
-                            "description": "Understanding of AI capabilities",
-                        }
-                    ],
                 },
                 "structured_output": {
                     "summary": "AI is transformative",
@@ -613,6 +604,14 @@ class ReflectResponse(BaseModel):
                 "trace": {
                     "tool_calls": [{"tool": "recall", "input": {"query": "AI"}, "duration_ms": 150}],
                     "llm_calls": [{"scope": "agent_1", "duration_ms": 1200}],
+                    "mental_models": [
+                        {
+                            "id": "mm-1",
+                            "name": "AI Technology",
+                            "type": "concept",
+                            "subtype": "structural",
+                        }
+                    ],
                 },
             }
         }

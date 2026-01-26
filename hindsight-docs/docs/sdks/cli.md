@@ -74,7 +74,7 @@ hindsight memory recall <bank_id> "hiking recommendations" \
   --max-tokens 8192
 
 # Filter by fact type
-hindsight memory recall <bank_id> "query" --fact-type world,opinion
+hindsight memory recall <bank_id> "query" --fact-type world,mental_model
 
 # Show trace information
 hindsight memory recall <bank_id> "query" --trace
@@ -120,13 +120,13 @@ hindsight bank stats <bank_id>
 hindsight bank name <bank_id> "My Assistant"
 ```
 
-### Set Background
+### Set Mission
 
 ```bash
-hindsight bank background <bank_id> "I am a helpful AI assistant interested in technology"
+hindsight bank mission <bank_id> "I am a helpful AI assistant interested in technology"
 
 # Skip automatic disposition inference
-hindsight bank background <bank_id> "Background text" --no-update-disposition
+hindsight bank mission <bank_id> "Mission text" --no-update-disposition
 ```
 
 ## Document Management
@@ -150,9 +150,6 @@ hindsight entity list <bank_id>
 
 # Get entity details
 hindsight entity get <bank_id> <entity_id>
-
-# Regenerate entity observations
-hindsight entity regenerate <bank_id> <entity_id>
 ```
 
 ## Output Formats
@@ -209,7 +206,7 @@ The explorer provides an interactive terminal interface to:
 - **Browse memory banks** — View all banks and their statistics
 - **Search memories** — Run recall queries with real-time results
 - **Inspect entities** — Explore the knowledge graph and entity relationships
-- **View facts** — Browse world facts, experiences, and opinions
+- **View facts** — Browse world facts, experiences, and mental models
 - **Navigate documents** — See source documents and their extracted memories
 
 ### Keyboard Shortcuts

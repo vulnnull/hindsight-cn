@@ -95,7 +95,7 @@
 }
 
 /* Navbar icons (desktop only) */
-@media (min-width: 997px) {
+@media (min-width: 1400px) {
   .navbar-item-developer::before,
   .navbar-item-sdks::before,
   .navbar-item-api::before,
@@ -186,8 +186,15 @@
   background-color: #27272a;
 }
 
-/* Mobile navbar */
-@media (max-width: 996px) {
+/* Desktop navbar - hide hamburger toggle at >= 1400px */
+@media (min-width: 1400px) {
+  .navbar__toggle {
+    display: none !important;
+  }
+}
+
+/* Mobile navbar - show hamburger, hide desktop items at < 1400px */
+@media (max-width: 1399px) {
   :root {
     --ifm-navbar-height: 3.5rem;
   }
@@ -205,8 +212,18 @@
     height: 24px !important;
   }
 
-  /* Hamburger menu toggle */
+  /* Hide all desktop navbar items except logo and toggle */
+  .navbar__items--right > .navbar__item {
+    display: none !important;
+  }
+
+  .navbar__items--left > .navbar__link {
+    display: none !important;
+  }
+
+  /* Show hamburger toggle */
   .navbar__toggle {
+    display: flex !important;
     color: var(--ifm-color-primary);
   }
 
@@ -253,7 +270,7 @@
 }
 
 /* Dark mode mobile sidebar */
-@media (max-width: 996px) {
+@media (max-width: 1399px) {
   [data-theme='dark'] .navbar-sidebar {
     background: #09090b !important;
   }
@@ -270,8 +287,42 @@
     color: #e2e8f0 !important;
   }
 
+  [data-theme='dark'] .navbar-sidebar .menu__link--active,
+  [data-theme='dark'] .navbar-sidebar .menu__link--active:hover {
+    color: transparent !important;
+    background: var(--hindsight-gradient) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+  }
+
   [data-theme='dark'] .navbar-sidebar__close {
     color: #e2e8f0 !important;
+  }
+}
+
+/* Mobile sidebar - show right navbar items */
+@media (max-width: 1399px) {
+  /* Ensure right-side items are visible in mobile sidebar */
+  .navbar-sidebar .navbar__item {
+    display: block !important;
+  }
+
+  /* GitHub icon - add text label in mobile */
+  .navbar-sidebar .header-github-link::before {
+    display: none;
+  }
+
+  .navbar-sidebar .header-github-link::after {
+    content: 'GitHub';
+    font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-weight: 600;
+    font-size: 1rem;
+    color: #1e293b;
+  }
+
+  [data-theme='dark'] .navbar-sidebar .header-github-link::after {
+    color: #e2e8f0;
   }
 }
 

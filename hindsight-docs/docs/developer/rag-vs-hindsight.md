@@ -13,8 +13,8 @@ Traditional RAG (Retrieval-Augmented Generation) retrieves documents similar to 
 | **Search strategy** | Semantic similarity only | Semantic + keyword + graph + temporal |
 | **Multi-hop reasoning** | Limited to retrieved chunks | Graph traversal across entity relationships |
 | **Temporal queries** | Keyword matching ("spring") | Date parsing and range filtering |
-| **Entity understanding** | None | Entity resolution, observations, co-occurrence |
-| **Belief formation** | Stateless | Opinions with confidence scores that evolve |
+| **Entity understanding** | None | Entity resolution, co-occurrence tracking |
+| **Knowledge consolidation** | Stateless | Mental models that synthesize and evolve |
 | **Disposition** | None | 3 traits (skepticism, literalism, empathy) influence interpretation |
 
 ## Architecture Comparison
@@ -86,9 +86,9 @@ Multiple retrieval strategies. Persistent state across sessions.
 | System | Result |
 |--------|--------|
 | RAG | Lists disconnected facts |
-| Hindsight | Returns synthesized entity observations: subscription status, billing, known issues |
+| Hindsight | Returns connected facts via entity graph: subscription status, billing, known issues |
 
-### Belief Evolution
+### Knowledge Evolution
 
 **Week 1:** User struggles with async Python, succeeds with threads
 **Week 3:** User asks about asyncio, implements async database calls
@@ -96,7 +96,7 @@ Multiple retrieval strategies. Persistent state across sessions.
 | System | Behavior |
 |--------|----------|
 | RAG | No memory of progression |
-| Hindsight | Forms opinion "user prefers sync" (0.7) → updates to "user growing comfortable with async" (0.6) |
+| Hindsight | Consolidates mental model "user prefers sync" → refines to "user growing comfortable with async" |
 
 ## When to Use Each
 

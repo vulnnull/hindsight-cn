@@ -29,6 +29,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'developer/mental-models',
+          label: 'Mental Models',
+        },
+        {
+          type: 'doc',
           id: 'developer/multilingual',
           label: 'Multilingual',
         },
@@ -76,13 +81,13 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
-          id: 'developer/api/memory-banks',
-          label: 'Memory Banks',
+          id: 'developer/api/reflections',
+          label: 'Reflections',
         },
         {
           type: 'doc',
-          id: 'developer/api/entities',
-          label: 'Entities',
+          id: 'developer/api/memory-banks',
+          label: 'Memory Banks',
         },
         {
           type: 'doc',

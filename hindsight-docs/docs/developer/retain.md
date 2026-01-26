@@ -63,8 +63,7 @@ Hindsight distinguishes between **world** facts (about others) and **experience*
 | **experience** | Conversations and events         | "I recommended Python to Alice" |
 
 
-**Note:** Opinions aren't created during `retain()` — only during `reflect()` when the bank forms beliefs.
-This separation is important for `reflect()` — the bank can reason about what it knows versus what happened in conversations.
+**Note:** Mental models are consolidated automatically in the background after `retain()` operations complete. This consolidation process synthesizes patterns from new facts into the bank's knowledge base.
 
 ---
 
@@ -151,22 +150,6 @@ Without this distinction, old information would either be unsearchable by date o
 
 ---
 
-## Entity Observations
-
-As facts accumulate about an entity, Hindsight synthesizes **observations** — high-level summaries that capture what's known:
-
-**From multiple facts:**
-- "Alice works at Google"
-- "Alice is a software engineer"
-- "Alice specializes in ML"
-
-**Hindsight creates:**
-- "Alice is a software engineer at Google specializing in ML"
-
-**Why it helps:** You can quickly understand an entity without reading through dozens of individual facts.
-
----
-
 ## Tagging Memories
 
 Tags enable visibility scoping—useful when one memory bank serves multiple users but each should only see relevant memories.
@@ -187,15 +170,30 @@ After `retain()` completes:
 - **Unified entities** that resolve different name variations
 - **Knowledge graph** with entity, temporal, semantic, and causal links
 - **Temporal grounding** for both historical and recency-based queries
-- **Background processing** that generates entity summaries
 - **Optional tags** for filtering during recall
 
 All stored in your isolated **memory bank**, ready for `recall()` and `reflect()`.
 
 ---
 
+## Mental Model Consolidation
+
+After `retain()` completes, Hindsight automatically triggers **mental model consolidation** in the background. This process:
+
+1. Analyzes new facts against existing mental models
+2. Creates new mental models when patterns emerge
+3. Refines existing mental models with new evidence
+4. Tracks which facts support each mental model
+
+This happens asynchronously — your `retain()` call returns immediately while consolidation runs in the background.
+
+See [Mental Models](./mental-models) for details on how consolidation works.
+
+---
+
 ## Next Steps
 
+- [**Mental Models**](./mental-models) — How knowledge is consolidated after retain
 - [**Recall**](./retrieval) — How multi-strategy search retrieves relevant memories
-- [**Reflect**](./reflect) — How disposition influences reasoning and opinion formation
+- [**Reflect**](./reflect) — How the agentic loop uses mental models
 - [**Retain API**](./api/retain) — Code examples and parameters

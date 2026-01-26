@@ -13,7 +13,7 @@ AI agents forget everything between sessions. Every conversation starts from zer
 
 - **Simple vector search isn't enough** — "What did Alice do last spring?" requires temporal reasoning, not just semantic similarity
 - **Facts get disconnected** — Knowing "Alice works at Google" and "Google is in Mountain View" should let you answer "Where does Alice work?" even if you never stored that directly
-- **AI Agents needs to form opinions** — A coding assistant that remembers "the user prefers functional programming" should weigh that when making recommendations
+- **AI Agents need to consolidate knowledge** — A coding assistant that remembers "the user prefers functional programming" should consolidate this into a mental model and weigh it when making recommendations
 - **Context matters** — The same information means different things to different memory banks with different personalities
 
 Hindsight solves these problems with a memory system designed specifically for AI agents.
@@ -21,7 +21,7 @@ Hindsight solves these problems with a memory system designed specifically for A
 ## What Hindsight Does
 
 ```mermaid
-graph TB
+graph LR
     subgraph app["<b>Your Application</b>"]
         Agent[AI Agent]
     end
@@ -30,9 +30,13 @@ graph TB
         API[API Server]
 
         subgraph bank["<b>Memory Bank</b>"]
+            direction TB
+            MentalModels[Mental Models]
+            MemEnt[Memories & Entities]
+            Chunks[Chunks]
             Documents[Documents]
-            Memories[Memories]
-            Entities[Entities]
+
+            MentalModels --> MemEnt --> Chunks --> Documents
         end
     end
 
@@ -40,24 +44,22 @@ graph TB
     Agent -->|recall| API
     Agent -->|reflect| API
 
-    API --> Documents
-    API --> Memories
-    API --> Entities
+    API --> bank
 ```
 
 **Your AI agent** stores information via `retain()`, searches with `recall()`, and reasons with `reflect()` — all interactions with its dedicated **memory bank**
 
 ## Key Components
 
-### Three Memory Types
+### Memory Types
 
-Hindsight separates memories by type for epistemic clarity:
+Hindsight organizes knowledge into facts and consolidated mental models:
 
 | Type | What it stores | Example |
 |------|----------------|---------|
 | **World** | Objective facts received | "Alice works at Google" |
-| **Bank** | Bank's own actions | "I recommended Python to Bob" |
-| **Opinion** | Formed beliefs + confidence | "Python is best for ML" (0.85) |
+| **Experience** | Bank's own actions and interactions | "I recommended Python to Bob" |
+| **Mental Model** | Consolidated knowledge from facts | "The user prefers functional programming patterns"
 
 ### Multi-Strategy Retrieval (TEMPR)
 
@@ -86,9 +88,17 @@ graph LR
 | **Graph** | Related entities, indirect connections |
 | **Temporal** | "last spring", "in June", time ranges |
 
+### Mental Model Consolidation
+
+After memories are retained, Hindsight automatically consolidates related facts into **mental models** — synthesized knowledge representations that capture patterns and learnings:
+
+- **Automatic synthesis**: New facts are analyzed and consolidated into existing or new mental models
+- **Evidence tracking**: Each mental model tracks which facts support it
+- **Continuous refinement**: Mental models evolve as new evidence arrives
+
 ### Disposition Traits
 
-Memory banks have disposition traits that influence how opinions are formed during Reflect:
+Memory banks have disposition traits that influence reasoning during Reflect:
 
 | Trait | Scale | Low (1) | High (5) |
 |-------|-------|---------|----------|
@@ -107,14 +117,13 @@ These traits only affect the `reflect` operation, not `recall`.
 ### Core Concepts
 - [**Retain**](/developer/retain) — How memories are stored with multi-dimensional facts
 - [**Recall**](/developer/retrieval) — How TEMPR's 4-way search retrieves memories
-- [**Reflect**](/developer/reflect) — How disposition influences reasoning and opinion formation
+- [**Reflect**](/developer/reflect) — How disposition influences reasoning
 
 ### API Methods
 - [**Retain**](/developer/api/retain) — Store information in memory banks
 - [**Recall**](/developer/api/recall) — Search and retrieve memories
 - [**Reflect**](/developer/api/reflect) — Reason with disposition
-- [**Memory Banks**](/developer/api/memory-banks) — Configure disposition and background
-- [**Entities**](/developer/api/entities) — Track people, places, and concepts
+- [**Memory Banks**](/developer/api/memory-banks) — Configure disposition and mission
 - [**Documents**](/developer/api/documents) — Manage document sources
 - [**Operations**](/developer/api/operations) — Monitor async tasks
 

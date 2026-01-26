@@ -70,6 +70,29 @@ for (const fact of sourcesResponse.based_on || []) {
 // [/docs:reflect-sources]
 
 
+// [docs:reflect-structured-output]
+// Define JSON schema directly
+const responseSchema = {
+    type: 'object',
+    properties: {
+        recommendation: { type: 'string' },
+        confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+        key_factors: { type: 'array', items: { type: 'string' } },
+        risks: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['recommendation', 'confidence', 'key_factors'],
+};
+
+const structuredResponse = await client.reflect('hiring-team', 'Should we hire Alice for the ML team lead position?', {
+    responseSchema: responseSchema,
+});
+
+// Structured output
+console.log(structuredResponse.structuredOutput.recommendation);
+console.log(structuredResponse.structuredOutput.keyFactors);
+// [/docs:reflect-structured-output]
+
+
 // =============================================================================
 // Cleanup (not shown in docs)
 // =============================================================================

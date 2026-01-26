@@ -19,7 +19,7 @@ const client = new HindsightClient({ baseUrl: HINDSIGHT_URL });
 // [docs:create-bank]
 await client.createBank('my-bank', {
     name: 'Research Assistant',
-    background: 'I am a research assistant specializing in machine learning',
+    mission: 'I am a research assistant specializing in machine learning',
     disposition: {
         skepticism: 4,
         literalism: 3,
@@ -29,14 +29,14 @@ await client.createBank('my-bank', {
 // [/docs:create-bank]
 
 
-// [docs:bank-background]
+// [docs:bank-mission]
 await client.createBank('financial-advisor', {
     name: 'Financial Advisor',
-    background: `I am a conservative financial advisor with 20 years of experience.
+    mission: `I am a conservative financial advisor with 20 years of experience.
     I prioritize capital preservation over aggressive growth.
     I have seen multiple market crashes and believe in diversification.`
 });
-// [/docs:bank-background]
+// [/docs:bank-mission]
 
 
 // =============================================================================

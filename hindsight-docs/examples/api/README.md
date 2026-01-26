@@ -18,7 +18,7 @@ This directory contains runnable example scripts that serve as the source of tru
 | `reflect.py/mjs/sh` | reflect.md | AI reflection examples |
 | `memory-banks.py/mjs` | memory-banks.md | Bank management examples |
 | `documents.py/mjs` | documents.md | Document CRUD examples |
-| `opinions.py` | opinions.md | Opinion management examples |
+| `reflections.py` | reflections.md | Reflections CRUD examples |
 | `main-methods.py` | main-methods.md | Core method examples |
 | `cli-reference.sh` | cli.md | CLI command examples |
 
@@ -36,6 +36,10 @@ for f in *.sh; do bash "$f"; done
 ```
 
 Requires a running Hindsight server at `http://localhost:8888` (or set `HINDSIGHT_API_URL`).
+
+## Legacy Examples
+
+The `legacy/` folder contains deprecated example files kept only for backward compatibility with older documentation versions. These files are **not runnable** and are skipped by CI tests.
 
 ## What's NOT Covered
 

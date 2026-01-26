@@ -73,7 +73,7 @@ hindsight_litellm.configure(
 
     # Optional - Bank Configuration
     bank_name="My Agent",          # Human-readable display name for the memory bank
-    background="This agent...",    # Instructions guiding what Hindsight should remember
+    mission="This agent...",       # Instructions guiding what Hindsight should remember
 
     # Optional - Advanced
     injection_mode="system_message",  # or "prepend_user"
@@ -84,16 +84,16 @@ hindsight_litellm.configure(
 
 ### Bank Configuration
 
-The `background` and `bank_name` parameters configure the memory bank itself. When provided, `configure()` will automatically create or update the bank with these settings.
+The `mission` and `bank_name` parameters configure the memory bank itself. When provided, `configure()` will automatically create or update the bank with these settings.
 
 ```python
 hindsight_litellm.configure(
     hindsight_api_url="http://localhost:8888",
     bank_id="support-router",
     bank_name="Customer Support Router",
-    background="""This agent routes customer support requests to the appropriate team.
-    Remember which types of issues should go to which teams (billing, technical, sales).
-    Track customer preferences for communication channels and past issue resolutions.""",
+    mission="""You're a customer support router - keep track of which types of issues
+    should go to which teams (billing, technical, sales), customer preferences for
+    communication channels, and past issue resolutions.""",
 )
 ```
 
@@ -108,7 +108,7 @@ hindsight_litellm.configure(
     bank_id="my-agent",
     use_reflect=False,  # Default
 )
-# Injects: "1. [WORLD] User prefers Python\n2. [OPINION] User dislikes Java..."
+# Injects: "1. [WORLD] User prefers Python\n2. [MENTAL MODEL] User prefers simple code..."
 
 # Reflect mode - synthesized context
 hindsight_litellm.configure(
