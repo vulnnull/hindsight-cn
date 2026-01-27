@@ -77,7 +77,7 @@ async def tool_search_mental_models(
     rows = await conn.fetch(
         f"""
         SELECT
-            id, name, content, reflect_response,
+            id, name, content,
             tags, created_at, last_refreshed_at,
             1 - (embedding <=> $2::vector) as relevance
         FROM {fq_table("mental_models")}
@@ -107,7 +107,6 @@ async def tool_search_mental_models(
                 "id": str(row["id"]),
                 "name": row["name"],
                 "content": row["content"],
-                "reflect_response": row["reflect_response"],
                 "tags": row["tags"] or [],
                 "relevance": round(row["relevance"], 4),
                 "updated_at": last_refreshed_at.isoformat() if last_refreshed_at else None,

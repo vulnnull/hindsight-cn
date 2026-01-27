@@ -70,17 +70,17 @@ const config: Config = {
           routeBasePath: '/',
           // Only show "next" version in development or when INCLUDE_CURRENT_VERSION=true
           // In production, only show released versions from versions.json
-          onlyIncludeVersions:
-            process.env.NODE_ENV === 'development' ||
-            process.env.INCLUDE_CURRENT_VERSION === 'true'
-              ? undefined
-              : (() => {
-                  try {
-                    return require('./versions.json');
-                  } catch {
-                    return undefined; // No versions yet, show current
-                  }
-                })(),
+          onlyIncludeVersions: (() => {
+            const isDev = process.env.NODE_ENV === 'development' || process.env.INCLUDE_CURRENT_VERSION === 'true';
+            try {
+              const versions = require('./versions.json') as string[];
+              // In dev mode, explicitly include 'current' (Next) + all released versions
+              // In production, only show released versions
+              return isDev ? ['current', ...versions] : versions;
+            } catch {
+              return undefined; // No versions yet, show current
+            }
+          })(),
           // Disable version badges on all versions
           versions: (() => {
             const config: Record<string, {badge: boolean}> = {

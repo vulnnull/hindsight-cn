@@ -31,12 +31,13 @@ graph LR
 
         subgraph bank["<b>Memory Bank</b>"]
             direction TB
+            MentalModels[Mental Models]
             Observations[Observations]
             MemEnt[Memories & Entities]
             Chunks[Chunks]
             Documents[Documents]
 
-            Observations --> MemEnt --> Chunks --> Documents
+            MentalModels --> Observations --> MemEnt --> Chunks --> Documents
         end
     end
 
@@ -53,13 +54,16 @@ graph LR
 
 ### Memory Types
 
-Hindsight organizes knowledge into facts and consolidated observations:
+Hindsight organizes knowledge into a hierarchy of facts and consolidated knowledge:
 
 | Type | What it stores | Example |
 |------|----------------|---------|
-| **World** | Objective facts received | "Alice works at Google" |
-| **Experience** | Bank's own actions and interactions | "I recommended Python to Bob" |
-| **Observation** | Consolidated knowledge from facts | "The user prefers functional programming patterns"
+| **Mental Model** | User-curated summaries for common queries | "Team communication best practices" |
+| **Observation** | Automatically consolidated knowledge from facts | "User was a React enthusiast but has now switched to Vue" (captures history) |
+| **World Fact** | Objective facts received | "Alice works at Google" |
+| **Experience Fact** | Bank's own actions and interactions | "I recommended Python to Bob" |
+
+During reflect, the agent checks sources in priority order: **Mental Models → Observations → Raw Facts**.
 
 ### Multi-Strategy Retrieval (TEMPR)
 
@@ -96,17 +100,19 @@ After memories are retained, Hindsight automatically consolidates related facts 
 - **Evidence tracking**: Each observation tracks which facts support it
 - **Continuous refinement**: Observations evolve as new evidence arrives
 
-### Disposition Traits
+### Mission, Directives & Disposition
 
-Memory banks have disposition traits that influence reasoning during Reflect:
+Memory banks can be configured to shape how the agent reasons during `reflect`:
 
-| Trait | Scale | Low (1) | High (5) |
-|-------|-------|---------|----------|
-| **Skepticism** | 1-5 | Trusting | Skeptical |
-| **Literalism** | 1-5 | Flexible interpretation | Literal interpretation |
-| **Empathy** | 1-5 | Detached | Empathetic |
+| Configuration | Purpose | Example |
+|---------------|---------|---------|
+| **Mission** | Natural language identity for the bank | "I am a research assistant specializing in ML. I prefer simplicity over cutting-edge." |
+| **Directives** | Hard rules the agent must follow | "Never recommend specific stocks", "Always cite sources" |
+| **Disposition** | Soft traits that influence reasoning style | Skepticism, literalism, empathy (1-5 scale) |
 
-These traits only affect the `reflect` operation, not `recall`.
+The **mission** tells Hindsight what knowledge to prioritize and provides context for reasoning. **Directives** are guardrails and compliance rules that must never be violated. **Disposition traits** subtly influence interpretation style.
+
+These settings only affect the `reflect` operation, not `recall`.
 
 ## Next Steps
 
@@ -117,13 +123,14 @@ These traits only affect the `reflect` operation, not `recall`.
 ### Core Concepts
 - [**Retain**](/developer/retain) — How memories are stored with multi-dimensional facts
 - [**Recall**](/developer/retrieval) — How TEMPR's 4-way search retrieves memories
-- [**Reflect**](/developer/reflect) — How disposition influences reasoning
+- [**Reflect**](/developer/reflect) — How mission, directives, and disposition shape reasoning
 
 ### API Methods
 - [**Retain**](/developer/api/retain) — Store information in memory banks
 - [**Recall**](/developer/api/recall) — Search and retrieve memories
-- [**Reflect**](/developer/api/reflect) — Reason with disposition
-- [**Memory Banks**](/developer/api/memory-banks) — Configure disposition and mission
+- [**Reflect**](/developer/api/reflect) — Agentic reasoning with memory
+- [**Mental Models**](/developer/api/mental-models) — User-curated summaries for common queries
+- [**Memory Banks**](/developer/api/memory-banks) — Configure mission, directives, and disposition
 - [**Documents**](/developer/api/documents) — Manage document sources
 - [**Operations**](/developer/api/operations) — Monitor async tasks
 

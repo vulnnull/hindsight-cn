@@ -17,8 +17,10 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
+from hindsight_client_api.models.mental_model_trigger import MentalModelTrigger
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -27,7 +29,11 @@ class UpdateMentalModelRequest(BaseModel):
     Request model for updating a mental model.
     """ # noqa: E501
     name: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["name"]
+    source_query: Optional[StrictStr] = None
+    max_tokens: Optional[Annotated[int, Field(le=8192, strict=True, ge=256)]] = None
+    tags: Optional[List[StrictStr]] = None
+    trigger: Optional[MentalModelTrigger] = None
+    __properties: ClassVar[List[str]] = ["name", "source_query", "max_tokens", "tags", "trigger"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -68,10 +74,33 @@ class UpdateMentalModelRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of trigger
+        if self.trigger:
+            _dict['trigger'] = self.trigger.to_dict()
         # set to None if name (nullable) is None
         # and model_fields_set contains the field
         if self.name is None and "name" in self.model_fields_set:
             _dict['name'] = None
+
+        # set to None if source_query (nullable) is None
+        # and model_fields_set contains the field
+        if self.source_query is None and "source_query" in self.model_fields_set:
+            _dict['source_query'] = None
+
+        # set to None if max_tokens (nullable) is None
+        # and model_fields_set contains the field
+        if self.max_tokens is None and "max_tokens" in self.model_fields_set:
+            _dict['max_tokens'] = None
+
+        # set to None if tags (nullable) is None
+        # and model_fields_set contains the field
+        if self.tags is None and "tags" in self.model_fields_set:
+            _dict['tags'] = None
+
+        # set to None if trigger (nullable) is None
+        # and model_fields_set contains the field
+        if self.trigger is None and "trigger" in self.model_fields_set:
+            _dict['trigger'] = None
 
         return _dict
 
@@ -85,7 +114,11 @@ class UpdateMentalModelRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "name": obj.get("name")
+            "name": obj.get("name"),
+            "source_query": obj.get("source_query"),
+            "max_tokens": obj.get("max_tokens"),
+            "tags": obj.get("tags"),
+            "trigger": MentalModelTrigger.from_dict(obj["trigger"]) if obj.get("trigger") is not None else None
         })
         return _obj
 

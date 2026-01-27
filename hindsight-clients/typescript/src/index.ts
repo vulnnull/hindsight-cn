@@ -321,6 +321,225 @@ export class HindsightClient {
 
         return this.validateResponse(response, 'setMission');
     }
+
+    /**
+     * Delete a bank.
+     */
+    async deleteBank(bankId: string): Promise<void> {
+        const response = await sdk.deleteBank({
+            client: this.client,
+            path: { bank_id: bankId },
+        });
+        if (response.error) {
+            throw new Error(`deleteBank failed: ${JSON.stringify(response.error)}`);
+        }
+    }
+
+    // Directive methods
+
+    /**
+     * Create a directive (hard rule for reflect).
+     */
+    async createDirective(
+        bankId: string,
+        name: string,
+        content: string,
+        options?: {
+            priority?: number;
+            isActive?: boolean;
+            tags?: string[];
+        }
+    ): Promise<any> {
+        const response = await sdk.createDirective({
+            client: this.client,
+            path: { bank_id: bankId },
+            body: {
+                name,
+                content,
+                priority: options?.priority ?? 0,
+                is_active: options?.isActive ?? true,
+                tags: options?.tags,
+            },
+        });
+
+        return this.validateResponse(response, 'createDirective');
+    }
+
+    /**
+     * List all directives in a bank.
+     */
+    async listDirectives(bankId: string, options?: { tags?: string[] }): Promise<any> {
+        const response = await sdk.listDirectives({
+            client: this.client,
+            path: { bank_id: bankId },
+            query: { tags: options?.tags },
+        });
+
+        return this.validateResponse(response, 'listDirectives');
+    }
+
+    /**
+     * Get a specific directive.
+     */
+    async getDirective(bankId: string, directiveId: string): Promise<any> {
+        const response = await sdk.getDirective({
+            client: this.client,
+            path: { bank_id: bankId, directive_id: directiveId },
+        });
+
+        return this.validateResponse(response, 'getDirective');
+    }
+
+    /**
+     * Update a directive.
+     */
+    async updateDirective(
+        bankId: string,
+        directiveId: string,
+        options: {
+            name?: string;
+            content?: string;
+            priority?: number;
+            isActive?: boolean;
+            tags?: string[];
+        }
+    ): Promise<any> {
+        const response = await sdk.updateDirective({
+            client: this.client,
+            path: { bank_id: bankId, directive_id: directiveId },
+            body: {
+                name: options.name,
+                content: options.content,
+                priority: options.priority,
+                is_active: options.isActive,
+                tags: options.tags,
+            },
+        });
+
+        return this.validateResponse(response, 'updateDirective');
+    }
+
+    /**
+     * Delete a directive.
+     */
+    async deleteDirective(bankId: string, directiveId: string): Promise<void> {
+        const response = await sdk.deleteDirective({
+            client: this.client,
+            path: { bank_id: bankId, directive_id: directiveId },
+        });
+        if (response.error) {
+            throw new Error(`deleteDirective failed: ${JSON.stringify(response.error)}`);
+        }
+    }
+
+    // Mental Model methods
+
+    /**
+     * Create a mental model (runs reflect in background).
+     */
+    async createMentalModel(
+        bankId: string,
+        name: string,
+        sourceQuery: string,
+        options?: {
+            tags?: string[];
+            maxTokens?: number;
+            trigger?: { refreshAfterConsolidation?: boolean };
+        }
+    ): Promise<any> {
+        const response = await sdk.createMentalModel({
+            client: this.client,
+            path: { bank_id: bankId },
+            body: {
+                name,
+                source_query: sourceQuery,
+                tags: options?.tags,
+                max_tokens: options?.maxTokens,
+                trigger: options?.trigger ? { refresh_after_consolidation: options.trigger.refreshAfterConsolidation } : undefined,
+            },
+        });
+
+        return this.validateResponse(response, 'createMentalModel');
+    }
+
+    /**
+     * List all mental models in a bank.
+     */
+    async listMentalModels(bankId: string, options?: { tags?: string[] }): Promise<any> {
+        const response = await sdk.listMentalModels({
+            client: this.client,
+            path: { bank_id: bankId },
+            query: { tags: options?.tags },
+        });
+
+        return this.validateResponse(response, 'listMentalModels');
+    }
+
+    /**
+     * Get a specific mental model.
+     */
+    async getMentalModel(bankId: string, mentalModelId: string): Promise<any> {
+        const response = await sdk.getMentalModel({
+            client: this.client,
+            path: { bank_id: bankId, mental_model_id: mentalModelId },
+        });
+
+        return this.validateResponse(response, 'getMentalModel');
+    }
+
+    /**
+     * Refresh a mental model to update with current knowledge.
+     */
+    async refreshMentalModel(bankId: string, mentalModelId: string): Promise<any> {
+        const response = await sdk.refreshMentalModel({
+            client: this.client,
+            path: { bank_id: bankId, mental_model_id: mentalModelId },
+        });
+
+        return this.validateResponse(response, 'refreshMentalModel');
+    }
+
+    /**
+     * Update a mental model's metadata.
+     */
+    async updateMentalModel(
+        bankId: string,
+        mentalModelId: string,
+        options: {
+            name?: string;
+            sourceQuery?: string;
+            tags?: string[];
+            maxTokens?: number;
+            trigger?: { refreshAfterConsolidation?: boolean };
+        }
+    ): Promise<any> {
+        const response = await sdk.updateMentalModel({
+            client: this.client,
+            path: { bank_id: bankId, mental_model_id: mentalModelId },
+            body: {
+                name: options.name,
+                source_query: options.sourceQuery,
+                tags: options.tags,
+                max_tokens: options.maxTokens,
+                trigger: options.trigger ? { refresh_after_consolidation: options.trigger.refreshAfterConsolidation } : undefined,
+            },
+        });
+
+        return this.validateResponse(response, 'updateMentalModel');
+    }
+
+    /**
+     * Delete a mental model.
+     */
+    async deleteMentalModel(bankId: string, mentalModelId: string): Promise<void> {
+        const response = await sdk.deleteMentalModel({
+            client: this.client,
+            path: { bank_id: bankId, mental_model_id: mentalModelId },
+        });
+        if (response.error) {
+            throw new Error(`deleteMentalModel failed: ${JSON.stringify(response.error)}`);
+        }
+    }
 }
 
 // Re-export types for convenience

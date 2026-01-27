@@ -481,3 +481,409 @@ fn test_json_yaml_output_formats() {
             .expect("Expected valid YAML for bank list");
     }
 }
+
+// ============================================================================
+// Directive Tests
+// ============================================================================
+
+#[test]
+fn test_directive_list() {
+    skip_if_no_server!();
+
+    let bank_id = test_bank_id("dir-list");
+
+    // Create the bank first
+    let _ = run_hindsight(&["bank", "create", &bank_id, "--name", "Test Bank"]);
+
+    // List directives
+    let output = run_hindsight(&["directive", "list", &bank_id]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should succeed (even if empty)
+    assert!(
+        output.status.success(),
+        "Directive list command failed: {} / {}",
+        stdout,
+        stderr
+    );
+
+    // Clean up
+    let _ = run_hindsight(&["bank", "delete", &bank_id, "-y"]);
+}
+
+#[test]
+fn test_directive_create_get_update_delete() {
+    skip_if_no_server!();
+
+    let bank_id = test_bank_id("dir-crud");
+
+    // Create the bank first
+    let _ = run_hindsight(&["bank", "create", &bank_id, "--name", "Test Bank"]);
+
+    // Create a directive
+    let output = run_hindsight(&[
+        "directive", "create",
+        &bank_id,
+        "Test Directive",
+        "Always respond politely",
+    ]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "Directive create failed: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+
+    // List directives and get the ID
+    let output = run_hindsight(&["directive", "list", &bank_id, "-o", "json"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "Directive list failed: {}",
+        stdout
+    );
+
+    // Parse JSON and get directive ID
+    let directive_id: Option<String> = if let Ok(result) = serde_json::from_str::<serde_json::Value>(&stdout) {
+        result.get("items")
+            .and_then(|v| v.as_array())
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    } else {
+        None
+    };
+
+    if let Some(id) = directive_id {
+        // Get the directive
+        let output = run_hindsight(&["directive", "get", &bank_id, &id]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(
+            output.status.success(),
+            "Directive get failed: stdout={}, stderr={}",
+            stdout,
+            stderr
+        );
+
+        // Update the directive
+        let output = run_hindsight(&[
+            "directive", "update",
+            &bank_id,
+            &id,
+            "--name", "Updated Directive",
+            "--content", "Always respond very politely",
+        ]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(
+            output.status.success(),
+            "Directive update failed: stdout={}, stderr={}",
+            stdout,
+            stderr
+        );
+
+        // Verify update in JSON
+        let output = run_hindsight(&["directive", "get", &bank_id, &id, "-o", "json"]);
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+            assert_eq!(
+                result.get("name").and_then(|v| v.as_str()),
+                Some("Updated Directive")
+            );
+        }
+
+        // Delete the directive
+        let output = run_hindsight(&["directive", "delete", &bank_id, &id, "-y"]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(
+            output.status.success(),
+            "Directive delete failed: stdout={}, stderr={}",
+            stdout,
+            stderr
+        );
+    }
+
+    // Clean up
+    let _ = run_hindsight(&["bank", "delete", &bank_id, "-y"]);
+}
+
+// ============================================================================
+// Mental Model Extended Tests
+// ============================================================================
+
+#[test]
+fn test_mental_model_get() {
+    skip_if_no_server!();
+
+    let bank_id = test_bank_id("mm-get");
+
+    // Create the bank first
+    let _ = run_hindsight(&["bank", "create", &bank_id, "--name", "Test Bank"]);
+
+    // Create a mental model
+    let output = run_hindsight(&[
+        "mental-model", "create",
+        &bank_id,
+        "Test Get Model",
+        "What are the key facts?",
+    ]);
+
+    if output.status.success() {
+        // List to get the ID
+        let output = run_hindsight(&["mental-model", "list", &bank_id, "-o", "json"]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        if let Ok(result) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(id) = result.get("items")
+                .and_then(|v| v.as_array())
+                .and_then(|items| items.iter().find(|item| {
+                    item.get("name").and_then(|v| v.as_str()) == Some("Test Get Model")
+                }))
+                .and_then(|item| item.get("id"))
+                .and_then(|v| v.as_str())
+            {
+                // Get the mental model
+                let output = run_hindsight(&["mental-model", "get", &bank_id, id]);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                assert!(
+                    output.status.success(),
+                    "Mental model get failed: stdout={}, stderr={}",
+                    stdout,
+                    stderr
+                );
+            }
+        }
+    }
+
+    // Clean up
+    let _ = run_hindsight(&["bank", "delete", &bank_id, "-y"]);
+}
+
+#[test]
+fn test_mental_model_update() {
+    skip_if_no_server!();
+
+    let bank_id = test_bank_id("mm-update");
+
+    // Create the bank first
+    let _ = run_hindsight(&["bank", "create", &bank_id, "--name", "Test Bank"]);
+
+    // Create a mental model
+    let output = run_hindsight(&[
+        "mental-model", "create",
+        &bank_id,
+        "Test Update Model",
+        "What are the key facts?",
+    ]);
+
+    if output.status.success() {
+        // List to get the ID
+        let output = run_hindsight(&["mental-model", "list", &bank_id, "-o", "json"]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        if let Ok(result) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(id) = result.get("items")
+                .and_then(|v| v.as_array())
+                .and_then(|items| items.iter().find(|item| {
+                    item.get("name").and_then(|v| v.as_str()) == Some("Test Update Model")
+                }))
+                .and_then(|item| item.get("id"))
+                .and_then(|v| v.as_str())
+            {
+                // Update the mental model
+                let output = run_hindsight(&[
+                    "mental-model", "update",
+                    &bank_id,
+                    id,
+                    "--name", "Updated Model Name",
+                ]);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                assert!(
+                    output.status.success(),
+                    "Mental model update failed: stdout={}, stderr={}",
+                    stdout,
+                    stderr
+                );
+
+                // Verify update
+                let output = run_hindsight(&["mental-model", "get", &bank_id, id, "-o", "json"]);
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+                    assert_eq!(
+                        result.get("name").and_then(|v| v.as_str()),
+                        Some("Updated Model Name")
+                    );
+                }
+            }
+        }
+    }
+
+    // Clean up
+    let _ = run_hindsight(&["bank", "delete", &bank_id, "-y"]);
+}
+
+#[test]
+fn test_mental_model_refresh() {
+    skip_if_no_server!();
+
+    let bank_id = test_bank_id("mm-refresh");
+
+    // Create the bank first
+    let _ = run_hindsight(&["bank", "create", &bank_id, "--name", "Test Bank"]);
+
+    // Create a mental model
+    let output = run_hindsight(&[
+        "mental-model", "create",
+        &bank_id,
+        "Test Refresh Model",
+        "What are the key facts?",
+    ]);
+
+    if output.status.success() {
+        // List to get the ID
+        let output = run_hindsight(&["mental-model", "list", &bank_id, "-o", "json"]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        if let Ok(result) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(id) = result.get("items")
+                .and_then(|v| v.as_array())
+                .and_then(|items| items.iter().find(|item| {
+                    item.get("name").and_then(|v| v.as_str()) == Some("Test Refresh Model")
+                }))
+                .and_then(|item| item.get("id"))
+                .and_then(|v| v.as_str())
+            {
+                // Refresh the mental model
+                let output = run_hindsight(&["mental-model", "refresh", &bank_id, id]);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                assert!(
+                    output.status.success(),
+                    "Mental model refresh failed: stdout={}, stderr={}",
+                    stdout,
+                    stderr
+                );
+            }
+        }
+    }
+
+    // Clean up
+    let _ = run_hindsight(&["bank", "delete", &bank_id, "-y"]);
+}
+
+// ============================================================================
+// Bank Consolidation Tests
+// ============================================================================
+
+#[test]
+fn test_bank_consolidate() {
+    skip_if_no_server!();
+
+    let bank_id = test_bank_id("bank-consolidate");
+
+    // Create the bank first
+    let _ = run_hindsight(&["bank", "create", &bank_id, "--name", "Test Bank"]);
+
+    // Trigger consolidation
+    let output = run_hindsight(&["bank", "consolidate", &bank_id]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should succeed
+    assert!(
+        output.status.success(),
+        "Bank consolidate command failed: {} / {}",
+        stdout,
+        stderr
+    );
+
+    // Clean up
+    let _ = run_hindsight(&["bank", "delete", &bank_id, "-y"]);
+}
+
+#[test]
+fn test_bank_clear_observations() {
+    skip_if_no_server!();
+
+    let bank_id = test_bank_id("bank-clear-obs");
+
+    // Create the bank first
+    let _ = run_hindsight(&["bank", "create", &bank_id, "--name", "Test Bank"]);
+
+    // Clear observations
+    let output = run_hindsight(&["bank", "clear-observations", &bank_id, "-y"]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should succeed
+    assert!(
+        output.status.success(),
+        "Bank clear-observations command failed: {} / {}",
+        stdout,
+        stderr
+    );
+
+    // Clean up
+    let _ = run_hindsight(&["bank", "delete", &bank_id, "-y"]);
+}
+
+// ============================================================================
+// Version Test
+// ============================================================================
+
+#[test]
+fn test_version() {
+    skip_if_no_server!();
+
+    let output = run_hindsight(&["version"]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should succeed
+    assert!(
+        output.status.success(),
+        "Version command failed: {} / {}",
+        stdout,
+        stderr
+    );
+}
+
+#[test]
+fn test_version_json() {
+    skip_if_no_server!();
+
+    let output = run_hindsight(&["version", "-o", "json"]);
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let result: serde_json::Value = serde_json::from_str(&stdout)
+            .expect(&format!("Expected valid JSON output, got: {}", stdout));
+
+        // Should have api_version and features
+        assert!(result.get("api_version").is_some(), "Expected api_version field");
+        assert!(result.get("features").is_some(), "Expected features field");
+    }
+}

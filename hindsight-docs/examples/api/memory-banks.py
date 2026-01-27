@@ -57,11 +57,21 @@ client.create_bank(
 # [/docs:bank-with-disposition]
 
 
+# [docs:bank-support-agent]
+client.create_bank(
+    bank_id="support-agent",
+    mission="You're a customer support agent - keep track of "
+            "customer preferences, past issues, and communication styles."
+)
+# [/docs:bank-support-agent]
+
+
 # =============================================================================
 # Cleanup (not shown in docs)
 # =============================================================================
 requests.delete(f"{HINDSIGHT_URL}/v1/default/banks/my-bank")
 requests.delete(f"{HINDSIGHT_URL}/v1/default/banks/financial-advisor")
 requests.delete(f"{HINDSIGHT_URL}/v1/default/banks/architect-bank")
+requests.delete(f"{HINDSIGHT_URL}/v1/default/banks/support-agent")
 
 print("memory-banks.py: All examples passed")

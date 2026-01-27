@@ -19,16 +19,20 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
+from hindsight_client_api.models.reflect_directive import ReflectDirective
 from hindsight_client_api.models.reflect_fact import ReflectFact
+from hindsight_client_api.models.reflect_mental_model import ReflectMentalModel
 from typing import Optional, Set
 from typing_extensions import Self
 
 class ReflectBasedOn(BaseModel):
     """
-    Evidence the response is based on: memories and mental models.
+    Evidence the response is based on: memories, mental models, and directives.
     """ # noqa: E501
     memories: Optional[List[ReflectFact]] = Field(default=None, description="Memory facts used to generate the response")
-    __properties: ClassVar[List[str]] = ["memories"]
+    mental_models: Optional[List[ReflectMentalModel]] = Field(default=None, description="Mental models used during reflection")
+    directives: Optional[List[ReflectDirective]] = Field(default=None, description="Directives applied during reflection")
+    __properties: ClassVar[List[str]] = ["memories", "mental_models", "directives"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -76,6 +80,20 @@ class ReflectBasedOn(BaseModel):
                 if _item_memories:
                     _items.append(_item_memories.to_dict())
             _dict['memories'] = _items
+        # override the default output from pydantic by calling `to_dict()` of each item in mental_models (list)
+        _items = []
+        if self.mental_models:
+            for _item_mental_models in self.mental_models:
+                if _item_mental_models:
+                    _items.append(_item_mental_models.to_dict())
+            _dict['mental_models'] = _items
+        # override the default output from pydantic by calling `to_dict()` of each item in directives (list)
+        _items = []
+        if self.directives:
+            for _item_directives in self.directives:
+                if _item_directives:
+                    _items.append(_item_directives.to_dict())
+            _dict['directives'] = _items
         return _dict
 
     @classmethod
@@ -88,7 +106,9 @@ class ReflectBasedOn(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "memories": [ReflectFact.from_dict(_item) for _item in obj["memories"]] if obj.get("memories") is not None else None
+            "memories": [ReflectFact.from_dict(_item) for _item in obj["memories"]] if obj.get("memories") is not None else None,
+            "mental_models": [ReflectMentalModel.from_dict(_item) for _item in obj["mental_models"]] if obj.get("mental_models") is not None else None,
+            "directives": [ReflectDirective.from_dict(_item) for _item in obj["directives"]] if obj.get("directives") is not None else None
         })
         return _obj
 

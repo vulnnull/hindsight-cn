@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # CLI Reference
 
-The Hindsight CLI provides command-line access to memory operations and bank management.
+The Hindsight CLI provides command-line access to memory operations and bank management. All commands follow the [OpenAPI specification](/api), so you can use `--help` on any command to see all available options.
 
 ## Installation
 
@@ -23,8 +23,12 @@ hindsight configure
 # Or set directly
 hindsight configure --api-url http://localhost:8888
 
-# Or use environment variable (highest priority)
+# With API key for authentication
+hindsight configure --api-url http://localhost:8888 --api-key your-api-key
+
+# Or use environment variables (highest priority)
 export HINDSIGHT_API_URL=http://localhost:8888
+export HINDSIGHT_API_KEY=your-api-key
 ```
 
 ## Core Commands
@@ -124,9 +128,6 @@ hindsight bank name <bank_id> "My Assistant"
 
 ```bash
 hindsight bank mission <bank_id> "I am a helpful AI assistant interested in technology"
-
-# Skip automatic disposition inference
-hindsight bank mission <bank_id> "Mission text" --no-update-disposition
 ```
 
 ## Document Management

@@ -5,7 +5,6 @@ Run: python examples/api/mental-models.py
 """
 import os
 import time
-import requests
 
 HINDSIGHT_URL = os.getenv("HINDSIGHT_API_URL", "http://localhost:8888")
 BANK_ID = "mental-models-demo-bank"
@@ -32,76 +31,90 @@ time.sleep(2)
 
 # [docs:create-mental-model]
 # Create a mental model (runs reflect in background)
-response = requests.post(
-    f"{HINDSIGHT_URL}/v1/default/banks/{BANK_ID}/mental-models",
-    json={
-        "name": "Team Communication Preferences",
-        "source_query": "How does the team prefer to communicate?",
-        "tags": ["team", "communication"]
-    }
+result = client.create_mental_model(
+    bank_id=BANK_ID,
+    name="Team Communication Preferences",
+    source_query="How does the team prefer to communicate?",
+    tags=["team", "communication"]
 )
-result = response.json()
 
 # Returns an operation_id - check operations endpoint for completion
-print(f"Operation ID: {result['operation_id']}")
+print(f"Operation ID: {result.operation_id}")
 # [/docs:create-mental-model]
+
+# Wait for the mental model to be created
+time.sleep(5)
+
+# [docs:create-mental-model-with-trigger]
+# Create a mental model with automatic refresh enabled
+result = client.create_mental_model(
+    bank_id=BANK_ID,
+    name="Project Status",
+    source_query="What is the current project status?",
+    trigger={"refresh_after_consolidation": True}
+)
+
+# This mental model will automatically refresh when observations are updated
+print(f"Operation ID: {result.operation_id}")
+# [/docs:create-mental-model-with-trigger]
 
 # Wait for the mental model to be created
 time.sleep(5)
 
 # [docs:list-mental-models]
 # List all mental models in a bank
-response = requests.get(f"{HINDSIGHT_URL}/v1/default/banks/{BANK_ID}/mental-models")
-mental_models = response.json()
+mental_models = client.list_mental_models(bank_id=BANK_ID)
 
-for mental_model in mental_models["items"]:
-    print(f"- {mental_model['name']}: {mental_model['source_query']}")
+for mental_model in mental_models.items:
+    print(f"- {mental_model.name}: {mental_model.source_query}")
 # [/docs:list-mental-models]
 
 # Get the mental model ID for subsequent examples
-mental_model_id = mental_models["items"][0]["id"] if mental_models["items"] else None
+mental_model_id = mental_models.items[0].id if mental_models.items else None
 
 if mental_model_id:
     # [docs:get-mental-model]
     # Get a specific mental model
-    response = requests.get(
-        f"{HINDSIGHT_URL}/v1/default/banks/{BANK_ID}/mental-models/{mental_model_id}"
+    mental_model = client.get_mental_model(
+        bank_id=BANK_ID,
+        mental_model_id=mental_model_id
     )
-    mental_model = response.json()
 
-    print(f"Name: {mental_model['name']}")
-    print(f"Content: {mental_model['content']}")
-    print(f"Last refreshed: {mental_model['last_refreshed_at']}")
+    print(f"Name: {mental_model.name}")
+    print(f"Content: {mental_model.content}")
+    print(f"Last refreshed: {mental_model.last_refreshed_at}")
     # [/docs:get-mental-model]
 
 
     # [docs:refresh-mental-model]
     # Refresh a mental model to update with current knowledge
-    response = requests.post(
-        f"{HINDSIGHT_URL}/v1/default/banks/{BANK_ID}/mental-models/{mental_model_id}/refresh"
+    result = client.refresh_mental_model(
+        bank_id=BANK_ID,
+        mental_model_id=mental_model_id
     )
-    result = response.json()
 
-    print(f"Refresh operation ID: {result['operation_id']}")
+    print(f"Refresh operation ID: {result.operation_id}")
     # [/docs:refresh-mental-model]
 
 
     # [docs:update-mental-model]
-    # Update a mental model's name
-    response = requests.patch(
-        f"{HINDSIGHT_URL}/v1/default/banks/{BANK_ID}/mental-models/{mental_model_id}",
-        json={"name": "Updated Team Communication Preferences"}
+    # Update a mental model's metadata
+    updated = client.update_mental_model(
+        bank_id=BANK_ID,
+        mental_model_id=mental_model_id,
+        name="Updated Team Communication Preferences",
+        trigger={"refresh_after_consolidation": True}  # Enable auto-refresh
     )
-    updated = response.json()
 
-    print(f"Updated name: {updated['name']}")
+    print(f"Updated name: {updated.name}")
     # [/docs:update-mental-model]
 
 
     # [docs:delete-mental-model]
     # Delete a mental model
-    requests.delete(
-        f"{HINDSIGHT_URL}/v1/default/banks/{BANK_ID}/mental-models/{mental_model_id}"
+    client.delete_mental_model(
+        bank_id=BANK_ID,
+        mental_model_id=mental_model_id
     )
     # [/docs:delete-mental-model]
 
@@ -109,6 +122,6 @@ if mental_model_id:
 # =============================================================================
 # Cleanup (not shown in docs)
 # =============================================================================
-requests.delete(f"{HINDSIGHT_URL}/v1/default/banks/{BANK_ID}")
+client.delete_bank(bank_id=BANK_ID)
 
 print("mental-models.py: All examples passed")

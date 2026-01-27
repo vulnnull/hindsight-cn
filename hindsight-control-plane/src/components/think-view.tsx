@@ -24,14 +24,18 @@ import {
   MessageSquare,
   Shield,
   X,
+  Check,
+  Play,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import JsonView from "react18-json-view";
 import "react18-json-view/src/style.css";
-import { MemoryDetailPanel } from "./memory-detail-panel";
+import { MemoryDetailModal } from "./memory-detail-modal";
+import { MentalModelDetailModal } from "./mental-model-detail-modal";
 
 type TagsMatch = "any" | "all" | "any_strict" | "all_strict";
 type ViewMode = "answer" | "trace" | "json";
+type BasedOnTab = "directives" | "mental_models" | "observations" | "world" | "experience";
 
 export function ThinkView() {
   const { currentBank } = useBank();
@@ -48,13 +52,15 @@ export function ThinkView() {
   const [feedback, setFeedback] = useState("");
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
-  const [selectedMemory, setSelectedMemory] = useState<any | null>(null);
+  const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
   const [selectedDirective, setSelectedDirective] = useState<any | null>(null);
   const [fullDirective, setFullDirective] = useState<any | null>(null);
   const [loadingDirective, setLoadingDirective] = useState(false);
   const [selectedObservation, setSelectedObservation] = useState<any | null>(null);
   const [fullObservation, setFullObservation] = useState<any | null>(null);
   const [loadingObservation, setLoadingObservation] = useState(false);
+  const [selectedMentalModelId, setSelectedMentalModelId] = useState<string | null>(null);
+  const [activeBasedOnTab, setActiveBasedOnTab] = useState<BasedOnTab>("world");
 
   const FEEDBACK_DIRECTIVE_NAME = "General Feedback";
 
@@ -387,15 +393,15 @@ export function ThinkView() {
                 </Card>
               )}
 
-              {/* Feedback */}
+              {/* Directive */}
               <Card className="border-blue-200 dark:border-blue-800">
                 <CardHeader className="py-4">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <MessageSquare className="w-4 h-4" />
-                    Provide Feedback
+                    Add Directive
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Your feedback will be saved as a directive to improve future responses
+                    Hard rules injected into prompts that the agent must follow
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-0">
@@ -403,7 +409,7 @@ export function ThinkView() {
                     <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
                       <span className="text-lg">&#10003;</span>
                       <span className="text-sm font-medium">
-                        Feedback saved to {FEEDBACK_DIRECTIVE_NAME}
+                        Directive saved to {FEEDBACK_DIRECTIVE_NAME}
                       </span>
                     </div>
                   ) : (
@@ -411,7 +417,7 @@ export function ThinkView() {
                       <Textarea
                         value={feedback}
                         onChange={(e) => setFeedback(e.target.value)}
-                        placeholder="Enter your feedback here..."
+                        placeholder="e.g., Always respond in formal English..."
                         className="flex-1 min-h-[60px] resize-none"
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -503,7 +509,7 @@ export function ThinkView() {
                       </div>
                     ) : (result.trace?.llm_calls && result.trace.llm_calls.length > 0) ||
                       (result.trace?.tool_calls && result.trace.tool_calls.length > 0) ? (
-                      <div className="max-h-[500px] overflow-y-auto">
+                      <div className="max-h-[500px] overflow-y-auto pr-2">
                         {/* Build timeline: LLM -> Tools -> LLM -> Tools */}
                         {(() => {
                           const llmCalls = result.trace?.llm_calls || [];
@@ -560,13 +566,19 @@ export function ThinkView() {
                                 // LLM Call
                                 <div className="flex items-start gap-3 pb-3">
                                   <div
-                                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                                    className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
                                       item.isFinal
-                                        ? "bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300"
-                                        : "bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300"
+                                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                                        : "bg-primary/10 text-primary"
                                     }`}
                                   >
-                                    {item.isFinal ? "✓" : item.iteration}
+                                    {item.isFinal ? (
+                                      <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
+                                    ) : (
+                                      <span className="text-[10px] font-semibold">
+                                        {item.iteration}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between">
@@ -586,8 +598,8 @@ export function ThinkView() {
                               ) : (
                                 // Tool Calls
                                 <div className="flex items-start gap-3 pb-3">
-                                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 flex-shrink-0">
-                                    ⚡
+                                  <div className="w-6 h-6 rounded-full flex items-center justify-center bg-blue-500/15 text-blue-600 dark:text-blue-400 flex-shrink-0">
+                                    <Play className="w-3 h-3" fill="currentColor" />
                                   </div>
                                   <div className="flex-1 min-w-0 space-y-2">
                                     <div className="text-xs text-muted-foreground">
@@ -668,8 +680,7 @@ export function ThinkView() {
                         (result.based_on?.observations?.filter(
                           (o: any) => o.subtype !== "directive"
                         )?.length || 0) +
-                        (result.trace?.observations?.filter((o: any) => o.subtype === "directive")
-                          ?.length || 0)}{" "}
+                        (result.based_on?.directives?.length || 0)}{" "}
                       items used
                     </CardDescription>
                   </CardHeader>
@@ -685,164 +696,145 @@ export function ThinkView() {
                         </div>
                       </div>
                     ) : (result.based_on?.memories && result.based_on.memories.length > 0) ||
+                      (result.based_on?.mental_models &&
+                        result.based_on.mental_models.length > 0) ||
+                      (result.based_on?.directives && result.based_on.directives.length > 0) ||
                       (result.based_on?.observations && result.based_on.observations.length > 0) ? (
-                      <div className="space-y-4 max-h-[500px] overflow-y-auto">
-                        {(() => {
-                          const memories = result.based_on?.memories || [];
-                          const worldFacts = memories.filter((f: any) => f.type === "world");
-                          const experienceFacts = memories.filter(
-                            (f: any) => f.type === "experience"
-                          );
-                          const opinionFacts = memories.filter((f: any) => f.type === "opinion");
-                          const observations = (result.based_on?.observations || []).filter(
-                            (o: any) => o.subtype !== "directive"
-                          );
-                          const directives =
-                            result.trace?.observations?.filter(
-                              (o: any) => o.subtype === "directive"
-                            ) || [];
+                      (() => {
+                        const memories = result.based_on?.memories || [];
+                        const worldFacts = memories.filter((f: any) => f.type === "world");
+                        const experienceFacts = memories.filter(
+                          (f: any) => f.type === "experience"
+                        );
+                        // Mental models are in based_on.mental_models
+                        const mentalModelFacts = result.based_on?.mental_models || [];
+                        const observations = (result.based_on?.observations || []).filter(
+                          (o: any) => o.subtype !== "directive"
+                        );
+                        // Directives are in based_on.directives
+                        const directives = result.based_on?.directives || [];
 
-                          return (
-                            <>
-                              {/* Directives */}
-                              {directives.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                                    <Shield className="w-3 h-3" />
-                                    Directives ({directives.length})
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {directives.map((directive: any, i: number) => (
-                                      <div
-                                        key={i}
-                                        className="p-2 bg-muted rounded text-xs cursor-pointer hover:bg-muted/80 transition-colors"
-                                        onClick={() => handleSelectDirective(directive)}
-                                      >
-                                        <div className="font-medium">{directive.name}</div>
-                                        {directive.observations &&
-                                          directive.observations.length > 0 && (
-                                            <ul className="mt-1 space-y-0.5">
-                                              {directive.observations.map(
-                                                (obs: string, j: number) => (
-                                                  <li
-                                                    key={j}
-                                                    className="text-[10px] text-muted-foreground flex items-start gap-1"
-                                                  >
-                                                    <span>•</span>
-                                                    <span>{obs}</span>
-                                                  </li>
-                                                )
-                                              )}
-                                            </ul>
-                                          )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                        // Build tabs array with all categories
+                        const tabs: { id: BasedOnTab; label: string; count: number }[] = [
+                          { id: "directives", label: "Directives", count: directives.length },
+                          {
+                            id: "mental_models",
+                            label: "Mental Models",
+                            count: mentalModelFacts.length,
+                          },
+                          { id: "observations", label: "Observations", count: observations.length },
+                          { id: "world", label: "World", count: worldFacts.length },
+                          { id: "experience", label: "Experience", count: experienceFacts.length },
+                        ];
 
-                              {/* Observations */}
-                              {observations.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <div className="flex items-center gap-2 text-xs font-semibold text-orange-600 dark:text-orange-400">
-                                    <div className="w-2 h-2 rounded-full bg-orange-500" />
-                                    Observations ({observations.length})
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {observations.map((obs: any, i: number) => (
-                                      <div
-                                        key={i}
-                                        className="p-2 bg-muted rounded text-xs cursor-pointer hover:bg-muted/80 transition-colors"
-                                        onClick={() => handleSelectObservation(obs)}
-                                      >
-                                        <div className="font-medium">{obs.name}</div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                        const currentTab = activeBasedOnTab;
 
-                              {/* World Facts */}
-                              {worldFacts.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400">
-                                    <div className="w-2 h-2 rounded-full bg-blue-500" />
-                                    World ({worldFacts.length})
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {worldFacts.map((fact: any, i: number) => (
-                                      <div
-                                        key={i}
-                                        className="p-2 bg-muted rounded text-xs cursor-pointer hover:bg-muted/80 transition-colors"
-                                        onClick={() => setSelectedMemory(fact)}
-                                      >
-                                        {fact.text}
-                                        {fact.context && (
-                                          <div className="text-[10px] text-muted-foreground mt-1">
-                                            {fact.context}
+                        const getCurrentFacts = () => {
+                          switch (currentTab) {
+                            case "directives":
+                              return directives;
+                            case "mental_models":
+                              return mentalModelFacts;
+                            case "observations":
+                              return observations;
+                            case "world":
+                              return worldFacts;
+                            case "experience":
+                              return experienceFacts;
+                            default:
+                              return [];
+                          }
+                        };
+
+                        const currentFacts = getCurrentFacts();
+
+                        return (
+                          <div>
+                            {/* Tabs */}
+                            <div className="flex items-center gap-1 bg-muted rounded-lg p-1 mb-4">
+                              {tabs.map((tab) => (
+                                <button
+                                  key={tab.id}
+                                  onClick={() => setActiveBasedOnTab(tab.id)}
+                                  className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                                    currentTab === tab.id
+                                      ? "bg-background text-foreground shadow-sm"
+                                      : "text-muted-foreground hover:text-foreground"
+                                  }`}
+                                >
+                                  {tab.label} ({tab.count})
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Tab Content */}
+                            {currentFacts.length > 0 ? (
+                              <div className="max-h-[400px] overflow-y-auto pr-2 space-y-3">
+                                {currentFacts.map((item: any, i: number) => (
+                                  <div
+                                    key={item.id || i}
+                                    className={`p-4 bg-muted/50 rounded-lg border border-border/50 ${
+                                      currentTab !== "directives"
+                                        ? "cursor-pointer hover:bg-muted/80 transition-colors"
+                                        : ""
+                                    }`}
+                                    onClick={() => {
+                                      if (currentTab === "directives") return; // Not clickable
+                                      if (currentTab === "observations")
+                                        handleSelectObservation(item);
+                                      else if (currentTab === "mental_models")
+                                        setSelectedMentalModelId(item.id);
+                                      else setSelectedMemoryId(item.id);
+                                    }}
+                                  >
+                                    {currentTab === "directives" ? (
+                                      <>
+                                        <div className="font-medium text-sm">{item.name}</div>
+                                        {item.content && (
+                                          <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                                            {item.content}
+                                          </p>
+                                        )}
+                                      </>
+                                    ) : currentTab === "observations" ? (
+                                      <div className="font-medium text-sm">{item.name}</div>
+                                    ) : currentTab === "mental_models" ? (
+                                      (() => {
+                                        const colonIdx = item.text?.indexOf(": ") ?? -1;
+                                        const name =
+                                          colonIdx > 0 ? item.text.slice(0, colonIdx) : item.id;
+                                        return (
+                                          <>
+                                            <div className="font-medium text-sm">{name}</div>
+                                            <code className="text-xs font-mono text-muted-foreground">
+                                              {item.id}
+                                            </code>
+                                          </>
+                                        );
+                                      })()
+                                    ) : (
+                                      <>
+                                        <p className="text-sm text-foreground leading-relaxed">
+                                          {item.text}
+                                        </p>
+                                        {item.context && (
+                                          <div className="text-xs text-muted-foreground mt-2">
+                                            {item.context}
                                           </div>
                                         )}
-                                      </div>
-                                    ))}
+                                      </>
+                                    )}
                                   </div>
-                                </div>
-                              )}
-
-                              {/* Experience Facts */}
-                              {experienceFacts.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <div className="flex items-center gap-2 text-xs font-semibold text-green-600 dark:text-green-400">
-                                    <div className="w-2 h-2 rounded-full bg-green-500" />
-                                    Experience ({experienceFacts.length})
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {experienceFacts.map((fact: any, i: number) => (
-                                      <div
-                                        key={i}
-                                        className="p-2 bg-muted rounded text-xs cursor-pointer hover:bg-muted/80 transition-colors"
-                                        onClick={() => setSelectedMemory(fact)}
-                                      >
-                                        {fact.text}
-                                        {fact.context && (
-                                          <div className="text-[10px] text-muted-foreground mt-1">
-                                            {fact.context}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Opinion Facts */}
-                              {opinionFacts.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <div className="flex items-center gap-2 text-xs font-semibold text-purple-600 dark:text-purple-400">
-                                    <div className="w-2 h-2 rounded-full bg-purple-500" />
-                                    Opinions ({opinionFacts.length})
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {opinionFacts.map((fact: any, i: number) => (
-                                      <div
-                                        key={i}
-                                        className="p-2 bg-muted rounded text-xs cursor-pointer hover:bg-muted/80 transition-colors"
-                                        onClick={() => setSelectedMemory(fact)}
-                                      >
-                                        {fact.text}
-                                        {fact.context && (
-                                          <div className="text-[10px] text-muted-foreground mt-1">
-                                            {fact.context}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-muted-foreground text-center py-4">
+                                No {currentTab} items
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()
                     ) : (
                       <div className="flex items-start gap-3 p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
                         <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
@@ -892,17 +884,8 @@ export function ThinkView() {
         </Card>
       )}
 
-      {/* Memory Detail Panel */}
-      {selectedMemory && (
-        <div className="fixed right-0 top-0 h-screen w-[420px] bg-card border-l shadow-2xl z-50 overflow-y-auto">
-          <MemoryDetailPanel
-            memory={selectedMemory}
-            onClose={() => setSelectedMemory(null)}
-            inPanel
-            bankId={currentBank || undefined}
-          />
-        </div>
-      )}
+      {/* Memory Detail Modal */}
+      <MemoryDetailModal memoryId={selectedMemoryId} onClose={() => setSelectedMemoryId(null)} />
 
       {/* Directive Detail Panel */}
       {selectedDirective && (
@@ -958,31 +941,14 @@ export function ThinkView() {
                     </div>
                   </div>
                 )}
-                {(fullDirective?.observations || selectedDirective.observations) && (
+                {/* Show content from directive */}
+                {(fullDirective?.content || selectedDirective.content) && (
                   <div>
-                    <h3 className="text-sm font-medium text-muted-foreground mb-2">
-                      Observations (
-                      {(fullDirective?.observations || selectedDirective.observations)?.length || 0}
-                      )
-                    </h3>
-                    <div className="space-y-2">
-                      {(fullDirective?.observations || selectedDirective.observations)?.map(
-                        (obs: any, i: number) => (
-                          <div key={i} className="p-3 bg-muted rounded-lg">
-                            {obs.title && (
-                              <div className="font-medium text-sm mb-1">{obs.title}</div>
-                            )}
-                            <div className="text-sm text-muted-foreground whitespace-pre-wrap">
-                              {obs.content || obs.text || (typeof obs === "string" ? obs : "")}
-                            </div>
-                            {obs.memory_ids && obs.memory_ids.length > 0 && (
-                              <div className="mt-2 text-xs text-muted-foreground">
-                                Based on {obs.memory_ids.length} memories
-                              </div>
-                            )}
-                          </div>
-                        )
-                      )}
+                    <h3 className="text-sm font-medium text-muted-foreground mb-2">Content</h3>
+                    <div className="p-3 bg-muted rounded-lg">
+                      <div className="text-sm text-muted-foreground whitespace-pre-wrap">
+                        {fullDirective?.content || selectedDirective.content}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1073,6 +1039,12 @@ export function ThinkView() {
           </div>
         </div>
       )}
+
+      {/* Mental Model Detail Modal */}
+      <MentalModelDetailModal
+        mentalModelId={selectedMentalModelId}
+        onClose={() => setSelectedMentalModelId(null)}
+      />
     </div>
   );
 }

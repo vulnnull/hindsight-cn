@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 import hindsight_client_api
-from hindsight_client_api.api import banks_api, memory_api
+from hindsight_client_api.api import banks_api, directives_api, memory_api, mental_models_api
 from hindsight_client_api.models import (
     memory_item,
     recall_request,
@@ -78,6 +78,8 @@ class Hindsight:
             self._api_client.set_default_header("Authorization", f"Bearer {api_key}")
         self._memory_api = memory_api.MemoryApi(self._api_client)
         self._banks_api = banks_api.BanksApi(self._api_client)
+        self._mental_models_api = mental_models_api.MentalModelsApi(self._api_client)
+        self._directives_api = directives_api.DirectivesApi(self._api_client)
 
     def __enter__(self):
         """Context manager entry."""
@@ -534,3 +536,253 @@ class Hindsight:
         )
 
         return await self._memory_api.reflect(bank_id, request_obj)
+
+    # Mental Models methods
+
+    def create_mental_model(
+        self,
+        bank_id: str,
+        name: str,
+        source_query: str,
+        tags: list[str] | None = None,
+        max_tokens: int | None = None,
+        trigger: dict[str, Any] | None = None,
+    ):
+        """
+        Create a mental model (runs reflect in background).
+
+        Args:
+            bank_id: The memory bank ID
+            name: Human-readable name for the mental model
+            source_query: The query to run to generate content
+            tags: Optional tags for filtering during retrieval
+            max_tokens: Optional maximum tokens for the mental model content
+            trigger: Optional trigger settings (e.g., {"refresh_after_consolidation": True})
+
+        Returns:
+            CreateMentalModelResponse with operation_id
+        """
+        from hindsight_client_api.models import create_mental_model_request, mental_model_trigger
+
+        trigger_obj = None
+        if trigger:
+            trigger_obj = mental_model_trigger.MentalModelTrigger(**trigger)
+
+        request_obj = create_mental_model_request.CreateMentalModelRequest(
+            name=name,
+            source_query=source_query,
+            tags=tags,
+            max_tokens=max_tokens,
+            trigger=trigger_obj,
+        )
+
+        return _run_async(self._mental_models_api.create_mental_model(bank_id, request_obj))
+
+    def list_mental_models(self, bank_id: str, tags: list[str] | None = None):
+        """
+        List all mental models in a bank.
+
+        Args:
+            bank_id: The memory bank ID
+            tags: Optional tags to filter by
+
+        Returns:
+            ListMentalModelsResponse with items
+        """
+        return _run_async(self._mental_models_api.list_mental_models(bank_id, tags=tags))
+
+    def get_mental_model(self, bank_id: str, mental_model_id: str):
+        """
+        Get a specific mental model.
+
+        Args:
+            bank_id: The memory bank ID
+            mental_model_id: The mental model ID
+
+        Returns:
+            MentalModelResponse
+        """
+        return _run_async(self._mental_models_api.get_mental_model(bank_id, mental_model_id))
+
+    def refresh_mental_model(self, bank_id: str, mental_model_id: str):
+        """
+        Refresh a mental model to update with current knowledge.
+
+        Args:
+            bank_id: The memory bank ID
+            mental_model_id: The mental model ID
+
+        Returns:
+            RefreshMentalModelResponse with operation_id
+        """
+        return _run_async(self._mental_models_api.refresh_mental_model(bank_id, mental_model_id))
+
+    def update_mental_model(
+        self,
+        bank_id: str,
+        mental_model_id: str,
+        name: str | None = None,
+        source_query: str | None = None,
+        tags: list[str] | None = None,
+        max_tokens: int | None = None,
+        trigger: dict[str, Any] | None = None,
+    ):
+        """
+        Update a mental model's metadata.
+
+        Args:
+            bank_id: The memory bank ID
+            mental_model_id: The mental model ID
+            name: Optional new name
+            source_query: Optional new source query
+            tags: Optional new tags
+            max_tokens: Optional new max tokens
+            trigger: Optional trigger settings (e.g., {"refresh_after_consolidation": True})
+
+        Returns:
+            MentalModelResponse
+        """
+        from hindsight_client_api.models import mental_model_trigger, update_mental_model_request
+
+        trigger_obj = None
+        if trigger:
+            trigger_obj = mental_model_trigger.MentalModelTrigger(**trigger)
+
+        request_obj = update_mental_model_request.UpdateMentalModelRequest(
+            name=name,
+            source_query=source_query,
+            tags=tags,
+            max_tokens=max_tokens,
+            trigger=trigger_obj,
+        )
+
+        return _run_async(self._mental_models_api.update_mental_model(bank_id, mental_model_id, request_obj))
+
+    def delete_mental_model(self, bank_id: str, mental_model_id: str):
+        """
+        Delete a mental model.
+
+        Args:
+            bank_id: The memory bank ID
+            mental_model_id: The mental model ID
+        """
+        return _run_async(self._mental_models_api.delete_mental_model(bank_id, mental_model_id))
+
+    # Directives methods
+
+    def create_directive(
+        self,
+        bank_id: str,
+        name: str,
+        content: str,
+        priority: int = 0,
+        is_active: bool = True,
+        tags: list[str] | None = None,
+    ):
+        """
+        Create a directive (hard rule for reflect).
+
+        Args:
+            bank_id: The memory bank ID
+            name: Human-readable name for the directive
+            content: The directive content/rules
+            priority: Priority level (higher = injected first)
+            is_active: Whether the directive is active
+            tags: Optional tags for filtering
+
+        Returns:
+            DirectiveResponse
+        """
+        from hindsight_client_api.models import create_directive_request
+
+        request_obj = create_directive_request.CreateDirectiveRequest(
+            name=name,
+            content=content,
+            priority=priority,
+            is_active=is_active,
+            tags=tags,
+        )
+
+        return _run_async(self._directives_api.create_directive(bank_id, request_obj))
+
+    def list_directives(self, bank_id: str, tags: list[str] | None = None):
+        """
+        List all directives in a bank.
+
+        Args:
+            bank_id: The memory bank ID
+            tags: Optional tags to filter by
+
+        Returns:
+            ListDirectivesResponse with items
+        """
+        return _run_async(self._directives_api.list_directives(bank_id, tags=tags))
+
+    def get_directive(self, bank_id: str, directive_id: str):
+        """
+        Get a specific directive.
+
+        Args:
+            bank_id: The memory bank ID
+            directive_id: The directive ID
+
+        Returns:
+            DirectiveResponse
+        """
+        return _run_async(self._directives_api.get_directive(bank_id, directive_id))
+
+    def update_directive(
+        self,
+        bank_id: str,
+        directive_id: str,
+        name: str | None = None,
+        content: str | None = None,
+        priority: int | None = None,
+        is_active: bool | None = None,
+        tags: list[str] | None = None,
+    ):
+        """
+        Update a directive.
+
+        Args:
+            bank_id: The memory bank ID
+            directive_id: The directive ID
+            name: Optional new name
+            content: Optional new content
+            priority: Optional new priority
+            is_active: Optional new active status
+            tags: Optional new tags
+
+        Returns:
+            DirectiveResponse
+        """
+        from hindsight_client_api.models import update_directive_request
+
+        request_obj = update_directive_request.UpdateDirectiveRequest(
+            name=name,
+            content=content,
+            priority=priority,
+            is_active=is_active,
+            tags=tags,
+        )
+
+        return _run_async(self._directives_api.update_directive(bank_id, directive_id, request_obj))
+
+    def delete_directive(self, bank_id: str, directive_id: str):
+        """
+        Delete a directive.
+
+        Args:
+            bank_id: The memory bank ID
+            directive_id: The directive ID
+        """
+        return _run_async(self._directives_api.delete_directive(bank_id, directive_id))
+
+    def delete_bank(self, bank_id: str):
+        """
+        Delete a memory bank.
+
+        Args:
+            bank_id: The memory bank ID
+        """
+        return _run_async(self._banks_api.delete_bank(bank_id))

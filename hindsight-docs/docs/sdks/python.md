@@ -43,7 +43,7 @@ from hindsight import HindsightServer, HindsightClient
 
 with HindsightServer(
     llm_provider="openai",
-    llm_model="gpt-4.1-mini",
+    llm_model="gpt-4o-mini",
     llm_api_key=os.environ["OPENAI_API_KEY"]
 ) as server:
     client = HindsightClient(base_url=server.url)
@@ -156,28 +156,25 @@ results = client.recall(
 )
 ```
 
-### Recall with Full Response
+### Recall with Chunks
 
 ```python
-# Returns RecallResponse with entities and chunks
+# Returns RecallResponse with source chunks
 response = client.recall(
     bank_id="my-bank",
     query="What does Alice do?",
     types=["world", "experience"],
     budget="mid",
     max_tokens=4096,
-    include_entities=True,
-    max_entity_tokens=500
+    include_chunks=True,
+    max_chunk_tokens=500
 )
 
 print(f"Found {len(response.results)} memories")
 for r in response.results:
     print(f"  - {r.text}")
-
-# Access entities
-if response.entities:
-    for entity in response.entities:
-        print(f"Entity: {entity.name}")
+    if r.chunks:
+        print(f"    Source: {r.chunks[0].text[:100]}...")
 ```
 
 ### Reflect (Generate Response)

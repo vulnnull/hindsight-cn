@@ -54,6 +54,7 @@ from hindsight_client_api.models.list_tags_response import ListTagsResponse
 from hindsight_client_api.models.memory_item import MemoryItem
 from hindsight_client_api.models.mental_model_list_response import MentalModelListResponse
 from hindsight_client_api.models.mental_model_response import MentalModelResponse
+from hindsight_client_api.models.mental_model_trigger import MentalModelTrigger
 from hindsight_client_api.models.operation_response import OperationResponse
 from hindsight_client_api.models.operation_status_response import OperationStatusResponse
 from hindsight_client_api.models.operations_list_response import OperationsListResponse
@@ -61,9 +62,11 @@ from hindsight_client_api.models.recall_request import RecallRequest
 from hindsight_client_api.models.recall_response import RecallResponse
 from hindsight_client_api.models.recall_result import RecallResult
 from hindsight_client_api.models.reflect_based_on import ReflectBasedOn
+from hindsight_client_api.models.reflect_directive import ReflectDirective
 from hindsight_client_api.models.reflect_fact import ReflectFact
 from hindsight_client_api.models.reflect_include_options import ReflectIncludeOptions
 from hindsight_client_api.models.reflect_llm_call import ReflectLLMCall
+from hindsight_client_api.models.reflect_mental_model import ReflectMentalModel
 from hindsight_client_api.models.reflect_request import ReflectRequest
 from hindsight_client_api.models.reflect_response import ReflectResponse
 from hindsight_client_api.models.reflect_tool_call import ReflectToolCall

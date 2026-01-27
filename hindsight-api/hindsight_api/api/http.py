@@ -535,6 +535,22 @@ class ReflectFact(BaseModel):
     occurred_end: str | None = None
 
 
+class ReflectDirective(BaseModel):
+    """A directive applied during reflect."""
+
+    id: str = Field(description="Directive ID")
+    name: str = Field(description="Directive name")
+    content: str = Field(description="Directive content")
+
+
+class ReflectMentalModel(BaseModel):
+    """A mental model used during reflect."""
+
+    id: str = Field(description="Mental model ID")
+    text: str = Field(description="Mental model content")
+    context: str | None = Field(default=None, description="Additional context")
+
+
 class ReflectToolCall(BaseModel):
     """A tool call made during reflect agent execution."""
 
@@ -555,9 +571,13 @@ class ReflectLLMCall(BaseModel):
 
 
 class ReflectBasedOn(BaseModel):
-    """Evidence the response is based on: memories and mental models."""
+    """Evidence the response is based on: memories, mental models, and directives."""
 
     memories: list[ReflectFact] = Field(default_factory=list, description="Memory facts used to generate the response")
+    mental_models: list[ReflectMentalModel] = Field(
+        default_factory=list, description="Mental models used during reflection"
+    )
+    directives: list[ReflectDirective] = Field(default_factory=list, description="Directives applied during reflection")
 
 
 class ReflectTrace(BaseModel):
@@ -1082,6 +1102,15 @@ class UpdateDirectiveRequest(BaseModel):
 # =========================================================================
 
 
+class MentalModelTrigger(BaseModel):
+    """Trigger settings for a mental model."""
+
+    refresh_after_consolidation: bool = Field(
+        default=False,
+        description="If true, refresh this mental model after observations consolidation (real-time mode)",
+    )
+
+
 class MentalModelResponse(BaseModel):
     """Response model for a mental model (stored reflect response)."""
 
@@ -1091,6 +1120,8 @@ class MentalModelResponse(BaseModel):
     source_query: str
     content: str
     tags: list[str] = Field(default_factory=list)
+    max_tokens: int = Field(default=2048)
+    trigger: MentalModelTrigger = Field(default_factory=MentalModelTrigger)
     last_refreshed_at: str | None = None
     created_at: str | None = None
     reflect_response: dict | None = Field(
@@ -1115,6 +1146,7 @@ class CreateMentalModelRequest(BaseModel):
                 "source_query": "How does the team prefer to communicate?",
                 "tags": ["team"],
                 "max_tokens": 2048,
+                "trigger": {"refresh_after_consolidation": False},
             }
         }
     )
@@ -1123,6 +1155,7 @@ class CreateMentalModelRequest(BaseModel):
     source_query: str = Field(description="The query to run to generate content")
     tags: list[str] = Field(default_factory=list, description="Tags for scoped visibility")
     max_tokens: int = Field(default=2048, ge=256, le=8192, description="Maximum tokens for generated content")
+    trigger: MentalModelTrigger = Field(default_factory=MentalModelTrigger, description="Trigger settings")
 
 
 class CreateMentalModelResponse(BaseModel):
@@ -1138,11 +1171,19 @@ class UpdateMentalModelRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "name": "Updated Team Communication Preferences",
+                "source_query": "How does the team prefer to communicate?",
+                "max_tokens": 4096,
+                "tags": ["team", "communication"],
+                "trigger": {"refresh_after_consolidation": True},
             }
         }
     )
 
     name: str | None = Field(default=None, description="New name for the mental model")
+    source_query: str | None = Field(default=None, description="New source query for the mental model")
+    max_tokens: int | None = Field(default=None, ge=256, le=8192, description="Maximum tokens for generated content")
+    tags: list[str] | None = Field(default=None, description="Tags for scoped visibility")
+    trigger: MentalModelTrigger | None = Field(default=None, description="Trigger settings")
 
 
 class OperationResponse(BaseModel):
@@ -1846,23 +1887,46 @@ def _register_routes(app: FastAPI):
                     tags_match=request.tags_match,
                 )
 
-            # Build based_on (memories + observations) if facts are requested
+            # Build based_on (memories + mental_models + directives) if facts are requested
             based_on_result: ReflectBasedOn | None = None
             if request.include.facts is not None:
                 memories = []
+                mental_models = []
+                directives = []
                 for fact_type, facts in core_result.based_on.items():
-                    for fact in facts:
-                        memories.append(
-                            ReflectFact(
-                                id=fact.id,
-                                text=fact.text,
-                                type=fact.fact_type,
-                                context=fact.context,
-                                occurred_start=fact.occurred_start,
-                                occurred_end=fact.occurred_end,
+                    if fact_type == "directives":
+                        # Directives have different structure (id, name, content)
+                        for directive in facts:
+                            directives.append(
+                                ReflectDirective(
+                                    id=directive.id,
+                                    name=directive.name,
+                                    content=directive.content,
+                                )
                             )
-                        )
-                based_on_result = ReflectBasedOn(memories=memories)
+                    elif fact_type == "mental_models":
+                        # Mental models are MemoryFact with type "mental_models"
+                        for fact in facts:
+                            mental_models.append(
+                                ReflectMentalModel(
+                                    id=fact.id,
+                                    text=fact.text,
+                                    context=fact.context,
+                                )
+                            )
+                    else:
+                        for fact in facts:
+                            memories.append(
+                                ReflectFact(
+                                    id=fact.id,
+                                    text=fact.text,
+                                    type=fact.fact_type,
+                                    context=fact.context,
+                                    occurred_start=fact.occurred_start,
+                                    occurred_end=fact.occurred_end,
+                                )
+                            )
+                based_on_result = ReflectBasedOn(memories=memories, mental_models=mental_models, directives=directives)
 
             # Build trace (tool_calls + llm_calls + observations) if tool_calls is requested
             trace_result: ReflectTrace | None = None
@@ -2266,12 +2330,21 @@ def _register_routes(app: FastAPI):
     ):
         """Create a mental model (async - returns operation_id)."""
         try:
-            result = await app.state.memory.submit_async_create_mental_model(
+            # 1. Create the mental model with placeholder content
+            mental_model = await app.state.memory.create_mental_model(
                 bank_id=bank_id,
                 name=body.name,
                 source_query=body.source_query,
+                content="Generating content...",
                 tags=body.tags if body.tags else None,
                 max_tokens=body.max_tokens,
+                trigger=body.trigger.model_dump() if body.trigger else None,
+                request_context=request_context,
+            )
+            # 2. Schedule a refresh to generate the actual content
+            result = await app.state.memory.submit_async_refresh_mental_model(
+                bank_id=bank_id,
+                mental_model_id=mental_model["id"],
                 request_context=request_context,
             )
             return CreateMentalModelResponse(operation_id=result["operation_id"])
@@ -2324,7 +2397,7 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/mental-models/{mental_model_id}",
         response_model=MentalModelResponse,
         summary="Update mental model",
-        description="Update a mental model's name.",
+        description="Update a mental model's name and/or source query.",
         operation_id="update_mental_model",
         tags=["Mental Models"],
     )
@@ -2340,6 +2413,10 @@ def _register_routes(app: FastAPI):
                 bank_id=bank_id,
                 mental_model_id=mental_model_id,
                 name=body.name,
+                source_query=body.source_query,
+                max_tokens=body.max_tokens,
+                tags=body.tags,
+                trigger=body.trigger.model_dump() if body.trigger else None,
                 request_context=request_context,
             )
             if mental_model is None:

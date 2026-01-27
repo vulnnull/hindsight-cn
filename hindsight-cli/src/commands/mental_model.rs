@@ -112,6 +112,7 @@ pub fn create(
         source_query: source_query.to_string(),
         max_tokens: 2048,
         tags: vec![],
+        trigger: None,
     };
 
     let response = client.create_mental_model(bank_id, &request, verbose);
@@ -152,7 +153,13 @@ pub fn update(
         None
     };
 
-    let request = types::UpdateMentalModelRequest { name };
+    let request = types::UpdateMentalModelRequest {
+        name,
+        source_query: None,
+        max_tokens: None,
+        tags: None,
+        trigger: None,
+    };
 
     let response = client.update_mental_model(bank_id, mental_model_id, &request, verbose);
 

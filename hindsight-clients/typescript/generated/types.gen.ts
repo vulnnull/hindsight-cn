@@ -417,6 +417,10 @@ export type CreateMentalModelRequest = {
    * Maximum tokens for generated content
    */
   max_tokens?: number;
+  /**
+   * Trigger settings
+   */
+  trigger?: MentalModelTrigger;
 };
 
 /**
@@ -1025,6 +1029,11 @@ export type MentalModelResponse = {
    */
   tags?: Array<string>;
   /**
+   * Max Tokens
+   */
+  max_tokens?: number;
+  trigger?: MentalModelTrigger;
+  /**
    * Last Refreshed At
    */
   last_refreshed_at?: string | null;
@@ -1040,6 +1049,20 @@ export type MentalModelResponse = {
   reflect_response?: {
     [key: string]: unknown;
   } | null;
+};
+
+/**
+ * MentalModelTrigger
+ *
+ * Trigger settings for a mental model.
+ */
+export type MentalModelTrigger = {
+  /**
+   * Refresh After Consolidation
+   *
+   * If true, refresh this mental model after observations consolidation (real-time mode)
+   */
+  refresh_after_consolidation?: boolean;
 };
 
 /**
@@ -1286,7 +1309,7 @@ export type RecallResult = {
 /**
  * ReflectBasedOn
  *
- * Evidence the response is based on: memories and mental models.
+ * Evidence the response is based on: memories, mental models, and directives.
  */
 export type ReflectBasedOn = {
   /**
@@ -1295,6 +1318,44 @@ export type ReflectBasedOn = {
    * Memory facts used to generate the response
    */
   memories?: Array<ReflectFact>;
+  /**
+   * Mental Models
+   *
+   * Mental models used during reflection
+   */
+  mental_models?: Array<ReflectMentalModel>;
+  /**
+   * Directives
+   *
+   * Directives applied during reflection
+   */
+  directives?: Array<ReflectDirective>;
+};
+
+/**
+ * ReflectDirective
+ *
+ * A directive applied during reflect.
+ */
+export type ReflectDirective = {
+  /**
+   * Id
+   *
+   * Directive ID
+   */
+  id: string;
+  /**
+   * Name
+   *
+   * Directive name
+   */
+  name: string;
+  /**
+   * Content
+   *
+   * Directive content
+   */
+  content: string;
 };
 
 /**
@@ -1363,6 +1424,32 @@ export type ReflectLlmCall = {
    * Execution time in milliseconds
    */
   duration_ms: number;
+};
+
+/**
+ * ReflectMentalModel
+ *
+ * A mental model used during reflect.
+ */
+export type ReflectMentalModel = {
+  /**
+   * Id
+   *
+   * Mental model ID
+   */
+  id: string;
+  /**
+   * Text
+   *
+   * Mental model content
+   */
+  text: string;
+  /**
+   * Context
+   *
+   * Additional context
+   */
+  context?: string | null;
 };
 
 /**
@@ -1692,6 +1779,28 @@ export type UpdateMentalModelRequest = {
    * New name for the mental model
    */
   name?: string | null;
+  /**
+   * Source Query
+   *
+   * New source query for the mental model
+   */
+  source_query?: string | null;
+  /**
+   * Max Tokens
+   *
+   * Maximum tokens for generated content
+   */
+  max_tokens?: number | null;
+  /**
+   * Tags
+   *
+   * Tags for scoped visibility
+   */
+  tags?: Array<string> | null;
+  /**
+   * Trigger settings
+   */
+  trigger?: MentalModelTrigger | null;
 };
 
 /**

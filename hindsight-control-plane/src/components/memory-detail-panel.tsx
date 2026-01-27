@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, X, Loader2 } from "lucide-react";
+import { Copy, Check, X, Loader2, Calendar } from "lucide-react";
 import { DocumentChunkModal } from "./document-chunk-modal";
 import { MemoryDetailModal } from "./memory-detail-modal";
 import { client } from "@/lib/api";
@@ -61,6 +61,16 @@ export function MemoryDetailPanel({
   const isObservation =
     displayMemory?.fact_type === "observation" || displayMemory?.type === "observation";
 
+  // Determine the display title based on memory type
+  const getMemoryTypeTitle = () => {
+    const factType = displayMemory?.fact_type || displayMemory?.type;
+    if (factType === "observation") return "Observation";
+    if (factType === "world") return "World Fact";
+    if (factType === "experience") return "Experience";
+    return "Memory Details";
+  };
+  const memoryTypeTitle = getMemoryTypeTitle();
+
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -101,10 +111,7 @@ export function MemoryDetailPanel({
         <div className="p-5">
           {/* Header with close button */}
           <div className="flex justify-between items-center mb-6 pb-4 border-b border-border">
-            <div>
-              <h3 className="text-xl font-bold text-foreground">Memory Details</h3>
-              <p className="text-sm text-muted-foreground mt-1">Full memory content and metadata</p>
-            </div>
+            <h3 className="text-xl font-bold text-foreground">{memoryTypeTitle}</h3>
             <Button variant="secondary" size="sm" onClick={onClose} className="h-8 w-8 p-0">
               <X className="h-5 w-5" />
             </Button>
@@ -117,11 +124,9 @@ export function MemoryDetailPanel({
             </div>
           ) : (
             <div className="space-y-5">
-              {/* Full Text */}
+              {/* Text */}
               <div>
-                <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                  Full Text
-                </div>
+                <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Text</div>
                 <div className="text-sm whitespace-pre-wrap leading-relaxed text-foreground">
                   {displayMemory.text}
                 </div>
@@ -129,7 +134,7 @@ export function MemoryDetailPanel({
 
               {/* Context (not shown for observations) */}
               {displayMemory.context && !isObservation && (
-                <div className="p-4 bg-muted/50 rounded-lg">
+                <div>
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
                     Context
                   </div>
@@ -138,28 +143,38 @@ export function MemoryDetailPanel({
               )}
 
               {/* Dates */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-muted/50 rounded-lg">
+              {displayMemory.occurred_start && (
+                <div>
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
                     Occurred
                   </div>
-                  <div className="text-sm font-medium text-foreground">
-                    {displayMemory.occurred_start
-                      ? new Date(displayMemory.occurred_start).toLocaleString()
-                      : "N/A"}
+                  <div className="flex items-center gap-2 text-sm text-foreground">
+                    <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span>
+                      {new Date(displayMemory.occurred_start).toLocaleString()}
+                      {displayMemory.occurred_end &&
+                        displayMemory.occurred_end !== displayMemory.occurred_start && (
+                          <>
+                            <span className="text-muted-foreground mx-1">→</span>
+                            {new Date(displayMemory.occurred_end).toLocaleString()}
+                          </>
+                        )}
+                    </span>
                   </div>
                 </div>
-                <div className="p-4 bg-muted/50 rounded-lg">
+              )}
+
+              {displayMemory.mentioned_at && (
+                <div>
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
                     Mentioned
                   </div>
-                  <div className="text-sm font-medium text-foreground">
-                    {displayMemory.mentioned_at
-                      ? new Date(displayMemory.mentioned_at).toLocaleString()
-                      : "N/A"}
+                  <div className="flex items-center gap-2 text-sm text-foreground">
+                    <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span>{new Date(displayMemory.mentioned_at).toLocaleString()}</span>
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Entities */}
               {displayMemory.entities &&
@@ -270,32 +285,6 @@ export function MemoryDetailPanel({
                 </div>
               )}
 
-              {/* ID */}
-              {memoryId && (
-                <div className="p-4 bg-muted/50 rounded-lg">
-                  <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                    Memory ID
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <code className="text-xs font-mono break-all flex-1 text-muted-foreground">
-                      {memoryId}
-                    </code>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 flex-shrink-0"
-                      onClick={() => copyToClipboard(memoryId)}
-                    >
-                      {copiedId === memoryId ? (
-                        <Check className="h-4 w-4 text-green-600" />
-                      ) : (
-                        <Copy className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
               {/* Document/Chunk buttons */}
               {(displayMemory.document_id || displayMemory.chunk_id) && (
                 <div className="flex gap-3 pt-2">
@@ -317,6 +306,30 @@ export function MemoryDetailPanel({
                       View Chunk
                     </Button>
                   )}
+                </div>
+              )}
+
+              {/* Memory ID */}
+              {memoryId && (
+                <div>
+                  <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
+                    Memory ID
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs font-mono text-muted-foreground">{memoryId}</code>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0"
+                      onClick={() => copyToClipboard(memoryId)}
+                    >
+                      {copiedId === memoryId ? (
+                        <Check className="h-3 w-3 text-green-600" />
+                      ) : (
+                        <Copy className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -348,12 +361,7 @@ export function MemoryDetailPanel({
         className={`bg-card border-2 border-primary rounded-lg ${padding} sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto`}
       >
         <div className="flex justify-between items-start mb-4">
-          <div>
-            <h3 className={`${titleSize} font-bold text-card-foreground`}>Memory Details</h3>
-            {!compact && (
-              <p className="text-sm text-muted-foreground">Full memory content and metadata</p>
-            )}
-          </div>
+          <h3 className={`${titleSize} font-bold text-card-foreground`}>{memoryTypeTitle}</h3>
           <Button
             variant="ghost"
             size="sm"
@@ -371,17 +379,17 @@ export function MemoryDetailPanel({
           </div>
         ) : (
           <div className={gap}>
-            {/* Full Text */}
+            {/* Text */}
             <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
               <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
-                Full Text
+                Text
               </div>
               <div className={`${textSize} whitespace-pre-wrap`}>{displayMemory.text}</div>
             </div>
 
             {/* Context */}
             {displayMemory.context && (
-              <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
+              <div>
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
                   Context
                 </div>
@@ -390,28 +398,42 @@ export function MemoryDetailPanel({
             )}
 
             {/* Dates */}
-            <div className="grid grid-cols-2 gap-2">
+            {displayMemory.occurred_start && (
               <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
                   Occurred
                 </div>
-                <div className={textSize}>
-                  {displayMemory.occurred_start
-                    ? new Date(displayMemory.occurred_start).toLocaleString()
-                    : "N/A"}
+                <div className={`flex items-center gap-2 ${textSize}`}>
+                  <Calendar
+                    className={`${compact ? "h-3 w-3" : "h-4 w-4"} text-muted-foreground flex-shrink-0`}
+                  />
+                  <span>
+                    {new Date(displayMemory.occurred_start).toLocaleString()}
+                    {displayMemory.occurred_end &&
+                      displayMemory.occurred_end !== displayMemory.occurred_start && (
+                        <>
+                          <span className="text-muted-foreground mx-1">→</span>
+                          {new Date(displayMemory.occurred_end).toLocaleString()}
+                        </>
+                      )}
+                  </span>
                 </div>
               </div>
+            )}
+
+            {displayMemory.mentioned_at && (
               <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
                   Mentioned
                 </div>
-                <div className={textSize}>
-                  {displayMemory.mentioned_at
-                    ? new Date(displayMemory.mentioned_at).toLocaleString()
-                    : "N/A"}
+                <div className={`flex items-center gap-2 ${textSize}`}>
+                  <Calendar
+                    className={`${compact ? "h-3 w-3" : "h-4 w-4"} text-muted-foreground flex-shrink-0`}
+                  />
+                  <span>{new Date(displayMemory.mentioned_at).toLocaleString()}</span>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Entities */}
             {displayMemory.entities &&
@@ -459,32 +481,6 @@ export function MemoryDetailPanel({
                       {tag}
                     </span>
                   ))}
-                </div>
-              </div>
-            )}
-
-            {/* ID */}
-            {memoryId && (
-              <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
-                <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
-                  Memory ID
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`${compact ? "text-[10px]" : "text-sm"} font-mono break-all`}>
-                    {memoryId}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0 flex-shrink-0"
-                    onClick={() => copyToClipboard(memoryId)}
-                  >
-                    {copiedId === memoryId ? (
-                      <Check className="h-3 w-3 text-green-600" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </Button>
                 </div>
               </div>
             )}
@@ -554,6 +550,36 @@ export function MemoryDetailPanel({
                       )}
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Memory ID */}
+            {memoryId && (
+              <div>
+                <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
+                  Memory ID
+                </div>
+                <div className="flex items-center gap-2">
+                  <code
+                    className={`${compact ? "text-[9px]" : "text-xs"} font-mono text-muted-foreground`}
+                  >
+                    {memoryId}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={`${compact ? "h-4 w-4" : "h-5 w-5"} p-0`}
+                    onClick={() => copyToClipboard(memoryId)}
+                  >
+                    {copiedId === memoryId ? (
+                      <Check className={`${compact ? "h-2.5 w-2.5" : "h-3 w-3"} text-green-600`} />
+                    ) : (
+                      <Copy
+                        className={`${compact ? "h-2.5 w-2.5" : "h-3 w-3"} text-muted-foreground`}
+                      />
+                    )}
+                  </Button>
                 </div>
               </div>
             )}

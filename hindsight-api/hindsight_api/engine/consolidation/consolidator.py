@@ -153,7 +153,7 @@ async def run_consolidation_job(
             t0 = time.time()
             memories = await conn.fetch(
                 f"""
-                SELECT id, text, fact_type, occurred_start, event_date, tags, mentioned_at
+                SELECT id, text, fact_type, occurred_start, occurred_end, event_date, tags, mentioned_at
                 FROM {fq_table("memory_units")}
                 WHERE bank_id = $1
                   AND consolidated_at IS NULL
@@ -328,6 +328,8 @@ async def _process_memory(
                 memory_id=memory_id,
                 action=action,
                 observations=related_observations,
+                source_occurred_start=memory.get("occurred_start"),
+                source_occurred_end=memory.get("occurred_end"),
                 source_mentioned_at=memory.get("mentioned_at"),
                 perf=perf,
             )
@@ -341,6 +343,7 @@ async def _process_memory(
                 action=action,
                 event_date=memory.get("event_date"),
                 occurred_start=memory.get("occurred_start"),
+                occurred_end=memory.get("occurred_end"),
                 mentioned_at=memory.get("mentioned_at"),
                 perf=perf,
             )
@@ -374,6 +377,8 @@ async def _execute_update_action(
     memory_id: uuid.UUID,
     action: dict[str, Any],
     observations: list[dict[str, Any]],
+    source_occurred_start: datetime | None = None,
+    source_occurred_end: datetime | None = None,
     source_mentioned_at: datetime | None = None,
     perf: ConsolidationPerfLog | None = None,
 ) -> dict[str, Any]:
@@ -381,7 +386,10 @@ async def _execute_update_action(
     Execute an update action on an existing observation.
 
     Updates the observation text, adds to history, increments proof_count,
-    and updates mentioned_at if the new source memory has a more recent date.
+    and updates temporal fields:
+    - occurred_start: uses LEAST to keep the earliest start time
+    - occurred_end: uses GREATEST to keep the most recent end time
+    - mentioned_at: uses GREATEST to keep the most recent mention time
     """
     learning_id = action.get("learning_id")
     new_text = action.get("text")
@@ -417,8 +425,10 @@ async def _execute_update_action(
     if perf:
         perf.record_timing("embedding", time.time() - t0)
 
-    # Update the mental model
-    # Update mentioned_at if source memory has a more recent date
+    # Update the observation
+    # - occurred_start: LEAST keeps the earliest start time across all source facts
+    # - occurred_end: GREATEST keeps the most recent end time across all source facts
+    # - mentioned_at: GREATEST keeps the most recent mention time
     t0 = time.time()
     await conn.execute(
         f"""
@@ -429,7 +439,9 @@ async def _execute_update_action(
             source_memory_ids = $4,
             proof_count = $5,
             updated_at = now(),
-            mentioned_at = GREATEST(mentioned_at, COALESCE($7, mentioned_at))
+            occurred_start = LEAST(occurred_start, COALESCE($7, occurred_start)),
+            occurred_end = GREATEST(occurred_end, COALESCE($8, occurred_end)),
+            mentioned_at = GREATEST(mentioned_at, COALESCE($9, mentioned_at))
         WHERE id = $6
         """,
         new_text,
@@ -438,6 +450,8 @@ async def _execute_update_action(
         source_ids,
         len(source_ids),
         uuid.UUID(learning_id),
+        source_occurred_start,
+        source_occurred_end,
         source_mentioned_at,
     )
 
@@ -459,6 +473,7 @@ async def _execute_create_action(
     action: dict[str, Any],
     event_date: datetime | None = None,
     occurred_start: datetime | None = None,
+    occurred_end: datetime | None = None,
     mentioned_at: datetime | None = None,
     perf: ConsolidationPerfLog | None = None,
 ) -> dict[str, Any]:
@@ -484,6 +499,7 @@ async def _execute_create_action(
         tags=tags,
         event_date=event_date,
         occurred_start=occurred_start,
+        occurred_end=occurred_end,
         mentioned_at=mentioned_at,
         perf=perf,
     )
@@ -504,16 +520,17 @@ async def _create_memory_links(
     This:
     1. Creates bidirectional semantic links between memory and observation
     2. Copies existing memory_links from the source memory to the observation
-    3. Copies entity links from the source memory to the observation
 
-    This enables graph traversal to find related memories via their observations.
+    Note: We intentionally do NOT copy entity links (unit_entities) to observations.
+    Instead, the retriever traverses through source_memory_ids to find entity
+    connections. This avoids duplicating entity data and ensures observations
+    are connected via their source facts' entity relationships.
 
     Note: Uses EXISTS checks to handle the case where source memory was deleted
     by a concurrent operation between fetching and link creation.
     """
     mu_table = fq_table("memory_units")
     ml_table = fq_table("memory_links")
-    ue_table = fq_table("unit_entities")
 
     # 1. Bidirectional link between memory and observation
     # Only insert if both units exist (handles concurrent deletion)
@@ -572,19 +589,9 @@ async def _create_memory_links(
         memory_id,
     )
 
-    # 4. Copy entity links from source memory to observation
-    await conn.execute(
-        f"""
-        INSERT INTO {ue_table} (unit_id, entity_id)
-        SELECT $1, ue.entity_id
-        FROM {ue_table} ue
-        WHERE ue.unit_id = $2
-          AND EXISTS (SELECT 1 FROM {mu_table} WHERE id = $1)
-        ON CONFLICT DO NOTHING
-        """,
-        observation_id,
-        memory_id,
-    )
+    # Note: Entity links (unit_entities) are NOT copied to observations.
+    # The retriever uses source_memory_ids to traverse through source facts'
+    # entity connections, avoiding data duplication.
 
 
 async def _find_related_observations(
@@ -755,6 +762,7 @@ async def _create_observation_directly(
     tags: list[str] | None = None,
     event_date: datetime | None = None,
     occurred_start: datetime | None = None,
+    occurred_end: datetime | None = None,
     mentioned_at: datetime | None = None,
     perf: ConsolidationPerfLog | None = None,
 ) -> dict[str, Any]:
@@ -775,6 +783,7 @@ async def _create_observation_directly(
     now = datetime.now(timezone.utc)
     obs_event_date = event_date or now
     obs_occurred_start = occurred_start or now
+    obs_occurred_end = occurred_end or now
     obs_mentioned_at = mentioned_at or now
     obs_tags = tags or []
 
@@ -784,9 +793,9 @@ async def _create_observation_directly(
         f"""
         INSERT INTO {fq_table("memory_units")} (
             id, bank_id, text, fact_type, embedding, proof_count, source_memory_ids, history,
-            tags, event_date, occurred_start, mentioned_at
+            tags, event_date, occurred_start, occurred_end, mentioned_at
         )
-        VALUES ($1, $2, $3, 'observation', $4::vector, 1, $5, '[]'::jsonb, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, 'observation', $4::vector, 1, $5, '[]'::jsonb, $6, $7, $8, $9, $10)
         RETURNING id
         """,
         observation_id,
@@ -797,6 +806,7 @@ async def _create_observation_directly(
         obs_tags,
         obs_event_date,
         obs_occurred_start,
+        obs_occurred_end,
         obs_mentioned_at,
     )
 

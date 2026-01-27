@@ -6,8 +6,6 @@ import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Copy,
-  Check,
   Calendar,
   ZoomIn,
   ZoomOut,
@@ -21,6 +19,8 @@ import {
   RefreshCw,
   CheckCircle,
   Clock,
+  Network,
+  List,
 } from "lucide-react";
 import {
   Table,
@@ -34,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { MemoryDetailPanel } from "./memory-detail-panel";
+import { MemoryDetailModal } from "./memory-detail-modal";
 import { Graph2D, convertHindsightGraphData, GraphNode } from "./graph-2d";
 
 type FactType = "world" | "experience" | "observation";
@@ -49,10 +50,9 @@ export function DataView({ factType }: DataViewProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedGraphNode, setSelectedGraphNode] = useState<any>(null);
-  const [selectedTableMemory, setSelectedTableMemory] = useState<any>(null);
+  const [modalMemoryId, setModalMemoryId] = useState<string | null>(null);
   const itemsPerPage = 100;
 
   // Fetch limit state - how many memories to load from the API
@@ -94,16 +94,6 @@ export function DataView({ factType }: DataViewProps) {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selectedGraphNode]);
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(text);
-      setTimeout(() => setCopiedId(null), 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  };
 
   const loadData = async (limit?: number) => {
     if (!currentBank) return;
@@ -338,33 +328,36 @@ export function DataView({ factType }: DataViewProps) {
             <div className="flex items-center gap-2 bg-muted rounded-lg p-1">
               <button
                 onClick={() => setViewMode("graph")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1.5 ${
                   viewMode === "graph"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                Graph View
+                <Network className="w-4 h-4" />
+                Graph
               </button>
               <button
                 onClick={() => setViewMode("table")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1.5 ${
                   viewMode === "table"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                Table View
+                <List className="w-4 h-4" />
+                Table
               </button>
               <button
                 onClick={() => setViewMode("timeline")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1.5 ${
                   viewMode === "timeline"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                Timeline View
+                <Calendar className="w-4 h-4" />
+                Timeline
               </button>
             </div>
           </div>
@@ -616,25 +609,12 @@ export function DataView({ factType }: DataViewProps) {
                             <Table className="table-fixed">
                               <TableHeader>
                                 <TableRow className="bg-muted/50">
-                                  <TableHead
-                                    className={factType === "observation" ? "w-[55%]" : "w-[45%]"}
-                                  >
+                                  <TableHead className="w-[45%]">
                                     {factType === "observation" ? "Observation" : "Memory"}
                                   </TableHead>
-                                  {factType === "observation" ? (
-                                    <>
-                                      <TableHead className="w-[10%]">Sources</TableHead>
-                                      <TableHead className="w-[15%]">Created</TableHead>
-                                      <TableHead className="w-[15%]">Mentioned</TableHead>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <TableHead className="w-[20%]">Entities</TableHead>
-                                      <TableHead className="w-[15%]">Occurred</TableHead>
-                                      <TableHead className="w-[15%]">Mentioned</TableHead>
-                                    </>
-                                  )}
-                                  <TableHead className="w-[5%]"></TableHead>
+                                  <TableHead className="w-[20%]">Entities</TableHead>
+                                  <TableHead className="w-[17%]">Occurred</TableHead>
+                                  <TableHead className="w-[18%]">Mentioned</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
@@ -643,112 +623,66 @@ export function DataView({ factType }: DataViewProps) {
                                     ? new Date(row.occurred_start).toLocaleDateString("en-US", {
                                         month: "short",
                                         day: "numeric",
+                                        year: "numeric",
                                       })
                                     : null;
                                   const mentionedDisplay = row.mentioned_at
                                     ? new Date(row.mentioned_at).toLocaleDateString("en-US", {
                                         month: "short",
                                         day: "numeric",
-                                      })
-                                    : null;
-                                  const createdDisplay = row.created_at
-                                    ? new Date(row.created_at).toLocaleDateString("en-US", {
-                                        month: "short",
-                                        day: "numeric",
+                                        year: "numeric",
                                       })
                                     : null;
 
                                   return (
                                     <TableRow
                                       key={row.id || idx}
-                                      onClick={() => setSelectedTableMemory(row)}
-                                      className={`cursor-pointer hover:bg-muted/50 ${
-                                        selectedTableMemory?.id === row.id ? "bg-primary/10" : ""
-                                      }`}
+                                      onClick={() => setModalMemoryId(row.id)}
+                                      className="cursor-pointer hover:bg-muted/50"
                                     >
                                       <TableCell className="py-2">
                                         <div className="line-clamp-2 text-sm leading-snug text-foreground">
                                           {row.text}
                                         </div>
-                                        {row.context && (
+                                        {row.context && factType !== "observation" && (
                                           <div className="text-xs text-muted-foreground mt-0.5 truncate">
                                             {row.context}
                                           </div>
                                         )}
                                       </TableCell>
-                                      {factType === "observation" ? (
-                                        <>
-                                          <TableCell className="text-xs py-2 text-foreground text-center">
-                                            {row.proof_count || 1}
-                                          </TableCell>
-                                          <TableCell className="text-xs py-2 text-foreground">
-                                            {createdDisplay || (
-                                              <span className="text-muted-foreground">-</span>
-                                            )}
-                                          </TableCell>
-                                          <TableCell className="text-xs py-2 text-foreground">
-                                            {mentionedDisplay || (
-                                              <span className="text-muted-foreground">-</span>
-                                            )}
-                                          </TableCell>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <TableCell className="py-2">
-                                            {row.entities ? (
-                                              <div className="flex gap-1 flex-wrap">
-                                                {row.entities
-                                                  .split(", ")
-                                                  .slice(0, 2)
-                                                  .map((entity: string, i: number) => (
-                                                    <span
-                                                      key={i}
-                                                      className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium"
-                                                    >
-                                                      {entity}
-                                                    </span>
-                                                  ))}
-                                                {row.entities.split(", ").length > 2 && (
-                                                  <span className="text-[10px] text-muted-foreground">
-                                                    +{row.entities.split(", ").length - 2}
-                                                  </span>
-                                                )}
-                                              </div>
-                                            ) : (
-                                              <span className="text-xs text-muted-foreground">
-                                                -
+                                      <TableCell className="py-2">
+                                        {row.entities ? (
+                                          <div className="flex gap-1 flex-wrap">
+                                            {row.entities
+                                              .split(", ")
+                                              .slice(0, 2)
+                                              .map((entity: string, i: number) => (
+                                                <span
+                                                  key={i}
+                                                  className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium"
+                                                >
+                                                  {entity}
+                                                </span>
+                                              ))}
+                                            {row.entities.split(", ").length > 2 && (
+                                              <span className="text-[10px] text-muted-foreground">
+                                                +{row.entities.split(", ").length - 2}
                                               </span>
                                             )}
-                                          </TableCell>
-                                          <TableCell className="text-xs py-2 text-foreground">
-                                            {occurredDisplay || (
-                                              <span className="text-muted-foreground">-</span>
-                                            )}
-                                          </TableCell>
-                                          <TableCell className="text-xs py-2 text-foreground">
-                                            {mentionedDisplay || (
-                                              <span className="text-muted-foreground">-</span>
-                                            )}
-                                          </TableCell>
-                                        </>
-                                      )}
-                                      <TableCell className="py-2">
-                                        <Button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            copyToClipboard(row.id);
-                                          }}
-                                          size="sm"
-                                          variant="secondary"
-                                          className="h-6 w-6 p-0"
-                                          title="Copy ID"
-                                        >
-                                          {copiedId === row.id ? (
-                                            <Check className="h-3 w-3 text-green-600" />
-                                          ) : (
-                                            <Copy className="h-3 w-3" />
-                                          )}
-                                        </Button>
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground">-</span>
+                                        )}
+                                      </TableCell>
+                                      <TableCell className="text-xs py-2 text-foreground">
+                                        {occurredDisplay || (
+                                          <span className="text-muted-foreground">-</span>
+                                        )}
+                                      </TableCell>
+                                      <TableCell className="text-xs py-2 text-foreground">
+                                        {mentionedDisplay || (
+                                          <span className="text-muted-foreground">-</span>
+                                        )}
                                       </TableCell>
                                     </TableRow>
                                   );
@@ -819,18 +753,6 @@ export function DataView({ factType }: DataViewProps) {
                   )}
                 </div>
               </div>
-
-              {/* Memory Detail Panel for Table View - Fixed on Right */}
-              {selectedTableMemory && (
-                <div className="fixed right-0 top-0 h-screen w-[420px] bg-card border-l-2 border-primary shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
-                  <MemoryDetailPanel
-                    memory={selectedTableMemory}
-                    onClose={() => setSelectedTableMemory(null)}
-                    inPanel
-                    bankId={currentBank || undefined}
-                  />
-                </div>
-              )}
             </div>
           )}
 
@@ -850,6 +772,9 @@ export function DataView({ factType }: DataViewProps) {
           </div>
         </div>
       )}
+
+      {/* Memory Detail Modal */}
+      <MemoryDetailModal memoryId={modalMemoryId} onClose={() => setModalMemoryId(null)} />
     </div>
   );
 }

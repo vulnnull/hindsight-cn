@@ -36,6 +36,7 @@ class ToolCallTrace(BaseModel):
     """A single tool call made during reflect."""
 
     tool: str = Field(description="Tool name: lookup, recall, learn, expand")
+    reason: str | None = Field(default=None, description="Agent's reasoning for making this tool call")
     input: dict = Field(description="Tool input parameters")
     output: dict = Field(description="Tool output/result")
     duration_ms: int = Field(description="Execution time in milliseconds")
@@ -65,7 +66,7 @@ class DirectiveRef(BaseModel):
 
     id: str = Field(description="Directive mental model ID")
     name: str = Field(description="Directive name")
-    rules: list[str] = Field(default_factory=list, description="Directive rules/observations that were applied")
+    content: str = Field(description="Directive content")
 
 
 class TokenUsage(BaseModel):
@@ -253,7 +254,14 @@ class ReflectResult(BaseModel):
                     ],
                     "experience": [],
                     "opinion": [],
-                    "mental-models": [],
+                    "mental_models": [],
+                    "directives": [
+                        {
+                            "id": "directive-123",
+                            "name": "Response Style",
+                            "rules": ["Always be concise"],
+                        }
+                    ],
                 },
                 "new_opinions": ["Machine learning has great potential in healthcare"],
                 "structured_output": {"summary": "ML in healthcare", "confidence": 0.9},
@@ -263,8 +271,8 @@ class ReflectResult(BaseModel):
     )
 
     text: str = Field(description="The formulated answer text")
-    based_on: dict[str, list[MemoryFact]] = Field(
-        description="Facts used to formulate the answer, organized by type (world, experience, opinion, mental-models)"
+    based_on: dict[str, Any] = Field(
+        description="Facts used to formulate the answer, organized by type (world, experience, opinion, mental_models, directives)"
     )
     new_opinions: list[str] = Field(default_factory=list, description="List of newly formed opinions during reflection")
     structured_output: dict[str, Any] | None = Field(

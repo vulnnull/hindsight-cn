@@ -126,6 +126,7 @@ def build_system_prompt_for_tools(
     context: str | None = None,
     directives: list[dict[str, Any]] | None = None,
     has_mental_models: bool = False,
+    budget: str | None = None,
 ) -> str:
     """
     Build the system prompt for tool-calling reflect agent.
@@ -140,6 +141,7 @@ def build_system_prompt_for_tools(
         context: Optional additional context
         directives: Optional list of directive mental models to inject as hard rules
         has_mental_models: Whether the bank has any mental models (skip if not)
+        budget: Search depth budget - "low", "mid", or "high". Controls exploration thoroughness.
     """
     name = bank_profile.get("name", "Assistant")
     mission = bank_profile.get("mission", "")
@@ -230,9 +232,50 @@ def build_system_prompt_for_tools(
             "",
             "Think: What ENTITIES and CONCEPTS does this question involve? Search for each separately.",
             "",
-            "## Workflow",
         ]
     )
+
+    # Add budget guidance
+    if budget:
+        budget_lower = budget.lower()
+        if budget_lower == "low":
+            parts.extend(
+                [
+                    "## RESEARCH DEPTH: SHALLOW (Quick Response)",
+                    "- Prioritize speed over completeness",
+                    "- If mental models or observations provide a reasonable answer, stop there",
+                    "- Only dig deeper if the initial results are clearly insufficient",
+                    "- Prefer a quick overview rather than exhaustive details",
+                    "- Answer promptly with available information",
+                    "",
+                ]
+            )
+        elif budget_lower == "mid":
+            parts.extend(
+                [
+                    "## RESEARCH DEPTH: MODERATE (Balanced)",
+                    "- Balance thoroughness with efficiency",
+                    "- Check multiple sources when the question warrants it",
+                    "- Verify stale data if it's central to the answer",
+                    "- Don't over-explore, but ensure reasonable coverage",
+                    "",
+                ]
+            )
+        elif budget_lower == "high":
+            parts.extend(
+                [
+                    "## RESEARCH DEPTH: DEEP (Thorough Exploration)",
+                    "- Explore comprehensively before answering",
+                    "- Search across all available knowledge levels",
+                    "- Use multiple query variations to ensure coverage",
+                    "- Verify information across different retrieval levels",
+                    "- Use expand() to get full context on important memories",
+                    "- Take time to synthesize a complete, well-researched answer",
+                    "",
+                ]
+            )
+
+    parts.append("## Workflow")
 
     if has_mental_models:
         parts.extend(

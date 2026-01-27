@@ -20,7 +20,12 @@ from .tools_schema import get_reflect_tools
 
 
 def _build_directives_applied(directives: list[dict[str, Any]] | None) -> list[DirectiveInfo]:
-    """Build list of DirectiveInfo from directive mental models."""
+    """Build list of DirectiveInfo from directive mental models.
+
+    Handles multiple directive formats:
+    1. New format: directives have direct 'content' field
+    2. Fallback: directives have 'description' field
+    """
     if not directives:
         return []
 
@@ -28,17 +33,11 @@ def _build_directives_applied(directives: list[dict[str, Any]] | None) -> list[D
     for directive in directives:
         directive_id = directive.get("id", "")
         directive_name = directive.get("name", "")
-        observations = directive.get("observations", [])
 
-        rules = []
-        for obs in observations:
-            # Support both Pydantic Observation objects and dicts
-            if hasattr(obs, "content"):
-                rules.append(obs.content)
-            elif isinstance(obs, dict) and obs.get("content"):
-                rules.append(obs["content"])
+        # Get content from 'content' field or fallback to 'description'
+        content = directive.get("content", "") or directive.get("description", "")
 
-        result.append(DirectiveInfo(id=directive_id, name=directive_name, rules=rules))
+        result.append(DirectiveInfo(id=directive_id, name=directive_name, content=content))
 
     return result
 
@@ -211,6 +210,8 @@ async def run_reflect_agent(
     max_tokens: int | None = None,
     response_schema: dict | None = None,
     directives: list[dict[str, Any]] | None = None,
+    has_mental_models: bool = False,
+    budget: str | None = None,
 ) -> ReflectAgentResult:
     """
     Execute the reflect agent loop using native tool calling.
@@ -251,7 +252,9 @@ async def run_reflect_agent(
     tools = get_reflect_tools(directive_rules=directive_rules)
 
     # Build initial messages (directives are injected into system prompt at START and END)
-    system_prompt = build_system_prompt_for_tools(bank_profile, context, directives=directives)
+    system_prompt = build_system_prompt_for_tools(
+        bank_profile, context, directives=directives, has_mental_models=has_mental_models, budget=budget
+    )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": query},
@@ -643,9 +646,17 @@ async def run_reflect_agent(
                 input_dict = {"tool": tc.name, **tc.arguments}
                 input_summary = _summarize_input(tc.name, tc.arguments)
 
+                # Extract reason from tool arguments (if provided)
+                tool_reason = tc.arguments.get("reason")
+
                 tool_trace.append(
                     ToolCall(
-                        tool=tc.name, input=input_dict, output=output, duration_ms=duration_ms, iteration=iteration + 1
+                        tool=tc.name,
+                        reason=tool_reason,
+                        input=input_dict,
+                        output=output,
+                        duration_ms=duration_ms,
+                        iteration=iteration + 1,
                     )
                 )
 

@@ -570,71 +570,6 @@ class MemoryEngine(MemoryEngineInterface):
 
         logger.info(f"[CONSOLIDATION] bank={bank_id} completed: {result.get('memories_processed', 0)} processed")
 
-    async def _handle_create_mental_model(self, task_dict: dict[str, Any]):
-        """
-        Handler for create_mental_model tasks.
-
-        Runs reflect with the source query and updates the mental model with the generated content.
-        The mental model should already exist in the database (created during submit_async_create_mental_model).
-
-        Args:
-            task_dict: Dict with 'bank_id', 'mental_model_id', 'source_query', 'max_tokens', 'operation_id'
-
-        Raises:
-            ValueError: If required fields are missing
-            Exception: Any exception from reflect/update (propagates to execute_task for retry)
-        """
-        bank_id = task_dict.get("bank_id")
-        mental_model_id = task_dict.get("mental_model_id")
-        source_query = task_dict.get("source_query")
-        max_tokens = task_dict.get("max_tokens", 2048)
-
-        if not bank_id or not mental_model_id or not source_query:
-            raise ValueError("bank_id, mental_model_id, and source_query are required for create_mental_model task")
-
-        logger.info(f"[CREATE_MENTAL_MODEL_TASK] Starting for bank_id={bank_id}, mental_model_id={mental_model_id}")
-
-        from hindsight_api.models import RequestContext
-
-        internal_context = RequestContext(internal=True)
-
-        # Run reflect to generate content
-        reflect_result = await self.reflect_async(
-            bank_id=bank_id,
-            query=source_query,
-            max_tokens=max_tokens,
-            request_context=internal_context,
-        )
-
-        generated_content = reflect_result.text or "No content generated"
-
-        # Build reflect_response payload to store
-        reflect_response = {
-            "text": reflect_result.text,
-            "based_on": {
-                fact_type: [
-                    {
-                        "id": str(fact.id),
-                        "text": fact.text,
-                        "type": fact_type,
-                    }
-                    for fact in facts
-                ]
-                for fact_type, facts in reflect_result.based_on.items()
-            },
-        }
-
-        # Update the mental model with the generated content and reflect_response
-        await self.update_mental_model(
-            bank_id=bank_id,
-            mental_model_id=mental_model_id,
-            content=generated_content,
-            reflect_response=reflect_response,
-            request_context=internal_context,
-        )
-
-        logger.info(f"[CREATE_MENTAL_MODEL_TASK] Completed for bank_id={bank_id}, mental_model_id={mental_model_id}")
-
     async def _handle_refresh_mental_model(self, task_dict: dict[str, Any]):
         """
         Handler for refresh_mental_model tasks.
@@ -747,8 +682,6 @@ class MemoryEngine(MemoryEngineInterface):
                 await self._handle_batch_retain(task_dict)
             elif task_type == "consolidation":
                 await self._handle_consolidation(task_dict)
-            elif task_type == "create_mental_model":
-                await self._handle_create_mental_model(task_dict)
             elif task_type == "refresh_mental_model":
                 await self._handle_refresh_mental_model(task_dict)
             else:
@@ -3674,6 +3607,7 @@ class MemoryEngine(MemoryEngineInterface):
         tool_trace_result = [
             ToolCallTrace(
                 tool=tc.tool,
+                reason=tc.reason,
                 input=tc.input,
                 output=tc.output,
                 duration_ms=tc.duration_ms,
@@ -3828,7 +3762,7 @@ class MemoryEngine(MemoryEngineInterface):
         from hindsight_api.engine.response_models import DirectiveRef
 
         directives_applied_result = [
-            DirectiveRef(id=d.id, name=d.name, rules=d.rules) for d in agent_result.directives_applied
+            DirectiveRef(id=d.id, name=d.name, content=d.content) for d in agent_result.directives_applied
         ]
 
         # Convert agent usage to TokenUsage format
@@ -4571,7 +4505,8 @@ class MemoryEngine(MemoryEngineInterface):
             rows = await conn.fetch(
                 f"""
                 SELECT id, bank_id, name, source_query, content, tags,
-                       last_refreshed_at, created_at, reflect_response
+                       last_refreshed_at, created_at, reflect_response,
+                       max_tokens, trigger
                 FROM {fq_table("mental_models")}
                 WHERE bank_id = $1 {tag_filter}
                 ORDER BY last_refreshed_at DESC
@@ -4606,7 +4541,8 @@ class MemoryEngine(MemoryEngineInterface):
             row = await conn.fetchrow(
                 f"""
                 SELECT id, bank_id, name, source_query, content, tags,
-                       last_refreshed_at, created_at, reflect_response
+                       last_refreshed_at, created_at, reflect_response,
+                       max_tokens, trigger
                 FROM {fq_table("mental_models")}
                 WHERE bank_id = $1 AND id = $2
                 """,
@@ -4623,7 +4559,10 @@ class MemoryEngine(MemoryEngineInterface):
         source_query: str,
         content: str,
         *,
+        mental_model_id: str | None = None,
         tags: list[str] | None = None,
+        max_tokens: int | None = None,
+        trigger: dict[str, Any] | None = None,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
         """Create a new pinned mental model.
@@ -4633,7 +4572,10 @@ class MemoryEngine(MemoryEngineInterface):
             name: Human-readable name for the mental model
             source_query: The query that generated this mental model
             content: The synthesized content
+            mental_model_id: Optional UUID for the mental model (auto-generated if not provided)
             tags: Optional tags for scoped visibility
+            max_tokens: Token limit for content generation during refresh
+            trigger: Trigger settings (e.g., refresh_after_consolidation)
             request_context: Request context for authentication
 
         Returns:
@@ -4649,21 +4591,45 @@ class MemoryEngine(MemoryEngineInterface):
         embedding_str = str(embedding[0]) if embedding else None
 
         async with acquire_with_retry(pool) as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {fq_table("mental_models")}
-                (bank_id, name, source_query, content, embedding, tags)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING id, bank_id, name, source_query, content, tags,
-                          last_refreshed_at, created_at
-                """,
-                bank_id,
-                name,
-                source_query,
-                content,
-                embedding_str,
-                tags or [],
-            )
+            if mental_model_id:
+                row = await conn.fetchrow(
+                    f"""
+                    INSERT INTO {fq_table("mental_models")}
+                    (id, bank_id, name, source_query, content, embedding, tags, max_tokens, trigger)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 2048), COALESCE($9, '{{"refresh_after_consolidation": false}}'::jsonb))
+                    RETURNING id, bank_id, name, source_query, content, tags,
+                              last_refreshed_at, created_at, reflect_response,
+                              max_tokens, trigger
+                    """,
+                    mental_model_id,
+                    bank_id,
+                    name,
+                    source_query,
+                    content,
+                    embedding_str,
+                    tags or [],
+                    max_tokens,
+                    json.dumps(trigger) if trigger else None,
+                )
+            else:
+                row = await conn.fetchrow(
+                    f"""
+                    INSERT INTO {fq_table("mental_models")}
+                    (bank_id, name, source_query, content, embedding, tags, max_tokens, trigger)
+                    VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 2048), COALESCE($8, '{{"refresh_after_consolidation": false}}'::jsonb))
+                    RETURNING id, bank_id, name, source_query, content, tags,
+                              last_refreshed_at, created_at, reflect_response,
+                              max_tokens, trigger
+                    """,
+                    bank_id,
+                    name,
+                    source_query,
+                    content,
+                    embedding_str,
+                    tags or [],
+                    max_tokens,
+                    json.dumps(trigger) if trigger else None,
+                )
 
         logger.info(f"[MENTAL_MODELS] Created pinned mental model '{name}' for bank {bank_id}")
         return self._row_to_mental_model(row)
@@ -4739,6 +4705,10 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         name: str | None = None,
         content: str | None = None,
+        source_query: str | None = None,
+        max_tokens: int | None = None,
+        tags: list[str] | None = None,
+        trigger: dict[str, Any] | None = None,
         reflect_response: dict[str, Any] | None = None,
         request_context: "RequestContext",
     ) -> dict[str, Any] | None:
@@ -4749,6 +4719,10 @@ class MemoryEngine(MemoryEngineInterface):
             mental_model_id: Pinned mental model UUID
             name: New name (if changing)
             content: New content (if changing)
+            source_query: New source query (if changing)
+            max_tokens: New max tokens (if changing)
+            tags: New tags (if changing)
+            trigger: New trigger settings (if changing)
             reflect_response: Full reflect API response payload (if changing)
             request_context: Request context for authentication
 
@@ -4787,6 +4761,26 @@ class MemoryEngine(MemoryEngineInterface):
                 params.append(json.dumps(reflect_response))
                 param_idx += 1
 
+            if source_query is not None:
+                updates.append(f"source_query = ${param_idx}")
+                params.append(source_query)
+                param_idx += 1
+
+            if max_tokens is not None:
+                updates.append(f"max_tokens = ${param_idx}")
+                params.append(max_tokens)
+                param_idx += 1
+
+            if tags is not None:
+                updates.append(f"tags = ${param_idx}")
+                params.append(tags)
+                param_idx += 1
+
+            if trigger is not None:
+                updates.append(f"trigger = ${param_idx}")
+                params.append(json.dumps(trigger))
+                param_idx += 1
+
             if not updates:
                 return None
 
@@ -4795,7 +4789,8 @@ class MemoryEngine(MemoryEngineInterface):
                 SET {", ".join(updates)}
                 WHERE bank_id = $1 AND id = $2
                 RETURNING id, bank_id, name, source_query, content, tags,
-                          last_refreshed_at, created_at, reflect_response
+                          last_refreshed_at, created_at, reflect_response,
+                          max_tokens, trigger
             """
 
             row = await conn.fetchrow(query, *params)
@@ -4840,6 +4835,12 @@ class MemoryEngine(MemoryEngineInterface):
                 reflect_response = json.loads(reflect_response)
             except json.JSONDecodeError:
                 reflect_response = None
+        trigger = row.get("trigger")
+        if isinstance(trigger, str):
+            try:
+                trigger = json.loads(trigger)
+            except json.JSONDecodeError:
+                trigger = None
         return {
             "id": str(row["id"]),
             "bank_id": row["bank_id"],
@@ -4847,6 +4848,8 @@ class MemoryEngine(MemoryEngineInterface):
             "source_query": row["source_query"],
             "content": row["content"],
             "tags": row["tags"] or [],
+            "max_tokens": row.get("max_tokens"),
+            "trigger": trigger,
             "last_refreshed_at": row["last_refreshed_at"].isoformat() if row["last_refreshed_at"] else None,
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
             "reflect_response": reflect_response,
@@ -5455,61 +5458,6 @@ class MemoryEngine(MemoryEngineInterface):
             task_type="consolidation",
             task_payload={},
             dedupe_by_bank=True,
-        )
-
-    async def submit_async_create_mental_model(
-        self,
-        bank_id: str,
-        name: str,
-        source_query: str,
-        *,
-        tags: list[str] | None = None,
-        max_tokens: int = 2048,
-        request_context: "RequestContext",
-    ) -> dict[str, Any]:
-        """Submit an async mental model creation operation.
-
-        This:
-        1. Creates the mental model in the database immediately (with placeholder content)
-        2. Schedules a background task to run reflect and update the content
-        3. Returns operation_id for tracking
-
-        Args:
-            bank_id: Bank identifier
-            name: Human-readable name for the mental model
-            source_query: The query to run to generate content
-            tags: Optional tags for scoped visibility
-            max_tokens: Maximum tokens for the reflect response
-            request_context: Request context for authentication
-
-        Returns:
-            Dict with operation_id
-        """
-        await self._authenticate_tenant(request_context)
-
-        # 1. Create the mental model in the database with placeholder content
-        mental_model = await self.create_mental_model(
-            bank_id=bank_id,
-            name=name,
-            source_query=source_query,
-            content="Generating content...",  # Placeholder
-            tags=tags,
-            request_context=request_context,
-        )
-        mental_model_id = mental_model["id"]
-
-        # 2. Submit async operation
-        return await self._submit_async_operation(
-            bank_id=bank_id,
-            operation_type="create_mental_model",
-            task_type="create_mental_model",
-            task_payload={
-                "mental_model_id": mental_model_id,
-                "source_query": source_query,
-                "max_tokens": max_tokens,
-            },
-            result_metadata={"mental_model_id": mental_model_id, "name": name, "source_query": source_query},
-            dedupe_by_bank=False,
         )
 
     async def submit_async_refresh_mental_model(

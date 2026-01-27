@@ -1063,7 +1063,7 @@
           "Mental Models"
         ],
         "summary": "Update mental model",
-        "description": "Update a mental model's name.",
+        "description": "Update a mental model's name and/or source query.",
         "operationId": "update_mental_model",
         "parameters": [
           {
@@ -3598,6 +3598,10 @@
             "title": "Max Tokens",
             "description": "Maximum tokens for generated content",
             "default": 2048
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/MentalModelTrigger",
+            "description": "Trigger settings"
           }
         },
         "type": "object",
@@ -3613,7 +3617,10 @@
           "source_query": "How does the team prefer to communicate?",
           "tags": [
             "team"
-          ]
+          ],
+          "trigger": {
+            "refresh_after_consolidation": false
+          }
         }
       },
       "CreateMentalModelResponse": {
@@ -4651,6 +4658,14 @@
             "type": "array",
             "title": "Tags"
           },
+          "max_tokens": {
+            "type": "integer",
+            "title": "Max Tokens",
+            "default": 2048
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/MentalModelTrigger"
+          },
           "last_refreshed_at": {
             "anyOf": [
               {
@@ -4697,6 +4712,19 @@
         ],
         "title": "MentalModelResponse",
         "description": "Response model for a mental model (stored reflect response)."
+      },
+      "MentalModelTrigger": {
+        "properties": {
+          "refresh_after_consolidation": {
+            "type": "boolean",
+            "title": "Refresh After Consolidation",
+            "description": "If true, refresh this mental model after observations consolidation (real-time mode)",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "MentalModelTrigger",
+        "description": "Trigger settings for a mental model."
       },
       "OperationResponse": {
         "properties": {
@@ -5276,11 +5304,54 @@
             "type": "array",
             "title": "Memories",
             "description": "Memory facts used to generate the response"
+          },
+          "mental_models": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectMentalModel"
+            },
+            "type": "array",
+            "title": "Mental Models",
+            "description": "Mental models used during reflection"
+          },
+          "directives": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectDirective"
+            },
+            "type": "array",
+            "title": "Directives",
+            "description": "Directives applied during reflection"
           }
         },
         "type": "object",
         "title": "ReflectBasedOn",
-        "description": "Evidence the response is based on: memories and mental models."
+        "description": "Evidence the response is based on: memories, mental models, and directives."
+      },
+      "ReflectDirective": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Directive ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Directive name"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Directive content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "content"
+        ],
+        "title": "ReflectDirective",
+        "description": "A directive applied during reflect."
       },
       "ReflectFact": {
         "properties": {
@@ -5408,6 +5479,39 @@
         ],
         "title": "ReflectLLMCall",
         "description": "An LLM call made during reflect agent execution."
+      },
+      "ReflectMentalModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Mental model ID"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "Mental model content"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context",
+            "description": "Additional context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "ReflectMentalModel",
+        "description": "A mental model used during reflect."
       },
       "ReflectRequest": {
         "properties": {
@@ -5985,13 +6089,74 @@
             ],
             "title": "Name",
             "description": "New name for the mental model"
+          },
+          "source_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Query",
+            "description": "New source query for the mental model"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 8192.0,
+                "minimum": 256.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens",
+            "description": "Maximum tokens for generated content"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Tags for scoped visibility"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MentalModelTrigger"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Trigger settings"
           }
         },
         "type": "object",
         "title": "UpdateMentalModelRequest",
         "description": "Request model for updating a mental model.",
         "example": {
-          "name": "Updated Team Communication Preferences"
+          "max_tokens": 4096,
+          "name": "Updated Team Communication Preferences",
+          "source_query": "How does the team prefer to communicate?",
+          "tags": [
+            "team",
+            "communication"
+          ],
+          "trigger": {
+            "refresh_after_consolidation": true
+          }
         }
       },
       "ValidationError": {

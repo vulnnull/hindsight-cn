@@ -75,6 +75,45 @@ pub fn health(
     }
 }
 
+/// Get API version information
+pub fn version(
+    client: &ApiClient,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Fetching version..."))
+    } else {
+        None
+    };
+
+    let response = client.get_version(verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(result) => {
+            if output_format == OutputFormat::Pretty {
+                ui::print_section_header("API Version");
+                println!("  {} {}", ui::dim("Version:"), result.api_version);
+
+                println!();
+                println!("  {}", ui::dim("Features:"));
+                println!("    {} MCP Server: {}", ui::gradient_start("•"), if result.features.mcp { "enabled" } else { "disabled" });
+                println!("    {} Observations: {}", ui::gradient_start("•"), if result.features.observations { "enabled" } else { "disabled" });
+                println!("    {} Background Worker: {}", ui::gradient_start("•"), if result.features.worker { "enabled" } else { "disabled" });
+                println!();
+            } else {
+                output::print_output(&result, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Get Prometheus metrics
 pub fn metrics(
     client: &ApiClient,

@@ -539,6 +539,31 @@ impl ApiClient {
             Ok(response.into_inner())
         })
     }
+
+    // --- Consolidation Methods ---
+
+    pub fn trigger_consolidation(&self, bank_id: &str, _verbose: bool) -> Result<types::ConsolidationResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.trigger_consolidation(bank_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn clear_observations(&self, bank_id: &str, _verbose: bool) -> Result<types::DeleteResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.clear_observations(bank_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Version Methods ---
+
+    pub fn get_version(&self, _verbose: bool) -> Result<types::VersionResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_version().await?;
+            Ok(response.into_inner())
+        })
+    }
 }
 
 // Re-export types from the generated client for use in commands

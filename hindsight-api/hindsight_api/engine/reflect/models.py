@@ -51,6 +51,7 @@ class ToolCall(BaseModel):
     """A single tool call made during reflect."""
 
     tool: str = Field(description="Tool name: lookup, recall, expand")
+    reason: str | None = Field(default=None, description="Agent's reasoning for making this tool call")
     input: dict = Field(description="Tool input parameters")
     output: dict = Field(description="Tool output/result")
     duration_ms: int = Field(description="Execution time in milliseconds")
@@ -71,7 +72,7 @@ class DirectiveInfo(BaseModel):
 
     id: str = Field(description="Directive mental model ID")
     name: str = Field(description="Directive name")
-    rules: list[str] = Field(default_factory=list, description="Directive rules/observations that were applied")
+    content: str = Field(description="Directive content")
 
 
 class TokenUsageSummary(BaseModel):

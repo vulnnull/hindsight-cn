@@ -19,21 +19,17 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from typing_extensions import Annotated
-from hindsight_client_api.models.mental_model_trigger import MentalModelTrigger
 from typing import Optional, Set
 from typing_extensions import Self
 
-class CreateMentalModelRequest(BaseModel):
+class ReflectMentalModel(BaseModel):
     """
-    Request model for creating a mental model.
+    A mental model used during reflect.
     """ # noqa: E501
-    name: StrictStr = Field(description="Human-readable name for the mental model")
-    source_query: StrictStr = Field(description="The query to run to generate content")
-    tags: Optional[List[StrictStr]] = Field(default=None, description="Tags for scoped visibility")
-    max_tokens: Optional[Annotated[int, Field(le=8192, strict=True, ge=256)]] = Field(default=2048, description="Maximum tokens for generated content")
-    trigger: Optional[MentalModelTrigger] = Field(default=None, description="Trigger settings")
-    __properties: ClassVar[List[str]] = ["name", "source_query", "tags", "max_tokens", "trigger"]
+    id: StrictStr = Field(description="Mental model ID")
+    text: StrictStr = Field(description="Mental model content")
+    context: Optional[StrictStr] = None
+    __properties: ClassVar[List[str]] = ["id", "text", "context"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -53,7 +49,7 @@ class CreateMentalModelRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of CreateMentalModelRequest from a JSON string"""
+        """Create an instance of ReflectMentalModel from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -74,14 +70,16 @@ class CreateMentalModelRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of trigger
-        if self.trigger:
-            _dict['trigger'] = self.trigger.to_dict()
+        # set to None if context (nullable) is None
+        # and model_fields_set contains the field
+        if self.context is None and "context" in self.model_fields_set:
+            _dict['context'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of CreateMentalModelRequest from a dict"""
+        """Create an instance of ReflectMentalModel from a dict"""
         if obj is None:
             return None
 
@@ -89,11 +87,9 @@ class CreateMentalModelRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "name": obj.get("name"),
-            "source_query": obj.get("source_query"),
-            "tags": obj.get("tags"),
-            "max_tokens": obj.get("max_tokens") if obj.get("max_tokens") is not None else 2048,
-            "trigger": MentalModelTrigger.from_dict(obj["trigger"]) if obj.get("trigger") is not None else None
+            "id": obj.get("id"),
+            "text": obj.get("text"),
+            "context": obj.get("context")
         })
         return _obj
 

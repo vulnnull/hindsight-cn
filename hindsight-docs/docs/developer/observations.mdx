@@ -4,6 +4,7 @@ sidebar_position: 5
 
 import CodeSnippet from '@site/src/components/CodeSnippet';
 import recallPy from '!!raw-loader!@site/examples/api/recall.py';
+import memoryBanksPy from '!!raw-loader!@site/examples/api/memory-banks.py';
 
 # Observations: Knowledge Consolidation
 
@@ -136,14 +137,7 @@ The bank's **mission** directly influences what knowledge gets consolidated into
 
 **Example:**
 
-```python
-# A support agent bank
-client.create_bank(
-    bank_id="support-agent",
-    mission="You're a customer support agent - you need to keep track of "
-            "customer preferences, past issues, and communication styles."
-)
-```
+<CodeSnippet code={memoryBanksPy} section="bank-support-agent" language="python" />
 
 With this mission, the consolidation engine will:
 - **Prioritize** customer preferences, issue patterns, and communication styles

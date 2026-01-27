@@ -109,6 +109,9 @@ enum Commands {
     /// Get Prometheus metrics
     Metrics,
 
+    /// Get API version information
+    Version,
+
     /// Interactive TUI explorer (k9s-style) for navigating banks, memories, entities, and performing recall/reflect
     #[command(alias = "tui")]
     Explore,
@@ -245,6 +248,22 @@ enum BankCommands {
 
     /// Delete a bank and all its data
     Delete {
+        /// Bank ID
+        bank_id: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// Trigger consolidation to create/update observations
+    Consolidate {
+        /// Bank ID
+        bank_id: String,
+    },
+
+    /// Clear all observations for a bank
+    ClearObservations {
         /// Bank ID
         bank_id: String,
 
@@ -706,9 +725,10 @@ fn run() -> Result<()> {
         Commands::Ui => unreachable!(), // Handled above
         Commands::Explore => commands::explore::run(&client),
 
-        // Health and Metrics
+        // Health, Metrics, and Version
         Commands::Health => commands::health::health(&client, verbose, output_format),
         Commands::Metrics => commands::health::metrics(&client, verbose, output_format),
+        Commands::Version => commands::health::version(&client, verbose, output_format),
 
         // Bank commands
         Commands::Bank(bank_cmd) => match bank_cmd {
@@ -733,6 +753,12 @@ fn run() -> Result<()> {
             }
             BankCommands::Delete { bank_id, yes } => {
                 commands::bank::delete(&client, &bank_id, yes, verbose, output_format)
+            }
+            BankCommands::Consolidate { bank_id } => {
+                commands::bank::consolidate(&client, &bank_id, verbose, output_format)
+            }
+            BankCommands::ClearObservations { bank_id, yes } => {
+                commands::bank::clear_observations(&client, &bank_id, yes, verbose, output_format)
             }
         },
 

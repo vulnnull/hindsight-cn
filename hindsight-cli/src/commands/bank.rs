@@ -495,3 +495,96 @@ pub fn delete(
         Err(e) => Err(e)
     }
 }
+
+/// Trigger consolidation to create/update observations
+pub fn consolidate(
+    client: &ApiClient,
+    bank_id: &str,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Triggering consolidation..."))
+    } else {
+        None
+    };
+
+    let response = client.trigger_consolidation(bank_id, verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(result) => {
+            if output_format == OutputFormat::Pretty {
+                ui::print_success("Consolidation triggered");
+                println!("  {} {}", ui::dim("Operation ID:"), result.operation_id);
+                if result.deduplicated {
+                    println!("  {} {}", ui::dim("Note:"), "Reusing existing pending consolidation task");
+                }
+                println!();
+                println!("{}", ui::dim("Use 'hindsight operation get' to check the operation status."));
+            } else {
+                output::print_output(&result, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Clear all observations for a bank
+pub fn clear_observations(
+    client: &ApiClient,
+    bank_id: &str,
+    yes: bool,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    // Confirmation prompt unless -y flag is used
+    if !yes && output_format == OutputFormat::Pretty {
+        let message = format!(
+            "Are you sure you want to clear all observations for bank '{}'? This cannot be undone.",
+            bank_id
+        );
+
+        let confirmed = ui::prompt_confirmation(&message)?;
+
+        if !confirmed {
+            ui::print_info("Operation cancelled");
+            return Ok(());
+        }
+    }
+
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Clearing observations..."))
+    } else {
+        None
+    };
+
+    let response = client.clear_observations(bank_id, verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(result) => {
+            if output_format == OutputFormat::Pretty {
+                if result.success {
+                    ui::print_success(&format!("Observations cleared for bank '{}'", bank_id));
+                    if let Some(count) = result.deleted_count {
+                        println!("  Observations deleted: {}", count);
+                    }
+                } else {
+                    ui::print_error("Failed to clear observations");
+                }
+            } else {
+                output::print_output(&result, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}

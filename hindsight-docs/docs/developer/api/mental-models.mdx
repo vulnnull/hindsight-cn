@@ -83,6 +83,54 @@ curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models" \
 | `source_query` | string | Yes | The query to run to generate content |
 | `tags` | list | No | Tags for filtering during retrieval |
 | `max_tokens` | int | No | Maximum tokens for the mental model content |
+| `trigger` | object | No | Trigger settings (see [Automatic Refresh](#automatic-refresh)) |
+
+---
+
+## Automatic Refresh
+
+Mental models can be configured to **automatically refresh** when observations are updated. This keeps them in sync with the latest knowledge without manual intervention.
+
+### Trigger Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `refresh_after_consolidation` | bool | false | Automatically refresh after observations consolidation |
+
+When `refresh_after_consolidation` is enabled, the mental model will be re-generated every time the bank's observations are consolidated — ensuring it always reflects the latest synthesized knowledge.
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={mentalModelsPy} section="create-mental-model-with-trigger" language="python" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+# Create a mental model with automatic refresh enabled
+curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Project Status",
+    "source_query": "What is the current project status?",
+    "trigger": {"refresh_after_consolidation": true}
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+### When to Use Automatic Refresh
+
+| Use Case | Automatic Refresh | Why |
+|----------|-------------------|-----|
+| **Real-time dashboards** | ✅ Enabled | Status should always be current |
+| **Policy summaries** | ❌ Disabled | Policies change infrequently, manual refresh preferred |
+| **User preferences** | ✅ Enabled | Preferences evolve with new interactions |
+| **FAQ answers** | ❌ Disabled | Answers are curated, should be reviewed before updating |
+
+:::tip
+Enable automatic refresh for mental models that need to stay current. Disable it for curated content where you want to review changes before they go live.
+:::
 
 ---
 

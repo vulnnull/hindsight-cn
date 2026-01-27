@@ -220,6 +220,7 @@ export function BankProfileView() {
   const [operations, setOperations] = useState<Operation[]>([]);
   const [totalOperations, setTotalOperations] = useState(0);
   const [directives, setDirectives] = useState<Directive[]>([]);
+  const [mentalModelsCount, setMentalModelsCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -289,12 +290,14 @@ export function BankProfileView() {
     // Use ref to get current value (avoids stale closure in setInterval)
     if (isPolling) {
       try {
-        const [statsData, directivesData] = await Promise.all([
+        const [statsData, directivesData, mentalModelsData] = await Promise.all([
           client.getBankStats(currentBank),
           client.listDirectives(currentBank),
+          client.listMentalModels(currentBank),
         ]);
         setStats(statsData as BankStats);
         setDirectives(directivesData.items || []);
+        setMentalModelsCount(mentalModelsData.items?.length || 0);
         // Skip operations refresh during polling to not interfere with filter/pagination state
       } catch (error) {
         console.error("Error refreshing stats:", error);
@@ -304,14 +307,16 @@ export function BankProfileView() {
 
     setLoading(true);
     try {
-      const [profileData, statsData, directivesData] = await Promise.all([
+      const [profileData, statsData, directivesData, mentalModelsData] = await Promise.all([
         client.getBankProfile(currentBank),
         client.getBankStats(currentBank),
         client.listDirectives(currentBank),
+        client.listMentalModels(currentBank),
       ]);
       setProfile(profileData);
       setStats(statsData as BankStats);
       setDirectives(directivesData.items || []);
+      setMentalModelsCount(mentalModelsData.items?.length || 0);
       await loadOperations();
 
       // Only initialize edit state when not in edit mode
@@ -645,7 +650,7 @@ export function BankProfileView() {
 
       {/* Memory Type Breakdown */}
       {stats && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-center">
             <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold uppercase tracking-wide">
               World Facts
@@ -684,6 +689,14 @@ export function BankProfileView() {
               }`}
             >
               {observationsEnabled ? stats.total_mental_models || 0 : "—"}
+            </p>
+          </div>
+          <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-xl p-4 text-center">
+            <p className="text-xs text-cyan-600 dark:text-cyan-400 font-semibold uppercase tracking-wide">
+              Mental Models
+            </p>
+            <p className="text-2xl font-bold text-cyan-600 dark:text-cyan-400 mt-1">
+              {mentalModelsCount}
             </p>
           </div>
           <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-4 text-center">
@@ -1069,8 +1082,9 @@ export function BankProfileView() {
       </AlertDialog>
 
       {/* Create Directive Dialog */}
-      <CreateDirectiveDialog
+      <DirectiveFormDialog
         open={showCreateDirective}
+        mode="create"
         onClose={() => setShowCreateDirective(false)}
         onCreated={(d) => {
           setDirectives((prev) => [d, ...prev]);
@@ -1119,68 +1133,99 @@ export function BankProfileView() {
               name: selectedDirective.name,
             })
           }
+          onUpdated={(updated) => {
+            setDirectives((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+            setSelectedDirective(updated);
+          }}
         />
       )}
     </div>
   );
 }
 
-// ============= CREATE DIRECTIVE DIALOG =============
+// ============= DIRECTIVE FORM DIALOG (CREATE/EDIT) =============
 
-function CreateDirectiveDialog({
+function DirectiveFormDialog({
   open,
+  mode,
+  directive,
   onClose,
   onCreated,
+  onSaved,
 }: {
   open: boolean;
+  mode: "create" | "edit";
+  directive?: Directive;
   onClose: () => void;
-  onCreated: (d: Directive) => void;
+  onCreated?: (d: Directive) => void;
+  onSaved?: (d: Directive) => void;
 }) {
   const { currentBank } = useBank();
-  const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: "", description: "", tags: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({ name: "", content: "", tags: "" });
 
-  const handleCreate = async () => {
-    if (!currentBank || !form.name.trim() || !form.description.trim()) return;
+  // Reset form when dialog opens or directive changes
+  useEffect(() => {
+    if (mode === "edit" && directive) {
+      setForm({
+        name: directive.name,
+        content: directive.content,
+        tags: (directive.tags || []).join(", "),
+      });
+    } else if (mode === "create") {
+      setForm({ name: "", content: "", tags: "" });
+    }
+  }, [open, mode, directive]);
 
-    setCreating(true);
+  const handleSubmit = async () => {
+    if (!currentBank || !form.name.trim() || !form.content.trim()) return;
+
+    setSubmitting(true);
     try {
       const tags = form.tags
         .split(",")
         .map((t) => t.trim())
         .filter((t) => t.length > 0);
 
-      const result = await client.createDirective(currentBank, {
-        name: form.name.trim(),
-        content: form.description.trim(),
-        tags: tags.length > 0 ? tags : undefined,
-      });
-
-      setForm({ name: "", description: "", tags: "" });
-      onCreated(result);
+      if (mode === "create") {
+        const result = await client.createDirective(currentBank, {
+          name: form.name.trim(),
+          content: form.content.trim(),
+          tags: tags.length > 0 ? tags : undefined,
+        });
+        setForm({ name: "", content: "", tags: "" });
+        onCreated?.(result);
+      } else if (directive) {
+        const result = await client.updateDirective(currentBank, directive.id, {
+          name: form.name.trim(),
+          content: form.content.trim(),
+          tags: tags,
+        });
+        onSaved?.(result);
+        onClose();
+      }
     } catch (error) {
-      console.error("Error creating directive:", error);
-      alert("Error creating directive: " + (error as Error).message);
+      console.error(`Error ${mode === "create" ? "creating" : "updating"} directive:`, error);
+      alert(`Error ${mode === "create" ? "creating" : "updating"}: ` + (error as Error).message);
     } finally {
-      setCreating(false);
+      setSubmitting(false);
     }
   };
 
+  const handleClose = () => {
+    if (mode === "create") {
+      setForm({ name: "", content: "", tags: "" });
+    }
+    onClose();
+  };
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) {
-          setForm({ name: "", description: "", tags: "" });
-          onClose();
-        }
-      }}
-    >
+    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-rose-500" />
-            Create Directive
+            {mode === "create" ? "Create" : "Edit"} Directive
           </DialogTitle>
           <DialogDescription>
             Directives are hard rules that must be followed during reflect.
@@ -1199,8 +1244,8 @@ function CreateDirectiveDialog({
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Rule *</label>
             <Textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              value={form.content}
+              onChange={(e) => setForm({ ...form, content: e.target.value })}
               placeholder="e.g., Never mention competitor products directly."
               className="min-h-[120px]"
             />
@@ -1218,16 +1263,16 @@ function CreateDirectiveDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={handleClose} disabled={submitting}>
             Cancel
           </Button>
           <Button
-            onClick={handleCreate}
-            disabled={creating || !form.name.trim() || !form.description.trim()}
+            onClick={handleSubmit}
+            disabled={submitting || !form.name.trim() || !form.content.trim()}
             className="bg-rose-500 hover:bg-rose-600"
           >
-            {creating ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
-            Create
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+            {mode === "create" ? "Create" : "Save"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1241,11 +1286,15 @@ function DirectiveDetailPanel({
   directive,
   onClose,
   onDelete,
+  onUpdated,
 }: {
   directive: Directive;
   onClose: () => void;
   onDelete: () => void;
+  onUpdated: (d: Directive) => void;
 }) {
+  const [showEditModal, setShowEditModal] = useState(false);
+
   return (
     <div className="fixed right-0 top-0 h-screen w-1/2 bg-card border-l-2 border-rose-500 shadow-2xl z-50 overflow-y-auto animate-in slide-in-from-right duration-300 ease-out">
       <div className="p-6">
@@ -1254,15 +1303,35 @@ function DirectiveDetailPanel({
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-rose-500" />
             <div>
-              <h3 className="text-xl font-bold text-foreground">{directive.name}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xl font-bold text-foreground">{directive.name}</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowEditModal(true)}
+                  className="h-7 w-7 p-0"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </div>
               <span className="text-xs px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400">
                 directive
               </span>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              className="h-8 w-8 p-0 text-muted-foreground hover:text-rose-500"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         <div className="space-y-6">
@@ -1296,7 +1365,7 @@ function DirectiveDetailPanel({
           )}
 
           {/* ID */}
-          <div className="p-4 bg-muted/50 rounded-lg">
+          <div>
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
               ID
             </div>
@@ -1304,21 +1373,17 @@ function DirectiveDetailPanel({
               {directive.id}
             </code>
           </div>
-
-          {/* Actions */}
-          <div className="pt-4 border-t border-border">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onDelete}
-              className="text-muted-foreground hover:text-rose-500 hover:border-rose-500 hover:bg-rose-500/10"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete
-            </Button>
-          </div>
         </div>
       </div>
+
+      {/* Edit Modal */}
+      <DirectiveFormDialog
+        open={showEditModal}
+        mode="edit"
+        directive={directive}
+        onClose={() => setShowEditModal(false)}
+        onSaved={onUpdated}
+      />
     </div>
   );
 }

@@ -357,3 +357,92 @@ class TestRecallWithObservationsAndMentalModels:
 
         # Cleanup
         await api_client.delete(f"/v1/default/banks/{test_bank_id}")
+
+
+class TestReflectUsesMentalModels:
+    """Test that reflect searches and uses mental models when available."""
+
+    @pytest.mark.asyncio
+    async def test_reflect_searches_mental_models_when_available(self, memory: MemoryEngine, request_context):
+        """Test that reflect uses search_mental_models when the bank has mental models.
+
+        Given:
+        - A bank with a mental model about "team collaboration"
+
+        Expected:
+        - Reflect should call search_mental_models tool
+        - The mental model content should influence the response
+        """
+        bank_id = f"test-reflect-mm-{uuid.uuid4().hex[:8]}"
+
+        # Create the bank
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        # Create a mental model about team collaboration
+        mental_model = await memory.create_mental_model(
+            bank_id=bank_id,
+            mental_model_id=str(uuid.uuid4()),
+            name="Team Collaboration Practices",
+            source_query="How does the team collaborate?",
+            content="The team uses async communication via Slack and holds daily standups at 9am. "
+            "Code reviews are required before merging. The team values documentation and "
+            "prefers written communication for complex decisions.",
+            tags=["team"],
+            request_context=request_context,
+        )
+
+        # Run reflect with a query about team collaboration
+        result = await memory.reflect_async(
+            bank_id=bank_id,
+            query="How does the team work together?",
+            request_context=request_context,
+        )
+
+        # Check that mental models were searched
+        tool_calls = result.tool_trace
+        search_mm_calls = [tc for tc in tool_calls if tc.tool == "search_mental_models"]
+
+        assert len(search_mm_calls) > 0, (
+            f"Expected search_mental_models to be called when bank has mental models. "
+            f"Tool calls: {[tc.tool for tc in tool_calls]}"
+        )
+
+        # Check that the reason field is populated for debugging
+        for tc in search_mm_calls:
+            assert tc.reason is not None, "Tool call should have a reason for debugging"
+
+        # The response should mention concepts from the mental model
+        response_text = result.text.lower()
+        has_relevant_content = any(
+            keyword in response_text
+            for keyword in ["slack", "async", "standup", "code review", "documentation", "communication"]
+        )
+        assert has_relevant_content, (
+            f"Expected response to reference mental model content. Got: {result.text[:500]}"
+        )
+
+        # Cleanup
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_reflect_tool_trace_includes_reason(self, memory: MemoryEngine, request_context):
+        """Test that tool traces include the reason field for debugging."""
+        bank_id = f"test-reflect-reason-{uuid.uuid4().hex[:8]}"
+
+        # Create the bank
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        # Run reflect - it should use observations or recall
+        result = await memory.reflect_async(
+            bank_id=bank_id,
+            query="What is the weather like?",
+            request_context=request_context,
+        )
+
+        # All tool calls should have a reason
+        for tc in result.tool_trace:
+            if tc.tool != "done":  # done doesn't need a reason
+                assert tc.reason is not None, f"Tool {tc.tool} should have a reason for debugging"
+
+        # Cleanup
+        await memory.delete_bank(bank_id, request_context=request_context)

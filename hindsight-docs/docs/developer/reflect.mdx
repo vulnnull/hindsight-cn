@@ -36,7 +36,8 @@ Unlike simple retrieval, reflect is an **agentic system** that:
 1. **Autonomously gathers evidence** — The agent decides what information it needs and calls appropriate tools
 2. **Uses hierarchical retrieval** — Checks mental models first, then observations, then raw facts
 3. **Applies disposition** — Shapes reasoning based on the bank's personality traits
-4. **Cites sources** — Returns which memories and observations were used
+4. **Enforces directives** — Hard rules that must be followed in all responses
+5. **Cites sources** — Returns which memories and observations were used
 
 ### The Agentic Loop
 
@@ -155,13 +156,43 @@ Different use cases benefit from different disposition configurations:
 
 ---
 
+## Directives: Hard Rules
+
+While disposition traits *influence* reasoning style, **directives** are hard rules that the agent *must* follow. Directives are injected into the prompt and enforced in every response.
+
+### When to Use Directives
+
+Use directives for constraints that must never be violated:
+
+- **Compliance rules**: "Never recommend specific stocks or financial products"
+- **Privacy constraints**: "Never share personal data with third parties"
+- **Style requirements**: "Always respond in formal English"
+- **Domain guardrails**: "Always cite sources when making factual claims"
+
+### Directives vs Disposition
+
+| Aspect | Disposition | Directives |
+|--------|-------------|------------|
+| **Nature** | Soft influence | Hard rules |
+| **Effect** | Shapes interpretation and tone | Must be followed exactly |
+| **Violation** | Acceptable (it's a tendency) | Not acceptable |
+| **Example** | High skepticism → questions claims | "Never make medical diagnoses" |
+
+:::tip
+Use disposition for personality and character. Use directives for compliance and guardrails.
+:::
+
+See [Memory Banks: Directives](/developer/api/memory-banks#directives) for how to create and manage directives.
+
+---
+
 ## What You Get from Reflect
 
 When you call `reflect()`:
 
 **Returns:**
 - **Response text** — Disposition-influenced answer from the agent
-- **based_on** — Evidence used: memories that grounded the response
+- **based_on** — Evidence used: memories, mental models, and directives that grounded the response
 - **trace** — Tool calls, LLM calls, and observations accessed (when `include.tool_calls=True`)
 - **structured_output** — Parsed response if `response_schema` was provided
 - **usage** — Token usage metrics
@@ -174,17 +205,10 @@ When you call `reflect()`:
     "memories": [
       {"id": "mem-123", "text": "Alice has 5 years of ML experience", "type": "world"},
       {"id": "mem-456", "text": "Alice worked at Google on search ranking", "type": "experience"}
-    ]
-  },
-  "trace": {
-    "tool_calls": [
-      {"tool": "recall", "input": {"query": "Alice"}, "duration_ms": 150}
     ],
-    "llm_calls": [
-      {"scope": "agent_1", "duration_ms": 1200}
-    ],
-    "observations": [
-      {"id": "obs-789", "name": "Alice", "type": "entity", "subtype": "structural"}
+    "mental_models": [],
+    "directives": [
+      {"id": "dir-001", "name": "Formal Language", "rules": ["Always respond in formal English"]}
     ]
   },
   "usage": {"input_tokens": 1500, "output_tokens": 500, "total_tokens": 2000}

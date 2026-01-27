@@ -53,6 +53,7 @@ hindsight_client_api/models/list_tags_response.py
 hindsight_client_api/models/memory_item.py
 hindsight_client_api/models/mental_model_list_response.py
 hindsight_client_api/models/mental_model_response.py
+hindsight_client_api/models/mental_model_trigger.py
 hindsight_client_api/models/operation_response.py
 hindsight_client_api/models/operation_status_response.py
 hindsight_client_api/models/operations_list_response.py
@@ -60,9 +61,11 @@ hindsight_client_api/models/recall_request.py
 hindsight_client_api/models/recall_response.py
 hindsight_client_api/models/recall_result.py
 hindsight_client_api/models/reflect_based_on.py
+hindsight_client_api/models/reflect_directive.py
 hindsight_client_api/models/reflect_fact.py
 hindsight_client_api/models/reflect_include_options.py
 hindsight_client_api/models/reflect_llm_call.py
+hindsight_client_api/models/reflect_mental_model.py
 hindsight_client_api/models/reflect_request.py
 hindsight_client_api/models/reflect_response.py
 hindsight_client_api/models/reflect_tool_call.py

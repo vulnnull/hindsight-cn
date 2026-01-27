@@ -87,10 +87,6 @@ ENV_MCP_LOCAL_BANK_ID = "HINDSIGHT_API_MCP_LOCAL_BANK_ID"
 ENV_MCP_INSTRUCTIONS = "HINDSIGHT_API_MCP_INSTRUCTIONS"
 ENV_MENTAL_MODEL_REFRESH_CONCURRENCY = "HINDSIGHT_API_MENTAL_MODEL_REFRESH_CONCURRENCY"
 
-# Observation settings (consolidated knowledge from facts)
-ENV_OBSERVATION_MIN_FACTS = "HINDSIGHT_API_OBSERVATION_MIN_FACTS"
-ENV_OBSERVATION_TOP_ENTITIES = "HINDSIGHT_API_OBSERVATION_TOP_ENTITIES"
-
 # Retain settings
 ENV_RETAIN_MAX_COMPLETION_TOKENS = "HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS"
 ENV_RETAIN_CHUNK_SIZE = "HINDSIGHT_API_RETAIN_CHUNK_SIZE"
@@ -100,7 +96,6 @@ ENV_RETAIN_OBSERVATIONS_ASYNC = "HINDSIGHT_API_RETAIN_OBSERVATIONS_ASYNC"
 
 # Observations settings (consolidated knowledge from facts)
 ENV_ENABLE_OBSERVATIONS = "HINDSIGHT_API_ENABLE_OBSERVATIONS"
-ENV_CONSOLIDATION_SIMILARITY_THRESHOLD = "HINDSIGHT_API_CONSOLIDATION_SIMILARITY_THRESHOLD"
 ENV_CONSOLIDATION_BATCH_SIZE = "HINDSIGHT_API_CONSOLIDATION_BATCH_SIZE"
 
 # Optimization flags
@@ -169,10 +164,6 @@ DEFAULT_RECALL_CONNECTION_BUDGET = 4  # Max concurrent DB connections per recall
 DEFAULT_MCP_LOCAL_BANK_ID = "mcp"
 DEFAULT_MENTAL_MODEL_REFRESH_CONCURRENCY = 8  # Max concurrent mental model refreshes
 
-# Observation thresholds
-DEFAULT_OBSERVATION_MIN_FACTS = 5  # Min facts required to generate entity observations
-DEFAULT_OBSERVATION_TOP_ENTITIES = 5  # Max entities to process per retain batch
-
 # Retain settings
 DEFAULT_RETAIN_MAX_COMPLETION_TOKENS = 64000  # Max tokens for fact extraction LLM call
 DEFAULT_RETAIN_CHUNK_SIZE = 3000  # Max chars per chunk for fact extraction
@@ -183,7 +174,6 @@ DEFAULT_RETAIN_OBSERVATIONS_ASYNC = False  # Run observation generation async (a
 
 # Observations defaults (consolidated knowledge from facts)
 DEFAULT_ENABLE_OBSERVATIONS = False  # Observations disabled by default (experimental)
-DEFAULT_CONSOLIDATION_SIMILARITY_THRESHOLD = 0.75  # Minimum similarity to consider a learning related
 DEFAULT_CONSOLIDATION_BATCH_SIZE = 50  # Memories to load per batch (internal memory optimization)
 
 # Database migrations
@@ -333,10 +323,6 @@ class HindsightConfig:
     recall_connection_budget: int
     mental_model_refresh_concurrency: int
 
-    # Observation thresholds
-    observation_min_facts: int
-    observation_top_entities: int
-
     # Retain settings
     retain_max_completion_tokens: int
     retain_chunk_size: int
@@ -346,7 +332,6 @@ class HindsightConfig:
 
     # Observations settings (consolidated knowledge from facts)
     enable_observations: bool
-    consolidation_similarity_threshold: float
     consolidation_batch_size: int
 
     # Optimization flags
@@ -434,11 +419,6 @@ class HindsightConfig:
             # Optimization flags
             skip_llm_verification=os.getenv(ENV_SKIP_LLM_VERIFICATION, "false").lower() == "true",
             lazy_reranker=os.getenv(ENV_LAZY_RERANKER, "false").lower() == "true",
-            # Observation thresholds
-            observation_min_facts=int(os.getenv(ENV_OBSERVATION_MIN_FACTS, str(DEFAULT_OBSERVATION_MIN_FACTS))),
-            observation_top_entities=int(
-                os.getenv(ENV_OBSERVATION_TOP_ENTITIES, str(DEFAULT_OBSERVATION_TOP_ENTITIES))
-            ),
             # Retain settings
             retain_max_completion_tokens=int(
                 os.getenv(ENV_RETAIN_MAX_COMPLETION_TOKENS, str(DEFAULT_RETAIN_MAX_COMPLETION_TOKENS))
@@ -457,9 +437,6 @@ class HindsightConfig:
             == "true",
             # Observations settings (consolidated knowledge from facts)
             enable_observations=os.getenv(ENV_ENABLE_OBSERVATIONS, str(DEFAULT_ENABLE_OBSERVATIONS)).lower() == "true",
-            consolidation_similarity_threshold=float(
-                os.getenv(ENV_CONSOLIDATION_SIMILARITY_THRESHOLD, str(DEFAULT_CONSOLIDATION_SIMILARITY_THRESHOLD))
-            ),
             consolidation_batch_size=int(
                 os.getenv(ENV_CONSOLIDATION_BATCH_SIZE, str(DEFAULT_CONSOLIDATION_BATCH_SIZE))
             ),

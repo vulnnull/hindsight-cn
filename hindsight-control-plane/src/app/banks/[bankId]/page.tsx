@@ -71,8 +71,8 @@ export default function BankPage() {
               <div>
                 <h1 className="text-3xl font-bold mb-2 text-foreground">Reflect</h1>
                 <p className="text-muted-foreground mb-6">
-                  Query the memory bank and generate a response with optional disposition-aware
-                  reasoning.
+                  Run an agentic loop that autonomously gathers evidence and reasons through the
+                  lens of the bank&apos;s disposition to generate contextual responses.
                 </p>
                 <ThinkView />
               </div>
@@ -149,11 +149,31 @@ export default function BankPage() {
                 </div>
 
                 <div>
-                  {subTab === "world" && <DataView key="world" factType="world" />}
-                  {subTab === "experience" && <DataView key="experience" factType="experience" />}
+                  {subTab === "world" && (
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        Objective facts about the world received from external sources.
+                      </p>
+                      <DataView key="world" factType="world" />
+                    </div>
+                  )}
+                  {subTab === "experience" && (
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        The bank&apos;s own actions, interactions, and first-person experiences.
+                      </p>
+                      <DataView key="experience" factType="experience" />
+                    </div>
+                  )}
                   {subTab === "observations" &&
                     (observationsEnabled ? (
-                      <DataView key="observations" factType="observation" />
+                      <div>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          Consolidated knowledge synthesized from facts — patterns, preferences, and
+                          learnings that emerge from accumulated evidence.
+                        </p>
+                        <DataView key="observations" factType="observation" />
+                      </div>
                     ) : (
                       <div className="flex flex-col items-center justify-center py-16 text-center">
                         <div className="text-muted-foreground mb-2">
@@ -185,7 +205,15 @@ export default function BankPage() {
                         </p>
                       </div>
                     ))}
-                  {subTab === "mental-models" && <MentalModelsView key="mental-models" />}
+                  {subTab === "mental-models" && (
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        User-curated summaries generated from queries — reusable knowledge snapshots
+                        that can be refreshed as memories evolve.
+                      </p>
+                      <MentalModelsView key="mental-models" />
+                    </div>
+                  )}
                 </div>
               </div>
             )}

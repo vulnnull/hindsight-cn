@@ -1245,6 +1245,136 @@ class TestConsolidationTagRouting:
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    @pytest.mark.asyncio
+    async def test_observation_temporal_range_expands_on_update(
+        self, memory: MemoryEngine, request_context
+    ):
+        """Test that observation temporal range uses LEAST(occurred_start) and GREATEST(occurred_end).
+
+        When an observation is updated with a new source fact:
+        - occurred_start should be the EARLIEST start time across all source facts
+        - occurred_end should be the LATEST end time across all source facts
+
+        This ensures observations capture the full temporal range of their source facts.
+        """
+        from datetime import datetime, timezone
+
+        bank_id = f"test-consolidation-temporal-range-{uuid.uuid4().hex[:8]}"
+
+        # Create the bank
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        # Define dates: first memory is from June 2023, second is from January 2024
+        early_start = datetime(2023, 6, 1, 10, 0, 0, tzinfo=timezone.utc)
+        early_end = datetime(2023, 6, 15, 18, 0, 0, tzinfo=timezone.utc)
+        late_start = datetime(2024, 1, 10, 9, 0, 0, tzinfo=timezone.utc)
+        late_end = datetime(2024, 1, 20, 17, 0, 0, tzinfo=timezone.utc)
+
+        # Create first memory with early dates
+        async with memory._pool.acquire() as conn:
+            memory_id_1 = uuid.uuid4()
+            await conn.execute(
+                """
+                INSERT INTO memory_units (
+                    id, bank_id, text, fact_type, occurred_start, occurred_end, event_date, created_at
+                )
+                VALUES ($1, $2, $3, 'experience', $4, $5, $4, now())
+                """,
+                memory_id_1,
+                bank_id,
+                "Tom started learning Python programming in summer 2023.",
+                early_start,
+                early_end,
+            )
+
+        # Run consolidation - should create observation with early dates
+        from hindsight_api.engine.consolidation.consolidator import run_consolidation_job
+
+        result = await run_consolidation_job(
+            memory_engine=memory,
+            bank_id=bank_id,
+            request_context=request_context,
+        )
+        assert result["status"] == "completed"
+
+        # Check observation has the early dates
+        async with memory._pool.acquire() as conn:
+            obs_after_first = await conn.fetchrow(
+                """
+                SELECT id, occurred_start, occurred_end, source_memory_ids
+                FROM memory_units
+                WHERE bank_id = $1 AND fact_type = 'observation'
+                LIMIT 1
+                """,
+                bank_id,
+            )
+
+        if obs_after_first:
+            assert obs_after_first["occurred_start"].year == 2023, (
+                f"Initial observation should have 2023 start, got {obs_after_first['occurred_start']}"
+            )
+            assert obs_after_first["occurred_end"].year == 2023, (
+                f"Initial observation should have 2023 end, got {obs_after_first['occurred_end']}"
+            )
+
+            # Now add a second related memory with later dates
+            async with memory._pool.acquire() as conn:
+                memory_id_2 = uuid.uuid4()
+                await conn.execute(
+                    """
+                    INSERT INTO memory_units (
+                        id, bank_id, text, fact_type, occurred_start, occurred_end, event_date, created_at
+                    )
+                    VALUES ($1, $2, $3, 'experience', $4, $5, $4, now())
+                    """,
+                    memory_id_2,
+                    bank_id,
+                    "Tom completed his Python certification in January 2024.",
+                    late_start,
+                    late_end,
+                )
+
+            # Run consolidation again - should update observation with expanded range
+            result = await run_consolidation_job(
+                memory_engine=memory,
+                bank_id=bank_id,
+                request_context=request_context,
+            )
+            assert result["status"] == "completed"
+
+            # Check observation now has expanded temporal range
+            async with memory._pool.acquire() as conn:
+                obs_after_second = await conn.fetchrow(
+                    """
+                    SELECT id, occurred_start, occurred_end, source_memory_ids, proof_count
+                    FROM memory_units
+                    WHERE bank_id = $1 AND fact_type = 'observation'
+                    ORDER BY proof_count DESC
+                    LIMIT 1
+                    """,
+                    bank_id,
+                )
+
+            if obs_after_second and obs_after_second["proof_count"] >= 2:
+                # occurred_start should be the EARLIEST (2023)
+                assert obs_after_second["occurred_start"].year == 2023, (
+                    f"occurred_start should be earliest (2023), got {obs_after_second['occurred_start']}"
+                )
+                assert obs_after_second["occurred_start"].month == 6, (
+                    f"occurred_start month should be 6 (June), got {obs_after_second['occurred_start'].month}"
+                )
+
+                # occurred_end should be the LATEST (2024)
+                assert obs_after_second["occurred_end"].year == 2024, (
+                    f"occurred_end should be latest (2024), got {obs_after_second['occurred_end']}"
+                )
+                assert obs_after_second["occurred_end"].month == 1, (
+                    f"occurred_end month should be 1 (January), got {obs_after_second['occurred_end'].month}"
+                )
+
+        # Cleanup
+        await memory.delete_bank(bank_id, request_context=request_context)
+
 
 class TestObservationDrillDown:
     """Test that reflect agent can drill down from observations to source memories."""
@@ -1584,6 +1714,174 @@ class TestHierarchicalRetrieval:
         has_q4_data = "$2.1M" in all_memory_text or "$2.1 million" in all_memory_text
         assert has_q3_data or has_q4_data, (
             f"Recall should return raw facts with specific data. Got: {all_memory_text}"
+        )
+
+        # Cleanup
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+class TestMentalModelRefreshAfterConsolidation:
+    """Test that mental models with refresh_after_consolidation trigger are refreshed after consolidation."""
+
+    @pytest.mark.asyncio
+    async def test_mental_model_with_trigger_is_refreshed_after_consolidation(
+        self, memory: MemoryEngine, request_context
+    ):
+        """Test that mental models with refresh_after_consolidation=true get refreshed.
+
+        Given:
+        - A mental model with trigger.refresh_after_consolidation = true
+        - New memories are retained (triggers consolidation)
+
+        Expected:
+        - After consolidation, the mental model is refreshed (last_refreshed_at updated)
+        """
+        bank_id = f"test-mm-refresh-trigger-{uuid.uuid4().hex[:8]}"
+
+        # Create the bank
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        # Create a mental model with refresh_after_consolidation trigger enabled
+        mental_model = await memory.create_mental_model(
+            bank_id=bank_id,
+            mental_model_id=str(uuid.uuid4()),
+            name="User Preferences",
+            source_query="What are the user's preferences?",
+            content="Initial content about user preferences.",
+            tags=[],
+            trigger={"refresh_after_consolidation": True},
+            request_context=request_context,
+        )
+        mental_model_id = mental_model["id"]
+
+        # Verify trigger was set correctly
+        assert mental_model.get("trigger", {}).get("refresh_after_consolidation") is True
+
+        # Get the initial last_refreshed_at
+        async with memory._pool.acquire() as conn:
+            initial_row = await conn.fetchrow(
+                """
+                SELECT last_refreshed_at, content
+                FROM mental_models
+                WHERE id = $1 AND bank_id = $2
+                """,
+                mental_model_id,
+                bank_id,
+            )
+            initial_refreshed_at = initial_row["last_refreshed_at"]
+            initial_content = initial_row["content"]
+
+        # Retain a memory - this triggers consolidation which should trigger mental model refresh
+        await memory.retain_async(
+            bank_id=bank_id,
+            content="The user prefers dark mode and uses keyboard shortcuts extensively.",
+            request_context=request_context,
+        )
+
+        # Check that the mental model was refreshed
+        async with memory._pool.acquire() as conn:
+            refreshed_row = await conn.fetchrow(
+                """
+                SELECT last_refreshed_at, content
+                FROM mental_models
+                WHERE id = $1 AND bank_id = $2
+                """,
+                mental_model_id,
+                bank_id,
+            )
+            refreshed_at = refreshed_row["last_refreshed_at"]
+            refreshed_content = refreshed_row["content"]
+
+        # The mental model should have been refreshed (last_refreshed_at updated)
+        assert refreshed_at > initial_refreshed_at, (
+            f"Mental model should have been refreshed after consolidation. "
+            f"Initial: {initial_refreshed_at}, After: {refreshed_at}"
+        )
+
+        # The content should have changed (regenerated by reflect)
+        assert refreshed_content != initial_content, (
+            f"Mental model content should have been updated. "
+            f"Initial: {initial_content}, After: {refreshed_content}"
+        )
+
+        # Cleanup
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_mental_model_without_trigger_is_not_refreshed(
+        self, memory: MemoryEngine, request_context
+    ):
+        """Test that mental models with refresh_after_consolidation=false are NOT refreshed.
+
+        Given:
+        - A mental model with trigger.refresh_after_consolidation = false (default)
+        - New memories are retained (triggers consolidation)
+
+        Expected:
+        - After consolidation, the mental model is NOT refreshed
+        """
+        bank_id = f"test-mm-no-refresh-{uuid.uuid4().hex[:8]}"
+
+        # Create the bank
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        # Create a mental model (default trigger is refresh_after_consolidation: false)
+        mental_model = await memory.create_mental_model(
+            bank_id=bank_id,
+            mental_model_id=str(uuid.uuid4()),
+            name="Static Knowledge",
+            source_query="What is the company mission?",
+            content="Our mission is to build great software.",
+            tags=[],
+            request_context=request_context,
+        )
+        mental_model_id = mental_model["id"]
+
+        # Get the initial last_refreshed_at and content
+        async with memory._pool.acquire() as conn:
+            initial_row = await conn.fetchrow(
+                """
+                SELECT last_refreshed_at, content
+                FROM mental_models
+                WHERE id = $1 AND bank_id = $2
+                """,
+                mental_model_id,
+                bank_id,
+            )
+            initial_refreshed_at = initial_row["last_refreshed_at"]
+            initial_content = initial_row["content"]
+
+        # Retain a memory - this triggers consolidation
+        await memory.retain_async(
+            bank_id=bank_id,
+            content="We launched a new product feature today.",
+            request_context=request_context,
+        )
+
+        # Check that the mental model was NOT refreshed
+        async with memory._pool.acquire() as conn:
+            after_row = await conn.fetchrow(
+                """
+                SELECT last_refreshed_at, content
+                FROM mental_models
+                WHERE id = $1 AND bank_id = $2
+                """,
+                mental_model_id,
+                bank_id,
+            )
+            after_refreshed_at = after_row["last_refreshed_at"]
+            after_content = after_row["content"]
+
+        # The mental model should NOT have been refreshed
+        assert after_refreshed_at == initial_refreshed_at, (
+            f"Mental model without trigger should NOT be refreshed. "
+            f"Initial: {initial_refreshed_at}, After: {after_refreshed_at}"
+        )
+
+        # The content should be unchanged
+        assert after_content == initial_content, (
+            f"Mental model content should be unchanged. "
+            f"Initial: {initial_content}, After: {after_content}"
         )
 
         # Cleanup

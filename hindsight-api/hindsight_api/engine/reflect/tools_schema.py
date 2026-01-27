@@ -22,6 +22,10 @@ TOOL_SEARCH_MENTAL_MODELS = {
         "parameters": {
             "type": "object",
             "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of why you're making this search (for debugging)",
+                },
                 "query": {
                     "type": "string",
                     "description": "Search query to find relevant mental models",
@@ -31,7 +35,7 @@ TOOL_SEARCH_MENTAL_MODELS = {
                     "description": "Maximum number of mental models to return (default 5)",
                 },
             },
-            "required": ["query"],
+            "required": ["reason", "query"],
         },
     },
 }
@@ -48,6 +52,10 @@ TOOL_SEARCH_OBSERVATIONS = {
         "parameters": {
             "type": "object",
             "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of why you're making this search (for debugging)",
+                },
                 "query": {
                     "type": "string",
                     "description": "Search query to find relevant observations",
@@ -57,7 +65,7 @@ TOOL_SEARCH_OBSERVATIONS = {
                     "description": "Maximum tokens for results (default 5000). Use higher values for broader searches.",
                 },
             },
-            "required": ["query"],
+            "required": ["reason", "query"],
         },
     },
 }
@@ -75,6 +83,10 @@ TOOL_RECALL = {
         "parameters": {
             "type": "object",
             "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of why you're making this search (for debugging)",
+                },
                 "query": {
                     "type": "string",
                     "description": "Search query string",
@@ -84,7 +96,7 @@ TOOL_RECALL = {
                     "description": "Optional limit on result size (default 2048). Use higher values for broader searches.",
                 },
             },
-            "required": ["query"],
+            "required": ["reason", "query"],
         },
     },
 }
@@ -97,6 +109,10 @@ TOOL_EXPAND = {
         "parameters": {
             "type": "object",
             "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of why you need more context (for debugging)",
+                },
                 "memory_ids": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -108,7 +124,7 @@ TOOL_EXPAND = {
                     "description": "chunk: surrounding text chunk, document: full source document",
                 },
             },
-            "required": ["memory_ids", "depth"],
+            "required": ["reason", "memory_ids", "depth"],
         },
     },
 }

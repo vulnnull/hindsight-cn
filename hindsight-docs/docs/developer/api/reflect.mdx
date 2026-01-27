@@ -58,37 +58,19 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 
 ### Budget
 
-The `budget` parameter controls how thoroughly the agent searches for information:
+The `budget` parameter controls the research depth — how thoroughly the agent explores before answering:
 
-| Budget | Iterations | Use Case |
-|--------|------------|----------|
-| `low` | 0.5x base | Quick answers, simple lookups |
-| `mid` | 1x base | Balanced exploration |
-| `high` | 2x base | Complex questions, comprehensive analysis |
+| Budget | Research Depth | Use Case |
+|--------|----------------|----------|
+| `low` | Shallow | Quick answers, simple lookups. Prioritizes speed over completeness. |
+| `mid` | Moderate | Balanced exploration. Checks multiple sources when warranted. |
+| `high` | Deep | Comprehensive analysis. Explores all knowledge levels, uses multiple query variations. |
 
-Higher budgets allow the agent more iterations to search mental models, observations, and raw facts before generating a response. Use `high` for questions that require synthesizing information from multiple sources.
+Use `high` for complex questions that require synthesizing information from multiple sources or verifying facts across different retrieval levels.
 
 ### Max Tokens
 
 The `max_tokens` parameter limits the length of the final generated response. This does not affect how much the agent can retrieve during the agentic loop — only the final answer length.
-
-### Response Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `text` | string | The generated answer text |
-| `used_memory_ids` | array | Memory IDs cited by the agent |
-| `used_mental_model_ids` | array | Mental model IDs cited by the agent |
-| `used_observation_ids` | array | Observation IDs cited by the agent |
-| `structured_output` | object | Parsed structured output (when `response_schema` provided) |
-| `iterations` | int | Number of agent loop iterations |
-| `tools_called` | int | Total number of tool calls made |
-| `usage` | TokenUsage | Token usage metrics |
-
-The `usage` field contains:
-- `input_tokens`: Number of input/prompt tokens consumed
-- `output_tokens`: Number of output/completion tokens generated
-- `total_tokens`: Sum of input and output tokens
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -120,11 +102,11 @@ The bank's disposition affects reflect responses:
 
 ## Citations
 
-The agent cites which sources it used to generate the response:
+The response includes a `based_on` field that shows which sources were used:
 
-- `used_memory_ids` — Raw memory facts that were retrieved and cited
-- `used_mental_model_ids` — User-curated mental models that were used
-- `used_observation_ids` — Consolidated observations that were used
+- `based_on.memories` — Memory facts (world, experience) that were retrieved and cited
+- `based_on.mental_models` — User-curated mental models that were used
+- `based_on.directives` — Directives that were enforced
 
 **Important:** Only IDs that were actually retrieved during the agent loop can be cited. The agent validates citations to prevent hallucinated references.
 

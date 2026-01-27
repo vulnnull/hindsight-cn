@@ -85,7 +85,7 @@ The `budget` parameter controls the search depth and quality. Choose based on qu
 
 1. **Appropriate budgets**: Use lower budgets for simple queries, higher for comprehensive reasoning
 2. **Limit result tokens**: Set `max_tokens` to control response size (default: 4096)
-3. **Include entities/chunks**: Use `include_entities` and `include_chunks` to retrieve additional context when needed — each has its own token budget
+3. **Include chunks**: Use `include_chunks` to retrieve the raw text that generated memories when you need additional context
 
 ### Database Performance
 

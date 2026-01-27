@@ -13,6 +13,8 @@ import CodeSnippet from '@site/src/components/CodeSnippet';
 {/* Import raw source files */}
 import memoryBanksPy from '!!raw-loader!@site/examples/api/memory-banks.py';
 import memoryBanksMjs from '!!raw-loader!@site/examples/api/memory-banks.mjs';
+import directivesPy from '!!raw-loader!@site/examples/api/directives.py';
+import directivesMjs from '!!raw-loader!@site/examples/api/directives.mjs';
 
 ## What is a Memory Bank?
 
@@ -22,6 +24,7 @@ A memory bank is a complete, isolated storage unit containing:
 - **Documents** — Files and content indexed for retrieval
 - **Entities** — People, places, concepts extracted from memories
 - **Relationships** — Connections between entities in the knowledge graph
+- **Directives** — Hard rules the agent must follow during reflect operations
 
 Banks are completely isolated from each other — memories stored in one bank are not visible to another.
 
@@ -86,3 +89,73 @@ Disposition traits influence how reasoning is performed during reflection. Each 
 | **Skepticism** | Trusting, accepts information at face value | Skeptical, questions and doubts claims |
 | **Literalism** | Flexible interpretation, reads between the lines | Literal interpretation, takes things exactly as stated |
 | **Empathy** | Detached, focuses on facts and logic | Empathetic, considers emotional context |
+
+## Directives
+
+Directives are hard rules that the agent must follow during [reflect](./reflect) operations. Unlike disposition traits which influence *how* the agent reasons, directives are explicit instructions that are *always* enforced.
+
+:::info
+Directives only affect the `reflect` operation. They are injected into prompts and the agent is required to comply with them in all responses.
+:::
+
+### When to Use Directives
+
+Use directives for rules that must never be violated:
+
+- **Language/style constraints**: "Always respond in formal English"
+- **Privacy rules**: "Never share personal data with third parties"
+- **Domain constraints**: "Prefer conservative investment recommendations"
+- **Behavioral guardrails**: "Always cite sources when making claims"
+
+### Creating Directives
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={directivesPy} section="create-directive" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={directivesMjs} section="create-directive" language="javascript" />
+</TabItem>
+</Tabs>
+
+### Listing Directives
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={directivesPy} section="list-directives" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={directivesMjs} section="list-directives" language="javascript" />
+</TabItem>
+</Tabs>
+
+### Updating Directives
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={directivesPy} section="update-directive" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={directivesMjs} section="update-directive" language="javascript" />
+</TabItem>
+</Tabs>
+
+### Deleting Directives
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={directivesPy} section="delete-directive" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={directivesMjs} section="delete-directive" language="javascript" />
+</TabItem>
+</Tabs>
+
+### Directives vs Disposition
+
+| Aspect | Directives | Disposition |
+|--------|------------|-------------|
+| **Nature** | Hard rules, must be followed | Soft influence on reasoning style |
+| **Enforcement** | Strict — responses are rejected if violated | Flexible — shapes interpretation |
+| **Use case** | Compliance, guardrails, constraints | Personality, character, tone |
+| **Example** | "Never recommend specific stocks" | High skepticism: questions claims |

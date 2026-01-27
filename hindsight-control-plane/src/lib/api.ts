@@ -3,6 +3,20 @@
  * This should be used in client components, not the SDK directly
  */
 
+export interface MentalModel {
+  id: string;
+  bank_id: string;
+  name: string;
+  source_query: string;
+  content: string;
+  tags: string[];
+  max_tokens: number;
+  trigger: { refresh_after_consolidation: boolean };
+  last_refreshed_at: string;
+  created_at: string;
+  reflect_response?: any;
+}
+
 export class ControlPlaneClient {
   private async fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     const response = await fetch(path, {
@@ -562,6 +576,8 @@ export class ControlPlaneClient {
         source_query: string;
         content: string;
         tags: string[];
+        max_tokens: number;
+        trigger: { refresh_after_consolidation: boolean };
         last_refreshed_at: string;
         created_at: string;
         reflect_response?: {
@@ -583,6 +599,7 @@ export class ControlPlaneClient {
       source_query: string;
       tags?: string[];
       max_tokens?: number;
+      trigger?: { refresh_after_consolidation: boolean };
     }
   ) {
     return this.fetchApi<{
@@ -596,22 +613,8 @@ export class ControlPlaneClient {
   /**
    * Get a mental model
    */
-  async getMentalModel(bankId: string, mentalModelId: string) {
-    return this.fetchApi<{
-      id: string;
-      bank_id: string;
-      name: string;
-      source_query: string;
-      content: string;
-      tags: string[];
-      last_refreshed_at: string;
-      created_at: string;
-      reflect_response?: {
-        text: string;
-        based_on: Record<string, Array<{ id: string; text: string; type: string }>>;
-        observations?: Array<{ id: string; text: string }>;
-      };
-    }>(`/api/banks/${bankId}/mental-models/${mentalModelId}`);
+  async getMentalModel(bankId: string, mentalModelId: string): Promise<MentalModel> {
+    return this.fetchApi<MentalModel>(`/api/banks/${bankId}/mental-models/${mentalModelId}`);
   }
 
   /**
@@ -622,6 +625,10 @@ export class ControlPlaneClient {
     mentalModelId: string,
     params: {
       name?: string;
+      source_query?: string;
+      max_tokens?: number;
+      tags?: string[];
+      trigger?: { refresh_after_consolidation: boolean };
     }
   ) {
     return this.fetchApi<{
@@ -631,12 +638,13 @@ export class ControlPlaneClient {
       source_query: string;
       content: string;
       tags: string[];
+      max_tokens: number;
+      trigger: { refresh_after_consolidation: boolean };
       last_refreshed_at: string;
       created_at: string;
       reflect_response?: {
         text: string;
         based_on: Record<string, Array<{ id: string; text: string; type: string }>>;
-        observations?: Array<{ id: string; text: string }>;
       };
     }>(`/api/banks/${bankId}/mental-models/${mentalModelId}`, {
       method: "PATCH",
