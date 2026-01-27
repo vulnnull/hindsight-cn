@@ -2818,7 +2818,7 @@ class MemoryEngine(MemoryEngineInterface):
             param_count += 1
             units = await conn.fetch(
                 f"""
-                SELECT id, text, event_date, context, occurred_start, occurred_end, mentioned_at, document_id, chunk_id, fact_type
+                SELECT id, text, event_date, context, occurred_start, occurred_end, mentioned_at, document_id, chunk_id, fact_type, tags, created_at, proof_count
                 FROM {fq_table("memory_units")}
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, event_date DESC
@@ -2959,6 +2959,9 @@ class MemoryEngine(MemoryEngineInterface):
                     "document_id": row["document_id"],
                     "chunk_id": row["chunk_id"] if row["chunk_id"] else None,
                     "fact_type": row["fact_type"],
+                    "tags": list(row["tags"]) if row["tags"] else [],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "proof_count": row["proof_count"] if row["proof_count"] else None,
                 }
             )
 
