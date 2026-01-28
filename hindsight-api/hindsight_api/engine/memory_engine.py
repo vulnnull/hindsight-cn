@@ -23,12 +23,17 @@ from ..metrics import get_metrics_collector
 from .db_budget import budgeted_operation
 
 # Context variable for current schema (async-safe, per-task isolation)
-_current_schema: contextvars.ContextVar[str] = contextvars.ContextVar("current_schema", default="public")
+# Note: default is None, actual default comes from config via get_current_schema()
+_current_schema: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_schema", default=None)
 
 
 def get_current_schema() -> str:
-    """Get the current schema from context (default: 'public')."""
-    return _current_schema.get()
+    """Get the current schema from context (falls back to config default)."""
+    schema = _current_schema.get()
+    if schema is None:
+        # Fall back to configured default schema
+        return get_config().database_schema
+    return schema
 
 
 def fq_table(table_name: str) -> str:
@@ -881,11 +886,12 @@ class MemoryEngine(MemoryEngineInterface):
             if not self.db_url:
                 raise ValueError("Database URL is required for migrations")
             logger.info("Running database migrations...")
-            run_migrations(self.db_url)
+            # Use configured database schema for migrations (defaults to "public")
+            run_migrations(self.db_url, schema=get_config().database_schema)
 
             # Ensure embedding column dimension matches the model's dimension
             # This is done after migrations and after embeddings.initialize()
-            ensure_embedding_dimension(self.db_url, self.embeddings.dimension)
+            ensure_embedding_dimension(self.db_url, self.embeddings.dimension, schema=get_config().database_schema)
 
         logger.info(f"Connecting to PostgreSQL at {self.db_url}")
 

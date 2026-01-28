@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Environment variable names
 ENV_DATABASE_URL = "HINDSIGHT_API_DATABASE_URL"
+ENV_DATABASE_SCHEMA = "HINDSIGHT_API_DATABASE_SCHEMA"
 ENV_LLM_PROVIDER = "HINDSIGHT_API_LLM_PROVIDER"
 ENV_LLM_API_KEY = "HINDSIGHT_API_LLM_API_KEY"
 ENV_LLM_MODEL = "HINDSIGHT_API_LLM_MODEL"
@@ -125,6 +126,7 @@ ENV_REFLECT_MAX_ITERATIONS = "HINDSIGHT_API_REFLECT_MAX_ITERATIONS"
 
 # Default values
 DEFAULT_DATABASE_URL = "pg0"
+DEFAULT_DATABASE_SCHEMA = "public"
 DEFAULT_LLM_PROVIDER = "openai"
 DEFAULT_LLM_MODEL = "gpt-5-mini"
 DEFAULT_LLM_MAX_CONCURRENT = 32
@@ -270,6 +272,7 @@ class HindsightConfig:
 
     # Database
     database_url: str
+    database_schema: str
 
     # LLM (default, used as fallback for per-operation config)
     llm_provider: str
@@ -367,6 +370,7 @@ class HindsightConfig:
         return cls(
             # Database
             database_url=os.getenv(ENV_DATABASE_URL, DEFAULT_DATABASE_URL),
+            database_schema=os.getenv(ENV_DATABASE_SCHEMA, DEFAULT_DATABASE_SCHEMA),
             # LLM
             llm_provider=os.getenv(ENV_LLM_PROVIDER, DEFAULT_LLM_PROVIDER),
             llm_api_key=os.getenv(ENV_LLM_API_KEY),
@@ -515,7 +519,7 @@ class HindsightConfig:
 
     def log_config(self) -> None:
         """Log the current configuration (without sensitive values)."""
-        logger.info(f"Database: {self.database_url}")
+        logger.info(f"Database: {self.database_url} (schema: {self.database_schema})")
         logger.info(f"LLM: provider={self.llm_provider}, model={self.llm_model}")
         if self.retain_llm_provider or self.retain_llm_model:
             retain_provider = self.retain_llm_provider or self.llm_provider

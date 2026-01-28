@@ -170,6 +170,7 @@ def main():
     if args.log_level != config.log_level:
         config = HindsightConfig(
             database_url=config.database_url,
+            database_schema=config.database_schema,
             llm_provider=config.llm_provider,
             llm_api_key=config.llm_api_key,
             llm_model=config.llm_model,
