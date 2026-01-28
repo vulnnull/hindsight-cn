@@ -14,6 +14,7 @@ from hindsight_api.engine.reflect.agent import (
     _normalize_tool_name,
     _is_done_tool,
     _clean_answer_text,
+    _clean_done_answer,
     run_reflect_agent,
 )
 from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult, TokenUsage
@@ -59,6 +60,79 @@ class TestCleanAnswerText:
         })'''
         cleaned = _clean_answer_text(text)
         assert cleaned == "Summary of findings."
+
+
+class TestCleanDoneAnswer:
+    """Test cleanup of answer field from done() tool call that leaks structured output."""
+
+    def test_clean_answer_with_leaked_json_code_block(self):
+        """Answer with leaked JSON code block at the end should be cleaned."""
+        text = '''The user's favorite color is blue.
+
+```json
+{"observation_ids": ["obs-1", "obs-2"]}
+```'''
+        cleaned = _clean_done_answer(text)
+        assert cleaned == "The user's favorite color is blue."
+        assert "observation_ids" not in cleaned
+
+    def test_clean_answer_with_memory_ids_code_block(self):
+        """Answer with leaked memory_ids JSON code block should be cleaned."""
+        text = '''Here is the answer.
+
+```json
+{"memory_ids": ["mem-1"]}
+```'''
+        cleaned = _clean_done_answer(text)
+        assert cleaned == "Here is the answer."
+
+    def test_clean_answer_with_raw_json_object(self):
+        """Answer with raw JSON object containing IDs at the end should be cleaned."""
+        text = 'The answer is 42. {"observation_ids": ["obs-1"]}'
+        cleaned = _clean_done_answer(text)
+        assert cleaned == "The answer is 42."
+
+    def test_clean_answer_with_trailing_ids_pattern(self):
+        """Answer with 'observation_ids: [...]' pattern at the end should be cleaned."""
+        text = "This is the answer.\n\nobservation_ids: [\"obs-1\", \"obs-2\"]"
+        cleaned = _clean_done_answer(text)
+        assert cleaned == "This is the answer."
+
+    def test_clean_answer_with_memory_ids_equals(self):
+        """Answer with 'memory_ids = [...]' pattern at the end should be cleaned."""
+        text = "Answer text here.\nmemory_ids = [\"mem-1\"]"
+        cleaned = _clean_done_answer(text)
+        assert cleaned == "Answer text here."
+
+    def test_clean_normal_answer_unchanged(self):
+        """Normal answer without leaked output should be unchanged."""
+        text = "This is a normal answer about observation strategies."
+        cleaned = _clean_done_answer(text)
+        assert cleaned == text
+
+    def test_clean_empty_answer(self):
+        """Empty answer should return empty."""
+        assert _clean_done_answer("") == ""
+
+    def test_clean_answer_with_observation_word_in_content(self):
+        """The word 'observation' in regular text should not be stripped."""
+        text = "Based on my observation, the user prefers dark mode."
+        cleaned = _clean_done_answer(text)
+        assert cleaned == text
+
+    def test_clean_answer_multiline_with_markdown(self):
+        """Answer with markdown and leaked JSON at end should clean only the leak."""
+        text = '''Summary:
+- Point 1
+- Point 2
+
+```json
+{"mental_model_ids": ["mm-1"]}
+```'''
+        cleaned = _clean_done_answer(text)
+        assert "Point 1" in cleaned
+        assert "Point 2" in cleaned
+        assert "mental_model_ids" not in cleaned
 
 
 class TestToolNameNormalization:

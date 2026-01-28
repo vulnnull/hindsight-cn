@@ -173,7 +173,7 @@ RETAIN_EXTRACTION_MODES = ("concise", "verbose")  # Allowed extraction modes
 DEFAULT_RETAIN_OBSERVATIONS_ASYNC = False  # Run observation generation async (after retain completes)
 
 # Observations defaults (consolidated knowledge from facts)
-DEFAULT_ENABLE_OBSERVATIONS = False  # Observations disabled by default (experimental)
+DEFAULT_ENABLE_OBSERVATIONS = True  # Observations enabled by default
 DEFAULT_CONSOLIDATION_BATCH_SIZE = 50  # Memories to load per batch (internal memory optimization)
 
 # Database migrations

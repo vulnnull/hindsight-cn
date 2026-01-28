@@ -332,11 +332,11 @@ The extraction mode controls how aggressively facts are extracted from content:
 
 ### Observations (Experimental)
 
-Observations are consolidated knowledge synthesized from facts. This feature is experimental and disabled by default.
+Observations are consolidated knowledge synthesized from facts.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_ENABLE_OBSERVATIONS` | Enable observation consolidation | `false` |
+| `HINDSIGHT_API_ENABLE_OBSERVATIONS` | Enable observation consolidation | `true` |
 | `HINDSIGHT_API_CONSOLIDATION_BATCH_SIZE` | Memories to load per batch (internal optimization) | `50` |
 | `HINDSIGHT_API_RETAIN_OBSERVATIONS_ASYNC` | Run observation generation asynchronously (after retain completes) | `false` |
 

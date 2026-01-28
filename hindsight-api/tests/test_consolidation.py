@@ -268,8 +268,16 @@ class TestConsolidationIntegration:
         await memory.delete_bank(bank_id, request_context=request_context)
 
     @pytest.mark.asyncio
-    async def test_consolidation_creates_memory_links(self, memory: MemoryEngine, request_context):
-        """Test that observations get bidirectional links to their source memories."""
+    async def test_consolidation_uses_source_memory_ids(self, memory: MemoryEngine, request_context):
+        """Test that observations use source_memory_ids (not memory_links) to track source facts.
+
+        Observations rely on source_memory_ids for traversal:
+        - Entity connections: observation → source_memory_ids → unit_entities
+        - Semantic similarity: observations have their own embeddings
+        - Temporal proximity: observations have their own temporal fields
+
+        No memory_links are created between observations and their source facts.
+        """
         bank_id = f"test-consolidation-links-{uuid.uuid4().hex[:8]}"
 
         # Create the bank
@@ -282,7 +290,7 @@ class TestConsolidationIntegration:
             request_context=request_context,
         )
 
-        # Check memory_links between observation and source memory
+        # Check that observation has source_memory_ids but no memory_links
         async with memory._pool.acquire() as conn:
             observation = await conn.fetchrow(
                 """
@@ -294,32 +302,35 @@ class TestConsolidationIntegration:
                 bank_id,
             )
 
-            if observation and observation["source_memory_ids"]:
+            if observation:
+                # Observation should have source_memory_ids
+                assert observation["source_memory_ids"] is not None, "Observation should have source_memory_ids"
+                assert len(observation["source_memory_ids"]) > 0, "Observation should have at least one source memory"
+
                 source_memory_id = observation["source_memory_ids"][0]
 
-                # Check that bidirectional links exist
-                link_from_memory = await conn.fetchrow(
+                # Verify the source memory exists
+                source_memory = await conn.fetchrow(
                     """
-                    SELECT * FROM memory_links
-                    WHERE from_unit_id = $1 AND to_unit_id = $2
+                    SELECT id, fact_type FROM memory_units WHERE id = $1
                     """,
                     source_memory_id,
-                    observation["id"],
                 )
-                link_to_memory = await conn.fetchrow(
-                    """
-                    SELECT * FROM memory_links
-                    WHERE from_unit_id = $1 AND to_unit_id = $2
-                    """,
-                    observation["id"],
-                    source_memory_id,
-                )
+                assert source_memory is not None, "Source memory should exist"
+                assert source_memory["fact_type"] in ("world", "experience"), "Source should be a fact"
 
-                # Both directions should have links
-                assert link_from_memory is not None, "Expected link from source memory to observation"
-                assert link_to_memory is not None, "Expected link from observation to source memory"
-                assert link_from_memory["link_type"] == "semantic"
-                assert link_to_memory["link_type"] == "semantic"
+                # No memory_links should exist between observation and source
+                # (observations rely on source_memory_ids for traversal)
+                links = await conn.fetch(
+                    """
+                    SELECT * FROM memory_links
+                    WHERE (from_unit_id = $1 AND to_unit_id = $2)
+                       OR (from_unit_id = $2 AND to_unit_id = $1)
+                    """,
+                    source_memory_id,
+                    observation["id"],
+                )
+                assert len(links) == 0, "No memory_links should exist between observation and source"
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
