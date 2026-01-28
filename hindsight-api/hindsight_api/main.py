@@ -140,6 +140,13 @@ def main():
         args.port = DEFAULT_DAEMON_PORT
         args.host = "127.0.0.1"  # Only bind to localhost for security
 
+        # Force CPU mode for daemon to avoid macOS MPS/XPC issues
+        # MPS (Metal Performance Shaders) has unstable XPC connections in background processes
+        # that can cause assertion failures and process crashes at the C++ level
+        # (which Python exception handlers cannot catch)
+        os.environ["HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"] = "1"
+        os.environ["HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU"] = "1"
+
         # Check if another daemon is already running
         daemon_lock = DaemonLock()
         if not daemon_lock.acquire():
@@ -191,11 +198,14 @@ def main():
             consolidation_llm_base_url=config.consolidation_llm_base_url,
             embeddings_provider=config.embeddings_provider,
             embeddings_local_model=config.embeddings_local_model,
+            embeddings_local_force_cpu=config.embeddings_local_force_cpu,
             embeddings_tei_url=config.embeddings_tei_url,
             embeddings_openai_base_url=config.embeddings_openai_base_url,
             embeddings_cohere_base_url=config.embeddings_cohere_base_url,
             reranker_provider=config.reranker_provider,
             reranker_local_model=config.reranker_local_model,
+            reranker_local_force_cpu=config.reranker_local_force_cpu,
+            reranker_local_max_concurrent=config.reranker_local_max_concurrent,
             reranker_tei_url=config.reranker_tei_url,
             reranker_tei_batch_size=config.reranker_tei_batch_size,
             reranker_tei_max_concurrent=config.reranker_tei_max_concurrent,
