@@ -20,7 +20,7 @@
 Hindsight™ is an agent memory system built to create smarter agents that learn over time. Most agent memory systems focus on recalling conversation history. Hindsight is focused on making agents that learn, not just remember.
 
 
-<video src="https://github.com/user-attachments/assets/920f60ba-47f1-486e-ba52-a90013a23b6a" controls></video>
+<video src="https://github.com/user-attachments/assets/4b41f463-2bad-4a55-a4ad-da451f8513f9" controls></video>
 
 It eliminates the shortcomings of alternative techniques such as RAG and knowledge graph and delivers state-of-the-art performance on long term memory tasks.
 
@@ -133,11 +133,11 @@ Hindsight is built to support conversational AI agents as well as agents that ar
 
 One of the simpler use cases you can use Hindsight for is to personalize AI chatbots and other conversational agents by storing and recalling memories associated with individual users.
 
-<video src="https://github.com/user-attachments/assets/4805e8e1-e7d1-47c6-a4f8-2344a5ec8906" controls></video>
-
 The requirements for this use case usually look something like this:
 
 ![Per-User Memories](./hindsight-docs/static/img/per-user-memory-requirements.png)
+
+<video src="https://github.com/user-attachments/assets/4805e8e1-e7d1-47c6-a4f8-2344a5ec8906" controls></video>
 
 Satisfying these requirements in Hindsight is straightforward. When new user inputs and tool calls are ingested into Hindsight using the retain operation, custom metadata can be used to enrich the new memories. Metadata provides a convenient way to isolate memories that need to be restricted to a given user. Once these are fed into the retain operation, any raw memories and mental models that get created can be filtered when retrieving relevant memories. 
 
