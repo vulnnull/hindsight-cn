@@ -92,6 +92,7 @@ ENV_RETAIN_MAX_COMPLETION_TOKENS = "HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS"
 ENV_RETAIN_CHUNK_SIZE = "HINDSIGHT_API_RETAIN_CHUNK_SIZE"
 ENV_RETAIN_EXTRACT_CAUSAL_LINKS = "HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS"
 ENV_RETAIN_EXTRACTION_MODE = "HINDSIGHT_API_RETAIN_EXTRACTION_MODE"
+ENV_RETAIN_CUSTOM_INSTRUCTIONS = "HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS"
 ENV_RETAIN_OBSERVATIONS_ASYNC = "HINDSIGHT_API_RETAIN_OBSERVATIONS_ASYNC"
 
 # Observations settings (consolidated knowledge from facts)
@@ -168,8 +169,9 @@ DEFAULT_MENTAL_MODEL_REFRESH_CONCURRENCY = 8  # Max concurrent mental model refr
 DEFAULT_RETAIN_MAX_COMPLETION_TOKENS = 64000  # Max tokens for fact extraction LLM call
 DEFAULT_RETAIN_CHUNK_SIZE = 3000  # Max chars per chunk for fact extraction
 DEFAULT_RETAIN_EXTRACT_CAUSAL_LINKS = True  # Extract causal links between facts
-DEFAULT_RETAIN_EXTRACTION_MODE = "concise"  # Extraction mode: "concise" or "verbose"
-RETAIN_EXTRACTION_MODES = ("concise", "verbose")  # Allowed extraction modes
+DEFAULT_RETAIN_EXTRACTION_MODE = "concise"  # Extraction mode: "concise", "verbose", or "custom"
+RETAIN_EXTRACTION_MODES = ("concise", "verbose", "custom")  # Allowed extraction modes
+DEFAULT_RETAIN_CUSTOM_INSTRUCTIONS = None  # Custom extraction guidelines (only used when mode="custom")
 DEFAULT_RETAIN_OBSERVATIONS_ASYNC = False  # Run observation generation async (after retain completes)
 
 # Observations defaults (consolidated knowledge from facts)
@@ -328,6 +330,7 @@ class HindsightConfig:
     retain_chunk_size: int
     retain_extract_causal_links: bool
     retain_extraction_mode: str
+    retain_custom_instructions: str | None
     retain_observations_async: bool
 
     # Observations settings (consolidated knowledge from facts)
@@ -431,6 +434,7 @@ class HindsightConfig:
             retain_extraction_mode=_validate_extraction_mode(
                 os.getenv(ENV_RETAIN_EXTRACTION_MODE, DEFAULT_RETAIN_EXTRACTION_MODE)
             ),
+            retain_custom_instructions=os.getenv(ENV_RETAIN_CUSTOM_INSTRUCTIONS) or DEFAULT_RETAIN_CUSTOM_INSTRUCTIONS,
             retain_observations_async=os.getenv(
                 ENV_RETAIN_OBSERVATIONS_ASYNC, str(DEFAULT_RETAIN_OBSERVATIONS_ASYNC)
             ).lower()

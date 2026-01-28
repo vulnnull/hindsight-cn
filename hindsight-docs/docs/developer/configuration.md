@@ -319,7 +319,8 @@ Controls the retain (memory ingestion) pipeline.
 |----------|-------------|---------|
 | `HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS` | Max completion tokens for fact extraction LLM calls | `64000` |
 | `HINDSIGHT_API_RETAIN_CHUNK_SIZE` | Max characters per chunk for fact extraction. Larger chunks extract fewer LLM calls but may lose context. | `3000` |
-| `HINDSIGHT_API_RETAIN_EXTRACTION_MODE` | Fact extraction mode: `concise` (selective, fewer high-quality facts) or `verbose` (detailed, more facts) | `concise` |
+| `HINDSIGHT_API_RETAIN_EXTRACTION_MODE` | Fact extraction mode: `concise`, `verbose`, or `custom` | `concise` |
+| `HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS` | Custom extraction guidelines (only used when mode is `custom`) | - |
 | `HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS` | Extract causal relationships between facts | `true` |
 
 #### Extraction Modes
@@ -329,6 +330,31 @@ The extraction mode controls how aggressively facts are extracted from content:
 - **`concise`** (default): Selective extraction that focuses on significant, long-term valuable facts. Filters out greetings, filler, and trivial information. Produces fewer but higher-quality facts with better performance.
 
 - **`verbose`**: Detailed extraction that captures every piece of information with maximum verbosity. Produces more facts with extensive detail but slower performance and higher token usage.
+
+- **`custom`**: Inject your own extraction guidelines while keeping the structural parts of the prompt (output format, coreference resolution, temporal handling, etc.) intact. Useful for A/B testing different extraction strategies or domain-specific customization.
+
+**Example: Custom Extraction Mode**
+
+```bash
+# Set mode to custom
+export HINDSIGHT_API_RETAIN_EXTRACTION_MODE=custom
+
+# Define custom guidelines (multi-line is fine)
+export HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS="ONLY extract facts that are:
+✅ Technical decisions and their rationale
+✅ Architecture patterns and design choices
+✅ Performance metrics and benchmarks
+✅ Code reviews and feedback
+
+DO NOT extract:
+❌ Generic greetings or pleasantries
+❌ Process chatter (\"let me check\", \"one moment\")
+❌ Repeated information already captured
+
+CONSOLIDATE related technical discussions into ONE fact when possible.
+
+Ask yourself: 'Would this technical context be useful in 6 months?' If no, skip it."
+```
 
 ### Observations (Experimental)
 
