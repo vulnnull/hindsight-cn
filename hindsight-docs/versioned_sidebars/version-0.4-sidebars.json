@@ -27,6 +27,11 @@
         },
         {
           "type": "doc",
+          "id": "developer/observations",
+          "label": "Observations"
+        },
+        {
+          "type": "doc",
           "id": "developer/multilingual",
           "label": "Multilingual"
         },
@@ -74,13 +79,13 @@
         },
         {
           "type": "doc",
-          "id": "developer/api/memory-banks",
-          "label": "Memory Banks"
+          "id": "developer/api/mental-models",
+          "label": "Mental Models"
         },
         {
           "type": "doc",
-          "id": "developer/api/entities",
-          "label": "Entities"
+          "id": "developer/api/memory-banks",
+          "label": "Memory Banks"
         },
         {
           "type": "doc",
