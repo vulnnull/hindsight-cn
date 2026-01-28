@@ -163,6 +163,12 @@ class TestToolNameNormalization:
         assert _normalize_tool_name("call=functions.recall") == "recall"
         assert _normalize_tool_name("call=functions.search_observations") == "search_observations"
 
+    def test_normalize_special_token_suffix(self):
+        """Tool names with malformed special tokens should be normalized."""
+        assert _normalize_tool_name("done<|channel|>commentary") == "done"
+        assert _normalize_tool_name("recall<|endoftext|>") == "recall"
+        assert _normalize_tool_name("search_observations<|im_end|>extra") == "search_observations"
+
     def test_is_done_tool(self):
         """Test _is_done_tool helper."""
         # Standard
@@ -174,9 +180,14 @@ class TestToolNameNormalization:
         assert _is_done_tool("call=done") is True
         assert _is_done_tool("call=functions.done") is True
 
+        # With malformed special tokens
+        assert _is_done_tool("done<|channel|>commentary") is True
+        assert _is_done_tool("done<|endoftext|>") is True
+
         # Not done
         assert _is_done_tool("functions.recall") is False
         assert _is_done_tool("call=functions.recall") is False
+        assert _is_done_tool("recall<|channel|>done") is False
 
 
 class TestReflectAgentMocked:

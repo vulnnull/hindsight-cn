@@ -58,6 +58,7 @@ def _normalize_tool_name(name: str) -> str:
     - 'functions.done' (OpenAI-style prefix)
     - 'call=functions.done' (some models)
     - 'call=done' (some models)
+    - 'done<|channel|>commentary' (malformed special tokens appended)
 
     Returns the normalized tool name (e.g., 'done', 'recall', etc.)
     """
@@ -68,6 +69,11 @@ def _normalize_tool_name(name: str) -> str:
     # Handle 'functions.name' format
     if name.startswith("functions."):
         name = name[len("functions.") :]
+
+    # Handle malformed special tokens appended to tool name
+    # e.g., 'done<|channel|>commentary' -> 'done'
+    if "<|" in name:
+        name = name.split("<|")[0]
 
     return name
 

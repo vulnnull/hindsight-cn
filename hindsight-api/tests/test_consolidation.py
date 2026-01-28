@@ -1897,3 +1897,93 @@ class TestMentalModelRefreshAfterConsolidation:
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_graph_endpoint_observations_inherit_links_and_entities(
+        self, memory: MemoryEngine, request_context
+    ):
+        """Test that graph endpoint shows links and entities for observations filtered by type.
+
+        When filtering graph by type=observation:
+        - Observations should inherit links from their source memories
+        - Observations should show entities inherited from source memories
+        - Even when source memories are not visible, their links should be copied to observations
+        """
+        bank_id = f"test-graph-obs-{uuid.uuid4().hex[:8]}"
+
+        # Create the bank
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        # Retain content that will create world facts with shared entities
+        # This should create facts that are linked by shared entities
+        await memory.retain_async(
+            bank_id=bank_id,
+            content="Alice works at Google as a software engineer.",
+            request_context=request_context,
+        )
+
+        await memory.retain_async(
+            bank_id=bank_id,
+            content="Bob also works at Google in the sales department.",
+            request_context=request_context,
+        )
+
+        # Wait for consolidation to create observations
+        import asyncio
+
+        await asyncio.sleep(2)
+
+        # Get graph data filtered by observation type only
+        graph_data = await memory.get_graph_data(
+            bank_id=bank_id,
+            fact_type="observation",
+            limit=1000,
+            request_context=request_context,
+        )
+
+        # Should have observations
+        assert graph_data["total_units"] > 0, "Should have observations"
+        assert len(graph_data["nodes"]) > 0, "Should have observation nodes"
+
+        # Verify all nodes are observations
+        for row in graph_data["table_rows"]:
+            assert row["fact_type"] == "observation", f"All nodes should be observations, got {row['fact_type']}"
+
+        # Should have edges (inherited from source memories)
+        # Even though we're only showing observations, they should inherit links from their sources
+        assert len(graph_data["edges"]) > 0, (
+            "Observations should have edges inherited from source memories. "
+            f"Found {len(graph_data['edges'])} edges"
+        )
+
+        # Should have entities (inherited from source memories)
+        observations_with_entities = [
+            row for row in graph_data["table_rows"] if row["entities"] and row["entities"] != "None"
+        ]
+        assert len(observations_with_entities) > 0, (
+            "Observations should inherit entities from source memories. "
+            f"Found {len(observations_with_entities)} observations with entities"
+        )
+
+        # Verify entities contain expected values
+        all_entities = " ".join([row["entities"] for row in graph_data["table_rows"]])
+        assert "Alice" in all_entities or "Bob" in all_entities or "Google" in all_entities, (
+            f"Expected to find Alice, Bob, or Google in entities, got: {all_entities}"
+        )
+
+        # Verify edge types are valid
+        valid_link_types = {"semantic", "temporal", "entity"}
+        for edge in graph_data["edges"]:
+            link_type = edge["data"]["linkType"]
+            assert link_type in valid_link_types, f"Invalid link type: {link_type}"
+
+        # Verify all edges connect visible observation nodes
+        visible_node_ids = {row["id"] for row in graph_data["table_rows"]}
+        for edge in graph_data["edges"]:
+            source_id = edge["data"]["source"]
+            target_id = edge["data"]["target"]
+            assert source_id in visible_node_ids, f"Edge source {source_id[:8]} not in visible nodes"
+            assert target_id in visible_node_ids, f"Edge target {target_id[:8]} not in visible nodes"
+
+        # Cleanup
+        await memory.delete_bank(bank_id, request_context=request_context)
