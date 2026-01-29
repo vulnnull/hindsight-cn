@@ -889,6 +889,23 @@ class MemoryEngine(MemoryEngineInterface):
             # Use configured database schema for migrations (defaults to "public")
             run_migrations(self.db_url, schema=get_config().database_schema)
 
+            # Migrate all existing tenant schemas (if multi-tenant)
+            if self._tenant_extension is not None:
+                try:
+                    tenants = await self._tenant_extension.list_tenants()
+                    if tenants:
+                        logger.info(f"Running migrations on {len(tenants)} tenant schemas...")
+                        for tenant in tenants:
+                            schema = tenant.schema
+                            if schema and schema != "public":
+                                try:
+                                    run_migrations(self.db_url, schema=schema)
+                                except Exception as e:
+                                    logger.warning(f"Failed to migrate tenant schema {schema}: {e}")
+                        logger.info("Tenant schema migrations completed")
+                except Exception as e:
+                    logger.warning(f"Failed to run tenant schema migrations: {e}")
+
             # Ensure embedding column dimension matches the model's dimension
             # This is done after migrations and after embeddings.initialize()
             ensure_embedding_dimension(self.db_url, self.embeddings.dimension, schema=get_config().database_schema)
