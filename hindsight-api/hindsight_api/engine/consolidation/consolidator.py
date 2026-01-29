@@ -144,9 +144,13 @@ async def run_consolidation_job(
     }
 
     batch_num = 0
+    last_progress_timings = {}  # Track timings at last progress log
     while True:
         batch_num += 1
         batch_start = time.time()
+
+        # Snapshot timings at batch start for per-batch calculation
+        batch_start_timings = perf.timings.copy()
 
         # Fetch next batch of unconsolidated memories
         async with pool.acquire() as conn:
@@ -217,18 +221,43 @@ async def run_consolidation_job(
             elif action == "skipped":
                 stats["skipped"] += 1
 
-            # Log progress periodically
+            # Log progress periodically with timing breakdown
             if stats["memories_processed"] % 10 == 0:
+                # Calculate timing deltas since last progress log
+                timing_parts = []
+                for key in ["recall", "llm", "embedding", "db_write"]:
+                    if key in perf.timings:
+                        delta = perf.timings[key] - last_progress_timings.get(key, 0)
+                        timing_parts.append(f"{key}={delta:.2f}s")
+
+                timing_str = f" | {', '.join(timing_parts)}" if timing_parts else ""
                 logger.info(
                     f"[CONSOLIDATION] bank={bank_id} progress: "
-                    f"{stats['memories_processed']}/{total_count} memories processed"
+                    f"{stats['memories_processed']}/{total_count} memories processed{timing_str}"
                 )
+
+                # Update last progress snapshot
+                last_progress_timings = perf.timings.copy()
 
         batch_time = time.time() - batch_start
         perf.log(
             f"[2] Batch {batch_num}: {len(memories)} memories in {batch_time:.3f}s "
             f"(avg {batch_time / len(memories):.3f}s/memory)"
         )
+
+        # Log timing breakdown after each batch (delta from batch start)
+        timing_parts = []
+        for key in ["recall", "llm", "embedding", "db_write"]:
+            if key in perf.timings:
+                delta = perf.timings[key] - batch_start_timings.get(key, 0)
+                timing_parts.append(f"{key}={delta:.3f}s")
+
+        if timing_parts:
+            avg_per_memory = batch_time / len(memories) if memories else 0
+            logger.info(
+                f"[CONSOLIDATION] bank={bank_id} batch {batch_num}/{len(memories)} memories: "
+                f"{', '.join(timing_parts)} | avg={avg_per_memory:.3f}s/memory"
+            )
 
     # Build summary
     perf.log(
