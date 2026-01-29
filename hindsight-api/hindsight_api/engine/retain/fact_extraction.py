@@ -782,12 +782,28 @@ Text:
     usage = TokenUsage()  # Track cumulative usage across retries
     for attempt in range(max_retries):
         try:
+            # Use retain-specific overrides if set, otherwise fall back to global LLM config
+            max_retries = (
+                config.retain_llm_max_retries if config.retain_llm_max_retries is not None else config.llm_max_retries
+            )
+            initial_backoff = (
+                config.retain_llm_initial_backoff
+                if config.retain_llm_initial_backoff is not None
+                else config.llm_initial_backoff
+            )
+            max_backoff = (
+                config.retain_llm_max_backoff if config.retain_llm_max_backoff is not None else config.llm_max_backoff
+            )
+
             extraction_response_json, call_usage = await llm_config.call(
                 messages=[{"role": "system", "content": prompt}, {"role": "user", "content": user_message}],
                 response_format=response_schema,
                 scope="memory_extract_facts",
                 temperature=0.1,
                 max_completion_tokens=config.retain_max_completion_tokens,
+                max_retries=max_retries,
+                initial_backoff=initial_backoff,
+                max_backoff=max_backoff,
                 skip_validation=True,  # Get raw JSON, we'll validate leniently
                 return_usage=True,
             )
