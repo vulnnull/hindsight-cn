@@ -789,7 +789,7 @@ class MemoryEngine(MemoryEngineInterface):
                 kwargs = {"name": self._pg0_instance_name}
                 if self._pg0_port is not None:
                     kwargs["port"] = self._pg0_port
-                pg0 = EmbeddedPostgres(**kwargs)  # type: ignore[invalid-argument-type] - dict kwargs
+                pg0 = EmbeddedPostgres(**kwargs)
                 # Check if pg0 is already running before we start it
                 was_already_running = await pg0.is_running()
                 self.db_url = await pg0.ensure_running()
@@ -1200,7 +1200,7 @@ class MemoryEngine(MemoryEngineInterface):
             List of created unit IDs
         """
         # Build content dict
-        content_dict: RetainContentDict = {"content": content, "context": context}  # type: ignore[typeddict-item] - building incrementally
+        content_dict: RetainContentDict = {"content": content, "context": context}
         if event_date:
             content_dict["event_date"] = event_date
         if document_id:

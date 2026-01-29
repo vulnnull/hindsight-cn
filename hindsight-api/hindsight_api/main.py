@@ -180,6 +180,9 @@ def main():
             llm_initial_backoff=config.llm_initial_backoff,
             llm_max_backoff=config.llm_max_backoff,
             llm_timeout=config.llm_timeout,
+            llm_vertexai_project_id=config.llm_vertexai_project_id,
+            llm_vertexai_region=config.llm_vertexai_region,
+            llm_vertexai_service_account_key=config.llm_vertexai_service_account_key,
             retain_llm_provider=config.retain_llm_provider,
             retain_llm_api_key=config.retain_llm_api_key,
             retain_llm_model=config.retain_llm_model,
@@ -380,7 +383,7 @@ def main():
 
         threading.Thread(target=run_idle_checker, daemon=True).start()
 
-    uvicorn.run(**uvicorn_config)  # type: ignore[invalid-argument-type] - dict kwargs
+    uvicorn.run(**uvicorn_config)
 
 
 if __name__ == "__main__":

@@ -614,7 +614,7 @@ class FlashRankCrossEncoder(CrossEncoderModel):
             return
 
         try:
-            from flashrank import Ranker  # type: ignore[import-untyped]
+            from flashrank import Ranker
         except ImportError:
             raise ImportError("flashrank is required for FlashRankCrossEncoder. Install it with: pip install flashrank")
 
@@ -641,7 +641,7 @@ class FlashRankCrossEncoder(CrossEncoderModel):
 
     def _predict_sync(self, pairs: list[tuple[str, str]]) -> list[float]:
         """Synchronous predict - processes each query group."""
-        from flashrank import RerankRequest  # type: ignore[import-untyped]
+        from flashrank import RerankRequest
 
         if not pairs:
             return []

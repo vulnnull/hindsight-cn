@@ -545,7 +545,7 @@ class CohereEmbeddings(Embeddings):
                 model=self.model,
                 input_type=self.input_type,
             )
-            if response.embeddings:
+            if response.embeddings and isinstance(response.embeddings, list):
                 self._dimension = len(response.embeddings[0])
 
         logger.info(f"Embeddings: Cohere provider initialized (model: {self.model}, dim: {self._dimension})")
