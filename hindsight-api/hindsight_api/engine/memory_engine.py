@@ -504,12 +504,11 @@ class MemoryEngine(MemoryEngineInterface):
         if request_context is None:
             raise AuthenticationError("RequestContext is required when tenant extension is configured")
 
-        # For internal/background operations (e.g., worker tasks), skip extension authentication
-        # if the schema has already been set by execute_task via the _schema field.
+        # For internal/background operations (e.g., worker tasks), skip extension authentication.
+        # The task was already authenticated at submission time, and execute_task sets _current_schema
+        # from the task's _schema field. For public schema tasks, _current_schema keeps its default "public".
         if request_context.internal:
-            current = _current_schema.get()
-            if current and current != "public":
-                return current
+            return _current_schema.get()
 
         # Let AuthenticationError propagate - HTTP layer will convert to 401
         tenant_context = await self._tenant_extension.authenticate(request_context)
