@@ -29,13 +29,24 @@ logger = logging.getLogger(__name__)
 # Default bank_id from environment variable
 DEFAULT_BANK_ID = os.environ.get("HINDSIGHT_MCP_BANK_ID", "default")
 
+# MCP authentication token (optional - if set, Bearer token auth is required)
+MCP_AUTH_TOKEN = os.environ.get("HINDSIGHT_API_MCP_AUTH_TOKEN")
+
 # Context variable to hold the current bank_id
 _current_bank_id: ContextVar[str | None] = ContextVar("current_bank_id", default=None)
+
+# Context variable to hold the current API key (for tenant auth propagation)
+_current_api_key: ContextVar[str | None] = ContextVar("current_api_key", default=None)
 
 
 def get_current_bank_id() -> str | None:
     """Get the current bank_id from context."""
     return _current_bank_id.get()
+
+
+def get_current_api_key() -> str | None:
+    """Get the current API key from context."""
+    return _current_api_key.get()
 
 
 def create_mcp_server(memory: MemoryEngine) -> FastMCP:
@@ -54,6 +65,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
     # Configure and register tools using shared module
     config = MCPToolsConfig(
         bank_id_resolver=get_current_bank_id,
+        api_key_resolver=get_current_api_key,  # Propagate API key for tenant auth
         include_bank_id_param=True,  # HTTP MCP supports multi-bank via parameter
         tools=None,  # All tools
         retain_fire_and_forget=False,  # HTTP MCP supports sync/async modes
@@ -65,7 +77,11 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
 
 
 class MCPMiddleware:
-    """ASGI middleware that extracts bank_id from header or path and sets context.
+    """ASGI middleware that handles authentication and extracts bank_id from header or path.
+
+    Authentication:
+        If HINDSIGHT_API_MCP_AUTH_TOKEN is set, all requests must include a valid
+        Authorization header with Bearer token or direct token matching the configured value.
 
     Bank ID can be provided via:
     1. X-Bank-Id header (recommended for Claude Code)
@@ -74,7 +90,7 @@ class MCPMiddleware:
 
     For Claude Code, configure with:
         claude mcp add --transport http hindsight http://localhost:8888/mcp \\
-            --header "X-Bank-Id: my-bank"
+            --header "X-Bank-Id: my-bank" --header "Authorization: Bearer <token>"
     """
 
     def __init__(self, app, memory: MemoryEngine):
@@ -97,6 +113,22 @@ class MCPMiddleware:
         if scope["type"] != "http":
             await self.mcp_app(scope, receive, send)
             return
+
+        # Extract auth token from header (for tenant auth propagation)
+        auth_header = self._get_header(scope, "Authorization")
+        auth_token: str | None = None
+        if auth_header:
+            # Support both "Bearer <token>" and direct token
+            auth_token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else auth_header.strip()
+
+        # Authenticate if MCP_AUTH_TOKEN is configured
+        if MCP_AUTH_TOKEN:
+            if not auth_token:
+                await self._send_error(send, 401, "Authorization header required")
+                return
+            if auth_token != MCP_AUTH_TOKEN:
+                await self._send_error(send, 401, "Invalid authentication token")
+                return
 
         path = scope.get("path", "")
 
@@ -132,8 +164,10 @@ class MCPMiddleware:
             bank_id = DEFAULT_BANK_ID
             logger.debug(f"Using default bank_id: {bank_id}")
 
-        # Set bank_id context
-        token = _current_bank_id.set(bank_id)
+        # Set bank_id and api_key context
+        bank_id_token = _current_bank_id.set(bank_id)
+        # Store the auth token for tenant extension to validate
+        api_key_token = _current_api_key.set(auth_token) if auth_token else None
         try:
             new_scope = scope.copy()
             new_scope["path"] = new_path
@@ -152,7 +186,9 @@ class MCPMiddleware:
 
             await self.mcp_app(new_scope, receive, send_wrapper)
         finally:
-            _current_bank_id.reset(token)
+            _current_bank_id.reset(bank_id_token)
+            if api_key_token is not None:
+                _current_api_key.reset(api_key_token)
 
     async def _send_error(self, send, status: int, message: str):
         """Send an error response."""
@@ -175,6 +211,10 @@ class MCPMiddleware:
 def create_mcp_app(memory: MemoryEngine):
     """
     Create an ASGI app that handles MCP requests.
+
+    Authentication:
+        Set HINDSIGHT_API_MCP_AUTH_TOKEN to require Bearer token authentication.
+        If not set, MCP endpoint is open (for local development).
 
     Bank ID can be provided via:
     1. X-Bank-Id header: claude mcp add --transport http hindsight http://localhost:8888/mcp --header "X-Bank-Id: my-bank"
