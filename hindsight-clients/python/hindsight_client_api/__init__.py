@@ -14,7 +14,7 @@
 """  # noqa: E501
 
 
-__version__ = "0.4.4"
+__version__ = "0.4.5"
 
 # import apis into sdk package
 from hindsight_client_api.api.banks_api import BanksApi
