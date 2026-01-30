@@ -170,6 +170,11 @@ const sidebars: SidebarsConfig = {
           id: 'sdks/cli',
           label: 'CLI',
         },
+        {
+          type: 'doc',
+          id: 'sdks/embed',
+          label: 'Embedded SDK',
+        },
       ],
     },
     {
