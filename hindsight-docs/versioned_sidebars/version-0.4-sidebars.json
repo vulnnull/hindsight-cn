@@ -187,6 +187,11 @@
         },
         {
           "type": "doc",
+          "id": "sdks/integrations/openclawd",
+          "label": "OpenClawd"
+        },
+        {
+          "type": "doc",
           "id": "sdks/integrations/skills",
           "label": "Skills"
         }
