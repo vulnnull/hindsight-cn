@@ -118,7 +118,7 @@ Think of hooks as "forced automation" - they always run.
 ### Prerequisites
 
 - **Node.js** 22+
-- **OpenClaw** (Clawdbot) with plugin support
+- **OpenClaw** with plugin support
 - **uv/uvx** for running `hindsight-embed`
 - **LLM API key** (OpenAI, Anthropic, etc.)
 
