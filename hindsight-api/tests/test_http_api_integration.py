@@ -1098,3 +1098,79 @@ async def test_version_endpoint_returns_correct_version(api_client):
     assert isinstance(features["worker"], bool)
 
     print(f"Version endpoint returned: api_version={result['api_version']}, features={features}")
+
+
+@pytest.mark.asyncio
+async def test_retain_with_timestamp_async(api_client, test_bank_id):
+    """Test that async retain accepts timestamp field and serializes correctly."""
+    response = await api_client.post(
+        f"/v1/default/banks/{test_bank_id}/memories",
+        json={
+            "items": [
+                {
+                    "content": "Test memory with timestamp",
+                    "context": "test",
+                    "timestamp": "2026-01-30T11:45:00Z"
+                }
+            ],
+            "async": True
+        }
+    )
+    
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+    data = response.json()
+    assert data["success"] is True
+    assert data["async"] is True
+    assert "operation_id" in data
+    
+
+@pytest.mark.asyncio
+async def test_retain_with_timestamp_sync(api_client, test_bank_id):
+    """Test that sync retain accepts timestamp field."""
+    response = await api_client.post(
+        f"/v1/default/banks/{test_bank_id}/memories",
+        json={
+            "items": [
+                {
+                    "content": "Test memory with timestamp sync",
+                    "context": "test", 
+                    "timestamp": "2026-01-30T11:45:00Z"
+                }
+            ],
+            "async": False
+        }
+    )
+    
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+    data = response.json()
+    assert data["success"] is True
+    assert data["async"] is False
+    
+
+@pytest.mark.asyncio
+async def test_retain_with_multiple_timestamps(api_client, test_bank_id):
+    """Test that multiple items with different timestamp formats work."""
+    response = await api_client.post(
+        f"/v1/default/banks/{test_bank_id}/memories",
+        json={
+            "items": [
+                {
+                    "content": "Event 1",
+                    "timestamp": "2026-01-30T11:45:00Z"  # With Z
+                },
+                {
+                    "content": "Event 2", 
+                    "timestamp": "2026-01-30T12:00:00+00:00"  # With timezone
+                },
+                {
+                    "content": "Event 3"  # No timestamp
+                }
+            ],
+            "async": True
+        }
+    )
+    
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+    data = response.json()
+    assert data["success"] is True
+    assert data["items_count"] == 3
