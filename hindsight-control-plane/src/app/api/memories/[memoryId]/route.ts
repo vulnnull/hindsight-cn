@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || "http://localhost:8888";
+import { DATAPLANE_URL, getDataplaneHeaders } from "@/lib/hindsight-client";
 
 export async function GET(
   request: NextRequest,
@@ -19,9 +18,7 @@ export async function GET(
       `${DATAPLANE_URL}/v1/default/banks/${bankId}/memories/${memoryId}`,
       {
         method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: getDataplaneHeaders({ "Content-Type": "application/json" }),
       }
     );
 

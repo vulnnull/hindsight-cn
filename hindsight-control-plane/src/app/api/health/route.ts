@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, createConfig, sdk } from "@vectorize-io/hindsight-client";
+import { getDataplaneHeaders } from "@/lib/hindsight-client";
 
 const HEALTH_CHECK_TIMEOUT_MS = 3000;
 
@@ -27,6 +28,7 @@ export async function GET() {
       createConfig({
         baseUrl: dataplaneUrl,
         signal: controller.signal,
+        headers: getDataplaneHeaders(),
       })
     );
 

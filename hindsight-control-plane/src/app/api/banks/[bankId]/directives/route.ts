@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-
-const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || "http://localhost:8888";
+import { DATAPLANE_URL, getDataplaneHeaders } from "@/lib/hindsight-client";
 
 export async function GET(request: Request, { params }: { params: Promise<{ bankId: string }> }) {
   try {
@@ -22,7 +21,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ bank
     }
 
     const url = `${DATAPLANE_URL}/v1/default/banks/${bankId}/directives${queryParams.toString() ? `?${queryParams}` : ""}`;
-    const response = await fetch(url, { method: "GET" });
+    const response = await fetch(url, { method: "GET", headers: getDataplaneHeaders() });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -50,7 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ban
 
     const response = await fetch(`${DATAPLANE_URL}/v1/default/banks/${bankId}/directives`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getDataplaneHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     });
 
