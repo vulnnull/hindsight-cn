@@ -41,6 +41,7 @@ def _find_hindsight_api_command() -> list[str]:
     # Fall back to uvx for installed version
     # Allow version override via environment variable (defaults to matching embed version)
     from . import __version__
+
     api_version = os.getenv("HINDSIGHT_EMBED_API_VERSION", __version__)
     return ["uvx", f"hindsight-api@{api_version}"]
 

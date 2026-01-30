@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Installing Hindsight Memory Plugin for Moltbot..."
+echo "🚀 Installing Hindsight Memory Plugin for OpenClaw..."
 
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-INSTALL_DIR="$HOME/.clawdbot/extensions/hindsight-openclaw"
+INSTALL_DIR="$HOME/.openclaw/extensions/hindsight-openclaw"
 
 # Check Node version
 if ! command -v node &> /dev/null; then
@@ -25,7 +25,7 @@ rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 
 # Copy files
-cp -r dist package.json clawdbot.plugin.json README.md "$INSTALL_DIR/"
+cp -r dist package.json openclaw.plugin.json README.md "$INSTALL_DIR/"
 
 # Install dependencies in deployed location
 echo "📥 Installing dependencies..."
@@ -41,9 +41,9 @@ echo "1. Make sure you have an OpenAI API key set:"
 echo "   export OPENAI_API_KEY=\"sk-your-key-here\""
 echo ""
 echo "2. Enable the plugin:"
-echo "   clawdbot plugins enable hindsight-openclaw"
+echo "   openclaw plugins enable hindsight-openclaw"
 echo ""
 echo "3. Start OpenClaw:"
-echo "   clawdbot start"
+echo "   openclaw gateway"
 echo ""
 echo "On first start, uvx will automatically download hindsight-embed (no manual install needed)"
