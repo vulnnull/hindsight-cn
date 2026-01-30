@@ -107,8 +107,8 @@ function detectLLMConfig(api: MoltbotPluginAPI): {
     `Please set one of these environment variables:\n${keyInstructions}\n\n` +
     `You can set them in your shell profile (~/.zshrc or ~/.bashrc):\n` +
     `  export ANTHROPIC_API_KEY="your-key-here"\n\n` +
-    `Or run Moltbot with the environment variable:\n` +
-    `  ANTHROPIC_API_KEY="your-key" clawdbot start\n\n` +
+    `Or run OpenClaw with the environment variable:\n` +
+    `  ANTHROPIC_API_KEY="your-key" openclaw gateway\n\n` +
     `Alternatively, configure ollama provider which doesn't require an API key.`
   );
 }
@@ -272,10 +272,10 @@ export default function (api: MoltbotPluginAPI) {
 
         console.log('[Hindsight] Auto-recall for prompt:', prompt.substring(0, 50));
 
-        // Recall relevant memories (up to 1024 tokens)
+        // Recall relevant memories (up to 512 tokens)
         const response = await client.recall({
           query: prompt,
-          max_tokens: 1024,
+          max_tokens: 512,
         });
 
         if (!response.results || response.results.length === 0) {
@@ -287,7 +287,10 @@ export default function (api: MoltbotPluginAPI) {
         const memoriesJson = JSON.stringify(response.results, null, 2);
 
         const contextMessage = `<hindsight_memories>
+Relevant memories from past conversations (score 1=highest, prioritize recent when conflicting):
 ${memoriesJson}
+
+User message: ${prompt}
 </hindsight_memories>`;
 
         console.log(`[Hindsight] Auto-recall: Injecting ${response.results.length} memories`);

@@ -39,7 +39,10 @@ def _find_hindsight_api_command() -> list[str]:
         return ["uv", "run", "--project", str(dev_api_path), "hindsight-api"]
 
     # Fall back to uvx for installed version
-    return ["uvx", "hindsight-api"]
+    # Allow version override via environment variable (defaults to matching embed version)
+    from . import __version__
+    api_version = os.getenv("HINDSIGHT_EMBED_API_VERSION", __version__)
+    return ["uvx", f"hindsight-api@{api_version}"]
 
 
 def _is_daemon_running() -> bool:
@@ -220,15 +223,24 @@ def install_cli() -> bool:
     import subprocess
     import sys
 
-    print("Installing hindsight CLI...")
+    from . import __version__
+
+    # Determine CLI version (use env var or match embed version)
+    cli_version = os.getenv("HINDSIGHT_EMBED_CLI_VERSION", __version__)
+
+    print(f"Installing hindsight CLI (version {cli_version})...")
     print(f"  Installer URL: {CLI_INSTALLER_URL}")
 
     try:
-        # Download and run installer
+        # Download and run installer with version env var
+        env = os.environ.copy()
+        env["HINDSIGHT_CLI_VERSION"] = cli_version
+
         result = subprocess.run(
             ["bash", "-c", f"curl -fsSL {CLI_INSTALLER_URL} | bash"],
             capture_output=True,
             text=True,
+            env=env,
         )
 
         if result.returncode != 0:
