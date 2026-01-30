@@ -4,9 +4,9 @@ sidebar_position: 4
 
 # OpenClawd
 
-Biomimetic long-term memory for [OpenClawd](https://openclawd.ai) using [Hindsight](https://vectorize.io/hindsight).
+Local-first, persistent memory for [OpenClawd](https://openclawd.ai) agents using [Hindsight](https://vectorize.io/hindsight).
 
-This plugin integrates [hindsight-embed](https://vectorize.io/hindsight/cli), a standalone daemon that bundles Hindsight's memory engine (API + PostgreSQL) into a single command. The plugin automatically manages the daemon lifecycle and provides hooks for seamless memory capture and recall.
+This plugin integrates [hindsight-embed](https://vectorize.io/hindsight/cli), a standalone daemon that bundles Hindsight's memory engine (API + PostgreSQL) into a single command. Everything runs locally on your machine, reuses the LLM you're already paying for, and costs nothing extra. The plugin automatically manages the daemon lifecycle and provides hooks for seamless memory capture and recall.
 
 ## Quick Start
 
@@ -35,8 +35,31 @@ Every conversation is **automatically stored** after each turn:
 ### Auto-Recall (Before Agent Start)
 Before each agent response, relevant memories are **automatically injected**:
 - Relevant memories retrieved (up to 1024 tokens)
-- Injected into context with `<hindsight-context>` tags
+- Injected into context with `<hindsight_memories>` tags (JSON format with metadata)
 - Agent seamlessly uses past context
+
+## Why Auto-Recall?
+
+Traditional memory systems give agents a `search_memory` tool - the model must decide when to call it. In practice, models don't use memory tools consistently. They lack reliable self-awareness about what they should remember to check.
+
+Auto-recall solves this by injecting relevant memories automatically before every agent turn. Memories are formatted as JSON with full metadata:
+
+```json
+<hindsight_memories>
+[
+  {
+    "content": "User prefers JSON responses for technical data",
+    "score": 0.95,
+    "metadata": {
+      "document_id": "session-abc123",
+      "chunk_id": "chunk-1"
+    }
+  }
+]
+</hindsight_memories>
+```
+
+The agent sees past context automatically without needing to remember to remember. This approach trades token cost for reliability - but for conversational agents, spending 500 tokens on auto-injected context is better than ignoring 10,000 stored facts because the model didn't call a tool.
 
 ## Understanding OpenClawd Concepts
 
@@ -77,6 +100,13 @@ Think of hooks as "forced automation" - they always run.
 ```
 
 **Database Architecture:** All banks share a single pg0 database instance (`pg0://hindsight-embed`). Bank isolation happens within the database via separate tables/schemas per bank ID. The 'openclawd' bank is automatically created when the plugin stores its first memory.
+
+**Local-First Design:**
+- **Your data stays local**: All conversations, facts, and relationships stored in PostgreSQL on your machine
+- **No additional costs**: Reuses your configured LLM provider (OpenAI, Anthropic, Gemini, Groq, Ollama) - no separate memory API charges
+- **No vendor lock-in**: Standard PostgreSQL storage, export anytime with `hindsight-embed memory export`
+- **Works offline**: With Ollama, the entire stack (agent + memory + LLM) runs offline
+- **Zero infrastructure setup**: No database deployment, connection strings, or credential management - everything handled automatically
 
 ## Installation
 
@@ -125,8 +155,7 @@ Optional settings in `~/.clawdbot/clawdbot.json`:
 
 **Options:**
 - `daemonIdleTimeout` (number, default: `0`) - Seconds before daemon shuts down from inactivity (0 = never)
-- `embedPort` (number, default: auto) - Port for embedded server
-- `bankMission` (string, default: none) - Custom context for the memory bank
+- `bankMission` (string, default: auto-generated) - Custom context for the memory bank. Defaults to: "You are an AI assistant helping users across multiple communication channels (Telegram, Slack, Discord, etc.). Remember user preferences, instructions, and important context from conversations to provide personalized assistance."
 - `embedVersion` (string, default: `"latest"`) - hindsight-embed version to use (e.g., `"latest"`, `"0.4.2"`, or leave empty for latest). Use this to pin a specific version if latest is broken.
 
 ## Supported LLM Providers
