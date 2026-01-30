@@ -7,11 +7,17 @@ import { fileURLToPath } from 'url';
 // Module-level state
 let embedManager: HindsightEmbedManager | null = null;
 let client: HindsightClient | null = null;
+let initPromise: Promise<void> | null = null;
+let isInitialized = false;
 
 // Global access for hooks (Moltbot loads hooks separately)
 if (typeof global !== 'undefined') {
   (global as any).__hindsightClient = {
     getClient: () => client,
+    waitForReady: async () => {
+      if (isInitialized) return;
+      if (initPromise) await initPromise;
+    },
   };
 }
 
@@ -20,7 +26,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Default bank name
-const BANK_NAME = 'moltbot';
+const BANK_NAME = 'openclawd';
 
 // Provider mapping: moltbot provider name -> hindsight provider name
 const PROVIDER_MAP: Record<string, string> = {
@@ -108,11 +114,14 @@ function detectLLMConfig(api: MoltbotPluginAPI): {
 }
 
 function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
-  const config = api.config.plugins?.entries?.['hindsight-memory']?.config || {};
+  const config = api.config.plugins?.entries?.['hindsight-openclawd']?.config || {};
+  const defaultMission = 'You are an AI assistant helping users across multiple communication channels (Telegram, Slack, Discord, etc.). Remember user preferences, instructions, and important context from conversations to provide personalized assistance.';
+
   return {
-    bankMission: config.bankMission,
+    bankMission: config.bankMission || defaultMission,
     embedPort: config.embedPort || 0,
     daemonIdleTimeout: config.daemonIdleTimeout !== undefined ? config.daemonIdleTimeout : 0,
+    embedVersion: config.embedVersion || 'latest',
   };
 }
 
@@ -141,41 +150,57 @@ export default function (api: MoltbotPluginAPI) {
     const port = pluginConfig.embedPort || Math.floor(Math.random() * 10000) + 10000;
     console.log(`[Hindsight] Port: ${port}`);
 
-    // Register background service
+    // Initialize in background (non-blocking)
+    console.log('[Hindsight] Starting initialization in background...');
+    initPromise = (async () => {
+      try {
+        // Initialize embed manager
+        console.log('[Hindsight] Creating HindsightEmbedManager...');
+        embedManager = new HindsightEmbedManager(
+          port,
+          llmConfig.provider,
+          llmConfig.apiKey,
+          llmConfig.model,
+          pluginConfig.daemonIdleTimeout,
+          pluginConfig.embedVersion
+        );
+
+        // Start the embedded server
+        console.log('[Hindsight] Starting embedded server...');
+        await embedManager.start();
+
+        // Initialize client
+        console.log('[Hindsight] Creating HindsightClient...');
+        client = new HindsightClient(llmConfig.provider, llmConfig.apiKey, llmConfig.model, pluginConfig.embedVersion);
+
+        // Use openclawd bank
+        console.log(`[Hindsight] Using bank: ${BANK_NAME}`);
+        client.setBankId(BANK_NAME);
+
+        // Set bank mission
+        if (pluginConfig.bankMission) {
+          console.log(`[Hindsight] Setting bank mission...`);
+          await client.setBankMission(pluginConfig.bankMission);
+        }
+
+        isInitialized = true;
+        console.log('[Hindsight] ✓ Ready');
+      } catch (error) {
+        console.error('[Hindsight] Initialization error:', error);
+        throw error;
+      }
+    })();
+
+    // Don't await - let it initialize in background
+
+    // Register background service for cleanup
     console.log('[Hindsight] Registering service...');
     api.registerService({
       id: 'hindsight-memory',
       async start() {
-        try {
-          console.log('[Hindsight] Service starting...');
-
-          // Initialize embed manager
-          console.log('[Hindsight] Creating HindsightEmbedManager...');
-          embedManager = new HindsightEmbedManager(
-            port,
-            llmConfig.provider,
-            llmConfig.apiKey,
-            llmConfig.model,
-            pluginConfig.daemonIdleTimeout
-          );
-
-          // Start the embedded server
-          console.log('[Hindsight] Starting embedded server...');
-          await embedManager.start();
-
-          // Initialize client
-          console.log('[Hindsight] Creating HindsightClient...');
-          client = new HindsightClient(llmConfig.provider, llmConfig.apiKey, llmConfig.model);
-
-          // Use moltbot bank
-          console.log(`[Hindsight] Using bank: ${BANK_NAME}`);
-          client.setBankId(BANK_NAME);
-
-          console.log('[Hindsight] Service ready');
-        } catch (error) {
-          console.error('[Hindsight] Service start error:', error);
-          throw error;
-        }
+        // Wait for background init if still pending
+        console.log('[Hindsight] Service start called - ensuring initialization complete...');
+        if (initPromise) await initPromise;
       },
 
       async stop() {
@@ -188,6 +213,7 @@ export default function (api: MoltbotPluginAPI) {
           }
 
           client = null;
+          isInitialized = false;
 
           console.log('[Hindsight] Service stopped');
         } catch (error) {
@@ -229,14 +255,18 @@ export default function (api: MoltbotPluginAPI) {
           return; // Skip very short messages after extraction
         }
 
-        // Get client from global
+        // Wait for client to be ready
         const clientGlobal = (global as any).__hindsightClient;
         if (!clientGlobal) {
+          console.log('[Hindsight] Client global not available, skipping auto-recall');
           return;
         }
 
+        await clientGlobal.waitForReady();
+
         const client = clientGlobal.getClient();
         if (!client) {
+          console.log('[Hindsight] Client not initialized, skipping auto-recall');
           return;
         }
 
@@ -253,21 +283,12 @@ export default function (api: MoltbotPluginAPI) {
           return;
         }
 
-        // Format memories for injection
-        const memories = response.results
-          .map((result: any, idx: number) => {
-            const score = result.score ? ` (relevance: ${result.score.toFixed(2)})` : '';
-            return `${idx + 1}. ${result.content}${score}`;
-          })
-          .join('\n\n');
+        // Format memories as JSON with all fields from recall
+        const memoriesJson = JSON.stringify(response.results, null, 2);
 
-        const contextMessage = `<hindsight-context>
-You have access to long-term memory from previous conversations. Here are relevant memories:
-
-${memories}
-
-Use this context naturally when relevant to the conversation. Don't mention "memory" or "recall" unless specifically asked about past conversations.
-</hindsight-context>`;
+        const contextMessage = `<hindsight_memories>
+${memoriesJson}
+</hindsight_memories>`;
 
         console.log(`[Hindsight] Auto-recall: Injecting ${response.results.length} memories`);
 
@@ -289,12 +310,14 @@ Use this context naturally when relevant to the conversation. Don't mention "mem
           return;
         }
 
-        // Get client from global
+        // Wait for client to be ready
         const clientGlobal = (global as any).__hindsightClient;
         if (!clientGlobal) {
           console.warn('[Hindsight] Client global not found, skipping retain');
           return;
         }
+
+        await clientGlobal.waitForReady();
 
         const client = clientGlobal.getClient();
         if (!client) {

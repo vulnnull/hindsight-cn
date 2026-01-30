@@ -71,9 +71,8 @@ def _start_daemon(config: dict) -> bool:
     if config.get("llm_model"):
         env["HINDSIGHT_API_LLM_MODEL"] = config["llm_model"]
 
-    # Use pg0 database specific to bank
-    bank_id = config.get("bank_id", "default")
-    env["HINDSIGHT_API_DATABASE_URL"] = f"pg0://hindsight-embed-{bank_id}"
+    # Use single shared pg0 database for all banks (banks are isolated within the database)
+    env["HINDSIGHT_API_DATABASE_URL"] = "pg0://hindsight-embed"
     env["HINDSIGHT_API_LOG_LEVEL"] = "info"
 
     # Get idle timeout from environment or use default
