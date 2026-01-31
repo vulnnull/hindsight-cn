@@ -2290,6 +2290,23 @@ def _register_routes(app: FastAPI):
     ):
         """Get a mental model by ID."""
         try:
+            # Pre-operation validation hook
+            validator = app.state.memory._operation_validator
+            if validator:
+                from hindsight_api.extensions.operation_validator import MentalModelGetContext
+
+                ctx = MentalModelGetContext(
+                    bank_id=bank_id,
+                    mental_model_id=mental_model_id,
+                    request_context=request_context,
+                )
+                validation = await validator.validate_mental_model_get(ctx)
+                if not validation.allowed:
+                    raise OperationValidationError(
+                        validation.reason or "Operation not allowed",
+                        status_code=validation.status_code,
+                    )
+
             mental_model = await app.state.memory.get_mental_model(
                 bank_id=bank_id,
                 mental_model_id=mental_model_id,
@@ -2297,9 +2314,31 @@ def _register_routes(app: FastAPI):
             )
             if mental_model is None:
                 raise HTTPException(status_code=404, detail=f"Mental model '{mental_model_id}' not found")
+
+            # Post-operation hook
+            if validator:
+                from hindsight_api.extensions.operation_validator import MentalModelGetResult
+
+                content = mental_model.get("content", "")
+                output_tokens = len(content) // 4 if content else 0
+
+                result_ctx = MentalModelGetResult(
+                    bank_id=bank_id,
+                    mental_model_id=mental_model_id,
+                    request_context=request_context,
+                    output_tokens=output_tokens,
+                    success=True,
+                )
+                try:
+                    await validator.on_mental_model_get_complete(result_ctx)
+                except Exception as hook_err:
+                    logger.warning(f"Post-mental-model-get hook error (non-fatal): {hook_err}")
+
             return MentalModelResponse(**mental_model)
         except (AuthenticationError, HTTPException):
             raise
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except Exception as e:
             import traceback
 
