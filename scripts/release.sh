@@ -183,6 +183,10 @@ else
     fi
 fi
 
+# Show changes
+print_info "Changes to be committed:"
+git diff
+
 # Commit changes
 print_info "Committing version changes..."
 git add -A
