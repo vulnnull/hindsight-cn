@@ -8,6 +8,7 @@ import json
 import logging
 
 from ..memory_engine import fq_table
+from .fact_extraction import _sanitize_text
 from .types import ProcessedFact
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ async def insert_facts_batch(
     tags_list = []
 
     for fact in facts:
-        fact_texts.append(fact.fact_text)
+        fact_texts.append(_sanitize_text(fact.fact_text))
         # Convert embedding to string for asyncpg vector type
         embeddings.append(str(fact.embedding))
         # event_date: Use occurred_start if available, otherwise use mentioned_at
@@ -56,7 +57,7 @@ async def insert_facts_batch(
         occurred_starts.append(fact.occurred_start)
         occurred_ends.append(fact.occurred_end)
         mentioned_ats.append(fact.mentioned_at)
-        contexts.append(fact.context)
+        contexts.append(_sanitize_text(fact.context))
         fact_types.append(fact.fact_type)
         # confidence_score is only for opinion facts
         confidence_scores.append(1.0 if fact.fact_type == "opinion" else None)
@@ -157,7 +158,8 @@ async def handle_document_tracking(
     """
     import hashlib
 
-    # Calculate content hash
+    # Sanitize and calculate content hash
+    combined_content = _sanitize_text(combined_content) or ""
     content_hash = hashlib.sha256(combined_content.encode()).hexdigest()
 
     # Always delete old document first if it exists (cascades to units and links)
