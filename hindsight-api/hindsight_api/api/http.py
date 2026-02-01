@@ -2363,6 +2363,23 @@ def _register_routes(app: FastAPI):
     ):
         """Create a mental model (async - returns operation_id)."""
         try:
+            # Pre-operation validation hook
+            validator = app.state.memory._operation_validator
+            if validator:
+                from hindsight_api.extensions.operation_validator import MentalModelRefreshContext
+
+                ctx = MentalModelRefreshContext(
+                    bank_id=bank_id,
+                    mental_model_id=None,  # Not yet created
+                    request_context=request_context,
+                )
+                validation = await validator.validate_mental_model_refresh(ctx)
+                if not validation.allowed:
+                    raise OperationValidationError(
+                        validation.reason or "Operation not allowed",
+                        status_code=validation.status_code,
+                    )
+
             # 1. Create the mental model with placeholder content
             mental_model = await app.state.memory.create_mental_model(
                 bank_id=bank_id,
@@ -2385,6 +2402,8 @@ def _register_routes(app: FastAPI):
             raise HTTPException(status_code=400, detail=str(e))
         except (AuthenticationError, HTTPException):
             raise
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except Exception as e:
             import traceback
 
@@ -2407,6 +2426,23 @@ def _register_routes(app: FastAPI):
     ):
         """Refresh a mental model by re-running its source query (async)."""
         try:
+            # Pre-operation validation hook
+            validator = app.state.memory._operation_validator
+            if validator:
+                from hindsight_api.extensions.operation_validator import MentalModelRefreshContext
+
+                ctx = MentalModelRefreshContext(
+                    bank_id=bank_id,
+                    mental_model_id=mental_model_id,
+                    request_context=request_context,
+                )
+                validation = await validator.validate_mental_model_refresh(ctx)
+                if not validation.allowed:
+                    raise OperationValidationError(
+                        validation.reason or "Operation not allowed",
+                        status_code=validation.status_code,
+                    )
+
             result = await app.state.memory.submit_async_refresh_mental_model(
                 bank_id=bank_id,
                 mental_model_id=mental_model_id,
@@ -2417,6 +2453,8 @@ def _register_routes(app: FastAPI):
             raise HTTPException(status_code=404, detail=str(e))
         except (AuthenticationError, HTTPException):
             raise
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except Exception as e:
             import traceback
 

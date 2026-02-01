@@ -211,6 +211,15 @@ class MentalModelGetContext:
 
 
 @dataclass
+class MentalModelRefreshContext:
+    """Context for a mental model refresh/create operation validation (pre-operation)."""
+
+    bank_id: str
+    mental_model_id: str | None  # None for create (not yet assigned)
+    request_context: "RequestContext"
+
+
+@dataclass
 class MentalModelGetResult:
     """Result context for post-mental-model-GET hook."""
 
@@ -459,6 +468,23 @@ class OperationValidatorExtension(Extension, ABC):
             ctx: Context containing:
                 - bank_id: Bank identifier
                 - mental_model_id: Mental model identifier
+                - request_context: Request context with auth info
+
+        Returns:
+            ValidationResult indicating whether the operation is allowed.
+        """
+        return ValidationResult.accept()
+
+    async def validate_mental_model_refresh(self, ctx: MentalModelRefreshContext) -> ValidationResult:
+        """
+        Validate a mental model refresh/create operation before execution.
+
+        Override to implement custom validation logic for mental model refresh.
+
+        Args:
+            ctx: Context containing:
+                - bank_id: Bank identifier
+                - mental_model_id: Mental model identifier (None for create)
                 - request_context: Request context with auth info
 
         Returns:

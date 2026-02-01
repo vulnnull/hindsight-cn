@@ -27,6 +27,7 @@ from hindsight_api.extensions.operation_validator import (
     # Mental Model operations
     MentalModelGetContext,
     MentalModelGetResult,
+    MentalModelRefreshContext,
     MentalModelRefreshResult,
     # Core operations
     OperationValidationError,
@@ -72,6 +73,7 @@ __all__ = [
     # Operation Validator - Mental Model
     "MentalModelGetContext",
     "MentalModelGetResult",
+    "MentalModelRefreshContext",
     "MentalModelRefreshResult",
     # Tenant/Auth
     "ApiKeyTenantExtension",
