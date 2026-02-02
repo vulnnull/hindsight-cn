@@ -20,7 +20,7 @@ import warnings
 
 import uvicorn
 
-from . import MemoryEngine
+from . import MemoryEngine, __version__
 from .api import create_app
 from .banner import print_banner
 from .config import DEFAULT_WORKERS, ENV_WORKERS, HindsightConfig, get_config
@@ -362,6 +362,7 @@ def main():
             embeddings_provider=config.embeddings_provider,
             reranker_provider=config.reranker_provider,
             mcp_enabled=config.mcp_enabled,
+            version=__version__,
         )
 
     # Start idle checker in daemon mode
