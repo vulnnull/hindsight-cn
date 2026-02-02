@@ -176,13 +176,19 @@ def main():
         nonlocal memory, poller
         import uvicorn
 
-        from ..extensions import TenantExtension, load_extension
+        from ..extensions import OperationValidatorExtension, TenantExtension, load_extension
 
         # Load tenant extension BEFORE creating MemoryEngine so it can
         # set correct schema context during task execution. Without this,
         # _authenticate_tenant sees no extension and resets schema to "public",
         # causing worker writes to land in the wrong schema.
         tenant_extension = load_extension("TENANT", TenantExtension)
+
+        # Load operation validator so workers can record usage metering
+        # for async operations (e.g. refresh_mental_model after consolidation)
+        operation_validator = load_extension("OPERATION_VALIDATOR", OperationValidatorExtension)
+        if operation_validator:
+            logger.info(f"Loaded operation validator: {operation_validator.__class__.__name__}")
 
         # Initialize MemoryEngine
         # Workers use SyncTaskBackend because they execute tasks directly,
@@ -191,6 +197,7 @@ def main():
             run_migrations=False,  # Workers don't run migrations
             task_backend=SyncTaskBackend(),
             tenant_extension=tenant_extension,
+            operation_validator=operation_validator,
         )
 
         await memory.initialize()
