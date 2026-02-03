@@ -27,8 +27,8 @@
       },
       "llmProvider": {
         "type": "string",
-        "description": "LLM provider for Hindsight memory (e.g. 'openai', 'anthropic', 'gemini', 'groq', 'ollama'). Takes priority over auto-detection but not over HINDSIGHT_API_LLM_PROVIDER env var.",
-        "enum": ["openai", "anthropic", "gemini", "groq", "ollama"]
+        "description": "LLM provider for Hindsight memory (e.g. 'openai', 'anthropic', 'gemini', 'groq', 'ollama', 'openai-codex', 'claude-code'). Takes priority over auto-detection but not over HINDSIGHT_API_LLM_PROVIDER env var.",
+        "enum": ["openai", "anthropic", "gemini", "groq", "ollama", "openai-codex", "claude-code"]
       },
       "llmModel": {
         "type": "string",
@@ -37,6 +37,15 @@
       "llmApiKeyEnv": {
         "type": "string",
         "description": "Name of the env var holding the API key (e.g. 'MY_CUSTOM_KEY'). If not set, uses the standard env var for the chosen provider."
+      },
+      "embedPackagePath": {
+        "type": "string",
+        "description": "Local path to hindsight package for development (e.g. '/path/to/hindsight'). When set, uses 'uv run --directory <path>' instead of 'uvx hindsight-embed@latest'."
+      },
+      "apiPort": {
+        "type": "number",
+        "description": "Port for the openclaw profile daemon (default: 9077)",
+        "default": 9077
       }
     },
     "additionalProperties": false
@@ -69,6 +78,14 @@
     "llmApiKeyEnv": {
       "label": "API Key Env Var",
       "placeholder": "e.g. MY_CUSTOM_API_KEY (optional)"
+    },
+    "embedPackagePath": {
+      "label": "Local Package Path (Dev)",
+      "placeholder": "/path/to/hindsight (for local development)"
+    },
+    "apiPort": {
+      "label": "API Port",
+      "placeholder": "9077 (default)"
     }
   }
 }

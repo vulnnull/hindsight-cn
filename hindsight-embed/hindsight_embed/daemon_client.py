@@ -153,31 +153,29 @@ def _start_daemon(config: dict, profile: str | None = None) -> bool:
     # Get idle timeout from environment or use default
     idle_timeout = int(os.getenv("HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT", str(DEFAULT_DAEMON_IDLE_TIMEOUT)))
 
-    # Pass profile-specific port and lockfile
+    # Use profile-specific log file
+    daemon_log = paths.log
+    daemon_log.parent.mkdir(parents=True, exist_ok=True)
+
+    # Tell hindsight-api daemon where to write its logs
+    env["HINDSIGHT_API_DAEMON_LOG"] = str(daemon_log)
+
+    # Pass profile-specific port (no lockfile - we use port-based discovery)
     cmd = _find_hindsight_api_command() + [
         "--daemon",
         "--idle-timeout",
         str(idle_timeout),
         "--port",
         str(paths.port),
-        "--lockfile",
-        str(paths.lock),
     ]
-
-    # Use profile-specific log file
-    daemon_log = paths.log
-    daemon_log.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Starting daemon with command: {' '.join(cmd)}", file=sys.stderr)
     print(f"  Log file: {daemon_log}", file=sys.stderr)
 
     try:
-        # Start daemon with shell redirection (works across forks)
-        # The >> appends to log file, 2>&1 redirects stderr to stdout
-        shell_cmd = f"{' '.join(cmd)} >> {shlex.quote(str(daemon_log))} 2>&1"
+        # Start daemon directly (hindsight-api handles its own log redirection via HINDSIGHT_API_DAEMON_LOG)
         subprocess.Popen(
-            shell_cmd,
-            shell=True,
+            cmd,
             env=env,
             start_new_session=True,
         )
@@ -261,19 +259,36 @@ def stop_daemon(profile: str | None = None) -> bool:
     Returns:
         True if daemon stopped successfully.
     """
+    import subprocess
+
     if profile is None:
         profile = resolve_active_profile()
 
-    # Get profile-specific lockfile
+    # Check if daemon is actually running via health check
+    if not _is_daemon_running(profile):
+        logger.debug(f"Daemon not running for profile '{profile or 'default'}'")
+        return True
+
+    # Get profile-specific port
     pm = ProfileManager()
     paths = pm.resolve_profile_paths(profile)
-    lockfile = paths.lock
+    port = paths.port
 
-    # Try to kill by PID from lockfile
-    if lockfile.exists():
-        try:
-            pid = int(lockfile.read_text().strip())
-            os.kill(pid, 15)  # SIGTERM
+    # Find PID by port using lsof (works on macOS/Linux, handles stale lockfiles)
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            pid = int(result.stdout.strip().split()[0])
+            logger.debug(f"Found daemon PID {pid} on port {port}")
+
+            # Send SIGTERM
+            os.kill(pid, 15)
+
             # Wait for process to exit
             for _ in range(50):
                 time.sleep(0.1)
@@ -281,8 +296,10 @@ def stop_daemon(profile: str | None = None) -> bool:
                     os.kill(pid, 0)
                 except OSError:
                     break  # Process exited
-        except (ValueError, OSError):
-            pass
+        else:
+            logger.warning(f"Could not find PID for port {port}")
+    except (subprocess.TimeoutExpired, ValueError, OSError, FileNotFoundError) as e:
+        logger.warning(f"Could not find/kill daemon by port: {e}")
 
     # Wait for health check to fail (daemon fully stopped)
     for _ in range(30):  # Wait up to 3 seconds

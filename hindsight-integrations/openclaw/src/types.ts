@@ -32,9 +32,11 @@ export interface PluginConfig {
   embedPort?: number;
   daemonIdleTimeout?: number; // Seconds before daemon shuts down (0 = never)
   embedVersion?: string; // hindsight-embed version (default: "latest")
+  embedPackagePath?: string; // Local path to hindsight package (e.g. '/path/to/hindsight')
   llmProvider?: string; // LLM provider override (e.g. 'openai', 'anthropic', 'gemini', 'groq', 'ollama')
   llmModel?: string; // LLM model override (e.g. 'gpt-4o-mini', 'claude-3-5-haiku-20241022')
   llmApiKeyEnv?: string; // Env var name holding the API key (e.g. 'MY_CUSTOM_KEY')
+  apiPort?: number; // Port for openclaw profile daemon (default: 9077)
 }
 
 export interface ServiceConfig {
