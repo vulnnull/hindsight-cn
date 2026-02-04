@@ -9,6 +9,7 @@ Configuration via environment variables - see hindsight_api.config for all env v
 import asyncio
 import logging
 import os
+import warnings
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 
@@ -162,11 +163,28 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             except Exception as e:
                 logger.warning(f"Failed to detect GPU/MPS, falling back to CPU: {e}")
 
-        self._model = CrossEncoder(
-            self.model_name,
-            device=device,
-            model_kwargs={"low_cpu_mem_usage": False},
-        )
+        # Suppress verbose transformers warnings during model loading
+        # This suppresses the "UNEXPECTED" warnings from CrossEncoder which are harmless
+        # but look alarming to users (e.g., "embeddings.position_ids | UNEXPECTED")
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            warnings.filterwarnings("ignore", message=".*was not found in model state dict.*")
+            warnings.filterwarnings("ignore", message=".*UNEXPECTED.*")
+
+            # Also suppress transformers library logging temporarily
+            transformers_logger = logging.getLogger("transformers")
+            original_level = transformers_logger.level
+            transformers_logger.setLevel(logging.ERROR)
+
+            try:
+                self._model = CrossEncoder(
+                    self.model_name,
+                    device=device,
+                    model_kwargs={"low_cpu_mem_usage": False},
+                )
+            finally:
+                # Restore original logging level
+                transformers_logger.setLevel(original_level)
 
         # Initialize shared executor (limited workers naturally limits concurrency)
         if LocalSTCrossEncoder._executor is None:

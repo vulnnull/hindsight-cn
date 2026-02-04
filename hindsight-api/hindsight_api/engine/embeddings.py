@@ -11,6 +11,7 @@ Configuration via environment variables - see hindsight_api.config for all env v
 
 import logging
 import os
+import warnings
 from abc import ABC, abstractmethod
 
 import httpx
@@ -157,11 +158,28 @@ class LocalSTEmbeddings(Embeddings):
             except Exception as e:
                 logger.warning(f"Failed to detect GPU/MPS, falling back to CPU: {e}")
 
-        self._model = SentenceTransformer(
-            self.model_name,
-            device=device,
-            model_kwargs={"low_cpu_mem_usage": False},
-        )
+        # Suppress verbose transformers warnings during model loading
+        # This suppresses the "UNEXPECTED" warnings from BertModel which are harmless
+        # but look alarming to users (e.g., "embeddings.position_ids | UNEXPECTED")
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            warnings.filterwarnings("ignore", message=".*was not found in model state dict.*")
+            warnings.filterwarnings("ignore", message=".*UNEXPECTED.*")
+
+            # Also suppress transformers library logging temporarily
+            transformers_logger = logging.getLogger("transformers")
+            original_level = transformers_logger.level
+            transformers_logger.setLevel(logging.ERROR)
+
+            try:
+                self._model = SentenceTransformer(
+                    self.model_name,
+                    device=device,
+                    model_kwargs={"low_cpu_mem_usage": False},
+                )
+            finally:
+                # Restore original logging level
+                transformers_logger.setLevel(original_level)
 
         self._dimension = self._model.get_sentence_embedding_dimension()
         logger.info(f"Embeddings: local provider initialized (dim: {self._dimension})")
