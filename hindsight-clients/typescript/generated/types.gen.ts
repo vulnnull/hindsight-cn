@@ -394,6 +394,12 @@ export type CreateDirectiveRequest = {
  */
 export type CreateMentalModelRequest = {
   /**
+   * Id
+   *
+   * Optional custom ID for the mental model (alphanumeric lowercase with hyphens)
+   */
+  id?: string | null;
+  /**
    * Name
    *
    * Human-readable name for the mental model

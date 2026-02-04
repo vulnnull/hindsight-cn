@@ -3573,6 +3573,18 @@
       },
       "CreateMentalModelRequest": {
         "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Optional custom ID for the mental model (alphanumeric lowercase with hyphens)"
+          },
           "name": {
             "type": "string",
             "title": "Name",
@@ -3612,6 +3624,7 @@
         "title": "CreateMentalModelRequest",
         "description": "Request model for creating a mental model.",
         "example": {
+          "id": "team-communication",
           "max_tokens": 2048,
           "name": "Team Communication Preferences",
           "source_query": "How does the team prefer to communicate?",

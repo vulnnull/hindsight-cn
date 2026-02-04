@@ -1134,6 +1134,7 @@ class CreateMentalModelRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
+                "id": "team-communication",
                 "name": "Team Communication Preferences",
                 "source_query": "How does the team prefer to communicate?",
                 "tags": ["team"],
@@ -1143,6 +1144,9 @@ class CreateMentalModelRequest(BaseModel):
         }
     )
 
+    id: str | None = Field(
+        None, description="Optional custom ID for the mental model (alphanumeric lowercase with hyphens)"
+    )
     name: str = Field(description="Human-readable name for the mental model")
     source_query: str = Field(description="The query to run to generate content")
     tags: list[str] = Field(default_factory=list, description="Tags for scoped visibility")
@@ -2386,6 +2390,7 @@ def _register_routes(app: FastAPI):
                 name=body.name,
                 source_query=body.source_query,
                 content="Generating content...",
+                mental_model_id=body.id if body.id else None,
                 tags=body.tags if body.tags else None,
                 max_tokens=body.max_tokens,
                 trigger=body.trigger.model_dump() if body.trigger else None,
