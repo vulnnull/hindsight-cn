@@ -3,7 +3,8 @@
 export interface MoltbotPluginAPI {
   config: MoltbotConfig;
   registerService(config: ServiceConfig): void;
-  on(event: string, handler: (context: any) => void | Promise<void | { prependContext?: string }>): void;
+  // OpenClaw hook handler signature: (event, ctx?) where ctx contains channel/sender info
+  on(event: string, handler: (event: any, ctx?: any) => void | Promise<void | { prependContext?: string }>): void;
   // Add more as needed
 }
 
@@ -39,6 +40,8 @@ export interface PluginConfig {
   apiPort?: number; // Port for openclaw profile daemon (default: 9077)
   hindsightApiUrl?: string; // External Hindsight API URL (skips local daemon when set)
   hindsightApiToken?: string; // API token for external Hindsight API authentication
+  dynamicBankId?: boolean; // Enable per-channel memory banks (default: true)
+  bankIdPrefix?: string; // Prefix for bank IDs (e.g. 'prod' -> 'prod-slack-C123')
 }
 
 export interface ServiceConfig {

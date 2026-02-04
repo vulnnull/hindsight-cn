@@ -55,6 +55,15 @@
       "hindsightApiToken": {
         "type": "string",
         "description": "API token for external Hindsight API authentication. Required if the external API has authentication enabled."
+      },
+      "dynamicBankId": {
+        "type": "boolean",
+        "description": "Enable per-channel memory banks. When true, memories are isolated by channel (e.g., slack-C123, telegram-456). When false, all channels share a single 'openclaw' bank.",
+        "default": true
+      },
+      "bankIdPrefix": {
+        "type": "string",
+        "description": "Optional prefix for bank IDs (e.g., 'prod' results in 'prod-slack-C123'). Useful for separating environments."
       }
     },
     "additionalProperties": false
@@ -103,6 +112,14 @@
     "hindsightApiToken": {
       "label": "External API Token",
       "placeholder": "API token if external API requires authentication"
+    },
+    "dynamicBankId": {
+      "label": "Dynamic Bank IDs",
+      "placeholder": "true (isolate memories per channel)"
+    },
+    "bankIdPrefix": {
+      "label": "Bank ID Prefix",
+      "placeholder": "e.g., prod, staging (optional)"
     }
   }
 }
