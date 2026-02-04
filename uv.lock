@@ -1453,6 +1453,7 @@ source = { editable = "hindsight" }
 dependencies = [
     { name = "hindsight-api" },
     { name = "hindsight-client" },
+    { name = "hindsight-embed" },
 ]
 
 [package.optional-dependencies]
@@ -1465,6 +1466,7 @@ test = [
 requires-dist = [
     { name = "hindsight-api", editable = "hindsight-api" },
     { name = "hindsight-client", editable = "hindsight-clients/python" },
+    { name = "hindsight-embed", editable = "hindsight-embed" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
 ]

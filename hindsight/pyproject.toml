@@ -11,11 +11,13 @@ requires-python = ">=3.11"
 dependencies = [
     "hindsight-api>=0.0.7",
     "hindsight-client>=0.0.7",
+    "hindsight-embed>=0.1.0",
 ]
 
 [tool.uv.sources]
 hindsight-api = { workspace = true }
 hindsight-client = { workspace = true }
+hindsight-embed = { workspace = true }
 
 [project.optional-dependencies]
 test = [
