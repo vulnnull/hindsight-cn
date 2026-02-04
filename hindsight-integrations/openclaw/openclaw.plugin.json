@@ -46,6 +46,15 @@
         "type": "number",
         "description": "Port for the openclaw profile daemon (default: 9077)",
         "default": 9077
+      },
+      "hindsightApiUrl": {
+        "type": "string",
+        "description": "External Hindsight API URL (e.g. 'https://mcp.hindsight.devcraft.team'). When set, skips local daemon and connects directly to this API.",
+        "format": "uri"
+      },
+      "hindsightApiToken": {
+        "type": "string",
+        "description": "API token for external Hindsight API authentication. Required if the external API has authentication enabled."
       }
     },
     "additionalProperties": false
@@ -86,6 +95,14 @@
     "apiPort": {
       "label": "API Port",
       "placeholder": "9077 (default)"
+    },
+    "hindsightApiUrl": {
+      "label": "External Hindsight API URL",
+      "placeholder": "e.g. https://mcp.hindsight.devcraft.team (leave empty for local daemon)"
+    },
+    "hindsightApiToken": {
+      "label": "External API Token",
+      "placeholder": "API token if external API requires authentication"
     }
   }
 }

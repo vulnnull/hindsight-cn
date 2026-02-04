@@ -9,6 +9,7 @@ let embedManager: HindsightEmbedManager | null = null;
 let client: HindsightClient | null = null;
 let initPromise: Promise<void> | null = null;
 let isInitialized = false;
+let usingExternalApi = false; // Track if using external API (skip daemon management)
 
 // Global access for hooks (Moltbot loads hooks separately)
 if (typeof global !== 'undefined') {
@@ -148,6 +149,37 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
   );
 }
 
+/**
+ * Detect external Hindsight API configuration.
+ * Priority: env vars > plugin config
+ */
+function detectExternalApi(pluginConfig?: PluginConfig): {
+  apiUrl: string | null;
+  apiToken: string | null;
+} {
+  const apiUrl = process.env.HINDSIGHT_EMBED_API_URL || pluginConfig?.hindsightApiUrl || null;
+  const apiToken = process.env.HINDSIGHT_EMBED_API_TOKEN || pluginConfig?.hindsightApiToken || null;
+  return { apiUrl, apiToken };
+}
+
+/**
+ * Health check for external Hindsight API.
+ */
+async function checkExternalApiHealth(apiUrl: string): Promise<void> {
+  const healthUrl = `${apiUrl.replace(/\/$/, '')}/health`;
+  console.log(`[Hindsight] Checking external API health at ${healthUrl}...`);
+  try {
+    const response = await fetch(healthUrl, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    const data = await response.json() as { status?: string };
+    console.log(`[Hindsight] External API health: ${JSON.stringify(data)}`);
+  } catch (error) {
+    throw new Error(`Cannot connect to external Hindsight API at ${apiUrl}: ${error}`);
+  }
+}
+
 function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
   const config = api.config.plugins?.entries?.['hindsight-openclaw']?.config || {};
   const defaultMission = 'You are an AI assistant helping users across multiple communication channels (Telegram, Slack, Discord, etc.). Remember user preferences, instructions, and important context from conversations to provide personalized assistance.';
@@ -161,6 +193,8 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     llmProvider: config.llmProvider,
     llmModel: config.llmModel,
     llmApiKeyEnv: config.llmApiKeyEnv,
+    hindsightApiUrl: config.hindsightApiUrl,
+    hindsightApiToken: config.hindsightApiToken,
   };
 }
 
@@ -187,49 +221,88 @@ export default function (api: MoltbotPluginAPI) {
     if (pluginConfig.bankMission) {
       console.log(`[Hindsight] Custom bank mission configured: "${pluginConfig.bankMission.substring(0, 50)}..."`);
     }
-    console.log(`[Hindsight] Daemon idle timeout: ${pluginConfig.daemonIdleTimeout}s (0 = never timeout)`);
+    // Detect external API mode
+    const externalApi = detectExternalApi(pluginConfig);
 
     // Get API port from config (default: 9077)
     const apiPort = pluginConfig.apiPort || 9077;
-    console.log(`[Hindsight] API Port: ${apiPort}`);
+
+    if (externalApi.apiUrl) {
+      // External API mode - skip local daemon
+      usingExternalApi = true;
+      console.log(`[Hindsight] ✓ Using external API: ${externalApi.apiUrl}`);
+
+      // Set env vars so CLI commands (uvx hindsight-embed) use external API
+      process.env.HINDSIGHT_EMBED_API_URL = externalApi.apiUrl;
+      if (externalApi.apiToken) {
+        process.env.HINDSIGHT_EMBED_API_TOKEN = externalApi.apiToken;
+        console.log('[Hindsight] API token configured');
+      }
+    } else {
+      console.log(`[Hindsight] Daemon idle timeout: ${pluginConfig.daemonIdleTimeout}s (0 = never timeout)`);
+      console.log(`[Hindsight] API Port: ${apiPort}`);
+    }
 
     // Initialize in background (non-blocking)
     console.log('[Hindsight] Starting initialization in background...');
     initPromise = (async () => {
       try {
-        // Initialize embed manager
-        console.log('[Hindsight] Creating HindsightEmbedManager...');
-        embedManager = new HindsightEmbedManager(
-          apiPort,
-          llmConfig.provider,
-          llmConfig.apiKey,
-          llmConfig.model,
-          llmConfig.baseUrl,
-          pluginConfig.daemonIdleTimeout,
-          pluginConfig.embedVersion,
-          pluginConfig.embedPackagePath
-        );
+        if (usingExternalApi && externalApi.apiUrl) {
+          // External API mode - check health, skip daemon startup
+          console.log('[Hindsight] External API mode - skipping local daemon...');
+          await checkExternalApiHealth(externalApi.apiUrl);
 
-        // Start the embedded server
-        console.log('[Hindsight] Starting embedded server...');
-        await embedManager.start();
+          // Initialize client (CLI commands will use external API via env vars)
+          console.log('[Hindsight] Creating HindsightClient...');
+          client = new HindsightClient(llmConfig.provider, llmConfig.apiKey, llmConfig.model, pluginConfig.embedVersion, pluginConfig.embedPackagePath);
 
-        // Initialize client
-        console.log('[Hindsight] Creating HindsightClient...');
-        client = new HindsightClient(llmConfig.provider, llmConfig.apiKey, llmConfig.model, pluginConfig.embedVersion, pluginConfig.embedPackagePath);
+          // Use openclaw bank
+          console.log(`[Hindsight] Using bank: ${BANK_NAME}`);
+          client.setBankId(BANK_NAME);
 
-        // Use openclaw bank
-        console.log(`[Hindsight] Using bank: ${BANK_NAME}`);
-        client.setBankId(BANK_NAME);
+          // Set bank mission
+          if (pluginConfig.bankMission) {
+            console.log(`[Hindsight] Setting bank mission...`);
+            await client.setBankMission(pluginConfig.bankMission);
+          }
 
-        // Set bank mission
-        if (pluginConfig.bankMission) {
-          console.log(`[Hindsight] Setting bank mission...`);
-          await client.setBankMission(pluginConfig.bankMission);
+          isInitialized = true;
+          console.log('[Hindsight] ✓ Ready (external API mode)');
+        } else {
+          // Local daemon mode - start hindsight-embed daemon
+          console.log('[Hindsight] Creating HindsightEmbedManager...');
+          embedManager = new HindsightEmbedManager(
+            apiPort,
+            llmConfig.provider,
+            llmConfig.apiKey,
+            llmConfig.model,
+            llmConfig.baseUrl,
+            pluginConfig.daemonIdleTimeout,
+            pluginConfig.embedVersion,
+            pluginConfig.embedPackagePath
+          );
+
+          // Start the embedded server
+          console.log('[Hindsight] Starting embedded server...');
+          await embedManager.start();
+
+          // Initialize client
+          console.log('[Hindsight] Creating HindsightClient...');
+          client = new HindsightClient(llmConfig.provider, llmConfig.apiKey, llmConfig.model, pluginConfig.embedVersion, pluginConfig.embedPackagePath);
+
+          // Use openclaw bank
+          console.log(`[Hindsight] Using bank: ${BANK_NAME}`);
+          client.setBankId(BANK_NAME);
+
+          // Set bank mission
+          if (pluginConfig.bankMission) {
+            console.log(`[Hindsight] Setting bank mission...`);
+            await client.setBankMission(pluginConfig.bankMission);
+          }
+
+          isInitialized = true;
+          console.log('[Hindsight] ✓ Ready');
         }
-
-        isInitialized = true;
-        console.log('[Hindsight] ✓ Ready');
       } catch (error) {
         console.error('[Hindsight] Initialization error:', error);
         throw error;
@@ -243,7 +316,7 @@ export default function (api: MoltbotPluginAPI) {
     api.registerService({
       id: 'hindsight-memory',
       async start() {
-        console.log('[Hindsight] Service start called - checking daemon health...');
+        console.log('[Hindsight] Service start called...');
 
         // Wait for background init if still pending
         if (initPromise) {
@@ -255,50 +328,90 @@ export default function (api: MoltbotPluginAPI) {
           }
         }
 
-        // Check if daemon is actually healthy (handles SIGUSR1 restart case)
-        if (embedManager && isInitialized) {
-          const healthy = await embedManager.checkHealth();
-          if (healthy) {
-            console.log('[Hindsight] Daemon is healthy');
-            return;
+        // External API mode: check external API health
+        if (usingExternalApi) {
+          const externalApi = detectExternalApi(pluginConfig);
+          if (externalApi.apiUrl && isInitialized) {
+            try {
+              await checkExternalApiHealth(externalApi.apiUrl);
+              console.log('[Hindsight] External API is healthy');
+              return;
+            } catch (error) {
+              console.error('[Hindsight] External API health check failed:', error);
+              // Reset state for reinitialization attempt
+              client = null;
+              isInitialized = false;
+            }
           }
+        } else {
+          // Local daemon mode: check daemon health (handles SIGUSR1 restart case)
+          if (embedManager && isInitialized) {
+            const healthy = await embedManager.checkHealth();
+            if (healthy) {
+              console.log('[Hindsight] Daemon is healthy');
+              return;
+            }
 
-          console.log('[Hindsight] Daemon is not responding - reinitializing...');
-          // Reset state for reinitialization
-          embedManager = null;
-          client = null;
-          isInitialized = false;
+            console.log('[Hindsight] Daemon is not responding - reinitializing...');
+            // Reset state for reinitialization
+            embedManager = null;
+            client = null;
+            isInitialized = false;
+          }
         }
 
-        // Reinitialize if needed (fresh start or recovery from dead daemon)
+        // Reinitialize if needed (fresh start or recovery)
         if (!isInitialized) {
-          console.log('[Hindsight] Reinitializing daemon...');
-          const pluginConfig = getPluginConfig(api);
-          const llmConfig = detectLLMConfig(pluginConfig);
-          const apiPort = pluginConfig.apiPort || 9077;
+          console.log('[Hindsight] Reinitializing...');
+          const reinitPluginConfig = getPluginConfig(api);
+          const llmConfig = detectLLMConfig(reinitPluginConfig);
+          const externalApi = detectExternalApi(reinitPluginConfig);
+          const apiPort = reinitPluginConfig.apiPort || 9077;
 
-          embedManager = new HindsightEmbedManager(
-            apiPort,
-            llmConfig.provider,
-            llmConfig.apiKey,
-            llmConfig.model,
-            llmConfig.baseUrl,
-            pluginConfig.daemonIdleTimeout,
-            pluginConfig.embedVersion,
-            pluginConfig.embedPackagePath
-          );
+          if (externalApi.apiUrl) {
+            // External API mode
+            usingExternalApi = true;
+            process.env.HINDSIGHT_EMBED_API_URL = externalApi.apiUrl;
+            if (externalApi.apiToken) {
+              process.env.HINDSIGHT_EMBED_API_TOKEN = externalApi.apiToken;
+            }
 
-          await embedManager.start();
+            await checkExternalApiHealth(externalApi.apiUrl);
 
-          client = new HindsightClient(llmConfig.provider, llmConfig.apiKey, llmConfig.model, pluginConfig.embedVersion, pluginConfig.embedPackagePath);
-          client.setBankId(BANK_NAME);
+            client = new HindsightClient(llmConfig.provider, llmConfig.apiKey, llmConfig.model, reinitPluginConfig.embedVersion, reinitPluginConfig.embedPackagePath);
+            client.setBankId(BANK_NAME);
 
-          if (pluginConfig.bankMission) {
-            await client.setBankMission(pluginConfig.bankMission);
+            if (reinitPluginConfig.bankMission) {
+              await client.setBankMission(reinitPluginConfig.bankMission);
+            }
+
+            isInitialized = true;
+            console.log('[Hindsight] Reinitialization complete (external API mode)');
+          } else {
+            // Local daemon mode
+            embedManager = new HindsightEmbedManager(
+              apiPort,
+              llmConfig.provider,
+              llmConfig.apiKey,
+              llmConfig.model,
+              llmConfig.baseUrl,
+              reinitPluginConfig.daemonIdleTimeout,
+              reinitPluginConfig.embedVersion,
+              reinitPluginConfig.embedPackagePath
+            );
+
+            await embedManager.start();
+
+            client = new HindsightClient(llmConfig.provider, llmConfig.apiKey, llmConfig.model, reinitPluginConfig.embedVersion, reinitPluginConfig.embedPackagePath);
+            client.setBankId(BANK_NAME);
+
+            if (reinitPluginConfig.bankMission) {
+              await client.setBankMission(reinitPluginConfig.bankMission);
+            }
+
+            isInitialized = true;
+            console.log('[Hindsight] Reinitialization complete');
           }
-
-          isInitialized = true;
-          console.log('[Hindsight] Reinitialization complete');
         }
       },
 
@@ -306,7 +419,8 @@ export default function (api: MoltbotPluginAPI) {
         try {
           console.log('[Hindsight] Service stopping...');
 
-          if (embedManager) {
+          // Only stop daemon if in local mode
+          if (!usingExternalApi && embedManager) {
             await embedManager.stop();
             embedManager = null;
           }
