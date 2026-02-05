@@ -1161,7 +1161,7 @@ class CreateMentalModelRequest(BaseModel):
 class CreateMentalModelResponse(BaseModel):
     """Response model for mental model creation."""
 
-    mental_model_id: str = Field(description="ID of the created mental model")
+    mental_model_id: str | None = Field(None, description="ID of the created mental model")
     operation_id: str = Field(description="Operation ID to track refresh progress")
 
 

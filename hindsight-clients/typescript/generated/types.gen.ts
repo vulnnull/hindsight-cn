@@ -440,7 +440,7 @@ export type CreateMentalModelResponse = {
    *
    * ID of the created mental model
    */
-  mental_model_id: string;
+  mental_model_id?: string | null;
   /**
    * Operation Id
    *

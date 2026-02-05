@@ -3639,7 +3639,14 @@
       "CreateMentalModelResponse": {
         "properties": {
           "mental_model_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Mental Model Id",
             "description": "ID of the created mental model"
           },
@@ -3651,7 +3658,6 @@
         },
         "type": "object",
         "required": [
-          "mental_model_id",
           "operation_id"
         ],
         "title": "CreateMentalModelResponse",

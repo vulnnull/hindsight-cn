@@ -1085,3 +1085,51 @@ jobs:
           exit 1
         fi
         echo "✓ All generated files are up to date"
+
+  check-openapi-compatibility:
+    runs-on: ubuntu-latest
+    env:
+      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full git history to access base branch
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version-file: ".python-version"
+
+    - name: Install hindsight-dev dependencies
+      run: |
+        cd hindsight-dev && uv sync --frozen --index-strategy unsafe-best-match
+
+    - name: Check OpenAPI compatibility with base branch
+      run: |
+        # Get the base branch (usually main)
+        BASE_BRANCH="${{ github.base_ref }}"
+
+        if [ -z "$BASE_BRANCH" ]; then
+          echo "⚠️  Warning: No base branch found (not a PR?). Skipping compatibility check."
+          exit 0
+        fi
+
+        echo "Checking OpenAPI compatibility against base branch: $BASE_BRANCH"
+
+        # Extract the old OpenAPI spec from base branch
+        git show "origin/$BASE_BRANCH:hindsight-docs/static/openapi.json" > /tmp/old-openapi.json
+
+        if [ ! -s /tmp/old-openapi.json ]; then
+          echo "⚠️  Warning: Could not find OpenAPI spec in base branch. Skipping compatibility check."
+          exit 0
+        fi
+
+        # Check compatibility using our tool
+        cd hindsight-dev
+        uv run check-openapi-compatibility /tmp/old-openapi.json ../hindsight-docs/static/openapi.json

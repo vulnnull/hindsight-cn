@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -26,7 +26,7 @@ class CreateMentalModelResponse(BaseModel):
     """
     Response model for mental model creation.
     """ # noqa: E501
-    mental_model_id: StrictStr = Field(description="ID of the created mental model")
+    mental_model_id: Optional[StrictStr] = None
     operation_id: StrictStr = Field(description="Operation ID to track refresh progress")
     __properties: ClassVar[List[str]] = ["mental_model_id", "operation_id"]
 
@@ -69,6 +69,11 @@ class CreateMentalModelResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # set to None if mental_model_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.mental_model_id is None and "mental_model_id" in self.model_fields_set:
+            _dict['mental_model_id'] = None
+
         return _dict
 
     @classmethod
