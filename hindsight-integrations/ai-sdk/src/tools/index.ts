@@ -233,11 +233,6 @@ export interface HindsightClient {
     }
   ): Promise<CreateDirectiveResponse>;
 
-  getDirective(
-    bankId: string,
-    directiveId: string
-  ): Promise<DirectiveResponse | null>;
-
   listDirectives(
     bankId: string,
     options?: {
@@ -367,10 +362,6 @@ export function createHindsightTools({
     tags: z.array(z.string()).optional().describe('Tags for filtering'),
   });
 
-  const getDirectiveParams = z.object({
-    bankId: z.string().describe('Memory bank ID (usually the user ID)'),
-    directiveId: z.string().describe('ID of the directive to retrieve'),
-  });
 
   type RetainInput = z.infer<typeof retainParams>;
   type RetainOutput = { success: boolean; itemsCount: number };
@@ -392,9 +383,6 @@ export function createHindsightTools({
 
   type CreateDirectiveInput = z.infer<typeof createDirectiveParams>;
   type CreateDirectiveOutput = { id: string; name: string; content: string; tags: string[]; createdAt: string };
-
-  type GetDirectiveInput = z.infer<typeof getDirectiveParams>;
-  type GetDirectiveOutput = { id: string; name: string; content: string; tags: string[]; isActive: boolean } | null;
 
   return {
     retain: tool<RetainInput, RetainOutput>({
@@ -531,25 +519,6 @@ export function createHindsightTools({
           content: result.content,
           tags: result.tags,
           createdAt: result.created_at,
-        };
-      },
-    }),
-
-    getDirective: tool<GetDirectiveInput, GetDirectiveOutput>({
-      description:
-        `Retrieve a directive by its ID. Returns the directive's content, tags, and active status.`,
-      inputSchema: getDirectiveParams,
-      execute: async (input) => {
-        const result = await client.getDirective(input.bankId, input.directiveId);
-        if (!result) {
-          return null;
-        }
-        return {
-          id: result.id,
-          name: result.name,
-          content: result.content,
-          tags: result.tags,
-          isActive: result.is_active,
         };
       },
     }),

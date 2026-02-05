@@ -173,7 +173,7 @@ const sidebars: SidebarsConfig = {
         {
           type: 'doc',
           id: 'sdks/embed',
-          label: 'Embedded SDK',
+          label: 'Embedded Python',
         },
       ],
     },
@@ -199,6 +199,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/ai-sdk',
+          label: 'Vercel AI SDK',
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/skills',
           label: 'Skills',
         },
@@ -209,111 +214,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'doc',
       id: 'cookbook/index',
-      label: 'Overview',
-    },
-    {
-      type: 'category',
-      label: 'Recipes',
-      collapsible: false,
-      items: [
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/quickstart',
-          label: 'Hindsight Quickstart',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/per-user-memory',
-          label: 'Per-User Memory',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/support-agent-shared-knowledge',
-          label: 'Support Agent with Shared Knowledge',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/litellm-memory-demo',
-          label: 'Memory with LiteLLM',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/tool-learning-demo',
-          label: 'Routing Tool Learning',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/fitness_tracker',
-          label: 'Fitness Coach with Hindsight Memory',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/healthcare_assistant',
-          label: 'Healthcare Assistant with Hindsight Memory',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/movie_recommendation',
-          label: 'Movie Recommendation Assistant with Hindsight Memory',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/personal_assistant',
-          label: 'Personal AI Assistant with Hindsight Memory',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/personalized_search',
-          label: 'Personalized Search Agent with Hindsight Memory',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/recipes/study_buddy',
-          label: 'Study Buddy with Hindsight Memory',
-        }
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Applications',
-      collapsible: false,
-      items: [
-        {
-          type: 'doc',
-          id: 'cookbook/applications/chat-memory',
-          label: 'Chat Memory App',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/applications/deliveryman-demo',
-          label: 'Deliveryman Demo',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/applications/hindsight-litellm-demo',
-          label: 'Memory Approaches Comparison Demo',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/applications/hindsight-tool-learning-demo',
-          label: 'Tool Learning Demo',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/applications/openai-fitness-coach',
-          label: 'OpenAI Agent + Hindsight Memory Integration',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/applications/sanity-blog-memory',
-          label: 'Sanity CMS Blog Memory',
-        },
-        {
-          type: 'doc',
-          id: 'cookbook/applications/stancetracker',
-          label: 'Stance Tracker',
-        }
-      ],
+      label: 'Cookbook',
     },
   ],
 };

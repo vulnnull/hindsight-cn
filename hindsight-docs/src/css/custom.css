@@ -429,6 +429,84 @@
   color: var(--ifm-color-emphasis-500);
 }
 
+/* Client sidebar icons */
+a.menu__link[href*="/sdks/python"]::before,
+a.menu__link[href*="/sdks/nodejs"]::before,
+a.menu__link[href*="/sdks/cli"]::before,
+a.menu__link[href*="/sdks/embed"]::before {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  vertical-align: middle;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  content: '';
+}
+
+/* Python logo */
+a.menu__link[href*="/sdks/python"]::before {
+  background-image: url('/img/icons/python.svg');
+}
+
+/* Node.js logo */
+a.menu__link[href*="/sdks/nodejs"]::before {
+  background-image: url('/img/icons/nodejs.svg');
+}
+
+/* CLI - terminal icon */
+a.menu__link[href*="/sdks/cli"]::before {
+  background-image: url('/img/icons/terminal.svg');
+}
+
+/* Embedded SDK - package icon */
+a.menu__link[href*="/sdks/embed"]::before {
+  background-image: url('/img/icons/package.svg');
+}
+
+/* Integration sidebar icons */
+a.menu__link[href*="/sdks/integrations/local-mcp"]::before,
+a.menu__link[href*="/sdks/integrations/litellm"]::before,
+a.menu__link[href*="/sdks/integrations/openclaw"]::before,
+a.menu__link[href*="/sdks/integrations/ai-sdk"]::before,
+a.menu__link[href*="/sdks/integrations/skills"]::before {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  vertical-align: middle;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  content: '';
+}
+
+/* Local MCP Server */
+a.menu__link[href*="/sdks/integrations/local-mcp"]::before {
+  background-image: url('/img/icons/mcp.png');
+}
+
+/* LiteLLM */
+a.menu__link[href*="/sdks/integrations/litellm"]::before {
+  background-image: url('/img/icons/litellm.png');
+}
+
+/* OpenClaw */
+a.menu__link[href*="/sdks/integrations/openclaw"]::before {
+  background-image: url('/img/icons/openclaw.png');
+}
+
+/* Vercel AI SDK */
+a.menu__link[href*="/sdks/integrations/ai-sdk"]::before {
+  background-image: url('/img/icons/vercel.png');
+}
+
+/* Skills */
+a.menu__link[href*="/sdks/integrations/skills"]::before {
+  background-image: url('/img/icons/skills.png');
+}
+
 /* Code blocks */
 pre,
 pre code,
@@ -1306,3 +1384,75 @@ ul[class*="suggestion"] {
   }
 }
 
+
+/* ============================================
+   Cookbook: Hide sidebar for OpenAI-style layout
+   ============================================ */
+
+/* Hide sidebar completely on cookbook pages - use multiple selectors for reliability */
+[class*="docPage"] aside[class*="docSidebarContainer"],
+aside[class*="docSidebarContainer"]:has(+ * .cookbook-page),
+body:has(.cookbook-page) aside[class*="docSidebarContainer"],
+.hidden-sidebar aside,
+article[id="cookbook-index"] ~ aside,
+div:has(> article[id="cookbook-index"]) aside {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+}
+
+/* Make main wrapper full width */
+body:has(.cookbook-page) .main-wrapper,
+.hidden-sidebar ~ * .main-wrapper,
+div:has(> article[id="cookbook-index"]) {
+  max-width: 100% !important;
+}
+
+/* Make doc page container full width */
+body:has(.cookbook-page) [class*="docMainContainer"],
+.hidden-sidebar [class*="docMainContainer"],
+div:has(> .cookbook-page) > div {
+  max-width: 100% !important;
+}
+
+/* Make the content column full width */
+body:has(.cookbook-page) [class*="docItemCol"],
+.hidden-sidebar [class*="docItemCol"],
+.cookbook-page ~ * [class*="col"] {
+  max-width: 100% !important;
+  flex: 1 1 100% !important;
+}
+
+/* Container adjustments */
+.cookbook-page .container,
+body:has(.cookbook-page) .container {
+  max-width: 1400px !important;
+  padding-left: 2rem !important;
+  padding-right: 2rem !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 996px) {
+  .cookbook-page .container {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+}
+
+/* Additional fallback selectors for hiding cookbook sidebar */
+[data-route="/cookbook"] aside,
+[data-route="/cookbook/"] aside,
+div[class*="docPage"]:has(article[id*="cookbook"]) > aside:first-child {
+  display: none !important;
+}
+
+/* Force full width on cookbook route */
+[data-route="/cookbook"] div[class*="docRoot"],
+[data-route="/cookbook/"] div[class*="docRoot"] {
+  grid-template-columns: 0 auto !important;
+}
+
+[data-route="/cookbook"] main,
+[data-route="/cookbook/"] main {
+  max-width: 100% !important;
+}
