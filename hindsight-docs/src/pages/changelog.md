@@ -8,6 +8,26 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.4.9](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.9)
+
+**Features**
+
+- New AI SDK integration. ([`7e339e1`](https://github.com/vectorize-io/hindsight/commit/7e339e1))
+- Add a Python SDK for running Hindsight in embedded mode (HindsightEmbedded). ([`d3302c9`](https://github.com/vectorize-io/hindsight/commit/d3302c9))
+- Add streaming support to the hindsight-litellm wrappers. ([`665877b`](https://github.com/vectorize-io/hindsight/commit/665877b))
+- Add OpenClaw support for connecting to an external Hindsight API and using dynamic per-channel memory banks. ([`6b34692`](https://github.com/vectorize-io/hindsight/commit/6b34692))
+
+**Improvements**
+
+- Improve the mental models experience in the control plane UI. ([`7097716`](https://github.com/vectorize-io/hindsight/commit/7097716))
+- Reduce noisy Hugging Face logging output. ([`34d9188`](https://github.com/vectorize-io/hindsight/commit/34d9188))
+
+**Bug Fixes**
+
+- Improve recall endpoint reliability by handling timeouts correctly and rejecting overly long queries. ([`dd621a6`](https://github.com/vectorize-io/hindsight/commit/dd621a6))
+- Improve /reflect behavior with Claude Code and Codex providers. ([`a43d208`](https://github.com/vectorize-io/hindsight/commit/a43d208))
+- Fix OpenClaw shell argument escaping for more reliable command execution. ([`63e2964`](https://github.com/vectorize-io/hindsight/commit/63e2964))
+
 ## [0.4.8](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.8)
 
 **Features**
