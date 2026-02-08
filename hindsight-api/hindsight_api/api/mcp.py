@@ -54,12 +54,14 @@ def get_current_api_key() -> str | None:
     return _current_api_key.get()
 
 
-def create_mcp_server(memory: MemoryEngine) -> FastMCP:
+def create_mcp_server(memory: MemoryEngine, multi_bank: bool = True) -> FastMCP:
     """
     Create and configure the Hindsight MCP server.
 
     Args:
         memory: MemoryEngine instance (required)
+        multi_bank: If True, expose all tools with bank_id parameters (default).
+                   If False, only expose bank-scoped tools without bank_id parameters.
 
     Returns:
         Configured FastMCP server instance with stateless_http enabled
@@ -71,8 +73,8 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
     config = MCPToolsConfig(
         bank_id_resolver=get_current_bank_id,
         api_key_resolver=get_current_api_key,  # Propagate API key for tenant auth
-        include_bank_id_param=True,  # HTTP MCP supports multi-bank via parameter
-        tools=None,  # All tools
+        include_bank_id_param=multi_bank,
+        tools=None if multi_bank else {"retain", "recall", "reflect"},  # Scoped tools for single-bank mode
         retain_fire_and_forget=False,  # HTTP MCP supports sync/async modes
     )
 
@@ -88,7 +90,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
 
 
 class MCPMiddleware:
-    """ASGI middleware that handles authentication and extracts bank_id from header or path.
+    """ASGI middleware that handles authentication and routes to appropriate MCP server.
 
     Authentication:
         1. If HINDSIGHT_API_MCP_AUTH_TOKEN is set (legacy), validates against that token
@@ -96,12 +98,25 @@ class MCPMiddleware:
            - DefaultTenantExtension: no auth required (local dev)
            - ApiKeyTenantExtension: validates against env var
 
-    Bank ID can be provided via:
-    1. X-Bank-Id header (recommended for Claude Code)
-    2. URL path: /mcp/{bank_id}/
-    3. Environment variable HINDSIGHT_MCP_BANK_ID (fallback default)
+    Two modes based on URL structure:
 
-    For Claude Code, configure with:
+    1. Multi-bank mode (for /mcp/ root endpoint):
+       - Exposes all tools: retain, recall, reflect, list_banks, create_bank
+       - All tools include optional bank_id parameter for cross-bank operations
+       - Bank ID from: X-Bank-Id header or HINDSIGHT_MCP_BANK_ID env var
+
+    2. Single-bank mode (for /mcp/{bank_id}/ endpoints):
+       - Exposes bank-scoped tools only: retain, recall, reflect
+       - No bank_id parameter (comes from URL)
+       - No bank management tools (list_banks, create_bank)
+       - Recommended for agent isolation
+
+    Examples:
+        # Single-bank mode (recommended for agent isolation)
+        claude mcp add --transport http my-agent http://localhost:8888/mcp/my-agent-bank/ \\
+            --header "Authorization: Bearer <token>"
+
+        # Multi-bank mode (for cross-bank operations)
         claude mcp add --transport http hindsight http://localhost:8888/mcp \\
             --header "X-Bank-Id: my-bank" --header "Authorization: Bearer <token>"
     """
@@ -110,10 +125,23 @@ class MCPMiddleware:
         self.app = app
         self.memory = memory
         self.tenant_extension = memory._tenant_extension
-        self.mcp_server = create_mcp_server(memory)
-        self.mcp_app = self.mcp_server.http_app(path="/")
-        # Expose the lifespan for the parent app to chain
-        self.lifespan = self.mcp_app.lifespan_handler if hasattr(self.mcp_app, "lifespan_handler") else None
+
+        # Create two server instances:
+        # 1. Multi-bank server (for /mcp/ root endpoint)
+        self.multi_bank_server = create_mcp_server(memory, multi_bank=True)
+        self.multi_bank_app = self.multi_bank_server.http_app(path="/")
+
+        # 2. Single-bank server (for /mcp/{bank_id}/ endpoints)
+        self.single_bank_server = create_mcp_server(memory, multi_bank=False)
+        self.single_bank_app = self.single_bank_server.http_app(path="/")
+
+        # Backward compatibility: expose multi_bank_app as mcp_app
+        self.mcp_app = self.multi_bank_app
+
+        # Expose the lifespan for the parent app to chain (use multi-bank as default)
+        self.lifespan = (
+            self.multi_bank_app.lifespan_handler if hasattr(self.multi_bank_app, "lifespan_handler") else None
+        )
 
     def _get_header(self, scope: dict, name: str) -> str | None:
         """Extract a header value from ASGI scope."""
@@ -125,7 +153,7 @@ class MCPMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
-            await self.mcp_app(scope, receive, send)
+            await self.multi_bank_app(scope, receive, send)
             return
 
         # Extract auth token from header (for tenant auth propagation)
@@ -173,8 +201,13 @@ class MCPMiddleware:
         elif path == "/mcp":
             path = "/"
 
+        # Ensure path has leading slash (needed after stripping mount path)
+        if path and not path.startswith("/"):
+            path = "/" + path
+
         # Try to get bank_id from header first (for Claude Code compatibility)
         bank_id = self._get_header(scope, "X-Bank-Id")
+        bank_id_from_path = False
 
         # MCP endpoint paths that should not be treated as bank_ids
         MCP_ENDPOINTS = {"sse", "messages"}
@@ -187,12 +220,18 @@ class MCPMiddleware:
             if parts[0] and parts[0] not in MCP_ENDPOINTS:
                 # First segment looks like a bank_id
                 bank_id = parts[0]
+                bank_id_from_path = True
                 new_path = "/" + parts[1] if len(parts) > 1 else "/"
 
         # Fall back to default bank_id
         if not bank_id:
             bank_id = DEFAULT_BANK_ID
             logger.debug(f"Using default bank_id: {bank_id}")
+
+        # Select the appropriate MCP app based on how bank_id was provided:
+        # - Path-based bank_id → single-bank app (no bank_id param, scoped tools)
+        # - Header/env bank_id → multi-bank app (bank_id param, all tools)
+        target_app = self.single_bank_app if bank_id_from_path else self.multi_bank_app
 
         # Set bank_id and api_key context
         bank_id_token = _current_bank_id.set(bank_id)
@@ -206,7 +245,7 @@ class MCPMiddleware:
 
             # Wrap send to rewrite the SSE endpoint URL to include bank_id if using path-based routing
             async def send_wrapper(message):
-                if message["type"] == "http.response.body":
+                if message["type"] == "http.response.body" and bank_id_from_path:
                     body = message.get("body", b"")
                     if body and b"/messages" in body:
                         # Rewrite /messages to /{bank_id}/messages in SSE endpoint event
@@ -214,7 +253,7 @@ class MCPMiddleware:
                         message = {**message, "body": body}
                 await send(message)
 
-            await self.mcp_app(new_scope, receive, send_wrapper)
+            await target_app(new_scope, receive, send_wrapper)
         finally:
             _current_bank_id.reset(bank_id_token)
             if api_key_token is not None:
@@ -242,15 +281,23 @@ class MCPMiddleware:
 
 def create_mcp_app(memory: MemoryEngine):
     """
-    Create an ASGI app that handles MCP requests.
+    Create an ASGI app that handles MCP requests with dynamic tool exposure.
 
     Authentication:
         Uses the TenantExtension from the MemoryEngine (same auth as REST API).
 
-    Bank ID can be provided via:
-    1. X-Bank-Id header: claude mcp add --transport http hindsight http://localhost:8888/mcp --header "X-Bank-Id: my-bank"
-    2. URL path: /mcp/{bank_id}/
-    3. Environment variable HINDSIGHT_MCP_BANK_ID (fallback, default: "default")
+    Two modes based on URL structure:
+
+    1. Single-bank mode (recommended for agent isolation):
+       - URL: /mcp/{bank_id}/
+       - Tools: retain, recall, reflect (no bank_id parameter)
+       - Example: claude mcp add --transport http my-agent http://localhost:8888/mcp/my-agent-bank/
+
+    2. Multi-bank mode (for cross-bank operations):
+       - URL: /mcp/
+       - Tools: retain, recall, reflect, list_banks, create_bank (all with bank_id parameter)
+       - Bank ID from: X-Bank-Id header or HINDSIGHT_MCP_BANK_ID env var (default: "default")
+       - Example: claude mcp add --transport http hindsight http://localhost:8888/mcp --header "X-Bank-Id: my-bank"
 
     Args:
         memory: MemoryEngine instance

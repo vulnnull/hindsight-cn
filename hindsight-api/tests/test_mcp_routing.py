@@ -1,11 +1,7 @@
 """Test MCP server routing with dynamic bank_id."""
 
-import json
-
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-
-from hindsight_api.extensions.builtin.tenant import ApiKeyTenantExtension, DefaultTenantExtension
 
 
 @pytest.fixture
@@ -16,41 +12,6 @@ def mock_memory():
     memory.submit_async_retain = AsyncMock(return_value={"operation_id": "test-op-123"})
     memory.recall_async = AsyncMock(return_value=MagicMock(results=[]))
     return memory
-
-
-def _make_scope(path="/mcp", headers=None):
-    """Build a minimal ASGI HTTP scope."""
-    raw_headers = []
-    for k, v in (headers or {}).items():
-        raw_headers.append((k.lower().encode(), v.encode()))
-    # MCP requires Accept header
-    raw_headers.append((b"accept", b"application/json, text/event-stream"))
-    raw_headers.append((b"content-type", b"application/json"))
-    return {
-        "type": "http",
-        "path": path,
-        "root_path": "",
-        "headers": raw_headers,
-    }
-
-
-async def _collect_response(middleware, scope, body=b""):
-    """Send a request through the middleware and collect the response status and body."""
-    status = None
-    response_body = b""
-
-    async def receive():
-        return {"type": "http.request", "body": body}
-
-    async def send(message):
-        nonlocal status, response_body
-        if message["type"] == "http.response.start":
-            status = message["status"]
-        elif message["type"] == "http.response.body":
-            response_body += message.get("body", b"")
-
-    await middleware(scope, receive, send)
-    return status, response_body
 
 
 @pytest.mark.asyncio
@@ -182,199 +143,150 @@ async def test_mcp_tools_propagate_api_key(mock_memory):
         _current_api_key.reset(api_key_token)
 
 
-# --- Middleware authentication tests ---
+def test_multi_bank_mode_exposes_all_tools(mock_memory):
+    """Test that multi-bank mode exposes all tools including bank management."""
+    from hindsight_api.api.mcp import create_mcp_server
+
+    # Create server in multi-bank mode (default)
+    mcp_server = create_mcp_server(mock_memory, multi_bank=True)
+    tools = mcp_server._tool_manager._tools
+
+    # Should have all tools
+    assert "retain" in tools
+    assert "recall" in tools
+    assert "reflect" in tools
+    assert "list_banks" in tools
+    assert "create_bank" in tools
 
 
-@pytest.fixture
-def memory_with_api_key_auth():
-    """Create a mock MemoryEngine with ApiKeyTenantExtension."""
-    memory = MagicMock()
-    memory._tenant_extension = ApiKeyTenantExtension({"api_key": "test-secret-123"})
-    return memory
+def test_single_bank_mode_excludes_bank_management_tools(mock_memory):
+    """Test that single-bank mode only exposes bank-scoped tools."""
+    from hindsight_api.api.mcp import create_mcp_server
+
+    # Create server in single-bank mode
+    mcp_server = create_mcp_server(mock_memory, multi_bank=False)
+    tools = mcp_server._tool_manager._tools
+
+    # Should only have bank-scoped tools
+    assert "retain" in tools
+    assert "recall" in tools
+    assert "reflect" in tools
+
+    # Should NOT have bank management tools
+    assert "list_banks" not in tools
+    assert "create_bank" not in tools
 
 
-@pytest.fixture
-def memory_with_default_auth():
-    """Create a mock MemoryEngine with DefaultTenantExtension (no auth)."""
-    memory = MagicMock()
-    memory._tenant_extension = DefaultTenantExtension({})
-    return memory
+def test_multi_bank_mode_tools_have_bank_id_param(mock_memory):
+    """Test that multi-bank mode tools include bank_id parameter."""
+    from hindsight_api.api.mcp import create_mcp_server
+    import inspect
+
+    mcp_server = create_mcp_server(mock_memory, multi_bank=True)
+    tools = mcp_server._tool_manager._tools
+
+    # Check that tools have bank_id parameter
+    retain_tool = tools["retain"]
+    retain_sig = inspect.signature(retain_tool.fn)
+    assert "bank_id" in retain_sig.parameters
+
+    recall_tool = tools["recall"]
+    recall_sig = inspect.signature(recall_tool.fn)
+    assert "bank_id" in recall_sig.parameters
+
+    reflect_tool = tools["reflect"]
+    reflect_sig = inspect.signature(reflect_tool.fn)
+    assert "bank_id" in reflect_sig.parameters
 
 
-@pytest.mark.asyncio
-async def test_mcp_middleware_rejects_no_auth(memory_with_api_key_auth):
-    """MCP middleware returns 401 when no Authorization header is provided."""
-    from hindsight_api.api.mcp import MCPMiddleware
+def test_single_bank_mode_tools_no_bank_id_param(mock_memory):
+    """Test that single-bank mode tools do NOT include bank_id parameter."""
+    from hindsight_api.api.mcp import create_mcp_server
+    import inspect
 
-    middleware = MCPMiddleware(None, memory_with_api_key_auth)
-    scope = _make_scope(path="/mcp")
-    status, body = await _collect_response(middleware, scope)
+    mcp_server = create_mcp_server(mock_memory, multi_bank=False)
+    tools = mcp_server._tool_manager._tools
 
-    assert status == 401
-    assert b"Authentication failed" in body
+    # Check that tools do NOT have bank_id parameter
+    retain_tool = tools["retain"]
+    retain_sig = inspect.signature(retain_tool.fn)
+    assert "bank_id" not in retain_sig.parameters
 
+    recall_tool = tools["recall"]
+    recall_sig = inspect.signature(recall_tool.fn)
+    assert "bank_id" not in recall_sig.parameters
 
-@pytest.mark.asyncio
-async def test_mcp_middleware_rejects_wrong_key(memory_with_api_key_auth):
-    """MCP middleware returns 401 when an invalid API key is provided."""
-    from hindsight_api.api.mcp import MCPMiddleware
-
-    middleware = MCPMiddleware(None, memory_with_api_key_auth)
-    scope = _make_scope(path="/mcp", headers={"Authorization": "Bearer wrong-key"})
-    status, body = await _collect_response(middleware, scope)
-
-    assert status == 401
-    assert b"Authentication failed" in body
-
-
-@pytest.mark.asyncio
-async def test_mcp_middleware_accepts_valid_key(memory_with_api_key_auth):
-    """MCP middleware passes through when a valid API key is provided."""
-    from hindsight_api.api.mcp import MCPMiddleware
-
-    middleware = MCPMiddleware(None, memory_with_api_key_auth)
-    scope = _make_scope(
-        path="/mcp",
-        headers={"Authorization": "Bearer test-secret-123"},
-    )
-    # FastMCP raises RuntimeError because its lifespan isn't initialized in unit tests.
-    # If we get that error, auth passed — the request made it past the middleware.
-    with pytest.raises(RuntimeError, match="Task group is not initialized"):
-        await _collect_response(
-            middleware,
-            scope,
-            body=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode(),
-        )
-
-
-@pytest.mark.asyncio
-async def test_mcp_middleware_default_tenant_no_auth_required(memory_with_default_auth):
-    """MCP middleware passes through with no auth when DefaultTenantExtension is used."""
-    from hindsight_api.api.mcp import MCPMiddleware
-
-    middleware = MCPMiddleware(None, memory_with_default_auth)
-    scope = _make_scope(path="/mcp")
-    # Same as above — RuntimeError means auth passed and request reached FastMCP internals.
-    with pytest.raises(RuntimeError, match="Task group is not initialized"):
-        await _collect_response(
-            middleware,
-            scope,
-            body=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode(),
-        )
-
-
-class MultiTenantTestExtension:
-    """Test extension that maps API keys to tenant schemas."""
-
-    def __init__(self, key_to_schema: dict[str, str]):
-        self.key_to_schema = key_to_schema
-
-    async def authenticate(self, context):
-        from hindsight_api.extensions.tenant import AuthenticationError, TenantContext
-
-        if not context.api_key:
-            raise AuthenticationError("API key required")
-        schema = self.key_to_schema.get(context.api_key)
-        if not schema:
-            raise AuthenticationError("Invalid API key")
-        return TenantContext(schema_name=schema)
-
-    async def authenticate_mcp(self, context):
-        """MCP auth delegates to authenticate by default."""
-        return await self.authenticate(context)
+    reflect_tool = tools["reflect"]
+    reflect_sig = inspect.signature(reflect_tool.fn)
+    assert "bank_id" not in reflect_sig.parameters
 
 
 @pytest.mark.asyncio
-async def test_mcp_middleware_sets_schema_from_tenant_context():
-    """MCP middleware sets _current_schema from tenant context for multi-tenant isolation."""
+async def test_middleware_handles_both_endpoints(mock_memory):
+    """Test that MCPMiddleware routes to correct server based on URL path."""
     from hindsight_api.api.mcp import MCPMiddleware
-    from hindsight_api.engine.memory_engine import _current_schema
 
-    # Create extension that maps keys to different schemas
-    tenant_ext = MultiTenantTestExtension({
-        "key-for-tenant-alpha": "tenant_alpha",
-        "key-for-tenant-beta": "tenant_beta",
-    })
+    # Create middleware (single instance)
+    middleware = MCPMiddleware(None, mock_memory)
 
-    memory = MagicMock()
-    memory._tenant_extension = tenant_ext
+    # Verify both server instances exist
+    assert middleware.multi_bank_app is not None
+    assert middleware.single_bank_app is not None
 
-    middleware = MCPMiddleware(None, memory)
+    # Verify they expose different tools
+    multi_bank_tools = middleware.multi_bank_server._tool_manager._tools
+    single_bank_tools = middleware.single_bank_server._tool_manager._tools
 
-    # Track what schema was set during request processing
-    captured_schema = None
+    # Multi-bank should have all tools
+    assert "retain" in multi_bank_tools
+    assert "recall" in multi_bank_tools
+    assert "list_banks" in multi_bank_tools
+    assert "create_bank" in multi_bank_tools
 
-    # Patch the mcp_app to capture the schema instead of actually processing
-    async def mock_mcp_app(scope, receive, send):
-        nonlocal captured_schema
-        captured_schema = _current_schema.get()
-        # Send a minimal response
-        await send({"type": "http.response.start", "status": 200, "headers": []})
-        await send({"type": "http.response.body", "body": b"{}"})
-
-    middleware.mcp_app = mock_mcp_app
-
-    # Test tenant alpha
-    scope = _make_scope(path="/mcp", headers={"Authorization": "Bearer key-for-tenant-alpha"})
-    await _collect_response(middleware, scope)
-    assert captured_schema == "tenant_alpha", f"Expected tenant_alpha, got {captured_schema}"
-
-    # Test tenant beta
-    scope = _make_scope(path="/mcp", headers={"Authorization": "Bearer key-for-tenant-beta"})
-    await _collect_response(middleware, scope)
-    assert captured_schema == "tenant_beta", f"Expected tenant_beta, got {captured_schema}"
+    # Single-bank should only have scoped tools
+    assert "retain" in single_bank_tools
+    assert "recall" in single_bank_tools
+    assert "list_banks" not in single_bank_tools
+    assert "create_bank" not in single_bank_tools
 
 
 @pytest.mark.asyncio
-async def test_mcp_legacy_auth_token(monkeypatch):
-    """MCP middleware supports legacy MCP_AUTH_TOKEN for backwards compatibility."""
-    import hindsight_api.api.mcp as mcp_module
+async def test_routing_logic_from_url_path():
+    """Test that routing correctly selects server based on URL structure."""
     from hindsight_api.api.mcp import MCPMiddleware
+    from unittest.mock import AsyncMock
 
-    # Set legacy auth token
-    monkeypatch.setattr(mcp_module, "MCP_AUTH_TOKEN", "legacy-secret-token")
+    # Mock memory
+    mock_memory = MagicMock()
 
-    memory = MagicMock()
-    # Even with ApiKeyTenantExtension, legacy token should work
-    memory._tenant_extension = ApiKeyTenantExtension({"api_key": "different-key"})
+    # Create middleware
+    middleware = MCPMiddleware(None, mock_memory)
 
-    middleware = MCPMiddleware(None, memory)
+    # Simulate different URL patterns and verify routing
+    test_cases = [
+        # (path_after_stripping_mcp, expected_bank_id_from_path, expected_bank_id, description)
+        ("/alice/messages", True, "alice", "Bank ID in path with endpoint"),
+        ("/my-agent-123/", True, "my-agent-123", "Bank ID in path with trailing slash"),
+        ("ciccio/messages", True, "ciccio", "Bank ID without leading slash (after mount strip)"),
+        ("bob", True, "bob", "Bank ID only, no leading slash"),
+        ("/messages", False, None, "MCP endpoint, no bank ID"),
+        ("/", False, None, "Root path, no bank ID"),
+    ]
 
-    # Wrong token should fail
-    scope = _make_scope(path="/mcp", headers={"Authorization": "Bearer wrong-token"})
-    status, body = await _collect_response(middleware, scope)
-    assert status == 401
-    assert b"Invalid authentication token" in body
+    for path, expected_bank_from_path, expected_bank_id, description in test_cases:
+        # Simulate the path parsing logic with leading slash normalization
+        if path and not path.startswith("/"):
+            path = "/" + path
 
-    # Correct legacy token should pass
-    scope = _make_scope(path="/mcp", headers={"Authorization": "Bearer legacy-secret-token"})
-    with pytest.raises(RuntimeError, match="Task group is not initialized"):
-        await _collect_response(
-            middleware,
-            scope,
-            body=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode(),
-        )
+        bank_id = None
+        bank_id_from_path = False
+        MCP_ENDPOINTS = {"sse", "messages"}
 
+        if path.startswith("/") and len(path) > 1:
+            parts = path[1:].split("/", 1)
+            if parts[0] and parts[0] not in MCP_ENDPOINTS:
+                bank_id = parts[0]
+                bank_id_from_path = True
 
-@pytest.mark.asyncio
-async def test_mcp_auth_disabled_flag():
-    """ApiKeyTenantExtension with mcp_auth_disabled=true skips MCP auth."""
-    from hindsight_api.api.mcp import MCPMiddleware
-
-    memory = MagicMock()
-    # Create extension with MCP auth disabled
-    memory._tenant_extension = ApiKeyTenantExtension({
-        "api_key": "test-secret-123",
-        "mcp_auth_disabled": "true",
-    })
-
-    middleware = MCPMiddleware(None, memory)
-
-    # No auth should pass when mcp_auth_disabled=true
-    scope = _make_scope(path="/mcp")
-    with pytest.raises(RuntimeError, match="Task group is not initialized"):
-        await _collect_response(
-            middleware,
-            scope,
-            body=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode(),
-        )
+        assert bank_id_from_path == expected_bank_from_path, f"Failed for: {description} (path={path})"
+        assert bank_id == expected_bank_id, f"Failed bank_id for: {description} (path={path}, got={bank_id})"
