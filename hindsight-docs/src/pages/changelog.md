@@ -8,6 +8,31 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.4.10](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.10)
+
+**Features**
+
+- Provided a slimmer Docker distribution to reduce image size and speed up pulls. ([`f648178`](https://github.com/vectorize-io/hindsight/commit/f648178))
+- Added Markdown support in Reflect and Mental Models content. ([`c4ef090`](https://github.com/vectorize-io/hindsight/commit/c4ef090))
+- Added built-in Supabase tenant extension for running Hindsight with Supabase-backed multi-tenancy. ([`e99ee0f`](https://github.com/vectorize-io/hindsight/commit/e99ee0f))
+- Added TenantExtension authentication support to the MCP endpoint. ([`fedfb49`](https://github.com/vectorize-io/hindsight/commit/fedfb49))
+
+**Improvements**
+
+- Improved MCP tool availability/routing based on the endpoint being used. ([`d90588b`](https://github.com/vectorize-io/hindsight/commit/d90588b))
+
+**Bug Fixes**
+
+- Stopped logging database usernames and passwords to prevent credential leaks in logs. ([`c568094`](https://github.com/vectorize-io/hindsight/commit/c568094))
+- Fixed OpenClaw sessions wiping memory on each new session. ([`981cf60`](https://github.com/vectorize-io/hindsight/commit/981cf60))
+- Fixed hindsight-embed profiles not loading correctly. ([`0430588`](https://github.com/vectorize-io/hindsight/commit/0430588))
+- Fixed tagged directives so they correctly apply to tagged mental models. ([`278718d`](https://github.com/vectorize-io/hindsight/commit/278718d))
+- Fixed a cast error that could cause failures at runtime. ([`093ecff`](https://github.com/vectorize-io/hindsight/commit/093ecff))
+
+**Other**
+
+- Added a docker-compose example to simplify local deployment and testing. ([`5179d5f`](https://github.com/vectorize-io/hindsight/commit/5179d5f))
+
 ## [0.4.9](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.9)
 
 **Features**
