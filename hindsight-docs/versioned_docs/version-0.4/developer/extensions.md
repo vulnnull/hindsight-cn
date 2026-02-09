@@ -19,7 +19,20 @@ HINDSIGHT_API_TENANT_EXTENSION=hindsight_api.extensions.builtin.tenant:ApiKeyTen
 HINDSIGHT_API_TENANT_API_KEY=your-secret-key
 ```
 
-For multi-tenant setups with separate schemas per tenant (e.g., JWT-based auth with per-tenant schemas), implement a custom `TenantExtension`.
+**Built-in: SupabaseTenantExtension**
+
+Validates [Supabase](https://supabase.com) JWTs and provides multi-tenant memory isolation. Each authenticated user gets their own PostgreSQL schema (`{prefix}_{user_id}`), ensuring complete data separation. Performs local JWT verification using JWKS for optimal performance (no network call per request).
+
+```bash
+HINDSIGHT_API_TENANT_EXTENSION=hindsight_api.extensions.builtin.supabase_tenant:SupabaseTenantExtension
+HINDSIGHT_API_TENANT_SUPABASE_URL=https://your-project.supabase.co
+# Optional - only needed for legacy HS256 projects or health check
+HINDSIGHT_API_TENANT_SUPABASE_SERVICE_KEY=your-service-role-key
+```
+
+See the [source code](https://github.com/vectorize-io/hindsight/blob/main/hindsight-api/hindsight_api/extensions/builtin/supabase_tenant.py) for complete configuration options and implementation details.
+
+For other multi-tenant setups with separate schemas per tenant (e.g., custom JWT-based auth), implement a custom `TenantExtension`.
 
 ---
 
@@ -47,6 +60,18 @@ Hooks into retain/recall/reflect operations for validation and monitoring. Use c
 
 ```bash
 HINDSIGHT_API_OPERATION_VALIDATOR_EXTENSION=mypackage.validators:MyValidator
+```
+
+---
+
+### MCPExtension
+
+Registers additional MCP (Model Context Protocol) tools on the Hindsight MCP server. Enables external packages to add custom tools without modifying core code.
+
+**No built-in implementation** - implement your own to add custom MCP tools.
+
+```bash
+HINDSIGHT_API_MCP_EXTENSION=mypackage.mcp:MyMCPExtension
 ```
 
 ---
@@ -159,6 +184,24 @@ class MyValidator(OperationValidatorExtension):
     async def on_retain_complete(self, result: RetainResult) -> None:
         # Log usage, update metrics, send notifications, etc.
         pass
+```
+
+### Example: Custom MCPExtension
+
+```python
+from mcp.server.fastmcp import FastMCP
+from hindsight_api.extensions import MCPExtension
+from hindsight_api.engine import MemoryEngine
+
+class MyMCPExtension(MCPExtension):
+    async def register_tools(self, mcp: FastMCP, memory: MemoryEngine) -> None:
+        @mcp.tool()
+        async def custom_search(query: str) -> str:
+            """Custom MCP tool for specialized search."""
+            # Access memory engine for operations
+            pool = await memory._get_pool()
+            # ... custom logic
+            return f"Results for: {query}"
 ```
 
 ---
