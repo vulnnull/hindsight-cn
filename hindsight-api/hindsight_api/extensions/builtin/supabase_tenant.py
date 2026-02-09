@@ -8,6 +8,16 @@ This extension enables multi-tenant memory isolation for applications using
 Supabase Auth - each authenticated user's memories are stored in a separate
 schema, ensuring complete data isolation.
 
+Features:
+    - Local JWT Verification: Validates tokens locally using JWKS public keys
+      (no network call per request)
+    - Automatic Schema Isolation: Each user gets {prefix}_{user_id} schema
+    - Zero User Management: Leverages your existing Supabase Auth setup
+    - Production Ready: Includes health checks, timeouts, key rotation handling,
+      and error handling
+    - Built-in: Ships with Hindsight, no extra installation needed
+    - Legacy Support: Falls back to /auth/v1/user endpoint for HS256 projects
+
 JWT Verification Strategy:
     By default, JWTs are verified locally using public keys from the Supabase
     JWKS endpoint (/auth/v1/.well-known/jwks.json). This is the Supabase-recommended

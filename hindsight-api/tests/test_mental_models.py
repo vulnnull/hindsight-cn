@@ -852,3 +852,61 @@ class TestMentalModelRefreshTagSecurity:
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_refresh_mental_model_with_directives(self, memory: MemoryEngine, request_context):
+        """Test that refreshing a mental model with directives works correctly."""
+        bank_id = f"test-refresh-directives-{uuid.uuid4().hex[:8]}"
+
+        # Ensure bank exists
+        await memory.get_bank_profile(bank_id, request_context=request_context)
+
+        # Create a directive
+        directive = await memory.create_directive(
+            bank_id=bank_id,
+            name="Response Style",
+            content="Always be concise and professional",
+            request_context=request_context,
+        )
+
+        # Create a concept mental model to refresh
+        concept = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Team Info",
+            source_query="Team information summary",
+            content="Initial team information",
+            request_context=request_context,
+        )
+
+        # Add some memories
+        await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[
+                {"content": "Alice is the team lead and handles project planning."},
+                {"content": "Bob is a senior engineer who mentors junior developers."},
+            ],
+            request_context=request_context,
+        )
+
+        # Wait for retain to complete
+        await memory.wait_for_background_tasks()
+
+        # Refresh the concept mental model (this should include directive in based_on)
+        refreshed = await memory.refresh_mental_model(
+            bank_id=bank_id,
+            mental_model_id=concept["id"],
+            request_context=request_context,
+        )
+
+        # Wait for background tasks to complete
+        await memory.wait_for_background_tasks()
+
+        # Verify the refresh completed without errors
+        assert refreshed is not None
+        assert refreshed["content"] is not None
+
+        # Get the updated mental model
+        updated = await memory.get_mental_model(bank_id, concept["id"], request_context=request_context)
+        assert updated["content"] != "Initial team information"
+
+        # Cleanup
+        await memory.delete_bank(bank_id, request_context=request_context)

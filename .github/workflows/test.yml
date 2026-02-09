@@ -334,8 +334,9 @@ jobs:
         push: false
         load: ${{ matrix.variant == 'slim' }}
         tags: hindsight-${{ matrix.name }}:test
-        cache-from: type=gha,scope=${{ matrix.name }}
-        cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+        # Removed GitHub Actions cache (type=gha) - it frequently returns 502 errors
+        # causing buildx to fail with "failed to parse error response 502"
+        # Build will be slower but more reliable
 
     # Only test slim variants to save disk space (they're much smaller)
     # Slim variants require external embedding providers

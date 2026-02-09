@@ -51,6 +51,7 @@ import {
   List,
 } from "lucide-react";
 import { MemoryDetailModal } from "./memory-detail-modal";
+import { DirectiveDetailModal } from "./directive-detail-modal";
 
 interface ReflectResponseBasedOnFact {
   id: string;
@@ -927,6 +928,7 @@ function MentalModelDetailPanel({
   const { currentBank } = useBank();
   const [refreshing, setRefreshing] = useState(false);
   const [viewMemoryId, setViewMemoryId] = useState<string | null>(null);
+  const [viewDirectiveId, setViewDirectiveId] = useState<string | null>(null);
 
   const handleRefresh = async () => {
     if (!currentBank) return;
@@ -998,14 +1000,13 @@ function MentalModelDetailPanel({
 
   // Helper to determine display label for fact type
   const getFactTypeDisplay = (fact: any) => {
+    if (fact.factType === "directives") {
+      return {
+        label: "directive",
+        color: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+      };
+    }
     if (fact.factType === "mental-models") {
-      // Check context to distinguish directives from mental models
-      if (fact.context?.includes("directive")) {
-        return {
-          label: "directive",
-          color: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
-        };
-      }
       return {
         label: "mental model",
         color: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
@@ -1160,7 +1161,13 @@ function MentalModelDetailPanel({
                           variant="outline"
                           size="sm"
                           className="h-6 text-xs"
-                          onClick={() => setViewMemoryId(fact.id)}
+                          onClick={() => {
+                            if (fact.factType === "directives") {
+                              setViewDirectiveId(fact.id);
+                            } else {
+                              setViewMemoryId(fact.id);
+                            }
+                          }}
                         >
                           View
                         </Button>
@@ -1233,6 +1240,14 @@ function MentalModelDetailPanel({
       {/* Memory Detail Modal */}
       {viewMemoryId && currentBank && (
         <MemoryDetailModal memoryId={viewMemoryId} onClose={() => setViewMemoryId(null)} />
+      )}
+
+      {/* Directive Detail Modal */}
+      {viewDirectiveId && currentBank && (
+        <DirectiveDetailModal
+          directiveId={viewDirectiveId}
+          onClose={() => setViewDirectiveId(null)}
+        />
       )}
     </div>
   );

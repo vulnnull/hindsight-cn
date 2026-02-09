@@ -650,19 +650,34 @@ class MemoryEngine(MemoryEngineInterface):
         generated_content = reflect_result.text or "No content generated"
 
         # Build reflect_response payload to store
+        # based_on contains MemoryFact objects for most types, but plain dicts for directives
+        based_on_serialized: dict[str, list[dict[str, Any]]] = {}
+        for fact_type, facts in reflect_result.based_on.items():
+            serialized_facts = []
+            for fact in facts:
+                if isinstance(fact, dict):
+                    # Plain dict (e.g., directives with id, name, content)
+                    serialized_facts.append(
+                        {
+                            "id": str(fact["id"]),
+                            "text": fact.get("text", fact.get("content", fact.get("name", ""))),
+                            "type": fact_type,
+                        }
+                    )
+                else:
+                    # MemoryFact object with .id and .text attributes
+                    serialized_facts.append(
+                        {
+                            "id": str(fact.id),
+                            "text": fact.text,
+                            "type": fact_type,
+                        }
+                    )
+            based_on_serialized[fact_type] = serialized_facts
+
         reflect_response = {
             "text": reflect_result.text,
-            "based_on": {
-                fact_type: [
-                    {
-                        "id": str(fact.id),
-                        "text": fact.text,
-                        "type": fact_type,
-                    }
-                    for fact in facts
-                ]
-                for fact_type, facts in reflect_result.based_on.items()
-            },
+            "based_on": based_on_serialized,
         }
 
         # Update the mental model with the generated content and reflect_response
@@ -4740,20 +4755,36 @@ class MemoryEngine(MemoryEngineInterface):
         )
 
         # Build reflect_response payload to store
+        # based_on contains MemoryFact objects for most types, but plain dicts for directives
+        based_on_serialized_payload: dict[str, list[dict[str, Any]]] = {}
+        for fact_type, facts in reflect_result.based_on.items():
+            serialized_facts = []
+            for fact in facts:
+                if isinstance(fact, dict):
+                    # Plain dict (e.g., directives with id, name, content)
+                    serialized_facts.append(
+                        {
+                            "id": str(fact["id"]),
+                            "text": fact.get("text", fact.get("content", fact.get("name", ""))),
+                            "type": fact_type,
+                            "context": fact.get("context", None),
+                        }
+                    )
+                else:
+                    # MemoryFact object with .id, .text, .context attributes
+                    serialized_facts.append(
+                        {
+                            "id": str(fact.id),
+                            "text": fact.text,
+                            "type": fact_type,
+                            "context": fact.context,
+                        }
+                    )
+            based_on_serialized_payload[fact_type] = serialized_facts
+
         reflect_response_payload = {
             "text": reflect_result.text,
-            "based_on": {
-                fact_type: [
-                    {
-                        "id": str(fact.id),
-                        "text": fact.text,
-                        "type": fact_type,
-                        "context": fact.context,  # Include context to distinguish directives from mental models in UI
-                    }
-                    for fact in facts
-                ]
-                for fact_type, facts in reflect_result.based_on.items()
-            },
+            "based_on": based_on_serialized_payload,
             "mental_models": [],  # Mental models are included in based_on["mental-models"]
         }
 
