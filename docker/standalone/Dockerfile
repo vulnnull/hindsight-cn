@@ -8,6 +8,7 @@
 #                                     Set to false when using external providers (TEI, OpenAI, Cohere)
 #   PRELOAD_ML_MODELS=true/false   - Pre-download ML models during build (default: true)
 #                                     Only effective when INCLUDE_LOCAL_MODELS=true
+#                                     NOTE: tiktoken encodings are ALWAYS preloaded (required for air-gapped deployments)
 #
 # Examples:
 #   docker build -t hindsight .                                          # Both (standalone)
@@ -167,6 +168,28 @@ USER hindsight
 
 ENV PATH="/app/api/.venv/bin:${PATH}"
 
+# Pre-download tiktoken encoding (ALWAYS - required for token counting even in air-gapped envs)
+# Tiktoken is a core runtime dependency, not an optional ML model
+RUN MAX_RETRIES=3; \
+    RETRY_DELAY=5; \
+    for i in $(seq 1 $MAX_RETRIES); do \
+      echo "Attempt $i/$MAX_RETRIES: Downloading tiktoken encoding..."; \
+      /app/api/.venv/bin/python -c "\
+import tiktoken; \
+print('Downloading cl100k_base encoding...'); \
+tiktoken.get_encoding('cl100k_base'); \
+print('Tiktoken encoding cached successfully')" && break; \
+      if [ $i -lt $MAX_RETRIES ]; then \
+        echo "Attempt $i failed, retrying in ${RETRY_DELAY}s..."; \
+        sleep $RETRY_DELAY; \
+        RETRY_DELAY=$((RETRY_DELAY * 2)); \
+      fi; \
+    done; \
+    if [ $i -eq $MAX_RETRIES ]; then \
+      echo "ERROR: Failed to download tiktoken encoding after $MAX_RETRIES attempts"; \
+      exit 1; \
+    fi
+
 # Pre-download ML models to avoid runtime download (conditional)
 # Only runs if both PRELOAD_ML_MODELS=true AND INCLUDE_LOCAL_MODELS=true
 # Includes retry logic with exponential backoff for transient network failures
@@ -185,7 +208,6 @@ print('Downloading embedding model...'); \
 SentenceTransformer('BAAI/bge-small-en-v1.5'); \
 print('Downloading cross-encoder model...'); \
 CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
-print('Downloading tiktoken encoding...'); import tiktoken; tiktoken.get_encoding('cl100k_base'); \
 print('Models cached successfully')" && break; \
       if [ $i -lt $MAX_RETRIES ]; then \
         echo "Attempt $i failed, retrying in ${RETRY_DELAY}s..."; \
@@ -297,6 +319,28 @@ USER hindsight
 
 ENV PATH="/app/api/.venv/bin:${PATH}"
 
+# Pre-download tiktoken encoding (ALWAYS - required for token counting even in air-gapped envs)
+# Tiktoken is a core runtime dependency, not an optional ML model
+RUN MAX_RETRIES=3; \
+    RETRY_DELAY=5; \
+    for i in $(seq 1 $MAX_RETRIES); do \
+      echo "Attempt $i/$MAX_RETRIES: Downloading tiktoken encoding..."; \
+      /app/api/.venv/bin/python -c "\
+import tiktoken; \
+print('Downloading cl100k_base encoding...'); \
+tiktoken.get_encoding('cl100k_base'); \
+print('Tiktoken encoding cached successfully')" && break; \
+      if [ $i -lt $MAX_RETRIES ]; then \
+        echo "Attempt $i failed, retrying in ${RETRY_DELAY}s..."; \
+        sleep $RETRY_DELAY; \
+        RETRY_DELAY=$((RETRY_DELAY * 2)); \
+      fi; \
+    done; \
+    if [ $i -eq $MAX_RETRIES ]; then \
+      echo "ERROR: Failed to download tiktoken encoding after $MAX_RETRIES attempts"; \
+      exit 1; \
+    fi
+
 # Pre-download ML models to avoid runtime download (conditional)
 # Only runs if both PRELOAD_ML_MODELS=true AND INCLUDE_LOCAL_MODELS=true
 # Includes retry logic with exponential backoff for transient network failures
@@ -315,7 +359,6 @@ print('Downloading embedding model...'); \
 SentenceTransformer('BAAI/bge-small-en-v1.5'); \
 print('Downloading cross-encoder model...'); \
 CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
-print('Downloading tiktoken encoding...'); import tiktoken; tiktoken.get_encoding('cl100k_base'); \
 print('Models cached successfully')" && break; \
       if [ $i -lt $MAX_RETRIES ]; then \
         echo "Attempt $i failed, retrying in ${RETRY_DELAY}s..."; \
