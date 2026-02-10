@@ -129,6 +129,23 @@ class MockLLM(LLMInterface):
         if self._mock_exception is not None:
             raise self._mock_exception
 
+        # Record trace span (minimal for mock provider)
+        from hindsight_api.tracing import get_span_recorder
+
+        span_recorder = get_span_recorder()
+        span_recorder.record_llm_call(
+            provider=self.provider,
+            model=self.model,
+            scope=scope,
+            messages=messages,
+            response_content="mock response",
+            input_tokens=10,
+            output_tokens=5,
+            duration=0.001,  # Mock calls are instant
+            finish_reason="stop",
+            error=None,
+        )
+
         # Return mock response
         if self._mock_response is not None:
             result = self._mock_response
@@ -192,20 +209,50 @@ class MockLLM(LLMInterface):
         if self._mock_exception is not None:
             raise self._mock_exception
 
+        # Record OpenTelemetry span
+        from hindsight_api.tracing import get_span_recorder
+
+        span_recorder = get_span_recorder()
+
         if self._mock_response is not None:
             if isinstance(self._mock_response, LLMToolCallResult):
-                return self._mock_response
-            # Allow setting just tool calls as a list
-            if isinstance(self._mock_response, list):
-                return LLMToolCallResult(
+                result = self._mock_response
+            elif isinstance(self._mock_response, list):
+                # Allow setting just tool calls as a list
+                result = LLMToolCallResult(
                     tool_calls=[
                         LLMToolCall(id=f"mock_{i}", name=tc["name"], arguments=tc.get("arguments", {}))
                         for i, tc in enumerate(self._mock_response)
                     ],
                     finish_reason="tool_calls",
                 )
+            else:
+                result = LLMToolCallResult(content="mock response", finish_reason="stop")
+        else:
+            result = LLMToolCallResult(content="mock response", finish_reason="stop")
 
-        return LLMToolCallResult(content="mock response", finish_reason="stop")
+        # Record span with mock values
+        # Convert LLMToolCall objects to dicts for span recording
+        tool_calls_dict = (
+            [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in result.tool_calls]
+            if result.tool_calls
+            else None
+        )
+        span_recorder.record_llm_call(
+            provider=self.provider,
+            model=self.model,
+            scope=scope,
+            messages=messages,
+            response_content=result.content,
+            input_tokens=10,  # Mock value
+            output_tokens=5,  # Mock value
+            duration=0.1,  # Mock value
+            finish_reason=result.finish_reason,
+            error=None,
+            tool_calls=tool_calls_dict,
+        )
+
+        return result
 
     async def cleanup(self) -> None:
         """Clean up resources (no-op for mock provider)."""

@@ -242,6 +242,11 @@ def main():
             worker_consolidation_max_slots=config.worker_consolidation_max_slots,
             reflect_max_iterations=config.reflect_max_iterations,
             mental_model_refresh_concurrency=config.mental_model_refresh_concurrency,
+            otel_traces_enabled=config.otel_traces_enabled,
+            otel_exporter_otlp_endpoint=config.otel_exporter_otlp_endpoint,
+            otel_exporter_otlp_headers=config.otel_exporter_otlp_headers,
+            otel_service_name=config.otel_service_name,
+            otel_deployment_environment=config.otel_deployment_environment,
         )
     config.configure_logging()
     if not args.daemon:

@@ -45,6 +45,7 @@ cd hindsight-control-plane && npm run dev
 ./scripts/dev/start-docs.sh
 ```
 
+
 ### Generating Clients/OpenAPI
 ```bash
 # Regenerate OpenAPI spec after API changes (REQUIRED after changing endpoints)

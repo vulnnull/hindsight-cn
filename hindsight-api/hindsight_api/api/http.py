@@ -1400,6 +1400,26 @@ def create_app(
             app.state.prometheus_reader = None
             # Metrics collector is already initialized as no-op by default
 
+        # Initialize OpenTelemetry tracing if enabled
+        if config.otel_traces_enabled:
+            if not config.otel_exporter_otlp_endpoint:
+                logging.warning("OTEL tracing enabled but no endpoint configured. Tracing disabled.")
+            else:
+                from hindsight_api.tracing import create_span_recorder, initialize_tracing
+
+                try:
+                    initialize_tracing(
+                        service_name=config.otel_service_name,
+                        endpoint=config.otel_exporter_otlp_endpoint,
+                        headers=config.otel_exporter_otlp_headers,
+                        deployment_environment=config.otel_deployment_environment,
+                    )
+                    create_span_recorder()
+                    logging.info("OpenTelemetry tracing enabled and configured")
+                except Exception as e:
+                    logging.error(f"Failed to initialize tracing: {e}")
+                    logging.warning("Continuing without tracing")
+
         # Startup: Initialize database and memory system (migrations run inside initialize if enabled)
         if initialize_memory:
             await memory.initialize()

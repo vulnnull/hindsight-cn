@@ -426,94 +426,109 @@ async def _process_memory(
     Returns:
         Dict with action summary: created/updated/merged counts
     """
+    from ...tracing import get_tracer, is_tracing_enabled
+
     fact_text = memory["text"]
     memory_id = memory["id"]
     fact_tags = memory.get("tags") or []
 
-    # Find related observations using the full recall system
-    # SECURITY: Pass tags to ensure observations don't leak across security boundaries
-    t0 = time.time()
-    related_observations = await _find_related_observations(
-        conn=conn,
-        memory_engine=memory_engine,
-        bank_id=bank_id,
-        query=fact_text,
-        request_context=request_context,
-        tags=fact_tags,  # Pass source memory's tags for security
-    )
-    if perf:
-        perf.record_timing("recall", time.time() - t0)
+    # Create parent span for this memory's consolidation
+    tracer = get_tracer()
+    if is_tracing_enabled():
+        consolidation_span = tracer.start_span("hindsight.consolidation")
+        consolidation_span.set_attribute("hindsight.memory_id", str(memory_id))
+        consolidation_span.set_attribute("hindsight.bank_id", bank_id)
+    else:
+        consolidation_span = None
 
-    # Single LLM call handles ALL cases (with or without existing observations)
-    # Note: Tags are NOT passed to LLM - they are handled algorithmically
-    t0 = time.time()
-    actions = await _consolidate_with_llm(
-        memory_engine=memory_engine,
-        fact_text=fact_text,
-        observations=related_observations,  # Can be empty list
-        mission=mission,
-    )
-    if perf:
-        perf.record_timing("llm", time.time() - t0)
+    try:
+        # Find related observations using the full recall system
+        # SECURITY: Pass tags to ensure observations don't leak across security boundaries
+        t0 = time.time()
+        related_observations = await _find_related_observations(
+            conn=conn,
+            memory_engine=memory_engine,
+            bank_id=bank_id,
+            query=fact_text,
+            request_context=request_context,
+            tags=fact_tags,  # Pass source memory's tags for security
+        )
+        if perf:
+            perf.record_timing("recall", time.time() - t0)
 
-    if not actions:
-        # LLM returned empty array - fact is purely ephemeral, skip
-        return {"action": "skipped", "reason": "no_durable_knowledge"}
+        # Single LLM call handles ALL cases (with or without existing observations)
+        # Note: Tags are NOT passed to LLM - they are handled algorithmically
+        t0 = time.time()
+        actions = await _consolidate_with_llm(
+            memory_engine=memory_engine,
+            fact_text=fact_text,
+            observations=related_observations,  # Can be empty list
+            mission=mission,
+        )
+        if perf:
+            perf.record_timing("llm", time.time() - t0)
 
-    # Execute all actions and collect results
-    results = []
-    for action in actions:
-        action_type = action.get("action")
-        if action_type == "update":
-            result = await _execute_update_action(
-                conn=conn,
-                memory_engine=memory_engine,
-                bank_id=bank_id,
-                memory_id=memory_id,
-                action=action,
-                observations=related_observations,
-                source_fact_tags=fact_tags,  # Pass source fact's tags for security
-                source_occurred_start=memory.get("occurred_start"),
-                source_occurred_end=memory.get("occurred_end"),
-                source_mentioned_at=memory.get("mentioned_at"),
-                perf=perf,
-            )
-            results.append(result)
-        elif action_type == "create":
-            result = await _execute_create_action(
-                conn=conn,
-                memory_engine=memory_engine,
-                bank_id=bank_id,
-                memory_id=memory_id,
-                action=action,
-                source_fact_tags=fact_tags,  # Pass source fact's tags for security
-                event_date=memory.get("event_date"),
-                occurred_start=memory.get("occurred_start"),
-                occurred_end=memory.get("occurred_end"),
-                mentioned_at=memory.get("mentioned_at"),
-                perf=perf,
-            )
-            results.append(result)
+        if not actions:
+            # LLM returned empty array - fact is purely ephemeral, skip
+            return {"action": "skipped", "reason": "no_durable_knowledge"}
 
-    if not results:
-        # No valid actions executed
-        return {"action": "skipped", "reason": "no_valid_actions"}
+        # Execute all actions and collect results
+        results = []
+        for action in actions:
+            action_type = action.get("action")
+            if action_type == "update":
+                result = await _execute_update_action(
+                    conn=conn,
+                    memory_engine=memory_engine,
+                    bank_id=bank_id,
+                    memory_id=memory_id,
+                    action=action,
+                    observations=related_observations,
+                    source_fact_tags=fact_tags,  # Pass source fact's tags for security
+                    source_occurred_start=memory.get("occurred_start"),
+                    source_occurred_end=memory.get("occurred_end"),
+                    source_mentioned_at=memory.get("mentioned_at"),
+                    perf=perf,
+                )
+                results.append(result)
+            elif action_type == "create":
+                result = await _execute_create_action(
+                    conn=conn,
+                    memory_engine=memory_engine,
+                    bank_id=bank_id,
+                    memory_id=memory_id,
+                    action=action,
+                    source_fact_tags=fact_tags,  # Pass source fact's tags for security
+                    event_date=memory.get("event_date"),
+                    occurred_start=memory.get("occurred_start"),
+                    occurred_end=memory.get("occurred_end"),
+                    mentioned_at=memory.get("mentioned_at"),
+                    perf=perf,
+                )
+                results.append(result)
 
-    # Summarize results
-    created = sum(1 for r in results if r.get("action") == "created")
-    updated = sum(1 for r in results if r.get("action") == "updated")
-    merged = sum(1 for r in results if r.get("action") == "merged")
+        if not results:
+            # No valid actions executed
+            return {"action": "skipped", "reason": "no_valid_actions"}
 
-    if len(results) == 1:
-        return results[0]
+        # Summarize results
+        created = sum(1 for r in results if r.get("action") == "created")
+        updated = sum(1 for r in results if r.get("action") == "updated")
+        merged = sum(1 for r in results if r.get("action") == "merged")
 
-    return {
-        "action": "multiple",
-        "created": created,
-        "updated": updated,
-        "merged": merged,
-        "total_actions": len(results),
-    }
+        if len(results) == 1:
+            return results[0]
+
+        return {
+            "action": "multiple",
+            "created": created,
+            "updated": updated,
+            "merged": merged,
+            "total_actions": len(results),
+        }
+    finally:
+        if consolidation_span:
+            consolidation_span.end()
 
 
 async def _execute_update_action(
@@ -733,22 +748,37 @@ async def _find_related_observations(
     # Use recall to find related observations with token budget
     # max_tokens naturally limits how many observations are returned
     from ...config import get_config
+    from ...tracing import get_tracer, is_tracing_enabled
 
     config = get_config()
 
     # SECURITY: Use all_strict matching if tags provided to prevent cross-scope consolidation
     tags_match = "all_strict" if tags else "any"
 
-    recall_result = await memory_engine.recall_async(
-        bank_id=bank_id,
-        query=query,
-        max_tokens=config.consolidation_max_tokens,  # Token budget for observations (configurable)
-        fact_type=["observation"],  # Only retrieve observations
-        request_context=request_context,
-        tags=tags,  # Filter by source memory's tags
-        tags_match=tags_match,  # Use strict matching for security
-        _quiet=True,  # Suppress logging
-    )
+    # Create span for recall operation within consolidation
+    tracer = get_tracer()
+    if is_tracing_enabled():
+        recall_span = tracer.start_span("hindsight.consolidation_recall")
+        recall_span.set_attribute("hindsight.bank_id", bank_id)
+        recall_span.set_attribute("hindsight.query", query[:100])  # Truncate for brevity
+        recall_span.set_attribute("hindsight.fact_type", "observation")
+    else:
+        recall_span = None
+
+    try:
+        recall_result = await memory_engine.recall_async(
+            bank_id=bank_id,
+            query=query,
+            max_tokens=config.consolidation_max_tokens,  # Token budget for observations (configurable)
+            fact_type=["observation"],  # Only retrieve observations
+            request_context=request_context,
+            tags=tags,  # Filter by source memory's tags
+            tags_match=tags_match,  # Use strict matching for security
+            _quiet=True,  # Suppress logging
+        )
+    finally:
+        if recall_span:
+            recall_span.end()
 
     # If no observations returned, return empty list
     if not recall_result.results:

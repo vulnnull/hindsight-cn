@@ -84,7 +84,7 @@ class AnthropicLLM(LLMInterface):
                 messages=test_messages,
                 max_completion_tokens=10,
                 temperature=0.0,
-                scope="test",
+                scope="verification",
                 max_retries=0,
             )
             logger.info("Anthropic connection verified successfully")
@@ -221,6 +221,24 @@ class AnthropicLLM(LLMInterface):
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     success=True,
+                )
+
+                # Record trace span
+                from hindsight_api.tracing import _serialize_for_span, get_span_recorder
+
+                finish_reason = response.stop_reason if hasattr(response, "stop_reason") else None
+                span_recorder = get_span_recorder()
+                span_recorder.record_llm_call(
+                    provider=self.provider,
+                    model=self.model,
+                    scope=scope,
+                    messages=messages,
+                    response_content=_serialize_for_span(result),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    duration=duration,
+                    finish_reason=finish_reason,
+                    error=None,
                 )
 
                 # Log slow calls
@@ -397,14 +415,39 @@ class AnthropicLLM(LLMInterface):
 
                 # Record metrics
                 metrics = get_metrics_collector()
+                duration = time.time() - start_time
                 metrics.record_llm_call(
                     provider=self.provider,
                     model=self.model,
                     scope=scope,
-                    duration=time.time() - start_time,
+                    duration=duration,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     success=True,
+                )
+
+                # Record OpenTelemetry span
+                from hindsight_api.tracing import get_span_recorder
+
+                span_recorder = get_span_recorder()
+                # Convert LLMToolCall objects to dicts for span recording
+                tool_calls_dict = (
+                    [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tool_calls]
+                    if tool_calls
+                    else None
+                )
+                span_recorder.record_llm_call(
+                    provider=self.provider,
+                    model=self.model,
+                    scope=scope,
+                    messages=messages,
+                    response_content=content,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    duration=duration,
+                    finish_reason=finish_reason,
+                    error=None,
+                    tool_calls=tool_calls_dict,
                 )
 
                 return LLMToolCallResult(

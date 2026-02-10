@@ -402,7 +402,7 @@ async def run_reflect_agent(
                     {"role": "system", "content": FINAL_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                scope="reflect_agent_final",
+                scope="reflect",
                 max_completion_tokens=max_tokens,
                 return_usage=True,
             )
@@ -447,7 +447,7 @@ async def run_reflect_agent(
             result = await llm_config.call_with_tools(
                 messages=messages,
                 tools=tools,
-                scope="reflect_agent",
+                scope="reflect_tool_call",
                 tool_choice="required" if iteration == 0 else "auto",  # Force tool use on first iteration
             )
             llm_duration = int((time.time() - llm_start) * 1000)
@@ -479,7 +479,7 @@ async def run_reflect_agent(
                     {"role": "system", "content": FINAL_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                scope="reflect_agent_final",
+                scope="reflect",
                 max_completion_tokens=max_tokens,
                 return_usage=True,
             )
@@ -550,7 +550,7 @@ async def run_reflect_agent(
                     {"role": "system", "content": FINAL_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                scope="reflect_agent_final",
+                scope="reflect",
                 max_completion_tokens=max_tokens,
                 return_usage=True,
             )
@@ -617,23 +617,30 @@ async def run_reflect_agent(
                 )
                 continue
 
-            # Process done tool
-            return await _process_done_tool(
-                done_call,
-                available_memory_ids,
-                available_mental_model_ids,
-                available_observation_ids,
-                iteration + 1,
-                total_tools_called,
-                tool_trace,
-                _get_llm_trace(),
-                _get_usage(),
-                _log_completion,
-                reflect_id,
-                directives_applied=directives_applied,
-                llm_config=llm_config,
-                response_schema=response_schema,
-            )
+            # Process done tool - wrap with tool call span
+            from hindsight_api.tracing import get_tracer
+
+            tracer = get_tracer()
+            span_name = "hindsight.reflect_tool_call"
+            with tracer.start_as_current_span(span_name) as span:
+                span.set_attribute("hindsight.scope", "reflect_tool_call")
+                span.set_attribute("hindsight.operation", "reflect_tool_call")
+                return await _process_done_tool(
+                    done_call,
+                    available_memory_ids,
+                    available_mental_model_ids,
+                    available_observation_ids,
+                    iteration + 1,
+                    total_tools_called,
+                    tool_trace,
+                    _get_llm_trace(),
+                    _get_usage(),
+                    _log_completion,
+                    reflect_id,
+                    directives_applied=directives_applied,
+                    llm_config=llm_config,
+                    response_schema=response_schema,
+                )
 
         # Execute other tools in parallel (exclude done tool in all its format variants)
         other_tools = [tc for tc in result.tool_calls if not _is_done_tool(tc.name)]
@@ -842,17 +849,67 @@ async def _execute_tool_with_timing(
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
 ) -> tuple[dict[str, Any], int]:
     """Execute a tool call and return result with timing."""
-    start = time.time()
-    result = await _execute_tool(
-        tc.name,
-        tc.arguments,
-        search_mental_models_fn,
-        search_observations_fn,
-        recall_fn,
-        expand_fn,
-    )
-    duration_ms = int((time.time() - start) * 1000)
-    return result, duration_ms
+    from hindsight_api.tracing import get_tracer
+
+    start_time = time.time()
+
+    # Create span for tool execution
+    tracer = get_tracer()
+    # Normalize tool name for span
+    normalized_name = _normalize_tool_name(tc.name)
+    span_name = f"hindsight.reflect_tool_exec.{normalized_name}"
+
+    # Calculate timestamps
+    start_time_ns = time.time_ns()
+
+    with tracer.start_as_current_span(
+        span_name,
+        start_time=start_time_ns,
+        end_on_exit=False,
+    ) as span:
+        # Set attributes
+        span.set_attribute("hindsight.tool.name", normalized_name)
+        span.set_attribute("hindsight.tool.id", tc.id)
+        span.set_attribute("hindsight.tool.arguments", json.dumps(tc.arguments))
+
+        try:
+            result = await _execute_tool(
+                tc.name,
+                tc.arguments,
+                search_mental_models_fn,
+                search_observations_fn,
+                recall_fn,
+                expand_fn,
+            )
+
+            # Set success attributes
+            if isinstance(result, dict) and "error" in result:
+                from opentelemetry.trace import Status, StatusCode
+
+                span.set_status(Status(StatusCode.ERROR, result["error"]))
+            else:
+                from opentelemetry.trace import Status, StatusCode
+
+                span.set_status(Status(StatusCode.OK))
+
+            duration_ms = int((time.time() - start_time) * 1000)
+            span.set_attribute("hindsight.tool.duration_ms", duration_ms)
+
+            # End span with correct timestamp
+            end_time_ns = time.time_ns()
+            span.end(end_time=end_time_ns)
+
+            return result, duration_ms
+        except Exception as e:
+            from opentelemetry.trace import Status, StatusCode
+
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            duration_ms = int((time.time() - start_time) * 1000)
+            span.set_attribute("hindsight.tool.duration_ms", duration_ms)
+            end_time_ns = time.time_ns()
+            span.end(end_time=end_time_ns)
+            raise
 
 
 async def _execute_tool(

@@ -95,7 +95,7 @@ class ClaudeCodeLLM(LLMInterface):
                 messages=test_messages,
                 max_completion_tokens=10,
                 temperature=0.0,
-                scope="test",
+                scope="verification",
                 max_retries=0,
             )
             logger.info("Claude Code connection verified successfully")
@@ -235,6 +235,23 @@ class ClaudeCodeLLM(LLMInterface):
                     input_tokens=estimated_input,
                     output_tokens=estimated_output,
                     success=True,
+                )
+
+                # Record trace span
+                from hindsight_api.tracing import get_span_recorder
+
+                span_recorder = get_span_recorder()
+                span_recorder.record_llm_call(
+                    provider=self.provider,
+                    model=self.model,
+                    scope=scope,
+                    messages=messages,
+                    response_content=result if isinstance(result, str) else json.dumps(result),
+                    input_tokens=estimated_input,
+                    output_tokens=estimated_output,
+                    duration=duration,
+                    finish_reason=None,
+                    error=None,
                 )
 
                 # Log slow calls

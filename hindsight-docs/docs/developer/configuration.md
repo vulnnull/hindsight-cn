@@ -558,6 +558,74 @@ await memory.initialize()
 
 ---
 
+## Observability & Tracing
+
+Hindsight provides OpenTelemetry-based observability for LLM calls, conforming to GenAI semantic conventions.
+
+### OpenTelemetry Tracing
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_OTEL_TRACES_ENABLED` | Enable distributed tracing for LLM calls | `false` |
+| `HINDSIGHT_API_OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL (e.g., Grafana LGTM, Langfuse, etc.) | - |
+| `HINDSIGHT_API_OTEL_EXPORTER_OTLP_HEADERS` | Headers for OTLP exporter (format: "key1=value1,key2=value2") | - |
+| `HINDSIGHT_API_OTEL_SERVICE_NAME` | Service name for traces | `hindsight-api` |
+| `HINDSIGHT_API_OTEL_DEPLOYMENT_ENVIRONMENT` | Deployment environment name (e.g., development, staging, production) | `development` |
+
+**Features:**
+- Full prompts and completions recorded as events
+- Token usage tracking (input/output)
+- Model and provider information
+- Error tracking with finish reasons
+- Conforms to OpenTelemetry GenAI semantic conventions v1.37+
+
+**OTLP-Compatible Backends:**
+
+The tracing implementation uses standard OTLP HTTP protocol, so it works with any OTLP-compatible backend:
+- **Grafana LGTM** (Recommended for local dev): All-in-one stack with Tempo traces, Loki logs, Mimir metrics, and Grafana UI
+- **Langfuse**: LLM-focused observability and analytics
+- **OpenLIT**: Built-in LLM dashboards, cost tracking
+- **DataDog, New Relic, Honeycomb**: Commercial platforms
+
+**Example Configuration:**
+
+```bash
+# Enable tracing
+export HINDSIGHT_API_OTEL_TRACES_ENABLED=true
+
+# Configure endpoint (example: OpenLIT Cloud)
+export HINDSIGHT_API_OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.openlit.io
+export HINDSIGHT_API_OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer olit-xxx"
+
+# Optional: Custom service name and environment
+export HINDSIGHT_API_OTEL_SERVICE_NAME=hindsight-production
+export HINDSIGHT_API_OTEL_DEPLOYMENT_ENVIRONMENT=production
+```
+
+**Local Development:**
+
+For local development, we recommend the Grafana LGTM stack which provides traces, metrics, and logs in a single container:
+
+```bash
+./scripts/dev/start-grafana.sh
+```
+
+See `scripts/dev/grafana/README.md` for detailed setup instructions.
+
+Other options: See `scripts/dev/openlit/README.md` for OpenLIT or `scripts/dev/jaeger/README.md` for standalone Jaeger.
+
+### Metrics
+
+Hindsight exposes Prometheus metrics at the `/metrics` endpoint, including:
+- LLM call duration and token usage
+- Operation duration (retain/recall/reflect)
+- HTTP request metrics
+- Database connection pool metrics
+
+Metrics are always enabled and available at `http://localhost:8888/metrics`.
+
+---
+
 ## Control Plane
 
 The Control Plane is the web UI for managing memory banks.

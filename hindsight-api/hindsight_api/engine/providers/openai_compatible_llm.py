@@ -130,6 +130,7 @@ class OpenAICompatibleLLM(LLMInterface):
                 max_retries=2,
                 initial_backoff=0.5,
                 max_backoff=2.0,
+                scope="verification",
             )
             logger.info(f"Connection verified: {self.provider}/{self.model}")
         except Exception as e:
@@ -368,6 +369,24 @@ class OpenAICompatibleLLM(LLMInterface):
                     success=True,
                 )
 
+                # Record trace span
+                from hindsight_api.tracing import _serialize_for_span, get_span_recorder
+
+                finish_reason = response.choices[0].finish_reason if response.choices else None
+                span_recorder = get_span_recorder()
+                span_recorder.record_llm_call(
+                    provider=self.provider,
+                    model=self.model,
+                    scope=scope,
+                    messages=messages,
+                    response_content=_serialize_for_span(result),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    duration=duration,
+                    finish_reason=finish_reason,
+                    error=None,
+                )
+
                 # Log slow calls
                 if duration > 10.0 and usage:
                     ratio = max(1, output_tokens) / max(1, input_tokens)
@@ -554,6 +573,30 @@ class OpenAICompatibleLLM(LLMInterface):
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     success=True,
+                )
+
+                # Record OpenTelemetry span
+                from hindsight_api.tracing import get_span_recorder
+
+                span_recorder = get_span_recorder()
+                # Convert LLMToolCall objects to dicts for span recording
+                tool_calls_dict = (
+                    [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tool_calls]
+                    if tool_calls
+                    else None
+                )
+                span_recorder.record_llm_call(
+                    provider=self.provider,
+                    model=self.model,
+                    scope=scope,
+                    messages=messages,
+                    response_content=content,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    duration=duration,
+                    finish_reason=finish_reason,
+                    error=None,
+                    tool_calls=tool_calls_dict,
                 )
 
                 return LLMToolCallResult(

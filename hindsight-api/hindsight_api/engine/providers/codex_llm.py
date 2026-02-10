@@ -136,6 +136,7 @@ class CodexLLM(LLMInterface):
                 max_retries=2,
                 initial_backoff=0.5,
                 max_backoff=2.0,
+                scope="verification",
             )
             logger.info(f"Codex LLM verified: {self.model}")
         except Exception as e:
@@ -259,6 +260,26 @@ class CodexLLM(LLMInterface):
                     input_tokens=0,  # Codex doesn't report token counts in SSE
                     output_tokens=0,
                     success=True,
+                )
+
+                # Record trace span
+                from hindsight_api.tracing import get_span_recorder
+
+                # Estimate tokens for tracing
+                estimated_input = sum(len(m.get("content", "")) for m in messages) // 4
+                estimated_output = len(content) // 4
+                span_recorder = get_span_recorder()
+                span_recorder.record_llm_call(
+                    provider=self.provider,
+                    model=self.model,
+                    scope=scope,
+                    messages=messages,
+                    response_content=result if isinstance(result, str) else json.dumps(result),
+                    input_tokens=estimated_input,
+                    output_tokens=estimated_output,
+                    duration=duration,
+                    finish_reason=None,
+                    error=None,
                 )
 
                 if return_usage:
@@ -502,6 +523,28 @@ class CodexLLM(LLMInterface):
                 input_tokens=0,
                 output_tokens=0,
                 success=True,
+            )
+
+            # Record OpenTelemetry span
+            from hindsight_api.tracing import get_span_recorder
+
+            span_recorder = get_span_recorder()
+            # Convert LLMToolCall objects to dicts for span recording
+            tool_calls_dict = (
+                [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tool_calls] if tool_calls else None
+            )
+            span_recorder.record_llm_call(
+                provider=self.provider,
+                model=self.model,
+                scope=scope,
+                messages=messages,
+                response_content=content,
+                input_tokens=0,  # Codex doesn't provide token counts
+                output_tokens=0,
+                duration=duration,
+                finish_reason="tool_calls" if tool_calls else "stop",
+                error=None,
+                tool_calls=tool_calls_dict,
             )
 
             return LLMToolCallResult(
