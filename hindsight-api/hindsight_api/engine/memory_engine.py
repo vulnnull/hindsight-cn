@@ -1487,6 +1487,9 @@ class MemoryEngine(MemoryEngineInterface):
                 unit_ids=result,
                 success=True,
                 error=None,
+                llm_input_tokens=total_usage.input_tokens,
+                llm_output_tokens=total_usage.output_tokens,
+                llm_total_tokens=total_usage.total_tokens,
             )
             try:
                 await self._operation_validator.on_retain_complete(result_ctx)

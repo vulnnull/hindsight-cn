@@ -353,6 +353,14 @@ class TestOperationHooksParameters:
         assert post_result.error is None
         assert post_result.unit_ids == result  # Should match the return value
 
+        # Verify actual LLM token usage is populated
+        assert post_result.llm_input_tokens is not None
+        assert post_result.llm_input_tokens > 0
+        assert post_result.llm_output_tokens is not None
+        assert post_result.llm_output_tokens > 0
+        assert post_result.llm_total_tokens is not None
+        assert post_result.llm_total_tokens == post_result.llm_input_tokens + post_result.llm_output_tokens
+
     @pytest.mark.asyncio
     async def test_recall_pre_hook_receives_all_parameters(self, memory_with_tracking_validator):
         """Pre-recall hook receives all user-provided parameters."""

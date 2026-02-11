@@ -132,6 +132,10 @@ class RetainResult:
     unit_ids: list[list[str]]  # List of unit IDs per content item
     success: bool = True
     error: str | None = None
+    # Actual LLM token usage (populated by engine when available)
+    llm_input_tokens: int | None = None
+    llm_output_tokens: int | None = None
+    llm_total_tokens: int | None = None
 
 
 @dataclass
