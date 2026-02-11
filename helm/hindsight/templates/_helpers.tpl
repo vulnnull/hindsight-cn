@@ -128,6 +128,38 @@ API URL for control plane
 {{- end }}
 
 {{/*
+TEI reranker labels
+*/}}
+{{- define "hindsight.tei.reranker.labels" -}}
+{{ include "hindsight.labels" . }}
+app.kubernetes.io/component: tei-reranker
+{{- end }}
+
+{{/*
+TEI reranker selector labels
+*/}}
+{{- define "hindsight.tei.reranker.selectorLabels" -}}
+{{ include "hindsight.selectorLabels" . }}
+app.kubernetes.io/component: tei-reranker
+{{- end }}
+
+{{/*
+TEI embedding labels
+*/}}
+{{- define "hindsight.tei.embedding.labels" -}}
+{{ include "hindsight.labels" . }}
+app.kubernetes.io/component: tei-embedding
+{{- end }}
+
+{{/*
+TEI embedding selector labels
+*/}}
+{{- define "hindsight.tei.embedding.selectorLabels" -}}
+{{ include "hindsight.selectorLabels" . }}
+app.kubernetes.io/component: tei-embedding
+{{- end }}
+
+{{/*
 Get the name of the secret to use
 */}}
 {{- define "hindsight.secretName" -}}

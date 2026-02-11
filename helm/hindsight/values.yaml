@@ -293,6 +293,84 @@ tolerations: []
 # Affinity (applied to all components unless overridden per-component)
 affinity: {}
 
+# TEI (Text Embeddings Inference) - optional standalone deployments
+# for reranking and/or embedding models
+tei:
+  reranker:
+    enabled: false
+    replicaCount: 1
+    image:
+      repository: ghcr.io/huggingface/text-embeddings-inference
+      tag: cpu-1.8.3
+      pullPolicy: IfNotPresent
+    model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    port: 8090
+    args:
+      - "--auto-truncate"
+    env:
+      PAYLOAD_LIMIT: "10000000"
+      MAX_CLIENT_BATCH_SIZE: "256"
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8090
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 6
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8090
+      initialDelaySeconds: 15
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+  embedding:
+    enabled: false
+    replicaCount: 1
+    image:
+      repository: ghcr.io/huggingface/text-embeddings-inference
+      tag: cpu-1.8.3
+      pullPolicy: IfNotPresent
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    port: 8091
+    args: []
+    env:
+      PAYLOAD_LIMIT: "10000000"
+      MAX_CLIENT_BATCH_SIZE: "256"
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8091
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 6
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8091
+      initialDelaySeconds: 15
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
 # Autoscaling
 autoscaling:
   enabled: false

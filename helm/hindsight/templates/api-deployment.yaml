@@ -67,6 +67,18 @@ spec:
         - name: {{ $key }}
           value: {{ $value | quote }}
         {{- end }}
+        {{- if .Values.tei.reranker.enabled }}
+        - name: HINDSIGHT_API_RERANKER_PROVIDER
+          value: "tei"
+        - name: HINDSIGHT_API_RERANKER_TEI_URL
+          value: "http://{{ include "hindsight.fullname" . }}-tei-reranker:{{ .Values.tei.reranker.port }}"
+        {{- end }}
+        {{- if .Values.tei.embedding.enabled }}
+        - name: HINDSIGHT_API_EMBEDDINGS_PROVIDER
+          value: "tei"
+        - name: HINDSIGHT_API_EMBEDDINGS_TEI_URL
+          value: "http://{{ include "hindsight.fullname" . }}-tei-embedding:{{ .Values.tei.embedding.port }}"
+        {{- end }}
         {{- /* Only use api.secrets when not using existingSecret (for chart-managed secrets) */}}
         {{- if not .Values.existingSecret }}
         {{- range $key, $value := .Values.api.secrets }}
