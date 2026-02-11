@@ -24,6 +24,7 @@ from ..config import (
     DEFAULT_RERANKER_LOCAL_FORCE_CPU,
     DEFAULT_RERANKER_LOCAL_MAX_CONCURRENT,
     DEFAULT_RERANKER_LOCAL_MODEL,
+    DEFAULT_RERANKER_LOCAL_TRUST_REMOTE_CODE,
     DEFAULT_RERANKER_PROVIDER,
     DEFAULT_RERANKER_TEI_BATCH_SIZE,
     DEFAULT_RERANKER_TEI_MAX_CONCURRENT,
@@ -34,6 +35,7 @@ from ..config import (
     ENV_RERANKER_LOCAL_FORCE_CPU,
     ENV_RERANKER_LOCAL_MAX_CONCURRENT,
     ENV_RERANKER_LOCAL_MODEL,
+    ENV_RERANKER_LOCAL_TRUST_REMOTE_CODE,
     ENV_RERANKER_PROVIDER,
     ENV_RERANKER_TEI_BATCH_SIZE,
     ENV_RERANKER_TEI_MAX_CONCURRENT,
@@ -98,7 +100,13 @@ class LocalSTCrossEncoder(CrossEncoderModel):
     _executor: ThreadPoolExecutor | None = None
     _max_concurrent: int = 4  # Limit concurrent CPU-bound reranking calls
 
-    def __init__(self, model_name: str | None = None, max_concurrent: int = 4, force_cpu: bool = False):
+    def __init__(
+        self,
+        model_name: str | None = None,
+        max_concurrent: int = 4,
+        force_cpu: bool = False,
+        trust_remote_code: bool = False,
+    ):
         """
         Initialize local SentenceTransformers cross-encoder.
 
@@ -109,9 +117,13 @@ class LocalSTCrossEncoder(CrossEncoderModel):
                            Higher values may cause CPU thrashing under load.
             force_cpu: Force CPU mode (avoids MPS/XPC issues on macOS in daemon mode).
                       Default: False
+            trust_remote_code: Allow loading models with custom code (security risk).
+                              Required for some models like jina-reranker-v2-base-multilingual.
+                              Default: False (disabled for security)
         """
         self.model_name = model_name or DEFAULT_RERANKER_LOCAL_MODEL
         self.force_cpu = force_cpu
+        self.trust_remote_code = trust_remote_code
         self._model = None
         LocalSTCrossEncoder._max_concurrent = max_concurrent
 
@@ -177,6 +189,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
                     self.model_name,
                     device=device,
                     model_kwargs={"low_cpu_mem_usage": False},
+                    trust_remote_code=self.trust_remote_code,
                 )
             finally:
                 # Restore original logging level
@@ -843,6 +856,7 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
             model_name=config.reranker_local_model,
             max_concurrent=config.reranker_local_max_concurrent,
             force_cpu=config.reranker_local_force_cpu,
+            trust_remote_code=config.reranker_local_trust_remote_code,
         )
     elif provider == "cohere":
         api_key = config.reranker_cohere_api_key

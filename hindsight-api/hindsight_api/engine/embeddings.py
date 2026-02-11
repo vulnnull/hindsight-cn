@@ -21,12 +21,14 @@ from ..config import (
     DEFAULT_EMBEDDINGS_LITELLM_MODEL,
     DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU,
     DEFAULT_EMBEDDINGS_LOCAL_MODEL,
+    DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE,
     DEFAULT_EMBEDDINGS_OPENAI_MODEL,
     DEFAULT_EMBEDDINGS_PROVIDER,
     DEFAULT_LITELLM_API_BASE,
     ENV_EMBEDDINGS_COHERE_API_KEY,
     ENV_EMBEDDINGS_LOCAL_FORCE_CPU,
     ENV_EMBEDDINGS_LOCAL_MODEL,
+    ENV_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE,
     ENV_EMBEDDINGS_OPENAI_API_KEY,
     ENV_EMBEDDINGS_OPENAI_BASE_URL,
     ENV_EMBEDDINGS_OPENAI_MODEL,
@@ -90,7 +92,7 @@ class LocalSTEmbeddings(Embeddings):
     The embedding dimension is auto-detected from the model.
     """
 
-    def __init__(self, model_name: str | None = None, force_cpu: bool = False):
+    def __init__(self, model_name: str | None = None, force_cpu: bool = False, trust_remote_code: bool = False):
         """
         Initialize local SentenceTransformers embeddings.
 
@@ -99,9 +101,13 @@ class LocalSTEmbeddings(Embeddings):
                        Default: BAAI/bge-small-en-v1.5
             force_cpu: Force CPU mode (avoids MPS/XPC issues on macOS in daemon mode).
                       Default: False
+            trust_remote_code: Allow loading models with custom code (security risk).
+                              Required for some models with custom architectures.
+                              Default: False (disabled for security)
         """
         self.model_name = model_name or DEFAULT_EMBEDDINGS_LOCAL_MODEL
         self.force_cpu = force_cpu
+        self.trust_remote_code = trust_remote_code
         self._model = None
         self._dimension: int | None = None
 
@@ -171,6 +177,7 @@ class LocalSTEmbeddings(Embeddings):
                     self.model_name,
                     device=device,
                     model_kwargs={"low_cpu_mem_usage": False},
+                    trust_remote_code=self.trust_remote_code,
                 )
             finally:
                 # Restore original logging level
@@ -736,6 +743,7 @@ def create_embeddings_from_env() -> Embeddings:
         return LocalSTEmbeddings(
             model_name=config.embeddings_local_model,
             force_cpu=config.embeddings_local_force_cpu,
+            trust_remote_code=config.embeddings_local_trust_remote_code,
         )
     elif provider == "openai":
         # Use dedicated embeddings API key, or fall back to LLM API key
