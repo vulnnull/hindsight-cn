@@ -329,8 +329,8 @@ DEFAULT_RERANKER_COHERE_MODEL = "rerank-english-v3.0"
 # Vector extension (pgvector vs vchord)
 DEFAULT_VECTOR_EXTENSION = "pgvector"  # Options: "pgvector", "vchord"
 
-# Text search extension (native PostgreSQL vs vchord BM25)
-DEFAULT_TEXT_SEARCH_EXTENSION = "native"  # Options: "native", "vchord"
+# Text search extension (native PostgreSQL, vchord BM25, or Timescale pg_textsearch)
+DEFAULT_TEXT_SEARCH_EXTENSION = "native"  # Options: "native", "vchord", "pg_textsearch"
 
 # LiteLLM defaults
 DEFAULT_LITELLM_API_BASE = "http://localhost:4000"
@@ -706,7 +706,7 @@ class HindsightConfig:
             )
 
         # Validate text_search_extension
-        valid_text_search = ("native", "vchord")
+        valid_text_search = ("native", "vchord", "pg_textsearch")
         if self.text_search_extension not in valid_text_search:
             raise ValueError(
                 f"Invalid text_search_extension: {self.text_search_extension}. Must be one of: {', '.join(valid_text_search)}"

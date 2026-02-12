@@ -90,30 +90,37 @@ If you need to switch from one extension to another:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` | Text search backend: `native` or `vchord` | `native` |
+| `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` | Text search backend: `native`, `vchord`, or `pg_textsearch` | `native` |
 
-Hindsight supports two text search backends for BM25 keyword retrieval:
+Hindsight supports three text search backends for BM25 keyword retrieval:
 - **native**: PostgreSQL's built-in full-text search (`tsvector` + GIN indexes)
 - **vchord**: VectorChord BM25 (`bm25vector` + BM25 indexes) - requires `vchord_bm25` extension
-
-**When to use vchord:**
-- Already using vchord for vector search (good integration)
-- Want better BM25 ranking performance
-- Need advanced tokenization (uses `llmlingua2` tokenizer)
+- **pg_textsearch**: Timescale BM25 (text columns + BM25 indexes) - requires `pg_textsearch` extension
 
 **When to use native:**
 - Standard PostgreSQL deployment (no extra extensions)
 - Simpler setup and wider compatibility
 - Works well for most use cases
 
+**When to use vchord:**
+- Already using vchord for vector search (good integration)
+- Want better BM25 ranking performance
+- Need advanced tokenization (uses `llmlingua2` tokenizer)
+
+**When to use pg_textsearch:**
+- Want industry-standard BM25 ranking with better relevance than native PostgreSQL
+- Need efficient top-K queries with Block-Max WAND optimization
+- Prefer lower memory footprint compared to vchord
+- Already using Timescale or have `pg_textsearch` available
+
 **Switching backends:**
 
-To switch from native to vchord (or vice versa):
-1. Set `HINDSIGHT_API_TEXT_SEARCH_EXTENSION=vchord` (or `native`)
+To switch between backends:
+1. Set `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` to your desired backend (`native`, `vchord`, or `pg_textsearch`)
 2. If your database has existing data, you'll get an error with migration instructions
 3. For empty databases, the columns/indexes will be automatically recreated on startup
 
-**Note:** VectorChord text search uses the `llmlingua2` tokenizer for multilingual support, while native uses PostgreSQL's English tokenizer.
+**Note:** VectorChord uses the `llmlingua2` tokenizer for multilingual support, while native and pg_textsearch use PostgreSQL's English tokenizer.
 
 ### LLM Provider
 

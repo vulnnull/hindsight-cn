@@ -688,6 +688,9 @@ def ensure_text_search_extension(
         if text_search_extension == "vchord":
             target_column_type = "bm25vector"
             target_index_type = "bm25"
+        elif text_search_extension == "pg_textsearch":
+            target_column_type = "text"
+            target_index_type = "bm25"
         else:  # native
             target_column_type = "tsvector"
             target_index_type = "gin"
@@ -775,7 +778,16 @@ def ensure_text_search_extension(
         # If there's data in any mismatched table, raise error
         if tables_with_data:
             table_list = ", ".join([f"{table}({count} rows)" for table, count in tables_with_data])
-            current_ext = "native" if mismatched_tables[0][1] == "tsvector" else "vchord"
+            # Detect current extension from column type
+            current_col_type = mismatched_tables[0][1]
+            if current_col_type == "tsvector":
+                current_ext = "native"
+            elif current_col_type == "bm25vector":
+                current_ext = "vchord"
+            elif current_col_type == "text":
+                current_ext = "pg_textsearch"
+            else:
+                current_ext = "unknown"
             raise RuntimeError(
                 f"Cannot change text search extension from {current_ext} to {text_search_extension}: "
                 f"the following tables contain data: {table_list}. "
@@ -818,6 +830,27 @@ def ensure_text_search_extension(
                         CREATE INDEX idx_{table_name.replace(".", "_")}_text_search
                         ON {schema_name}.{table_name}
                         USING bm25 (search_vector bm25_catalog.bm25_ops)
+                    """)
+                )
+            elif text_search_extension == "pg_textsearch":
+                logger.info(f"Creating TEXT column on {table_name}")
+                # Dummy TEXT column for consistency (indexes operate on base columns)
+                conn.execute(text(f"ALTER TABLE {schema_name}.{table_name} ADD COLUMN search_vector TEXT"))
+
+                # Create BM25 index on expression
+                logger.info(f"Creating BM25 index on {table_name}")
+                # Different expression for each table
+                if table_name == "memory_units":
+                    index_expr = "(COALESCE(text, '') || ' ' || COALESCE(context, ''))"
+                else:  # reflections
+                    index_expr = "(COALESCE(name, '') || ' ' || content)"
+
+                conn.execute(
+                    text(f"""
+                        CREATE INDEX idx_{table_name.replace(".", "_")}_text_search
+                        ON {schema_name}.{table_name}
+                        USING bm25({index_expr})
+                        WITH (text_config='english')
                     """)
                 )
             else:  # native

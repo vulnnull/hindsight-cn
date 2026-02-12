@@ -1030,8 +1030,9 @@ async def _create_observation_directly(
                     tokenize($3, 'llmlingua2')::bm25_catalog.bm25vector)
             RETURNING id
         """
-    else:  # native
+    else:  # native or pg_textsearch
         # Native PostgreSQL: search_vector is GENERATED ALWAYS, don't include it
+        # pg_textsearch: indexes operate on base columns directly, don't populate search_vector
         query = f"""
             INSERT INTO {fq_table("memory_units")} (
                 id, bank_id, text, fact_type, embedding, proof_count, source_memory_ids, history,

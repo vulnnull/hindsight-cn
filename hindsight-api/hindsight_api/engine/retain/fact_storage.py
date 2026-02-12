@@ -97,8 +97,9 @@ async def insert_facts_batch(
             FROM input_data
             RETURNING id
         """
-    else:  # native
+    else:  # native or pg_textsearch
         # Native PostgreSQL: search_vector is GENERATED ALWAYS, don't include it
+        # pg_textsearch: indexes operate on base columns directly, don't populate search_vector
         query = f"""
             WITH input_data AS (
                 SELECT * FROM unnest(

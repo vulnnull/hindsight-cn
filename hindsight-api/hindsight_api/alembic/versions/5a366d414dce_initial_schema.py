@@ -51,7 +51,7 @@ def _detect_vector_extension() -> str:
 
 def _detect_text_search_extension() -> str:
     """
-    Detect or validate text search extension: 'native' or 'vchord'.
+    Detect or validate text search extension: 'native', 'vchord', or 'pg_textsearch'.
     Respects HINDSIGHT_API_TEXT_SEARCH_EXTENSION env var.
     Creates the extension if needed.
     """
@@ -69,11 +69,23 @@ def _detect_text_search_extension() -> str:
                 # Extension truly doesn't exist - re-raise the error
                 raise
         return "vchord"
+    elif text_search_extension == "pg_textsearch":
+        # Create pg_textsearch extension if not exists
+        try:
+            op.execute("CREATE EXTENSION IF NOT EXISTS pg_textsearch CASCADE")
+        except Exception:
+            # Extension might already exist or user lacks permissions - verify it exists
+            conn = op.get_bind()
+            result = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pg_textsearch'")).fetchone()
+            if not result:
+                # Extension truly doesn't exist - re-raise the error
+                raise
+        return "pg_textsearch"
     elif text_search_extension == "native":
         return "native"
     else:
         raise ValueError(
-            f"Invalid HINDSIGHT_API_TEXT_SEARCH_EXTENSION: {text_search_extension}. Must be 'native' or 'vchord'"
+            f"Invalid HINDSIGHT_API_TEXT_SEARCH_EXTENSION: {text_search_extension}. Must be 'native', 'vchord', or 'pg_textsearch'"
         )
 
 
@@ -232,6 +244,12 @@ def upgrade() -> None:
             ALTER TABLE memory_units
             ADD COLUMN search_vector bm25_catalog.bm25vector
         """)
+    elif text_search_ext == "pg_textsearch":
+        # Timescale pg_textsearch: dummy TEXT column for consistency (indexes operate on base columns directly)
+        op.execute("""
+            ALTER TABLE memory_units
+            ADD COLUMN search_vector TEXT
+        """)
     else:  # native
         # Native PostgreSQL: tsvector with automatic generation
         op.execute("""
@@ -294,6 +312,14 @@ def upgrade() -> None:
         op.execute("""
             CREATE INDEX idx_memory_units_text_search ON memory_units
             USING bm25 (search_vector bm25_catalog.bm25_ops)
+        """)
+    elif text_search_ext == "pg_textsearch":
+        # Timescale pg_textsearch BM25 index on text column
+        # Note: pg_textsearch doesn't support expressions, so we index the main text column
+        op.execute("""
+            CREATE INDEX idx_memory_units_text_search ON memory_units
+            USING bm25(text)
+            WITH (text_config='english')
         """)
     else:  # native
         # Native PostgreSQL GIN index
