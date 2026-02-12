@@ -2093,7 +2093,7 @@ async def test_custom_extraction_mode():
     import os
     from hindsight_api import LLMConfig
     from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
-    from hindsight_api.config import clear_config_cache
+    from hindsight_api.config import clear_config_cache, _get_raw_config
 
     # Save original env vars
     original_mode = os.getenv("HINDSIGHT_API_RETAIN_EXTRACTION_MODE")
@@ -2135,7 +2135,8 @@ If the text contains both Italian and English content, extract ONLY the Italian 
             event_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
             context="team meeting notes",
             llm_config=llm_config,
-            agent_name="TestUser"
+            agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         logger.info(f"\nExtracted {len(facts)} facts with custom mode (Italian only):")

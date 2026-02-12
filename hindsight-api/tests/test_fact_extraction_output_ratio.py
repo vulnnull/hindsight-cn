@@ -11,6 +11,7 @@ from datetime import datetime
 import pytest
 
 from hindsight_api import LLMConfig
+from hindsight_api.config import _get_raw_config
 from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
 
 
@@ -44,7 +45,8 @@ I ran into my neighbor Sarah who mentioned she's planning a trip to Italy next m
             event_date=datetime(2024, 6, 15),
             context=context,
             llm_config=llm_config,
-            agent_name="TestUser"
+            agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         input_length = len(text)
@@ -88,7 +90,8 @@ User: Perfect, I'll make a reservation for Saturday at 7pm.
             event_date=datetime(2024, 6, 15),
             context=context,
             llm_config=llm_config,
-            agent_name="TestUser"
+            agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         input_length = len(text)
@@ -144,7 +147,8 @@ I edited about 20 photos from my recent trip to the mountains.
             event_date=datetime(2024, 4, 15),
             context=context,
             llm_config=llm_config,
-            agent_name="TestUser"
+            agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         input_length = len(text)
@@ -208,7 +212,8 @@ I edited about 20 photos from my recent trip to the mountains.
             event_date=datetime(2023, 5, 8),  # Date from locomo dataset
             context=context,
             llm_config=llm_config,
-            agent_name=data["conversation"]["speaker_a"]
+            agent_name=data["conversation"]["speaker_a"],
+            config=_get_raw_config(),
         )
 
         # Calculate ratios
@@ -269,7 +274,8 @@ I'm planning to visit Japan next year.
             event_date=datetime(2024, 6, 15),
             context=context,
             llm_config=llm_config,
-            agent_name="TestUser"
+            agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         # Count approximate number of statements (sentences)

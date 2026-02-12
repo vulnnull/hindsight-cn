@@ -12,6 +12,7 @@ from datetime import datetime
 import pytest
 
 from hindsight_api import LLMConfig
+from hindsight_api.config import _get_raw_config
 from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
 
 
@@ -44,6 +45,7 @@ class TestCausalRelationsValidation:
             context=context,
             llm_config=llm_config,
             agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         assert len(facts) > 0, "Should extract at least one fact"
@@ -88,6 +90,7 @@ class TestCausalRelationsValidation:
             context=context,
             llm_config=llm_config,
             agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         assert len(facts) > 0, "Should extract at least one fact"
@@ -124,6 +127,7 @@ class TestCausalRelationsValidation:
             context=context,
             llm_config=llm_config,
             agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         assert len(facts) > 0, "Should extract facts about the causal chain"
@@ -173,6 +177,7 @@ class TestCausalRelationsValidation:
             context=context,
             llm_config=llm_config,
             agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         assert len(facts) > 0, "Should extract facts"
@@ -209,6 +214,7 @@ class TestCausalRelationsValidation:
             context=context,
             llm_config=llm_config,
             agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         # Verify relation types are all backward-looking

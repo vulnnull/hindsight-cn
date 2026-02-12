@@ -21,9 +21,9 @@ from hindsight_api.engine.reflect.tools import (
 @pytest.fixture(autouse=True)
 def enable_observations():
     """Enable observations for all tests in this module."""
-    from hindsight_api.config import get_config
+    from hindsight_api.config import _get_raw_config
 
-    config = get_config()
+    config = _get_raw_config()
     original_value = config.enable_observations
     config.enable_observations = True
     yield
@@ -563,25 +563,26 @@ class TestConsolidationDisabled:
         self, memory: MemoryEngine, request_context
     ):
         """Test that consolidation returns disabled status when enable_observations is False."""
-        from unittest.mock import patch
-
         bank_id = f"test-consolidation-disabled-{uuid.uuid4().hex[:8]}"
 
         # Create the bank
         await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
 
-        # Disable observations via config
-        with patch("hindsight_api.config.get_config") as mock_config:
-            mock_config.return_value.enable_observations = False
+        # Disable observations for this bank via bank config
+        await memory._config_resolver.update_bank_config(
+            bank_id=bank_id,
+            updates={"enable_observations": False},
+            context=request_context,
+        )
 
-            result = await run_consolidation_job(
-                memory_engine=memory,
-                bank_id=bank_id,
-                request_context=request_context,
-            )
+        result = await run_consolidation_job(
+            memory_engine=memory,
+            bank_id=bank_id,
+            request_context=request_context,
+        )
 
-            assert result["status"] == "disabled"
-            assert result["bank_id"] == bank_id
+        assert result["status"] == "disabled"
+        assert result["bank_id"] == bank_id
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)

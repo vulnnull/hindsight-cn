@@ -8,14 +8,14 @@ populated from the summary for backwards compatibility.
 import pytest
 from hindsight_api.engine.memory_engine import Budget
 from hindsight_api import RequestContext
-from hindsight_api.config import get_config
+from hindsight_api.config import _get_raw_config
 from datetime import datetime, timezone
 
 
 @pytest.fixture
 def disable_observations():
     """Disable observations for a specific test."""
-    config = get_config()
+    config = _get_raw_config()
     original_value = config.enable_observations
     config.enable_observations = False
     yield

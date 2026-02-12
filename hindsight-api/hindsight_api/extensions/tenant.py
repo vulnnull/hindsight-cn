@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 from hindsight_api.extensions.base import Extension
 from hindsight_api.models import RequestContext
@@ -87,6 +88,54 @@ class TenantExtension(Extension, ABC):
             For single-tenant setups, return [Tenant(schema="public")].
         """
         ...
+
+    async def get_tenant_config(self, context: RequestContext) -> dict[str, Any]:
+        """
+        Get tenant-specific configuration overrides.
+
+        This method is called during hierarchical configuration resolution to get
+        tenant-level config overrides. The returned dict should contain Python field
+        names (lowercase snake_case) as keys, not environment variable names.
+
+        Example:
+            {"llm_model": "gpt-4", "retain_extraction_mode": "verbose"}
+
+        The default implementation returns an empty dict (no tenant-specific config).
+        Override this method in custom extensions to provide tenant-specific configuration.
+
+        Args:
+            context: The request context containing tenant information.
+
+        Returns:
+            Dict of config field names to values (only configurable fields).
+            Empty dict if no tenant-specific config.
+        """
+        return {}
+
+    async def get_allowed_config_fields(self, context: RequestContext, bank_id: str) -> set[str] | None:
+        """
+        Get set of config fields that this tenant/bank is allowed to modify.
+
+        This method controls which configurable fields can be modified via the bank config API.
+        It enables fine-grained permission control per tenant or per bank.
+
+        Examples:
+            - Return None: Allow all configurable fields (default)
+            - Return {"retain_chunk_size", "retain_custom_instructions"}: Allow only these fields
+            - Return set(): Allow no modifications (read-only)
+
+        The default implementation returns None (all configurable fields allowed).
+        Override this method in custom extensions to implement custom permission logic.
+
+        Args:
+            context: The request context containing tenant information.
+            bank_id: The bank identifier for per-bank permissions.
+
+        Returns:
+            Set of allowed field names, or None to allow all configurable fields.
+            Returned fields must be a subset of HindsightConfig.get_configurable_fields().
+        """
+        return None
 
     async def authenticate_mcp(self, context: RequestContext) -> TenantContext:
         """

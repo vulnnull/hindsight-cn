@@ -45,7 +45,7 @@ class TestMainModuleExtensionLoading:
 
         with patch("hindsight_api.main.MemoryEngine") as mock_engine, \
              patch("hindsight_api.main.create_app") as mock_create_app, \
-             patch("hindsight_api.main.get_config") as mock_get_config, \
+             patch("hindsight_api.main._get_raw_config") as mock_get_config, \
              patch("hindsight_api.main.load_extension", side_effect=tracking_load_extension), \
              patch("hindsight_api.main.DefaultExtensionContext"), \
              patch("hindsight_api.main.print_banner"), \
@@ -96,7 +96,7 @@ class TestMainModuleExtensionLoading:
 
         with patch("hindsight_api.main.MemoryEngine") as mock_engine, \
              patch("hindsight_api.main.create_app") as mock_create_app, \
-             patch("hindsight_api.main.get_config") as mock_get_config, \
+             patch("hindsight_api.main._get_raw_config") as mock_get_config, \
              patch("hindsight_api.main.load_extension", side_effect=tracking_load_extension), \
              patch("hindsight_api.main.DefaultExtensionContext"), \
              patch("hindsight_api.main.print_banner"), \
@@ -143,7 +143,7 @@ class TestMainModuleExtensionLoading:
 
         with patch("hindsight_api.main.MemoryEngine", side_effect=capture_memory_engine), \
              patch("hindsight_api.main.create_app") as mock_create_app, \
-             patch("hindsight_api.main.get_config") as mock_get_config, \
+             patch("hindsight_api.main._get_raw_config") as mock_get_config, \
              patch("hindsight_api.main.DefaultExtensionContext"), \
              patch("hindsight_api.main.print_banner"), \
              patch("uvicorn.run"):
@@ -200,7 +200,7 @@ class TestMainModuleExtensionLoading:
 
         with patch("hindsight_api.main.MemoryEngine", side_effect=capture_memory_engine), \
              patch("hindsight_api.main.create_app") as mock_create_app, \
-             patch("hindsight_api.main.get_config") as mock_get_config, \
+             patch("hindsight_api.main._get_raw_config") as mock_get_config, \
              patch("hindsight_api.main.DefaultExtensionContext", side_effect=capture_context), \
              patch("hindsight_api.main.print_banner"), \
              patch("uvicorn.run"):
@@ -242,7 +242,7 @@ class TestMainModuleExtensionLoading:
 
         with patch("hindsight_api.main.MemoryEngine", side_effect=capture_memory_engine), \
              patch("hindsight_api.main.create_app") as mock_create_app, \
-             patch("hindsight_api.main.get_config") as mock_get_config, \
+             patch("hindsight_api.main._get_raw_config") as mock_get_config, \
              patch("hindsight_api.main.print_banner"), \
              patch("uvicorn.run"):
 
@@ -287,7 +287,7 @@ class TestMainModuleExtensionLoading:
 
         with patch("hindsight_api.main.MemoryEngine") as mock_engine, \
              patch("hindsight_api.main.create_app", return_value=mock_app), \
-             patch("hindsight_api.main.get_config") as mock_get_config, \
+             patch("hindsight_api.main._get_raw_config") as mock_get_config, \
              patch("hindsight_api.main.print_banner"), \
              patch("uvicorn.run", side_effect=capture_uvicorn_run):
 
@@ -327,7 +327,7 @@ class TestMainModuleExtensionLoading:
 
         with patch("hindsight_api.main.MemoryEngine") as mock_engine, \
              patch("hindsight_api.main.create_app") as mock_create_app, \
-             patch("hindsight_api.main.get_config") as mock_get_config, \
+             patch("hindsight_api.main._get_raw_config") as mock_get_config, \
              patch("hindsight_api.main.print_banner"), \
              patch("uvicorn.run", side_effect=capture_uvicorn_run):
 

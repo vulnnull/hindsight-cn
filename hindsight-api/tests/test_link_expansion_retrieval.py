@@ -12,9 +12,9 @@ import pytest
 @pytest.fixture(autouse=True)
 def enable_observations():
     """Enable observations for all tests in this module."""
-    from hindsight_api.config import get_config
+    from hindsight_api.config import _get_raw_config
 
-    config = get_config()
+    config = _get_raw_config()
     original_value = config.enable_observations
     config.enable_observations = True
     yield

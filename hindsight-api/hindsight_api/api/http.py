@@ -70,6 +70,7 @@ def FieldWithDefault(default_factory: Callable, **kwargs) -> Any:
     return Field(default_factory=default_factory, json_schema_extra=json_extra, **kwargs)
 
 
+from hindsight_api.config import get_config
 from hindsight_api.engine.db_utils import acquire_with_retry
 from hindsight_api.engine.memory_engine import Budget, _get_tiktoken_encoding, fq_table
 from hindsight_api.engine.reflect.observations import Observation
@@ -826,6 +827,55 @@ class CreateBankRequest(BaseModel):
     background: str | None = Field(default=None, description="Deprecated: use mission instead")
 
 
+class BankConfigUpdate(BaseModel):
+    """Request model for updating bank configuration."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "updates": {
+                    "llm_model": "claude-sonnet-4-5",
+                    "retain_extraction_mode": "verbose",
+                    "retain_custom_instructions": "Extract technical details carefully",
+                }
+            }
+        }
+    )
+
+    updates: dict[str, Any] = Field(
+        description="Configuration overrides. Keys can be in Python field format (llm_provider) "
+        "or environment variable format (HINDSIGHT_API_LLM_PROVIDER). "
+        "Only hierarchical fields can be overridden per-bank."
+    )
+
+
+class BankConfigResponse(BaseModel):
+    """Response model for bank configuration."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "bank_id": "my-bank",
+                "config": {
+                    "llm_provider": "openai",
+                    "llm_model": "gpt-4",
+                    "retain_extraction_mode": "verbose",
+                },
+                "overrides": {
+                    "llm_model": "gpt-4",
+                    "retain_extraction_mode": "verbose",
+                },
+            }
+        }
+    )
+
+    bank_id: str = Field(description="Bank identifier")
+    config: dict[str, Any] = Field(
+        description="Fully resolved configuration with all hierarchical overrides applied (Python field names)"
+    )
+    overrides: dict[str, Any] = Field(description="Bank-specific configuration overrides only (Python field names)")
+
+
 class GraphDataResponse(BaseModel):
     """Response model for graph data endpoint."""
 
@@ -1355,6 +1405,7 @@ class FeaturesInfo(BaseModel):
     observations: bool = Field(description="Whether observations (auto-consolidation) are enabled")
     mcp: bool = Field(description="Whether MCP (Model Context Protocol) server is enabled")
     worker: bool = Field(description="Whether the background worker is enabled")
+    bank_config_api: bool = Field(description="Whether per-bank configuration API is enabled")
 
 
 class VersionResponse(BaseModel):
@@ -1368,6 +1419,7 @@ class VersionResponse(BaseModel):
                     "observations": False,
                     "mcp": True,
                     "worker": True,
+                    "bank_config_api": False,
                 },
             }
         }
@@ -1647,17 +1699,21 @@ def _register_routes(app: FastAPI):
 
         Returns version info and feature flags that can be used by clients
         to determine which capabilities are available.
+
+        Note: observations flag shows the global default. Individual banks
+        may override this setting via bank-specific configuration.
         """
         from hindsight_api import __version__
-        from hindsight_api.config import get_config
+        from hindsight_api.config import _get_raw_config
 
-        config = get_config()
+        config = _get_raw_config()
         return VersionResponse(
             api_version=__version__,
             features=FeaturesInfo(
                 observations=config.enable_observations,
                 mcp=config.mcp_enabled,
                 worker=config.worker_enabled,
+                bank_config_api=config.enable_bank_config_api,
             ),
         )
 
@@ -3309,6 +3365,112 @@ def _register_routes(app: FastAPI):
 
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             logger.error(f"Error in DELETE /v1/default/banks/{bank_id}/observations: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get(
+        "/v1/default/banks/{bank_id}/config",
+        response_model=BankConfigResponse,
+        summary="Get bank configuration",
+        description="Get fully resolved configuration for a bank including all hierarchical overrides (global → tenant → bank). "
+        "The 'config' field contains all resolved config values. The 'overrides' field shows only bank-specific overrides.",
+        operation_id="get_bank_config",
+        tags=["Banks"],
+    )
+    async def api_get_bank_config(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
+        """Get configuration for a bank with all hierarchical overrides applied."""
+        if not get_config().enable_bank_config_api:
+            raise HTTPException(
+                status_code=404,
+                detail="Bank configuration API is disabled. Set HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true to enable.",
+            )
+        try:
+            # Get resolved config from config resolver
+            config_dict = await app.state.memory._config_resolver.get_bank_config(bank_id, request_context)
+
+            # Get bank-specific overrides only
+            bank_overrides = await app.state.memory._config_resolver._load_bank_config(bank_id)
+
+            return BankConfigResponse(bank_id=bank_id, config=config_dict, overrides=bank_overrides)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Error in GET /v1/default/banks/{bank_id}/config: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.patch(
+        "/v1/default/banks/{bank_id}/config",
+        response_model=BankConfigResponse,
+        summary="Update bank configuration",
+        description="Update configuration overrides for a bank. Only hierarchical fields can be overridden (LLM settings, retention parameters, etc.). "
+        "Keys can be provided in Python field format (llm_provider) or environment variable format (HINDSIGHT_API_LLM_PROVIDER).",
+        operation_id="update_bank_config",
+        tags=["Banks"],
+    )
+    async def api_update_bank_config(
+        bank_id: str, request: BankConfigUpdate, request_context: RequestContext = Depends(get_request_context)
+    ):
+        """Update configuration overrides for a bank."""
+        if not get_config().enable_bank_config_api:
+            raise HTTPException(
+                status_code=404,
+                detail="Bank configuration API is disabled. Set HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true to enable.",
+            )
+        try:
+            # Update config via config resolver (validates configurable fields and permissions)
+            await app.state.memory._config_resolver.update_bank_config(bank_id, request.updates, request_context)
+
+            # Return updated config
+            config_dict = await app.state.memory._config_resolver.get_bank_config(bank_id, request_context)
+            bank_overrides = await app.state.memory._config_resolver._load_bank_config(bank_id)
+
+            return BankConfigResponse(bank_id=bank_id, config=config_dict, overrides=bank_overrides)
+        except ValueError as e:
+            # Validation error (e.g., trying to override static field)
+            raise HTTPException(status_code=400, detail=str(e))
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Error in PATCH /v1/default/banks/{bank_id}/config: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.delete(
+        "/v1/default/banks/{bank_id}/config",
+        response_model=BankConfigResponse,
+        summary="Reset bank configuration",
+        description="Reset bank configuration to defaults by removing all bank-specific overrides. "
+        "The bank will then use global and tenant-level configuration only.",
+        operation_id="reset_bank_config",
+        tags=["Banks"],
+    )
+    async def api_reset_bank_config(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
+        """Reset bank configuration to defaults (remove all overrides)."""
+        if not get_config().enable_bank_config_api:
+            raise HTTPException(
+                status_code=404,
+                detail="Bank configuration API is disabled. Set HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true to enable.",
+            )
+        try:
+            # Reset config via config resolver
+            await app.state.memory._config_resolver.reset_bank_config(bank_id)
+
+            # Return updated config (should match defaults now)
+            config_dict = await app.state.memory._config_resolver.get_bank_config(bank_id, request_context)
+            bank_overrides = await app.state.memory._config_resolver._load_bank_config(bank_id)
+
+            return BankConfigResponse(bank_id=bank_id, config=config_dict, overrides=bank_overrides)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Error in DELETE /v1/default/banks/{bank_id}/config: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post(

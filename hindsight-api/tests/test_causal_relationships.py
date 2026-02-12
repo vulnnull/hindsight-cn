@@ -10,6 +10,7 @@ from datetime import datetime
 import pytest
 
 from hindsight_api import LLMConfig
+from hindsight_api.config import _get_raw_config
 from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
 
 
@@ -37,7 +38,8 @@ After searching for weeks, I finally found a cheaper apartment in Brooklyn.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text, event_date=datetime(2024, 3, 15), context=context, llm_config=llm_config, agent_name="TestUser"
+            text=text, event_date=datetime(2024, 3, 15), context=context, llm_config=llm_config, agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         assert len(facts) >= 3, f"Should extract at least 3 facts from the causal chain. Got {len(facts)}"
@@ -106,7 +108,8 @@ The renovation took three months and cost $15,000.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text, event_date=datetime(2024, 6, 1), context=context, llm_config=llm_config, agent_name="TestUser"
+            text=text, event_date=datetime(2024, 6, 1), context=context, llm_config=llm_config, agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         assert len(facts) >= 4, f"Should extract at least 4 facts. Got {len(facts)}"
@@ -136,7 +139,8 @@ Machine learning fascinated me so much that I changed my career to data science.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text, event_date=datetime(2024, 1, 1), context=context, llm_config=llm_config, agent_name="TestUser"
+            text=text, event_date=datetime(2024, 1, 1), context=context, llm_config=llm_config, agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         # Check no fact references itself
@@ -163,7 +167,8 @@ The new role enabled me to lead a team of engineers.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text, event_date=datetime(2024, 2, 15), context=context, llm_config=llm_config, agent_name="TestUser"
+            text=text, event_date=datetime(2024, 2, 15), context=context, llm_config=llm_config, agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         # Validate all indices (must reference PREVIOUS facts only)
@@ -190,7 +195,8 @@ Reduced spending somewhat affected local businesses.
         llm_config = LLMConfig.for_memory()
 
         facts, _, _ = await extract_facts_from_text(
-            text=text, event_date=datetime(2024, 4, 1), context=context, llm_config=llm_config, agent_name="TestUser"
+            text=text, event_date=datetime(2024, 4, 1), context=context, llm_config=llm_config, agent_name="TestUser",
+            config=_get_raw_config(),
         )
 
         for i, fact in enumerate(facts):
