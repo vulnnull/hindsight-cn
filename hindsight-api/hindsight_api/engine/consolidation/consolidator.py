@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from ...config import get_config
 from ..memory_engine import fq_table
 from ..retain import embedding_utils
 from .prompts import (
@@ -1015,15 +1016,33 @@ async def _create_observation_directly(
 
     t0 = time.time()
     observation_id = uuid.uuid4()
+
+    # Query varies based on text search backend
+    config = get_config()
+    if config.text_search_extension == "vchord":
+        # VectorChord: manually tokenize and insert search_vector
+        query = f"""
+            INSERT INTO {fq_table("memory_units")} (
+                id, bank_id, text, fact_type, embedding, proof_count, source_memory_ids, history,
+                tags, event_date, occurred_start, occurred_end, mentioned_at, search_vector
+            )
+            VALUES ($1, $2, $3, 'observation', $4::vector, 1, $5, '[]'::jsonb, $6, $7, $8, $9, $10,
+                    tokenize($3, 'llmlingua2')::bm25_catalog.bm25vector)
+            RETURNING id
+        """
+    else:  # native
+        # Native PostgreSQL: search_vector is GENERATED ALWAYS, don't include it
+        query = f"""
+            INSERT INTO {fq_table("memory_units")} (
+                id, bank_id, text, fact_type, embedding, proof_count, source_memory_ids, history,
+                tags, event_date, occurred_start, occurred_end, mentioned_at
+            )
+            VALUES ($1, $2, $3, 'observation', $4::vector, 1, $5, '[]'::jsonb, $6, $7, $8, $9, $10)
+            RETURNING id
+        """
+
     row = await conn.fetchrow(
-        f"""
-        INSERT INTO {fq_table("memory_units")} (
-            id, bank_id, text, fact_type, embedding, proof_count, source_memory_ids, history,
-            tags, event_date, occurred_start, occurred_end, mentioned_at
-        )
-        VALUES ($1, $2, $3, 'observation', $4::vector, 1, $5, '[]'::jsonb, $6, $7, $8, $9, $10)
-        RETURNING id
-        """,
+        query,
         observation_id,
         bank_id,
         observation_text,

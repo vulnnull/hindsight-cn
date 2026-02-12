@@ -155,6 +155,8 @@ def main():
         config = HindsightConfig(
             database_url=config.database_url,
             database_schema=config.database_schema,
+            vector_extension=config.vector_extension,
+            text_search_extension=config.text_search_extension,
             llm_provider=config.llm_provider,
             llm_api_key=config.llm_api_key,
             llm_model=config.llm_model,

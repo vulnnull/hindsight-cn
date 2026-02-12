@@ -158,7 +158,7 @@ async def retrieve_bm25(
 
     from .tags import TagsMatch, build_tags_where_clause_simple
 
-    # Sanitize query text: remove special characters that have meaning in tsquery
+    # Sanitize query text for native backend: remove special characters that have meaning in tsquery
     # Keep only alphanumeric characters and spaces
     sanitized_text = re.sub(r"[^\w\s]", " ", query_text.lower())
 
@@ -169,29 +169,46 @@ async def retrieve_bm25(
         # If no valid tokens, return empty results
         return []
 
-    # Convert query to tsquery using OR for more flexible matching
-    # This prevents empty results when some terms are missing
-    query_tsquery = " | ".join(tokens)
-
+    # Build query based on text search backend
+    config = get_config()
     tags_clause = build_tags_where_clause_simple(tags, 5)
-    params = [query_tsquery, bank_id, fact_type, limit]
-    if tags:
-        params.append(tags)
 
-    results = await conn.fetch(
-        f"""
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
-               ts_rank_cd(search_vector, to_tsquery('english', $1)) AS bm25_score
-        FROM {fq_table("memory_units")}
-        WHERE bank_id = $2
-          AND fact_type = $3
-          AND search_vector @@ to_tsquery('english', $1)
-          {tags_clause}
-        ORDER BY bm25_score DESC
-        LIMIT $4
-        """,
-        *params,
-    )
+    if config.text_search_extension == "vchord":
+        # VectorChord BM25: use <&> operator with to_bm25query and tokenize
+        params = [bank_id, fact_type, limit, query_text]  # Use raw query_text for tokenization
+        if tags:
+            params.append(query_text)  # VectorChord doesn't need sanitization
+
+        query = f"""
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                   search_vector <&> to_bm25query('idx_memory_units_text_search', tokenize($4, 'llmlingua2')) AS bm25_score
+            FROM {fq_table("memory_units")}
+            WHERE bank_id = $1
+              AND fact_type = $2
+              {tags_clause}
+            ORDER BY bm25_score DESC
+            LIMIT $3
+        """
+    else:  # native
+        # Native PostgreSQL: use ts_rank_cd with to_tsquery
+        query_tsquery = " | ".join(tokens)
+        params = [query_tsquery, bank_id, fact_type, limit]
+        if tags:
+            params.append(tags)
+
+        query = f"""
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                   ts_rank_cd(search_vector, to_tsquery('english', $1)) AS bm25_score
+            FROM {fq_table("memory_units")}
+            WHERE bank_id = $2
+              AND fact_type = $3
+              AND search_vector @@ to_tsquery('english', $1)
+              {tags_clause}
+            ORDER BY bm25_score DESC
+            LIMIT $4
+        """
+
+    results = await conn.fetch(query, *params)
     return [RetrievalResult.from_db_row(dict(r)) for r in results]
 
 
@@ -268,59 +285,109 @@ async def retrieve_semantic_bm25_combined(
                 result_dict[ft][0].append(RetrievalResult.from_db_row(row))
         return result_dict
 
-    query_tsquery = " | ".join(tokens)
+    # Build BM25 query based on text search backend
+    config = get_config()
 
     # Build tags clause - param 6 if tags provided
     tags_clause = build_tags_where_clause_simple(tags, 6, match=tags_match)
-    params = [query_emb_str, bank_id, fact_types, limit, query_tsquery]
-    if tags:
-        params.append(tags)
+
+    if config.text_search_extension == "vchord":
+        # VectorChord BM25: use <&> operator with to_bm25query and tokenize
+        # Note: VectorChord scores are negative (higher = better, so -1 > -10)
+        params = [query_emb_str, bank_id, fact_types, limit, query_text]  # Pass raw query_text for tokenization
+        if tags:
+            params.append(tags)
+
+        query = f"""
+            WITH semantic_ranked AS (
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                       1 - (embedding <=> $1::vector) AS similarity,
+                       NULL::float AS bm25_score,
+                       'semantic' AS source,
+                       ROW_NUMBER() OVER (PARTITION BY fact_type ORDER BY embedding <=> $1::vector) AS rn
+                FROM {fq_table("memory_units")}
+                WHERE bank_id = $2
+                  AND embedding IS NOT NULL
+                  AND fact_type = ANY($3)
+                  AND (1 - (embedding <=> $1::vector)) >= 0.3
+                  {tags_clause}
+            ),
+            bm25_ranked AS (
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                       NULL::float AS similarity,
+                       search_vector <&> to_bm25query('idx_memory_units_text_search', tokenize($5, 'llmlingua2')) AS bm25_score,
+                       'bm25' AS source,
+                       ROW_NUMBER() OVER (PARTITION BY fact_type ORDER BY search_vector <&> to_bm25query('idx_memory_units_text_search', tokenize($5, 'llmlingua2')) DESC) AS rn
+                FROM {fq_table("memory_units")}
+                WHERE bank_id = $2
+                  AND fact_type = ANY($3)
+                  {tags_clause}
+            ),
+            semantic AS (
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                       similarity, bm25_score, source
+                FROM semantic_ranked WHERE rn <= $4
+            ),
+            bm25 AS (
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                       similarity, bm25_score, source
+                FROM bm25_ranked WHERE rn <= $4
+            )
+            SELECT * FROM semantic
+            UNION ALL
+            SELECT * FROM bm25
+        """
+    else:  # native
+        # Native PostgreSQL: use ts_rank_cd with to_tsquery
+        query_tsquery = " | ".join(tokens)
+        params = [query_emb_str, bank_id, fact_types, limit, query_tsquery]
+        if tags:
+            params.append(tags)
+
+        query = f"""
+            WITH semantic_ranked AS (
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                       1 - (embedding <=> $1::vector) AS similarity,
+                       NULL::float AS bm25_score,
+                       'semantic' AS source,
+                       ROW_NUMBER() OVER (PARTITION BY fact_type ORDER BY embedding <=> $1::vector) AS rn
+                FROM {fq_table("memory_units")}
+                WHERE bank_id = $2
+                  AND embedding IS NOT NULL
+                  AND fact_type = ANY($3)
+                  AND (1 - (embedding <=> $1::vector)) >= 0.3
+                  {tags_clause}
+            ),
+            bm25_ranked AS (
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                       NULL::float AS similarity,
+                       ts_rank_cd(search_vector, to_tsquery('english', $5)) AS bm25_score,
+                       'bm25' AS source,
+                       ROW_NUMBER() OVER (PARTITION BY fact_type ORDER BY ts_rank_cd(search_vector, to_tsquery('english', $5)) DESC) AS rn
+                FROM {fq_table("memory_units")}
+                WHERE bank_id = $2
+                  AND fact_type = ANY($3)
+                  AND search_vector @@ to_tsquery('english', $5)
+                  {tags_clause}
+            ),
+            semantic AS (
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                       similarity, bm25_score, source
+                FROM semantic_ranked WHERE rn <= $4
+            ),
+            bm25 AS (
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                       similarity, bm25_score, source
+                FROM bm25_ranked WHERE rn <= $4
+            )
+            SELECT * FROM semantic
+            UNION ALL
+            SELECT * FROM bm25
+        """
 
     # Combined CTE query for both semantic and BM25 across all fact types
     # Uses window functions to limit per fact_type per method
-    results = await conn.fetch(
-        f"""
-        WITH semantic_ranked AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
-                   1 - (embedding <=> $1::vector) AS similarity,
-                   NULL::float AS bm25_score,
-                   'semantic' AS source,
-                   ROW_NUMBER() OVER (PARTITION BY fact_type ORDER BY embedding <=> $1::vector) AS rn
-            FROM {fq_table("memory_units")}
-            WHERE bank_id = $2
-              AND embedding IS NOT NULL
-              AND fact_type = ANY($3)
-              AND (1 - (embedding <=> $1::vector)) >= 0.3
-              {tags_clause}
-        ),
-        bm25_ranked AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
-                   NULL::float AS similarity,
-                   ts_rank_cd(search_vector, to_tsquery('english', $5)) AS bm25_score,
-                   'bm25' AS source,
-                   ROW_NUMBER() OVER (PARTITION BY fact_type ORDER BY ts_rank_cd(search_vector, to_tsquery('english', $5)) DESC) AS rn
-            FROM {fq_table("memory_units")}
-            WHERE bank_id = $2
-              AND fact_type = ANY($3)
-              AND search_vector @@ to_tsquery('english', $5)
-              {tags_clause}
-        ),
-        semantic AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
-                   similarity, bm25_score, source
-            FROM semantic_ranked WHERE rn <= $4
-        ),
-        bm25 AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
-                   similarity, bm25_score, source
-            FROM bm25_ranked WHERE rn <= $4
-        )
-        SELECT * FROM semantic
-        UNION ALL
-        SELECT * FROM bm25
-        """,
-        *params,
-    )
+    results = await conn.fetch(query, *params)
 
     # Group results by fact_type and source
     result_dict: dict[str, tuple[list[RetrievalResult], list[RetrievalResult]]] = {ft: ([], []) for ft in fact_types}

@@ -52,6 +52,8 @@ services:
         psql -h hindsight-db -p 5432 -U hindsight_user -d hindsight_db -c 'CREATE EXTENSION IF NOT EXISTS vchord CASCADE;';
         psql -h hindsight-db -p 5432 -U hindsight_user -d hindsight_db -c 'CREATE EXTENSION IF NOT EXISTS pg_tokenizer CASCADE;';
         psql -h hindsight-db -p 5432 -U hindsight_user -d hindsight_db -c 'CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE;';
+        echo 'Creating llmlingua2 tokenizer';
+        psql -h hindsight-db -p 5432 -U hindsight_user -d hindsight_db -c \"SELECT create_tokenizer('llmlingua2', \\$\\$ model = \\\"llmlingua2\\\" \\$\\$);\" 2>/dev/null || echo 'Tokenizer already exists or creation skipped';
         echo 'Database and extensions created successfully';
       "
     restart: "no"
@@ -65,25 +67,18 @@ services:
       - "8888:8888"
       - "9999:9999"
     environment:
-      # LLM Configuration
-      - HINDSIGHT_API_LLM_PROVIDER=openai
-      - HINDSIGHT_API_LLM_MODEL=gpt-5-mini
-
-      # LiteLLM Configuration (shared by embeddings and reranker)
-
-      # Embeddings Configuration
-      # NOTE: OpenRouter does support embeddings endpoints
-      - HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai
-      - HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=text-embedding-3-large
-      - DEFAULT_EMBEDDING_DIMENSION=3072
-
-      # Reranker Configuration
-      - HINDSIGHT_API_RERANKER_PROVIDER=litellm
-      - HINDSIGHT_API_RERANKER_LITELLM_MODEL=deepinfra/Qwen3-Reranker-8B
+      # LLM Configuration (uses OpenAI for testing vchord)
+      # LLM configuration
+      HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_API_LLM_PROVIDER:-openai}
+      HINDSIGHT_API_LLM_API_KEY: ${OPENAI_API_KEY:-your-api-key}
 
       # Database Configuration
-      - HINDSIGHT_API_DATABASE_URL=postgresql://${HINDSIGHT_DB_USER:-hindsight_user}:${HINDSIGHT_DB_PASSWORD:-hindsight_password}@db:5432/${HINDSIGHT_DB_NAME:-hindsight_db}
-      - HINDSIGHT_API_OTEL_TRACES_ENABLED=false
+      HINDSIGHT_API_DATABASE_URL: postgresql://${HINDSIGHT_DB_USER:-hindsight_user}:${HINDSIGHT_DB_PASSWORD:-hindsight_password}@db:5432/${HINDSIGHT_DB_NAME:-hindsight_db}
+
+      # Vector and Text Search Extensions
+      HINDSIGHT_API_VECTOR_EXTENSION: vchord
+      HINDSIGHT_API_TEXT_SEARCH_EXTENSION: vchord
+
     depends_on:
       - db
     networks:

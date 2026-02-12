@@ -205,6 +205,9 @@ ENV_RERANKER_MAX_CANDIDATES = "HINDSIGHT_API_RERANKER_MAX_CANDIDATES"
 ENV_RERANKER_FLASHRANK_MODEL = "HINDSIGHT_API_RERANKER_FLASHRANK_MODEL"
 ENV_RERANKER_FLASHRANK_CACHE_DIR = "HINDSIGHT_API_RERANKER_FLASHRANK_CACHE_DIR"
 
+ENV_VECTOR_EXTENSION = "HINDSIGHT_API_VECTOR_EXTENSION"
+ENV_TEXT_SEARCH_EXTENSION = "HINDSIGHT_API_TEXT_SEARCH_EXTENSION"
+
 ENV_HOST = "HINDSIGHT_API_HOST"
 ENV_PORT = "HINDSIGHT_API_PORT"
 ENV_BASE_PATH = "HINDSIGHT_API_BASE_PATH"
@@ -322,6 +325,12 @@ DEFAULT_RERANKER_FLASHRANK_CACHE_DIR = None  # Use default cache directory
 
 DEFAULT_EMBEDDINGS_COHERE_MODEL = "embed-english-v3.0"
 DEFAULT_RERANKER_COHERE_MODEL = "rerank-english-v3.0"
+
+# Vector extension (pgvector vs vchord)
+DEFAULT_VECTOR_EXTENSION = "pgvector"  # Options: "pgvector", "vchord"
+
+# Text search extension (native PostgreSQL vs vchord BM25)
+DEFAULT_TEXT_SEARCH_EXTENSION = "native"  # Options: "native", "vchord"
 
 # LiteLLM defaults
 DEFAULT_LITELLM_API_BASE = "http://localhost:4000"
@@ -460,6 +469,8 @@ class HindsightConfig:
     # Database
     database_url: str
     database_schema: str
+    vector_extension: str  # "pgvector" or "vchord"
+    text_search_extension: str  # "native" or "vchord"
 
     # LLM (default, used as fallback for per-operation config)
     llm_provider: str
@@ -687,6 +698,20 @@ class HindsightConfig:
 
     def validate(self) -> None:
         """Validate configuration values and raise errors for invalid combinations."""
+        # Validate vector_extension
+        valid_extensions = ("pgvector", "vchord")
+        if self.vector_extension not in valid_extensions:
+            raise ValueError(
+                f"Invalid vector_extension: {self.vector_extension}. Must be one of: {', '.join(valid_extensions)}"
+            )
+
+        # Validate text_search_extension
+        valid_text_search = ("native", "vchord")
+        if self.text_search_extension not in valid_text_search:
+            raise ValueError(
+                f"Invalid text_search_extension: {self.text_search_extension}. Must be one of: {', '.join(valid_text_search)}"
+            )
+
         # RETAIN_MAX_COMPLETION_TOKENS must be greater than RETAIN_CHUNK_SIZE
         # to ensure the LLM has enough output capacity to extract facts from chunks
         if self.retain_max_completion_tokens <= self.retain_chunk_size:
@@ -712,6 +737,8 @@ class HindsightConfig:
             # Database
             database_url=os.getenv(ENV_DATABASE_URL, DEFAULT_DATABASE_URL),
             database_schema=os.getenv(ENV_DATABASE_SCHEMA, DEFAULT_DATABASE_SCHEMA),
+            vector_extension=os.getenv(ENV_VECTOR_EXTENSION, DEFAULT_VECTOR_EXTENSION).lower(),
+            text_search_extension=os.getenv(ENV_TEXT_SEARCH_EXTENSION, DEFAULT_TEXT_SEARCH_EXTENSION).lower(),
             # LLM
             llm_provider=llm_provider,
             llm_api_key=os.getenv(ENV_LLM_API_KEY),

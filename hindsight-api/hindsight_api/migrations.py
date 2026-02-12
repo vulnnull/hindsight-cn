@@ -33,35 +33,39 @@ logger = logging.getLogger(__name__)
 MIGRATION_LOCK_ID = 123456789
 
 
-def _detect_vector_extension(conn) -> str:
+def _detect_vector_extension(conn, vector_extension: str = "pgvector") -> str:
     """
-    Detect available vector extension: 'vchord' or 'pgvector'.
-    Prefers vchord if both available. Raises error if neither found.
+    Validate vector extension: 'vchord' or 'pgvector'.
 
     Args:
         conn: SQLAlchemy connection object
+        vector_extension: Configured extension ("pgvector" or "vchord")
 
     Returns:
         "vchord" or "pgvector"
 
     Raises:
-        RuntimeError: If neither extension is installed
+        RuntimeError: If configured extension is not installed
     """
-    # Check vchord first (preferred for high-dimensional embeddings)
-    vchord_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vchord'")).scalar()
-    if vchord_check:
-        logger.debug("Detected vector extension: vchord")
+    # Verify the configured extension is installed
+    if vector_extension == "vchord":
+        vchord_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vchord'")).scalar()
+        if not vchord_check:
+            raise RuntimeError(
+                "Configured vector extension 'vchord' not found. Install it with: CREATE EXTENSION vchord CASCADE;"
+            )
+        logger.debug("Using configured vector extension: vchord")
         return "vchord"
-
-    # Fall back to pgvector
-    pgvector_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar()
-    if pgvector_check:
-        logger.debug("Detected vector extension: pgvector")
+    elif vector_extension == "pgvector":
+        pgvector_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar()
+        if not pgvector_check:
+            raise RuntimeError(
+                "Configured vector extension 'pgvector' not found. Install it with: CREATE EXTENSION vector;"
+            )
+        logger.debug("Using configured vector extension: pgvector")
         return "pgvector"
-
-    raise RuntimeError(
-        "Neither vchord nor pgvector extension found. Install one: CREATE EXTENSION vchord; or CREATE EXTENSION vector;"
-    )
+    else:
+        raise ValueError(f"Invalid vector_extension: {vector_extension}. Must be 'pgvector' or 'vchord'")
 
 
 def _get_schema_lock_id(schema: str) -> int:
@@ -355,6 +359,7 @@ def ensure_embedding_dimension(
     database_url: str,
     required_dimension: int,
     schema: str | None = None,
+    vector_extension: str = "pgvector",
 ) -> None:
     """
     Ensure the embedding column dimension matches the model's dimension.
@@ -369,6 +374,7 @@ def ensure_embedding_dimension(
         database_url: SQLAlchemy database URL
         required_dimension: The embedding dimension required by the model
         schema: Target PostgreSQL schema name (None for public)
+        vector_extension: Configured vector extension ("pgvector" or "vchord")
 
     Raises:
         RuntimeError: If dimension mismatch with existing data
@@ -393,8 +399,8 @@ def ensure_embedding_dimension(
             return
 
         # Detect which vector extension is available
-        vector_ext = _detect_vector_extension(conn)
-        logger.info(f"Detected vector extension: {vector_ext}")
+        vector_ext = _detect_vector_extension(conn, vector_extension)
+        logger.info(f"Using vector extension: {vector_ext}")
 
         # Get current column dimension from pg_attribute
         # pgvector stores dimension in atttypmod
@@ -491,3 +497,354 @@ def ensure_embedding_dimension(
         conn.commit()
 
         logger.info(f"Successfully changed embedding dimension to {required_dimension}")
+
+
+def ensure_vector_extension(
+    database_url: str,
+    vector_extension: str = "pgvector",
+    schema: str | None = None,
+) -> None:
+    """
+    Ensure the vector indexes match the configured vector extension.
+
+    This function checks the current vector index type in the database
+    and adjusts it if necessary:
+    - If index type matches configured extension: no action needed
+    - If they differ and tables are empty: drop old indexes, recreate with new type
+    - If they differ and tables have data: raise error with migration guidance
+
+    Args:
+        database_url: SQLAlchemy database URL
+        vector_extension: Configured vector extension ("pgvector" or "vchord")
+        schema: Target PostgreSQL schema name (None for public)
+
+    Raises:
+        RuntimeError: If extension mismatch with existing data
+    """
+    schema_name = schema or "public"
+
+    engine = create_engine(database_url)
+    with engine.connect() as conn:
+        # Detect which vector extension should be used
+        target_ext = _detect_vector_extension(conn, vector_extension)
+        logger.info(f"Target vector extension: {target_ext}")
+
+        # Tables with vector indexes to check
+        tables_to_check = [
+            ("memory_units", "idx_memory_units_embedding"),
+            ("learnings", "idx_learnings_embedding"),
+            ("pinned_reflections", "idx_pinned_reflections_embedding"),
+        ]
+
+        # Determine target index type
+        target_index_type = "vchordrq" if target_ext == "vchord" else "hnsw"
+
+        mismatched_tables = []
+        tables_with_data = []
+
+        for table_name, index_name in tables_to_check:
+            # Check if table exists
+            table_exists = conn.execute(
+                text("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = :schema AND table_name = :table_name
+                    )
+                """),
+                {"schema": schema_name, "table_name": table_name},
+            ).scalar()
+
+            if not table_exists:
+                logger.debug(f"Table {table_name} does not exist in schema '{schema_name}', skipping")
+                continue
+
+            # Check current index type by querying pg_indexes
+            current_index_info = conn.execute(
+                text("""
+                    SELECT indexdef
+                    FROM pg_indexes
+                    WHERE schemaname = :schema
+                      AND tablename = :table_name
+                      AND indexname LIKE :index_pattern
+                """),
+                {"schema": schema_name, "table_name": table_name, "index_pattern": "%embedding%"},
+            ).fetchone()
+
+            if not current_index_info:
+                logger.warning(f"No embedding index found for {table_name}, will create it")
+                mismatched_tables.append((table_name, index_name, None))
+                continue
+
+            indexdef = current_index_info[0].lower()
+            if "vchordrq" in indexdef:
+                current_index_type = "vchordrq"
+            elif "hnsw" in indexdef:
+                current_index_type = "hnsw"
+            else:
+                logger.warning(f"Unknown index type for {table_name}: {indexdef}")
+                continue
+
+            # Check if index type matches target
+            if current_index_type != target_index_type:
+                logger.info(
+                    f"Index type mismatch on {table_name}: current={current_index_type}, target={target_index_type}"
+                )
+                mismatched_tables.append((table_name, index_name, current_index_type))
+
+                # Check if table has data
+                row_count = conn.execute(
+                    text(f"SELECT COUNT(*) FROM {schema_name}.{table_name} WHERE embedding IS NOT NULL")
+                ).scalar()
+
+                if row_count > 0:
+                    tables_with_data.append((table_name, row_count))
+            else:
+                logger.debug(f"Index type OK for {table_name}: {current_index_type}")
+
+        # If no mismatches, we're done
+        if not mismatched_tables:
+            logger.debug(f"All vector indexes match configured extension: {target_ext}")
+            return
+
+        # If there's data in any mismatched table, raise error
+        if tables_with_data:
+            table_list = ", ".join([f"{table}({count} rows)" for table, count in tables_with_data])
+            raise RuntimeError(
+                f"Cannot change vector extension from {current_index_type} to {target_index_type}: "
+                f"the following tables contain data: {table_list}. "
+                f"To change vector extension, you must either:\n"
+                f"  1. Re-embed all data: DELETE FROM {schema_name}.memory_units; "
+                f"DELETE FROM {schema_name}.learnings; DELETE FROM {schema_name}.pinned_reflections; then restart\n"
+                f"  2. Use the current vector extension (set HINDSIGHT_API_VECTOR_EXTENSION='{current_index_type.replace('vchordrq', 'vchord').replace('hnsw', 'pgvector')}')"
+            )
+
+        # Tables are empty, safe to recreate indexes
+        logger.info(f"Recreating vector indexes for {target_ext}")
+
+        for table_name, index_name, current_type in mismatched_tables:
+            # Drop existing index if it exists
+            if current_type:
+                logger.info(f"Dropping {current_type} index on {table_name}")
+                conn.execute(text(f"DROP INDEX IF EXISTS {schema_name}.{index_name}"))
+
+            # Create new index with appropriate type
+            if target_ext == "vchord":
+                logger.info(f"Creating vchordrq index on {table_name}")
+                conn.execute(
+                    text(f"""
+                        CREATE INDEX IF NOT EXISTS {index_name}
+                        ON {schema_name}.{table_name}
+                        USING vchordrq (embedding vector_l2_ops)
+                    """)
+                )
+            else:  # pgvector
+                logger.info(f"Creating HNSW index on {table_name}")
+                conn.execute(
+                    text(f"""
+                        CREATE INDEX IF NOT EXISTS {index_name}
+                        ON {schema_name}.{table_name}
+                        USING hnsw (embedding vector_cosine_ops)
+                        WITH (m = 16, ef_construction = 64)
+                    """)
+                )
+
+        conn.commit()
+        logger.info(f"Successfully migrated vector indexes to {target_ext}")
+
+
+def ensure_text_search_extension(
+    database_url: str,
+    text_search_extension: str = "native",
+    schema: str | None = None,
+) -> None:
+    """
+    Ensure the text search columns and indexes match the configured extension.
+
+    This function checks the current search_vector column type and index type
+    in the database and adjusts them if necessary:
+    - If they match configured extension: no action needed
+    - If they differ and tables are empty: drop old column/index, recreate with new type
+    - If they differ and tables have data: raise error with migration guidance
+
+    Args:
+        database_url: SQLAlchemy database URL
+        text_search_extension: Configured text search extension ("native" or "vchord")
+        schema: Target PostgreSQL schema name (None for public)
+
+    Raises:
+        RuntimeError: If extension mismatch with existing data
+    """
+    schema_name = schema or "public"
+
+    engine = create_engine(database_url)
+    with engine.connect() as conn:
+        # Tables with search_vector columns to check
+        tables_to_check = [
+            "memory_units",
+            "reflections",  # Renamed from pinned_reflections in p1k2l3m4n5o6 migration
+        ]
+
+        # Determine target column type and index type
+        if text_search_extension == "vchord":
+            target_column_type = "bm25vector"
+            target_index_type = "bm25"
+        else:  # native
+            target_column_type = "tsvector"
+            target_index_type = "gin"
+
+        mismatched_tables = []
+        tables_with_data = []
+
+        for table_name in tables_to_check:
+            # Check if table exists
+            table_exists = conn.execute(
+                text("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = :schema AND table_name = :table_name
+                    )
+                """),
+                {"schema": schema_name, "table_name": table_name},
+            ).scalar()
+
+            if not table_exists:
+                logger.debug(f"Table {table_name} does not exist in schema '{schema_name}', skipping")
+                continue
+
+            # Get current column type from information_schema
+            current_column_info = conn.execute(
+                text("""
+                    SELECT data_type, udt_name
+                    FROM information_schema.columns
+                    WHERE table_schema = :schema
+                      AND table_name = :table_name
+                      AND column_name = 'search_vector'
+                """),
+                {"schema": schema_name, "table_name": table_name},
+            ).fetchone()
+
+            if not current_column_info:
+                logger.warning(f"No search_vector column found for {table_name}, will create it")
+                mismatched_tables.append((table_name, None, None))
+                continue
+
+            # Check column type (udt_name contains the actual type: tsvector, bm25vector, etc.)
+            current_column_type = current_column_info[1]  # udt_name
+
+            # Get current index type
+            current_index_info = conn.execute(
+                text("""
+                    SELECT am.amname
+                    FROM pg_indexes pi
+                    JOIN pg_class c ON c.relname = pi.indexname
+                    JOIN pg_am am ON am.oid = c.relam
+                    WHERE pi.schemaname = :schema
+                      AND pi.tablename = :table_name
+                      AND pi.indexname LIKE '%text_search%'
+                """),
+                {"schema": schema_name, "table_name": table_name},
+            ).fetchone()
+
+            current_index_type = current_index_info[0] if current_index_info else None
+
+            # Check if column and index types match target
+            column_matches = current_column_type == target_column_type
+            index_matches = current_index_type == target_index_type if current_index_type else False
+
+            if not (column_matches and index_matches):
+                logger.info(
+                    f"Text search mismatch on {table_name}: "
+                    f"column={current_column_type} (want {target_column_type}), "
+                    f"index={current_index_type} (want {target_index_type})"
+                )
+                mismatched_tables.append((table_name, current_column_type, current_index_type))
+
+                # Check if table has data
+                row_count = conn.execute(text(f"SELECT COUNT(*) FROM {schema_name}.{table_name}")).scalar()
+
+                if row_count > 0:
+                    tables_with_data.append((table_name, row_count))
+            else:
+                logger.debug(f"Text search OK for {table_name}: {current_column_type}/{current_index_type}")
+
+        # If no mismatches, we're done
+        if not mismatched_tables:
+            logger.debug(f"All text search columns/indexes match configured extension: {text_search_extension}")
+            return
+
+        # If there's data in any mismatched table, raise error
+        if tables_with_data:
+            table_list = ", ".join([f"{table}({count} rows)" for table, count in tables_with_data])
+            current_ext = "native" if mismatched_tables[0][1] == "tsvector" else "vchord"
+            raise RuntimeError(
+                f"Cannot change text search extension from {current_ext} to {text_search_extension}: "
+                f"the following tables contain data: {table_list}. "
+                f"To change text search extension, you must either:\n"
+                f"  1. Clear all data: DELETE FROM {schema_name}.memory_units; "
+                f"DELETE FROM {schema_name}.reflections; then restart\n"
+                f"  2. Use the current text search extension (set HINDSIGHT_API_TEXT_SEARCH_EXTENSION='{current_ext}')"
+            )
+
+        # Tables are empty, safe to recreate columns/indexes
+        logger.info(f"Recreating text search columns/indexes for {text_search_extension}")
+
+        for table_name, current_col_type, current_idx_type in mismatched_tables:
+            # Drop existing index if it exists
+            if current_idx_type:
+                logger.info(f"Dropping {current_idx_type} index on {table_name}")
+                conn.execute(
+                    text(f"""
+                        DROP INDEX IF EXISTS {schema_name}.idx_{table_name.replace(".", "_")}_text_search
+                    """)
+                )
+
+            # Drop existing column if it exists
+            if current_col_type:
+                logger.info(f"Dropping {current_col_type} column on {table_name}")
+                conn.execute(text(f"ALTER TABLE {schema_name}.{table_name} DROP COLUMN IF EXISTS search_vector"))
+
+            # Create new column with appropriate type
+            if text_search_extension == "vchord":
+                logger.info(f"Creating bm25vector column on {table_name}")
+                # Note: vchord_bm25 extension creates types in bm25_catalog schema
+                conn.execute(
+                    text(f"ALTER TABLE {schema_name}.{table_name} ADD COLUMN search_vector bm25_catalog.bm25vector")
+                )
+
+                # Create BM25 index
+                logger.info(f"Creating BM25 index on {table_name}")
+                conn.execute(
+                    text(f"""
+                        CREATE INDEX idx_{table_name.replace(".", "_")}_text_search
+                        ON {schema_name}.{table_name}
+                        USING bm25 (search_vector bm25_catalog.bm25_ops)
+                    """)
+                )
+            else:  # native
+                logger.info(f"Creating tsvector column on {table_name}")
+                # Different GENERATED expression for each table
+                if table_name == "memory_units":
+                    generated_expr = "to_tsvector('english', COALESCE(text, '') || ' ' || COALESCE(context, ''))"
+                else:  # reflections
+                    generated_expr = "to_tsvector('english', COALESCE(name, '') || ' ' || content)"
+
+                conn.execute(
+                    text(f"""
+                        ALTER TABLE {schema_name}.{table_name}
+                        ADD COLUMN search_vector tsvector
+                        GENERATED ALWAYS AS ({generated_expr}) STORED
+                    """)
+                )
+
+                # Create GIN index
+                logger.info(f"Creating GIN index on {table_name}")
+                conn.execute(
+                    text(f"""
+                        CREATE INDEX idx_{table_name.replace(".", "_")}_text_search
+                        ON {schema_name}.{table_name}
+                        USING gin(search_vector)
+                    """)
+                )
+
+        conn.commit()
+        logger.info(f"Successfully migrated text search to {text_search_extension}")

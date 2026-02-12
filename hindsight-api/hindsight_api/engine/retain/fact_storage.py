@@ -7,6 +7,7 @@ Handles insertion of facts into the database.
 import json
 import logging
 
+from ...config import get_config
 from ..memory_engine import fq_table
 from .fact_extraction import _sanitize_text
 from .types import ProcessedFact
@@ -70,28 +71,58 @@ async def insert_facts_batch(
 
     # Batch insert all facts
     # Note: tags are passed as JSON strings and converted back to varchar[] via jsonb_array_elements_text + array_agg
-    results = await conn.fetch(
-        f"""
-        WITH input_data AS (
-            SELECT * FROM unnest(
-                $2::text[], $3::vector[], $4::timestamptz[], $5::timestamptz[], $6::timestamptz[], $7::timestamptz[],
-                $8::text[], $9::text[], $10::float[], $11::jsonb[], $12::text[], $13::text[], $14::jsonb[]
-            ) AS t(text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
-                   context, fact_type, confidence_score, metadata, chunk_id, document_id, tags_json)
-        )
-        INSERT INTO {fq_table("memory_units")} (bank_id, text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
-                                 context, fact_type, confidence_score, metadata, chunk_id, document_id, tags)
-        SELECT
-            $1,
-            text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
-            context, fact_type, confidence_score, metadata, chunk_id, document_id,
-            COALESCE(
-                (SELECT array_agg(elem) FROM jsonb_array_elements_text(tags_json) AS elem),
-                '{{}}'::varchar[]
+    # Query varies based on text search backend
+    config = get_config()
+    if config.text_search_extension == "vchord":
+        # VectorChord: manually tokenize and insert search_vector
+        query = f"""
+            WITH input_data AS (
+                SELECT * FROM unnest(
+                    $2::text[], $3::vector[], $4::timestamptz[], $5::timestamptz[], $6::timestamptz[], $7::timestamptz[],
+                    $8::text[], $9::text[], $10::float[], $11::jsonb[], $12::text[], $13::text[], $14::jsonb[]
+                ) AS t(text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+                       context, fact_type, confidence_score, metadata, chunk_id, document_id, tags_json)
             )
-        FROM input_data
-        RETURNING id
-        """,
+            INSERT INTO {fq_table("memory_units")} (bank_id, text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+                                     context, fact_type, confidence_score, metadata, chunk_id, document_id, tags, search_vector)
+            SELECT
+                $1,
+                text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+                context, fact_type, confidence_score, metadata, chunk_id, document_id,
+                COALESCE(
+                    (SELECT array_agg(elem) FROM jsonb_array_elements_text(tags_json) AS elem),
+                    '{{}}'::varchar[]
+                ),
+                tokenize(COALESCE(text, '') || ' ' || COALESCE(context, ''), 'llmlingua2')::bm25_catalog.bm25vector
+            FROM input_data
+            RETURNING id
+        """
+    else:  # native
+        # Native PostgreSQL: search_vector is GENERATED ALWAYS, don't include it
+        query = f"""
+            WITH input_data AS (
+                SELECT * FROM unnest(
+                    $2::text[], $3::vector[], $4::timestamptz[], $5::timestamptz[], $6::timestamptz[], $7::timestamptz[],
+                    $8::text[], $9::text[], $10::float[], $11::jsonb[], $12::text[], $13::text[], $14::jsonb[]
+                ) AS t(text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+                       context, fact_type, confidence_score, metadata, chunk_id, document_id, tags_json)
+            )
+            INSERT INTO {fq_table("memory_units")} (bank_id, text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+                                     context, fact_type, confidence_score, metadata, chunk_id, document_id, tags)
+            SELECT
+                $1,
+                text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+                context, fact_type, confidence_score, metadata, chunk_id, document_id,
+                COALESCE(
+                    (SELECT array_agg(elem) FROM jsonb_array_elements_text(tags_json) AS elem),
+                    '{{}}'::varchar[]
+                )
+            FROM input_data
+            RETURNING id
+        """
+
+    results = await conn.fetch(
+        query,
         bank_id,
         fact_texts,
         embeddings,

@@ -57,6 +57,64 @@ hindsight-admin run-db-migration
 hindsight-admin run-db-migration --schema tenant_acme
 ```
 
+### Vector Extension
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_VECTOR_EXTENSION` | Vector extension to use: `auto`, `pgvector`, or `vchord` | `auto` |
+
+Hindsight supports two PostgreSQL vector extensions:
+- **pgvector**: Standard extension, works well for most embeddings (up to ~2000 dimensions)
+- **vchord**: Optimized for high-dimensional embeddings (3000+ dimensions), includes BM25 search
+
+When set to `auto` (default), Hindsight automatically detects which extension is installed, preferring vchord if both are available.
+
+**When to use vchord:**
+- Using high-dimensional embeddings (e.g., `text-embedding-3-large` with 3072 dimensions)
+- Need better performance with large embedding dimensions
+- Want to use vchord's BM25 search capabilities
+
+**When to use pgvector:**
+- Using standard embedding dimensions (384-1536)
+- Prefer the widely-adopted pgvector extension
+- Simpler deployment (pgvector is more commonly available)
+
+**Switching extensions:**
+
+If you need to switch from one extension to another:
+1. Set `HINDSIGHT_API_VECTOR_EXTENSION` to your desired extension (`pgvector` or `vchord`)
+2. If your database has existing data, you'll get an error with migration instructions
+3. For empty databases, indexes will be automatically recreated on startup
+
+### Text Search Extension
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` | Text search backend: `native` or `vchord` | `native` |
+
+Hindsight supports two text search backends for BM25 keyword retrieval:
+- **native**: PostgreSQL's built-in full-text search (`tsvector` + GIN indexes)
+- **vchord**: VectorChord BM25 (`bm25vector` + BM25 indexes) - requires `vchord_bm25` extension
+
+**When to use vchord:**
+- Already using vchord for vector search (good integration)
+- Want better BM25 ranking performance
+- Need advanced tokenization (uses `llmlingua2` tokenizer)
+
+**When to use native:**
+- Standard PostgreSQL deployment (no extra extensions)
+- Simpler setup and wider compatibility
+- Works well for most use cases
+
+**Switching backends:**
+
+To switch from native to vchord (or vice versa):
+1. Set `HINDSIGHT_API_TEXT_SEARCH_EXTENSION=vchord` (or `native`)
+2. If your database has existing data, you'll get an error with migration instructions
+3. For empty databases, the columns/indexes will be automatically recreated on startup
+
+**Note:** VectorChord text search uses the `llmlingua2` tokenizer for multilingual support, while native uses PostgreSQL's English tokenizer.
+
 ### LLM Provider
 
 | Variable | Description | Default |

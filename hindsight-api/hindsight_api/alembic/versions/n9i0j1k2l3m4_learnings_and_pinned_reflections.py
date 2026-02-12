@@ -10,6 +10,7 @@ This migration:
 3. Adds consolidation tracking columns to the 'banks' table
 """
 
+import os
 from collections.abc import Sequence
 
 from alembic import context, op
@@ -30,21 +31,57 @@ def _get_schema_prefix() -> str:
 
 def _detect_vector_extension() -> str:
     """
-    Detect available vector extension: 'vchord' or 'pgvector'.
-    Prefers vchord if both available. Raises error if neither found.
+    Detect or validate vector extension: 'vchord' or 'pgvector'.
+    Respects HINDSIGHT_API_VECTOR_EXTENSION env var if set.
     """
     conn = op.get_bind()
-    vchord_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vchord'")).scalar()
-    if vchord_check:
+    vector_extension = os.getenv("HINDSIGHT_API_VECTOR_EXTENSION", "pgvector").lower()
+
+    # Validate configured extension is installed
+    if vector_extension == "vchord":
+        vchord_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vchord'")).scalar()
+        if not vchord_check:
+            raise RuntimeError(
+                "Configured vector extension 'vchord' not found. Install it with: CREATE EXTENSION vchord CASCADE;"
+            )
         return "vchord"
-
-    pgvector_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar()
-    if pgvector_check:
+    elif vector_extension == "pgvector":
+        pgvector_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar()
+        if not pgvector_check:
+            raise RuntimeError(
+                "Configured vector extension 'pgvector' not found. Install it with: CREATE EXTENSION vector;"
+            )
         return "pgvector"
+    else:
+        raise ValueError(f"Invalid HINDSIGHT_API_VECTOR_EXTENSION: {vector_extension}. Must be 'pgvector' or 'vchord'")
 
-    raise RuntimeError(
-        "Neither vchord nor pgvector extension found. Install one: CREATE EXTENSION vchord; or CREATE EXTENSION vector;"
-    )
+
+def _detect_text_search_extension() -> str:
+    """
+    Detect or validate text search extension: 'native' or 'vchord'.
+    Respects HINDSIGHT_API_TEXT_SEARCH_EXTENSION env var.
+    Creates the extension if needed.
+    """
+    text_search_extension = os.getenv("HINDSIGHT_API_TEXT_SEARCH_EXTENSION", "native").lower()
+
+    if text_search_extension == "vchord":
+        # Create vchord_bm25 extension if not exists
+        try:
+            op.execute("CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE")
+        except Exception:
+            # Extension might already exist or user lacks permissions - verify it exists
+            conn = op.get_bind()
+            result = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vchord_bm25'")).fetchone()
+            if not result:
+                # Extension truly doesn't exist - re-raise the error
+                raise
+        return "vchord"
+    elif text_search_extension == "native":
+        return "native"
+    else:
+        raise ValueError(
+            f"Invalid HINDSIGHT_API_TEXT_SEARCH_EXTENSION: {text_search_extension}. Must be 'native' or 'vchord'"
+        )
 
 
 def upgrade() -> None:
@@ -53,6 +90,9 @@ def upgrade() -> None:
 
     # Detect which vector extension is available
     vector_ext = _detect_vector_extension()
+
+    # Detect which text search extension to use
+    text_search_ext = _detect_text_search_extension()
 
     # 1. Create learnings table
     op.execute(f"""
@@ -96,11 +136,23 @@ def upgrade() -> None:
     op.execute(f"CREATE INDEX idx_learnings_tags ON {schema}learnings USING GIN(tags)")
 
     # Full-text search for learnings
-    op.execute(f"""
-        ALTER TABLE {schema}learnings ADD COLUMN search_vector tsvector
-        GENERATED ALWAYS AS (to_tsvector('english', text)) STORED
-    """)
-    op.execute(f"CREATE INDEX idx_learnings_text_search ON {schema}learnings USING gin(search_vector)")
+    if text_search_ext == "vchord":
+        # VectorChord BM25: bm25vector type (no GENERATED - tokenization happens on INSERT)
+        # Note: vchord_bm25 extension creates types in bm25_catalog schema
+        op.execute(f"""
+            ALTER TABLE {schema}learnings ADD COLUMN search_vector bm25_catalog.bm25vector
+        """)
+        op.execute(f"""
+            CREATE INDEX idx_learnings_text_search ON {schema}learnings
+            USING bm25 (search_vector bm25_catalog.bm25_ops)
+        """)
+    else:  # native
+        # Native PostgreSQL: tsvector with automatic generation
+        op.execute(f"""
+            ALTER TABLE {schema}learnings ADD COLUMN search_vector tsvector
+            GENERATED ALWAYS AS (to_tsvector('english', text)) STORED
+        """)
+        op.execute(f"CREATE INDEX idx_learnings_text_search ON {schema}learnings USING gin(search_vector)")
 
     # 2. Create pinned_reflections table
     op.execute(f"""
@@ -142,14 +194,26 @@ def upgrade() -> None:
     op.execute(f"CREATE INDEX idx_pinned_reflections_tags ON {schema}pinned_reflections USING GIN(tags)")
 
     # Full-text search for pinned_reflections
-    op.execute(f"""
-        ALTER TABLE {schema}pinned_reflections ADD COLUMN search_vector tsvector
-        GENERATED ALWAYS AS (to_tsvector('english', COALESCE(name, '') || ' ' || content)) STORED
-    """)
-    op.execute(f"""
-        CREATE INDEX idx_pinned_reflections_text_search ON {schema}pinned_reflections
-        USING gin(search_vector)
-    """)
+    if text_search_ext == "vchord":
+        # VectorChord BM25: bm25vector type (no GENERATED - tokenization happens on INSERT/UPDATE)
+        # Note: vchord_bm25 extension creates types in bm25_catalog schema
+        op.execute(f"""
+            ALTER TABLE {schema}pinned_reflections ADD COLUMN search_vector bm25_catalog.bm25vector
+        """)
+        op.execute(f"""
+            CREATE INDEX idx_pinned_reflections_text_search ON {schema}pinned_reflections
+            USING bm25 (search_vector bm25_catalog.bm25_ops)
+        """)
+    else:  # native
+        # Native PostgreSQL: tsvector with automatic generation
+        op.execute(f"""
+            ALTER TABLE {schema}pinned_reflections ADD COLUMN search_vector tsvector
+            GENERATED ALWAYS AS (to_tsvector('english', COALESCE(name, '') || ' ' || content)) STORED
+        """)
+        op.execute(f"""
+            CREATE INDEX idx_pinned_reflections_text_search ON {schema}pinned_reflections
+            USING gin(search_vector)
+        """)
 
     # 3. Add consolidation tracking columns to banks table
     op.execute(f"""

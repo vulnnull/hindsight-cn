@@ -968,7 +968,12 @@ class MemoryEngine(MemoryEngineInterface):
 
         # Run database migrations if enabled
         if self._run_migrations:
-            from ..migrations import ensure_embedding_dimension, run_migrations
+            from ..migrations import (
+                ensure_embedding_dimension,
+                ensure_text_search_extension,
+                ensure_vector_extension,
+                run_migrations,
+            )
 
             if not self.db_url:
                 raise ValueError("Database URL is required for migrations")
@@ -976,30 +981,43 @@ class MemoryEngine(MemoryEngineInterface):
             # Migrate all schemas from the tenant extension
             # The tenant extension is the single source of truth for which schemas exist
             logger.info("Running database migrations...")
-            try:
-                tenants = await self._tenant_extension.list_tenants()
-                if tenants:
-                    logger.info(f"Running migrations on {len(tenants)} schema(s)...")
-                    for tenant in tenants:
-                        schema = tenant.schema
-                        if schema:
-                            try:
-                                run_migrations(self.db_url, schema=schema)
-                            except Exception as e:
-                                logger.warning(f"Failed to migrate schema {schema}: {e}")
-                    logger.info("Schema migrations completed")
+            tenants = await self._tenant_extension.list_tenants()
+            if tenants:
+                logger.info(f"Running migrations on {len(tenants)} schema(s)...")
+                for tenant in tenants:
+                    schema = tenant.schema
+                    if schema:
+                        run_migrations(self.db_url, schema=schema)
+                logger.info("Schema migrations completed")
 
-                    # Ensure embedding column dimension matches the model's dimension
-                    # This is done after migrations and after embeddings.initialize()
-                    for tenant in tenants:
-                        schema = tenant.schema
-                        if schema:
-                            try:
-                                ensure_embedding_dimension(self.db_url, self.embeddings.dimension, schema=schema)
-                            except Exception as e:
-                                logger.warning(f"Failed to ensure embedding dimension for schema {schema}: {e}")
-            except Exception as e:
-                logger.warning(f"Failed to run schema migrations: {e}")
+                # Get config for vector extension setting
+                config = get_config()
+
+                # Ensure embedding column dimension matches the model's dimension
+                # This is done after migrations and after embeddings.initialize()
+                for tenant in tenants:
+                    schema = tenant.schema
+                    if schema:
+                        ensure_embedding_dimension(
+                            self.db_url,
+                            self.embeddings.dimension,
+                            schema=schema,
+                            vector_extension=config.vector_extension,
+                        )
+
+                # Ensure vector indexes match the configured extension
+                for tenant in tenants:
+                    schema = tenant.schema
+                    if schema:
+                        ensure_vector_extension(self.db_url, vector_extension=config.vector_extension, schema=schema)
+
+                # Ensure text search columns/indexes match the configured extension
+                for tenant in tenants:
+                    schema = tenant.schema
+                    if schema:
+                        ensure_text_search_extension(
+                            self.db_url, text_search_extension=config.text_search_extension, schema=schema
+                        )
 
         logger.info(f"Connecting to PostgreSQL at {mask_network_location(self.db_url)}")
 
