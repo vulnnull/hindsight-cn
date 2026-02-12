@@ -3560,7 +3560,8 @@
             },
             "type": "array",
             "title": "Tags",
-            "description": "Tags for filtering"
+            "description": "Tags for filtering",
+            "default": []
           }
         },
         "type": "object",
@@ -3601,7 +3602,8 @@
             },
             "type": "array",
             "title": "Tags",
-            "description": "Tags for scoped visibility"
+            "description": "Tags for scoped visibility",
+            "default": []
           },
           "max_tokens": {
             "type": "integer",
@@ -3613,7 +3615,8 @@
           },
           "trigger": {
             "$ref": "#/components/schemas/MentalModelTrigger",
-            "description": "Trigger settings"
+            "description": "Trigger settings",
+            "default": {}
           }
         },
         "type": "object",
@@ -3789,7 +3792,8 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Tags"
+            "title": "Tags",
+            "default": []
           },
           "created_at": {
             "anyOf": [
@@ -3905,7 +3909,8 @@
             },
             "type": "array",
             "title": "Tags",
-            "description": "Tags associated with this document"
+            "description": "Tags associated with this document",
+            "default": []
           }
         },
         "type": "object",
@@ -4686,7 +4691,8 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Tags"
+            "title": "Tags",
+            "default": []
           },
           "max_tokens": {
             "type": "integer",
@@ -4694,7 +4700,8 @@
             "default": 2048
           },
           "trigger": {
-            "$ref": "#/components/schemas/MentalModelTrigger"
+            "$ref": "#/components/schemas/MentalModelTrigger",
+            "default": {}
           },
           "last_refreshed_at": {
             "anyOf": [
@@ -5008,7 +5015,8 @@
           },
           "include": {
             "$ref": "#/components/schemas/IncludeOptions",
-            "description": "Options for including additional data (entities are included by default)"
+            "description": "Options for including additional data (entities are included by default)",
+            "default": {}
           },
           "tags": {
             "anyOf": [
@@ -5333,7 +5341,8 @@
             },
             "type": "array",
             "title": "Memories",
-            "description": "Memory facts used to generate the response"
+            "description": "Memory facts used to generate the response",
+            "default": []
           },
           "mental_models": {
             "items": {
@@ -5341,7 +5350,8 @@
             },
             "type": "array",
             "title": "Mental Models",
-            "description": "Mental models used during reflection"
+            "description": "Mental models used during reflection",
+            "default": []
           },
           "directives": {
             "items": {
@@ -5349,7 +5359,8 @@
             },
             "type": "array",
             "title": "Directives",
-            "description": "Directives applied during reflection"
+            "description": "Directives applied during reflection",
+            "default": []
           }
         },
         "type": "object",
@@ -5825,7 +5836,8 @@
             },
             "type": "array",
             "title": "Tool Calls",
-            "description": "Tool calls made during reflection"
+            "description": "Tool calls made during reflection",
+            "default": []
           },
           "llm_calls": {
             "items": {
@@ -5833,7 +5845,8 @@
             },
             "type": "array",
             "title": "Llm Calls",
-            "description": "LLM calls made during reflection"
+            "description": "LLM calls made during reflection",
+            "default": []
           }
         },
         "type": "object",

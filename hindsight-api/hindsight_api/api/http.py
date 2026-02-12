@@ -32,9 +32,44 @@ def _parse_metadata(metadata: Any) -> dict[str, Any]:
     return {}
 
 
+from typing import Callable
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from hindsight_api import MemoryEngine
+
+
+def FieldWithDefault(default_factory: Callable, **kwargs) -> Any:
+    """
+    Field wrapper that ensures default_factory values appear in OpenAPI schema.
+
+    Pydantic doesn't include default_factory in OpenAPI schemas, causing OpenAPI
+    Generator to make fields Optional with default=None instead of non-optional
+    with the correct default value.
+
+    This wrapper adds json_schema_extra to include the default in the schema.
+    """
+    # Determine the default value for the schema based on the factory
+    if default_factory is list:
+        schema_default = []
+    elif default_factory is dict:
+        schema_default = {}
+    else:
+        # For custom factories (like IncludeOptions), use empty dict as placeholder
+        schema_default = {}
+
+    # Add or merge json_schema_extra
+    json_extra = kwargs.pop("json_schema_extra", {})
+    if isinstance(json_extra, dict):
+        json_extra["default"] = schema_default
+    else:
+        # If json_schema_extra was a function, we can't merge easily
+        # Fall back to just setting default
+        json_extra = {"default": schema_default}
+
+    return Field(default_factory=default_factory, json_schema_extra=json_extra, **kwargs)
+
+
 from hindsight_api.engine.db_utils import acquire_with_retry
 from hindsight_api.engine.memory_engine import Budget, _get_tiktoken_encoding, fq_table
 from hindsight_api.engine.reflect.observations import Observation
@@ -103,8 +138,8 @@ class RecallRequest(BaseModel):
     query_timestamp: str | None = Field(
         default=None, description="ISO format date string (e.g., '2023-05-30T23:40:00')"
     )
-    include: IncludeOptions = Field(
-        default_factory=IncludeOptions,
+    include: IncludeOptions = FieldWithDefault(
+        IncludeOptions,
         description="Options for including additional data (entities are included by default)",
     )
     tags: list[str] | None = Field(
@@ -570,18 +605,16 @@ class ReflectLLMCall(BaseModel):
 class ReflectBasedOn(BaseModel):
     """Evidence the response is based on: memories, mental models, and directives."""
 
-    memories: list[ReflectFact] = Field(default_factory=list, description="Memory facts used to generate the response")
-    mental_models: list[ReflectMentalModel] = Field(
-        default_factory=list, description="Mental models used during reflection"
-    )
-    directives: list[ReflectDirective] = Field(default_factory=list, description="Directives applied during reflection")
+    memories: list[ReflectFact] = FieldWithDefault(list, description="Memory facts used to generate the response")
+    mental_models: list[ReflectMentalModel] = FieldWithDefault(list, description="Mental models used during reflection")
+    directives: list[ReflectDirective] = FieldWithDefault(list, description="Directives applied during reflection")
 
 
 class ReflectTrace(BaseModel):
     """Execution trace of LLM and tool calls during reflection."""
 
-    tool_calls: list[ReflectToolCall] = Field(default_factory=list, description="Tool calls made during reflection")
-    llm_calls: list[ReflectLLMCall] = Field(default_factory=list, description="LLM calls made during reflection")
+    tool_calls: list[ReflectToolCall] = FieldWithDefault(list, description="Tool calls made during reflection")
+    llm_calls: list[ReflectLLMCall] = FieldWithDefault(list, description="LLM calls made during reflection")
 
 
 class ReflectResponse(BaseModel):
@@ -942,7 +975,7 @@ class DocumentResponse(BaseModel):
     created_at: str
     updated_at: str
     memory_unit_count: int
-    tags: list[str] = Field(default_factory=list, description="Tags associated with this document")
+    tags: list[str] = FieldWithDefault(list, description="Tags associated with this document")
 
 
 class DeleteDocumentResponse(BaseModel):
@@ -1066,7 +1099,7 @@ class DirectiveResponse(BaseModel):
     content: str
     priority: int = 0
     is_active: bool = True
-    tags: list[str] = Field(default_factory=list)
+    tags: list[str] = FieldWithDefault(list)
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -1084,7 +1117,7 @@ class CreateDirectiveRequest(BaseModel):
     content: str = Field(description="The directive text to inject into prompts")
     priority: int = Field(default=0, description="Higher priority directives are injected first")
     is_active: bool = Field(default=True, description="Whether this directive is active")
-    tags: list[str] = Field(default_factory=list, description="Tags for filtering")
+    tags: list[str] = FieldWithDefault(list, description="Tags for filtering")
 
 
 class UpdateDirectiveRequest(BaseModel):
@@ -1121,9 +1154,9 @@ class MentalModelResponse(BaseModel):
     content: str = Field(
         description="The mental model content as well-formatted markdown (auto-generated from reflect endpoint)"
     )
-    tags: list[str] = Field(default_factory=list)
+    tags: list[str] = FieldWithDefault(list)
     max_tokens: int = Field(default=2048)
-    trigger: MentalModelTrigger = Field(default_factory=MentalModelTrigger)
+    trigger: MentalModelTrigger = FieldWithDefault(MentalModelTrigger)
     last_refreshed_at: str | None = None
     created_at: str | None = None
     reflect_response: dict | None = Field(
@@ -1159,9 +1192,9 @@ class CreateMentalModelRequest(BaseModel):
     )
     name: str = Field(description="Human-readable name for the mental model")
     source_query: str = Field(description="The query to run to generate content")
-    tags: list[str] = Field(default_factory=list, description="Tags for scoped visibility")
+    tags: list[str] = FieldWithDefault(list, description="Tags for scoped visibility")
     max_tokens: int = Field(default=2048, ge=256, le=8192, description="Maximum tokens for generated content")
-    trigger: MentalModelTrigger = Field(default_factory=MentalModelTrigger, description="Trigger settings")
+    trigger: MentalModelTrigger = FieldWithDefault(MentalModelTrigger, description="Trigger settings")
 
 
 class CreateMentalModelResponse(BaseModel):
