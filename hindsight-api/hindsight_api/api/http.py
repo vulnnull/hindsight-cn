@@ -1491,6 +1491,9 @@ def create_app(
         logging.info("Memory system closed")
 
     from hindsight_api import __version__
+    from hindsight_api.config import get_config
+
+    config = get_config()
 
     app = FastAPI(
         title="Hindsight HTTP API",
@@ -1504,6 +1507,7 @@ def create_app(
             "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
         },
         lifespan=lifespan,
+        root_path=config.base_path,
     )
 
     # IMPORTANT: Set memory on app.state immediately, don't wait for lifespan

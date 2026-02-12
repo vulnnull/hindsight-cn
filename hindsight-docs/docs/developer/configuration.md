@@ -429,6 +429,7 @@ For advanced authentication (JWT, OAuth, multi-tenant schemas), implement a cust
 |----------|-------------|---------|
 | `HINDSIGHT_API_HOST` | Bind address | `0.0.0.0` |
 | `HINDSIGHT_API_PORT` | Server port | `8888` |
+| `HINDSIGHT_API_BASE_PATH` | Base path for API when behind reverse proxy (e.g., `/hindsight`) | `""` (root) |
 | `HINDSIGHT_API_WORKERS` | Number of uvicorn worker processes | `1` |
 | `HINDSIGHT_API_LOG_LEVEL` | Log level: `debug`, `info`, `warning`, `error` | `info` |
 | `HINDSIGHT_API_LOG_FORMAT` | Log format: `text` or `json` (structured logging for cloud platforms) | `text` |
@@ -649,11 +650,77 @@ The Control Plane is the web UI for managing memory banks.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_CP_DATAPLANE_API_URL` | URL of the API service | `http://localhost:8888` |
+| `NEXT_PUBLIC_BASE_PATH` | Base path for Control Plane UI when behind reverse proxy (e.g., `/hindsight`) | `""` (root) |
 
 ```bash
 # Point Control Plane to a remote API service
 export HINDSIGHT_CP_DATAPLANE_API_URL=http://api.example.com:8888
 ```
+
+### Reverse Proxy / Subpath Deployment
+
+To deploy Hindsight under a subpath (e.g., `example.com/hindsight/`):
+
+1. Set both environment variables to the same path:
+   ```bash
+   HINDSIGHT_API_BASE_PATH=/hindsight
+   NEXT_PUBLIC_BASE_PATH=/hindsight
+   ```
+
+2. Configure your reverse proxy to:
+   - Forward `/hindsight/*` requests to Hindsight
+   - Preserve the full path in forwarded requests
+   - Set appropriate proxy headers (X-Forwarded-Proto, X-Forwarded-For)
+
+**Example: Nginx Configuration**
+
+```nginx
+location /hindsight/ {
+    proxy_pass http://localhost:8888/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**Example: Traefik Configuration**
+
+```yaml
+http:
+  routers:
+    hindsight:
+      rule: "PathPrefix(`/hindsight`)"
+      service: hindsight
+      middlewares:
+        - hindsight-stripprefix
+
+  middlewares:
+    hindsight-stripprefix:
+      stripPrefix:
+        prefixes:
+          - "/hindsight"
+
+  services:
+    hindsight:
+      loadBalancer:
+        servers:
+          - url: "http://localhost:8888"
+```
+
+**Important Notes:**
+- The base path must start with `/` and should NOT end with `/`
+- Both API and Control Plane should use the same base path
+- After setting environment variables, restart both services
+- OpenAPI docs will be available at `<base-path>/docs` (e.g., `/hindsight/docs`)
+
+**Complete Examples:**
+
+See `docker/compose-examples/` directory for:
+- Nginx configuration files (`simple.conf`, `api-and-control-plane.conf`)
+- Docker Compose setups (`docker-compose.yml`, `reverse-proxy-only.yml`)
+- Traefik and other reverse proxy examples
+- Full deployment documentation
 
 ---
 
