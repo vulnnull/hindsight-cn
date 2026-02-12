@@ -19,6 +19,7 @@ import httpx
 from ..config import (
     DEFAULT_EMBEDDINGS_COHERE_MODEL,
     DEFAULT_EMBEDDINGS_LITELLM_MODEL,
+    DEFAULT_EMBEDDINGS_LITELLM_SDK_MODEL,
     DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU,
     DEFAULT_EMBEDDINGS_LOCAL_MODEL,
     DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE,
@@ -26,6 +27,7 @@ from ..config import (
     DEFAULT_EMBEDDINGS_PROVIDER,
     DEFAULT_LITELLM_API_BASE,
     ENV_EMBEDDINGS_COHERE_API_KEY,
+    ENV_EMBEDDINGS_LITELLM_SDK_API_KEY,
     ENV_EMBEDDINGS_LOCAL_FORCE_CPU,
     ENV_EMBEDDINGS_LOCAL_MODEL,
     ENV_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE,
@@ -720,6 +722,148 @@ class LiteLLMEmbeddings(Embeddings):
         return all_embeddings
 
 
+class LiteLLMSDKEmbeddings(Embeddings):
+    """
+    LiteLLM SDK embeddings for direct API integration.
+
+    Supports embeddings via LiteLLM SDK without requiring a proxy server.
+    Supported providers: Cohere, OpenAI, Azure OpenAI, HuggingFace, Voyage AI, Together AI, etc.
+
+    Example model names:
+    - cohere/embed-english-v3.0
+    - openai/text-embedding-3-small
+    - together_ai/togethercomputer/m2-bert-80M-8k-retrieval
+    - voyage/voyage-2
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_EMBEDDINGS_LITELLM_SDK_MODEL,
+        api_base: str | None = None,
+        batch_size: int = 100,
+        timeout: float = 60.0,
+    ):
+        """
+        Initialize LiteLLM SDK embeddings client.
+
+        Args:
+            api_key: API key for the embedding provider
+            model: Model name with provider prefix (e.g., "cohere/embed-english-v3.0")
+            api_base: Custom base URL for API (optional)
+            batch_size: Maximum batch size for embedding requests (default: 100)
+            timeout: Request timeout in seconds (default: 60.0)
+        """
+        self.api_key = api_key
+        self.model = model
+        self.api_base = api_base
+        self.batch_size = batch_size
+        self.timeout = timeout
+        self._litellm = None  # Will be set during initialization
+        self._dimension: int | None = None
+
+    @property
+    def provider_name(self) -> str:
+        return "litellm-sdk"
+
+    @property
+    def dimension(self) -> int:
+        if self._dimension is None:
+            raise RuntimeError("Embeddings not initialized. Call initialize() first.")
+        return self._dimension
+
+    async def initialize(self) -> None:
+        """Initialize the LiteLLM SDK client and detect dimension."""
+        if self._litellm is not None:
+            return
+
+        try:
+            import litellm
+
+            self._litellm = litellm  # Store reference
+        except ImportError:
+            raise ImportError("litellm is required for LiteLLMSDKEmbeddings. Install it with: pip install litellm")
+
+        api_base_msg = f" at {self.api_base}" if self.api_base else ""
+        logger.info(f"Embeddings: initializing LiteLLM SDK provider with model {self.model}{api_base_msg}")
+
+        # Do a test embedding to detect dimension
+        try:
+            # Build kwargs for embedding call
+            embed_kwargs = {
+                "model": self.model,
+                "input": ["test"],
+                "api_key": self.api_key,
+            }
+            if self.api_base:
+                embed_kwargs["api_base"] = self.api_base
+
+            # Use async embedding method (standard in litellm)
+            response = await self._litellm.aembedding(**embed_kwargs)
+
+            # Extract dimension from response
+            if response.data and len(response.data) > 0:
+                self._dimension = len(response.data[0]["embedding"])
+            else:
+                raise RuntimeError(f"Unable to detect embedding dimension for model {self.model}")
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize LiteLLM SDK embeddings: {e}")
+
+        logger.info(f"Embeddings: LiteLLM SDK provider initialized (model: {self.model}, dim: {self._dimension})")
+
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        """
+        Generate embeddings using the LiteLLM SDK.
+
+        Args:
+            texts: List of text strings to encode
+
+        Returns:
+            List of embedding vectors (one per input text)
+        """
+        if self._litellm is None:
+            raise RuntimeError("Embeddings not initialized. Call initialize() first.")
+
+        if not texts:
+            return []
+
+        all_embeddings = []
+
+        # Process in batches
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i : i + self.batch_size]
+
+            try:
+                # Build kwargs for embedding call
+                embed_kwargs = {
+                    "model": self.model,
+                    "input": batch,
+                    "api_key": self.api_key,
+                }
+                if self.api_base:
+                    embed_kwargs["api_base"] = self.api_base
+
+                # Use sync embedding (litellm doesn't have async in thread-safe way)
+                response = self._litellm.embedding(**embed_kwargs)
+
+                # Extract embeddings from response
+                # Sort by index to ensure correct order
+                batch_embeddings = sorted(response.data, key=lambda x: x.get("index", 0))
+                all_embeddings.extend([e["embedding"] for e in batch_embeddings])
+
+            except Exception as e:
+                import traceback
+
+                logger.error(
+                    f"Error in LiteLLM embedding for batch starting at index {i}: {e}\n"
+                    f"Traceback: {traceback.format_exc()}"
+                )
+                raise
+
+        return all_embeddings
+
+
 def create_embeddings_from_env() -> Embeddings:
     """
     Create an Embeddings instance based on configuration.
@@ -771,7 +915,19 @@ def create_embeddings_from_env() -> Embeddings:
             api_key=config.embeddings_litellm_api_key,
             model=config.embeddings_litellm_model,
         )
+    elif provider == "litellm-sdk":
+        api_key = config.embeddings_litellm_sdk_api_key
+        if not api_key:
+            raise ValueError(
+                f"{ENV_EMBEDDINGS_LITELLM_SDK_API_KEY} is required when {ENV_EMBEDDINGS_PROVIDER} is 'litellm-sdk'"
+            )
+        return LiteLLMSDKEmbeddings(
+            api_key=api_key,
+            model=config.embeddings_litellm_sdk_model,
+            api_base=config.embeddings_litellm_sdk_api_base,
+        )
     else:
         raise ValueError(
-            f"Unknown embeddings provider: {provider}. Supported: 'local', 'tei', 'openai', 'cohere', 'litellm'"
+            f"Unknown embeddings provider: {provider}. "
+            f"Supported: 'local', 'tei', 'openai', 'cohere', 'litellm', 'litellm-sdk'"
         )
