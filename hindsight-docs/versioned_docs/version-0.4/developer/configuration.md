@@ -57,6 +57,71 @@ hindsight-admin run-db-migration
 hindsight-admin run-db-migration --schema tenant_acme
 ```
 
+### Vector Extension
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_VECTOR_EXTENSION` | Vector extension to use: `auto`, `pgvector`, or `vchord` | `auto` |
+
+Hindsight supports two PostgreSQL vector extensions:
+- **pgvector**: Standard extension, works well for most embeddings (up to ~2000 dimensions)
+- **vchord**: Optimized for high-dimensional embeddings (3000+ dimensions), includes BM25 search
+
+When set to `auto` (default), Hindsight automatically detects which extension is installed, preferring vchord if both are available.
+
+**When to use vchord:**
+- Using high-dimensional embeddings (e.g., `text-embedding-3-large` with 3072 dimensions)
+- Need better performance with large embedding dimensions
+- Want to use vchord's BM25 search capabilities
+
+**When to use pgvector:**
+- Using standard embedding dimensions (384-1536)
+- Prefer the widely-adopted pgvector extension
+- Simpler deployment (pgvector is more commonly available)
+
+**Switching extensions:**
+
+If you need to switch from one extension to another:
+1. Set `HINDSIGHT_API_VECTOR_EXTENSION` to your desired extension (`pgvector` or `vchord`)
+2. If your database has existing data, you'll get an error with migration instructions
+3. For empty databases, indexes will be automatically recreated on startup
+
+### Text Search Extension
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` | Text search backend: `native`, `vchord`, or `pg_textsearch` | `native` |
+
+Hindsight supports three text search backends for BM25 keyword retrieval:
+- **native**: PostgreSQL's built-in full-text search (`tsvector` + GIN indexes)
+- **vchord**: VectorChord BM25 (`bm25vector` + BM25 indexes) - requires `vchord_bm25` extension
+- **pg_textsearch**: Timescale BM25 (text columns + BM25 indexes) - requires `pg_textsearch` extension
+
+**When to use native:**
+- Standard PostgreSQL deployment (no extra extensions)
+- Simpler setup and wider compatibility
+- Works well for most use cases
+
+**When to use vchord:**
+- Already using vchord for vector search (good integration)
+- Want better BM25 ranking performance
+- Need advanced tokenization (uses `llmlingua2` tokenizer)
+
+**When to use pg_textsearch:**
+- Want industry-standard BM25 ranking with better relevance than native PostgreSQL
+- Need efficient top-K queries with Block-Max WAND optimization
+- Prefer lower memory footprint compared to vchord
+- Already using Timescale or have `pg_textsearch` available
+
+**Switching backends:**
+
+To switch between backends:
+1. Set `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` to your desired backend (`native`, `vchord`, or `pg_textsearch`)
+2. If your database has existing data, you'll get an error with migration instructions
+3. For empty databases, the columns/indexes will be automatically recreated on startup
+
+**Note:** VectorChord uses the `llmlingua2` tokenizer for multilingual support, while native and pg_textsearch use PostgreSQL's English tokenizer.
+
 ### LLM Provider
 
 | Variable | Description | Default |
@@ -267,23 +332,32 @@ export HINDSIGHT_API_RETAIN_LLM_MAX_BACKOFF=120.0    # Cap at 2min instead of 1m
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local`, `tei`, `openai`, `cohere`, or `litellm` | `local` |
+| `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local`, `tei`, `openai`, `cohere`, `litellm`, or `litellm-sdk` | `local` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL` | Model for local provider | `BAAI/bge-small-en-v1.5` |
+| `HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE` | Allow loading models with custom code (security risk, disabled by default) | `false` |
 | `HINDSIGHT_API_EMBEDDINGS_TEI_URL` | TEI server URL | - |
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY` | OpenAI API key (falls back to `HINDSIGHT_API_LLM_API_KEY`) | - |
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL` | OpenAI embedding model | `text-embedding-3-small` |
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL` | Custom base URL for OpenAI-compatible API (e.g., Azure OpenAI) | - |
-| `HINDSIGHT_API_COHERE_API_KEY` | Cohere API key (shared for embeddings and reranker) | - |
+| `HINDSIGHT_API_EMBEDDINGS_COHERE_API_KEY` | Cohere API key for embeddings | - |
 | `HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL` | Cohere embedding model | `embed-english-v3.0` |
 | `HINDSIGHT_API_EMBEDDINGS_COHERE_BASE_URL` | Custom base URL for Cohere-compatible API (e.g., Azure-hosted) | - |
-| `HINDSIGHT_API_LITELLM_API_BASE` | LiteLLM proxy base URL (shared for embeddings and reranker) | `http://localhost:4000` |
-| `HINDSIGHT_API_LITELLM_API_KEY` | LiteLLM proxy API key (optional, depends on proxy config) | - |
+| `HINDSIGHT_API_EMBEDDINGS_LITELLM_API_BASE` | LiteLLM proxy base URL for embeddings | `http://localhost:4000` |
+| `HINDSIGHT_API_EMBEDDINGS_LITELLM_API_KEY` | LiteLLM proxy API key for embeddings (optional, depends on proxy config) | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL` | LiteLLM embedding model (use provider prefix, e.g., `cohere/embed-english-v3.0`) | `text-embedding-3-small` |
+| `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_KEY` | LiteLLM SDK API key for direct embedding provider access | - |
+| `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MODEL` | LiteLLM SDK embedding model (use provider prefix, e.g., `cohere/embed-english-v3.0`) | `cohere/embed-english-v3.0` |
+| `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_BASE` | Custom base URL for LiteLLM SDK embeddings (optional) | - |
 
 ```bash
 # Local (default) - uses SentenceTransformers
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
 export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-small-en-v1.5
+
+# Local with custom model requiring trust_remote_code
+# WARNING: Only enable trust_remote_code for models you trust (security risk)
+# export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=your-custom-model
+# export HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE=true
 
 # OpenAI - cloud-based embeddings
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai
@@ -302,20 +376,32 @@ export HINDSIGHT_API_EMBEDDINGS_TEI_URL=http://localhost:8080
 
 # Cohere - cloud-based embeddings
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=cohere
-export HINDSIGHT_API_COHERE_API_KEY=your-api-key
+export HINDSIGHT_API_EMBEDDINGS_COHERE_API_KEY=your-api-key
 export HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL=embed-english-v3.0  # 1024 dimensions
 
 # Azure-hosted Cohere - embeddings via custom endpoint
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=cohere
-export HINDSIGHT_API_COHERE_API_KEY=your-azure-api-key
+export HINDSIGHT_API_EMBEDDINGS_COHERE_API_KEY=your-azure-api-key
 export HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL=embed-english-v3.0
 export HINDSIGHT_API_EMBEDDINGS_COHERE_BASE_URL=https://your-azure-cohere-endpoint.com
 
 # LiteLLM proxy - unified gateway for multiple providers
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=litellm
-export HINDSIGHT_API_LITELLM_API_BASE=http://localhost:4000
-export HINDSIGHT_API_LITELLM_API_KEY=your-litellm-key  # optional
+export HINDSIGHT_API_EMBEDDINGS_LITELLM_API_BASE=http://localhost:4000
+export HINDSIGHT_API_EMBEDDINGS_LITELLM_API_KEY=your-litellm-key  # optional
 export HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL=text-embedding-3-small  # or cohere/embed-english-v3.0
+
+# LiteLLM SDK - direct API access without proxy server (recommended)
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=litellm-sdk
+export HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_KEY=your-provider-api-key
+export HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MODEL=cohere/embed-english-v3.0
+
+# Supported LiteLLM SDK embedding providers:
+# - cohere/embed-english-v3.0 (1024 dimensions)
+# - openai/text-embedding-3-small (1536 dimensions)
+# - together_ai/togethercomputer/m2-bert-80M-8k-retrieval
+# - huggingface/sentence-transformers/all-MiniLM-L6-v2
+# - voyage/voyage-2
 ```
 
 #### Embedding Dimensions
@@ -338,15 +424,22 @@ Supported OpenAI embedding dimensions:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, `cohere`, `flashrank`, `litellm`, or `rrf` | `local` |
+| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, `cohere`, `flashrank`, `litellm`, `litellm-sdk`, or `rrf` | `local` |
 | `HINDSIGHT_API_RERANKER_LOCAL_MODEL` | Model for local provider | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `HINDSIGHT_API_RERANKER_LOCAL_MAX_CONCURRENT` | Max concurrent local reranking (prevents CPU thrashing under load) | `4` |
+| `HINDSIGHT_API_RERANKER_LOCAL_TRUST_REMOTE_CODE` | Allow loading models with custom code (security risk, disabled by default) | `false` |
 | `HINDSIGHT_API_RERANKER_TEI_URL` | TEI server URL | - |
 | `HINDSIGHT_API_RERANKER_TEI_BATCH_SIZE` | Batch size for TEI reranking | `128` |
 | `HINDSIGHT_API_RERANKER_TEI_MAX_CONCURRENT` | Max concurrent TEI reranking requests | `8` |
+| `HINDSIGHT_API_RERANKER_COHERE_API_KEY` | Cohere API key for reranking | - |
 | `HINDSIGHT_API_RERANKER_COHERE_MODEL` | Cohere rerank model | `rerank-english-v3.0` |
 | `HINDSIGHT_API_RERANKER_COHERE_BASE_URL` | Custom base URL for Cohere-compatible API (e.g., Azure-hosted) | - |
-| `HINDSIGHT_API_RERANKER_LITELLM_MODEL` | LiteLLM rerank model (use provider prefix, e.g., `cohere/rerank-english-v3.0`) | `cohere/rerank-english-v3.0` |
+| `HINDSIGHT_API_RERANKER_LITELLM_API_BASE` | LiteLLM proxy base URL for reranking | `http://localhost:4000` |
+| `HINDSIGHT_API_RERANKER_LITELLM_API_KEY` | LiteLLM proxy API key for reranking (optional, depends on proxy config) | - |
+| `HINDSIGHT_API_RERANKER_LITELLM_MODEL` | LiteLLM **proxy** rerank model (use provider prefix, e.g., `cohere/rerank-english-v3.0`) | `cohere/rerank-english-v3.0` |
+| `HINDSIGHT_API_RERANKER_LITELLM_SDK_API_KEY` | LiteLLM **SDK** API key for direct reranking (no proxy needed) | - |
+| `HINDSIGHT_API_RERANKER_LITELLM_SDK_MODEL` | LiteLLM SDK rerank model (e.g., `deepinfra/Qwen3-reranker-8B`) | `cohere/rerank-english-v3.0` |
+| `HINDSIGHT_API_RERANKER_LITELLM_SDK_API_BASE` | Custom API base URL for LiteLLM SDK (optional) | - |
 | `HINDSIGHT_API_RERANKER_FLASHRANK_MODEL` | FlashRank model for fast CPU-based reranking | `ms-marco-MiniLM-L-12-v2` |
 | `HINDSIGHT_API_RERANKER_FLASHRANK_CACHE_DIR` | Cache directory for FlashRank models | System default |
 
@@ -355,34 +448,52 @@ Supported OpenAI embedding dimensions:
 export HINDSIGHT_API_RERANKER_PROVIDER=local
 export HINDSIGHT_API_RERANKER_LOCAL_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 
+# Local with custom model requiring trust_remote_code (e.g., jina-reranker-v2)
+# WARNING: Only enable trust_remote_code for models you trust (security risk)
+export HINDSIGHT_API_RERANKER_PROVIDER=local
+export HINDSIGHT_API_RERANKER_LOCAL_MODEL=jinaai/jina-reranker-v2-base-multilingual
+export HINDSIGHT_API_RERANKER_LOCAL_TRUST_REMOTE_CODE=true
+
 # TEI - for high-performance inference
 export HINDSIGHT_API_RERANKER_PROVIDER=tei
 export HINDSIGHT_API_RERANKER_TEI_URL=http://localhost:8081
 
 # Cohere - cloud-based reranking
 export HINDSIGHT_API_RERANKER_PROVIDER=cohere
-export HINDSIGHT_API_COHERE_API_KEY=your-api-key  # shared with embeddings
+export HINDSIGHT_API_RERANKER_COHERE_API_KEY=your-api-key
 export HINDSIGHT_API_RERANKER_COHERE_MODEL=rerank-english-v3.0
 
 # Azure-hosted Cohere - reranking via custom endpoint
 export HINDSIGHT_API_RERANKER_PROVIDER=cohere
-export HINDSIGHT_API_COHERE_API_KEY=your-azure-api-key
+export HINDSIGHT_API_RERANKER_COHERE_API_KEY=your-azure-api-key
 export HINDSIGHT_API_RERANKER_COHERE_MODEL=rerank-english-v3.0
 export HINDSIGHT_API_RERANKER_COHERE_BASE_URL=https://your-azure-cohere-endpoint.com
 
-# LiteLLM proxy - unified gateway for multiple reranking providers
+# LiteLLM proxy - unified gateway for multiple reranking providers (requires running LiteLLM proxy server)
 export HINDSIGHT_API_RERANKER_PROVIDER=litellm
-export HINDSIGHT_API_LITELLM_API_BASE=http://localhost:4000
-export HINDSIGHT_API_LITELLM_API_KEY=your-litellm-key  # optional
+export HINDSIGHT_API_RERANKER_LITELLM_API_BASE=http://localhost:4000
+export HINDSIGHT_API_RERANKER_LITELLM_API_KEY=your-litellm-key  # optional
 export HINDSIGHT_API_RERANKER_LITELLM_MODEL=cohere/rerank-english-v3.0  # or voyage/rerank-2, together_ai/...
+
+# LiteLLM SDK - direct API access without proxy (recommended for simplicity)
+export HINDSIGHT_API_RERANKER_PROVIDER=litellm-sdk
+export HINDSIGHT_API_RERANKER_LITELLM_SDK_API_KEY=your-deepinfra-api-key
+export HINDSIGHT_API_RERANKER_LITELLM_SDK_MODEL=deepinfra/Qwen3-reranker-8B  # or cohere/rerank-english-v3.0, etc.
 ```
 
-LiteLLM supports multiple reranking providers via the `/rerank` endpoint:
-- Cohere (`cohere/rerank-english-v3.0`, `cohere/rerank-multilingual-v3.0`)
-- Together AI (`together_ai/...`)
-- Voyage AI (`voyage/rerank-2`)
-- Jina AI (`jina_ai/...`)
-- AWS Bedrock (`bedrock/...`)
+#### LiteLLM Proxy vs SDK
+
+- **`litellm`**: Requires running a separate LiteLLM proxy server. Good for centralized configuration, rate limiting, and caching.
+- **`litellm-sdk`**: Direct API access without proxy. Simpler setup, lower latency, fewer infrastructure components.
+
+Both support the same providers:
+- **Cohere** (`cohere/rerank-english-v3.0`, `cohere/rerank-multilingual-v3.0`)
+- **DeepInfra** (`deepinfra/Qwen3-reranker-8B`, `deepinfra/bge-reranker-v2-m3`)
+- **Together AI** (`together_ai/Salesforce/Llama-Rank-V1`)
+- **HuggingFace** (`huggingface/BAAI/bge-reranker-v2-m3`)
+- **Voyage AI** (`voyage/rerank-2`)
+- **Jina AI** (`jina_ai/jina-reranker-v2`)
+- **AWS Bedrock** (`bedrock/...`)
 
 ### Authentication
 
@@ -413,6 +524,7 @@ For advanced authentication (JWT, OAuth, multi-tenant schemas), implement a cust
 |----------|-------------|---------|
 | `HINDSIGHT_API_HOST` | Bind address | `0.0.0.0` |
 | `HINDSIGHT_API_PORT` | Server port | `8888` |
+| `HINDSIGHT_API_BASE_PATH` | Base path for API when behind reverse proxy (e.g., `/hindsight`) | `""` (root) |
 | `HINDSIGHT_API_WORKERS` | Number of uvicorn worker processes | `1` |
 | `HINDSIGHT_API_LOG_LEVEL` | Log level: `debug`, `info`, `warning`, `error` | `info` |
 | `HINDSIGHT_API_LOG_FORMAT` | Log format: `text` or `json` (structured logging for cloud platforms) | `text` |
@@ -558,6 +670,74 @@ await memory.initialize()
 
 ---
 
+## Observability & Tracing
+
+Hindsight provides OpenTelemetry-based observability for LLM calls, conforming to GenAI semantic conventions.
+
+### OpenTelemetry Tracing
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_OTEL_TRACES_ENABLED` | Enable distributed tracing for LLM calls | `false` |
+| `HINDSIGHT_API_OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL (e.g., Grafana LGTM, Langfuse, etc.) | - |
+| `HINDSIGHT_API_OTEL_EXPORTER_OTLP_HEADERS` | Headers for OTLP exporter (format: "key1=value1,key2=value2") | - |
+| `HINDSIGHT_API_OTEL_SERVICE_NAME` | Service name for traces | `hindsight-api` |
+| `HINDSIGHT_API_OTEL_DEPLOYMENT_ENVIRONMENT` | Deployment environment name (e.g., development, staging, production) | `development` |
+
+**Features:**
+- Full prompts and completions recorded as events
+- Token usage tracking (input/output)
+- Model and provider information
+- Error tracking with finish reasons
+- Conforms to OpenTelemetry GenAI semantic conventions v1.37+
+
+**OTLP-Compatible Backends:**
+
+The tracing implementation uses standard OTLP HTTP protocol, so it works with any OTLP-compatible backend:
+- **Grafana LGTM** (Recommended for local dev): All-in-one stack with Tempo traces, Loki logs, Mimir metrics, and Grafana UI
+- **Langfuse**: LLM-focused observability and analytics
+- **OpenLIT**: Built-in LLM dashboards, cost tracking
+- **DataDog, New Relic, Honeycomb**: Commercial platforms
+
+**Example Configuration:**
+
+```bash
+# Enable tracing
+export HINDSIGHT_API_OTEL_TRACES_ENABLED=true
+
+# Configure endpoint (example: OpenLIT Cloud)
+export HINDSIGHT_API_OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.openlit.io
+export HINDSIGHT_API_OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer olit-xxx"
+
+# Optional: Custom service name and environment
+export HINDSIGHT_API_OTEL_SERVICE_NAME=hindsight-production
+export HINDSIGHT_API_OTEL_DEPLOYMENT_ENVIRONMENT=production
+```
+
+**Local Development:**
+
+For local development, we recommend the Grafana LGTM stack which provides traces, metrics, and logs in a single container:
+
+```bash
+./scripts/dev/start-grafana.sh
+```
+
+See `scripts/dev/grafana/README.md` for detailed setup instructions.
+
+Other options: See `scripts/dev/openlit/README.md` for OpenLIT or `scripts/dev/jaeger/README.md` for standalone Jaeger.
+
+### Metrics
+
+Hindsight exposes Prometheus metrics at the `/metrics` endpoint, including:
+- LLM call duration and token usage
+- Operation duration (retain/recall/reflect)
+- HTTP request metrics
+- Database connection pool metrics
+
+Metrics are always enabled and available at `http://localhost:8888/metrics`.
+
+---
+
 ## Control Plane
 
 The Control Plane is the web UI for managing memory banks.
@@ -565,12 +745,198 @@ The Control Plane is the web UI for managing memory banks.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_CP_DATAPLANE_API_URL` | URL of the API service | `http://localhost:8888` |
+| `NEXT_PUBLIC_BASE_PATH` | Base path for Control Plane UI when behind reverse proxy (e.g., `/hindsight`) | `""` (root) |
 
 ```bash
 # Point Control Plane to a remote API service
 export HINDSIGHT_CP_DATAPLANE_API_URL=http://api.example.com:8888
 ```
 
+### Hierarchical Configuration
+
+Hindsight supports per-bank configuration overrides through a hierarchical system: **Global (env vars) → Tenant → Bank**.
+
+#### Type-Safe Config Access
+
+To prevent accidentally using global defaults when bank-specific overrides exist, Hindsight enforces type-safe config access:
+
+**In Application Code:**
+```python
+from hindsight_api.config import get_config
+
+# ✅ Access static (infrastructure) fields
+config = get_config()
+host = config.host  # OK - static field
+port = config.port  # OK - static field
+
+# ❌ Attempting to access bank-configurable fields raises an error
+chunk_size = config.retain_chunk_size  # ConfigFieldAccessError!
+```
+
+**Error Message:**
+```
+ConfigFieldAccessError: Field 'retain_chunk_size' is bank-configurable and cannot
+be accessed from global config. Use ConfigResolver.resolve_full_config(bank_id, context)
+to get bank-specific config.
+```
+
+**For Bank-Specific Config:**
+```python
+# Internal code that needs bank-specific settings
+from hindsight_api.config_resolver import ConfigResolver
+
+# Resolve full config for a specific bank
+config = await config_resolver.resolve_full_config(bank_id, request_context)
+chunk_size = config.retain_chunk_size  # ✅ Uses bank-specific value
+```
+
+This design prevents bugs where global defaults are used instead of bank overrides, making it impossible to make this mistake at compile/development time.
+
+#### Security Model
+
+Configuration fields are categorized for security:
+
+1. **Configurable Fields** - Safe behavioral settings that can be customized per-bank:
+   - Retention: `retain_chunk_size`, `retain_extraction_mode`, `retain_custom_instructions`
+   - Consolidation: `enable_observations`
+
+2. **Credential Fields** - NEVER exposed or configurable via API:
+   - API keys: `*_api_key` (all LLM API keys)
+   - Infrastructure: `*_base_url` (all base URLs)
+
+3. **Static Fields** - Server-level only, cannot be overridden:
+   - Infrastructure: `database_url`, `port`, `host`, `worker_count`
+   - Provider/Model selection: `llm_provider`, `llm_model` (requires presets - not yet implemented)
+   - Performance tuning: `llm_max_concurrent`, `llm_timeout`, retrieval settings, optimization flags
+
+#### Enabling the API
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_ENABLE_BANK_CONFIG_API` | Enable per-bank config API | `false` |
+
+**Important:** The bank config API is **disabled by default** for security. Enable it explicitly:
+
+```bash
+export HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true
+```
+
+#### API Endpoints
+
+- `GET /v1/default/banks/{bank_id}/config` - View resolved config (filtered by permissions)
+- `PATCH /v1/default/banks/{bank_id}/config` - Update bank overrides (only allowed fields)
+- `DELETE /v1/default/banks/{bank_id}/config` - Reset to defaults
+
+#### Permission System
+
+Tenant extensions can control which fields banks are allowed to modify via `get_allowed_config_fields()`:
+
+```python
+class CustomTenantExtension(TenantExtension):
+    async def get_allowed_config_fields(self, context, bank_id):
+        # Option 1: Allow all configurable fields
+        return None
+
+        # Option 2: Allow specific fields only
+        return {"retain_chunk_size", "retain_custom_instructions"}
+
+        # Option 3: Read-only (no modifications)
+        return set()
+```
+
+#### Examples
+
+```bash
+# Update retention settings for a bank
+curl -X PATCH http://localhost:8888/v1/default/banks/my-bank/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "updates": {
+      "retain_chunk_size": 4000,
+      "retain_extraction_mode": "custom",
+      "retain_custom_instructions": "Focus on technical details and implementation specifics"
+    }
+  }'
+
+# Note: retain_extraction_mode must be "custom" to use retain_custom_instructions
+
+# View resolved config (respects permissions)
+curl http://localhost:8888/v1/default/banks/my-bank/config
+
+# Reset to defaults
+curl -X DELETE http://localhost:8888/v1/default/banks/my-bank/config
+```
+
+**Security Notes:**
+- Credentials (API keys, base URLs) are never returned in responses
+- Only configurable fields can be modified
+- Responses are filtered by tenant permissions
+- Attempting to set credentials returns 400 error
+
+### Reverse Proxy / Subpath Deployment
+
+To deploy Hindsight under a subpath (e.g., `example.com/hindsight/`):
+
+1. Set both environment variables to the same path:
+   ```bash
+   HINDSIGHT_API_BASE_PATH=/hindsight
+   NEXT_PUBLIC_BASE_PATH=/hindsight
+   ```
+
+2. Configure your reverse proxy to:
+   - Forward `/hindsight/*` requests to Hindsight
+   - Preserve the full path in forwarded requests
+   - Set appropriate proxy headers (X-Forwarded-Proto, X-Forwarded-For)
+
+**Example: Nginx Configuration**
+
+```nginx
+location /hindsight/ {
+    proxy_pass http://localhost:8888/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**Example: Traefik Configuration**
+
+```yaml
+http:
+  routers:
+    hindsight:
+      rule: "PathPrefix(`/hindsight`)"
+      service: hindsight
+      middlewares:
+        - hindsight-stripprefix
+
+  middlewares:
+    hindsight-stripprefix:
+      stripPrefix:
+        prefixes:
+          - "/hindsight"
+
+  services:
+    hindsight:
+      loadBalancer:
+        servers:
+          - url: "http://localhost:8888"
+```
+
+**Important Notes:**
+- The base path must start with `/` and should NOT end with `/`
+- Both API and Control Plane should use the same base path
+- After setting environment variables, restart both services
+- OpenAPI docs will be available at `<base-path>/docs` (e.g., `/hindsight/docs`)
+
+**Complete Examples:**
+
+See `docker/compose-examples/` directory for:
+- Nginx configuration files (`simple.conf`, `api-and-control-plane.conf`)
+- Docker Compose setups (`docker-compose.yml`, `reverse-proxy-only.yml`)
+- Traefik and other reverse proxy examples
+- Full deployment documentation
 ---
 
 ## Example .env File

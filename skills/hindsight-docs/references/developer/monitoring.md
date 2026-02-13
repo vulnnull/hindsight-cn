@@ -1,22 +1,30 @@
 # Monitoring
 
-Hindsight provides comprehensive monitoring through Prometheus metrics and pre-built Grafana dashboards.
+Hindsight provides comprehensive observability through Prometheus metrics, OpenTelemetry distributed tracing, and pre-built Grafana dashboards.
 
 ## Local Development
 
-For local metrics visualization, a convenience script downloads and runs Prometheus and Grafana:
+For local observability, use the Grafana LGTM (Loki, Grafana, Tempo, Mimir) all-in-one stack:
 
 ```bash
 ./scripts/dev/start-monitoring.sh
 ```
 
-This will start:
-- **Grafana**: http://localhost:8890 (anonymous access enabled)
-- **Prometheus**: http://localhost:8889
-- **API Metrics**: http://localhost:8888/metrics
+This starts a single Docker container providing:
+- **Grafana UI**: http://localhost:3000 (anonymous admin access)
+- **Traces (Tempo)**: OTLP endpoint at http://localhost:4318 (HTTP) and http://localhost:4317 (gRPC)
+- **Metrics (Prometheus/Mimir)**: Scrapes http://localhost:8888/metrics automatically
+- **Logs (Loki)**: Available for log aggregation
+- **Pre-built Dashboards**: Hindsight Operations, LLM Metrics, API Service
+
+**Enable tracing in your API:**
+```bash
+export HINDSIGHT_API_OTEL_TRACES_ENABLED=true
+export HINDSIGHT_API_OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
 
 :::note Production Deployment
-The local monitoring script is for development only. In production, you need to install and configure Prometheus and Grafana separately, then point Prometheus to scrape your Hindsight API's `/metrics` endpoint.
+The local monitoring stack is for development only. In production, deploy Grafana LGTM separately or use commercial platforms (Grafana Cloud, DataDog, New Relic, etc.).
 :::
 
 ## Grafana Dashboards
@@ -197,3 +205,66 @@ hindsight_db_pool_size - hindsight_db_pool_idle
 ```promql
 rate(hindsight_process_cpu_seconds{type="user"}[1m])
 ```
+
+---
+
+## Distributed Tracing
+
+Hindsight supports OpenTelemetry distributed tracing for memory operations and LLM calls, following GenAI semantic conventions v1.37+.
+
+### Configuration
+
+See [Configuration - OpenTelemetry Tracing](./configuration#opentelemetry-tracing) for environment variables.
+
+**Quick Start:**
+```bash
+# Enable tracing
+export HINDSIGHT_API_OTEL_TRACES_ENABLED=true
+export HINDSIGHT_API_OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+
+# View traces with Grafana LGTM (local dev)
+./scripts/dev/start-monitoring.sh
+# Open http://localhost:3000 → Explore → Tempo
+```
+
+Supports any OTLP-compatible backend (Grafana LGTM, Langfuse, OpenLIT, DataDog, New Relic, Honeycomb, etc.).
+
+### Span Hierarchy
+
+**Parent Spans (Operations):**
+- `hindsight.retain` - Memory ingestion
+- `hindsight.recall` - Memory retrieval
+  - `hindsight.recall_embedding` - Query embedding
+  - `hindsight.recall_retrieval` - Parallel search (semantic, BM25, graph, temporal)
+  - `hindsight.recall_fusion` - Reciprocal Rank Fusion
+  - `hindsight.recall_rerank` - Cross-encoder reranking
+- `hindsight.reflect` - Agentic reasoning
+  - `hindsight.reflect_tool_call` - Tool execution (recall, lookup, etc.)
+- `hindsight.consolidation` - Observation synthesis
+- `hindsight.mental_model_refresh` - Mental model updates
+
+**Child Spans (LLM Calls):**
+- Named by scope (e.g., `hindsight.memory`, `hindsight.reflect`)
+- Contain full prompts/completions as events
+- Follow GenAI semantic conventions for attributes
+
+### Span Attributes
+
+**Operation Spans:**
+- `hindsight.operation` - Operation type
+- `hindsight.bank_id` - Memory bank ID
+- `hindsight.query` - Query text (truncated to 100 chars)
+- `hindsight.fact_types` - Fact types for recall
+- `hindsight.thinking_budget` - Budget allocation
+- `hindsight.max_tokens` - Token limit
+
+**LLM Spans (GenAI Semantic Conventions):**
+- `gen_ai.operation.name` - Always `"chat"`
+- `gen_ai.provider.name` - Provider (`openai`, `anthropic`, `google`, etc.)
+- `gen_ai.request.model` - Model name
+- `gen_ai.usage.input_tokens` - Input tokens
+- `gen_ai.usage.output_tokens` - Output tokens
+- `hindsight.scope` - LLM call purpose (`memory`, `reflect`, `consolidation`, etc.)
+
+**Events:**
+- `gen_ai.client.inference.operation.details` - Full prompts and completions
