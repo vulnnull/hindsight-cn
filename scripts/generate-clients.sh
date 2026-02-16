@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# Script to generate Python and TypeScript clients from OpenAPI spec using openapi-generator
+# Script to generate Python, TypeScript, and Go clients from OpenAPI spec
 # Note: Rust client is auto-generated at build time via build.rs (uses progenitor)
 # Usage: ./scripts/generate-clients.sh
 
@@ -24,6 +24,7 @@ echo "This script generates clients for:"
 echo "  - Rust (via progenitor in build.rs)"
 echo "  - Python (via openapi-generator)"
 echo "  - TypeScript (via @hey-api/openapi-ts)"
+echo "  - Go (via ogen)"
 echo ""
 
 # Check if OpenAPI spec exists
@@ -333,6 +334,25 @@ npm run generate
 echo "✓ TypeScript client generated at $TYPESCRIPT_CLIENT_DIR"
 echo ""
 
+# Generate Go client
+echo "=================================================="
+echo "Generating Go client..."
+echo "=================================================="
+
+GO_CLIENT_DIR="$CLIENTS_DIR/go"
+
+if ! command -v go &> /dev/null; then
+    echo "⚠ Go not found, skipping Go client generation"
+    echo "  Install Go 1.25+ from https://go.dev/dl/"
+else
+    echo "Regenerating Go client (via ogen)..."
+    cd "$GO_CLIENT_DIR"
+    go generate ./...
+    go build ./...
+    echo "✓ Go client generated at $GO_CLIENT_DIR"
+fi
+echo ""
+
 echo "=================================================="
 echo "✅ Client generation complete!"
 echo "=================================================="
@@ -340,6 +360,7 @@ echo ""
 echo "Rust client:       $RUST_CLIENT_DIR"
 echo "Python client:     $PYTHON_CLIENT_DIR"
 echo "TypeScript client: $TYPESCRIPT_CLIENT_DIR"
+echo "Go client:         $GO_CLIENT_DIR"
 echo ""
 echo "⚠️  Important: The maintained wrapper hindsight_client.py and README.md were preserved"
 echo ""
