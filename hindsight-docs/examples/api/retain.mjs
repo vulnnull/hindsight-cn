@@ -31,20 +31,19 @@ await client.retain('my-bank', 'Alice got promoted to senior engineer', {
 
 // [docs:retain-batch]
 await client.retainBatch('my-bank', [
-    { content: 'Alice works at Google', context: 'career' },
-    { content: 'Bob is a data scientist at Meta', context: 'career' },
-    { content: 'Alice and Bob are friends', context: 'relationship' }
-], { documentId: 'conversation_001' });
+    { content: 'Alice works at Google', context: 'career', document_id: 'conversation_001_msg_1' },
+    { content: 'Bob is a data scientist at Meta', context: 'career', document_id: 'conversation_001_msg_2' },
+    { content: 'Alice and Bob are friends', context: 'relationship', document_id: 'conversation_001_msg_3' }
+]);
 // [/docs:retain-batch]
 
 
 // [docs:retain-async]
 // Start async ingestion (returns immediately)
 await client.retainBatch('my-bank', [
-    { content: 'Large batch item 1' },
-    { content: 'Large batch item 2' },
+    { content: 'Large batch item 1', document_id: 'large-doc-1' },
+    { content: 'Large batch item 2', document_id: 'large-doc-2' },
 ], {
-    documentId: 'large-doc',
     async: true
 });
 // [/docs:retain-async]

@@ -245,6 +245,7 @@ def main():
             retain_extract_causal_links=config.retain_extract_causal_links,
             retain_extraction_mode=config.retain_extraction_mode,
             retain_custom_instructions=config.retain_custom_instructions,
+            retain_batch_tokens=config.retain_batch_tokens,
             enable_observations=config.enable_observations,
             consolidation_batch_size=config.consolidation_batch_size,
             consolidation_max_tokens=config.consolidation_max_tokens,

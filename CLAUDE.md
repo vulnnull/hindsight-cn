@@ -57,8 +57,15 @@ cd hindsight-control-plane && npm run dev
 
 ### Benchmarks
 ```bash
+# Accuracy benchmarks
 ./scripts/benchmarks/run-longmemeval.sh
 ./scripts/benchmarks/run-locomo.sh
+
+# Performance benchmarks
+./scripts/benchmarks/run-consolidation.sh
+./scripts/benchmarks/run-retain-perf.sh --document <path>  # Requires API server running
+
+# Results viewer
 ./scripts/benchmarks/start-visualizer.sh  # View results at localhost:8001
 ```
 

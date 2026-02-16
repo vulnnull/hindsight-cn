@@ -941,30 +941,11 @@ jobs:
           sleep 1
         done
 
-    - name: Run Python doc examples
-      working-directory: ./hindsight-clients/python
-      run: |
-        for f in ../../hindsight-docs/examples/api/*.py; do
-          echo "Running $f..."
-          uv run python "$f"
-        done
-
-    - name: Run Node.js doc examples
-      run: |
-        for f in hindsight-docs/examples/api/*.mjs; do
-          echo "Running $f..."
-          node "$f"
-        done
-
     - name: Configure CLI
       run: hindsight configure --api-url http://localhost:8888
 
-    - name: Run CLI doc examples
-      run: |
-        for f in hindsight-docs/examples/api/*.sh; do
-          echo "Running $f..."
-          bash "$f"
-        done
+    - name: Run all doc examples
+      run: ./scripts/test-doc-examples.sh
 
     - name: Show API server logs
       if: always()

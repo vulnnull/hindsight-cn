@@ -41,11 +41,10 @@ client.retain(
 client.retain_batch(
     bank_id="my-bank",
     items=[
-        {"content": "Alice works at Google", "context": "career"},
-        {"content": "Bob is a data scientist at Meta", "context": "career"},
-        {"content": "Alice and Bob are friends", "context": "relationship"}
-    ],
-    document_id="conversation_001"
+        {"content": "Alice works at Google", "context": "career", "document_id": "conversation_001_msg_1"},
+        {"content": "Bob is a data scientist at Meta", "context": "career", "document_id": "conversation_001_msg_2"},
+        {"content": "Alice and Bob are friends", "context": "relationship", "document_id": "conversation_001_msg_3"}
+    ]
 )
 # [/docs:retain-batch]
 
@@ -55,10 +54,9 @@ client.retain_batch(
 result = client.retain_batch(
     bank_id="my-bank",
     items=[
-        {"content": "Large batch item 1"},
-        {"content": "Large batch item 2"},
+        {"content": "Large batch item 1", "document_id": "large-doc-1"},
+        {"content": "Large batch item 2", "document_id": "large-doc-2"},
     ],
-    document_id="large-doc",
     retain_async=True
 )
 
@@ -74,14 +72,15 @@ client.retain_batch(
     items=[
         {
             "content": "User Alice said she loves the new dashboard",
-            "tags": ["user:alice", "feedback"]
+            "tags": ["user:alice", "feedback"],
+            "document_id": "user_feedback_001"
         },
         {
             "content": "User Bob reported a bug in the search feature",
-            "tags": ["user:bob", "bug-report"]
+            "tags": ["user:bob", "bug-report"],
+            "document_id": "user_feedback_002"
         }
-    ],
-    document_id="user_feedback_001"
+    ]
 )
 # [/docs:retain-with-tags]
 

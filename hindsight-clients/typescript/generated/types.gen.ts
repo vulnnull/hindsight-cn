@@ -279,6 +279,34 @@ export type CancelOperationResponse = {
 };
 
 /**
+ * ChildOperationStatus
+ *
+ * Status of a child operation (for batch operations).
+ */
+export type ChildOperationStatus = {
+  /**
+   * Operation Id
+   */
+  operation_id: string;
+  /**
+   * Status
+   */
+  status: string;
+  /**
+   * Sub Batch Index
+   */
+  sub_batch_index?: number | null;
+  /**
+   * Items Count
+   */
+  items_count?: number | null;
+  /**
+   * Error Message
+   */
+  error_message?: string | null;
+};
+
+/**
  * ChunkData
  *
  * Chunk data for a single chunk.
@@ -1201,6 +1229,20 @@ export type OperationStatusResponse = {
    * Error Message
    */
   error_message?: string | null;
+  /**
+   * Result Metadata
+   *
+   * Internal metadata for debugging. Structure may change without notice. Not for production use.
+   */
+  result_metadata?: {
+    [key: string]: unknown;
+  } | null;
+  /**
+   * Child Operations
+   *
+   * Child operations for batch operations (if applicable)
+   */
+  child_operations?: Array<ChildOperationStatus> | null;
 };
 
 /**

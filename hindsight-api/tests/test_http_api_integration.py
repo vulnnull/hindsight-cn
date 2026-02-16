@@ -528,7 +528,7 @@ async def test_delete_bank(api_client):
                 {
                     "content": "Bob is the CTO and leads the engineering team.",
                     "context": "team info",
-                    "document_id": "team-doc-1",
+                    "document_id": "team-doc-2",
                 },
             ]
         },

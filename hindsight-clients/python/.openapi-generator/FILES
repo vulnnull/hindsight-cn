@@ -24,6 +24,7 @@ hindsight_client_api/models/bank_profile_response.py
 hindsight_client_api/models/bank_stats_response.py
 hindsight_client_api/models/budget.py
 hindsight_client_api/models/cancel_operation_response.py
+hindsight_client_api/models/child_operation_status.py
 hindsight_client_api/models/chunk_data.py
 hindsight_client_api/models/chunk_include_options.py
 hindsight_client_api/models/chunk_response.py

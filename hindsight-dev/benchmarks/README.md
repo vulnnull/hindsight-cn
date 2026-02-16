@@ -68,6 +68,45 @@ Tests long-term memory across different categories.
 - `--only-failed` - Retry failed questions
 - `--fill` - Resume interrupted runs
 
+### Consolidation Performance
+
+Tests consolidation throughput and identifies bottlenecks.
+
+```bash
+./scripts/benchmarks/run-consolidation.sh
+
+# With custom memory count
+NUM_MEMORIES=200 ./scripts/benchmarks/run-consolidation.sh
+```
+
+### Retain Performance
+
+Measures retain operation performance (throughput and token usage).
+
+**Prerequisites:** API server must be running (`./scripts/dev/start-api.sh`)
+
+```bash
+# Basic usage
+./scripts/benchmarks/run-retain-perf.sh \
+    --document hindsight-dev/benchmarks/perf/test_data/sample_document.txt
+
+# Save results to JSON
+./scripts/benchmarks/run-retain-perf.sh \
+    --document ./my_document.txt \
+    --bank-id my-test-bank \
+    --output results/retain_perf.json
+```
+
+**Options:**
+- `--document PATH` - Document file to retain (required)
+- `--bank-id ID` - Bank ID to use (default: perf-test)
+- `--context TEXT` - Optional context
+- `--api-url URL` - API URL (default: http://localhost:8000)
+- `--timeout SECONDS` - Request timeout (default: 300)
+- `--output PATH` - Save results to JSON file
+
+See [perf/README.md](perf/README.md) for detailed documentation.
+
 ## Visualizer
 
 View benchmark results in a web UI:

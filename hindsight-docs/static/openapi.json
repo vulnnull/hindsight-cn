@@ -3605,6 +3605,58 @@
           "success": true
         }
       },
+      "ChildOperationStatus": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "sub_batch_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sub Batch Index"
+          },
+          "items_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items Count"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation_id",
+          "status"
+        ],
+        "title": "ChildOperationStatus",
+        "description": "Status of a child operation (for batch operations)."
+      },
       "ChunkData": {
         "properties": {
           "id": {
@@ -5150,6 +5202,34 @@
               }
             ],
             "title": "Error Message"
+          },
+          "result_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Metadata",
+            "description": "Internal metadata for debugging. Structure may change without notice. Not for production use."
+          },
+          "child_operations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChildOperationStatus"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Operations",
+            "description": "Child operations for batch operations (if applicable)"
           }
         },
         "type": "object",
