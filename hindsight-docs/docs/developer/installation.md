@@ -17,7 +17,8 @@ Hindsight requires PostgreSQL with the **pgvector** extension for vector similar
 **For production**, use an external PostgreSQL with pgvector:
 - **Supabase** — Managed PostgreSQL with pgvector built-in
 - **Neon** — Serverless PostgreSQL with pgvector
-- **AWS RDS** / **Cloud SQL** / **Azure** — With pgvector extension enabled
+- **Azure Database for PostgreSQL** — With pgvector and pg_diskann (DiskANN) support
+- **AWS RDS** / **Cloud SQL** — With pgvector extension enabled
 - **Self-hosted** — PostgreSQL 14+ with pgvector installed
 
 ### LLM Provider

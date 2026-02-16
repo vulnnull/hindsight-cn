@@ -73,13 +73,15 @@ Hindsight supports three PostgreSQL vector extensions:
 - Most widely deployed and supported
 
 #### **pgvectorscale** (DiskANN - recommended for scale) ⭐
-- Disk-based index using StreamingDiskANN algorithm (by Timescale)
+- Disk-based index using StreamingDiskANN algorithm
 - **28x lower p95 latency** and **16x higher throughput** vs dedicated vector DBs
 - **60-75% cost reduction** at scale (SSDs cheaper than RAM)
 - Superior filtering performance with streaming retrieval model
 - Optimized for large datasets (10M+ vectors)
-- Requires both `pgvector` and `vectorscale` extensions
-- **Installation:** `CREATE EXTENSION vector; CREATE EXTENSION vectorscale CASCADE;`
+- Supports both **pgvectorscale** (open source) and **pg_diskann** (Azure)
+- **Installation:**
+  - Open source/self-hosted: `CREATE EXTENSION vector; CREATE EXTENSION vectorscale CASCADE;`
+  - Azure PostgreSQL: `CREATE EXTENSION vector; CREATE EXTENSION pg_diskann CASCADE;`
 
 #### **vchord** (vchordrq)
 - Alternative high-performance vector index

@@ -42,30 +42,38 @@ def _detect_vector_extension(conn, vector_extension: str = "pgvector") -> str:
         vector_extension: Configured extension ("pgvector", "vchord", or "pgvectorscale")
 
     Returns:
-        "pgvector", "vchord", or "pgvectorscale"
+        "pgvector", "vchord", "pgvectorscale", or "pg_diskann"
 
     Raises:
         RuntimeError: If configured extension is not installed
     """
     # Verify the configured extension is installed
     if vector_extension == "pgvectorscale":
-        # pgvectorscale requires pgvector to be installed first
+        # pgvectorscale/DiskANN requires pgvector to be installed first
         pgvector_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar()
         if not pgvector_check:
             raise RuntimeError(
-                "pgvectorscale requires pgvector to be installed. "
-                "Install it with: CREATE EXTENSION vector; CREATE EXTENSION vectorscale CASCADE;"
+                "DiskANN (pgvectorscale/pg_diskann) requires pgvector to be installed. "
+                "Install it with: CREATE EXTENSION vector; then CREATE EXTENSION vectorscale CASCADE; (or pg_diskann on Azure)"
             )
 
-        # Check for vectorscale extension
+        # Check for either vectorscale (open source) or pg_diskann (Azure)
         vectorscale_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vectorscale'")).scalar()
-        if not vectorscale_check:
+        pg_diskann_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pg_diskann'")).scalar()
+
+        if vectorscale_check:
+            logger.debug("Using vector extension: pgvectorscale (DiskANN)")
+            return "pgvectorscale"
+        elif pg_diskann_check:
+            logger.debug("Using vector extension: pg_diskann (Azure DiskANN)")
+            return "pg_diskann"  # Return distinct name for parameter handling
+        else:
             raise RuntimeError(
                 "Configured vector extension 'pgvectorscale' not found. "
-                "Install it with: CREATE EXTENSION vectorscale CASCADE;"
+                "Install either:\n"
+                "  - pgvectorscale (open source): CREATE EXTENSION vectorscale CASCADE;\n"
+                "  - pg_diskann (Azure): CREATE EXTENSION pg_diskann CASCADE;"
             )
-        logger.debug("Using configured vector extension: pgvectorscale (DiskANN)")
-        return "pgvectorscale"
     elif vector_extension == "vchord":
         vchord_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vchord'")).scalar()
         if not vchord_check:
@@ -609,7 +617,7 @@ def ensure_vector_extension(
         ]
 
         # Determine target index type
-        if target_ext == "pgvectorscale":
+        if target_ext in ("pgvectorscale", "pg_diskann"):
             target_index_type = "diskann"
         elif target_ext == "vchord":
             target_index_type = "vchordrq"
@@ -713,13 +721,23 @@ def ensure_vector_extension(
 
             # Create new index with appropriate type
             if target_ext == "pgvectorscale":
-                logger.info(f"Creating DiskANN index on {table_name}")
+                logger.info(f"Creating DiskANN index on {table_name} (pgvectorscale)")
                 conn.execute(
                     text(f"""
                         CREATE INDEX IF NOT EXISTS {index_name}
                         ON {schema_name}.{table_name}
                         USING diskann (embedding vector_cosine_ops)
                         WITH (num_neighbors = 50)
+                    """)
+                )
+            elif target_ext == "pg_diskann":
+                logger.info(f"Creating DiskANN index on {table_name} (pg_diskann/Azure)")
+                conn.execute(
+                    text(f"""
+                        CREATE INDEX IF NOT EXISTS {index_name}
+                        ON {schema_name}.{table_name}
+                        USING diskann (embedding vector_cosine_ops)
+                        WITH (max_neighbors = 50)
                     """)
                 )
             elif target_ext == "vchord":
