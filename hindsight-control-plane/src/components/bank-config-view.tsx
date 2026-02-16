@@ -127,8 +127,7 @@ export function BankConfigView() {
       await loadConfig();
       setShowResetDialog(false);
     } catch (err: any) {
-      console.error("Failed to reset config:", err);
-      alert("Error resetting config: " + err.message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setResetting(false);
     }

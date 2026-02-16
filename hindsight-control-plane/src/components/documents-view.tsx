@@ -68,8 +68,7 @@ export function DocumentsView() {
       setDocuments(data.items || []);
       setTotal(data.total || 0);
     } catch (error) {
-      console.error("Error loading documents:", error);
-      alert("Error loading documents: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setLoading(false);
     }
@@ -91,8 +90,7 @@ export function DocumentsView() {
       const doc: any = await client.getDocument(documentId, currentBank);
       setSelectedDocument(doc);
     } catch (error) {
-      console.error("Error loading document:", error);
-      alert("Error loading document: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
       setSelectedDocument(null);
     } finally {
       setLoadingDocument(false);

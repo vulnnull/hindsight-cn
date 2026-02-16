@@ -116,8 +116,7 @@ export function DataView({ factType }: DataViewProps) {
         });
       }
     } catch (error) {
-      console.error("Error loading data:", error);
-      alert(`Error loading ${factType} data: ` + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setLoading(false);
     }

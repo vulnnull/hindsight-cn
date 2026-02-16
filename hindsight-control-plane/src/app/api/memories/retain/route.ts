@@ -18,8 +18,22 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(response, { status: 200 });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error batch retain:", error);
-    return NextResponse.json({ error: "Failed to batch retain" }, { status: 500 });
+
+    const errorMessage = error?.message || String(error);
+    const errorDetails = error?.details;
+    const statusCode = error?.statusCode;
+
+    // If we have a statusCode, use it
+    if (statusCode && typeof statusCode === "number") {
+      return NextResponse.json(
+        { error: errorMessage, details: errorDetails },
+        { status: statusCode }
+      );
+    }
+
+    // Otherwise, return generic 500 error
+    return NextResponse.json({ error: errorMessage || "Failed to batch retain" }, { status: 500 });
   }
 }

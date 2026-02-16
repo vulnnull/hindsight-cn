@@ -3,6 +3,8 @@
  * This should be used in client components, not the SDK directly
  */
 
+import { toast } from "sonner";
+
 export interface MentalModel {
   id: string;
   bank_id: string;
@@ -19,20 +21,78 @@ export interface MentalModel {
 
 export class ControlPlaneClient {
   private async fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(path, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-      },
-    });
+    try {
+      const response = await fetch(path, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+        },
+      });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`API Error: ${response.status} - ${error}`);
+      if (!response.ok) {
+        // Try to parse error response
+        let errorMessage = `HTTP ${response.status}`;
+        let errorDetails: string | undefined;
+
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+          errorDetails = errorData.details;
+        } catch {
+          // If JSON parse fails, try to get text
+          try {
+            const errorText = await response.text();
+            if (errorText) {
+              errorDetails = errorText;
+            }
+          } catch {
+            // Ignore text parse errors
+          }
+        }
+
+        // Show toast with different styles based on status code
+        const description = errorDetails || errorMessage;
+        const status = response.status;
+
+        if (status >= 400 && status < 500) {
+          // Client errors (4xx) - validation, bad request, etc. - show as warning
+          toast.warning("Client Error", {
+            description,
+            duration: 5000,
+          });
+        } else if (status >= 500) {
+          // Server errors (5xx) - show as error
+          toast.error("Server Error", {
+            description,
+            duration: 5000,
+          });
+        } else {
+          // Other HTTP errors - show as error
+          toast.error("API Error", {
+            description,
+            duration: 5000,
+          });
+        }
+
+        // Still throw error for callers that want to handle it
+        const error = new Error(errorMessage);
+        (error as any).status = response.status;
+        (error as any).details = errorDetails;
+        throw error;
+      }
+
+      return response.json();
+    } catch (error) {
+      // If it's not a response error (network error, etc.), show toast
+      if (!(error as any).status) {
+        toast.error("Network Error", {
+          description: error instanceof Error ? error.message : "Failed to connect to server",
+          duration: 5000,
+        });
+      }
+      throw error;
     }
-
-    return response.json();
   }
 
   /**

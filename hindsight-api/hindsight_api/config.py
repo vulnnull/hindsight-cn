@@ -129,6 +129,11 @@ ENV_LLM_INITIAL_BACKOFF = "HINDSIGHT_API_LLM_INITIAL_BACKOFF"
 ENV_LLM_MAX_BACKOFF = "HINDSIGHT_API_LLM_MAX_BACKOFF"
 ENV_LLM_TIMEOUT = "HINDSIGHT_API_LLM_TIMEOUT"
 ENV_LLM_GROQ_SERVICE_TIER = "HINDSIGHT_API_LLM_GROQ_SERVICE_TIER"
+ENV_LLM_OPENAI_SERVICE_TIER = "HINDSIGHT_API_LLM_OPENAI_SERVICE_TIER"
+
+# Defaults for service tiers
+DEFAULT_LLM_GROQ_SERVICE_TIER = "auto"  # "on_demand", "flex", or "auto"
+DEFAULT_LLM_OPENAI_SERVICE_TIER = None  # None (default) or "flex" (50% cheaper)
 
 # Per-operation LLM configuration (optional, falls back to global LLM config)
 ENV_RETAIN_LLM_PROVIDER = "HINDSIGHT_API_RETAIN_LLM_PROVIDER"
@@ -251,6 +256,8 @@ ENV_RETAIN_EXTRACT_CAUSAL_LINKS = "HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS"
 ENV_RETAIN_EXTRACTION_MODE = "HINDSIGHT_API_RETAIN_EXTRACTION_MODE"
 ENV_RETAIN_CUSTOM_INSTRUCTIONS = "HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS"
 ENV_RETAIN_BATCH_TOKENS = "HINDSIGHT_API_RETAIN_BATCH_TOKENS"
+ENV_RETAIN_BATCH_ENABLED = "HINDSIGHT_API_RETAIN_BATCH_ENABLED"
+ENV_RETAIN_BATCH_POLL_INTERVAL_SECONDS = "HINDSIGHT_API_RETAIN_BATCH_POLL_INTERVAL_SECONDS"
 
 # Observations settings (consolidated knowledge from facts)
 ENV_ENABLE_OBSERVATIONS = "HINDSIGHT_API_ENABLE_OBSERVATIONS"
@@ -373,6 +380,8 @@ DEFAULT_RETAIN_EXTRACTION_MODE = "concise"  # Extraction mode: "concise", "verbo
 RETAIN_EXTRACTION_MODES = ("concise", "verbose", "custom")  # Allowed extraction modes
 DEFAULT_RETAIN_CUSTOM_INSTRUCTIONS = None  # Custom extraction guidelines (only used when mode="custom")
 DEFAULT_RETAIN_BATCH_TOKENS = 10_000  # ~40KB of text  # Max chars per sub-batch for async retain auto-splitting
+DEFAULT_RETAIN_BATCH_ENABLED = False  # Use LLM Batch API for fact extraction (only when async=True)
+DEFAULT_RETAIN_BATCH_POLL_INTERVAL_SECONDS = 60  # Batch API polling interval in seconds
 
 # Observations defaults (consolidated knowledge from facts)
 DEFAULT_ENABLE_OBSERVATIONS = True  # Observations enabled by default
@@ -496,6 +505,8 @@ class HindsightConfig:
     llm_initial_backoff: float
     llm_max_backoff: float
     llm_timeout: float
+    llm_groq_service_tier: str  # Groq: "on_demand", "flex", or "auto"
+    llm_openai_service_tier: str | None  # OpenAI: None (default) or "flex" (50% cheaper)
 
     # Vertex AI configuration
     llm_vertexai_project_id: str | None
@@ -593,6 +604,8 @@ class HindsightConfig:
     retain_extraction_mode: str
     retain_custom_instructions: str | None
     retain_batch_tokens: int
+    retain_batch_enabled: bool
+    retain_batch_poll_interval_seconds: int
 
     # Observations settings (consolidated knowledge from facts)
     enable_observations: bool
@@ -770,6 +783,8 @@ class HindsightConfig:
             llm_initial_backoff=float(os.getenv(ENV_LLM_INITIAL_BACKOFF, str(DEFAULT_LLM_INITIAL_BACKOFF))),
             llm_max_backoff=float(os.getenv(ENV_LLM_MAX_BACKOFF, str(DEFAULT_LLM_MAX_BACKOFF))),
             llm_timeout=float(os.getenv(ENV_LLM_TIMEOUT, str(DEFAULT_LLM_TIMEOUT))),
+            llm_groq_service_tier=os.getenv(ENV_LLM_GROQ_SERVICE_TIER, DEFAULT_LLM_GROQ_SERVICE_TIER),
+            llm_openai_service_tier=os.getenv(ENV_LLM_OPENAI_SERVICE_TIER, DEFAULT_LLM_OPENAI_SERVICE_TIER),
             # Vertex AI
             llm_vertexai_project_id=os.getenv(ENV_LLM_VERTEXAI_PROJECT_ID) or DEFAULT_LLM_VERTEXAI_PROJECT_ID,
             llm_vertexai_region=os.getenv(ENV_LLM_VERTEXAI_REGION, DEFAULT_LLM_VERTEXAI_REGION),
@@ -943,6 +958,11 @@ class HindsightConfig:
             ),
             retain_custom_instructions=os.getenv(ENV_RETAIN_CUSTOM_INSTRUCTIONS) or DEFAULT_RETAIN_CUSTOM_INSTRUCTIONS,
             retain_batch_tokens=int(os.getenv(ENV_RETAIN_BATCH_TOKENS, str(DEFAULT_RETAIN_BATCH_TOKENS))),
+            retain_batch_enabled=os.getenv(ENV_RETAIN_BATCH_ENABLED, str(DEFAULT_RETAIN_BATCH_ENABLED)).lower()
+            == "true",
+            retain_batch_poll_interval_seconds=int(
+                os.getenv(ENV_RETAIN_BATCH_POLL_INTERVAL_SECONDS, str(DEFAULT_RETAIN_BATCH_POLL_INTERVAL_SECONDS))
+            ),
             # Observations settings (consolidated knowledge from facts)
             enable_observations=os.getenv(ENV_ENABLE_OBSERVATIONS, str(DEFAULT_ENABLE_OBSERVATIONS)).lower() == "true",
             consolidation_batch_size=int(

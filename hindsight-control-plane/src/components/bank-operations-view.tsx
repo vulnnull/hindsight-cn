@@ -125,8 +125,7 @@ export function BankOperationsView() {
       await client.cancelOperation(currentBank, operationId);
       await loadOperations();
     } catch (error) {
-      console.error("Error cancelling operation:", error);
-      alert("Error cancelling operation: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setCancellingOpId(null);
     }

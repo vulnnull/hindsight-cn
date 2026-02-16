@@ -3580,6 +3580,21 @@ def _register_routes(app: FastAPI):
                     }
                 )
             else:
+                # Check if batch API is enabled - if so, require async mode
+                from hindsight_api.config import get_config
+
+                config = get_config()
+                if config.retain_batch_enabled:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Batch API is enabled (HINDSIGHT_API_RETAIN_BATCH_ENABLED=true) but async=false. "
+                            "Batch operations can take several minutes to hours and will timeout in synchronous mode. "
+                            "Please set async=true in your request to use background processing, or disable batch API "
+                            "by setting HINDSIGHT_API_RETAIN_BATCH_ENABLED=false in your environment."
+                        ),
+                    )
+
                 # Synchronous processing: wait for completion (record metrics)
                 with metrics.record_operation("retain", bank_id=bank_id, source="api"):
                     result, usage = await app.state.memory.retain_batch_async(

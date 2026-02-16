@@ -50,6 +50,22 @@ export interface HindsightClientOptions {
     apiKey?: string;
 }
 
+/**
+ * Error thrown by the Hindsight client when an API request fails.
+ * Includes the HTTP status code and error details from the API.
+ */
+export class HindsightError extends Error {
+    public statusCode?: number;
+    public details?: unknown;
+
+    constructor(message: string, statusCode?: number, details?: unknown) {
+        super(message);
+        this.name = 'HindsightError';
+        this.statusCode = statusCode;
+        this.details = details;
+    }
+}
+
 export interface EntityInput {
     text: string;
     type?: string;
@@ -82,9 +98,22 @@ export class HindsightClient {
     /**
      * Validates the API response and throws an error if the request failed.
      */
-    private validateResponse<T>(response: { data?: T; error?: unknown }, operation: string): T {
+    private validateResponse<T>(response: { data?: T; error?: unknown; response?: Response }, operation: string): T {
         if (!response.data) {
-            throw new Error(`${operation} failed: ${JSON.stringify(response.error || 'Unknown error')}`);
+            // The generated client returns { error, response, request }
+            // Status code is in response.status, not in the error object
+            const error = response.error as any;
+            const httpResponse = (response as any).response as Response | undefined;
+
+            // Extract status code from the HTTP response object
+            const statusCode = httpResponse?.status;
+            const details = error?.detail || error?.message || error;
+
+            throw new HindsightError(
+                `${operation} failed: ${JSON.stringify(details)}`,
+                statusCode,
+                details
+            );
         }
         return response.data;
     }

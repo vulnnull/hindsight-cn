@@ -67,6 +67,7 @@ def create_llm_provider(
     model: str,
     reasoning_effort: str,
     groq_service_tier: str | None = None,
+    openai_service_tier: str | None = None,
     vertexai_project_id: str | None = None,
     vertexai_region: str | None = None,
     vertexai_credentials: Any = None,
@@ -80,7 +81,8 @@ def create_llm_provider(
         base_url: Base URL for the API.
         model: Model name.
         reasoning_effort: Reasoning effort level for supported providers.
-        groq_service_tier: Groq service tier (for Groq provider).
+        groq_service_tier: Groq service tier (for Groq provider) - "on_demand", "flex", or "auto".
+        openai_service_tier: OpenAI service tier (for OpenAI provider) - None (default) or "flex" (50% cheaper).
         vertexai_project_id: Vertex AI project ID (for VertexAI provider).
         vertexai_region: Vertex AI region (for VertexAI provider).
         vertexai_credentials: Vertex AI credentials object (for VertexAI provider).
@@ -156,6 +158,7 @@ def create_llm_provider(
             model=model,
             reasoning_effort=reasoning_effort,
             groq_service_tier=groq_service_tier,
+            openai_service_tier=openai_service_tier,
         )
 
     else:
@@ -177,6 +180,7 @@ class LLMProvider:
         model: str,
         reasoning_effort: str = "low",
         groq_service_tier: str | None = None,
+        openai_service_tier: str | None = None,
     ):
         """
         Initialize LLM provider.
@@ -187,15 +191,17 @@ class LLMProvider:
             base_url: Base URL for the API.
             model: Model name.
             reasoning_effort: Reasoning effort level for supported providers.
-            groq_service_tier: Groq service tier ("on_demand", "flex", "auto"). Default: None (uses Groq's default).
+            groq_service_tier: Groq service tier ("on_demand", "flex", "auto") - from config.
+            openai_service_tier: OpenAI service tier (None or "flex") - from config.
         """
         self.provider = provider.lower()
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
         self.reasoning_effort = reasoning_effort
-        # Default to 'auto' for best performance, users can override to 'on_demand' for free tier
-        self.groq_service_tier = groq_service_tier or os.getenv(ENV_LLM_GROQ_SERVICE_TIER, "auto")
+        # Service tiers from hierarchical config (not env vars)
+        self.groq_service_tier = groq_service_tier
+        self.openai_service_tier = openai_service_tier
 
         # Validate provider
         valid_providers = [
@@ -272,6 +278,7 @@ class LLMProvider:
             model=self.model,
             reasoning_effort=self.reasoning_effort,
             groq_service_tier=self.groq_service_tier,
+            openai_service_tier=self.openai_service_tier,
             vertexai_project_id=vertexai_project_id,
             vertexai_region=vertexai_region,
             vertexai_credentials=vertexai_credentials,

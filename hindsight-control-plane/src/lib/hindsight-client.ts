@@ -3,7 +3,13 @@
  * Configured to connect to the dataplane API server.
  */
 
-import { HindsightClient, createClient, createConfig, sdk } from "@vectorize-io/hindsight-client";
+import {
+  HindsightClient,
+  HindsightError,
+  createClient,
+  createConfig,
+  sdk,
+} from "@vectorize-io/hindsight-client";
 
 export const DATAPLANE_URL = process.env.HINDSIGHT_CP_DATAPLANE_API_URL || "http://localhost:8888";
 const DATAPLANE_API_KEY = process.env.HINDSIGHT_CP_DATAPLANE_API_KEY || "";
@@ -41,3 +47,8 @@ export const lowLevelClient = createClient(
  * Export SDK functions for direct API access
  */
 export { sdk };
+
+/**
+ * Export HindsightError for error handling
+ */
+export { HindsightError };

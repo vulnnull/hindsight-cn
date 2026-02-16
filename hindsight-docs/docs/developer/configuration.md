@@ -136,6 +136,7 @@ To switch between backends:
 | `HINDSIGHT_API_LLM_MAX_BACKOFF` | Max retry backoff cap in seconds | `60.0` |
 | `HINDSIGHT_API_LLM_TIMEOUT` | LLM request timeout in seconds | `120` |
 | `HINDSIGHT_API_LLM_GROQ_SERVICE_TIER` | Groq service tier: `on_demand`, `flex`, `auto` | `auto` |
+| `HINDSIGHT_API_LLM_OPENAI_SERVICE_TIER` | OpenAI service tier: `flex` for 50% cost savings (OpenAI Flex Processing) | None (default) |
 
 **Provider Examples**
 
@@ -151,6 +152,8 @@ export HINDSIGHT_API_LLM_MODEL=openai/gpt-oss-20b
 export HINDSIGHT_API_LLM_PROVIDER=openai
 export HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx
 export HINDSIGHT_API_LLM_MODEL=gpt-4o
+# Optional: Use Flex Processing for 50% cost savings (with variable latency)
+# export HINDSIGHT_API_LLM_OPENAI_SERVICE_TIER=flex
 
 # Gemini
 export HINDSIGHT_API_LLM_PROVIDER=gemini
@@ -558,6 +561,8 @@ Controls the retain (memory ingestion) pipeline.
 | `HINDSIGHT_API_RETAIN_EXTRACTION_MODE` | Fact extraction mode: `concise`, `verbose`, or `custom` | `concise` |
 | `HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS` | Custom extraction guidelines (only used when mode is `custom`) | - |
 | `HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS` | Extract causal relationships between facts | `true` |
+| `HINDSIGHT_API_RETAIN_BATCH_ENABLED` | Use LLM Batch API for fact extraction (50% cost savings, only with async operations) | `false` |
+| `HINDSIGHT_API_RETAIN_BATCH_POLL_INTERVAL_SECONDS` | Batch API polling interval in seconds | `60` |
 
 #### Extraction Modes
 

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import { BankSelector } from "@/components/bank-selector";
 import { Sidebar } from "@/components/sidebar";
 import { DataView } from "@/components/data-view";
@@ -84,8 +85,7 @@ export default function BankPage() {
       await loadBanks();
       router.push("/");
     } catch (error) {
-      console.error("Error deleting bank:", error);
-      alert("Error deleting bank: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsDeleting(false);
     }
@@ -98,10 +98,11 @@ export default function BankPage() {
     try {
       const result = await client.clearObservations(bankId);
       setShowClearObservationsDialog(false);
-      alert(result.message || "Observations cleared successfully");
+      toast.success("Success", {
+        description: result.message || "Observations cleared successfully",
+      });
     } catch (error) {
-      console.error("Error clearing observations:", error);
-      alert("Error clearing observations: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsClearingObservations(false);
     }
@@ -114,8 +115,7 @@ export default function BankPage() {
     try {
       await client.triggerConsolidation(bankId);
     } catch (error) {
-      console.error("Error triggering consolidation:", error);
-      alert("Error triggering consolidation: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsConsolidating(false);
     }

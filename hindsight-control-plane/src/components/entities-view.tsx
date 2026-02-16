@@ -55,8 +55,7 @@ export function EntitiesView() {
       setEntities(result.items || []);
       setTotal(result.total || 0);
     } catch (error) {
-      console.error("Error loading entities:", error);
-      alert("Error loading entities: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setLoading(false);
     }
@@ -70,8 +69,7 @@ export function EntitiesView() {
       const result: any = await client.getEntity(entityId, currentBank);
       setSelectedEntity(result);
     } catch (error) {
-      console.error("Error loading entity detail:", error);
-      alert("Error loading entity detail: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setLoadingDetail(false);
     }

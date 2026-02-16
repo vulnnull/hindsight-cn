@@ -8,6 +8,7 @@ import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { useFeatures } from "@/lib/features-context";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -246,8 +247,7 @@ export function BankProfileView() {
       setMentalModelsCount(mentalModelsData.items?.length || 0);
       await loadOperations();
     } catch (error) {
-      console.error("Error loading bank profile:", error);
-      alert("Error loading bank profile: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setLoading(false);
     }
@@ -264,8 +264,7 @@ export function BankProfileView() {
       await loadBanks();
       router.push("/");
     } catch (error) {
-      console.error("Error deleting bank:", error);
-      alert("Error deleting bank: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsDeleting(false);
     }
@@ -279,10 +278,11 @@ export function BankProfileView() {
       const result = await client.clearObservations(currentBank);
       setShowClearObservationsDialog(false);
       await loadData();
-      alert(result.message || "Observations cleared successfully");
+      toast.success("Success", {
+        description: result.message || "Observations cleared successfully",
+      });
     } catch (error) {
-      console.error("Error clearing observations:", error);
-      alert("Error clearing observations: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsClearingObservations(false);
     }
@@ -298,8 +298,7 @@ export function BankProfileView() {
       await loadData();
       await loadOperations();
     } catch (error) {
-      console.error("Error triggering consolidation:", error);
-      alert("Error triggering consolidation: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsConsolidating(false);
     }
@@ -324,8 +323,7 @@ export function BankProfileView() {
       await client.cancelOperation(currentBank, operationId);
       await loadOperations();
     } catch (error) {
-      console.error("Error cancelling operation:", error);
-      alert("Error cancelling operation: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setCancellingOpId(null);
     }
@@ -341,8 +339,7 @@ export function BankProfileView() {
       if (selectedDirective?.id === directiveDeleteTarget.id) setSelectedDirective(null);
       setDirectiveDeleteTarget(null);
     } catch (error) {
-      console.error("Error deleting directive:", error);
-      alert("Error deleting: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setDeletingDirective(false);
     }
@@ -752,8 +749,7 @@ function DispositionEditDialog({
       });
       onSaved();
     } catch (error) {
-      console.error("Error saving disposition:", error);
-      alert("Error saving disposition: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setSaving(false);
     }
@@ -843,8 +839,7 @@ function MissionEditDialog({
       });
       onSaved();
     } catch (error) {
-      console.error("Error saving mission:", error);
-      alert("Error saving mission: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setSaving(false);
     }
@@ -952,8 +947,7 @@ function DirectiveFormDialog({
         onClose();
       }
     } catch (error) {
-      console.error(`Error ${mode === "create" ? "creating" : "updating"} directive:`, error);
-      alert(`Error ${mode === "create" ? "creating" : "updating"}: ` + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setSubmitting(false);
     }

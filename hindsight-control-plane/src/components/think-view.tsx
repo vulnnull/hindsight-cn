@@ -133,8 +133,7 @@ export function ThinkView() {
       setFeedbackSubmitted(true);
       setTimeout(() => setFeedbackSubmitted(false), 3000);
     } catch (error) {
-      console.error("Error submitting feedback:", error);
-      alert("Error submitting feedback: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setFeedbackSubmitting(false);
     }
@@ -163,8 +162,7 @@ export function ThinkView() {
       });
       setResult(data);
     } catch (error) {
-      console.error("Error running reflect:", error);
-      alert("Error running reflect: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setLoading(false);
     }

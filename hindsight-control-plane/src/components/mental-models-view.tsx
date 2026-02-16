@@ -8,6 +8,7 @@ import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -138,8 +139,7 @@ export function MentalModelsView() {
       if (selectedMentalModel?.id === deleteTarget.id) setSelectedMentalModel(null);
       setDeleteTarget(null);
     } catch (error) {
-      console.error("Error deleting mental model:", error);
-      alert("Error deleting: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setDeleting(false);
     }
@@ -617,8 +617,7 @@ function CreateMentalModelDialog({
       });
       onCreated();
     } catch (error) {
-      console.error("Error creating mental model:", error);
-      alert("Error creating mental model: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setCreating(false);
     }
@@ -805,8 +804,7 @@ function UpdateMentalModelDialog({
       onUpdated(updated);
       onClose();
     } catch (error) {
-      console.error("Error updating mental model:", error);
-      alert("Error updating mental model: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setUpdating(false);
     }
@@ -958,7 +956,10 @@ function MentalModelDetailPanel({
           if (attempts >= maxAttempts) {
             // Timeout
             setRefreshing(false);
-            alert("Refresh is taking longer than expected. Check the operations list for status.");
+            toast.error("Refresh timeout", {
+              description:
+                "Refresh is taking longer than expected. Check the operations list for status.",
+            });
             return;
           }
           // Continue polling
@@ -972,8 +973,7 @@ function MentalModelDetailPanel({
       // Start polling after a short delay
       setTimeout(poll, pollInterval);
     } catch (error) {
-      console.error("Error refreshing mental model:", error);
-      alert("Error refreshing: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
       setRefreshing(false);
     }
   };

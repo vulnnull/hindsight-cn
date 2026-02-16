@@ -5,6 +5,7 @@ import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 import {
   Select,
   SelectContent,
@@ -99,7 +100,9 @@ export function SearchDebugView() {
 
   const runSearch = async () => {
     if (!currentBank) {
-      alert("Please select a memory bank first");
+      toast.error("Validation error", {
+        description: "Please select a memory bank first",
+      });
       return;
     }
 
@@ -109,7 +112,9 @@ export function SearchDebugView() {
 
     // Must select at least one type
     if (factTypes.length === 0) {
-      alert("Please select at least one type (World, Experience, or Observations)");
+      toast.error("Validation error", {
+        description: "Please select at least one type (World, Experience, or Observations)",
+      });
       return;
     }
 
@@ -146,8 +151,7 @@ export function SearchDebugView() {
       setTrace(data.trace || null);
       setViewMode("results");
     } catch (error) {
-      console.error("Error running search:", error);
-      alert("Error running search: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setLoading(false);
     }

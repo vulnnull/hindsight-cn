@@ -79,7 +79,6 @@ function BankSelectorInner() {
   const [docTags, setDocTags] = React.useState("");
   const [docAsync, setDocAsync] = React.useState(false);
   const [isCreatingDoc, setIsCreatingDoc] = React.useState(false);
-  const [docError, setDocError] = React.useState<string | null>(null);
 
   // File upload state
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
@@ -142,7 +141,6 @@ function BankSelectorInner() {
     if (!currentBank || selectedFiles.length === 0) return;
 
     setIsCreatingDoc(true);
-    setDocError(null);
     setUploadProgress("");
 
     try {
@@ -189,7 +187,7 @@ function BankSelectorInner() {
       // Navigate to documents view
       router.push(`/banks/${currentBank}?view=documents`);
     } catch (error) {
-      setDocError(error instanceof Error ? error.message : "Failed to upload files");
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsCreatingDoc(false);
       setUploadProgress("");
@@ -200,7 +198,6 @@ function BankSelectorInner() {
     if (!currentBank || !docContent.trim()) return;
 
     setIsCreatingDoc(true);
-    setDocError(null);
 
     try {
       // Parse tags from comma-separated string
@@ -241,7 +238,7 @@ function BankSelectorInner() {
       // Navigate to documents view to see the new document
       router.push(`/banks/${currentBank}?view=documents`);
     } catch (error) {
-      setDocError(error instanceof Error ? error.message : "Failed to create document");
+      // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsCreatingDoc(false);
     }
@@ -597,8 +594,6 @@ function BankSelectorInner() {
               </TabsContent>
             </Tabs>
 
-            {docError && <p className="text-sm text-destructive mt-2">{docError}</p>}
-
             <DialogFooter>
               <Button
                 variant="secondary"
@@ -610,7 +605,6 @@ function BankSelectorInner() {
                   setDocDocumentId("");
                   setDocTags("");
                   setDocAsync(false);
-                  setDocError(null);
                   setSelectedFiles([]);
                   setUploadProgress("");
                 }}

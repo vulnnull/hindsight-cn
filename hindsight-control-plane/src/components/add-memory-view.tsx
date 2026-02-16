@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tag } from "lucide-react";
+import { toast } from "sonner";
 
 export function AddMemoryView() {
   const { currentBank } = useBank();
@@ -18,7 +19,6 @@ export function AddMemoryView() {
   const [tags, setTags] = useState("");
   const [async, setAsync] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
 
   const clearForm = () => {
     setContent("");
@@ -27,17 +27,17 @@ export function AddMemoryView() {
     setDocumentId("");
     setTags("");
     setAsync(false);
-    setResult(null);
   };
 
   const submitMemory = async () => {
     if (!currentBank || !content) {
-      alert("Please enter content");
+      toast.error("Validation error", {
+        description: "Please enter content",
+      });
       return;
     }
 
     setLoading(true);
-    setResult(null);
 
     try {
       // Parse tags from comma-separated string
@@ -60,11 +60,18 @@ export function AddMemoryView() {
         ...(parsedTags.length > 0 && { document_tags: parsedTags }),
       });
 
-      setResult(data.message as string);
+      // Show success toast
+      toast.success("Memory retained", {
+        description: data.message || "Memory has been successfully added to the bank",
+      });
+
+      // Clear form on success
       setContent("");
+      setContext("");
+      setTags("");
     } catch (error) {
-      console.error("Error submitting memory:", error);
-      setResult("Error: " + (error as Error).message);
+      // Error toast is shown automatically by the API client interceptor
+      // No need to handle it here!
     } finally {
       setLoading(false);
     }
@@ -161,14 +168,6 @@ export function AddMemoryView() {
             </Button>
           </div>
         </div>
-
-        {result && (
-          <div
-            className={`mt-5 p-5 rounded-lg border-2 ${result.startsWith("Error") ? "bg-destructive/10 border-destructive text-destructive" : "bg-primary/10 border-primary text-primary"}`}
-          >
-            <div className="font-semibold">{result}</div>
-          </div>
-        )}
 
         {loading && (
           <div className="text-center py-10 text-muted-foreground">
