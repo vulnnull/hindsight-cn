@@ -86,6 +86,8 @@ def print_startup_info(
     reranker_provider: str,
     mcp_enabled: bool = False,
     version: str | None = None,
+    vector_extension: str | None = None,
+    text_search_extension: str | None = None,
 ):
     """Print styled startup information."""
     print(color_start("Starting Hindsight API..."))
@@ -96,6 +98,8 @@ def print_startup_info(
     print(f"  {dim('LLM:')} {color(f'{llm_provider} / {llm_model}', 0.6)}")
     print(f"  {dim('Embeddings:')} {color(embeddings_provider, 0.8)}")
     print(f"  {dim('Reranker:')} {color(reranker_provider, 1.0)}")
+    extensions = f"{vector_extension or 'default'} (vector) / {text_search_extension or 'default'} (text)"
+    print(f"  {dim('Extensions:')} {color(extensions, 0.4)}")
     if mcp_enabled:
         print(f"  {dim('MCP:')} {color_end('enabled at /mcp')}")
     print()

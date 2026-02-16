@@ -379,6 +379,8 @@ def main():
             reranker_provider=config.reranker_provider,
             mcp_enabled=config.mcp_enabled,
             version=__version__,
+            vector_extension=config.vector_extension,
+            text_search_extension=config.text_search_extension,
         )
 
     # Start idle checker in daemon mode

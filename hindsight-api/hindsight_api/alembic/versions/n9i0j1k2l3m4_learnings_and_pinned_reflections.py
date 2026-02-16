@@ -31,14 +31,27 @@ def _get_schema_prefix() -> str:
 
 def _detect_vector_extension() -> str:
     """
-    Detect or validate vector extension: 'vchord' or 'pgvector'.
+    Detect or validate vector extension: 'pgvector', 'vchord', or 'pgvectorscale'.
     Respects HINDSIGHT_API_VECTOR_EXTENSION env var if set.
     """
     conn = op.get_bind()
     vector_extension = os.getenv("HINDSIGHT_API_VECTOR_EXTENSION", "pgvector").lower()
 
     # Validate configured extension is installed
-    if vector_extension == "vchord":
+    if vector_extension == "pgvectorscale":
+        # pgvectorscale requires pgvector
+        pgvector_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar()
+        if not pgvector_check:
+            raise RuntimeError(
+                "pgvectorscale requires pgvector. Install with: CREATE EXTENSION vector; CREATE EXTENSION vectorscale CASCADE;"
+            )
+        vectorscale_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vectorscale'")).scalar()
+        if not vectorscale_check:
+            raise RuntimeError(
+                "Configured vector extension 'pgvectorscale' not found. Install it with: CREATE EXTENSION vectorscale CASCADE;"
+            )
+        return "pgvectorscale"
+    elif vector_extension == "vchord":
         vchord_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vchord'")).scalar()
         if not vchord_check:
             raise RuntimeError(
@@ -53,7 +66,9 @@ def _detect_vector_extension() -> str:
             )
         return "pgvector"
     else:
-        raise ValueError(f"Invalid HINDSIGHT_API_VECTOR_EXTENSION: {vector_extension}. Must be 'pgvector' or 'vchord'")
+        raise ValueError(
+            f"Invalid HINDSIGHT_API_VECTOR_EXTENSION: {vector_extension}. Must be 'pgvector', 'vchord', or 'pgvectorscale'"
+        )
 
 
 def _detect_text_search_extension() -> str:
@@ -134,7 +149,13 @@ def upgrade() -> None:
     op.execute(f"CREATE INDEX idx_learnings_bank_id ON {schema}learnings(bank_id)")
 
     # Create vector index based on detected extension
-    if vector_ext == "vchord":
+    if vector_ext == "pgvectorscale":
+        op.execute(f"""
+            CREATE INDEX idx_learnings_embedding ON {schema}learnings
+            USING diskann (embedding vector_cosine_ops)
+            WITH (num_neighbors = 50)
+        """)
+    elif vector_ext == "vchord":
         op.execute(f"""
             CREATE INDEX idx_learnings_embedding ON {schema}learnings
             USING vchordrq (embedding vector_l2_ops)
@@ -201,7 +222,13 @@ def upgrade() -> None:
     op.execute(f"CREATE INDEX idx_pinned_reflections_bank_id ON {schema}pinned_reflections(bank_id)")
 
     # Create vector index based on detected extension
-    if vector_ext == "vchord":
+    if vector_ext == "pgvectorscale":
+        op.execute(f"""
+            CREATE INDEX idx_pinned_reflections_embedding ON {schema}pinned_reflections
+            USING diskann (embedding vector_cosine_ops)
+            WITH (num_neighbors = 50)
+        """)
+    elif vector_ext == "vchord":
         op.execute(f"""
             CREATE INDEX idx_pinned_reflections_embedding ON {schema}pinned_reflections
             USING vchordrq (embedding vector_l2_ops)

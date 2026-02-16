@@ -342,8 +342,8 @@ DEFAULT_RERANKER_FLASHRANK_CACHE_DIR = None  # Use default cache directory
 DEFAULT_EMBEDDINGS_COHERE_MODEL = "embed-english-v3.0"
 DEFAULT_RERANKER_COHERE_MODEL = "rerank-english-v3.0"
 
-# Vector extension (pgvector vs vchord)
-DEFAULT_VECTOR_EXTENSION = "pgvector"  # Options: "pgvector", "vchord"
+# Vector extension (pgvector, vchord, or pgvectorscale)
+DEFAULT_VECTOR_EXTENSION = "pgvector"  # Options: "pgvector", "vchord", "pgvectorscale"
 
 # Text search extension (native PostgreSQL, vchord BM25, or Timescale pg_textsearch)
 DEFAULT_TEXT_SEARCH_EXTENSION = "native"  # Options: "native", "vchord", "pg_textsearch"
@@ -733,7 +733,7 @@ class HindsightConfig:
     def validate(self) -> None:
         """Validate configuration values and raise errors for invalid combinations."""
         # Validate vector_extension
-        valid_extensions = ("pgvector", "vchord")
+        valid_extensions = ("pgvector", "vchord", "pgvectorscale")
         if self.vector_extension not in valid_extensions:
             raise ValueError(
                 f"Invalid vector_extension: {self.vector_extension}. Must be one of: {', '.join(valid_extensions)}"

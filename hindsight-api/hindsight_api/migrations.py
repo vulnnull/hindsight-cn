@@ -35,20 +35,38 @@ MIGRATION_LOCK_ID = 123456789
 
 def _detect_vector_extension(conn, vector_extension: str = "pgvector") -> str:
     """
-    Validate vector extension: 'vchord' or 'pgvector'.
+    Validate vector extension: 'pgvector', 'vchord', or 'pgvectorscale'.
 
     Args:
         conn: SQLAlchemy connection object
-        vector_extension: Configured extension ("pgvector" or "vchord")
+        vector_extension: Configured extension ("pgvector", "vchord", or "pgvectorscale")
 
     Returns:
-        "vchord" or "pgvector"
+        "pgvector", "vchord", or "pgvectorscale"
 
     Raises:
         RuntimeError: If configured extension is not installed
     """
     # Verify the configured extension is installed
-    if vector_extension == "vchord":
+    if vector_extension == "pgvectorscale":
+        # pgvectorscale requires pgvector to be installed first
+        pgvector_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar()
+        if not pgvector_check:
+            raise RuntimeError(
+                "pgvectorscale requires pgvector to be installed. "
+                "Install it with: CREATE EXTENSION vector; CREATE EXTENSION vectorscale CASCADE;"
+            )
+
+        # Check for vectorscale extension
+        vectorscale_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vectorscale'")).scalar()
+        if not vectorscale_check:
+            raise RuntimeError(
+                "Configured vector extension 'pgvectorscale' not found. "
+                "Install it with: CREATE EXTENSION vectorscale CASCADE;"
+            )
+        logger.debug("Using configured vector extension: pgvectorscale (DiskANN)")
+        return "pgvectorscale"
+    elif vector_extension == "vchord":
         vchord_check = conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vchord'")).scalar()
         if not vchord_check:
             raise RuntimeError(
@@ -65,7 +83,9 @@ def _detect_vector_extension(conn, vector_extension: str = "pgvector") -> str:
         logger.debug("Using configured vector extension: pgvector")
         return "pgvector"
     else:
-        raise ValueError(f"Invalid vector_extension: {vector_extension}. Must be 'pgvector' or 'vchord'")
+        raise ValueError(
+            f"Invalid vector_extension: {vector_extension}. Must be 'pgvector', 'vchord', or 'pgvectorscale'"
+        )
 
 
 def _get_schema_lock_id(schema: str) -> int:
@@ -277,6 +297,48 @@ def run_migrations(
                                 "Please install it with: CREATE EXTENSION vector;"
                             ) from e
 
+                # If using pgvectorscale, ensure vectorscale extension is also installed
+                vector_extension = os.getenv("HINDSIGHT_API_VECTOR_EXTENSION", "pgvector").lower()
+                if vector_extension == "pgvectorscale":
+                    logger.debug("Checking pgvectorscale (vectorscale) extension availability...")
+
+                    vectorscale_check = conn.execute(
+                        text("SELECT 1 FROM pg_extension WHERE extname = 'vectorscale'")
+                    ).scalar()
+
+                    if vectorscale_check:
+                        logger.info("pgvectorscale extension already installed")
+                    else:
+                        # Extension doesn't exist - try to install
+                        logger.info("pgvectorscale extension not found, attempting to install...")
+                        try:
+                            conn.execute(text("CREATE EXTENSION vectorscale CASCADE"))
+                            conn.commit()
+                            logger.info("pgvectorscale extension installed successfully")
+                        except Exception as e:
+                            # Installation failed - check one more time in case another process installed it
+                            conn.rollback()
+                            vectorscale_recheck = conn.execute(
+                                text("SELECT 1 FROM pg_extension WHERE extname = 'vectorscale'")
+                            ).fetchone()
+
+                            if vectorscale_recheck:
+                                logger.warning(
+                                    "Could not install pgvectorscale extension (permission denied?), "
+                                    "but extension exists. Continuing..."
+                                )
+                            else:
+                                # Extension truly doesn't exist and we can't install it
+                                logger.error(
+                                    f"pgvectorscale extension is not installed and cannot be installed: {e}. "
+                                    f"Please ensure pgvectorscale is installed by a database administrator. "
+                                    f"See: https://github.com/timescale/pgvectorscale#installation"
+                                )
+                                raise RuntimeError(
+                                    "pgvectorscale extension is required but not installed. "
+                                    "Please install it with: CREATE EXTENSION vectorscale CASCADE;"
+                                ) from e
+
                 # Run migrations while holding the lock
                 _run_migrations_internal(database_url, script_location, schema=schema)
             finally:
@@ -475,7 +537,17 @@ def ensure_embedding_dimension(
         conn.commit()
 
         # Recreate index with appropriate type based on detected extension
-        if vector_ext == "vchord":
+        if vector_ext == "pgvectorscale":
+            conn.execute(
+                text(f"""
+                    CREATE INDEX IF NOT EXISTS idx_memory_units_embedding_diskann
+                    ON {schema_name}.memory_units
+                    USING diskann (embedding vector_cosine_ops)
+                    WITH (num_neighbors = 50)
+                """)
+            )
+            logger.info(f"Created DiskANN index for {required_dimension}-dimensional embeddings")
+        elif vector_ext == "vchord":
             conn.execute(
                 text(f"""
                     CREATE INDEX IF NOT EXISTS idx_memory_units_embedding_vchordrq
@@ -537,7 +609,12 @@ def ensure_vector_extension(
         ]
 
         # Determine target index type
-        target_index_type = "vchordrq" if target_ext == "vchord" else "hnsw"
+        if target_ext == "pgvectorscale":
+            target_index_type = "diskann"
+        elif target_ext == "vchord":
+            target_index_type = "vchordrq"
+        else:
+            target_index_type = "hnsw"
 
         mismatched_tables = []
         tables_with_data = []
@@ -576,7 +653,9 @@ def ensure_vector_extension(
                 continue
 
             indexdef = current_index_info[0].lower()
-            if "vchordrq" in indexdef:
+            if "diskann" in indexdef:
+                current_index_type = "diskann"
+            elif "vchordrq" in indexdef:
                 current_index_type = "vchordrq"
             elif "hnsw" in indexdef:
                 current_index_type = "hnsw"
@@ -609,13 +688,18 @@ def ensure_vector_extension(
         # If there's data in any mismatched table, raise error
         if tables_with_data:
             table_list = ", ".join([f"{table}({count} rows)" for table, count in tables_with_data])
+            # Map index type back to extension name for error message
+            current_ext_name = {"diskann": "pgvectorscale", "vchordrq": "vchord", "hnsw": "pgvector"}.get(
+                current_index_type, current_index_type
+            )
+
             raise RuntimeError(
                 f"Cannot change vector extension from {current_index_type} to {target_index_type}: "
                 f"the following tables contain data: {table_list}. "
                 f"To change vector extension, you must either:\n"
                 f"  1. Re-embed all data: DELETE FROM {schema_name}.memory_units; "
                 f"DELETE FROM {schema_name}.learnings; DELETE FROM {schema_name}.pinned_reflections; then restart\n"
-                f"  2. Use the current vector extension (set HINDSIGHT_API_VECTOR_EXTENSION='{current_index_type.replace('vchordrq', 'vchord').replace('hnsw', 'pgvector')}')"
+                f"  2. Use the current vector extension (set HINDSIGHT_API_VECTOR_EXTENSION='{current_ext_name}')"
             )
 
         # Tables are empty, safe to recreate indexes
@@ -628,7 +712,17 @@ def ensure_vector_extension(
                 conn.execute(text(f"DROP INDEX IF EXISTS {schema_name}.{index_name}"))
 
             # Create new index with appropriate type
-            if target_ext == "vchord":
+            if target_ext == "pgvectorscale":
+                logger.info(f"Creating DiskANN index on {table_name}")
+                conn.execute(
+                    text(f"""
+                        CREATE INDEX IF NOT EXISTS {index_name}
+                        ON {schema_name}.{table_name}
+                        USING diskann (embedding vector_cosine_ops)
+                        WITH (num_neighbors = 50)
+                    """)
+                )
+            elif target_ext == "vchord":
                 logger.info(f"Creating vchordrq index on {table_name}")
                 conn.execute(
                     text(f"""

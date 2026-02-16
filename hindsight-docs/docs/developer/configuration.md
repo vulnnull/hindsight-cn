@@ -61,30 +61,60 @@ hindsight-admin run-db-migration --schema tenant_acme
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_VECTOR_EXTENSION` | Vector extension to use: `auto`, `pgvector`, or `vchord` | `auto` |
+| `HINDSIGHT_API_VECTOR_EXTENSION` | Vector index algorithm: `pgvector`, `vchord`, or `pgvectorscale` | `pgvector` |
 
-Hindsight supports two PostgreSQL vector extensions:
-- **pgvector**: Standard extension, works well for most embeddings (up to ~2000 dimensions)
-- **vchord**: Optimized for high-dimensional embeddings (3000+ dimensions), includes BM25 search
+Hindsight supports three PostgreSQL vector extensions:
 
-When set to `auto` (default), Hindsight automatically detects which extension is installed, preferring vchord if both are available.
+#### **pgvector** (HNSW - default)
+- In-memory index using Hierarchical Navigable Small World algorithm
+- Works well for most embeddings and dataset sizes
+- Fast for small-medium datasets (<10M vectors)
+- Higher memory usage for large datasets
+- Most widely deployed and supported
+
+#### **pgvectorscale** (DiskANN - recommended for scale) ⭐
+- Disk-based index using StreamingDiskANN algorithm (by Timescale)
+- **28x lower p95 latency** and **16x higher throughput** vs dedicated vector DBs
+- **60-75% cost reduction** at scale (SSDs cheaper than RAM)
+- Superior filtering performance with streaming retrieval model
+- Optimized for large datasets (10M+ vectors)
+- Requires both `pgvector` and `vectorscale` extensions
+- **Installation:** `CREATE EXTENSION vector; CREATE EXTENSION vectorscale CASCADE;`
+
+#### **vchord** (vchordrq)
+- Alternative high-performance vector index
+- Optimized for high-dimensional embeddings (3000+ dimensions)
+- Includes integrated BM25 search capabilities
+- Requires `vchord` extension
+
+**When to use pgvectorscale (DiskANN):**
+- Large datasets (10M+ vectors) ⭐
+- Complex filtering requirements
+- Cost-sensitive deployments
+- Production workloads requiring high throughput
+- When disk I/O is not a bottleneck
+
+**When to use pgvector (HNSW):**
+- Small-medium datasets (<10M vectors)
+- Maximum query speed when all data fits in memory
+- Simple nearest-neighbor queries without filters
+- Standard PostgreSQL deployment preference
 
 **When to use vchord:**
-- Using high-dimensional embeddings (e.g., `text-embedding-3-large` with 3072 dimensions)
-- Need better performance with large embedding dimensions
-- Want to use vchord's BM25 search capabilities
-
-**When to use pgvector:**
-- Using standard embedding dimensions (384-1536)
-- Prefer the widely-adopted pgvector extension
-- Simpler deployment (pgvector is more commonly available)
+- High-dimensional embeddings (3000+ dimensions)
+- Want integrated BM25 search
+- Already using vchord for text search
 
 **Switching extensions:**
 
 If you need to switch from one extension to another:
-1. Set `HINDSIGHT_API_VECTOR_EXTENSION` to your desired extension (`pgvector` or `vchord`)
+1. Set `HINDSIGHT_API_VECTOR_EXTENSION` to your desired extension (`pgvector`, `vchord`, or `pgvectorscale`)
 2. If your database has existing data, you'll get an error with migration instructions
 3. For empty databases, indexes will be automatically recreated on startup
+
+**Learn more:**
+- [HNSW vs. DiskANN comparison](https://www.tigerdata.com/learn/hnsw-vs-diskann)
+- [pgvectorscale GitHub](https://github.com/timescale/pgvectorscale)
 
 ### Text Search Extension
 
