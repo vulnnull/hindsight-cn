@@ -1,5 +1,9 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { writeFile, mkdir, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { randomBytes } from 'crypto';
 import type {
   RetainRequest,
   RetainResponse,
@@ -8,6 +12,15 @@ import type {
 } from './types.js';
 
 const execAsync = promisify(exec);
+
+/**
+ * Sanitize a string for use as a cross-platform filename.
+ * Replaces characters illegal on Windows or Unix with underscores.
+ */
+function sanitizeFilename(name: string): string {
+  // Replace characters illegal on Windows (\/:*?"<>|) and control chars
+  return name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 200) || 'content';
+}
 
 /**
  * Escape a string for use as a single-quoted shell argument.
@@ -91,17 +104,25 @@ export class HindsightClient {
   }
 
   async retain(request: RetainRequest): Promise<RetainResponse> {
-    const content = escapeShellArg(request.content);
-    const docId = escapeShellArg(request.document_id || 'conversation');
+    const docId = request.document_id || 'conversation';
 
-    const embedCmd = this.getEmbedCommandPrefix();
-    const cmd = `${embedCmd} --profile openclaw memory retain ${this.bankId} '${content}' --doc-id '${docId}' --async`;
+    // Write content to a temp file to avoid E2BIG (ARG_MAX) errors when passing
+    // large conversations as shell arguments via execAsync.
+    const tempDir = join(tmpdir(), `hindsight_${randomBytes(8).toString('hex')}`);
+    const safeFilename = sanitizeFilename(docId);
+    const tempFile = join(tempDir, `${safeFilename}.txt`);
 
     try {
+      await mkdir(tempDir, { recursive: true });
+      await writeFile(tempFile, request.content, 'utf8');
+
+      const escapedTempFile = escapeShellArg(tempFile);
+      const embedCmd = this.getEmbedCommandPrefix();
+      const cmd = `${embedCmd} --profile openclaw memory retain-files ${this.bankId} '${escapedTempFile}' --async`;
+
       const { stdout } = await execAsync(cmd);
       console.log(`[Hindsight] Retained (async): ${stdout.trim()}`);
 
-      // Return a simple response
       return {
         message: 'Memory queued for background processing',
         document_id: docId,
@@ -109,6 +130,8 @@ export class HindsightClient {
       };
     } catch (error) {
       throw new Error(`Failed to retain memory: ${error}`);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 
