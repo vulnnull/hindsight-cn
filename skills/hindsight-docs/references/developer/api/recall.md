@@ -42,10 +42,10 @@ hindsight memory recall my-bank "What does Alice do?"
 | `query` | string | required | Natural language query |
 | `types` | list | all | Filter: `world`, `experience`, `observation` |
 | `budget` | string | "mid" | Budget level: `low`, `mid`, `high` |
-| `max_tokens` | int | 4096 | Token budget for results |
+| `max_tokens` | int | 4096 | Token budget for memory facts (text only) |
 | `trace` | bool | false | Enable trace output for debugging |
 | `include_chunks` | bool | false | Include raw text chunks that generated the memories |
-| `max_chunk_tokens` | int | 500 | Token budget for chunks |
+| `max_chunk_tokens` | int | 500 | Token budget for chunks (independent of `max_tokens`) |
 | `tags` | list | None | Filter memories by tags (see [Tag Filtering](#filter-by-tags)) |
 | `tags_match` | string | "any" | How to match tags: `any`, `all`, `any_strict`, `all_strict` |
 
@@ -140,6 +140,14 @@ results = client.recall(bank_id="my-bank", query="Alice's email", max_tokens=500
 
 This design means you never have to guess whether 10 results or 50 results will fit your context. Just specify the token budget and Hindsight returns as many relevant memories as will fit.
 
+> **📝 Chunks are Independent**
+> 
+When `include_chunks=True`, chunks are fetched **independently** of the `max_tokens` filtering. This means:
+- Setting `max_tokens=0` will return **0 memory facts** but can still return **chunks** (up to `max_chunk_tokens`)
+- Chunks are based on the top-scored (reranked) results **before** token filtering
+- Chunks are fetched in batches (batch size estimated as `(max_chunk_tokens / retain_chunk_size) * 2`) until the token budget is exhausted
+- This batching approach handles varying chunk sizes across documents efficiently
+- This allows you to retrieve raw source text without memory facts when needed
 ## Budget Levels
 
 The `budget` parameter controls graph traversal depth:

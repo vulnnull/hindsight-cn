@@ -53,11 +53,28 @@ To maximize retention throughput:
    - **Fast**: [Groq](https://groq.com) with `gpt-oss-20b` or other openai-oss models, self-hosted models on GPU clusters (vLLM, TGI)
    - **Slow**: Standard cloud LLM providers with rate limits
 
-2. **Batch your operations**: Group related content into batch requests. The only limit is the HTTP payload size — Hindsight automatically splits large batches into smaller, optimized chunks under the hood, so you don't have to worry about it.
+2. **Batch your operations**: Group related content into batch requests. Send as much data as you want in a single request — the only limit is the HTTP payload size.
 
 3. **Use async mode for large datasets**: Queue operations in the background
 
 4. **Parallel processing**: For very large datasets, use multiple concurrent retention requests with different `document_id` values
+
+### Automatic Batch Optimization
+
+**When using async retain, Hindsight automatically handles batch sizing for you.** You don't need to manually tune batch sizes or worry about optimal chunking.
+
+How it works:
+- **Send large batches**: Submit hundreds or thousands of items in a single async retain request
+- **Automatic splitting**: Hindsight automatically splits large batches (>10,000 tokens) into optimized sub-batches
+- **Parallel processing**: Sub-batches are processed concurrently in the background
+- **Status tracking**: Parent operation aggregates status from all sub-batches
+- **Token-based**: Batching uses tiktoken for accurate token counting, not character counts
+
+Benefits:
+- Send entire documents or datasets in one API call
+- Let Hindsight optimize the processing strategy
+- Track overall progress via the parent operation status
+- No need to manually split data into small batches
 
 ### Throughput
 

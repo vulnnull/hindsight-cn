@@ -1,335 +1,61 @@
----
-sidebar_position: 4
----
 
 # Vercel AI SDK
 
-Official Hindsight integration for the [Vercel AI SDK](https://ai-sdk.dev).
-
-## Features
-
-- **7 Memory Tools**: Core memory operations (retain, recall, reflect), mental models (create, query), documents (get), and directives (create)
-- **AI SDK 6 Native**: Works seamlessly with `generateText`, `streamText`, and `ToolLoopAgent`
-- **Multi-User Support**: Dynamic bank IDs per tool call for multi-user/multi-tenant scenarios
-- **Full Parameter Support**: Complete access to all Hindsight API parameters
-- **Type-Safe**: Full TypeScript support with Zod schemas for validation
+The `@vectorize-io/hindsight-ai-sdk` package integrates [Hindsight](https://hindsight.vectorize.io) memory with the [Vercel AI SDK](https://ai-sdk.dev). It provides five ready-to-use tools for retaining, recalling, and reflecting on long-term memories.
 
 ## Installation
 
 ```bash
-npm install @vectorize-io/hindsight-ai-sdk @vectorize-io/hindsight-client ai zod
+npm install @vectorize-io/hindsight-ai-sdk @vectorize-io/hindsight-client ai
 ```
 
-## Quick Start
+## Setup
 
-### 1. Set up your Hindsight client
+Create a Hindsight client and pass it to `createHindsightTools` along with a `bankId`. The `bankId` identifies the memory store for this session—typically a user ID.
 
 ```typescript
 import { HindsightClient } from '@vectorize-io/hindsight-client';
-
-const hindsightClient = new HindsightClient({
-  apiUrl: process.env.HINDSIGHT_API_URL || 'http://localhost:8000',
-});
-```
-
-### 2. Create Hindsight tools
-
-```typescript
 import { createHindsightTools } from '@vectorize-io/hindsight-ai-sdk';
+
+const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
 const tools = createHindsightTools({
-  client: hindsightClient,
+  client,
+  bankId: 'user-123',
 });
 ```
 
-### 3. Use with AI SDK
+> **💡 Per-request bank IDs**
+> 
+In multi-user applications, create `tools` inside your request handler so each request closes over the correct `bankId`. See the [Next.js example](#in-a-nextjs-route-handler) below.
+## Usage
+
+### With `generateText`
 
 ```typescript
 import { generateText } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { openai } from '@ai-sdk/openai';
 
-const result = await generateText({
-  model: anthropic('claude-sonnet-4-20250514'),
+const { text } = await generateText({
+  model: openai('gpt-4o'),
   tools,
-  prompt: 'Remember that Alice loves hiking and prefers spicy food',
+  maxSteps: 5,
+  system: 'You are a helpful assistant with long-term memory.',
+  prompt: 'Remember that I prefer dark mode and large fonts.',
 });
-
-console.log(result.text);
 ```
 
-## Memory Tools
-
-The integration provides seven tools that the AI model can use to manage memory:
-
-### `retain` - Store Information
-
-The model calls this tool to store information for future recall.
-
-**Parameters:**
-- `bankId` (required): Memory bank ID (usually the user ID)
-- `content` (required): Content to store
-- `documentId` (optional): Document ID for grouping/upserting related memories
-- `timestamp` (optional): ISO timestamp for when the memory occurred
-- `context` (optional): Additional context about the memory
-- `metadata` (optional): Key-value metadata for filtering
-
-**Example tool call:**
-```typescript
-{
-  bankId: "user-123",
-  content: "Alice loves hiking and goes to Yosemite every summer",
-  context: "User preferences",
-  timestamp: "2024-01-15T10:30:00Z"
-}
-```
-
-**Returns:**
-```typescript
-{
-  success: true,
-  itemsCount: 1
-}
-```
-
-### `recall` - Search Memories
-
-The model calls this tool to search for relevant information in memory.
-
-**Parameters:**
-- `bankId` (required): Memory bank ID
-- `query` (required): What to search for
-- `types` (optional): Filter by fact types (`['world', 'experience', 'opinion']`)
-- `maxTokens` (optional): Maximum tokens to return (default: 4096)
-- `budget` (optional): Processing budget - `'low'`, `'mid'`, or `'high'`
-- `queryTimestamp` (optional): Query from a specific time (ISO format)
-- `includeEntities` (optional): Include entity observations
-- `includeChunks` (optional): Include raw document chunks
-
-**Example tool call:**
-```typescript
-{
-  bankId: "user-123",
-  query: "What does Alice like to do outdoors?",
-  types: ["world", "experience"],
-  maxTokens: 2048,
-  budget: "mid"
-}
-```
-
-**Returns:**
-```typescript
-{
-  results: [
-    {
-      id: "mem-123",
-      text: "Alice loves hiking",
-      type: "world",
-      entities: ["Alice"],
-      context: "User preferences",
-      occurred_start: "2024-01-15T10:30:00Z",
-      document_id: "doc-456",
-      metadata: { source: "chat" }
-    }
-  ],
-  entities: {
-    "Alice": {
-      canonical_name: "Alice",
-      mention_count: 15,
-      observations: [...]
-    }
-  }
-}
-```
-
-### `reflect` - Synthesize Insights
-
-The model calls this tool to analyze memories and generate contextual insights.
-
-**Parameters:**
-- `bankId` (required): Memory bank ID
-- `query` (required): Question to reflect on
-- `context` (optional): Additional context for reflection
-- `budget` (optional): Processing budget - `'low'`, `'mid'`, or `'high'`
-
-**Example tool call:**
-```typescript
-{
-  bankId: "user-123",
-  query: "What outdoor activities does Alice enjoy?",
-  context: "Planning a weekend trip",
-  budget: "mid"
-}
-```
-
-**Returns:**
-```typescript
-{
-  text: "Alice is an avid hiker who particularly enjoys visiting Yosemite National Park during summer months. She has expressed strong preferences for mountain trails over beach activities.",
-  basedOn: [
-    {
-      id: "mem-123",
-      text: "Alice loves hiking",
-      type: "world",
-      context: "User preferences",
-      occurred_start: "2024-01-15T10:30:00Z"
-    }
-  ]
-}
-```
-
-### `createMentalModel` - Create Knowledge Consolidation
-
-The model calls this tool to create a mental model that automatically consolidates memories into structured knowledge.
-
-**Parameters:**
-- `bankId` (required): Memory bank ID
-- `mentalModelId` (optional): Custom ID for the mental model (auto-generated if not provided)
-- `name` (optional): Name for the mental model
-- `sourceQuery` (optional): Query defining which memories to consolidate
-- `tags` (optional): Tags for organizing mental models
-- `maxTokens` (optional): Maximum tokens for the content
-- `autoRefresh` (optional): Auto-refresh after new consolidations (default: false)
-
-**Example tool call:**
-```typescript
-{
-  bankId: "user-123",
-  name: "User Preferences",
-  sourceQuery: "What are the user's preferences?",
-  tags: ["preferences"],
-  autoRefresh: true
-}
-```
-
-**Returns:**
-```typescript
-{
-  mentalModelId: "mm-456",
-  createdAt: "2024-01-15T10:30:00Z"
-}
-```
-
-### `queryMentalModel` - Retrieve Consolidated Knowledge
-
-The model calls this tool to retrieve synthesized insights from an existing mental model.
-
-**Parameters:**
-- `bankId` (required): Memory bank ID
-- `mentalModelId` (required): ID of the mental model to query
-
-**Example tool call:**
-```typescript
-{
-  bankId: "user-123",
-  mentalModelId: "mm-456"
-}
-```
-
-**Returns:**
-```typescript
-{
-  content: "The user prefers outdoor activities, particularly hiking. They enjoy mountain trails and visit Yosemite regularly during summer.",
-  name: "User Preferences",
-  updatedAt: "2024-01-20T15:45:00Z"
-}
-```
-
-### `getDocument` - Retrieve Stored Document
-
-The model calls this tool to retrieve a stored document by its ID.
-
-**Parameters:**
-- `bankId` (required): Memory bank ID
-- `documentId` (required): ID of the document to retrieve
-
-**Example tool call:**
-```typescript
-{
-  bankId: "user-123",
-  documentId: "doc-789"
-}
-```
-
-**Returns:**
-```typescript
-{
-  originalText: "User profile: Alice, Software Engineer, loves hiking...",
-  id: "doc-789",
-  createdAt: "2024-01-10T09:00:00Z",
-  updatedAt: "2024-01-15T14:30:00Z"
-}
-```
-
-### `createDirective` - Create Behavioral Rule
-
-The model calls this tool to create a directive—a hard rule injected into prompts during reflect operations.
-
-**Parameters:**
-- `bankId` (required): Memory bank ID
-- `name` (required): Human-readable name for the directive
-- `content` (required): The directive text to inject
-- `priority` (optional): Higher priority directives are injected first (default: 0)
-- `isActive` (optional): Whether this directive is active (default: true)
-- `tags` (optional): Tags for filtering (e.g., user-specific directives)
-
-**Example tool call:**
-```typescript
-{
-  bankId: "user-123",
-  name: "Response Format",
-  content: "Always provide responses in bullet-point format",
-  priority: 10,
-  tags: ["formatting"]
-}
-```
-
-**Returns:**
-```typescript
-{
-  id: "dir-321",
-  name: "Response Format",
-  content: "Always provide responses in bullet-point format",
-  tags: ["formatting"],
-  createdAt: "2024-01-15T10:30:00Z"
-}
-```
-
-## Usage Examples
-
-### Using with `generateText`
-
-```typescript
-import { HindsightClient } from '@vectorize-io/hindsight-client';
-import { createHindsightTools } from '@vectorize-io/hindsight-ai-sdk';
-import { generateText } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
-
-const hindsightClient = new HindsightClient({
-  apiUrl: 'http://localhost:8000',
-});
-
-const tools = createHindsightTools({ client: hindsightClient });
-
-const result = await generateText({
-  model: anthropic('claude-sonnet-4-20250514'),
-  tools,
-  system: `You are a helpful assistant with long-term memory. Use the recall tool to check for relevant memories before responding.`,
-  prompt: 'Remember that Alice loves hiking and prefers spicy food',
-});
-
-console.log(result.text);
-```
-
-### Using with `streamText`
+### With `streamText`
 
 ```typescript
 import { streamText } from 'ai';
 
 const result = streamText({
-  model: anthropic('claude-sonnet-4-20250514'),
+  model: openai('gpt-4o'),
   tools,
-  system: `You have persistent memory. Use retain to store important information and recall to retrieve it.`,
-  prompt: 'What do you know about Alice?',
+  maxSteps: 5,
+  system: 'You are a helpful assistant with long-term memory.',
+  prompt: 'What are my display preferences?',
 });
 
 for await (const chunk of result.textStream) {
@@ -337,30 +63,132 @@ for await (const chunk of result.textStream) {
 }
 ```
 
-### Using with `ToolLoopAgent`
+### With `ToolLoopAgent`
 
 ```typescript
-import { ToolLoopAgent, stopWhen, stepCountIs } from 'ai';
+import { generateText, ToolLoopAgent, stepCountIs } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
+import { createHindsightTools } from '@vectorize-io/hindsight-ai-sdk';
+
+const client = new HindsightClient({ baseUrl: process.env.HINDSIGHT_API_URL! });
 
 const agent = new ToolLoopAgent({
-  model: anthropic('claude-sonnet-4-20250514'),
-  tools,
-  instructions: `You are a personal assistant with long-term memory. Always check recall before responding and use retain to store important information.`,
+  model: openai('gpt-4o'),
+  tools: createHindsightTools({ client, bankId: 'user-123' }),
   stopWhen: stepCountIs(10),
+  system: 'You are a helpful assistant with long-term memory.',
 });
 
 const result = await agent.generate({
-  prompt: 'What did I say I wanted to work on this week?',
+  prompt: 'Remember that my favorite editor is Neovim',
 });
 ```
 
-### Multi-User Support
+### In a Next.js Route Handler
 
 ```typescript
-const result = await generateText({
-  model: anthropic('claude-sonnet-4-20250514'),
-  tools,
-  system: `You are a helpful assistant. The user's ID is: ${userId}. Always pass this as the bankId parameter to memory tools.`,
-  prompt: 'Remember that I prefer dark mode',
+// app/api/chat/route.ts
+import { streamText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { HindsightClient } from '@vectorize-io/hindsight-client';
+import { createHindsightTools } from '@vectorize-io/hindsight-ai-sdk';
+
+const hindsightClient = new HindsightClient({
+  baseUrl: process.env.HINDSIGHT_API_URL!,
+});
+
+export async function POST(req: Request) {
+  const { messages, userId } = await req.json();
+
+  // Tools are created per-request, closing over the current user's bankId
+  const tools = createHindsightTools({
+    client: hindsightClient,
+    bankId: userId,
+  });
+
+  return streamText({
+    model: openai('gpt-4o'),
+    tools,
+    maxSteps: 5,
+    system: 'You are a helpful assistant with long-term memory.',
+    messages,
+  }).toDataStreamResponse();
+}
+```
+
+---
+
+## Tools Reference
+
+Five tools are registered. The `bankId` is fixed at creation time—the agent cannot change it.
+
+| Tool | What the agent provides | What the constructor controls |
+|------|------------------------|-------------------------------|
+| `retain` | `content`, `documentId`, `timestamp`, `context` | `async`, `tags`, `metadata` |
+| `recall` | `query`, `queryTimestamp` | `budget`, `types`, `maxTokens`, `includeEntities`, `includeChunks` |
+| `reflect` | `query`, `context` | `budget` |
+| `getMentalModel` | `mentalModelId` | — |
+| `getDocument` | `documentId` | — |
+
+**Why this split?** Semantic inputs (what to remember, what to search for) belong to the agent. Infrastructure concerns (cost budget, tagging strategy, async mode) belong to the application.
+
+---
+
+## Constructor Options
+
+All options except `client` and `bankId` are optional. Each tool's options are grouped under the tool name.
+
+```typescript
+const tools = createHindsightTools({
+  client,
+  bankId: userId,
+
+  retain: {
+    async: true,                        // fire-and-forget (default: false)
+    tags: ['env:prod', 'app:support'],  // always attached to every retained memory
+    metadata: { version: '2.0' },       // always attached to every retained memory
+  },
+
+  recall: {
+    budget: 'high',                     // processing depth: low | mid | high (default: 'mid')
+    types: ['experience', 'world'],     // restrict to these fact types (default: all)
+    maxTokens: 2048,                    // cap token budget (default: API default)
+    includeEntities: true,              // include entity observations (default: false)
+    includeChunks: true,                // include raw source chunks (default: false)
+  },
+
+  reflect: {
+    budget: 'mid',                      // processing depth (default: 'mid')
+  },
+
 });
 ```
+
+### `retain`
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `async` | `boolean` | `false` | Fire-and-forget — do not wait for ingestion to complete |
+| `tags` | `string[]` | — | Tags attached to every retained memory |
+| `metadata` | `Record<string, string>` | — | Metadata attached to every retained memory |
+| `description` | `string` | built-in | Override the tool description shown to the model |
+
+### `recall`
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `budget` | `'low' \| 'mid' \| 'high'` | `'mid'` | Controls retrieval depth and latency |
+| `types` | `('world' \| 'experience' \| 'observation')[]` | all | Restrict results to these fact types |
+| `maxTokens` | `number` | API default | Cap the total tokens returned |
+| `includeEntities` | `boolean` | `false` | Include entity observations in results |
+| `includeChunks` | `boolean` | `false` | Include raw source chunks in results |
+| `description` | `string` | built-in | Override the tool description shown to the model |
+
+### `reflect`
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `budget` | `'low' \| 'mid' \| 'high'` | `'mid'` | Controls synthesis depth and latency |
+| `maxTokens` | `number` | API default | Maximum tokens for the response |
+| `description` | `string` | built-in | Override the tool description shown to the model |

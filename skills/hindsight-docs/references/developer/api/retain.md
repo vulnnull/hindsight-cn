@@ -106,11 +106,10 @@ Store multiple items in a single request. **Batch ingestion is the recommended a
 client.retain_batch(
     bank_id="my-bank",
     items=[
-        {"content": "Alice works at Google", "context": "career"},
-        {"content": "Bob is a data scientist at Meta", "context": "career"},
-        {"content": "Alice and Bob are friends", "context": "relationship"}
-    ],
-    document_id="conversation_001"
+        {"content": "Alice works at Google", "context": "career", "document_id": "conversation_001_msg_1"},
+        {"content": "Bob is a data scientist at Meta", "context": "career", "document_id": "conversation_001_msg_2"},
+        {"content": "Alice and Bob are friends", "context": "relationship", "document_id": "conversation_001_msg_3"}
+    ]
 )
 ```
 
@@ -118,26 +117,109 @@ client.retain_batch(
 
 ```javascript
 await client.retainBatch('my-bank', [
-    { content: 'Alice works at Google', context: 'career' },
-    { content: 'Bob is a data scientist at Meta', context: 'career' },
-    { content: 'Alice and Bob are friends', context: 'relationship' }
-], { documentId: 'conversation_001' });
+    { content: 'Alice works at Google', context: 'career', document_id: 'conversation_001_msg_1' },
+    { content: 'Bob is a data scientist at Meta', context: 'career', document_id: 'conversation_001_msg_2' },
+    { content: 'Alice and Bob are friends', context: 'relationship', document_id: 'conversation_001_msg_3' }
+]);
 ```
 
 The `document_id` groups related memories for later management.
 
 ## Store from Files
 
+Upload files directly — Hindsight automatically converts them to text and extracts memories. File processing always runs asynchronously and returns operation IDs for tracking.
+
+**Supported formats:** PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, images (JPG, PNG, GIF, etc. — OCR), audio (MP3, WAV, FLAC, etc. — transcription), HTML, and plain text formats (TXT, MD, CSV, JSON, YAML, etc.)
+
 ### CLI
 
 ```bash
-# Single file
-hindsight memory retain-files my-bank document.txt
+# Upload a single file (PDF, DOCX, PPTX, XLSX, images, audio, and more)
+hindsight memory retain-files my-bank report.pdf
 
-# Directory (recursive by default)
+# Upload a directory of files
 hindsight memory retain-files my-bank ./documents/
+
+# Upload and wait for processing to complete (polls until done)
+hindsight memory retain-files my-bank report.pdf
+
+# Queue files for background processing (returns immediately)
+hindsight memory retain-files my-bank ./documents/ --async
 ```
 
+### HTTP
+
+```bash
+# Via HTTP API (multipart/form-data)
+curl -X POST "${HINDSIGHT_URL}/v1/default/banks/my-bank/files/retain" \
+    -F "files=@report.pdf;type=application/octet-stream" \
+    -F "request={\"files_metadata\": [{\"context\": \"quarterly report\"}]}"
+```
+
+### Python
+
+```python
+# Upload files and retain their contents as memories.
+# Supports: PDF, DOCX, PPTX, XLSX, images (OCR), audio (transcription), and text formats.
+# Pass file paths — the client reads and uploads them automatically.
+result = client.retain_files(
+    bank_id="my-bank",
+    files=[EXAMPLES_DIR / "sample.pdf"],
+    context="quarterly report",
+)
+print(result.operation_ids)  # Track processing via the operations endpoint
+```
+
+### Node.js
+
+```javascript
+// Upload files and retain their contents as memories.
+// Supports: PDF, DOCX, PPTX, XLSX, images (OCR), audio (transcription), and text formats.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pdfBytes = readFileSync(join(__dirname, 'sample.pdf'));
+const result = await client.retainFiles('my-bank', [
+    new File([pdfBytes], 'sample.pdf'),
+], { context: 'quarterly report' });
+console.log(result.operation_ids);  // Track processing via the operations endpoint
+```
+
+### File Retain Response
+
+The file retain endpoint always returns asynchronously:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `operation_ids` | string[] | One operation ID per uploaded file. Use `GET /v1/default/banks/{bank_id}/operations` to track progress. |
+
+### Batch File Uploads
+
+Upload up to 10 files per request (max 100 MB total). Each file becomes a separate document with optional per-file metadata:
+
+### Python
+
+```python
+# Upload multiple files with per-file metadata (up to 10 files per batch).
+# Each file gets its own context, document_id, and tags.
+result = client.retain_files(
+    bank_id="my-bank",
+    files=[
+        EXAMPLES_DIR / "sample.pdf",
+        EXAMPLES_DIR / "sample.pdf",  # Replace with a second file path
+    ],
+    files_metadata=[
+        {"context": "quarterly report", "document_id": "q1-report", "tags": ["project:alpha"]},
+        {"context": "meeting notes", "document_id": "q1-notes", "tags": ["project:alpha"]},
+    ],
+)
+print(result.operation_ids)  # One operation ID per file
+```
+
+:::info File Storage
+Uploaded files are stored server-side (PostgreSQL by default, or S3/GCS/Azure for production). Configure storage via `HINDSIGHT_API_FILE_STORAGE_TYPE`. See [Configuration](../configuration#file-processing) for details.
 ## Async Ingestion
 
 For large batches, use async ingestion to avoid blocking:
@@ -149,10 +231,9 @@ For large batches, use async ingestion to avoid blocking:
 result = client.retain_batch(
     bank_id="my-bank",
     items=[
-        {"content": "Large batch item 1"},
-        {"content": "Large batch item 2"},
+        {"content": "Large batch item 1", "document_id": "large-doc-1"},
+        {"content": "Large batch item 2", "document_id": "large-doc-2"},
     ],
-    document_id="large-doc",
     retain_async=True
 )
 
@@ -165,10 +246,9 @@ print(result.var_async)  # True
 ```javascript
 // Start async ingestion (returns immediately)
 await client.retainBatch('my-bank', [
-    { content: 'Large batch item 1' },
-    { content: 'Large batch item 2' },
+    { content: 'Large batch item 1', document_id: 'large-doc-1' },
+    { content: 'Large batch item 2', document_id: 'large-doc-2' },
 ], {
-    documentId: 'large-doc',
     async: true
 });
 ```
@@ -188,14 +268,15 @@ client.retain_batch(
     items=[
         {
             "content": "User Alice said she loves the new dashboard",
-            "tags": ["user:alice", "feedback"]
+            "tags": ["user:alice", "feedback"],
+            "document_id": "user_feedback_001"
         },
         {
             "content": "User Bob reported a bug in the search feature",
-            "tags": ["user:bob", "bug-report"]
+            "tags": ["user:bob", "bug-report"],
+            "document_id": "user_feedback_002"
         }
-    ],
-    document_id="user_feedback_001"
+    ]
 )
 ```
 
@@ -210,10 +291,9 @@ Use `document_tags` to apply the same tags to all items in a request:
 client.retain_batch(
     bank_id="my-bank",
     items=[
-        {"content": "Alice mentioned she prefers dark mode"},
-        {"content": "Bob asked about keyboard shortcuts"}
+        {"content": "Alice mentioned she prefers dark mode", "document_id": "support_session_123_msg_1"},
+        {"content": "Bob asked about keyboard shortcuts", "document_id": "support_session_123_msg_2"}
     ],
-    document_id="support_session_123",
     document_tags=["session:123", "support"]  # Applied to all items
 )
 ```
