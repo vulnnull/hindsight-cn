@@ -1274,8 +1274,8 @@ from .types import ExtractedFact as ExtractedFactType
 
 logger = logging.getLogger(__name__)
 
-# Each fact gets 10 seconds offset to preserve ordering within a document
-SECONDS_PER_FACT = 10
+# Each fact gets 10ms offset to preserve ordering within a document
+SECONDS_PER_FACT = 0.01
 
 
 async def extract_facts_from_contents_batch_api(
