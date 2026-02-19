@@ -2628,6 +2628,8 @@ class MemoryEngine(MemoryEngineInterface):
             rerank_span.set_attribute("hindsight.bank_id", bank_id)
             rerank_span.set_attribute("hindsight.candidates_count", len(merged_candidates))
 
+            scored_results: list = []
+            pre_filtered_count = 0
             try:
                 # Ensure reranker is initialized (for lazy initialization mode)
                 await reranker_instance.ensure_initialized()
@@ -2635,7 +2637,6 @@ class MemoryEngine(MemoryEngineInterface):
                 # Pre-filter candidates to reduce reranking cost (RRF already provides good ranking)
                 # This is especially important for remote rerankers with network latency
                 reranker_max_candidates = get_config().reranker_max_candidates
-                pre_filtered_count = 0
                 if len(merged_candidates) > reranker_max_candidates:
                     # Sort by RRF score and take top candidates
                     merged_candidates.sort(key=lambda mc: mc.rrf_score, reverse=True)
