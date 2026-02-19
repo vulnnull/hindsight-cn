@@ -21,6 +21,7 @@ var _ MappedNullable = &IncludeOptions{}
 type IncludeOptions struct {
 	Entities NullableEntityIncludeOptions `json:"entities,omitempty"`
 	Chunks NullableChunkIncludeOptions `json:"chunks,omitempty"`
+	SourceFacts NullableSourceFactsIncludeOptions `json:"source_facts,omitempty"`
 }
 
 // NewIncludeOptions instantiates a new IncludeOptions object
@@ -124,6 +125,48 @@ func (o *IncludeOptions) UnsetChunks() {
 	o.Chunks.Unset()
 }
 
+// GetSourceFacts returns the SourceFacts field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *IncludeOptions) GetSourceFacts() SourceFactsIncludeOptions {
+	if o == nil || IsNil(o.SourceFacts.Get()) {
+		var ret SourceFactsIncludeOptions
+		return ret
+	}
+	return *o.SourceFacts.Get()
+}
+
+// GetSourceFactsOk returns a tuple with the SourceFacts field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *IncludeOptions) GetSourceFactsOk() (*SourceFactsIncludeOptions, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.SourceFacts.Get(), o.SourceFacts.IsSet()
+}
+
+// HasSourceFacts returns a boolean if a field has been set.
+func (o *IncludeOptions) HasSourceFacts() bool {
+	if o != nil && o.SourceFacts.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetSourceFacts gets a reference to the given NullableSourceFactsIncludeOptions and assigns it to the SourceFacts field.
+func (o *IncludeOptions) SetSourceFacts(v SourceFactsIncludeOptions) {
+	o.SourceFacts.Set(&v)
+}
+// SetSourceFactsNil sets the value for SourceFacts to be an explicit nil
+func (o *IncludeOptions) SetSourceFactsNil() {
+	o.SourceFacts.Set(nil)
+}
+
+// UnsetSourceFacts ensures that no value is present for SourceFacts, not even an explicit nil
+func (o *IncludeOptions) UnsetSourceFacts() {
+	o.SourceFacts.Unset()
+}
+
 func (o IncludeOptions) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -139,6 +182,9 @@ func (o IncludeOptions) ToMap() (map[string]interface{}, error) {
 	}
 	if o.Chunks.IsSet() {
 		toSerialize["chunks"] = o.Chunks.Get()
+	}
+	if o.SourceFacts.IsSet() {
+		toSerialize["source_facts"] = o.SourceFacts.Get()
 	}
 	return toSerialize, nil
 }

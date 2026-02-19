@@ -77,6 +77,7 @@ from hindsight_client_api.models.reflect_tool_call import ReflectToolCall
 from hindsight_client_api.models.reflect_trace import ReflectTrace
 from hindsight_client_api.models.retain_request import RetainRequest
 from hindsight_client_api.models.retain_response import RetainResponse
+from hindsight_client_api.models.source_facts_include_options import SourceFactsIncludeOptions
 from hindsight_client_api.models.tag_item import TagItem
 from hindsight_client_api.models.token_usage import TokenUsage
 from hindsight_client_api.models.tool_calls_include_options import ToolCallsIncludeOptions

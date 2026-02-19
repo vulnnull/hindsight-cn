@@ -3226,6 +3226,8 @@ components:
           $ref: '#/components/schemas/EntityIncludeOptions'
         chunks:
           $ref: '#/components/schemas/ChunkIncludeOptions'
+        source_facts:
+          $ref: '#/components/schemas/SourceFactsIncludeOptions'
       title: IncludeOptions
     ListDocumentsResponse:
       description: Response model for list documents endpoint.
@@ -3724,6 +3726,10 @@ components:
           additionalProperties:
             $ref: '#/components/schemas/ChunkData'
           nullable: true
+        source_facts:
+          additionalProperties:
+            $ref: '#/components/schemas/RecallResult'
+          nullable: true
       required:
       - results
       title: RecallResponse
@@ -3785,6 +3791,11 @@ components:
           nullable: true
           type: string
         tags:
+          items:
+            type: string
+          nullable: true
+          type: array
+        source_fact_ids:
           items:
             type: string
           nullable: true
@@ -4148,6 +4159,15 @@ components:
       - items_count
       - success
       title: RetainResponse
+    SourceFactsIncludeOptions:
+      description: Options for including source facts for observation-type results.
+      properties:
+        max_tokens:
+          default: 4096
+          description: Maximum tokens for source facts
+          title: Max Tokens
+          type: integer
+      title: SourceFactsIncludeOptions
     TagItem:
       description: Single tag with usage count.
       properties:

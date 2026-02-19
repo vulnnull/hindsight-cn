@@ -252,6 +252,8 @@ class Hindsight:
         max_entity_tokens: int = 500,
         include_chunks: bool = False,
         max_chunk_tokens: int = 8192,
+        include_source_facts: bool = False,
+        max_source_facts_tokens: int = 4096,
         tags: list[str] | None = None,
         tags_match: Literal["any", "all", "any_strict", "all_strict"] = "any",
     ) -> RecallResponse:
@@ -270,20 +272,30 @@ class Hindsight:
             max_entity_tokens: Maximum tokens for entity observations (default: 500)
             include_chunks: Include raw text chunks in results (default: False)
             max_chunk_tokens: Maximum tokens for chunks (default: 8192)
+            include_source_facts: Include source facts for observation-type results (default: False)
+            max_source_facts_tokens: Maximum tokens for source facts (default: 4096)
             tags: Optional list of tags to filter memories by
             tags_match: How to match tags - "any" (OR, includes untagged), "all" (AND, includes untagged),
                 "any_strict" (OR, excludes untagged), "all_strict" (AND, excludes untagged). Default: "any"
 
         Returns:
-            RecallResponse with results, optional entities, optional chunks, and optional trace
+            RecallResponse with results, optional entities, optional chunks, optional source_facts, and optional trace
         """
-        from hindsight_client_api.models import chunk_include_options, entity_include_options, include_options
+        from hindsight_client_api.models import (
+            chunk_include_options,
+            entity_include_options,
+            include_options,
+            source_facts_include_options,
+        )
 
         include_opts = include_options.IncludeOptions(
             entities=entity_include_options.EntityIncludeOptions(max_tokens=max_entity_tokens)
             if include_entities
             else None,
             chunks=chunk_include_options.ChunkIncludeOptions(max_tokens=max_chunk_tokens) if include_chunks else None,
+            source_facts=source_facts_include_options.SourceFactsIncludeOptions(max_tokens=max_source_facts_tokens)
+            if include_source_facts
+            else None,
         )
 
         request_obj = recall_request.RecallRequest(
@@ -567,6 +579,8 @@ class Hindsight:
         max_entity_tokens: int = 500,
         include_chunks: bool = False,
         max_chunk_tokens: int = 8192,
+        include_source_facts: bool = False,
+        max_source_facts_tokens: int = 4096,
         tags: list[str] | None = None,
         tags_match: Literal["any", "all", "any_strict", "all_strict"] = "any",
     ) -> RecallResponse:
@@ -585,20 +599,30 @@ class Hindsight:
             max_entity_tokens: Maximum tokens for entity observations (default: 500)
             include_chunks: Include raw text chunks in results (default: False)
             max_chunk_tokens: Maximum tokens for chunks (default: 8192)
+            include_source_facts: Include source facts for observation-type results (default: False)
+            max_source_facts_tokens: Maximum tokens for source facts (default: 4096)
             tags: Optional list of tags to filter memories by
             tags_match: How to match tags - "any" (OR, includes untagged), "all" (AND, includes untagged),
                 "any_strict" (OR, excludes untagged), "all_strict" (AND, excludes untagged). Default: "any"
 
         Returns:
-            RecallResponse with results, optional entities, optional chunks, and optional trace
+            RecallResponse with results, optional entities, optional chunks, optional source_facts, and optional trace
         """
-        from hindsight_client_api.models import chunk_include_options, entity_include_options, include_options
+        from hindsight_client_api.models import (
+            chunk_include_options,
+            entity_include_options,
+            include_options,
+            source_facts_include_options,
+        )
 
         include_opts = include_options.IncludeOptions(
             entities=entity_include_options.EntityIncludeOptions(max_tokens=max_entity_tokens)
             if include_entities
             else None,
             chunks=chunk_include_options.ChunkIncludeOptions(max_tokens=max_chunk_tokens) if include_chunks else None,
+            source_facts=source_facts_include_options.SourceFactsIncludeOptions(max_tokens=max_source_facts_tokens)
+            if include_source_facts
+            else None,
         )
 
         request_obj = recall_request.RecallRequest(

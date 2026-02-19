@@ -74,7 +74,7 @@ from hindsight_api.config import get_config
 from hindsight_api.engine.db_utils import acquire_with_retry
 from hindsight_api.engine.memory_engine import Budget, _get_tiktoken_encoding, fq_table
 from hindsight_api.engine.reflect.observations import Observation
-from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES, TokenUsage
+from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES, MemoryFact, TokenUsage
 from hindsight_api.engine.search.tags import TagsMatch
 from hindsight_api.extensions import HttpExtension, OperationValidationError, load_extension
 from hindsight_api.metrics import create_metrics_collector, get_metrics_collector, initialize_metrics
@@ -97,6 +97,12 @@ class ChunkIncludeOptions(BaseModel):
     max_tokens: int = Field(default=8192, description="Maximum tokens for chunks (chunks may be truncated)")
 
 
+class SourceFactsIncludeOptions(BaseModel):
+    """Options for including source facts for observation-type results."""
+
+    max_tokens: int = Field(default=4096, description="Maximum tokens for source facts")
+
+
 class IncludeOptions(BaseModel):
     """Options for including additional data in recall results."""
 
@@ -106,6 +112,10 @@ class IncludeOptions(BaseModel):
     )
     chunks: ChunkIncludeOptions | None = Field(
         default=None, description="Include raw chunks. Set to {} to enable, null to disable (default: disabled)."
+    )
+    source_facts: SourceFactsIncludeOptions | None = Field(
+        default=None,
+        description="Include source facts for observation-type results. Set to {} to enable, null to disable (default: disabled).",
     )
 
 
@@ -189,6 +199,9 @@ class RecallResult(BaseModel):
     metadata: dict[str, str] | None = None  # User-defined metadata
     chunk_id: str | None = None  # Chunk this fact was extracted from
     tags: list[str] | None = None  # Visibility scope tags
+    source_fact_ids: list[str] | None = (
+        None  # IDs of source facts (observation type only, when source_facts is enabled)
+    )
 
 
 class EntityObservationResponse(BaseModel):
@@ -340,6 +353,9 @@ class RecallResponse(BaseModel):
         default=None, description="Entity states for entities mentioned in results"
     )
     chunks: dict[str, ChunkData] | None = Field(default=None, description="Chunks for facts, keyed by chunk_id")
+    source_facts: dict[str, RecallResult] | None = Field(
+        default=None, description="Source facts for observation-type results, keyed by fact ID"
+    )
 
 
 class EntityInput(BaseModel):
@@ -1959,6 +1975,10 @@ def _register_routes(app: FastAPI):
             include_chunks = request.include.chunks is not None
             max_chunk_tokens = request.include.chunks.max_tokens if include_chunks else 8192
 
+            # Determine source facts inclusion settings
+            include_source_facts = request.include.source_facts is not None
+            max_source_facts_tokens = request.include.source_facts.max_tokens if include_source_facts else 4096
+
             pre_recall = time.time() - handler_start
             # Run recall with tracing (record metrics)
             with metrics.record_operation(
@@ -1977,14 +1997,16 @@ def _register_routes(app: FastAPI):
                     max_entity_tokens=max_entity_tokens,
                     include_chunks=include_chunks,
                     max_chunk_tokens=max_chunk_tokens,
+                    include_source_facts=include_source_facts,
+                    max_source_facts_tokens=max_source_facts_tokens,
                     request_context=request_context,
                     tags=request.tags,
                     tags_match=request.tags_match,
                 )
 
             # Convert core MemoryFact objects to API RecallResult objects (excluding internal metrics)
-            recall_results = [
-                RecallResult(
+            def _fact_to_result(fact: "MemoryFact") -> RecallResult:
+                return RecallResult(
                     id=fact.id,
                     text=fact.text,
                     type=fact.fact_type,
@@ -1996,9 +2018,10 @@ def _register_routes(app: FastAPI):
                     document_id=fact.document_id,
                     chunk_id=fact.chunk_id,
                     tags=fact.tags,
+                    source_fact_ids=fact.source_fact_ids,
                 )
-                for fact in core_result.results
-            ]
+
+            recall_results = [_fact_to_result(fact) for fact in core_result.results]
 
             # Convert chunks from engine to HTTP API format
             chunks_response = None
@@ -2026,11 +2049,19 @@ def _register_routes(app: FastAPI):
                         ],
                     )
 
+            # Convert source facts dict to API format
+            source_facts_response = None
+            if core_result.source_facts:
+                source_facts_response = {
+                    fact_id: _fact_to_result(fact) for fact_id, fact in core_result.source_facts.items()
+                }
+
             response = RecallResponse(
                 results=recall_results,
                 trace=core_result.trace,
                 entities=entities_response,
                 chunks=chunks_response,
+                source_facts=source_facts_response,
             )
 
             handler_duration = time.time() - handler_start

@@ -38,7 +38,8 @@ class RecallResult(BaseModel):
     metadata: Optional[Dict[str, StrictStr]] = None
     chunk_id: Optional[StrictStr] = None
     tags: Optional[List[StrictStr]] = None
-    __properties: ClassVar[List[str]] = ["id", "text", "type", "entities", "context", "occurred_start", "occurred_end", "mentioned_at", "document_id", "metadata", "chunk_id", "tags"]
+    source_fact_ids: Optional[List[StrictStr]] = None
+    __properties: ClassVar[List[str]] = ["id", "text", "type", "entities", "context", "occurred_start", "occurred_end", "mentioned_at", "document_id", "metadata", "chunk_id", "tags", "source_fact_ids"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -129,6 +130,11 @@ class RecallResult(BaseModel):
         if self.tags is None and "tags" in self.model_fields_set:
             _dict['tags'] = None
 
+        # set to None if source_fact_ids (nullable) is None
+        # and model_fields_set contains the field
+        if self.source_fact_ids is None and "source_fact_ids" in self.model_fields_set:
+            _dict['source_fact_ids'] = None
+
         return _dict
 
     @classmethod
@@ -152,7 +158,8 @@ class RecallResult(BaseModel):
             "document_id": obj.get("document_id"),
             "metadata": obj.get("metadata"),
             "chunk_id": obj.get("chunk_id"),
-            "tags": obj.get("tags")
+            "tags": obj.get("tags"),
+            "source_fact_ids": obj.get("source_fact_ids")
         })
         return _obj
 

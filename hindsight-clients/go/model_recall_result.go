@@ -33,6 +33,7 @@ type RecallResult struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 	ChunkId NullableString `json:"chunk_id,omitempty"`
 	Tags []string `json:"tags,omitempty"`
+	SourceFactIds []string `json:"source_fact_ids,omitempty"`
 }
 
 type _RecallResult RecallResult
@@ -497,6 +498,39 @@ func (o *RecallResult) SetTags(v []string) {
 	o.Tags = v
 }
 
+// GetSourceFactIds returns the SourceFactIds field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *RecallResult) GetSourceFactIds() []string {
+	if o == nil {
+		var ret []string
+		return ret
+	}
+	return o.SourceFactIds
+}
+
+// GetSourceFactIdsOk returns a tuple with the SourceFactIds field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *RecallResult) GetSourceFactIdsOk() ([]string, bool) {
+	if o == nil || IsNil(o.SourceFactIds) {
+		return nil, false
+	}
+	return o.SourceFactIds, true
+}
+
+// HasSourceFactIds returns a boolean if a field has been set.
+func (o *RecallResult) HasSourceFactIds() bool {
+	if o != nil && !IsNil(o.SourceFactIds) {
+		return true
+	}
+
+	return false
+}
+
+// SetSourceFactIds gets a reference to the given []string and assigns it to the SourceFactIds field.
+func (o *RecallResult) SetSourceFactIds(v []string) {
+	o.SourceFactIds = v
+}
+
 func (o RecallResult) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -538,6 +572,9 @@ func (o RecallResult) ToMap() (map[string]interface{}, error) {
 	}
 	if o.Tags != nil {
 		toSerialize["tags"] = o.Tags
+	}
+	if o.SourceFactIds != nil {
+		toSerialize["source_fact_ids"] = o.SourceFactIds
 	}
 	return toSerialize, nil
 }

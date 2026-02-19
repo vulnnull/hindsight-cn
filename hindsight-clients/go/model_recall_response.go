@@ -25,6 +25,7 @@ type RecallResponse struct {
 	Trace map[string]interface{} `json:"trace,omitempty"`
 	Entities map[string]EntityStateResponse `json:"entities,omitempty"`
 	Chunks map[string]ChunkData `json:"chunks,omitempty"`
+	SourceFacts map[string]RecallResult `json:"source_facts,omitempty"`
 }
 
 type _RecallResponse RecallResponse
@@ -170,6 +171,39 @@ func (o *RecallResponse) SetChunks(v map[string]ChunkData) {
 	o.Chunks = v
 }
 
+// GetSourceFacts returns the SourceFacts field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *RecallResponse) GetSourceFacts() map[string]RecallResult {
+	if o == nil {
+		var ret map[string]RecallResult
+		return ret
+	}
+	return o.SourceFacts
+}
+
+// GetSourceFactsOk returns a tuple with the SourceFacts field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *RecallResponse) GetSourceFactsOk() (map[string]RecallResult, bool) {
+	if o == nil || IsNil(o.SourceFacts) {
+		return map[string]RecallResult{}, false
+	}
+	return o.SourceFacts, true
+}
+
+// HasSourceFacts returns a boolean if a field has been set.
+func (o *RecallResponse) HasSourceFacts() bool {
+	if o != nil && !IsNil(o.SourceFacts) {
+		return true
+	}
+
+	return false
+}
+
+// SetSourceFacts gets a reference to the given map[string]RecallResult and assigns it to the SourceFacts field.
+func (o *RecallResponse) SetSourceFacts(v map[string]RecallResult) {
+	o.SourceFacts = v
+}
+
 func (o RecallResponse) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -189,6 +223,9 @@ func (o RecallResponse) ToMap() (map[string]interface{}, error) {
 	}
 	if o.Chunks != nil {
 		toSerialize["chunks"] = o.Chunks
+	}
+	if o.SourceFacts != nil {
+		toSerialize["source_facts"] = o.SourceFacts
 	}
 	return toSerialize, nil
 }

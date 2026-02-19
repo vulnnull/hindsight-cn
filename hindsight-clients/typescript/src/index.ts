@@ -262,6 +262,10 @@ export class HindsightClient {
             maxEntityTokens?: number;
             includeChunks?: boolean;
             maxChunkTokens?: number;
+            /** Include source facts for observation-type results */
+            includeSourceFacts?: boolean;
+            /** Maximum tokens for source facts (default: 4096) */
+            maxSourceFactsTokens?: number;
             /** Optional list of tags to filter memories by */
             tags?: string[];
             /** How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged). Default: 'any' */
@@ -281,6 +285,7 @@ export class HindsightClient {
                 include: {
                     entities: options?.includeEntities ? { max_tokens: options?.maxEntityTokens ?? 500 } : undefined,
                     chunks: options?.includeChunks ? { max_tokens: options?.maxChunkTokens ?? 8192 } : undefined,
+                    source_facts: options?.includeSourceFacts ? { max_tokens: options?.maxSourceFactsTokens ?? 4096 } : undefined,
                 },
                 tags: options?.tags,
                 tags_match: options?.tagsMatch,

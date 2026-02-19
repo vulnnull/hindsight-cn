@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List, Optional
 from hindsight_client_api.models.chunk_include_options import ChunkIncludeOptions
 from hindsight_client_api.models.entity_include_options import EntityIncludeOptions
+from hindsight_client_api.models.source_facts_include_options import SourceFactsIncludeOptions
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -30,7 +31,8 @@ class IncludeOptions(BaseModel):
     """ # noqa: E501
     entities: Optional[EntityIncludeOptions] = None
     chunks: Optional[ChunkIncludeOptions] = None
-    __properties: ClassVar[List[str]] = ["entities", "chunks"]
+    source_facts: Optional[SourceFactsIncludeOptions] = None
+    __properties: ClassVar[List[str]] = ["entities", "chunks", "source_facts"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -77,6 +79,9 @@ class IncludeOptions(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of chunks
         if self.chunks:
             _dict['chunks'] = self.chunks.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of source_facts
+        if self.source_facts:
+            _dict['source_facts'] = self.source_facts.to_dict()
         # set to None if entities (nullable) is None
         # and model_fields_set contains the field
         if self.entities is None and "entities" in self.model_fields_set:
@@ -86,6 +91,11 @@ class IncludeOptions(BaseModel):
         # and model_fields_set contains the field
         if self.chunks is None and "chunks" in self.model_fields_set:
             _dict['chunks'] = None
+
+        # set to None if source_facts (nullable) is None
+        # and model_fields_set contains the field
+        if self.source_facts is None and "source_facts" in self.model_fields_set:
+            _dict['source_facts'] = None
 
         return _dict
 
@@ -100,7 +110,8 @@ class IncludeOptions(BaseModel):
 
         _obj = cls.model_validate({
             "entities": EntityIncludeOptions.from_dict(obj["entities"]) if obj.get("entities") is not None else None,
-            "chunks": ChunkIncludeOptions.from_dict(obj["chunks"]) if obj.get("chunks") is not None else None
+            "chunks": ChunkIncludeOptions.from_dict(obj["chunks"]) if obj.get("chunks") is not None else None,
+            "source_facts": SourceFactsIncludeOptions.from_dict(obj["source_facts"]) if obj.get("source_facts") is not None else None
         })
         return _obj
 

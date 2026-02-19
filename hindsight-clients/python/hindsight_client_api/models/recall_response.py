@@ -33,7 +33,8 @@ class RecallResponse(BaseModel):
     trace: Optional[Dict[str, Any]] = None
     entities: Optional[Dict[str, EntityStateResponse]] = None
     chunks: Optional[Dict[str, ChunkData]] = None
-    __properties: ClassVar[List[str]] = ["results", "trace", "entities", "chunks"]
+    source_facts: Optional[Dict[str, RecallResult]] = None
+    __properties: ClassVar[List[str]] = ["results", "trace", "entities", "chunks", "source_facts"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -95,6 +96,13 @@ class RecallResponse(BaseModel):
                 if self.chunks[_key_chunks]:
                     _field_dict[_key_chunks] = self.chunks[_key_chunks].to_dict()
             _dict['chunks'] = _field_dict
+        # override the default output from pydantic by calling `to_dict()` of each value in source_facts (dict)
+        _field_dict = {}
+        if self.source_facts:
+            for _key_source_facts in self.source_facts:
+                if self.source_facts[_key_source_facts]:
+                    _field_dict[_key_source_facts] = self.source_facts[_key_source_facts].to_dict()
+            _dict['source_facts'] = _field_dict
         # set to None if trace (nullable) is None
         # and model_fields_set contains the field
         if self.trace is None and "trace" in self.model_fields_set:
@@ -109,6 +117,11 @@ class RecallResponse(BaseModel):
         # and model_fields_set contains the field
         if self.chunks is None and "chunks" in self.model_fields_set:
             _dict['chunks'] = None
+
+        # set to None if source_facts (nullable) is None
+        # and model_fields_set contains the field
+        if self.source_facts is None and "source_facts" in self.model_fields_set:
+            _dict['source_facts'] = None
 
         return _dict
 
@@ -135,6 +148,12 @@ class RecallResponse(BaseModel):
                 for _k, _v in obj["chunks"].items()
             )
             if obj.get("chunks") is not None
+            else None,
+            "source_facts": dict(
+                (_k, RecallResult.from_dict(_v))
+                for _k, _v in obj["source_facts"].items()
+            )
+            if obj.get("source_facts") is not None
             else None
         })
         return _obj

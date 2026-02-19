@@ -266,6 +266,7 @@ pub fn recall(
                 max_tokens: chunk_max_tokens,
             }),
             entities: None,
+            source_facts: None,
         })
     } else {
         None

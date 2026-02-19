@@ -125,7 +125,7 @@ export class ControlPlaneClient {
     include?: {
       entities?: { max_tokens: number } | null;
       chunks?: { max_tokens: number } | null;
-      observations?: { max_results?: number } | null;
+      source_facts?: { max_tokens?: number } | null;
     };
     query_timestamp?: string;
     tags?: string[];

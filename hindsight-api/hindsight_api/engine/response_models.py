@@ -159,6 +159,10 @@ class MemoryFact(BaseModel):
         None, description="ID of the chunk this fact was extracted from (format: bank_id_document_id_chunk_index)"
     )
     tags: list[str] | None = Field(None, description="Visibility scope tags associated with this fact")
+    source_fact_ids: list[str] | None = Field(
+        None,
+        description="IDs of source facts this observation was derived from (observation type only, when source_facts is enabled)",
+    )
 
 
 class ChunkInfo(BaseModel):
@@ -225,6 +229,9 @@ class RecallResult(BaseModel):
     )
     chunks: dict[str, ChunkInfo] | None = Field(
         None, description="Chunks for facts, keyed by '{document_id}_{chunk_index}'"
+    )
+    source_facts: dict[str, MemoryFact] | None = Field(
+        None, description="Source facts for observation-type results, keyed by fact ID"
     )
 
 

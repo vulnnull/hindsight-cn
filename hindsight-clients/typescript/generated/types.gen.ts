@@ -994,6 +994,10 @@ export type IncludeOptions = {
    * Include raw chunks. Set to {} to enable, null to disable (default: disabled).
    */
   chunks?: ChunkIncludeOptions | null;
+  /**
+   * Include source facts for observation-type results. Set to {} to enable, null to disable (default: disabled).
+   */
+  source_facts?: SourceFactsIncludeOptions | null;
 };
 
 /**
@@ -1392,6 +1396,14 @@ export type RecallResponse = {
   chunks?: {
     [key: string]: ChunkData;
   } | null;
+  /**
+   * Source Facts
+   *
+   * Source facts for observation-type results, keyed by fact ID
+   */
+  source_facts?: {
+    [key: string]: RecallResult;
+  } | null;
 };
 
 /**
@@ -1450,6 +1462,10 @@ export type RecallResult = {
    * Tags
    */
   tags?: Array<string> | null;
+  /**
+   * Source Fact Ids
+   */
+  source_fact_ids?: Array<string> | null;
 };
 
 /**
@@ -1805,6 +1821,20 @@ export type RetainResponse = {
    * Token usage metrics for LLM calls during fact extraction (only present for synchronous operations)
    */
   usage?: TokenUsage | null;
+};
+
+/**
+ * SourceFactsIncludeOptions
+ *
+ * Options for including source facts for observation-type results.
+ */
+export type SourceFactsIncludeOptions = {
+  /**
+   * Max Tokens
+   *
+   * Maximum tokens for source facts
+   */
+  max_tokens?: number;
 };
 
 /**

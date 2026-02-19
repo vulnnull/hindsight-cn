@@ -2020,6 +2020,8 @@ class MemoryEngine(MemoryEngineInterface):
         max_entity_tokens: int = 500,
         include_chunks: bool = False,
         max_chunk_tokens: int = 8192,
+        include_source_facts: bool = False,
+        max_source_facts_tokens: int = 4096,
         request_context: "RequestContext",
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
@@ -2159,6 +2161,8 @@ class MemoryEngine(MemoryEngineInterface):
                             tags_match=tags_match,
                             connection_budget=_connection_budget,
                             quiet=_quiet,
+                            include_source_facts=include_source_facts,
+                            max_source_facts_tokens=max_source_facts_tokens,
                         )
                         break  # Success - exit retry loop
                     except Exception as e:
@@ -2283,6 +2287,8 @@ class MemoryEngine(MemoryEngineInterface):
         tags_match: TagsMatch = "any",
         connection_budget: int | None = None,
         quiet: bool = False,
+        include_source_facts: bool = False,
+        max_source_facts_tokens: int = 4096,
     ) -> RecallResultModel:
         """
         Search implementation with modular retrieval and reranking.
@@ -2879,6 +2885,74 @@ class MemoryEngine(MemoryEngineInterface):
                     )
                 top_results_dicts.append(result_dict)
 
+            # Fetch source facts for observation-type results (mirrors chunks pattern)
+            source_fact_ids_by_obs: dict[str, list[str]] = {}  # obs_id -> [source_id, ...]
+            source_facts_dict: dict[str, MemoryFact] | None = None
+            if include_source_facts:
+                observation_ids = [uuid.UUID(sr.id) for sr in top_scored if sr.retrieval.fact_type == "observation"]
+                if observation_ids:
+                    async with acquire_with_retry(pool) as sf_conn:
+                        # Fetch source_memory_ids for all observation results
+                        obs_rows = await sf_conn.fetch(
+                            f"""
+                            SELECT id, source_memory_ids
+                            FROM {fq_table("memory_units")}
+                            WHERE id = ANY($1::uuid[]) AND fact_type = 'observation'
+                            """,
+                            observation_ids,
+                        )
+
+                        # Collect unique source IDs in order of first appearance
+                        seen_source_ids: set[str] = set()
+                        source_ids_ordered: list[str] = []
+                        for obs_row in obs_rows:
+                            obs_id = str(obs_row["id"])
+                            sids = [str(s) for s in (obs_row["source_memory_ids"] or [])]
+                            source_fact_ids_by_obs[obs_id] = sids
+                            for sid in sids:
+                                if sid not in seen_source_ids:
+                                    source_ids_ordered.append(sid)
+                                    seen_source_ids.add(sid)
+
+                        # Fetch source fact content up to token budget
+                        if source_ids_ordered:
+                            import uuid as uuid_module
+
+                            source_rows = await sf_conn.fetch(
+                                f"""
+                                SELECT id, text, fact_type, context, occurred_start, occurred_end,
+                                       mentioned_at, document_id, chunk_id, tags
+                                FROM {fq_table("memory_units")}
+                                WHERE id = ANY($1::uuid[])
+                                """,
+                                [uuid_module.UUID(sid) for sid in source_ids_ordered],
+                            )
+                            source_row_by_id = {str(r["id"]): r for r in source_rows}
+
+                            encoding = _get_tiktoken_encoding()
+                            source_facts_dict = {}
+                            total_source_tokens = 0
+                            for sid in source_ids_ordered:
+                                if sid not in source_row_by_id:
+                                    continue
+                                r = source_row_by_id[sid]
+                                fact_tokens = len(encoding.encode(r["text"]))
+                                if total_source_tokens + fact_tokens > max_source_facts_tokens:
+                                    break
+                                source_facts_dict[sid] = MemoryFact(
+                                    id=sid,
+                                    text=r["text"],
+                                    fact_type=r["fact_type"],
+                                    context=r["context"],
+                                    occurred_start=r["occurred_start"].isoformat() if r["occurred_start"] else None,
+                                    occurred_end=r["occurred_end"].isoformat() if r["occurred_end"] else None,
+                                    mentioned_at=r["mentioned_at"].isoformat() if r["mentioned_at"] else None,
+                                    document_id=r["document_id"],
+                                    chunk_id=str(r["chunk_id"]) if r["chunk_id"] else None,
+                                    tags=r["tags"] or None,
+                                )
+                                total_source_tokens += fact_tokens
+
             # Get entities for each fact if include_entities is requested
             fact_entity_map = {}  # unit_id -> list of (entity_id, entity_name)
             if include_entities and top_scored:
@@ -2924,6 +2998,7 @@ class MemoryEngine(MemoryEngineInterface):
                         document_id=result_dict.get("document_id"),
                         chunk_id=result_dict.get("chunk_id"),
                         tags=result_dict.get("tags"),
+                        source_fact_ids=source_fact_ids_by_obs.get(result_id) if include_source_facts else None,
                     )
                 )
 
@@ -2977,7 +3052,13 @@ class MemoryEngine(MemoryEngineInterface):
             if not quiet:
                 logger.info("\n" + "\n".join(log_buffer))
 
-            return RecallResultModel(results=memory_facts, trace=trace_dict, entities=entities_dict, chunks=chunks_dict)
+            return RecallResultModel(
+                results=memory_facts,
+                trace=trace_dict,
+                entities=entities_dict,
+                chunks=chunks_dict,
+                source_facts=source_facts_dict,
+            )
 
         except Exception as e:
             log_buffer.append(f"[RECALL {recall_id}] ERROR after {time.time() - recall_start:.3f}s: {str(e)}")
