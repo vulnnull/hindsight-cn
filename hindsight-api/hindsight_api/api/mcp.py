@@ -78,10 +78,9 @@ def create_mcp_server(memory: MemoryEngine, multi_bank: bool = True) -> FastMCP:
                    If False, only expose bank-scoped tools without bank_id parameters.
 
     Returns:
-        Configured FastMCP server instance with stateless_http enabled
+        Configured FastMCP server instance
     """
-    # Use stateless_http=True for Claude Code compatibility
-    mcp = FastMCP("hindsight-mcp-server", stateless_http=True)
+    mcp = FastMCP("hindsight-mcp-server")
 
     # Configure and register tools using shared module
     config = MCPToolsConfig(
@@ -211,9 +210,9 @@ class MCPMiddleware:
         else:
             # Create servers internally (for direct construction / tests)
             self.multi_bank_server = create_mcp_server(memory, multi_bank=True)
-            self.multi_bank_app = self.multi_bank_server.http_app(path="/")
+            self.multi_bank_app = self.multi_bank_server.http_app(path="/", stateless_http=True)
             self.single_bank_server = create_mcp_server(memory, multi_bank=False)
-            self.single_bank_app = self.single_bank_server.http_app(path="/")
+            self.single_bank_app = self.single_bank_server.http_app(path="/", stateless_http=True)
 
     def _get_header(self, scope: dict, name: str) -> str | None:
         """Extract a header value from ASGI scope."""
@@ -379,9 +378,9 @@ def create_mcp_servers(memory: MemoryEngine):
         Tuple of (multi_bank_server, single_bank_server, multi_bank_app, single_bank_app)
     """
     multi_bank_server = create_mcp_server(memory, multi_bank=True)
-    multi_bank_app = multi_bank_server.http_app(path="/")
+    multi_bank_app = multi_bank_server.http_app(path="/", stateless_http=True)
 
     single_bank_server = create_mcp_server(memory, multi_bank=False)
-    single_bank_app = single_bank_server.http_app(path="/")
+    single_bank_app = single_bank_server.http_app(path="/", stateless_http=True)
 
     return multi_bank_server, single_bank_server, multi_bank_app, single_bank_app
