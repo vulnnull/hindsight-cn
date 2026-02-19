@@ -4,188 +4,119 @@ sidebar_position: 2
 
 # Local MCP Server
 
-Hindsight provides a fully local MCP server that runs entirely on your machine with an embedded PostgreSQL database. No external server or database setup required.
+Hindsight provides a local MCP server that runs entirely on your machine with an embedded PostgreSQL database. No external server or database setup required.
 
 This is ideal for:
-- **Personal use with Claude Desktop** — Give Claude long-term memory across conversations
+- **Personal use with Claude Code / Claude Desktop** — Give Claude long-term memory across conversations
 - **Development and testing** — Quick setup without infrastructure
 - **Privacy-focused setups** — All data stays on your machine
 
-## Quick Install
+## How It Works
+
+Running `hindsight-local-mcp` starts the full Hindsight API on `localhost:8888` with an embedded PostgreSQL database (pg0). You then connect your MCP client to it over HTTP.
+
+- Starts an embedded PostgreSQL (pg0) automatically
+- Runs database migrations on startup
+- Exposes the full MCP endpoint at `http://localhost:8888/mcp/`
+- Data persists in `~/.pg0/hindsight-mcp/` across restarts
+
+## Setup
+
+### 1. Start the server
 
 ```bash
-curl -fsSL https://hindsight.vectorize.io/get-mcp | bash -s -- \
-  --app claude-desktop \
-  --set HINDSIGHT_API_LLM_API_KEY=sk-...
+HINDSIGHT_API_LLM_API_KEY=sk-... uvx --from hindsight-api hindsight-local-mcp
 ```
 
-This script will:
-1. Install [uv](https://docs.astral.sh/uv/) if not already installed
-2. Configure Claude Desktop to use the Hindsight MCP server
-3. Set the provided environment variables in the MCP configuration
-
-:::info Other MCP Applications
-The quick install script currently supports Claude Desktop only. For other MCP-compatible applications (Cursor, Cline, etc.), follow the [Manual Configuration](#manual-configuration) steps below.
-:::
-
-## Manual Configuration
-
-Add the following to your MCP client's configuration. For Claude Desktop:
-
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-For other MCP clients, refer to their documentation for the configuration file location.
-
-```json
-{
-  "mcpServers": {
-    "hindsight": {
-      "command": "uvx",
-      "args": ["--from", "hindsight-api", "hindsight-local-mcp"],
-      "env": {
-        "HINDSIGHT_API_LLM_API_KEY": "sk-..."
-      }
-    }
-  }
-}
-```
-
-### With Custom Bank ID
-
-By default, memories are stored in a bank called `mcp`. To use a different bank:
-
-```json
-{
-  "mcpServers": {
-    "hindsight": {
-      "command": "uvx",
-      "args": ["--from", "hindsight-api", "hindsight-local-mcp"],
-      "env": {
-        "HINDSIGHT_API_LLM_API_KEY": "sk-...",
-        "HINDSIGHT_API_MCP_LOCAL_BANK_ID": "my-personal-memory"
-      }
-    }
-  }
-}
-```
-
-## Environment Variables
-
-All standard [Hindsight configuration variables](/developer/configuration) are supported.
-
-### Local MCP Specific
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `HINDSIGHT_API_MCP_LOCAL_BANK_ID` | No | `mcp` | Memory bank ID to use |
-| `HINDSIGHT_API_MCP_INSTRUCTIONS` | No | - | Additional instructions appended to both `retain` and `recall` tools |
-
-### Customizing Tool Behavior
-
-You can customize what gets stored by adding instructions to the tools. Re-run the install script with the additional `--set` flag:
+Or with Ollama (no API key needed):
 
 ```bash
-curl -fsSL https://hindsight.vectorize.io/get-mcp | bash -s -- \
-  --app claude-desktop \
-  --set HINDSIGHT_API_LLM_API_KEY=sk-... \
-  --set HINDSIGHT_API_MCP_INSTRUCTIONS="Also store every action you take, code you write, and files you modify."
+HINDSIGHT_API_LLM_PROVIDER=ollama HINDSIGHT_API_LLM_MODEL=llama3.2 uvx --from hindsight-api hindsight-local-mcp
 ```
 
-These instructions are appended to the default tool descriptions, guiding Claude on when and how to use the memory tools.
+### 2. Configure your MCP client
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http hindsight http://localhost:8888/mcp/
+```
+
+**Other MCP clients** — add an HTTP transport entry pointing to `http://localhost:8888/mcp/`.
+
+## Bank Modes
+
+The local server supports the same two modes as the hosted API:
+
+### Multi-bank mode (default)
+
+Use `http://localhost:8888/mcp/` — exposes all tools including bank management. Bank is selected per-request via the `bank_id` tool parameter or the `X-Bank-Id` header.
+
+```bash
+claude mcp add --transport http hindsight http://localhost:8888/mcp/
+```
+
+### Single-bank mode
+
+Use `http://localhost:8888/mcp/<bank-id>/` — pins all tools to one bank, no `bank_id` parameter needed. This replaces the old `HINDSIGHT_API_MCP_LOCAL_BANK_ID` env var.
+
+```bash
+claude mcp add --transport http hindsight http://localhost:8888/mcp/my-bank/
+```
 
 ## Available Tools
 
-### retain
+The local server exposes the full tool set:
 
-Store information to long-term memory. This is a **fire-and-forget** operation — it returns immediately while processing happens in the background.
+| Tool | Description |
+|------|-------------|
+| `retain` | Store information to long-term memory (fire-and-forget) |
+| `recall` | Search memories with natural language |
+| `reflect` | Synthesize memories into a reasoned answer |
+| `list_banks` | List all memory banks |
+| `create_bank` | Create or configure a memory bank |
+| `list_mental_models` | List pinned reflections for a bank |
+| `get_mental_model` | Get a specific mental model |
+| `create_mental_model` | Create a new mental model |
+| `update_mental_model` | Update a mental model's metadata |
+| `delete_mental_model` | Delete a mental model |
+| `refresh_mental_model` | Regenerate a mental model's content |
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `content` | string | Yes | The fact or memory to store |
-| `context` | string | No | Category for the memory (default: `general`) |
+## Environment Variables
 
-**Example:**
-```json
-{
-  "name": "retain",
-  "arguments": {
-    "content": "User's favorite color is blue",
-    "context": "preferences"
-  }
-}
-```
+All standard [Hindsight configuration variables](/developer/configuration) are supported. Key ones for local use:
 
-**Response:**
-```json
-{
-  "status": "accepted",
-  "message": "Memory storage initiated"
-}
-```
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HINDSIGHT_API_LLM_API_KEY` | Yes* | — | API key for your LLM provider |
+| `HINDSIGHT_API_LLM_PROVIDER` | No | `openai` | LLM provider (`openai`, `anthropic`, `ollama`, etc.) |
+| `HINDSIGHT_API_LLM_MODEL` | No | `gpt-4o-mini` | Model name |
+| `HINDSIGHT_API_DATABASE_URL` | No | `pg0://hindsight-mcp` | Override the database URL |
+| `HINDSIGHT_API_PORT` | No | `8888` | Port to listen on |
+| `HINDSIGHT_API_LOG_LEVEL` | No | `info` | Log level |
 
-### recall
-
-Search memories to provide personalized responses.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | Yes | Natural language search query |
-| `max_tokens` | integer | No | Maximum tokens to return (default: 4096) |
-
-**Example:**
-```json
-{
-  "name": "recall",
-  "arguments": {
-    "query": "What are the user's color preferences?",
-    "max_tokens": 2048
-  }
-}
-```
-
-## How It Works
-
-The local MCP server:
-
-1. **Starts an embedded PostgreSQL** (pg0) on an automatically assigned port
-2. **Initializes the Hindsight memory engine** with local embeddings
-3. **Connects via stdio** to Claude Code using the MCP protocol
-
-Data is persisted in the pg0 data directory (`~/.pg0/hindsight-mcp/`), so your memories survive restarts.
+*Not required when using a local provider like Ollama.
 
 ## Troubleshooting
 
-### "HINDSIGHT_API_LLM_API_KEY required"
+### Slow first startup
 
-Make sure you've set the API key in your MCP configuration:
+The first startup downloads the local embedding model (~100MB) and initializes the database. Subsequent starts are faster.
 
-```json
-{
-  "env": {
-    "HINDSIGHT_API_LLM_API_KEY": "sk-..."
-  }
-}
+### Port already in use
+
+Set a different port:
+
+```bash
+HINDSIGHT_API_LLM_API_KEY=sk-... HINDSIGHT_API_PORT=9000 uvx --from hindsight-api hindsight-local-mcp
 ```
 
-### Slow startup
-
-The first startup may take longer as it:
-- Downloads the embedding model (~100MB)
-- Initializes the PostgreSQL database
-
-Subsequent starts are faster.
+Then update your MCP client URL to `http://localhost:9000/mcp/`.
 
 ### Checking logs
 
 Set `HINDSIGHT_API_LOG_LEVEL=debug` for verbose output:
 
-```json
-{
-  "env": {
-    "HINDSIGHT_API_LOG_LEVEL": "debug"
-  }
-}
+```bash
+HINDSIGHT_API_LLM_API_KEY=sk-... HINDSIGHT_API_LOG_LEVEL=debug uvx --from hindsight-api hindsight-local-mcp
 ```
-
-Logs are written to stderr and visible in Claude Code's MCP server output.

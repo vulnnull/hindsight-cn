@@ -46,6 +46,8 @@ hindsight memory recall my-bank "What does Alice do?"
 | `trace` | bool | false | Enable trace output for debugging |
 | `include_chunks` | bool | false | Include raw text chunks that generated the memories |
 | `max_chunk_tokens` | int | 500 | Token budget for chunks (independent of `max_tokens`) |
+| `include_source_facts` | bool | false | Include source facts for observation-type results (see [Source Facts](#source-facts)) |
+| `max_source_facts_tokens` | int | 4096 | Token budget for source facts |
 | `tags` | list | None | Filter memories by tags (see [Tag Filtering](#filter-by-tags)) |
 | `tags_match` | string | "any" | How to match tags: `any`, `all`, `any_strict`, `all_strict` |
 
@@ -122,6 +124,59 @@ hindsight memory recall my-bank "query" --fact-type world,observation
 > **💡 About Observations**
 > 
 Observations are consolidated knowledge synthesized from multiple facts. They capture patterns, preferences, and learnings that the memory bank has built up over time. Observations are automatically created in the background after retain operations.
+## Source Facts
+
+When recalling `observation`-type memories, you can fetch the underlying facts they were derived from. This is useful when you need to understand or verify the evidence behind a synthesized observation.
+
+Source facts are returned as a top-level `source_facts` dict keyed by fact ID. Each observation result includes a `source_fact_ids` list for cross-referencing. Facts are deduplicated — if two observations share a source fact, it only appears once.
+
+### Python
+
+```python
+# Recall observations and include their source facts
+response = client.recall(
+    bank_id="my-bank",
+    query="What patterns have I learned about Alice?",
+    types=["observation"],
+    include_source_facts=True,
+    max_source_facts_tokens=4096,
+)
+
+for obs in response.results:
+    print(f"Observation: {obs.text}")
+    if obs.source_fact_ids and response.source_facts:
+        print("  Derived from:")
+        for fact_id in obs.source_fact_ids:
+            fact = response.source_facts.get(fact_id)
+            if fact:
+                print(f"    - [{fact.type}] {fact.text}")
+```
+
+### Node.js
+
+```javascript
+// Recall observations and include their source facts
+const obsResponse = await client.recall('my-bank', 'What patterns have I learned about Alice?', {
+    types: ['observation'],
+    includeSourceFacts: true,
+    maxSourceFactsTokens: 4096,
+});
+
+for (const obs of obsResponse.results) {
+    console.log(`Observation: ${obs.text}`);
+    if (obs.source_fact_ids && obsResponse.source_facts) {
+        console.log('  Derived from:');
+        for (const factId of obs.source_fact_ids) {
+            const fact = obsResponse.source_facts[factId];
+            if (fact) console.log(`    - [${fact.type}] ${fact.text}`);
+        }
+    }
+}
+```
+
+> **📝 Source Facts Token Budget**
+> 
+Source facts are fetched independently of the main `max_tokens` budget, up to `max_source_facts_tokens`. Facts are included in order of first appearance across all observations — once the budget is reached, remaining source facts are omitted.
 ## Token Budget Management
 
 Hindsight is built for AI agents, not humans. Traditional retrieval systems return "top-k" results, but agents don't think in terms of result counts—they think in tokens. An agent's context window is measured in tokens, and that's exactly how Hindsight measures results.
