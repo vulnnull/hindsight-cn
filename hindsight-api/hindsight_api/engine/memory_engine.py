@@ -164,7 +164,7 @@ from enum import Enum
 from ..metrics import get_metrics_collector
 from ..pg0 import EmbeddedPostgres, parse_pg0_url
 from .entity_resolver import EntityResolver
-from .llm_wrapper import LLMConfig
+from .llm_wrapper import LLMConfig, requires_api_key
 from .query_analyzer import QueryAnalyzer
 from .reflect import run_reflect_agent
 from .reflect.tools import tool_expand, tool_recall, tool_search_mental_models, tool_search_observations
@@ -324,10 +324,7 @@ class MemoryEngine(MemoryEngineInterface):
         db_url = db_url or config.database_url
         memory_llm_provider = memory_llm_provider or config.llm_provider
         memory_llm_api_key = memory_llm_api_key or config.llm_api_key
-        # Ollama, openai-codex, claude-code, and mock don't require an API key
-        # openai-codex uses OAuth tokens from ~/.codex/auth.json
-        # claude-code uses OAuth tokens from macOS Keychain
-        if not memory_llm_api_key and memory_llm_provider not in ("ollama", "openai-codex", "claude-code", "mock"):
+        if not memory_llm_api_key and requires_api_key(memory_llm_provider):
             raise ValueError("LLM API key is required. Set HINDSIGHT_API_LLM_API_KEY environment variable.")
         memory_llm_model = memory_llm_model or config.llm_model
         memory_llm_base_url = memory_llm_base_url or config.get_llm_base_url() or None
@@ -2937,7 +2934,10 @@ class MemoryEngine(MemoryEngineInterface):
                                     continue
                                 r = source_row_by_id[sid]
                                 fact_tokens = len(encoding.encode(r["text"]))
-                                if total_source_tokens + fact_tokens > max_source_facts_tokens:
+                                if (
+                                    max_source_facts_tokens >= 0
+                                    and total_source_tokens + fact_tokens > max_source_facts_tokens
+                                ):
                                     break
                                 source_facts_dict[sid] = MemoryFact(
                                     id=sid,
@@ -4300,6 +4300,7 @@ class MemoryEngine(MemoryEngineInterface):
                     tags=tags,
                     tags_match=tags_match,
                     exclude_ids=exclude_mental_model_ids,
+                    pending_consolidation=pending_consolidation,
                 )
 
         async def search_observations_fn(q: str, max_tokens: int = 5000) -> dict[str, Any]:
@@ -4327,6 +4328,7 @@ class MemoryEngine(MemoryEngineInterface):
         # Load directives from the dedicated directives table
         # Directives are hard rules that must be followed in all responses
         # Use isolation_mode=True to prevent tag-scoped directives from leaking into untagged operations
+        # Use the same tags_match as the reflect request so directives respect the same scoping rules
         directives_raw = await self.list_directives(
             bank_id=bank_id,
             tags=tags,
@@ -4335,16 +4337,7 @@ class MemoryEngine(MemoryEngineInterface):
             request_context=request_context,
             isolation_mode=True,
         )
-        # Convert directive format to the expected format for reflect agent
-        # The agent expects: name, description (optional), observations (list of {title, content})
-        directives = [
-            {
-                "name": d["name"],
-                "description": d["content"],  # Use content as description
-                "observations": [],  # Directives use content directly, not observations
-            }
-            for d in directives_raw
-        ]
+        directives = directives_raw
         if directives:
             logger.info(f"[REFLECT {reflect_id}] Loaded {len(directives)} directives")
 
@@ -5684,18 +5677,20 @@ class MemoryEngine(MemoryEngineInterface):
             if active_only:
                 filters.append("is_active = TRUE")
 
-            # Apply tags filter:
-            # - If tags provided: use standard filtering (with strict modes support)
-            # - If tags=None and isolation_mode=True: only include directives with NO tags
-            #   (prevents tag-scoped directives from leaking into untagged reflect/refresh)
-            # - If tags=None and isolation_mode=False: no filtering (normal API behavior)
+            # Apply tags filter for directives:
+            # Directives have special scoping rules:
+            #   - Untagged directives (tags=[] or null) always apply regardless of reflect tags
+            #   - Tagged directives only apply when the reflect operation includes matching tags
+            #   - If tags=None and isolation_mode=True: only untagged directives (no leakage)
+            #   - If tags=None and isolation_mode=False: all directives (normal API behavior)
             if tags:
                 tags_clause, tags_params, param_idx = build_tags_where_clause(
                     tags=tags, param_offset=param_idx, table_alias="", match=tags_match
                 )
                 if tags_clause:
-                    # Remove leading "AND " from clause since we're building filters list
-                    filters.append(tags_clause.replace("AND ", "", 1))
+                    # Always include untagged directives; tagged ones must match the reflect tags
+                    scoped_clause = tags_clause.replace("AND ", "", 1)
+                    filters.append(f"((tags IS NULL OR tags = '{{}}') OR ({scoped_clause}))")
                     params.extend(tags_params)
             elif isolation_mode:
                 # Isolation mode: only include directives with empty/null tags

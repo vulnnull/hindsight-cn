@@ -18,6 +18,7 @@ from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
 from hindsight_api.engine.llm_interface import LLMInterface, OutputTooLongError
+from hindsight_api.engine.llm_wrapper import parse_llm_json
 from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult, TokenUsage
 from hindsight_api.metrics import get_metrics_collector
 
@@ -221,10 +222,13 @@ class GeminiLLM(LLMInterface):
 
         for attempt in range(max_retries + 1):
             try:
-                response = await self._client.aio.models.generate_content(
-                    model=self.model,
-                    contents=gemini_contents,
-                    config=generation_config,
+                response = await asyncio.wait_for(
+                    self._client.aio.models.generate_content(
+                        model=self.model,
+                        contents=gemini_contents,
+                        config=generation_config,
+                    ),
+                    timeout=90.0,  # Safety net for network hangs; valid slow responses are <90s
                 )
 
                 content = response.text
@@ -247,7 +251,7 @@ class GeminiLLM(LLMInterface):
 
                 # Parse structured output if requested
                 if response_format is not None:
-                    json_data = json.loads(content)
+                    json_data = parse_llm_json(content)
                     if skip_validation:
                         result = json_data
                     else:
@@ -405,31 +409,57 @@ class GeminiLLM(LLMInterface):
         # Convert messages
         system_instruction = None
         gemini_contents = []
-        for msg in messages:
+        msg_list = list(messages)
+        i = 0
+        while i < len(msg_list):
+            msg = msg_list[i]
             role = msg.get("role", "user")
             content = msg.get("content", "")
 
             if role == "system":
                 system_instruction = (system_instruction + "\n\n" + content) if system_instruction else content
+                i += 1
             elif role == "tool":
-                # Gemini uses function_response
-                gemini_contents.append(
-                    genai_types.Content(
-                        role="user",
-                        parts=[
-                            genai_types.Part(
-                                function_response=genai_types.FunctionResponse(
-                                    name=msg.get("name", ""),
-                                    response={"result": content},
-                                )
+                # Gemini requires ALL tool responses for a given model turn to be grouped
+                # into a single Content with multiple FunctionResponse parts.
+                # Consecutive role="tool" messages correspond to one model turn's tool calls.
+                parts = []
+                while i < len(msg_list) and msg_list[i].get("role") == "tool":
+                    tool_msg = msg_list[i]
+                    tool_content = tool_msg.get("content", "")
+                    parts.append(
+                        genai_types.Part(
+                            function_response=genai_types.FunctionResponse(
+                                name=tool_msg.get("name", ""),
+                                response={"result": tool_content},
                             )
-                        ],
+                        )
                     )
-                )
+                    i += 1
+                gemini_contents.append(genai_types.Content(role="user", parts=parts))
             elif role == "assistant":
-                gemini_contents.append(genai_types.Content(role="model", parts=[genai_types.Part(text=content)]))
+                tool_calls_in_msg = msg.get("tool_calls", [])
+                if tool_calls_in_msg:
+                    # Convert OpenAI-style tool_calls to Gemini function_call parts
+                    # This is required for proper multi-turn conversation history
+                    parts = []
+                    if content:
+                        parts.append(genai_types.Part(text=content))
+                    for tc in tool_calls_in_msg:
+                        fn = tc.get("function", {})
+                        fn_name = fn.get("name", "")
+                        fn_args_str = fn.get("arguments", "{}")
+                        fn_args = parse_llm_json(fn_args_str)
+                        parts.append(
+                            genai_types.Part(function_call=genai_types.FunctionCall(name=fn_name, args=fn_args))
+                        )
+                    gemini_contents.append(genai_types.Content(role="model", parts=parts))
+                else:
+                    gemini_contents.append(genai_types.Content(role="model", parts=[genai_types.Part(text=content)]))
+                i += 1
             else:
                 gemini_contents.append(genai_types.Content(role="user", parts=[genai_types.Part(text=content)]))
+                i += 1
 
         config_kwargs: dict[str, Any] = {"tools": gemini_tools}
         if system_instruction:
@@ -437,15 +467,40 @@ class GeminiLLM(LLMInterface):
         if temperature is not None:
             config_kwargs["temperature"] = temperature
 
+        # Map OpenAI-style tool_choice to Gemini FunctionCallingConfig
+        if tool_choice == "required":
+            config_kwargs["tool_config"] = genai_types.ToolConfig(
+                function_calling_config=genai_types.FunctionCallingConfig(
+                    mode="ANY",
+                )
+            )
+        elif isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+            fn_name = tool_choice.get("function", {}).get("name")
+            if fn_name:
+                config_kwargs["tool_config"] = genai_types.ToolConfig(
+                    function_calling_config=genai_types.FunctionCallingConfig(
+                        mode="ANY",
+                        allowed_function_names=[fn_name],
+                    )
+                )
+        elif tool_choice == "none":
+            config_kwargs["tool_config"] = genai_types.ToolConfig(
+                function_calling_config=genai_types.FunctionCallingConfig(mode="NONE")
+            )
+        # "auto" is the default (no tool_config needed)
+
         config = genai_types.GenerateContentConfig(**config_kwargs)
 
         last_exception = None
         for attempt in range(max_retries + 1):
             try:
-                response = await self._client.aio.models.generate_content(
-                    model=self.model,
-                    contents=gemini_contents,
-                    config=config,
+                response = await asyncio.wait_for(
+                    self._client.aio.models.generate_content(
+                        model=self.model,
+                        contents=gemini_contents,
+                        config=config,
+                    ),
+                    timeout=90.0,  # Safety net for network hangs; valid slow responses are <90s
                 )
 
                 # Extract content and tool calls

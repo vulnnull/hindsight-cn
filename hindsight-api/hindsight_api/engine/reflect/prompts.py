@@ -12,57 +12,20 @@ from typing import Any
 
 
 def _extract_directive_rules(directives: list[dict[str, Any]]) -> list[str]:
-    """
-    Extract directive rules as a list of strings.
-
-    Args:
-        directives: List of directives with name and content
-
-    Returns:
-        List of directive rule strings
-    """
+    """Extract directive rules as a list of strings."""
     rules = []
     for directive in directives:
-        directive_name = directive.get("name", "")
-        # New format: directives have direct content field
+        name = directive.get("name", "")
         content = directive.get("content", "")
         if content:
-            if directive_name:
-                rules.append(f"**{directive_name}**: {content}")
-            else:
-                rules.append(content)
-        else:
-            # Legacy format: check for observations
-            observations = directive.get("observations", [])
-            if observations:
-                for obs in observations:
-                    # Support both Pydantic Observation objects and dicts
-                    if hasattr(obs, "title"):
-                        title = obs.title
-                        obs_content = obs.content
-                    else:
-                        title = obs.get("title", "")
-                        obs_content = obs.get("content", "")
-                    if title and obs_content:
-                        rules.append(f"**{title}**: {obs_content}")
-                    elif obs_content:
-                        rules.append(obs_content)
-            elif directive_name:
-                # Fallback to description
-                desc = directive.get("description", "")
-                if desc:
-                    rules.append(f"**{directive_name}**: {desc}")
+            rules.append(f"**{name}**: {content}" if name else content)
     return rules
 
 
 def build_directives_section(directives: list[dict[str, Any]]) -> str:
-    """
-    Build the directives section for the system prompt.
+    """Build the directives section for the system prompt.
 
     Directives are hard rules that MUST be followed in all responses.
-
-    Args:
-        directives: List of directive mental models with observations
     """
     if not directives:
         return ""
@@ -169,6 +132,12 @@ def build_system_prompt_for_tools(
 
     parts.extend(
         [
+            "## LANGUAGE RULE (default - directives take precedence)",
+            "- By default, detect the language of the user's question and respond in that SAME language.",
+            "- If the question is in Chinese, respond in Chinese. If in Japanese, respond in Japanese.",
+            "- IMPORTANT: The DIRECTIVES section above has HIGHER PRIORITY than this rule.",
+            "  If a directive specifies a language (e.g. 'Always respond in French'), follow the directive.",
+            "",
             "## CRITICAL RULES",
             "- ONLY use information from tool results - no external knowledge or guessing",
             "- You SHOULD synthesize, infer, and reason from the retrieved memories",
@@ -205,6 +174,7 @@ def build_system_prompt_for_tools(
                 "### 3. RAW FACTS (recall) - Ground Truth",
                 "- Individual memories (world facts and experiences)",
                 "- Use when: no mental models/observations exist, they're stale, or you need specific details",
+                "- MANDATORY: If search_mental_models and search_observations both return 0 results, you MUST call recall() before giving up",
                 "- This is the source of truth that other levels are built from",
                 "",
             ]
@@ -222,6 +192,7 @@ def build_system_prompt_for_tools(
                 "### 2. RAW FACTS (recall) - Ground Truth",
                 "- Individual memories (world facts and experiences)",
                 "- Use when: no observations exist, they're stale, or you need specific details",
+                "- MANDATORY: If search_observations returns 0 results or count=0, you MUST call recall() before giving up",
                 "- This is the source of truth that observations are built from",
                 "",
             ]
@@ -299,7 +270,7 @@ def build_system_prompt_for_tools(
         parts.extend(
             [
                 "1. First, try search_observations() - check for consolidated knowledge",
-                "2. If observations are stale OR you need specific details, use recall() for raw facts",
+                "2. If search_observations returns 0 results OR observations are stale, you MUST call recall() for raw facts",
                 "3. Use expand() if you need more context on specific memories",
                 "4. When ready, call done() with your answer and supporting IDs",
             ]

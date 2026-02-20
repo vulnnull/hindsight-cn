@@ -116,23 +116,40 @@ def load_config_file():
                         os.environ[key] = value
 
 
+def get_default_model_for_provider(provider: str) -> str:
+    """Return the default model for a given provider.
+
+    Delegates to hindsight_api.config when available (same Python environment),
+    with a minimal fallback for standalone use.
+    """
+    try:
+        from hindsight_api.config import PROVIDER_DEFAULT_MODELS
+
+        return PROVIDER_DEFAULT_MODELS.get(provider, "gpt-4o-mini")
+    except ImportError:
+        return "gpt-4o-mini"
+
+
 def get_config():
     """Get configuration from environment variables."""
     load_config_file()
+    provider = os.environ.get("HINDSIGHT_API_LLM_PROVIDER", "openai")
+    default_model = get_default_model_for_provider(provider)
     return {
         "llm_api_key": os.environ.get("HINDSIGHT_API_LLM_API_KEY") or os.environ.get("OPENAI_API_KEY"),
-        "llm_provider": os.environ.get("HINDSIGHT_API_LLM_PROVIDER", "openai"),
-        "llm_model": os.environ.get("HINDSIGHT_API_LLM_MODEL", "gpt-4o-mini"),
+        "llm_provider": provider,
+        "llm_model": os.environ.get("HINDSIGHT_API_LLM_MODEL", default_model),
         "bank_id": os.environ.get("HINDSIGHT_EMBED_BANK_ID", "default"),
     }
 
 
-# Provider defaults: (provider_id, default_model, env_key_name)
+# Provider choices for interactive configure: (provider_id, default_model, env_key_name)
 PROVIDER_DEFAULTS = {
-    "openai": ("openai", "o3-mini", "OPENAI_API_KEY"),
-    "groq": ("groq", "openai/gpt-oss-20b", "GROQ_API_KEY"),
-    "google": ("google", "gemini-2.0-flash", "GOOGLE_API_KEY"),
-    "ollama": ("ollama", "llama3.2", None),
+    "openai": ("openai", get_default_model_for_provider("openai"), "OPENAI_API_KEY"),
+    "groq": ("groq", get_default_model_for_provider("groq"), "GROQ_API_KEY"),
+    "gemini": ("gemini", get_default_model_for_provider("gemini"), "GEMINI_API_KEY"),
+    "ollama": ("ollama", get_default_model_for_provider("ollama"), None),
+    "vertexai": ("vertexai", get_default_model_for_provider("vertexai"), None),
 }
 
 
@@ -191,8 +208,9 @@ def _do_configure_from_env():
 
     _, default_model, env_key = PROVIDER_DEFAULTS[provider]
 
-    # Check for API key (required for non-ollama providers)
-    if not api_key and provider != "ollama":
+    # Check for API key (required for non-ollama and non-vertexai providers)
+    # vertexai uses GCP service account credentials instead of an API key
+    if not api_key and provider not in ("ollama", "vertexai"):
         print("Error: Cannot run interactive configuration without a terminal.", file=sys.stderr)
         print("", file=sys.stderr)
         print("For non-interactive (CI) mode, set environment variables:", file=sys.stderr)
@@ -356,7 +374,7 @@ def _do_configure_interactive(profile_name: str | None = None, port: int | None 
     providers = [
         ("OpenAI (recommended)", "openai"),
         ("Groq (fast & free tier)", "groq"),
-        ("Google Gemini", "google"),
+        ("Google Gemini", "gemini"),
         ("Ollama (local, no API key)", "ollama"),
     ]
 
@@ -1245,8 +1263,10 @@ def main():
         # Forward all other commands to hindsight-cli
         config = get_config()
 
-        # Check for LLM API key
-        if not config["llm_api_key"]:
+        # Check for LLM API key (not required for vertexai which uses GCP credentials)
+        llm_provider = config.get("llm_provider", "openai")
+        providers_without_api_key = ("ollama", "vertexai")
+        if not config["llm_api_key"] and llm_provider not in providers_without_api_key:
             print("Error: LLM API key is required.", file=sys.stderr)
             print("Run 'hindsight-embed configure' to set up.", file=sys.stderr)
             sys.exit(1)

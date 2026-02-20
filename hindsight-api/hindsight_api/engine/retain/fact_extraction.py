@@ -26,8 +26,6 @@ def _infer_temporal_date(fact_text: str, event_date: datetime) -> str | None:
     This is a fallback for when the LLM fails to extract temporal information
     from relative time expressions like "last night", "yesterday", etc.
     """
-    import re
-
     fact_lower = fact_text.lower()
 
     # Map relative time expressions to day offsets
@@ -440,7 +438,7 @@ def _chunk_conversation(turns: list[dict], max_chars: int) -> list[str]:
 # Uses {extraction_guidelines} placeholder for mode-specific instructions
 _BASE_FACT_EXTRACTION_PROMPT = """Extract SIGNIFICANT facts from text. Be SELECTIVE - only extract facts worth remembering long-term.
 
-LANGUAGE REQUIREMENT: Detect the language of the input text. All extracted facts, entity names, descriptions, and other output MUST be in the SAME language as the input. Do not translate to another language.
+LANGUAGE: MANDATORY — Detect the language of the input text and produce ALL output in that EXACT same language. You are STRICTLY FORBIDDEN from translating or switching to any other language. Every single word of your output must be in the same language as the input. Do NOT output in a different language under any circumstance.
 
 {fact_types_instruction}
 
@@ -483,7 +481,9 @@ TEMPORAL HANDLING
 ══════════════════════════════════════════════════════════════════════════
 
 Use "Event Date" from input as reference for relative dates.
-- "yesterday" relative to Event Date, not today
+- CRITICAL: Convert ALL relative temporal expressions to absolute dates in the fact text itself.
+  "yesterday" → write the resolved date (e.g. "on November 12, 2024"), NOT the word "yesterday"
+  "last night", "this morning", "today", "tonight" → convert to the resolved absolute date
 - For events: set occurred_start AND occurred_end (same for point events)
 - For conversation facts: NO occurred dates
 
@@ -521,7 +521,7 @@ CONSOLIDATE related statements into ONE fact when possible."""
 _CONCISE_EXAMPLES = """
 
 ══════════════════════════════════════════════════════════════════════════
-EXAMPLES
+EXAMPLES (shown in English for illustration; for non-English input, ALL output values MUST be in the input language)
 ══════════════════════════════════════════════════════════════════════════
 
 Example 1 - Selective extraction (Event Date: June 10, 2024):
@@ -567,8 +567,7 @@ CUSTOM_FACT_EXTRACTION_PROMPT = _BASE_FACT_EXTRACTION_PROMPT.format(
 # Verbose extraction prompt - detailed, comprehensive facts (legacy mode)
 VERBOSE_FACT_EXTRACTION_PROMPT = """Extract facts from text into structured format with FIVE required dimensions - BE EXTREMELY DETAILED.
 
-LANGUAGE REQUIREMENT: Detect the language of the input text. All extracted facts, entity names, descriptions,
-and other output MUST be in the SAME language as the input. Do not translate to English if the input is in another language.
+LANGUAGE: MANDATORY — Detect the language of the input text and produce ALL output in that EXACT same language. You are STRICTLY FORBIDDEN from translating or switching to any other language. Every single word of your output must be in the same language as the input. Do NOT output in a different language under any circumstance.
 
 {fact_types_instruction}
 

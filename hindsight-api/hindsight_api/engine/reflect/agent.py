@@ -20,26 +20,18 @@ from .tools_schema import get_reflect_tools
 
 
 def _build_directives_applied(directives: list[dict[str, Any]] | None) -> list[DirectiveInfo]:
-    """Build list of DirectiveInfo from directive mental models.
-
-    Handles multiple directive formats:
-    1. New format: directives have direct 'content' field
-    2. Fallback: directives have 'description' field
-    """
+    """Build list of DirectiveInfo from directives."""
     if not directives:
         return []
 
-    result = []
-    for directive in directives:
-        directive_id = directive.get("id", "")
-        directive_name = directive.get("name", "")
-
-        # Get content from 'content' field or fallback to 'description'
-        content = directive.get("content", "") or directive.get("description", "")
-
-        result.append(DirectiveInfo(id=directive_id, name=directive_name, content=content))
-
-    return result
+    return [
+        DirectiveInfo(
+            id=directive.get("id", ""),
+            name=directive.get("name", ""),
+            content=directive.get("content", ""),
+        )
+        for directive in directives
+    ]
 
 
 if TYPE_CHECKING:
@@ -390,6 +382,7 @@ async def run_reflect_agent(
             f"total={elapsed_ms}ms"
         )
 
+    consecutive_errors = 0
     for iteration in range(max_iterations):
         is_last = iteration == max_iterations - 1
 
@@ -443,14 +436,29 @@ async def run_reflect_agent(
         # Call LLM with tools
         llm_start = time.time()
 
+        # Determine tool_choice for this iteration.
+        # With mental models:
+        #   0 → search_mental_models, 1+ → auto
+        # Without mental models, enforce a minimum retrieval path:
+        #   0 → search_observations, 1 → recall, 2+ → auto
+        if iteration == 0 and has_mental_models:
+            iter_tool_choice: str | dict = {"type": "function", "function": {"name": "search_mental_models"}}
+        elif iteration == 0:
+            iter_tool_choice = {"type": "function", "function": {"name": "search_observations"}}
+        elif iteration == 1 and not has_mental_models:
+            iter_tool_choice = {"type": "function", "function": {"name": "recall"}}
+        else:
+            iter_tool_choice = "auto"
+
         try:
             result = await llm_config.call_with_tools(
                 messages=messages,
                 tools=tools,
                 scope="reflect_tool_call",
-                tool_choice="required" if iteration == 0 else "auto",  # Force tool use on first iteration
+                tool_choice=iter_tool_choice,
             )
             llm_duration = int((time.time() - llm_start) * 1000)
+            consecutive_errors = 0
             total_input_tokens += result.input_tokens
             total_output_tokens += result.output_tokens
             llm_trace.append(
@@ -464,13 +472,14 @@ async def run_reflect_agent(
 
         except Exception as e:
             err_duration = int((time.time() - llm_start) * 1000)
+            consecutive_errors += 1
             logger.warning(f"[REFLECT {reflect_id}] LLM error on iteration {iteration + 1}: {e} ({err_duration}ms)")
             llm_trace.append({"scope": f"agent_{iteration + 1}_err", "duration_ms": err_duration})
-            # Guardrail: If no evidence gathered yet, retry
+            # Guardrail: If no evidence gathered yet, retry (but cap consecutive errors to avoid long hangs)
             has_gathered_evidence = (
                 bool(available_memory_ids) or bool(available_mental_model_ids) or bool(available_observation_ids)
             )
-            if not has_gathered_evidence and iteration < max_iterations - 1:
+            if not has_gathered_evidence and iteration < max_iterations - 1 and consecutive_errors < 2:
                 continue
             prompt = build_final_prompt(query, context_history, bank_profile, context)
             llm_start = time.time()

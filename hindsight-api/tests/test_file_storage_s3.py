@@ -7,6 +7,7 @@ Requires Docker to be running. Tests are skipped automatically if Docker is unav
 
 import json
 import logging
+import os
 import subprocess
 import tempfile
 import time
@@ -25,8 +26,12 @@ try:
 except ImportError:
     _has_testcontainers = False
 
+_in_ci = os.getenv("CI") == "true"
+
 pytestmark = [
     pytest.mark.skipif(not _has_testcontainers, reason="testcontainers not installed"),
+    pytest.mark.skipif(_in_ci, reason="SeaweedFS Docker image pull too slow in CI"),
+    pytest.mark.timeout(300),
 ]
 
 SEAWEEDFS_S3_PORT = 8333
@@ -105,7 +110,7 @@ def seaweedfs_container():
         port = container.get_exposed_port(SEAWEEDFS_S3_PORT)
         endpoint = f"http://{host}:{port}"
 
-        _wait_for_seaweedfs(endpoint)
+        _wait_for_seaweedfs(endpoint, timeout=240)
 
         # Create test bucket using obstore (proper SigV4 signing)
         import obstore as obs

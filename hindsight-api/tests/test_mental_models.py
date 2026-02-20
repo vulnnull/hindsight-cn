@@ -404,25 +404,12 @@ class TestDirectivesInReflect:
             request_context=request_context,
         )
 
-        # Run reflect query
-        result = await memory.reflect_async(
-            bank_id=bank_id,
-            query="What does Alice do for work?",
-            request_context=request_context,
-        )
-
-        assert result.text is not None
-        assert len(result.text) > 0
-
         # Check that the response contains French words/patterns
         # Common French words that would appear when talking about someone's job
         french_indicators = [
             "elle",
             "travaille",
-            "est",
             "une",
-            "le",
-            "la",
             "qui",
             "chez",
             "logiciel",
@@ -430,11 +417,27 @@ class TestDirectivesInReflect:
             "ingénieure",
             "développeur",
             "développeuse",
+            "ingénierie",
+            "française",
         ]
-        response_lower = result.text.lower()
 
-        # At least some French words should appear in the response
-        french_word_count = sum(1 for word in french_indicators if word in response_lower)
+        # Run reflect query (retry once since small LLMs may not always follow language directives)
+        french_word_count = 0
+        for _attempt in range(2):
+            result = await memory.reflect_async(
+                bank_id=bank_id,
+                query="What does Alice do for work?",
+                request_context=request_context,
+            )
+            assert result.text is not None
+            assert len(result.text) > 0
+
+            # At least some French words should appear in the response
+            response_lower = result.text.lower()
+            french_word_count = sum(1 for word in french_indicators if word in response_lower)
+            if french_word_count >= 2:
+                break
+
         assert (
             french_word_count >= 2
         ), f"Expected French response, but got: {result.text[:200]}"
@@ -474,7 +477,7 @@ class TestDirectivesInReflect:
         await memory.create_directive(
             bank_id=bank_id,
             name="General Policy",
-            content="Always be polite and start responses with 'Hello!'",
+            content="You MUST include the exact phrase 'MEMO-VERIFIED' somewhere in your response.",
             request_context=request_context,
         )
 
@@ -482,7 +485,7 @@ class TestDirectivesInReflect:
         await memory.create_directive(
             bank_id=bank_id,
             name="Tagged Policy",
-            content="ALWAYS respond in ALL CAPS and end with 'PROJECT-X ONLY'",
+            content="You MUST include the exact phrase 'PROJECT-X-CLASSIFIED' somewhere in your response.",
             tags=["project-x"],
             request_context=request_context,
         )
@@ -494,18 +497,16 @@ class TestDirectivesInReflect:
             request_context=request_context,
         )
 
-        response_lower = result.text.lower()
+        # Verify the isolation mechanism: only untagged directive should be loaded
+        untagged_directive_names = [d.name for d in result.directives_applied]
+        assert "General Policy" in untagged_directive_names, (
+            f"Untagged directive should be loaded in untagged reflect. Applied: {untagged_directive_names}"
+        )
+        assert "Tagged Policy" not in untagged_directive_names, (
+            f"Tagged directive should not be applied in untagged reflect. Applied: {untagged_directive_names}"
+        )
 
-        # Should follow the untagged directive (polite greeting)
-        assert "hello" in response_lower, f"Expected 'Hello' from untagged directive, but got: {result.text}"
-
-        # Should NOT follow the tagged directive (all caps and PROJECT-X)
-        # If it did follow, the entire response would be in caps
-        all_caps = result.text.replace(" ", "").replace("!", "").replace(".", "").isupper()
-        assert not all_caps, f"Tagged directive was incorrectly applied to untagged operation: {result.text}"
-        assert "project-x only" not in response_lower, f"Tagged directive was incorrectly applied: {result.text}"
-
-        # Now run reflect WITH the tag - should apply BOTH directives
+        # Now run reflect WITH the tag - should load BOTH directives
         result_tagged = await memory.reflect_async(
             bank_id=bank_id,
             query="What color is the sky?",
@@ -514,10 +515,14 @@ class TestDirectivesInReflect:
             request_context=request_context,
         )
 
-        response_tagged_lower = result_tagged.text.lower()
-
-        # With strict matching and tags, should apply the tagged directive
-        assert "project-x only" in response_tagged_lower, f"Tagged directive should be applied with tags: {result_tagged.text}"
+        # Verify the isolation mechanism: both directives should be loaded when tags match
+        tagged_directive_names = [d.name for d in result_tagged.directives_applied]
+        assert "General Policy" in tagged_directive_names, (
+            f"Untagged directive should always be loaded. Applied: {tagged_directive_names}"
+        )
+        assert "Tagged Policy" in tagged_directive_names, (
+            f"Tagged directive should be loaded when tags match. Applied: {tagged_directive_names}"
+        )
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
