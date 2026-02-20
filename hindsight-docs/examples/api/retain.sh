@@ -7,6 +7,14 @@ set -e
 HINDSIGHT_URL="${HINDSIGHT_API_URL:-http://localhost:8888}"
 
 # =============================================================================
+# Setup (not shown in docs)
+# =============================================================================
+# Create placeholder files for file upload examples
+echo "%PDF-1.4 sample document" > report.pdf
+mkdir -p documents
+cp report.pdf documents/report.pdf
+
+# =============================================================================
 # Doc Examples
 # =============================================================================
 
@@ -32,9 +40,6 @@ hindsight memory retain-files my-bank report.pdf
 
 # Upload a directory of files
 hindsight memory retain-files my-bank ./documents/
-
-# Upload and wait for processing to complete (polls until done)
-hindsight memory retain-files my-bank report.pdf
 
 # Queue files for background processing (returns immediately)
 hindsight memory retain-files my-bank ./documents/ --async
