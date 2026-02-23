@@ -90,7 +90,7 @@ Providing context consistently is one of the highest-leverage things you can do 
 
 ### metadata
 
-Arbitrary key-value string pairs attached to every fact extracted from this item. For example: `{"source": "slack", "channel": "engineering", "thread_id": "T123"}`. The LLM never sees this field — it is passed through as-is and stored on each memory unit. During recall, every returned memory includes its metadata, which lets you do client-side filtering or static enrichment without extra lookups — for example, linking a memory back to its source URL, thread ID, or any application-specific identifier.
+Arbitrary key-value string pairs that provide context about this item. For example: `{"source": "slack", "channel": "engineering", "thread_id": "T123"}`. Metadata is included in the fact extraction prompt, so the LLM can use it as additional context when extracting facts — for instance, knowing the document title or source can improve accuracy. It is also stored on each memory unit and returned with every recalled memory, letting you do client-side filtering or static enrichment without extra lookups — for example, linking a memory back to its source URL, thread ID, or any application-specific identifier.
 
 ### document_id
 

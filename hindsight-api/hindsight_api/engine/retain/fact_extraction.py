@@ -733,7 +733,14 @@ def _build_extraction_prompt_and_schema(config) -> tuple[str, type]:
     return prompt, response_schema
 
 
-def _build_user_message(chunk: str, chunk_index: int, total_chunks: int, event_date: datetime, context: str) -> str:
+def _build_user_message(
+    chunk: str,
+    chunk_index: int,
+    total_chunks: int,
+    event_date: datetime,
+    context: str,
+    metadata: dict[str, str] | None = None,
+) -> str:
     """Build user message for fact extraction."""
     from .orchestrator import parse_datetime_flexible
 
@@ -742,11 +749,16 @@ def _build_user_message(chunk: str, chunk_index: int, total_chunks: int, event_d
     event_date = parse_datetime_flexible(event_date)
     event_date_formatted = event_date.strftime("%A, %B %d, %Y")
 
+    metadata_section = ""
+    if metadata:
+        metadata_lines = "\n".join(f"  {k}: {v}" for k, v in metadata.items())
+        metadata_section = f"\nMetadata:\n{metadata_lines}"
+
     return f"""Extract facts from the following text chunk.
 
 Chunk: {chunk_index + 1}/{total_chunks}
 Event Date: {event_date_formatted} ({event_date.isoformat()})
-Context: {sanitized_context}
+Context: {sanitized_context}{metadata_section}
 
 Text:
 {sanitized_chunk}"""
@@ -788,6 +800,7 @@ async def _extract_facts_from_chunk(
     llm_config: "LLMConfig",
     config,
     agent_name: str = None,
+    metadata: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, str]], TokenUsage]:
     """
     Extract facts from a single chunk (internal helper for parallel processing).
@@ -809,7 +822,7 @@ async def _extract_facts_from_chunk(
     extract_causal_links = config.retain_extract_causal_links
 
     # Build user message using helper function
-    user_message = _build_user_message(chunk, chunk_index, total_chunks, event_date, context)
+    user_message = _build_user_message(chunk, chunk_index, total_chunks, event_date, context, metadata)
 
     # Retry logic for JSON validation errors
     max_retries = 2
@@ -1089,6 +1102,7 @@ async def _extract_facts_with_auto_split(
     llm_config: LLMConfig,
     config,
     agent_name: str = None,
+    metadata: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, str]], TokenUsage]:
     """
     Extract facts from a chunk with automatic splitting if output exceeds token limits.
@@ -1105,6 +1119,7 @@ async def _extract_facts_with_auto_split(
         llm_config: LLM configuration to use
         config: Resolved HindsightConfig for this bank
         agent_name: Optional agent name (memory owner)
+        metadata: Optional document metadata key-value pairs
 
     Returns:
         Tuple of (facts list, token usage) extracted from the chunk (possibly from sub-chunks)
@@ -1124,6 +1139,7 @@ async def _extract_facts_with_auto_split(
             llm_config=llm_config,
             config=config,
             agent_name=agent_name,
+            metadata=metadata,
         )
     except OutputTooLongError:
         # Output exceeded token limits - split the chunk in half and retry
@@ -1169,6 +1185,7 @@ async def _extract_facts_with_auto_split(
                 llm_config=llm_config,
                 config=config,
                 agent_name=agent_name,
+                metadata=metadata,
             ),
             _extract_facts_with_auto_split(
                 chunk=second_half,
@@ -1179,6 +1196,7 @@ async def _extract_facts_with_auto_split(
                 llm_config=llm_config,
                 config=config,
                 agent_name=agent_name,
+                metadata=metadata,
             ),
         ]
 
@@ -1203,6 +1221,7 @@ async def extract_facts_from_text(
     agent_name: str,
     config,
     context: str = "",
+    metadata: dict[str, str] | None = None,
 ) -> tuple[list[Fact], list[tuple[str, int]], TokenUsage]:
     """
     Extract semantic facts from conversational or narrative text using LLM.
@@ -1220,6 +1239,7 @@ async def extract_facts_from_text(
         agent_name: Agent name (memory owner)
         config: Resolved HindsightConfig for this bank
         context: Context about the conversation/document
+        metadata: Optional document metadata key-value pairs
 
     Returns:
         Tuple of (facts, chunks, usage) where:
@@ -1247,6 +1267,7 @@ async def extract_facts_from_text(
             llm_config=llm_config,
             config=config,
             agent_name=agent_name,
+            metadata=metadata,
         )
         for i, chunk in enumerate(chunks)
     ]
@@ -1356,7 +1377,7 @@ async def extract_facts_from_contents_batch_api(
 
             # Build user message using helper function
             user_message = _build_user_message(
-                chunk, chunk_index_in_content, len(chunks), item.event_date, item.context
+                chunk, chunk_index_in_content, len(chunks), item.event_date, item.context, item.metadata or None
             )
 
             # Build request body using helper function
@@ -1736,6 +1757,7 @@ async def extract_facts_from_contents(
             llm_config=llm_config,
             agent_name=agent_name,
             config=config,
+            metadata=item.metadata or None,
         )
         fact_extraction_tasks.append(task)
 

@@ -231,6 +231,8 @@ def main():
             reranker_litellm_sdk_api_key=config.reranker_litellm_sdk_api_key,
             reranker_litellm_sdk_model=config.reranker_litellm_sdk_model,
             reranker_litellm_sdk_api_base=config.reranker_litellm_sdk_api_base,
+            reranker_zeroentropy_api_key=config.reranker_zeroentropy_api_key,
+            reranker_zeroentropy_model=config.reranker_zeroentropy_model,
             host=args.host,
             port=args.port,
             base_path=config.base_path,

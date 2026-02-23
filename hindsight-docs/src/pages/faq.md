@@ -176,6 +176,33 @@ See [Performance](/developer/performance) for tuning options.
 
 
 
+### Does Hindsight support metadata filtering?
+
+Yes — through **Tags**. Tags are string labels attached to memories at retain time and used as a visibility filter at recall/reflect time. Only memories tagged with a matching value are returned.
+
+```python
+# Tag memories at retain time
+client.retain(bank_id="my-bank", items=[{
+    "content": "...",
+    "tags": ["user:alice"],
+}])
+
+# Filter by tag at recall time
+client.recall(bank_id="my-bank", query="...", tags=["user:alice"])
+```
+
+See [Tags](/developer/api/retain#tags-and-document_tags) for full details including document-level tagging.
+
+**What about document `metadata`?**
+
+Document metadata (the `metadata` key-value pairs on a retain item) serves a different purpose. It is:
+- **Included in the fact extraction prompt**, so the LLM can use it as additional context when extracting facts — for example, knowing the document title or source can improve accuracy.
+- **Returned with every recalled memory** as-is, so your application can link memories back to source systems (e.g. a URL, thread ID, or ticket number) without extra lookups.
+
+Metadata is not a filter — use tags when you need recall to be scoped to a subset of documents.
+
+---
+
 ## Still have questions?
 
 Join our [Slack community](https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg) or report issues on [GitHub](https://github.com/vectorize-io/hindsight/issues).
