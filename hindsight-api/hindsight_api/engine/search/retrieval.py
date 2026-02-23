@@ -127,7 +127,7 @@ async def retrieve_semantic_bm25_combined(
         results = await conn.fetch(
             f"""
             WITH semantic_ranked AS (
-                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+                SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags,
                        1 - (embedding <=> $1::vector) AS similarity,
                        NULL::float AS bm25_score,
                        'semantic' AS source,
@@ -139,7 +139,7 @@ async def retrieve_semantic_bm25_combined(
                   AND (1 - (embedding <=> $1::vector)) >= 0.3
                   {tags_clause}
             )
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags,
                    similarity, bm25_score, source
             FROM semantic_ranked
             WHERE rn <= $4
@@ -194,7 +194,7 @@ async def retrieve_semantic_bm25_combined(
     # Single query template with backend-specific parts injected
     query = f"""
         WITH semantic_ranked AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags,
                    1 - (embedding <=> $1::vector) AS similarity,
                    NULL::float AS bm25_score,
                    'semantic' AS source,
@@ -207,7 +207,7 @@ async def retrieve_semantic_bm25_combined(
               {tags_clause}
         ),
         bm25_ranked AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags,
                    NULL::float AS similarity,
                    {bm25_score_expr} AS bm25_score,
                    'bm25' AS source,
@@ -219,12 +219,12 @@ async def retrieve_semantic_bm25_combined(
               {tags_clause}
         ),
         semantic AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags,
                    similarity, bm25_score, source
             FROM semantic_ranked WHERE rn <= $4
         ),
         bm25 AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags,
                    similarity, bm25_score, source
             FROM bm25_ranked WHERE rn <= $4
         )
@@ -301,7 +301,7 @@ async def retrieve_temporal_combined(
     entry_points = await conn.fetch(
         f"""
         WITH ranked_entries AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags,
+            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags,
                    1 - (embedding <=> $1::vector) AS similarity,
                    ROW_NUMBER() OVER (PARTITION BY fact_type ORDER BY COALESCE(occurred_start, mentioned_at, occurred_end) DESC, embedding <=> $1::vector) AS rn
             FROM {fq_table("memory_units")}
@@ -321,7 +321,7 @@ async def retrieve_temporal_combined(
               AND (1 - (embedding <=> $1::vector)) >= $6
               {tags_clause}
         )
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, embedding, fact_type, document_id, chunk_id, tags, similarity
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags, similarity
         FROM ranked_entries
         WHERE rn <= 10
         """,
@@ -401,7 +401,7 @@ async def retrieve_temporal_combined(
 
             neighbors = await conn.fetch(
                 f"""
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.embedding, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
+                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
                        ml.weight, ml.link_type, ml.from_unit_id,
                        1 - (mu.embedding <=> $1::vector) AS similarity
                 FROM {fq_table("memory_links")} ml
