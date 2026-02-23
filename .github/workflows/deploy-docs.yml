@@ -31,6 +31,9 @@ jobs:
       - run: npm ci --workspace=hindsight-docs
       - run: uv run generate-llms-full
       - run: npm run build --workspace=hindsight-docs
+        env:
+          UMAMI_URL: https://analytics.hindsight.vectorize.io
+          UMAMI_WEBSITE_ID: ${{ secrets.UMAMI_WEBSITE_ID }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: hindsight-docs/build
