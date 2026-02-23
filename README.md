@@ -36,7 +36,7 @@ Hindsight is being used in production at Fortune 500 enterprises and by a growin
 
 ## Adding Hindsight to Your AI Agents
 
-The easiest way use Hindsight with an existing agent is with the LLM Wrapper. You can add memory to your agent with 2 lines of code. That will swap your current LLM client out with the Hindsight wrapper. After that, memories will be stored and retrieved automatically as you make LLM calls.
+The easiest way to use Hindsight with an existing agent is with the LLM Wrapper. You can add memory to your agent with 2 lines of code. That will swap your current LLM client out with the Hindsight wrapper. After that, memories will be stored and retrieved automatically as you make LLM calls.
 
 If you need more control over how and when your agent stores and recalls memories, there's also a simple API you can integrate with using the SDKs or directly via HTTP.
 
@@ -181,7 +181,7 @@ Satisfying these requirements in Hindsight is straightforward. When new user inp
 
 ![Overview](./hindsight-docs/static/img/hindsight-overview.webp)
 
-Most agent memory implementation rely on basic vector search or sometimes use a knowledge graph. Hindsight uses biomimetic data structures to organize agent memories in a way that is more like how human memory works:
+Most agent memory implementations rely on basic vector search or sometimes use a knowledge graph. Hindsight uses biomimetic data structures to organize agent memories in a way that is more like how human memory works:
 
 - **World:** Facts about the world ("The stove gets hot")
 - **Experiences:** Agent's own experiences ("I touched the stove and it really hurt")
@@ -307,3 +307,5 @@ MIT — see [LICENSE](./LICENSE)
 ---
 
 Built by [Vectorize.io](https://vectorize.io)
+
+<img src="https://umami-pixel.chris-latimer.workers.dev/?id=a8b043e6-6964-454d-80df-69b69d3f0d50&host=github.com&url=/vectorize-io/hindsight" width="1" height="1" alt="" />
