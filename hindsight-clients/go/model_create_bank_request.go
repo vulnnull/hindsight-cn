@@ -21,8 +21,18 @@ var _ MappedNullable = &CreateBankRequest{}
 type CreateBankRequest struct {
 	Name NullableString `json:"name,omitempty"`
 	Disposition NullableDispositionTraits `json:"disposition,omitempty"`
+	DispositionSkepticism NullableInt32 `json:"disposition_skepticism,omitempty"`
+	DispositionLiteralism NullableInt32 `json:"disposition_literalism,omitempty"`
+	DispositionEmpathy NullableInt32 `json:"disposition_empathy,omitempty"`
 	Mission NullableString `json:"mission,omitempty"`
 	Background NullableString `json:"background,omitempty"`
+	ReflectMission NullableString `json:"reflect_mission,omitempty"`
+	RetainMission NullableString `json:"retain_mission,omitempty"`
+	RetainExtractionMode NullableString `json:"retain_extraction_mode,omitempty"`
+	RetainCustomInstructions NullableString `json:"retain_custom_instructions,omitempty"`
+	RetainChunkSize NullableInt32 `json:"retain_chunk_size,omitempty"`
+	EnableObservations NullableBool `json:"enable_observations,omitempty"`
+	ObservationsMission NullableString `json:"observations_mission,omitempty"`
 }
 
 // NewCreateBankRequest instantiates a new CreateBankRequest object
@@ -126,6 +136,132 @@ func (o *CreateBankRequest) UnsetDisposition() {
 	o.Disposition.Unset()
 }
 
+// GetDispositionSkepticism returns the DispositionSkepticism field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetDispositionSkepticism() int32 {
+	if o == nil || IsNil(o.DispositionSkepticism.Get()) {
+		var ret int32
+		return ret
+	}
+	return *o.DispositionSkepticism.Get()
+}
+
+// GetDispositionSkepticismOk returns a tuple with the DispositionSkepticism field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetDispositionSkepticismOk() (*int32, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.DispositionSkepticism.Get(), o.DispositionSkepticism.IsSet()
+}
+
+// HasDispositionSkepticism returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasDispositionSkepticism() bool {
+	if o != nil && o.DispositionSkepticism.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetDispositionSkepticism gets a reference to the given NullableInt32 and assigns it to the DispositionSkepticism field.
+func (o *CreateBankRequest) SetDispositionSkepticism(v int32) {
+	o.DispositionSkepticism.Set(&v)
+}
+// SetDispositionSkepticismNil sets the value for DispositionSkepticism to be an explicit nil
+func (o *CreateBankRequest) SetDispositionSkepticismNil() {
+	o.DispositionSkepticism.Set(nil)
+}
+
+// UnsetDispositionSkepticism ensures that no value is present for DispositionSkepticism, not even an explicit nil
+func (o *CreateBankRequest) UnsetDispositionSkepticism() {
+	o.DispositionSkepticism.Unset()
+}
+
+// GetDispositionLiteralism returns the DispositionLiteralism field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetDispositionLiteralism() int32 {
+	if o == nil || IsNil(o.DispositionLiteralism.Get()) {
+		var ret int32
+		return ret
+	}
+	return *o.DispositionLiteralism.Get()
+}
+
+// GetDispositionLiteralismOk returns a tuple with the DispositionLiteralism field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetDispositionLiteralismOk() (*int32, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.DispositionLiteralism.Get(), o.DispositionLiteralism.IsSet()
+}
+
+// HasDispositionLiteralism returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasDispositionLiteralism() bool {
+	if o != nil && o.DispositionLiteralism.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetDispositionLiteralism gets a reference to the given NullableInt32 and assigns it to the DispositionLiteralism field.
+func (o *CreateBankRequest) SetDispositionLiteralism(v int32) {
+	o.DispositionLiteralism.Set(&v)
+}
+// SetDispositionLiteralismNil sets the value for DispositionLiteralism to be an explicit nil
+func (o *CreateBankRequest) SetDispositionLiteralismNil() {
+	o.DispositionLiteralism.Set(nil)
+}
+
+// UnsetDispositionLiteralism ensures that no value is present for DispositionLiteralism, not even an explicit nil
+func (o *CreateBankRequest) UnsetDispositionLiteralism() {
+	o.DispositionLiteralism.Unset()
+}
+
+// GetDispositionEmpathy returns the DispositionEmpathy field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetDispositionEmpathy() int32 {
+	if o == nil || IsNil(o.DispositionEmpathy.Get()) {
+		var ret int32
+		return ret
+	}
+	return *o.DispositionEmpathy.Get()
+}
+
+// GetDispositionEmpathyOk returns a tuple with the DispositionEmpathy field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetDispositionEmpathyOk() (*int32, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.DispositionEmpathy.Get(), o.DispositionEmpathy.IsSet()
+}
+
+// HasDispositionEmpathy returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasDispositionEmpathy() bool {
+	if o != nil && o.DispositionEmpathy.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetDispositionEmpathy gets a reference to the given NullableInt32 and assigns it to the DispositionEmpathy field.
+func (o *CreateBankRequest) SetDispositionEmpathy(v int32) {
+	o.DispositionEmpathy.Set(&v)
+}
+// SetDispositionEmpathyNil sets the value for DispositionEmpathy to be an explicit nil
+func (o *CreateBankRequest) SetDispositionEmpathyNil() {
+	o.DispositionEmpathy.Set(nil)
+}
+
+// UnsetDispositionEmpathy ensures that no value is present for DispositionEmpathy, not even an explicit nil
+func (o *CreateBankRequest) UnsetDispositionEmpathy() {
+	o.DispositionEmpathy.Unset()
+}
+
 // GetMission returns the Mission field value if set, zero value otherwise (both if not set or set to explicit null).
 func (o *CreateBankRequest) GetMission() string {
 	if o == nil || IsNil(o.Mission.Get()) {
@@ -210,6 +346,300 @@ func (o *CreateBankRequest) UnsetBackground() {
 	o.Background.Unset()
 }
 
+// GetReflectMission returns the ReflectMission field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetReflectMission() string {
+	if o == nil || IsNil(o.ReflectMission.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.ReflectMission.Get()
+}
+
+// GetReflectMissionOk returns a tuple with the ReflectMission field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetReflectMissionOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.ReflectMission.Get(), o.ReflectMission.IsSet()
+}
+
+// HasReflectMission returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasReflectMission() bool {
+	if o != nil && o.ReflectMission.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetReflectMission gets a reference to the given NullableString and assigns it to the ReflectMission field.
+func (o *CreateBankRequest) SetReflectMission(v string) {
+	o.ReflectMission.Set(&v)
+}
+// SetReflectMissionNil sets the value for ReflectMission to be an explicit nil
+func (o *CreateBankRequest) SetReflectMissionNil() {
+	o.ReflectMission.Set(nil)
+}
+
+// UnsetReflectMission ensures that no value is present for ReflectMission, not even an explicit nil
+func (o *CreateBankRequest) UnsetReflectMission() {
+	o.ReflectMission.Unset()
+}
+
+// GetRetainMission returns the RetainMission field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetRetainMission() string {
+	if o == nil || IsNil(o.RetainMission.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.RetainMission.Get()
+}
+
+// GetRetainMissionOk returns a tuple with the RetainMission field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetRetainMissionOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.RetainMission.Get(), o.RetainMission.IsSet()
+}
+
+// HasRetainMission returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasRetainMission() bool {
+	if o != nil && o.RetainMission.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetRetainMission gets a reference to the given NullableString and assigns it to the RetainMission field.
+func (o *CreateBankRequest) SetRetainMission(v string) {
+	o.RetainMission.Set(&v)
+}
+// SetRetainMissionNil sets the value for RetainMission to be an explicit nil
+func (o *CreateBankRequest) SetRetainMissionNil() {
+	o.RetainMission.Set(nil)
+}
+
+// UnsetRetainMission ensures that no value is present for RetainMission, not even an explicit nil
+func (o *CreateBankRequest) UnsetRetainMission() {
+	o.RetainMission.Unset()
+}
+
+// GetRetainExtractionMode returns the RetainExtractionMode field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetRetainExtractionMode() string {
+	if o == nil || IsNil(o.RetainExtractionMode.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.RetainExtractionMode.Get()
+}
+
+// GetRetainExtractionModeOk returns a tuple with the RetainExtractionMode field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetRetainExtractionModeOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.RetainExtractionMode.Get(), o.RetainExtractionMode.IsSet()
+}
+
+// HasRetainExtractionMode returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasRetainExtractionMode() bool {
+	if o != nil && o.RetainExtractionMode.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetRetainExtractionMode gets a reference to the given NullableString and assigns it to the RetainExtractionMode field.
+func (o *CreateBankRequest) SetRetainExtractionMode(v string) {
+	o.RetainExtractionMode.Set(&v)
+}
+// SetRetainExtractionModeNil sets the value for RetainExtractionMode to be an explicit nil
+func (o *CreateBankRequest) SetRetainExtractionModeNil() {
+	o.RetainExtractionMode.Set(nil)
+}
+
+// UnsetRetainExtractionMode ensures that no value is present for RetainExtractionMode, not even an explicit nil
+func (o *CreateBankRequest) UnsetRetainExtractionMode() {
+	o.RetainExtractionMode.Unset()
+}
+
+// GetRetainCustomInstructions returns the RetainCustomInstructions field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetRetainCustomInstructions() string {
+	if o == nil || IsNil(o.RetainCustomInstructions.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.RetainCustomInstructions.Get()
+}
+
+// GetRetainCustomInstructionsOk returns a tuple with the RetainCustomInstructions field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetRetainCustomInstructionsOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.RetainCustomInstructions.Get(), o.RetainCustomInstructions.IsSet()
+}
+
+// HasRetainCustomInstructions returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasRetainCustomInstructions() bool {
+	if o != nil && o.RetainCustomInstructions.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetRetainCustomInstructions gets a reference to the given NullableString and assigns it to the RetainCustomInstructions field.
+func (o *CreateBankRequest) SetRetainCustomInstructions(v string) {
+	o.RetainCustomInstructions.Set(&v)
+}
+// SetRetainCustomInstructionsNil sets the value for RetainCustomInstructions to be an explicit nil
+func (o *CreateBankRequest) SetRetainCustomInstructionsNil() {
+	o.RetainCustomInstructions.Set(nil)
+}
+
+// UnsetRetainCustomInstructions ensures that no value is present for RetainCustomInstructions, not even an explicit nil
+func (o *CreateBankRequest) UnsetRetainCustomInstructions() {
+	o.RetainCustomInstructions.Unset()
+}
+
+// GetRetainChunkSize returns the RetainChunkSize field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetRetainChunkSize() int32 {
+	if o == nil || IsNil(o.RetainChunkSize.Get()) {
+		var ret int32
+		return ret
+	}
+	return *o.RetainChunkSize.Get()
+}
+
+// GetRetainChunkSizeOk returns a tuple with the RetainChunkSize field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetRetainChunkSizeOk() (*int32, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.RetainChunkSize.Get(), o.RetainChunkSize.IsSet()
+}
+
+// HasRetainChunkSize returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasRetainChunkSize() bool {
+	if o != nil && o.RetainChunkSize.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetRetainChunkSize gets a reference to the given NullableInt32 and assigns it to the RetainChunkSize field.
+func (o *CreateBankRequest) SetRetainChunkSize(v int32) {
+	o.RetainChunkSize.Set(&v)
+}
+// SetRetainChunkSizeNil sets the value for RetainChunkSize to be an explicit nil
+func (o *CreateBankRequest) SetRetainChunkSizeNil() {
+	o.RetainChunkSize.Set(nil)
+}
+
+// UnsetRetainChunkSize ensures that no value is present for RetainChunkSize, not even an explicit nil
+func (o *CreateBankRequest) UnsetRetainChunkSize() {
+	o.RetainChunkSize.Unset()
+}
+
+// GetEnableObservations returns the EnableObservations field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetEnableObservations() bool {
+	if o == nil || IsNil(o.EnableObservations.Get()) {
+		var ret bool
+		return ret
+	}
+	return *o.EnableObservations.Get()
+}
+
+// GetEnableObservationsOk returns a tuple with the EnableObservations field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetEnableObservationsOk() (*bool, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.EnableObservations.Get(), o.EnableObservations.IsSet()
+}
+
+// HasEnableObservations returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasEnableObservations() bool {
+	if o != nil && o.EnableObservations.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetEnableObservations gets a reference to the given NullableBool and assigns it to the EnableObservations field.
+func (o *CreateBankRequest) SetEnableObservations(v bool) {
+	o.EnableObservations.Set(&v)
+}
+// SetEnableObservationsNil sets the value for EnableObservations to be an explicit nil
+func (o *CreateBankRequest) SetEnableObservationsNil() {
+	o.EnableObservations.Set(nil)
+}
+
+// UnsetEnableObservations ensures that no value is present for EnableObservations, not even an explicit nil
+func (o *CreateBankRequest) UnsetEnableObservations() {
+	o.EnableObservations.Unset()
+}
+
+// GetObservationsMission returns the ObservationsMission field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *CreateBankRequest) GetObservationsMission() string {
+	if o == nil || IsNil(o.ObservationsMission.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.ObservationsMission.Get()
+}
+
+// GetObservationsMissionOk returns a tuple with the ObservationsMission field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *CreateBankRequest) GetObservationsMissionOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.ObservationsMission.Get(), o.ObservationsMission.IsSet()
+}
+
+// HasObservationsMission returns a boolean if a field has been set.
+func (o *CreateBankRequest) HasObservationsMission() bool {
+	if o != nil && o.ObservationsMission.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetObservationsMission gets a reference to the given NullableString and assigns it to the ObservationsMission field.
+func (o *CreateBankRequest) SetObservationsMission(v string) {
+	o.ObservationsMission.Set(&v)
+}
+// SetObservationsMissionNil sets the value for ObservationsMission to be an explicit nil
+func (o *CreateBankRequest) SetObservationsMissionNil() {
+	o.ObservationsMission.Set(nil)
+}
+
+// UnsetObservationsMission ensures that no value is present for ObservationsMission, not even an explicit nil
+func (o *CreateBankRequest) UnsetObservationsMission() {
+	o.ObservationsMission.Unset()
+}
+
 func (o CreateBankRequest) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -226,11 +656,41 @@ func (o CreateBankRequest) ToMap() (map[string]interface{}, error) {
 	if o.Disposition.IsSet() {
 		toSerialize["disposition"] = o.Disposition.Get()
 	}
+	if o.DispositionSkepticism.IsSet() {
+		toSerialize["disposition_skepticism"] = o.DispositionSkepticism.Get()
+	}
+	if o.DispositionLiteralism.IsSet() {
+		toSerialize["disposition_literalism"] = o.DispositionLiteralism.Get()
+	}
+	if o.DispositionEmpathy.IsSet() {
+		toSerialize["disposition_empathy"] = o.DispositionEmpathy.Get()
+	}
 	if o.Mission.IsSet() {
 		toSerialize["mission"] = o.Mission.Get()
 	}
 	if o.Background.IsSet() {
 		toSerialize["background"] = o.Background.Get()
+	}
+	if o.ReflectMission.IsSet() {
+		toSerialize["reflect_mission"] = o.ReflectMission.Get()
+	}
+	if o.RetainMission.IsSet() {
+		toSerialize["retain_mission"] = o.RetainMission.Get()
+	}
+	if o.RetainExtractionMode.IsSet() {
+		toSerialize["retain_extraction_mode"] = o.RetainExtractionMode.Get()
+	}
+	if o.RetainCustomInstructions.IsSet() {
+		toSerialize["retain_custom_instructions"] = o.RetainCustomInstructions.Get()
+	}
+	if o.RetainChunkSize.IsSet() {
+		toSerialize["retain_chunk_size"] = o.RetainChunkSize.Get()
+	}
+	if o.EnableObservations.IsSet() {
+		toSerialize["enable_observations"] = o.EnableObservations.Get()
+	}
+	if o.ObservationsMission.IsSet() {
+		toSerialize["observations_mission"] = o.ObservationsMission.Get()
 	}
 	return toSerialize, nil
 }

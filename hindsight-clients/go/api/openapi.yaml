@@ -1564,6 +1564,7 @@ paths:
       - Operations
   /v1/default/banks/{bank_id}/profile:
     get:
+      deprecated: true
       description: Get disposition traits and mission for a memory bank. Auto-creates
         agent with defaults if not exists.
       operationId: get_bank_profile
@@ -1601,6 +1602,7 @@ paths:
       tags:
       - Banks
     put:
+      deprecated: true
       description: "Update bank's disposition traits (skepticism, literalism, empathy)"
       operationId: update_bank_disposition
       parameters:
@@ -2616,22 +2618,56 @@ components:
     CreateBankRequest:
       description: Request model for creating/updating a bank.
       example:
-        disposition:
-          empathy: 3
-          literalism: 3
-          skepticism: 3
-        mission: I am a PM helping my engineering team stay organized
-        name: Alice
+        observations_mission: Observations are stable facts about people and projects.
+          Always include preferences and skills.
+        retain_mission: Always include technical decisions and architectural trade-offs.
+          Ignore meeting logistics.
       properties:
         name:
           nullable: true
           type: string
         disposition:
           $ref: '#/components/schemas/DispositionTraits'
+        disposition_skepticism:
+          maximum: 5.0
+          minimum: 1.0
+          nullable: true
+          type: integer
+        disposition_literalism:
+          maximum: 5.0
+          minimum: 1.0
+          nullable: true
+          type: integer
+        disposition_empathy:
+          maximum: 5.0
+          minimum: 1.0
+          nullable: true
+          type: integer
         mission:
           nullable: true
           type: string
         background:
+          nullable: true
+          type: string
+        reflect_mission:
+          nullable: true
+          type: string
+        retain_mission:
+          nullable: true
+          type: string
+        retain_extraction_mode:
+          nullable: true
+          type: string
+        retain_custom_instructions:
+          nullable: true
+          type: string
+        retain_chunk_size:
+          nullable: true
+          type: integer
+        enable_observations:
+          nullable: true
+          type: boolean
+        observations_mission:
           nullable: true
           type: string
       title: CreateBankRequest

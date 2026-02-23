@@ -117,14 +117,18 @@ When you create a memory bank, you can configure its disposition using three tra
 
 ### Mission: Natural Language Identity
 
-Beyond numeric traits, you can provide a natural language **mission** that describes the bank's identity:
+Beyond numeric traits, you can provide a natural language **mission** that describes the bank's identity and reasoning context:
 
 <CodeSnippet code={memoryBanksPy} section="bank-with-disposition" language="python" />
 
-The mission tells Hindsight what knowledge to prioritize and shapes how disposition traits are applied:
-- "keep track of system designs" → focuses consolidation on architectural decisions
-- "prefer simplicity over cutting-edge" + high skepticism → questions complex solutions
-- Explicit guidance → consistent memory focus across conversations
+The reflect mission frames how the agent reasons and responds:
+- Provides identity context: who the agent is and what it cares about
+- Shapes how disposition traits are applied in practice
+- Keeps reasoning consistent across conversations
+
+:::info Per-operation missions
+The reflect mission only affects `reflect()`. To steer what gets extracted during `retain()`, use [`retain_mission`](/developer/api/memory-banks#retain-configuration). To control what gets synthesised into observations, use [`observations_mission`](/developer/api/memory-banks#observations-configuration).
+:::
 
 ---
 

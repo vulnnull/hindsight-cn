@@ -293,6 +293,7 @@ pub fn create(
         mission: mission_text,
         background: None,
         disposition,
+        ..Default::default()
     };
 
     let response = client.create_bank(bank_id, &request, verbose);
@@ -356,6 +357,7 @@ pub fn update(
         mission: mission_text,
         background: None,
         disposition,
+        ..Default::default()
     };
 
     let response = client.update_bank(bank_id, &request, verbose);

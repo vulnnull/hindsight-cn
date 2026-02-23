@@ -2256,3 +2256,64 @@ async def test_retain_batch_with_per_item_tags_on_document(memory, request_conte
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)
         print(f"\n=== Cleaned up bank: {bank_id} ===")
+
+
+def test_retain_mission_injected_into_prompt():
+    """Test that retain_mission is injected as a FOCUS section into any extraction mode."""
+    from unittest.mock import MagicMock
+    from hindsight_api.engine.retain.fact_extraction import _build_extraction_prompt_and_schema
+
+    spec = "Focus on technical decisions and architecture choices only."
+
+    # Test with concise mode
+    config = MagicMock()
+    config.retain_extraction_mode = "concise"
+    config.retain_mission = spec
+    config.retain_custom_instructions = None
+    config.retain_extract_causal_links = False
+
+    prompt, _ = _build_extraction_prompt_and_schema(config)
+    assert spec in prompt
+    assert "FOCUS" in prompt
+
+    # retain_mission is present regardless of extraction mode (verbose has its own template, no spec injection)
+    config.retain_extraction_mode = "verbose"
+    prompt_verbose, _ = _build_extraction_prompt_and_schema(config)
+    # verbose uses its own template - spec not injected there
+    assert spec not in prompt_verbose
+
+
+def test_retain_mission_absent_when_not_set():
+    """Test that no FOCUS section appears when retain_mission is not set."""
+    from unittest.mock import MagicMock
+    from hindsight_api.engine.retain.fact_extraction import _build_extraction_prompt_and_schema
+
+    config = MagicMock()
+    config.retain_extraction_mode = "concise"
+    config.retain_mission = None
+    config.retain_custom_instructions = None
+    config.retain_extract_causal_links = False
+
+    prompt, _ = _build_extraction_prompt_and_schema(config)
+    assert "FOCUS" not in prompt
+    assert "retain_mission_section" not in prompt
+
+
+def test_retain_mission_config_loaded_from_env():
+    """Test that retain_mission is loaded from env and is a configurable field."""
+    import os
+    from hindsight_api.config import HindsightConfig, _get_raw_config, clear_config_cache
+
+    original = os.getenv("HINDSIGHT_API_RETAIN_MISSION")
+    try:
+        os.environ["HINDSIGHT_API_RETAIN_MISSION"] = "Only technical decisions."
+        clear_config_cache()
+        config = _get_raw_config()
+        assert config.retain_mission == "Only technical decisions."
+        assert "retain_mission" in HindsightConfig.get_configurable_fields()
+    finally:
+        if original is None:
+            os.environ.pop("HINDSIGHT_API_RETAIN_MISSION", None)
+        else:
+            os.environ["HINDSIGHT_API_RETAIN_MISSION"] = original
+        clear_config_cache()

@@ -39,6 +39,7 @@ import type {
     FileRetainResponse,
     ListMemoryUnitsResponse,
     BankProfileResponse,
+    BankConfigResponse,
     CreateBankRequest,
     Budget,
 } from '../generated/types.gen';
@@ -347,23 +348,71 @@ export class HindsightClient {
     }
 
     /**
-     * Create or update a bank with disposition and background.
+     * Create or update a bank with disposition, missions, and operational configuration.
      */
     async createBank(
         bankId: string,
-        options: { name?: string; background?: string; disposition?: any }
+        options: {
+            /** @deprecated Display label only. */
+            name?: string;
+            /** @deprecated Use reflectMission instead. */
+            mission?: string;
+            /** Mission/context for Reflect operations. */
+            reflectMission?: string;
+            /** @deprecated Alias for mission. */
+            background?: string;
+            /** @deprecated Use dispositionSkepticism, dispositionLiteralism, dispositionEmpathy instead. */
+            disposition?: { skepticism: number; literalism: number; empathy: number };
+            /** @deprecated Use updateBankConfig({ dispositionSkepticism }) instead. */
+            dispositionSkepticism?: number;
+            /** @deprecated Use updateBankConfig({ dispositionLiteralism }) instead. */
+            dispositionLiteralism?: number;
+            /** @deprecated Use updateBankConfig({ dispositionEmpathy }) instead. */
+            dispositionEmpathy?: number;
+            /** Steers what gets extracted during retain(). Injected alongside built-in rules. */
+            retainMission?: string;
+            /** Fact extraction mode: 'concise' (default), 'verbose', or 'custom'. */
+            retainExtractionMode?: string;
+            /** Custom extraction prompt (only active when retainExtractionMode is 'custom'). */
+            retainCustomInstructions?: string;
+            /** Maximum token size for each content chunk during retain. */
+            retainChunkSize?: number;
+            /** Toggle automatic observation consolidation after retain(). */
+            enableObservations?: boolean;
+            /** Controls what gets synthesised into observations. Replaces built-in rules. */
+            observationsMission?: string;
+        } = {}
     ): Promise<BankProfileResponse> {
         const response = await sdk.createOrUpdateBank({
             client: this.client,
             path: { bank_id: bankId },
             body: {
                 name: options.name,
+                mission: options.mission,
+                reflect_mission: options.reflectMission,
                 background: options.background,
                 disposition: options.disposition,
+                disposition_skepticism: options.dispositionSkepticism,
+                disposition_literalism: options.dispositionLiteralism,
+                disposition_empathy: options.dispositionEmpathy,
+                retain_mission: options.retainMission,
+                retain_extraction_mode: options.retainExtractionMode,
+                retain_custom_instructions: options.retainCustomInstructions,
+                retain_chunk_size: options.retainChunkSize,
+                enable_observations: options.enableObservations,
+                observations_mission: options.observationsMission,
             },
         });
 
         return this.validateResponse(response, 'createBank');
+    }
+
+    /**
+     * Set or update the reflect mission for a memory bank.
+     * @deprecated Use createBank({ reflectMission: '...' }) instead.
+     */
+    async setMission(bankId: string, mission: string): Promise<BankProfileResponse> {
+        return this.createBank(bankId, { reflectMission: mission });
     }
 
     /**
@@ -378,17 +427,81 @@ export class HindsightClient {
         return this.validateResponse(response, 'getBankProfile');
     }
 
+
     /**
-     * Set or update the mission for a memory bank.
+     * Get the resolved configuration for a bank, including any bank-level overrides.
+     *
+     * Requires `HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true` on the server.
      */
-    async setMission(bankId: string, mission: string): Promise<BankProfileResponse> {
-        const response = await sdk.createOrUpdateBank({
+    async getBankConfig(bankId: string): Promise<BankConfigResponse> {
+        const response = await sdk.getBankConfig({
             client: this.client,
             path: { bank_id: bankId },
-            body: { mission },
         });
 
-        return this.validateResponse(response, 'setMission');
+        return this.validateResponse(response, 'getBankConfig');
+    }
+
+    /**
+     * Update configuration overrides for a bank.
+     *
+     * Requires `HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true` on the server.
+     *
+     * @param bankId - The memory bank ID
+     * @param options - Fields to override
+     */
+    async updateBankConfig(
+        bankId: string,
+        options: {
+            reflectMission?: string;
+            retainMission?: string;
+            retainExtractionMode?: string;
+            retainCustomInstructions?: string;
+            retainChunkSize?: number;
+            enableObservations?: boolean;
+            observationsMission?: string;
+            /** How skeptical vs trusting (1=trusting, 5=skeptical). */
+            dispositionSkepticism?: number;
+            /** How literally to interpret information (1=flexible, 5=literal). */
+            dispositionLiteralism?: number;
+            /** How much to consider emotional context (1=detached, 5=empathetic). */
+            dispositionEmpathy?: number;
+        },
+    ): Promise<BankConfigResponse> {
+        const updates: Record<string, unknown> = {};
+        if (options.reflectMission !== undefined) updates.reflect_mission = options.reflectMission;
+        if (options.retainMission !== undefined) updates.retain_mission = options.retainMission;
+        if (options.retainExtractionMode !== undefined) updates.retain_extraction_mode = options.retainExtractionMode;
+        if (options.retainCustomInstructions !== undefined)
+            updates.retain_custom_instructions = options.retainCustomInstructions;
+        if (options.retainChunkSize !== undefined) updates.retain_chunk_size = options.retainChunkSize;
+        if (options.enableObservations !== undefined) updates.enable_observations = options.enableObservations;
+        if (options.observationsMission !== undefined) updates.observations_mission = options.observationsMission;
+        if (options.dispositionSkepticism !== undefined) updates.disposition_skepticism = options.dispositionSkepticism;
+        if (options.dispositionLiteralism !== undefined) updates.disposition_literalism = options.dispositionLiteralism;
+        if (options.dispositionEmpathy !== undefined) updates.disposition_empathy = options.dispositionEmpathy;
+
+        const response = await sdk.updateBankConfig({
+            client: this.client,
+            path: { bank_id: bankId },
+            body: { updates },
+        });
+
+        return this.validateResponse(response, 'updateBankConfig');
+    }
+
+    /**
+     * Reset all bank-level configuration overrides, reverting to server defaults.
+     *
+     * Requires `HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true` on the server.
+     */
+    async resetBankConfig(bankId: string): Promise<BankConfigResponse> {
+        const response = await sdk.resetBankConfig({
+            client: this.client,
+            path: { bank_id: bankId },
+        });
+
+        return this.validateResponse(response, 'resetBankConfig');
     }
 
     /**
@@ -623,6 +736,7 @@ export type {
     FileRetainResponse,
     ListMemoryUnitsResponse,
     BankProfileResponse,
+    BankConfigResponse,
     CreateBankRequest,
     Budget,
 };

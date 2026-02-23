@@ -440,9 +440,7 @@ _BASE_FACT_EXTRACTION_PROMPT = """Extract SIGNIFICANT facts from text. Be SELECT
 
 LANGUAGE: MANDATORY — Detect the language of the input text and produce ALL output in that EXACT same language. You are STRICTLY FORBIDDEN from translating or switching to any other language. Every single word of your output must be in the same language as the input. Do NOT output in a different language under any circumstance.
 
-{fact_types_instruction}
-
-{extraction_guidelines}
+{retain_mission_section}{extraction_guidelines}
 
 ══════════════════════════════════════════════════════════════════════════
 FACT FORMAT - BE CONCISE
@@ -549,16 +547,16 @@ about experiences ARE important to remember, even if they seem small (e.g., how 
 tasted, how someone looked, how loud music was). Extract these if they characterize
 an experience or person."""
 
-# Assembled concise prompt (backward compatible - exact same output as before)
+# Assembled concise prompt
 CONCISE_FACT_EXTRACTION_PROMPT = _BASE_FACT_EXTRACTION_PROMPT.format(
-    fact_types_instruction="{fact_types_instruction}",
+    retain_mission_section="{retain_mission_section}",
     extraction_guidelines=_CONCISE_GUIDELINES,
     examples=_CONCISE_EXAMPLES,
 )
 
 # Custom prompt uses same base but without examples
 CUSTOM_FACT_EXTRACTION_PROMPT = _BASE_FACT_EXTRACTION_PROMPT.format(
-    fact_types_instruction="{fact_types_instruction}",
+    retain_mission_section="{retain_mission_section}",
     extraction_guidelines="{custom_instructions}",
     examples="",  # No examples for custom mode
 )
@@ -568,8 +566,6 @@ CUSTOM_FACT_EXTRACTION_PROMPT = _BASE_FACT_EXTRACTION_PROMPT.format(
 VERBOSE_FACT_EXTRACTION_PROMPT = """Extract facts from text into structured format with FIVE required dimensions - BE EXTREMELY DETAILED.
 
 LANGUAGE: MANDATORY — Detect the language of the input text and produce ALL output in that EXACT same language. You are STRICTLY FORBIDDEN from translating or switching to any other language. Every single word of your output must be in the same language as the input. Do NOT output in a different language under any circumstance.
-
-{fact_types_instruction}
 
 ══════════════════════════════════════════════════════════════════════════
 FACT FORMAT - ALL FIVE DIMENSIONS REQUIRED - MAXIMUM VERBOSITY
@@ -701,27 +697,41 @@ def _build_extraction_prompt_and_schema(config) -> tuple[str, type]:
     Returns:
         Tuple of (prompt, response_schema)
     """
-    fact_types_instruction = "Extract ONLY 'world' and 'assistant' type facts."
     extraction_mode = config.retain_extraction_mode
     extract_causal_links = config.retain_extract_causal_links
+
+    # Build retain_mission section if set - injected before the mode-specific guidelines
+    retain_mission = getattr(config, "retain_mission", None)
+    if retain_mission:
+        retain_mission_section = (
+            f"══════════════════════════════════════════════════════════════════════════\n"
+            f"FOCUS — What to retain for this bank\n"
+            f"══════════════════════════════════════════════════════════════════════════\n\n"
+            f"{retain_mission}\n\n"
+        )
+    else:
+        retain_mission_section = ""
 
     # Select base prompt based on extraction mode
     if extraction_mode == "custom":
         if not config.retain_custom_instructions:
             base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
-            prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
+            prompt = base_prompt.format(
+                retain_mission_section=retain_mission_section,
+            )
         else:
             base_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
             prompt = base_prompt.format(
-                fact_types_instruction=fact_types_instruction,
+                retain_mission_section=retain_mission_section,
                 custom_instructions=config.retain_custom_instructions,
             )
     elif extraction_mode == "verbose":
-        base_prompt = VERBOSE_FACT_EXTRACTION_PROMPT
-        prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
+        prompt = VERBOSE_FACT_EXTRACTION_PROMPT
     else:
         base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
-        prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
+        prompt = base_prompt.format(
+            retain_mission_section=retain_mission_section,
+        )
 
     # Add causal relationships section if enabled
     if extract_causal_links:

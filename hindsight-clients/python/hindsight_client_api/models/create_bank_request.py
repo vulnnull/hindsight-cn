@@ -17,8 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
 from hindsight_client_api.models.disposition_traits import DispositionTraits
 from typing import Optional, Set
 from typing_extensions import Self
@@ -29,9 +30,19 @@ class CreateBankRequest(BaseModel):
     """ # noqa: E501
     name: Optional[StrictStr] = None
     disposition: Optional[DispositionTraits] = None
+    disposition_skepticism: Optional[Annotated[int, Field(le=5, strict=True, ge=1)]] = None
+    disposition_literalism: Optional[Annotated[int, Field(le=5, strict=True, ge=1)]] = None
+    disposition_empathy: Optional[Annotated[int, Field(le=5, strict=True, ge=1)]] = None
     mission: Optional[StrictStr] = None
     background: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["name", "disposition", "mission", "background"]
+    reflect_mission: Optional[StrictStr] = None
+    retain_mission: Optional[StrictStr] = None
+    retain_extraction_mode: Optional[StrictStr] = None
+    retain_custom_instructions: Optional[StrictStr] = None
+    retain_chunk_size: Optional[StrictInt] = None
+    enable_observations: Optional[StrictBool] = None
+    observations_mission: Optional[StrictStr] = None
+    __properties: ClassVar[List[str]] = ["name", "disposition", "disposition_skepticism", "disposition_literalism", "disposition_empathy", "mission", "background", "reflect_mission", "retain_mission", "retain_extraction_mode", "retain_custom_instructions", "retain_chunk_size", "enable_observations", "observations_mission"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -85,6 +96,21 @@ class CreateBankRequest(BaseModel):
         if self.disposition is None and "disposition" in self.model_fields_set:
             _dict['disposition'] = None
 
+        # set to None if disposition_skepticism (nullable) is None
+        # and model_fields_set contains the field
+        if self.disposition_skepticism is None and "disposition_skepticism" in self.model_fields_set:
+            _dict['disposition_skepticism'] = None
+
+        # set to None if disposition_literalism (nullable) is None
+        # and model_fields_set contains the field
+        if self.disposition_literalism is None and "disposition_literalism" in self.model_fields_set:
+            _dict['disposition_literalism'] = None
+
+        # set to None if disposition_empathy (nullable) is None
+        # and model_fields_set contains the field
+        if self.disposition_empathy is None and "disposition_empathy" in self.model_fields_set:
+            _dict['disposition_empathy'] = None
+
         # set to None if mission (nullable) is None
         # and model_fields_set contains the field
         if self.mission is None and "mission" in self.model_fields_set:
@@ -94,6 +120,41 @@ class CreateBankRequest(BaseModel):
         # and model_fields_set contains the field
         if self.background is None and "background" in self.model_fields_set:
             _dict['background'] = None
+
+        # set to None if reflect_mission (nullable) is None
+        # and model_fields_set contains the field
+        if self.reflect_mission is None and "reflect_mission" in self.model_fields_set:
+            _dict['reflect_mission'] = None
+
+        # set to None if retain_mission (nullable) is None
+        # and model_fields_set contains the field
+        if self.retain_mission is None and "retain_mission" in self.model_fields_set:
+            _dict['retain_mission'] = None
+
+        # set to None if retain_extraction_mode (nullable) is None
+        # and model_fields_set contains the field
+        if self.retain_extraction_mode is None and "retain_extraction_mode" in self.model_fields_set:
+            _dict['retain_extraction_mode'] = None
+
+        # set to None if retain_custom_instructions (nullable) is None
+        # and model_fields_set contains the field
+        if self.retain_custom_instructions is None and "retain_custom_instructions" in self.model_fields_set:
+            _dict['retain_custom_instructions'] = None
+
+        # set to None if retain_chunk_size (nullable) is None
+        # and model_fields_set contains the field
+        if self.retain_chunk_size is None and "retain_chunk_size" in self.model_fields_set:
+            _dict['retain_chunk_size'] = None
+
+        # set to None if enable_observations (nullable) is None
+        # and model_fields_set contains the field
+        if self.enable_observations is None and "enable_observations" in self.model_fields_set:
+            _dict['enable_observations'] = None
+
+        # set to None if observations_mission (nullable) is None
+        # and model_fields_set contains the field
+        if self.observations_mission is None and "observations_mission" in self.model_fields_set:
+            _dict['observations_mission'] = None
 
         return _dict
 
@@ -109,8 +170,18 @@ class CreateBankRequest(BaseModel):
         _obj = cls.model_validate({
             "name": obj.get("name"),
             "disposition": DispositionTraits.from_dict(obj["disposition"]) if obj.get("disposition") is not None else None,
+            "disposition_skepticism": obj.get("disposition_skepticism"),
+            "disposition_literalism": obj.get("disposition_literalism"),
+            "disposition_empathy": obj.get("disposition_empathy"),
             "mission": obj.get("mission"),
-            "background": obj.get("background")
+            "background": obj.get("background"),
+            "reflect_mission": obj.get("reflect_mission"),
+            "retain_mission": obj.get("retain_mission"),
+            "retain_extraction_mode": obj.get("retain_extraction_mode"),
+            "retain_custom_instructions": obj.get("retain_custom_instructions"),
+            "retain_chunk_size": obj.get("retain_chunk_size"),
+            "enable_observations": obj.get("enable_observations"),
+            "observations_mission": obj.get("observations_mission")
         })
         return _obj
 

@@ -79,6 +79,8 @@ class Hindsight:
         config = hindsight_client_api.Configuration(host=base_url, access_token=api_key)
         self._api_client = hindsight_client_api.ApiClient(config)
         self._timeout = timeout
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
         if api_key:
             self._api_client.set_default_header("Authorization", f"Bearer {api_key}")
         self._memory_api = memory_api.MemoryApi(self._api_client)
@@ -386,49 +388,124 @@ class Hindsight:
         bank_id: str,
         name: str | None = None,
         mission: str | None = None,
+        disposition_skepticism: int | None = None,
+        disposition_literalism: int | None = None,
+        disposition_empathy: int | None = None,
         disposition: dict[str, float] | None = None,
+        retain_mission: str | None = None,
+        retain_extraction_mode: str | None = None,
+        retain_custom_instructions: str | None = None,
+        retain_chunk_size: int | None = None,
+        enable_observations: bool | None = None,
+        observations_mission: str | None = None,
+        reflect_mission: str | None = None,
     ) -> BankProfileResponse:
         """Create or update a memory bank.
 
         Args:
             bank_id: Unique identifier for the bank
-            name: Human-readable display name
-            mission: Instructions guiding what Hindsight should learn and remember (for mental models)
-            disposition: Optional disposition traits (skepticism, literalism, empathy)
+            name: Deprecated. Display label only.
+            mission: Deprecated. Use reflect_mission instead.
+            disposition_skepticism: Deprecated. Use update_bank_config(disposition_skepticism=...) instead.
+            disposition_literalism: Deprecated. Use update_bank_config(disposition_literalism=...) instead.
+            disposition_empathy: Deprecated. Use update_bank_config(disposition_empathy=...) instead.
+            disposition: Deprecated. Use update_bank_config(disposition_skepticism=...) instead.
+            retain_mission: Steers what gets extracted during retain(). Injected alongside built-in rules.
+            retain_extraction_mode: Fact extraction mode: 'concise' (default), 'verbose', or 'custom'.
+            retain_custom_instructions: Custom extraction prompt (only active when mode is 'custom').
+            retain_chunk_size: Maximum token size for each content chunk during retain.
+            enable_observations: Toggle automatic observation consolidation after retain().
+            observations_mission: Controls what gets synthesised into observations. Replaces built-in rules.
+            reflect_mission: Mission/context for Reflect operations.
         """
-        from hindsight_client_api.models import create_bank_request, disposition_traits
-
-        disposition_obj = None
-        if disposition:
-            disposition_obj = disposition_traits.DispositionTraits(**disposition)
-
-        request_obj = create_bank_request.CreateBankRequest(
-            name=name,
-            mission=mission,
-            disposition=disposition_obj,
+        return _run_async(
+            self._acreate_bank(
+                bank_id,
+                name=name,
+                mission=mission,
+                reflect_mission=reflect_mission,
+                disposition_skepticism=disposition_skepticism,
+                disposition_literalism=disposition_literalism,
+                disposition_empathy=disposition_empathy,
+                disposition=disposition,
+                retain_mission=retain_mission,
+                retain_extraction_mode=retain_extraction_mode,
+                retain_custom_instructions=retain_custom_instructions,
+                retain_chunk_size=retain_chunk_size,
+                enable_observations=enable_observations,
+                observations_mission=observations_mission,
+            )
         )
 
-        return _run_async(self._banks_api.create_or_update_bank(bank_id, request_obj, _request_timeout=self._timeout))
-
-    def set_mission(
+    async def _acreate_bank(
         self,
         bank_id: str,
-        mission: str,
+        name: str | None = None,
+        mission: str | None = None,
+        reflect_mission: str | None = None,
+        disposition_skepticism: int | None = None,
+        disposition_literalism: int | None = None,
+        disposition_empathy: int | None = None,
+        disposition: dict[str, float] | None = None,
+        retain_mission: str | None = None,
+        retain_extraction_mode: str | None = None,
+        retain_custom_instructions: str | None = None,
+        retain_chunk_size: int | None = None,
+        enable_observations: bool | None = None,
+        observations_mission: str | None = None,
     ) -> BankProfileResponse:
-        """
-        Set or update the mission for a memory bank.
+        import aiohttp
 
-        Args:
-            bank_id: The memory bank ID
-            mission: The mission text describing the agent's purpose
+        body: dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if mission is not None:
+            body["mission"] = mission
+        if reflect_mission is not None:
+            body["reflect_mission"] = reflect_mission
+        # Individual disposition fields take priority over legacy disposition dict
+        if disposition_skepticism is not None:
+            body["disposition_skepticism"] = disposition_skepticism
+        elif disposition is not None:
+            body["disposition_skepticism"] = disposition.get("skepticism")
+        if disposition_literalism is not None:
+            body["disposition_literalism"] = disposition_literalism
+        elif disposition is not None:
+            body["disposition_literalism"] = disposition.get("literalism")
+        if disposition_empathy is not None:
+            body["disposition_empathy"] = disposition_empathy
+        elif disposition is not None:
+            body["disposition_empathy"] = disposition.get("empathy")
+        if retain_mission is not None:
+            body["retain_mission"] = retain_mission
+        if retain_extraction_mode is not None:
+            body["retain_extraction_mode"] = retain_extraction_mode
+        if retain_custom_instructions is not None:
+            body["retain_custom_instructions"] = retain_custom_instructions
+        if retain_chunk_size is not None:
+            body["retain_chunk_size"] = retain_chunk_size
+        if enable_observations is not None:
+            body["enable_observations"] = enable_observations
+        if observations_mission is not None:
+            body["observations_mission"] = observations_mission
 
-        Returns:
-            BankProfileResponse with updated bank profile
-        """
-        from hindsight_client_api.models import create_bank_request
+        url = f"{self._base_url}/v1/default/banks/{bank_id}"
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        async with aiohttp.ClientSession() as session:
+            async with session.put(
+                url, json=body, headers=headers, timeout=aiohttp.ClientTimeout(total=self._timeout)
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                return BankProfileResponse.model_validate(data)
 
-        request_obj = create_bank_request.CreateBankRequest(mission=mission)
-        return _run_async(self._banks_api.create_or_update_bank(bank_id, request_obj, _request_timeout=self._timeout))
+    def set_mission(self, bank_id: str, mission: str) -> dict[str, Any]:
+        """Deprecated. Use update_bank_config(reflect_mission=...) instead."""
+        return self.create_bank(bank_id, mission=mission)
+
+    def set_reflect_mission(self, bank_id: str, reflect_mission: str) -> dict[str, Any]:
+        """Deprecated alias for set_mission()."""
+        return self.set_mission(bank_id, reflect_mission)
 
     # Async methods (native async, no _run_async wrapper)
 
@@ -437,49 +514,60 @@ class Hindsight:
         bank_id: str,
         name: str | None = None,
         mission: str | None = None,
+        disposition_skepticism: int | None = None,
+        disposition_literalism: int | None = None,
+        disposition_empathy: int | None = None,
         disposition: dict[str, float] | None = None,
+        retain_mission: str | None = None,
+        retain_extraction_mode: str | None = None,
+        retain_custom_instructions: str | None = None,
+        retain_chunk_size: int | None = None,
+        enable_observations: bool | None = None,
+        observations_mission: str | None = None,
+        reflect_mission: str | None = None,
     ) -> BankProfileResponse:
         """Create or update a memory bank (async).
 
         Args:
             bank_id: Unique identifier for the bank
-            name: Human-readable display name
-            mission: Instructions guiding what Hindsight should learn and remember (for mental models)
-            disposition: Optional disposition traits (skepticism, literalism, empathy)
+            name: Deprecated. Display label only.
+            mission: Deprecated. Use reflect_mission instead.
+            disposition_skepticism: Deprecated. Use update_bank_config(disposition_skepticism=...) instead.
+            disposition_literalism: Deprecated. Use update_bank_config(disposition_literalism=...) instead.
+            disposition_empathy: Deprecated. Use update_bank_config(disposition_empathy=...) instead.
+            disposition: Deprecated. Use update_bank_config(disposition_skepticism=...) instead.
+            retain_mission: Steers what gets extracted during retain(). Injected alongside built-in rules.
+            retain_extraction_mode: Fact extraction mode: 'concise' (default), 'verbose', or 'custom'.
+            retain_custom_instructions: Custom extraction prompt (only active when mode is 'custom').
+            retain_chunk_size: Maximum token size for each content chunk during retain.
+            enable_observations: Toggle automatic observation consolidation after retain().
+            observations_mission: Controls what gets synthesised into observations. Replaces built-in rules.
+            reflect_mission: Mission/context for Reflect operations.
         """
-        from hindsight_client_api.models import create_bank_request, disposition_traits
-
-        disposition_obj = None
-        if disposition:
-            disposition_obj = disposition_traits.DispositionTraits(**disposition)
-
-        request_obj = create_bank_request.CreateBankRequest(
+        return await self._acreate_bank(
+            bank_id,
             name=name,
             mission=mission,
-            disposition=disposition_obj,
+            reflect_mission=reflect_mission,
+            disposition_skepticism=disposition_skepticism,
+            disposition_literalism=disposition_literalism,
+            disposition_empathy=disposition_empathy,
+            disposition=disposition,
+            retain_mission=retain_mission,
+            retain_extraction_mode=retain_extraction_mode,
+            retain_custom_instructions=retain_custom_instructions,
+            retain_chunk_size=retain_chunk_size,
+            enable_observations=enable_observations,
+            observations_mission=observations_mission,
         )
 
-        return await self._banks_api.create_or_update_bank(bank_id, request_obj, _request_timeout=self._timeout)
+    async def aset_mission(self, bank_id: str, mission: str) -> dict[str, Any]:
+        """Deprecated. Use update_bank_config(reflect_mission=...) instead."""
+        return await self.acreate_bank(bank_id, mission=mission)
 
-    async def aset_mission(
-        self,
-        bank_id: str,
-        mission: str,
-    ) -> BankProfileResponse:
-        """
-        Set or update the mission for a memory bank (async).
-
-        Args:
-            bank_id: The memory bank ID
-            mission: The mission text describing the agent's purpose
-
-        Returns:
-            BankProfileResponse with updated bank profile
-        """
-        from hindsight_client_api.models import create_bank_request
-
-        request_obj = create_bank_request.CreateBankRequest(mission=mission)
-        return await self._banks_api.create_or_update_bank(bank_id, request_obj, _request_timeout=self._timeout)
+    async def aset_reflect_mission(self, bank_id: str, reflect_mission: str) -> dict[str, Any]:
+        """Deprecated alias for aset_mission()."""
+        return await self.aset_mission(bank_id, reflect_mission)
 
     async def aretain_batch(
         self,
@@ -928,6 +1016,120 @@ class Hindsight:
             directive_id: The directive ID
         """
         return _run_async(self._directives_api.delete_directive(bank_id, directive_id, _request_timeout=self._timeout))
+
+    def get_bank_config(self, bank_id: str) -> dict[str, Any]:
+        """
+        Get the resolved configuration for a bank, including any bank-level overrides.
+
+        Requires ``HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true`` on the server.
+
+        Args:
+            bank_id: The memory bank ID
+
+        Returns:
+            dict with ``bank_id``, ``config`` (fully resolved), and ``overrides`` (bank-level only)
+        """
+        return _run_async(self._aget_bank_config(bank_id))
+
+    async def _aget_bank_config(self, bank_id: str) -> dict[str, Any]:
+        import aiohttp
+
+        url = f"{self._base_url}/v1/default/banks/{bank_id}/config"
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=self._timeout)) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+
+    def update_bank_config(
+        self,
+        bank_id: str,
+        *,
+        reflect_mission: str | None = None,
+        retain_mission: str | None = None,
+        retain_extraction_mode: str | None = None,
+        retain_custom_instructions: str | None = None,
+        retain_chunk_size: int | None = None,
+        enable_observations: bool | None = None,
+        observations_mission: str | None = None,
+        disposition_skepticism: int | None = None,
+        disposition_literalism: int | None = None,
+        disposition_empathy: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        Update configuration overrides for a bank.
+
+        Requires ``HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true`` on the server.
+
+        Args:
+            bank_id: The memory bank ID
+            reflect_mission: Identity and reasoning framing for reflect().
+            retain_mission: Steers what gets extracted during retain().
+            retain_extraction_mode: Fact extraction mode: 'concise', 'verbose', or 'custom'.
+            retain_custom_instructions: Custom extraction prompt (only active when mode is 'custom').
+            retain_chunk_size: Maximum token size for each content chunk during retain.
+            enable_observations: Toggle automatic observation consolidation after retain().
+            observations_mission: Controls what gets synthesised into observations.
+            disposition_skepticism: How skeptical vs trusting (1=trusting, 5=skeptical).
+            disposition_literalism: How literally to interpret information (1=flexible, 5=literal).
+            disposition_empathy: How much to consider emotional context (1=detached, 5=empathetic).
+
+        Returns:
+            dict with ``bank_id``, ``config`` (fully resolved), and ``overrides`` (bank-level only)
+        """
+        updates = {
+            k: v
+            for k, v in {
+                "reflect_mission": reflect_mission,
+                "retain_mission": retain_mission,
+                "retain_extraction_mode": retain_extraction_mode,
+                "retain_custom_instructions": retain_custom_instructions,
+                "retain_chunk_size": retain_chunk_size,
+                "enable_observations": enable_observations,
+                "observations_mission": observations_mission,
+                "disposition_skepticism": disposition_skepticism,
+                "disposition_literalism": disposition_literalism,
+                "disposition_empathy": disposition_empathy,
+            }.items()
+            if v is not None
+        }
+        return _run_async(self._aupdate_bank_config(bank_id, updates))
+
+    async def _aupdate_bank_config(self, bank_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        import aiohttp
+
+        url = f"{self._base_url}/v1/default/banks/{bank_id}/config"
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(
+                url, json={"updates": updates}, headers=headers, timeout=aiohttp.ClientTimeout(total=self._timeout)
+            ) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+
+    def reset_bank_config(self, bank_id: str) -> dict[str, Any]:
+        """
+        Reset all bank-level configuration overrides, reverting to server defaults.
+
+        Requires ``HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true`` on the server.
+
+        Args:
+            bank_id: The memory bank ID
+
+        Returns:
+            dict with ``bank_id``, ``config`` (fully resolved), and ``overrides`` (now empty)
+        """
+        return _run_async(self._areset_bank_config(bank_id))
+
+    async def _areset_bank_config(self, bank_id: str) -> dict[str, Any]:
+        import aiohttp
+
+        url = f"{self._base_url}/v1/default/banks/{bank_id}/config"
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(url, headers=headers, timeout=aiohttp.ClientTimeout(total=self._timeout)) as resp:
+                resp.raise_for_status()
+                return await resp.json()
 
     def delete_bank(self, bank_id: str):
         """

@@ -1990,3 +1990,100 @@ class TestMentalModelRefreshAfterConsolidation:
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
+
+
+def test_consolidation_prompt_default():
+    """Test that the default consolidation prompt contains the built-in durable-knowledge rules."""
+    from hindsight_api.engine.consolidation.prompts import build_consolidation_prompt
+
+    prompt = build_consolidation_prompt()
+    assert "DURABLE KNOWLEDGE" in prompt
+    assert "temporal markers" in prompt
+    assert "{fact_text}" in prompt
+    assert "{observations_text}" in prompt
+
+
+def test_consolidation_prompt_observations_mission():
+    """Test that observations_mission replaces the default rules."""
+    from hindsight_api.engine.consolidation.prompts import build_consolidation_prompt
+
+    spec = "Observations are weekly summaries of sprint outcomes and team dynamics."
+    prompt = build_consolidation_prompt(observations_mission=spec)
+
+    # Spec is injected
+    assert spec in prompt
+    # Default rules are NOT present
+    assert "EXTRACT DURABLE KNOWLEDGE" not in prompt
+    # Output format and data placeholders remain
+    assert "actions" in prompt
+    assert "{fact_text}" in prompt
+    assert "{observations_text}" in prompt
+
+    # Renders cleanly
+    rendered = prompt.format(fact_text="Alice fixed a bug.", observations_text="[]")
+    assert "{fact_text}" not in rendered
+    assert spec in rendered
+
+
+def test_observations_mission_config():
+    """Test that observations_mission is loaded from env and exposed as configurable."""
+    import os
+
+    from hindsight_api.config import HindsightConfig, _get_raw_config, clear_config_cache
+
+    original = os.getenv("HINDSIGHT_API_OBSERVATIONS_MISSION")
+    try:
+        os.environ["HINDSIGHT_API_OBSERVATIONS_MISSION"] = "Weekly sprint summaries only."
+        clear_config_cache()
+        config = _get_raw_config()
+        assert config.observations_mission == "Weekly sprint summaries only."
+        assert "observations_mission" in HindsightConfig.get_configurable_fields()
+    finally:
+        if original is None:
+            os.environ.pop("HINDSIGHT_API_OBSERVATIONS_MISSION", None)
+        else:
+            os.environ["HINDSIGHT_API_OBSERVATIONS_MISSION"] = original
+        clear_config_cache()
+
+
+@pytest.mark.asyncio
+async def test_consolidation_with_observations_mission(memory: "MemoryEngine", request_context):
+    """Test that observations_mission is used during consolidation without errors."""
+    import os
+
+    from hindsight_api.config import _get_raw_config, clear_config_cache
+
+    original = os.getenv("HINDSIGHT_API_OBSERVATIONS_MISSION")
+    try:
+        os.environ["HINDSIGHT_API_OBSERVATIONS_MISSION"] = (
+            "Observations are summaries of programming language usage patterns."
+        )
+        clear_config_cache()
+        config = _get_raw_config()
+
+        bank_id = f"test-obs-spec-{uuid.uuid4().hex[:8]}"
+        original_global_config = memory._config_resolver._global_config
+        memory._config_resolver._global_config = config
+
+        try:
+            await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+            await memory.retain_async(
+                bank_id=bank_id,
+                content="Alice uses Python for data analysis and loves its simplicity.",
+                request_context=request_context,
+            )
+            async with memory._pool.acquire() as conn:
+                observations = await conn.fetch(
+                    "SELECT id, text, fact_type FROM memory_units WHERE bank_id = $1 AND fact_type = 'observation'",
+                    bank_id,
+                )
+            assert isinstance(observations, list)
+        finally:
+            memory._config_resolver._global_config = original_global_config
+            await memory.delete_bank(bank_id, request_context=request_context)
+    finally:
+        if original is None:
+            os.environ.pop("HINDSIGHT_API_OBSERVATIONS_MISSION", None)
+        else:
+            os.environ["HINDSIGHT_API_OBSERVATIONS_MISSION"] = original
+        clear_config_cache()

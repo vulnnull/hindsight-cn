@@ -2309,6 +2309,7 @@
         "summary": "Get memory bank profile",
         "description": "Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.",
         "operationId": "get_bank_profile",
+        "deprecated": true,
         "parameters": [
           {
             "name": "bank_id",
@@ -2366,6 +2367,7 @@
         "summary": "Update memory bank disposition",
         "description": "Update bank's disposition traits (skepticism, literalism, empathy)",
         "operationId": "update_bank_disposition",
+        "deprecated": true,
         "parameters": [
           {
             "name": "bank_id",
@@ -3872,7 +3874,8 @@
                 "type": "null"
               }
             ],
-            "title": "Name"
+            "title": "Name",
+            "description": "Deprecated: display label only, not advertised"
           },
           "disposition": {
             "anyOf": [
@@ -3882,7 +3885,50 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Deprecated: use update_bank_config instead"
+          },
+          "disposition_skepticism": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disposition Skepticism",
+            "description": "Deprecated: use update_bank_config instead"
+          },
+          "disposition_literalism": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disposition Literalism",
+            "description": "Deprecated: use update_bank_config instead"
+          },
+          "disposition_empathy": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disposition Empathy",
+            "description": "Deprecated: use update_bank_config instead"
           },
           "mission": {
             "anyOf": [
@@ -3894,7 +3940,7 @@
               }
             ],
             "title": "Mission",
-            "description": "The agent's mission"
+            "description": "Deprecated: use update_bank_config with reflect_mission instead"
           },
           "background": {
             "anyOf": [
@@ -3906,20 +3952,99 @@
               }
             ],
             "title": "Background",
-            "description": "Deprecated: use mission instead"
+            "description": "Deprecated: use update_bank_config with reflect_mission instead"
+          },
+          "reflect_mission": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflect Mission",
+            "description": "Mission/context for Reflect operations. Guides how Reflect interprets and uses memories."
+          },
+          "retain_mission": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Mission",
+            "description": "Steers what gets extracted during retain(). Injected alongside built-in extraction rules."
+          },
+          "retain_extraction_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Extraction Mode",
+            "description": "Fact extraction mode: 'concise' (default), 'verbose', or 'custom'."
+          },
+          "retain_custom_instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Custom Instructions",
+            "description": "Custom extraction prompt. Only active when retain_extraction_mode is 'custom'."
+          },
+          "retain_chunk_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Chunk Size",
+            "description": "Maximum token size for each content chunk during retain."
+          },
+          "enable_observations": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Observations",
+            "description": "Toggle automatic observation consolidation after retain()."
+          },
+          "observations_mission": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observations Mission",
+            "description": "Controls what gets synthesised into observations. Replaces built-in consolidation rules entirely."
           }
         },
         "type": "object",
         "title": "CreateBankRequest",
         "description": "Request model for creating/updating a bank.",
         "example": {
-          "disposition": {
-            "empathy": 3,
-            "literalism": 3,
-            "skepticism": 3
-          },
-          "mission": "I am a PM helping my engineering team stay organized",
-          "name": "Alice"
+          "observations_mission": "Observations are stable facts about people and projects. Always include preferences and skills.",
+          "retain_mission": "Always include technical decisions and architectural trade-offs. Ignore meeting logistics."
         }
       },
       "CreateDirectiveRequest": {

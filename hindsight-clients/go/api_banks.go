@@ -804,6 +804,8 @@ Get disposition traits and mission for a memory bank. Auto-creates agent with de
  @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
  @param bankId
  @return ApiGetBankProfileRequest
+
+Deprecated
 */
 func (a *BanksAPIService) GetBankProfile(ctx context.Context, bankId string) ApiGetBankProfileRequest {
 	return ApiGetBankProfileRequest{
@@ -815,6 +817,7 @@ func (a *BanksAPIService) GetBankProfile(ctx context.Context, bankId string) Api
 
 // Execute executes the request
 //  @return BankProfileResponse
+// Deprecated
 func (a *BanksAPIService) GetBankProfileExecute(r ApiGetBankProfileRequest) (*BankProfileResponse, *http.Response, error) {
 	var (
 		localVarHTTPMethod   = http.MethodGet
@@ -1560,6 +1563,8 @@ Update bank's disposition traits (skepticism, literalism, empathy)
  @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
  @param bankId
  @return ApiUpdateBankDispositionRequest
+
+Deprecated
 */
 func (a *BanksAPIService) UpdateBankDisposition(ctx context.Context, bankId string) ApiUpdateBankDispositionRequest {
 	return ApiUpdateBankDispositionRequest{
@@ -1571,6 +1576,7 @@ func (a *BanksAPIService) UpdateBankDisposition(ctx context.Context, bankId stri
 
 // Execute executes the request
 //  @return BankProfileResponse
+// Deprecated
 func (a *BanksAPIService) UpdateBankDispositionExecute(r ApiUpdateBankDispositionRequest) (*BankProfileResponse, *http.Response, error) {
 	var (
 		localVarHTTPMethod   = http.MethodPut

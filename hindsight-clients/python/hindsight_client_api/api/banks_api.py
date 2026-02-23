@@ -1793,7 +1793,7 @@ class BanksApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> BankProfileResponse:
-        """Get memory bank profile
+        """(Deprecated) Get memory bank profile
 
         Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
 
@@ -1822,6 +1822,7 @@ class BanksApi:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("GET /v1/default/banks/{bank_id}/profile is deprecated.", DeprecationWarning)
 
         _param = self._get_bank_profile_serialize(
             bank_id=bank_id,
@@ -1865,7 +1866,7 @@ class BanksApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[BankProfileResponse]:
-        """Get memory bank profile
+        """(Deprecated) Get memory bank profile
 
         Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
 
@@ -1894,6 +1895,7 @@ class BanksApi:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("GET /v1/default/banks/{bank_id}/profile is deprecated.", DeprecationWarning)
 
         _param = self._get_bank_profile_serialize(
             bank_id=bank_id,
@@ -1937,7 +1939,7 @@ class BanksApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Get memory bank profile
+        """(Deprecated) Get memory bank profile
 
         Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
 
@@ -1966,6 +1968,7 @@ class BanksApi:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("GET /v1/default/banks/{bank_id}/profile is deprecated.", DeprecationWarning)
 
         _param = self._get_bank_profile_serialize(
             bank_id=bank_id,
@@ -3503,7 +3506,7 @@ class BanksApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> BankProfileResponse:
-        """Update memory bank disposition
+        """(Deprecated) Update memory bank disposition
 
         Update bank's disposition traits (skepticism, literalism, empathy)
 
@@ -3534,6 +3537,7 @@ class BanksApi:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("PUT /v1/default/banks/{bank_id}/profile is deprecated.", DeprecationWarning)
 
         _param = self._update_bank_disposition_serialize(
             bank_id=bank_id,
@@ -3579,7 +3583,7 @@ class BanksApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[BankProfileResponse]:
-        """Update memory bank disposition
+        """(Deprecated) Update memory bank disposition
 
         Update bank's disposition traits (skepticism, literalism, empathy)
 
@@ -3610,6 +3614,7 @@ class BanksApi:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("PUT /v1/default/banks/{bank_id}/profile is deprecated.", DeprecationWarning)
 
         _param = self._update_bank_disposition_serialize(
             bank_id=bank_id,
@@ -3655,7 +3660,7 @@ class BanksApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Update memory bank disposition
+        """(Deprecated) Update memory bank disposition
 
         Update bank's disposition traits (skepticism, literalism, empathy)
 
@@ -3686,6 +3691,7 @@ class BanksApi:
         :type _host_index: int, optional
         :return: Returns the result object.
         """ # noqa: E501
+        warnings.warn("PUT /v1/default/banks/{bank_id}/profile is deprecated.", DeprecationWarning)
 
         _param = self._update_bank_disposition_serialize(
             bank_id=bank_id,

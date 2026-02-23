@@ -879,18 +879,103 @@ class CreateBankRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "name": "Alice",
-                "disposition": {"skepticism": 3, "literalism": 3, "empathy": 3},
-                "mission": "I am a PM helping my engineering team stay organized",
+                "retain_mission": "Always include technical decisions and architectural trade-offs. Ignore meeting logistics.",
+                "observations_mission": "Observations are stable facts about people and projects. Always include preferences and skills.",
             }
         }
     )
 
-    name: str | None = None
-    disposition: DispositionTraits | None = None
-    mission: str | None = Field(default=None, description="The agent's mission")
-    # Deprecated: use mission instead
-    background: str | None = Field(default=None, description="Deprecated: use mission instead")
+    # Deprecated fields — kept for backwards compatibility only
+    name: str | None = Field(default=None, description="Deprecated: display label only, not advertised")
+    disposition: DispositionTraits | None = Field(
+        default=None, description="Deprecated: use update_bank_config instead"
+    )
+    disposition_skepticism: int | None = Field(
+        default=None, ge=1, le=5, description="Deprecated: use update_bank_config instead"
+    )
+    disposition_literalism: int | None = Field(
+        default=None, ge=1, le=5, description="Deprecated: use update_bank_config instead"
+    )
+    disposition_empathy: int | None = Field(
+        default=None, ge=1, le=5, description="Deprecated: use update_bank_config instead"
+    )
+    # Deprecated: use update_bank_config with reflect_mission instead
+    mission: str | None = Field(
+        default=None, description="Deprecated: use update_bank_config with reflect_mission instead"
+    )
+    # Deprecated alias for mission
+    background: str | None = Field(
+        default=None, description="Deprecated: use update_bank_config with reflect_mission instead"
+    )
+
+    # Reflect configuration
+    reflect_mission: str | None = Field(
+        default=None,
+        description="Mission/context for Reflect operations. Guides how Reflect interprets and uses memories.",
+    )
+
+    # Operational configuration (applied via config resolver)
+    retain_mission: str | None = Field(
+        default=None,
+        description="Steers what gets extracted during retain(). Injected alongside built-in extraction rules.",
+    )
+    retain_extraction_mode: str | None = Field(
+        default=None,
+        description="Fact extraction mode: 'concise' (default), 'verbose', or 'custom'.",
+    )
+    retain_custom_instructions: str | None = Field(
+        default=None,
+        description="Custom extraction prompt. Only active when retain_extraction_mode is 'custom'.",
+    )
+    retain_chunk_size: int | None = Field(
+        default=None,
+        description="Maximum token size for each content chunk during retain.",
+    )
+    enable_observations: bool | None = Field(
+        default=None,
+        description="Toggle automatic observation consolidation after retain().",
+    )
+    observations_mission: str | None = Field(
+        default=None,
+        description="Controls what gets synthesised into observations. Replaces built-in consolidation rules entirely.",
+    )
+
+    def get_config_updates(self) -> dict[str, Any]:
+        """Return only the config fields that were explicitly set.
+
+        reflect_mission takes precedence over deprecated mission/background aliases.
+        Individual disposition_* fields take priority over the deprecated disposition dict.
+        """
+        updates: dict[str, Any] = {}
+        # Resolve reflect mission: reflect_mission (new) > mission (deprecated) > background (deprecated)
+        resolved_reflect_mission = self.reflect_mission or self.mission or self.background
+        if resolved_reflect_mission is not None:
+            updates["reflect_mission"] = resolved_reflect_mission
+        # Disposition: individual fields take priority over legacy disposition dict
+        if self.disposition_skepticism is not None:
+            updates["disposition_skepticism"] = self.disposition_skepticism
+        elif self.disposition is not None:
+            updates["disposition_skepticism"] = self.disposition.skepticism
+        if self.disposition_literalism is not None:
+            updates["disposition_literalism"] = self.disposition_literalism
+        elif self.disposition is not None:
+            updates["disposition_literalism"] = self.disposition.literalism
+        if self.disposition_empathy is not None:
+            updates["disposition_empathy"] = self.disposition_empathy
+        elif self.disposition is not None:
+            updates["disposition_empathy"] = self.disposition.empathy
+        for field_name in (
+            "retain_mission",
+            "retain_extraction_mode",
+            "retain_custom_instructions",
+            "retain_chunk_size",
+            "enable_observations",
+            "observations_mission",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                updates[field_name] = value
+        return updates
 
 
 class BankConfigUpdate(BaseModel):
@@ -3203,6 +3288,7 @@ def _register_routes(app: FastAPI):
         description="Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.",
         operation_id="get_bank_profile",
         tags=["Banks"],
+        deprecated=True,
     )
     async def api_get_bank_profile(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
         """Get memory bank profile (disposition + mission)."""
@@ -3238,6 +3324,7 @@ def _register_routes(app: FastAPI):
         description="Update bank's disposition traits (skepticism, literalism, empathy)",
         operation_id="update_bank_disposition",
         tags=["Banks"],
+        deprecated=True,
     )
     async def api_update_bank_disposition(
         bank_id: str, request: UpdateDispositionRequest, request_context: RequestContext = Depends(get_request_context)
@@ -3317,21 +3404,18 @@ def _register_routes(app: FastAPI):
             # Ensure bank exists by getting profile (auto-creates with defaults)
             await app.state.memory.get_bank_profile(bank_id, request_context=request_context)
 
-            # Update name and/or mission if provided (support both mission and deprecated background)
-            mission_value = request.mission or request.background
-            if request.name is not None or mission_value is not None:
+            # Update name if provided (stored in DB for display only, deprecated)
+            if request.name is not None:
                 await app.state.memory.update_bank(
                     bank_id,
                     name=request.name,
-                    mission=mission_value,
                     request_context=request_context,
                 )
 
-            # Update disposition if provided
-            if request.disposition is not None:
-                await app.state.memory.update_bank_disposition(
-                    bank_id, request.disposition.model_dump(), request_context=request_context
-                )
+            # Apply all config overrides (includes reflect_mission, disposition, retain settings)
+            config_updates = request.get_config_updates()
+            if config_updates:
+                await app.state.memory._config_resolver.update_bank_config(bank_id, config_updates, request_context)
 
             # Get final profile
             final_profile = await app.state.memory.get_bank_profile(bank_id, request_context=request_context)
@@ -3373,21 +3457,18 @@ def _register_routes(app: FastAPI):
             # Ensure bank exists
             await app.state.memory.get_bank_profile(bank_id, request_context=request_context)
 
-            # Update name and/or mission if provided
-            mission_value = request.mission or request.background
-            if request.name is not None or mission_value is not None:
+            # Update name if provided (stored in DB for display only, deprecated)
+            if request.name is not None:
                 await app.state.memory.update_bank(
                     bank_id,
                     name=request.name,
-                    mission=mission_value,
                     request_context=request_context,
                 )
 
-            # Update disposition if provided
-            if request.disposition is not None:
-                await app.state.memory.update_bank_disposition(
-                    bank_id, request.disposition.model_dump(), request_context=request_context
-                )
+            # Apply all config overrides (includes reflect_mission, disposition, retain settings)
+            config_updates = request.get_config_updates()
+            if config_updates:
+                await app.state.memory._config_resolver.update_bank_config(bank_id, config_updates, request_context)
 
             # Get final profile
             final_profile = await app.state.memory.get_bank_profile(bank_id, request_context=request_context)

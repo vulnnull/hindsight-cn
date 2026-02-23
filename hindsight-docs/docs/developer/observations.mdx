@@ -131,26 +131,28 @@ This ensures responses stay accurate even as the underlying data changes.
 
 ---
 
-## Mission-Oriented Consolidation
+## Observations Mission
 
-The bank's **mission** directly influences what knowledge gets consolidated into observations. When you set a mission on your memory bank, the consolidation engine focuses on extracting knowledge that serves that mission.
+You can define exactly what this bank should synthesise by setting an **observations mission** (`observations_mission`). This replaces the built-in durable-knowledge rules with your own instructions, letting you control what shape observations take.
 
-**Example:**
+```
+e.g. Observations are stable facts about people and projects.
+     Always include preferences, skills, and recurring patterns.
+     Ignore one-off events and ephemeral state.
+```
 
-<CodeSnippet code={memoryBanksPy} section="bank-support-agent" language="python" />
+Leave it blank to use the server default — durable, specific facts that stay true over time (preferences, skills, relationships, recurring patterns), with ephemeral state filtered out.
 
-With this mission, the consolidation engine will:
-- **Prioritize** customer preferences, issue patterns, and communication styles
-- **Skip** ephemeral details that don't serve support goals
-- **Synthesize** observations focused on helping customers
+**Examples:**
 
-Without a mission, the engine performs general-purpose consolidation. With a mission, it becomes focused and efficient — extracting only knowledge that matters for your use case.
+| `observations_mission` | What gets synthesised |
+|------------------------|----------------------|
+| *(unset — default)* | Durable facts: preferences, skills, relationships, recurring patterns |
+| *"Observations are weekly summaries of sprint outcomes and blockers"* | Broad event summaries grouped by time period |
+| *"Observations are stable facts about named individuals only"* | Person-centric knowledge, tied to specific people |
+| *"Observations are recurring patterns in customer support interactions"* | Failure modes, common requests, pain points |
 
-| Mission | Observations Focus |
-|---------|-------------------|
-| *Customer support agent* | Customer preferences, issue patterns, resolution history |
-| *Code review assistant* | Coding patterns, team conventions, common mistakes |
-| *Research assistant* | Topic expertise, source reliability, methodology preferences |
+Set `observations_mission` via the [bank config API](/developer/api/memory-banks#observations-configuration) or the [`HINDSIGHT_API_OBSERVATIONS_MISSION`](/developer/configuration#observations) environment variable.
 
 ---
 

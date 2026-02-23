@@ -4095,12 +4095,28 @@ class MemoryEngine(MemoryEngineInterface):
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
         profile = await bank_utils.get_bank_profile(pool, bank_id)
-        disposition = profile["disposition"]
+
+        # reflect_mission and disposition in config take precedence over the legacy DB columns
+        config_dict = await self._config_resolver.get_bank_config(bank_id, request_context)
+        mission = config_dict.get("reflect_mission") or profile["mission"]
+
+        # Overlay disposition from config if explicitly set; fall back to DB values
+        db_disp = profile["disposition"]
+        db_disp_dict = db_disp.model_dump() if hasattr(db_disp, "model_dump") else dict(db_disp)
+        cfg_skep = config_dict.get("disposition_skepticism")
+        cfg_lit = config_dict.get("disposition_literalism")
+        cfg_emp = config_dict.get("disposition_empathy")
+        disposition = {
+            "skepticism": cfg_skep if cfg_skep is not None else db_disp_dict["skepticism"],
+            "literalism": cfg_lit if cfg_lit is not None else db_disp_dict["literalism"],
+            "empathy": cfg_emp if cfg_emp is not None else db_disp_dict["empathy"],
+        }
+
         return {
             "bank_id": bank_id,
             "name": profile["name"],
             "disposition": disposition,
-            "mission": profile["mission"],
+            "mission": mission,
         }
 
     async def update_bank_disposition(

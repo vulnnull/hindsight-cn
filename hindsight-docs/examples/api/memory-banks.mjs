@@ -17,42 +17,53 @@ const client = new HindsightClient({ baseUrl: HINDSIGHT_URL });
 // =============================================================================
 
 // [docs:create-bank]
-await client.createBank('my-bank', {
-    name: 'Research Assistant',
-    mission: 'I am a research assistant specializing in machine learning',
-    disposition: {
-        skepticism: 4,
-        literalism: 3,
-        empathy: 3
-    }
-});
+await client.createBank('my-bank');
 // [/docs:create-bank]
 
 
-// [docs:bank-mission]
-await client.createBank('financial-advisor', {
-    name: 'Financial Advisor',
-    mission: `I am a conservative financial advisor with 20 years of experience.
-    I prioritize capital preservation over aggressive growth.
-    I have seen multiple market crashes and believe in diversification.`
+// [docs:bank-with-disposition]
+await client.createBank('architect-bank');
+await client.updateBankConfig('architect-bank', {
+    reflectMission: "You're a senior software architect - keep track of system designs, technology decisions, and architectural patterns.",
+    dispositionSkepticism: 4,   // Questions new technologies
+    dispositionLiteralism: 4,   // Focuses on concrete specs
+    dispositionEmpathy: 2,      // Prioritizes technical facts
 });
-// [/docs:bank-mission]
+// [/docs:bank-with-disposition]
 
 
-// [docs:bank-background]
-// Legacy snippet for v0.3 docs (background renamed to mission in v0.4)
-await client.createBank('legacy-bank', {
-    name: 'Legacy Example',
-    mission: `I'm a personal assistant helping a software engineer. I should track their
-    project preferences, coding style, and technology choices.`
+// [docs:update-bank-config]
+// Requires HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true on the server
+
+await client.updateBankConfig('my-bank', {
+    retainMission: 'Always include technical decisions, API design choices, and architectural trade-offs. Ignore meeting logistics and social exchanges.',
+    retainExtractionMode: 'verbose',
+    observationsMission: 'Observations are stable facts about people and projects. Always include preferences, skills, and recurring patterns. Ignore one-off events.',
+    dispositionSkepticism: 4,
+    dispositionLiteralism: 4,
+    dispositionEmpathy: 2,
 });
-// [/docs:bank-background]
+// [/docs:update-bank-config]
+
+
+// [docs:get-bank-config]
+// Returns resolved config (server defaults merged with bank overrides) and the raw overrides
+const { config, overrides } = await client.getBankConfig('my-bank');
+// config    — full resolved configuration
+// overrides — only fields overridden at the bank level
+// [/docs:get-bank-config]
+
+
+// [docs:reset-bank-config]
+// Remove all bank-level overrides, reverting to server defaults
+await client.resetBankConfig('my-bank');
+// [/docs:reset-bank-config]
 
 
 // =============================================================================
 // Cleanup (not shown in docs)
 // =============================================================================
 await fetch(`${HINDSIGHT_URL}/v1/default/banks/my-bank`, { method: 'DELETE' });
-await fetch(`${HINDSIGHT_URL}/v1/default/banks/financial-advisor`, { method: 'DELETE' });
+await fetch(`${HINDSIGHT_URL}/v1/default/banks/architect-bank`, { method: 'DELETE' });
 
 console.log('memory-banks.mjs: All examples passed');

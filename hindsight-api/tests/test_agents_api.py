@@ -27,9 +27,9 @@ class TestAgentProfile:
         assert "disposition" in profile
 
         disposition = profile["disposition"]
-        assert disposition.skepticism == 3
-        assert disposition.literalism == 3
-        assert disposition.empathy == 3
+        assert disposition["skepticism"] == 3
+        assert disposition["literalism"] == 3
+        assert disposition["empathy"] == 3
 
     @pytest.mark.asyncio
     async def test_update_agent_disposition(self, memory: MemoryEngine, request_context):
@@ -37,7 +37,7 @@ class TestAgentProfile:
         bank_id = unique_agent_id("test_profile_update")
 
         profile = await memory.get_bank_profile(bank_id, request_context=request_context)
-        assert profile["disposition"].skepticism == 3
+        assert profile["disposition"]["skepticism"] == 3
 
         new_disposition = {
             "skepticism": 5,
@@ -48,9 +48,9 @@ class TestAgentProfile:
 
         updated_profile = await memory.get_bank_profile(bank_id, request_context=request_context)
         disposition = updated_profile["disposition"]
-        assert disposition.skepticism == new_disposition["skepticism"]
-        assert disposition.literalism == new_disposition["literalism"]
-        assert disposition.empathy == new_disposition["empathy"]
+        assert disposition["skepticism"] == new_disposition["skepticism"]
+        assert disposition["literalism"] == new_disposition["literalism"]
+        assert disposition["empathy"] == new_disposition["empathy"]
 
     @pytest.mark.asyncio
     async def test_list_agents(self, memory: MemoryEngine, request_context):
@@ -104,8 +104,8 @@ class TestAgentEndpoint:
 
         final_profile = await memory.get_bank_profile(bank_id, request_context=request_context)
 
-        assert final_profile["disposition"].skepticism == 4
-        assert final_profile["disposition"].literalism == 5
+        assert final_profile["disposition"]["skepticism"] == 4
+        assert final_profile["disposition"]["literalism"] == 5
 
 
 class TestAgentDispositionIntegration:

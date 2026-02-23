@@ -701,6 +701,8 @@ export const getOperationStatus = <ThrowOnError extends boolean = false>(
  * Get memory bank profile
  *
  * Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
+ *
+ * @deprecated
  */
 export const getBankProfile = <ThrowOnError extends boolean = false>(
   options: Options<GetBankProfileData, ThrowOnError>,
@@ -715,6 +717,8 @@ export const getBankProfile = <ThrowOnError extends boolean = false>(
  * Update memory bank disposition
  *
  * Update bank's disposition traits (skepticism, literalism, empathy)
+ *
+ * @deprecated
  */
 export const updateBankDisposition = <ThrowOnError extends boolean = false>(
   options: Options<UpdateBankDispositionData, ThrowOnError>,

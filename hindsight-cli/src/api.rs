@@ -127,6 +127,7 @@ impl ApiClient {
                 mission: None,
                 background: None,
                 disposition: None,
+                ..Default::default()
             };
             let response = self.client.create_or_update_bank(agent_id, None, &request).await?;
             Ok(response.into_inner())
@@ -436,6 +437,7 @@ impl ApiClient {
                 mission: Some(mission.to_string()),
                 background: None,
                 disposition: None,
+                ..Default::default()
             };
             let response = self.client.update_bank(bank_id, None, &request).await?;
             Ok(response.into_inner())

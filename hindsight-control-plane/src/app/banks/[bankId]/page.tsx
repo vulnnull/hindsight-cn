@@ -36,7 +36,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Brain, Trash2, Loader2, MoreVertical, Pencil } from "lucide-react";
+import { Brain, Trash2, Loader2, MoreVertical, Pencil, RotateCcw } from "lucide-react";
 
 type NavItem = "recall" | "reflect" | "data" | "documents" | "entities" | "profile";
 type DataSubTab = "world" | "experience" | "observations" | "mental-models";
@@ -61,6 +61,8 @@ export default function BankPage() {
   const [showClearObservationsDialog, setShowClearObservationsDialog] = useState(false);
   const [isClearingObservations, setIsClearingObservations] = useState(false);
   const [isConsolidating, setIsConsolidating] = useState(false);
+  const [showResetConfigDialog, setShowResetConfigDialog] = useState(false);
+  const [isResettingConfig, setIsResettingConfig] = useState(false);
 
   const handleTabChange = (tab: NavItem) => {
     router.push(`/banks/${bankId}?view=${tab}`);
@@ -105,6 +107,19 @@ export default function BankPage() {
       // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsClearingObservations(false);
+    }
+  };
+
+  const handleResetConfig = async () => {
+    if (!bankId) return;
+    setIsResettingConfig(true);
+    try {
+      await client.resetBankConfig(bankId);
+      setShowResetConfigDialog(false);
+    } catch {
+      // Error toast shown by API client interceptor
+    } finally {
+      setIsResettingConfig(false);
     }
   };
 
@@ -181,6 +196,14 @@ export default function BankPage() {
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
+                        onClick={() => setShowResetConfigDialog(true)}
+                        className="text-amber-600 dark:text-amber-400 focus:text-amber-700 dark:focus:text-amber-300"
+                      >
+                        <RotateCcw className="w-4 h-4 mr-2" />
+                        Reset Configuration
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
                         onClick={() => setShowDeleteDialog(true)}
                         className="text-red-600 dark:text-red-400 focus:text-red-700 dark:focus:text-red-300"
                       >
@@ -233,19 +256,13 @@ export default function BankPage() {
                       <div className="space-y-6">
                         <BankStatsView />
                         <BankOperationsView />
+                        <BankProfileView hideReflectFields />
                       </div>
                     </div>
                   )}
                   {bankConfigTab === "configuration" && (
-                    <div>
-                      <p className="text-sm text-muted-foreground mb-6">
-                        Configure disposition traits, mission, directives, and behavioral settings
-                        for this bank.
-                      </p>
-                      <div className="space-y-6">
-                        <BankProfileView />
-                        {bankConfigEnabled && <BankConfigView />}
-                      </div>
+                    <div className="space-y-6">
+                      <BankConfigView />
                     </div>
                   )}
                 </div>
@@ -474,6 +491,43 @@ export default function BankPage() {
                 <>
                   <Trash2 className="w-4 h-4 mr-2" />
                   Delete Bank
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Reset Configuration Confirmation Dialog */}
+      <AlertDialog open={showResetConfigDialog} onOpenChange={setShowResetConfigDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset Configuration</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  Are you sure you want to reset all configuration overrides for{" "}
+                  <span className="font-semibold text-foreground">{bankId}</span>?
+                </p>
+                <p className="text-amber-600 dark:text-amber-400 font-medium">
+                  All per-bank settings (retain, observations, reflect) will revert to server
+                  defaults. This does not affect memories, entities, or the bank profile.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isResettingConfig}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleResetConfig} disabled={isResettingConfig}>
+              {isResettingConfig ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Resetting...
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Reset Configuration
                 </>
               )}
             </AlertDialogAction>
