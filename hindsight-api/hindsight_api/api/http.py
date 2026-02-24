@@ -1235,6 +1235,14 @@ class DeleteResponse(BaseModel):
     deleted_count: int | None = None
 
 
+class ClearMemoryObservationsResponse(BaseModel):
+    """Response model for clearing observations for a specific memory."""
+
+    model_config = ConfigDict(json_schema_extra={"example": {"deleted_count": 3}})
+
+    deleted_count: int
+
+
 class BankStatsResponse(BaseModel):
     """Response model for bank statistics endpoint."""
 
@@ -3547,6 +3555,40 @@ def _register_routes(app: FastAPI):
 
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             logger.error(f"Error in DELETE /v1/default/banks/{bank_id}/observations: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.delete(
+        "/v1/default/banks/{bank_id}/memories/{memory_id}/observations",
+        response_model=ClearMemoryObservationsResponse,
+        summary="Clear observations for a memory",
+        description="Delete all observations derived from a specific memory and reset it for re-consolidation. "
+        "The memory itself is not deleted. A consolidation job is triggered automatically so the memory "
+        "will produce fresh observations on the next consolidation run.",
+        operation_id="clear_memory_observations",
+        tags=["Memory"],
+    )
+    async def api_clear_memory_observations(
+        bank_id: str,
+        memory_id: str,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """Clear all observations derived from a specific memory."""
+        try:
+            result = await app.state.memory.clear_observations_for_memory(
+                bank_id=bank_id,
+                memory_id=memory_id,
+                request_context=request_context,
+            )
+            return ClearMemoryObservationsResponse(deleted_count=result["deleted_count"])
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(
+                f"Error in DELETE /v1/default/banks/{bank_id}/memories/{memory_id}/observations: {error_detail}"
+            )
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get(

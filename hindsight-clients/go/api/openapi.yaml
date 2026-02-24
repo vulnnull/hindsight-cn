@@ -1852,6 +1852,54 @@ paths:
       summary: Clear all observations
       tags:
       - Banks
+  /v1/default/banks/{bank_id}/memories/{memory_id}/observations:
+    delete:
+      description: Delete all observations derived from a specific memory and reset
+        it for re-consolidation. The memory itself is not deleted. A consolidation
+        job is triggered automatically so the memory will produce fresh observations
+        on the next consolidation run.
+      operationId: clear_memory_observations
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: memory_id
+        required: true
+        schema:
+          title: Memory Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearMemoryObservationsResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Clear observations for a memory
+      tags:
+      - Memory
   /v1/default/banks/{bank_id}/config:
     delete:
       description: Reset bank configuration to defaults by removing all bank-specific
@@ -2597,6 +2645,17 @@ components:
       - created_at
       - document_id
       title: ChunkResponse
+    ClearMemoryObservationsResponse:
+      description: Response model for clearing observations for a specific memory.
+      example:
+        deleted_count: 3
+      properties:
+        deleted_count:
+          title: Deleted Count
+          type: integer
+      required:
+      - deleted_count
+      title: ClearMemoryObservationsResponse
     ConsolidationResponse:
       description: Response model for consolidation trigger endpoint.
       example:

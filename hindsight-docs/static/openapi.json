@@ -2751,6 +2751,74 @@
         }
       }
     },
+    "/v1/default/banks/{bank_id}/memories/{memory_id}/observations": {
+      "delete": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "Clear observations for a memory",
+        "description": "Delete all observations derived from a specific memory and reset it for re-consolidation. The memory itself is not deleted. A consolidation job is triggered automatically so the memory will produce fresh observations on the next consolidation run.",
+        "operationId": "clear_memory_observations",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearMemoryObservationsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/default/banks/{bank_id}/config": {
       "get": {
         "tags": [
@@ -3840,6 +3908,23 @@
           "chunk_text": "This is the first chunk of the document...",
           "created_at": "2024-01-15T10:30:00Z",
           "document_id": "session_1"
+        }
+      },
+      "ClearMemoryObservationsResponse": {
+        "properties": {
+          "deleted_count": {
+            "type": "integer",
+            "title": "Deleted Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted_count"
+        ],
+        "title": "ClearMemoryObservationsResponse",
+        "description": "Response model for clearing observations for a specific memory.",
+        "example": {
+          "deleted_count": 3
         }
       },
       "ConsolidationResponse": {

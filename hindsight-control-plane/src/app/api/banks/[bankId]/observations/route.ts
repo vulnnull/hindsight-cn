@@ -29,7 +29,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ bank
       id: item.id,
       bank_id: bankId,
       text: item.text,
-      proof_count: 1,
+      proof_count: (item as any).proof_count ?? 1,
       history: [],
       tags: item.tags || [],
       source_memory_ids: [],

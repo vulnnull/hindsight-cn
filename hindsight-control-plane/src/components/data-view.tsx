@@ -608,12 +608,25 @@ export function DataView({ factType }: DataViewProps) {
                             <Table className="table-fixed">
                               <TableHeader>
                                 <TableRow className="bg-muted/50">
-                                  <TableHead className="w-[45%]">
+                                  <TableHead
+                                    className={factType === "observation" ? "w-[40%]" : "w-[45%]"}
+                                  >
                                     {factType === "observation" ? "Observation" : "Memory"}
                                   </TableHead>
                                   <TableHead className="w-[20%]">Entities</TableHead>
-                                  <TableHead className="w-[17%]">Occurred</TableHead>
-                                  <TableHead className="w-[18%]">Mentioned</TableHead>
+                                  {factType === "observation" && (
+                                    <TableHead className="w-[10%]">Sources</TableHead>
+                                  )}
+                                  <TableHead
+                                    className={factType === "observation" ? "w-[15%]" : "w-[17%]"}
+                                  >
+                                    Occurred
+                                  </TableHead>
+                                  <TableHead
+                                    className={factType === "observation" ? "w-[15%]" : "w-[18%]"}
+                                  >
+                                    Mentioned
+                                  </TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
@@ -673,6 +686,11 @@ export function DataView({ factType }: DataViewProps) {
                                           <span className="text-xs text-muted-foreground">-</span>
                                         )}
                                       </TableCell>
+                                      {factType === "observation" && (
+                                        <TableCell className="text-xs py-2 text-foreground">
+                                          {row.proof_count ?? 1}
+                                        </TableCell>
+                                      )}
                                       <TableCell className="text-xs py-2 text-foreground">
                                         {occurredDisplay || (
                                           <span className="text-muted-foreground">-</span>

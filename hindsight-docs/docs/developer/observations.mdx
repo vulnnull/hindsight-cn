@@ -156,6 +156,42 @@ Set `observations_mission` via the [bank config API](/developer/api/memory-banks
 
 ---
 
+## Observation Lifecycle & Invalidation
+
+### When Memories Are Deleted
+
+Observations are derived from source memories. When source memories are removed, Hindsight automatically keeps observations consistent:
+
+| Action | Effect on observations |
+|--------|----------------------|
+| Delete a document | All observations derived from the document's memories are deleted |
+| Delete individual memories (by type) | Observations sourced from those memories are deleted |
+| Delete an entire bank | All observations are deleted along with everything else |
+
+After deletion, the **remaining source memories** that fed the affected observations have their consolidation state reset, so they will be re-consolidated on the next consolidation run and produce fresh observations.
+
+### Clearing Observations for a Specific Memory
+
+You can clear all observations derived from a single memory without deleting the memory itself. This is useful when you want to force re-synthesis of a memory's contribution to consolidated knowledge.
+
+Use the `DELETE /v1/default/banks/{bank_id}/memories/{memory_id}/observations` endpoint. This will:
+1. Delete all observations that list the memory as a source
+2. Reset `consolidated_at` on the memory itself and any other source memories that contributed to those observations
+3. Trigger a consolidation job so fresh observations are produced automatically
+
+### Resetting All Observations
+
+To wipe all consolidated knowledge and start over:
+
+```python
+# Clear all observations for a bank
+client.clear_observations(bank_id="my-bank")
+```
+
+This resets the consolidation state for all source memories in the bank, so the next consolidation run will re-derive all observations from scratch.
+
+---
+
 ## Configuration
 
 Observation consolidation runs automatically. You can monitor consolidation via the [Operations API](./api/operations).

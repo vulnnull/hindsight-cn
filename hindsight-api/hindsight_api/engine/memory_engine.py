@@ -3169,14 +3169,22 @@ class MemoryEngine(MemoryEngineInterface):
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
+        invalidated_obs = 0
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
-                # Get memory unit IDs before deletion (for mental model invalidation)
+                # Get memory unit IDs before deletion (for observation cleanup)
                 unit_rows = await conn.fetch(
-                    f"SELECT id FROM {fq_table('memory_units')} WHERE document_id = $1", document_id
+                    f"SELECT id FROM {fq_table('memory_units')} WHERE document_id = $1 AND fact_type IN ('experience', 'world')",
+                    document_id,
                 )
                 unit_ids = [str(row["id"]) for row in unit_rows]
-                units_count = len(unit_ids)
+                units_count = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM {fq_table('memory_units')} WHERE document_id = $1", document_id
+                )
+
+                # Invalidate observations referencing these memories before deletion
+                if unit_ids:
+                    invalidated_obs = await self._delete_stale_observations_for_memories(conn, bank_id, unit_ids)
 
                 # Delete document (cascades to memory_units and all their links)
                 deleted = await conn.fetchval(
@@ -3185,11 +3193,15 @@ class MemoryEngine(MemoryEngineInterface):
                     bank_id,
                 )
 
-                # Invalidate deleted fact IDs from mental models
-                if deleted and unit_ids:
-                    await self._invalidate_facts_from_mental_models(conn, bank_id, unit_ids)
+                result = {
+                    "document_deleted": 1 if deleted else 0,
+                    "memory_units_deleted": units_count if deleted else 0,
+                }
 
-                return {"document_deleted": 1 if deleted else 0, "memory_units_deleted": units_count if deleted else 0}
+        if invalidated_obs > 0:
+            await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+
+        return result
 
     async def delete_memory_unit(
         self,
@@ -3205,6 +3217,9 @@ class MemoryEngine(MemoryEngineInterface):
         - All links to this unit (memory_links where to_unit_id = unit_id)
         - All entity associations (unit_entities where unit_id = unit_id)
 
+        Observations referencing this memory are deleted and their other source
+        memories are reset for re-consolidation.
+
         Args:
             unit_id: UUID of the memory unit to delete
             request_context: Request context for authentication.
@@ -3214,27 +3229,41 @@ class MemoryEngine(MemoryEngineInterface):
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
+        invalidated_obs = 0
+        bank_id_for_consolidation: str | None = None
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
-                # Get bank_id before deletion (for mental model invalidation)
-                bank_id = await conn.fetchval(f"SELECT bank_id FROM {fq_table('memory_units')} WHERE id = $1", unit_id)
+                # Get bank_id and fact_type before deletion
+                row = await conn.fetchrow(
+                    f"SELECT bank_id, fact_type FROM {fq_table('memory_units')} WHERE id = $1",
+                    unit_id,
+                )
+                bank_id = row["bank_id"] if row else None
+                fact_type = row["fact_type"] if row else None
+
+                # Invalidate observations before deletion (only for source memory types)
+                if bank_id and fact_type in ("experience", "world"):
+                    invalidated_obs = await self._delete_stale_observations_for_memories(conn, bank_id, [unit_id])
+                    if invalidated_obs > 0:
+                        bank_id_for_consolidation = bank_id
 
                 # Delete the memory unit (cascades to links and associations)
                 deleted = await conn.fetchval(
                     f"DELETE FROM {fq_table('memory_units')} WHERE id = $1 RETURNING id", unit_id
                 )
 
-                # Invalidate deleted fact ID from mental models
-                if deleted and bank_id:
-                    await self._invalidate_facts_from_mental_models(conn, bank_id, [str(deleted)])
-
-                return {
+                result = {
                     "success": deleted is not None,
                     "unit_id": str(deleted) if deleted else None,
                     "message": "Memory unit and all its links deleted successfully"
                     if deleted
                     else "Memory unit not found",
                 }
+
+        if bank_id_for_consolidation:
+            await self.submit_async_consolidation(bank_id=bank_id_for_consolidation, request_context=request_context)
+
+        return result
 
     async def delete_bank(
         self,
@@ -3264,12 +3293,27 @@ class MemoryEngine(MemoryEngineInterface):
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
+        invalidated_obs = 0
+        result: dict[str, int] = {}
         async with acquire_with_retry(pool) as conn:
             # Ensure connection is not in read-only mode (can happen with connection poolers)
             await conn.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE")
             async with conn.transaction():
                 try:
                     if fact_type:
+                        # For source memory types, clean up observations before deletion
+                        if fact_type in ("experience", "world"):
+                            unit_id_rows = await conn.fetch(
+                                f"SELECT id FROM {fq_table('memory_units')} WHERE bank_id = $1 AND fact_type = $2",
+                                bank_id,
+                                fact_type,
+                            )
+                            unit_ids = [str(row["id"]) for row in unit_id_rows]
+                            if unit_ids:
+                                invalidated_obs = await self._delete_stale_observations_for_memories(
+                                    conn, bank_id, unit_ids
+                                )
+
                         # Delete only memories of a specific fact type
                         units_count = await conn.fetchval(
                             f"SELECT COUNT(*) FROM {fq_table('memory_units')} WHERE bank_id = $1 AND fact_type = $2",
@@ -3284,9 +3328,9 @@ class MemoryEngine(MemoryEngineInterface):
 
                         # Note: We don't delete entities when fact_type is specified,
                         # as they may be referenced by other memory units
-                        return {"memory_units_deleted": units_count, "entities_deleted": 0}
+                        result = {"memory_units_deleted": units_count, "entities_deleted": 0}
                     else:
-                        # Delete all data for the bank
+                        # Delete all data for the bank — observations are included, no invalidation needed
                         units_count = await conn.fetchval(
                             f"SELECT COUNT(*) FROM {fq_table('memory_units')} WHERE bank_id = $1", bank_id
                         )
@@ -3309,7 +3353,7 @@ class MemoryEngine(MemoryEngineInterface):
                         # Delete the bank profile itself
                         await conn.execute(f"DELETE FROM {fq_table('banks')} WHERE bank_id = $1", bank_id)
 
-                        return {
+                        result = {
                             "memory_units_deleted": units_count,
                             "entities_deleted": entities_count,
                             "documents_deleted": documents_count,
@@ -3318,6 +3362,11 @@ class MemoryEngine(MemoryEngineInterface):
 
                 except Exception as e:
                     raise Exception(f"Failed to delete agent data: {str(e)}")
+
+        if invalidated_obs > 0:
+            await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+
+        return result
 
     async def clear_observations(
         self,
@@ -3351,6 +3400,12 @@ class MemoryEngine(MemoryEngineInterface):
                     bank_id,
                 )
 
+                # Reset consolidated_at on source memories so they get re-consolidated
+                await conn.execute(
+                    f"UPDATE {fq_table('memory_units')} SET consolidated_at = NULL WHERE bank_id = $1 AND fact_type IN ('experience', 'world')",
+                    bank_id,
+                )
+
                 # Reset consolidation timestamp
                 await conn.execute(
                     f"UPDATE {fq_table('banks')} SET last_consolidated_at = NULL WHERE bank_id = $1",
@@ -3358,6 +3413,59 @@ class MemoryEngine(MemoryEngineInterface):
                 )
 
                 return {"deleted_count": count or 0}
+
+    async def clear_observations_for_memory(
+        self,
+        bank_id: str,
+        memory_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> dict[str, int]:
+        """
+        Clear all observations derived from a specific memory and mark source memories
+        (including the given memory itself) for re-consolidation.
+
+        Unlike deleting the memory, the memory itself is preserved. This is useful
+        when you want to force re-consolidation of a specific memory's observations
+        without losing the underlying fact.
+
+        Args:
+            bank_id: Bank ID
+            memory_id: ID of the memory whose observations should be cleared
+            request_context: Request context for authentication.
+
+        Returns:
+            Dictionary with count of deleted observations
+        """
+        await self._authenticate_tenant(request_context)
+        pool = await self._get_pool()
+        deleted_count = 0
+
+        async with acquire_with_retry(pool) as conn:
+            async with conn.transaction():
+                import uuid as uuid_module
+
+                deleted_count = await self._delete_stale_observations_for_memories(conn, bank_id, [memory_id])
+
+                # Also reset this memory's own consolidated_at so it gets re-consolidated
+                # (the memory was a source for the deleted observations, so it needs new ones)
+                if deleted_count > 0:
+                    await conn.execute(
+                        f"""
+                        UPDATE {fq_table("memory_units")}
+                        SET consolidated_at = NULL
+                        WHERE id = $1
+                          AND bank_id = $2
+                          AND fact_type IN ('experience', 'world')
+                        """,
+                        uuid_module.UUID(memory_id),
+                        bank_id,
+                    )
+
+        if deleted_count > 0:
+            await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+
+        return {"deleted_count": deleted_count}
 
     async def run_consolidation(
         self,
@@ -3747,7 +3855,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             units = await conn.fetch(
                 f"""
-                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end, chunk_id
+                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end, chunk_id, proof_count
                 FROM {fq_table("memory_units")}
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, created_at DESC
@@ -3799,6 +3907,7 @@ class MemoryEngine(MemoryEngineInterface):
                         "occurred_end": row["occurred_end"].isoformat() if row["occurred_end"] else None,
                         "entities": ", ".join(entities) if entities else "",
                         "chunk_id": row["chunk_id"] if row["chunk_id"] else None,
+                        "proof_count": row["proof_count"] if row["proof_count"] is not None else 1,
                     }
                 )
 
@@ -4974,61 +5083,88 @@ class MemoryEngine(MemoryEngineInterface):
             )
             return count or 0
 
-    async def _invalidate_facts_from_mental_models(
+    async def _delete_stale_observations_for_memories(
         self,
         conn,
         bank_id: str,
         fact_ids: list[str],
     ) -> int:
         """
-        Remove fact IDs from observation source_memory_ids when memories are deleted.
+        Handle cleanup of observations when source memories are deleted.
 
-        Observations are stored in memory_units with fact_type='observation'
-        and have a source_memory_ids column (UUID[]) tracking their source memories.
+        For each observation referencing any of the deleted fact IDs:
+        1. Delete the observation (its text is stale without those source memories)
+        2. Reset consolidated_at=NULL on the remaining source memories so they get re-consolidated
+
+        Must be called within an active transaction, before the source memories are deleted.
 
         Args:
-            conn: Database connection
+            conn: Database connection (must be in an active transaction)
             bank_id: Bank identifier
-            fact_ids: List of fact IDs to remove from observations
+            fact_ids: List of fact IDs (as strings) that are being deleted
 
         Returns:
-            Number of observations updated
+            Number of observations deleted
         """
         if not fact_ids:
             return 0
 
-        # Convert string IDs to UUIDs for the array comparison
         import uuid as uuid_module
 
         fact_uuids = [uuid_module.UUID(fid) for fid in fact_ids]
 
-        # Update observations (memory_units with fact_type='observation')
-        # by removing the deleted fact IDs from source_memory_ids
-        # Use array subtraction: source_memory_ids - deleted_ids
-        result = await conn.execute(
+        # Find all observations referencing any of the deleted facts
+        affected_obs = await conn.fetch(
             f"""
-            UPDATE {fq_table("memory_units")}
-            SET source_memory_ids = (
-                SELECT COALESCE(array_agg(elem), ARRAY[]::uuid[])
-                FROM unnest(source_memory_ids) AS elem
-                WHERE elem != ALL($2::uuid[])
-            ),
-                updated_at = NOW()
+            SELECT id, source_memory_ids
+            FROM {fq_table("memory_units")}
             WHERE bank_id = $1
-            AND fact_type = 'observation'
-            AND source_memory_ids && $2::uuid[]
+              AND fact_type = 'observation'
+              AND source_memory_ids && $2::uuid[]
             """,
             bank_id,
             fact_uuids,
         )
 
-        # Parse the result to get number of updated rows
-        updated_count = int(result.split()[-1]) if result and "UPDATE" in result else 0
-        if updated_count > 0:
-            logger.info(
-                f"[OBSERVATIONS] Invalidated {len(fact_ids)} fact IDs from {updated_count} observations in bank {bank_id}"
+        if not affected_obs:
+            return 0
+
+        # Collect observation IDs to delete and remaining source memory IDs to reset
+        deleted_set = {str(uid) for uid in fact_uuids}
+        obs_ids = [obs["id"] for obs in affected_obs]
+        seen_remaining: set[str] = set()
+        remaining_source_ids: list[uuid_module.UUID] = []
+
+        for obs in affected_obs:
+            for src_id in obs["source_memory_ids"] or []:
+                src_str = str(src_id)
+                if src_str not in deleted_set and src_str not in seen_remaining:
+                    remaining_source_ids.append(src_id)
+                    seen_remaining.add(src_str)
+
+        # Delete the stale observations
+        await conn.execute(
+            f"DELETE FROM {fq_table('memory_units')} WHERE id = ANY($1::uuid[])",
+            obs_ids,
+        )
+
+        # Reset consolidated_at on remaining source memories so they get re-consolidated
+        if remaining_source_ids:
+            await conn.execute(
+                f"""
+                UPDATE {fq_table("memory_units")}
+                SET consolidated_at = NULL
+                WHERE id = ANY($1::uuid[])
+                  AND fact_type IN ('experience', 'world')
+                """,
+                remaining_source_ids,
             )
-        return updated_count
+
+        logger.info(
+            f"[OBSERVATIONS] Deleted {len(obs_ids)} observations, reset {len(remaining_source_ids)} "
+            f"source memories for re-consolidation in bank {bank_id}"
+        )
+        return len(obs_ids)
 
     # =========================================================================
     # MENTAL MODELS (CONSOLIDATED) - Read-only access to auto-consolidated mental models

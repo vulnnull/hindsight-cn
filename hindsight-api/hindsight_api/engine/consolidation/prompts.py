@@ -39,7 +39,8 @@ Rules:
 - Keep specifics: names, numbers, locations. Never abstract into general principles.
 - NEVER merge observations about different people or unrelated topics.
 - REDUNDANT: same info worded differently → update existing.
-- CONTRADICTION/UPDATE: capture both states with temporal markers ("used to X, now Y")."""
+- CONTRADICTION/UPDATE: capture both states with temporal markers ("used to X, now Y").
+- RESOLVE REFERENCES: When a new fact provides a concrete value that resolves a vague placeholder in an existing observation (e.g., a location that corresponds to "home country", "hometown", "birthplace", "native language", "her ex", "that city"), UPDATE the existing observation to embed the resolved value explicitly. Example: new fact mentions grandma in Sweden + existing observation says "moved from her home country" → update to state "home country is Sweden"."""
 
 
 def build_consolidation_prompt(observations_mission: str | None = None) -> str:
