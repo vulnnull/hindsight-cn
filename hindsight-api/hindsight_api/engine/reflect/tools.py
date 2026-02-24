@@ -129,7 +129,7 @@ async def tool_search_observations(
     pending_consolidation: int = 0,
 ) -> dict[str, Any]:
     """
-    Search consolidated observations using recall with include_observations.
+    Search consolidated observations using recall with include_source_facts.
 
     Observations are auto-generated from memories. Returns freshness info
     so the agent knows if it should also verify with recall().
@@ -146,72 +146,24 @@ async def tool_search_observations(
         pending_consolidation: Number of memories waiting to be consolidated
 
     Returns:
-        Dict with matching observations including freshness info
+        Dict with matching observations including freshness info and source memories
     """
-    from ..memory_engine import fq_table
-
-    # Use recall to search observations (they come back in results field when fact_type=["observation"])
     result = await memory_engine.recall_async(
         bank_id=bank_id,
         query=query,
-        fact_type=["observation"],  # Only retrieve observations
-        max_tokens=max_tokens,  # Token budget controls how many observations are returned
+        fact_type=["observation"],
+        max_tokens=max_tokens,
         enable_trace=False,
         request_context=request_context,
         tags=tags,
         tags_match=tags_match,
+        include_source_facts=True,
+        max_source_facts_tokens=-1,  # No token limit — include all source facts
         _connection_budget=1,
         _quiet=True,
     )
 
-    observations = []
-
-    # When fact_type=["observation"], results come back in `results` field as MemoryFact objects
-    # We need to fetch additional fields (proof_count, source_memory_ids) from the database
-    if result.results:
-        obs_ids = [m.id for m in result.results]
-
-        # Fetch proof_count and source_memory_ids for these observations
-        pool = await memory_engine._get_pool()
-        async with pool.acquire() as conn:
-            obs_rows = await conn.fetch(
-                f"""
-                SELECT id, proof_count, source_memory_ids
-                FROM {fq_table("memory_units")}
-                WHERE id = ANY($1::uuid[])
-                """,
-                obs_ids,
-            )
-            obs_data = {str(row["id"]): row for row in obs_rows}
-
-        for m in result.results:
-            # Get additional data from DB lookup
-            extra = obs_data.get(m.id, {})
-            proof_count = extra.get("proof_count", 1) if extra else 1
-            source_ids = extra.get("source_memory_ids", []) if extra else []
-            # Convert UUIDs to strings
-            source_memory_ids = [str(sid) for sid in (source_ids or [])]
-
-            # Determine staleness
-            is_stale = False
-            staleness_reason = None
-            if pending_consolidation > 0:
-                is_stale = True
-                staleness_reason = f"{pending_consolidation} memories pending consolidation"
-
-            observations.append(
-                {
-                    "id": str(m.id),
-                    "text": m.text,
-                    "proof_count": proof_count,
-                    "source_memory_ids": source_memory_ids,
-                    "tags": m.tags or [],
-                    "is_stale": is_stale,
-                    "staleness_reason": staleness_reason,
-                }
-            )
-
-    # Return freshness info (more understandable than raw pending_consolidation count)
+    is_stale = pending_consolidation > 0
     if pending_consolidation == 0:
         freshness = "up_to_date"
     elif pending_consolidation < 10:
@@ -221,8 +173,10 @@ async def tool_search_observations(
 
     return {
         "query": query,
-        "count": len(observations),
-        "observations": observations,
+        "count": len(result.results),
+        "observations": [m.model_dump() for m in result.results],
+        "source_facts": {k: v.model_dump() for k, v in (result.source_facts or {}).items()},
+        "is_stale": is_stale,
         "freshness": freshness,
     }
 
@@ -233,10 +187,10 @@ async def tool_recall(
     query: str,
     request_context: "RequestContext",
     max_tokens: int = 2048,
-    max_results: int = 50,
     tags: list[str] | None = None,
     tags_match: str = "any",
     connection_budget: int = 1,
+    max_chunk_tokens: int = 1000,
 ) -> dict[str, Any]:
     """
     Search memories using TEMPR retrieval.
@@ -250,18 +204,19 @@ async def tool_recall(
         query: Search query
         request_context: Request context for authentication
         max_tokens: Maximum tokens for results (default 2048)
-        max_results: Maximum number of results
         tags: Filter by tags (includes untagged memories)
         tags_match: How to match tags - "any" (OR), "all" (AND), or "exact"
         connection_budget: Max DB connections for this recall (default 1 for internal ops)
+        max_chunk_tokens: Maximum tokens for raw source chunk text (default 1000, always included)
 
     Returns:
-        Dict with list of matching memories
+        Dict with list of matching memories including raw chunk text
     """
+    include_chunks = True
     result = await memory_engine.recall_async(
         bank_id=bank_id,
         query=query,
-        fact_type=["experience", "world"],  # Exclude opinions and observations
+        fact_type=["experience", "world"],
         max_tokens=max_tokens,
         enable_trace=False,
         request_context=request_context,
@@ -269,24 +224,14 @@ async def tool_recall(
         tags_match=tags_match,
         _connection_budget=connection_budget,
         _quiet=True,  # Suppress logging for internal operations
+        include_chunks=include_chunks,
+        max_chunk_tokens=max_chunk_tokens,
     )
-
-    memories = []
-    for m in result.results[:max_results]:
-        memories.append(
-            {
-                "id": str(m.id),
-                "text": m.text,
-                "type": m.fact_type,
-                "entities": m.entities or [],
-                "occurred": m.occurred_start,  # Already ISO format string
-            }
-        )
 
     return {
         "query": query,
-        "count": len(memories),
-        "memories": memories,
+        "memories": [m.model_dump() for m in result.results],
+        "chunks": {k: v.model_dump() for k, v in (result.chunks or {}).items()},
     }
 
 

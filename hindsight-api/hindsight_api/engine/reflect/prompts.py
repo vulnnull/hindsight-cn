@@ -286,6 +286,7 @@ def build_system_prompt_for_tools(
             "- Format for clarity and readability with proper spacing and hierarchy",
             "- NEVER include memory IDs, UUIDs, or 'Memory references' in the answer text",
             "- Put IDs ONLY in the memory_ids/mental_model_ids/observation_ids arrays, not in the answer",
+            "- CRITICAL: This is a NON-CONVERSATIONAL system. NEVER ask follow-up questions, offer further assistance, or suggest next steps. Your answer must be complete and self-contained. The user cannot reply.",
         ]
     )
 
@@ -481,4 +482,6 @@ CRITICAL: Output ONLY the final synthesized answer. Do NOT include:
 - Meta-commentary about what you're doing ("I'll search...", "Let me analyze...")
 - Explanations of your reasoning process
 - Descriptions of your approach
-Just provide the direct answer with proper markdown formatting."""
+Just provide the direct answer with proper markdown formatting.
+
+CRITICAL: This is a NON-CONVERSATIONAL system. NEVER ask follow-up questions, offer to search again, suggest alternatives, or end with anything like "Would you like me to..." or "Let me know if...". The user cannot reply. Your answer must be complete and self-contained."""

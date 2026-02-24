@@ -4332,9 +4332,16 @@ class MemoryEngine(MemoryEngineInterface):
                 pending_consolidation=pending_consolidation,
             )
 
-        async def recall_fn(q: str, max_tokens: int = 4096) -> dict[str, Any]:
+        async def recall_fn(q: str, max_tokens: int = 4096, max_chunk_tokens: int = 1000) -> dict[str, Any]:
             return await tool_recall(
-                self, bank_id, q, request_context, max_tokens=max_tokens, tags=tags, tags_match=tags_match
+                self,
+                bank_id,
+                q,
+                request_context,
+                max_tokens=max_tokens,
+                tags=tags,
+                tags_match=tags_match,
+                max_chunk_tokens=max_chunk_tokens,
             )
 
         async def expand_fn(memory_ids: list[str], depth: str) -> dict[str, Any]:
@@ -4443,16 +4450,16 @@ class MemoryEngine(MemoryEngineInterface):
                             if used_memory_ids_set and memory_id not in used_memory_ids_set:
                                 continue  # Skip memories not actually used by the agent
                             seen_memory_ids.add(memory_id)
-                            fact_type = memory_data.get("type", "world")
+                            fact_type = memory_data.get("fact_type", "world")
                             if fact_type in based_on:
                                 based_on[fact_type].append(
                                     MemoryFact(
                                         id=memory_id,
                                         text=memory_data.get("text", ""),
                                         fact_type=fact_type,
-                                        context=None,
-                                        occurred_start=memory_data.get("occurred"),
-                                        occurred_end=memory_data.get("occurred"),
+                                        context=memory_data.get("context"),
+                                        occurred_start=memory_data.get("occurred_start"),
+                                        occurred_end=memory_data.get("occurred_end"),
                                     )
                                 )
                 elif tc.tool == "search_observations" and "observations" in tc.output:
@@ -4462,14 +4469,7 @@ class MemoryEngine(MemoryEngineInterface):
                             if used_observation_ids_set and obs_id not in used_observation_ids_set:
                                 continue  # Skip observations not actually used by the agent
                             seen_memory_ids.add(obs_id)
-                            based_on["observation"].append(
-                                MemoryFact(
-                                    id=obs_id,
-                                    text=obs_data.get("text", ""),
-                                    fact_type="observation",
-                                    context=None,
-                                )
-                            )
+                            based_on["observation"].append(MemoryFact(**obs_data))
 
             # Extract mental models from tool outputs - only include models the agent actually used
             # agent_result.used_mental_model_ids contains validated IDs from the done action

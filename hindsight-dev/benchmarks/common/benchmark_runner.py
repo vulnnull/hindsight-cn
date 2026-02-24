@@ -643,9 +643,13 @@ class BenchmarkRunner:
             for q in category_5_questions:
                 logging.debug(f"  Skipped category=5 question: {q.get('question', 'N/A')[:100]}")
 
-        # Filter out category 5 and questions without answers
-        qa_pairs = [pair for pair in qa_pairs if pair.get("category") != 5 and pair.get("answer")]
-        questions_to_eval = qa_pairs[:max_questions] if max_questions else qa_pairs
+        # Filter out category 5 and questions without answers, preserving original indices
+        indexed_pairs = [
+            (orig_idx, pair)
+            for orig_idx, pair in enumerate(qa_pairs)
+            if pair.get("category") != 5 and pair.get("answer")
+        ]
+        indexed_pairs_to_eval = indexed_pairs[:max_questions] if max_questions else indexed_pairs
 
         with Progress(
             SpinnerColumn(),
@@ -655,11 +659,12 @@ class BenchmarkRunner:
             console=console,
         ) as progress:
             task = progress.add_task(
-                f"[cyan]Evaluating QA for {item_id} - {len(questions_to_eval)} questions", total=len(questions_to_eval)
+                f"[cyan]Evaluating QA for {item_id} - {len(indexed_pairs_to_eval)} questions",
+                total=len(indexed_pairs_to_eval),
             )
 
             # Create tasks for all questions
-            async def process_question(qa):
+            async def process_question(orig_idx: int, qa: dict):
                 async with semaphore:
                     question = qa["question"]
                     correct_answer = qa["answer"]
@@ -683,6 +688,7 @@ class BenchmarkRunner:
                         ]
 
                         return {
+                            "question_index": orig_idx,
                             "question": question,
                             "correct_answer": correct_answer,
                             "predicted_answer": predicted_answer,
@@ -696,9 +702,10 @@ class BenchmarkRunner:
                         logging.exception(f"Failed to answer question: {question[:100]}")
                         # Mark as invalid if answer generation failed
                         console.print(
-                            f"      [red]✗[/red] Failed to answer question: {question[:50]}... Error: {str(e)[:100]}"
+                            f"      [red]✗[/red] Failed to answer question [{orig_idx}]: {question[:50]}... Error: {str(e)[:100]}"
                         )
                         return {
+                            "question_index": orig_idx,
                             "question": question,
                             "correct_answer": correct_answer,
                             "predicted_answer": "ERROR: Failed to generate answer",
@@ -709,7 +716,7 @@ class BenchmarkRunner:
                             "error": str(e),
                         }
 
-            question_tasks = [process_question(qa) for qa in questions_to_eval]
+            question_tasks = [process_question(orig_idx, qa) for orig_idx, qa in indexed_pairs_to_eval]
 
             # Use as_completed to update progress as results come in
             results = []

@@ -83,7 +83,7 @@ app, rt = fast_app()
 
 def load_locomo_results(mode: str = "search") -> dict[str, Any] | None:
     """Load LoComo benchmark results."""
-    filename = "benchmark_results_think.json" if mode == "think" else "benchmark_results.json"
+    filename = "benchmark_results_reflect.json" if mode == "reflect" else "benchmark_results.json"
     results_path = BENCHMARKS_DIR / "locomo" / "results" / filename
 
     if not results_path.exists():
@@ -136,7 +136,7 @@ def get():
                 Select(
                     Option("-- Choose a benchmark --", value="", selected=True),
                     Option("LoComo (search mode)", value="/locomo/search"),
-                    Option("LoComo (think mode)", value="/locomo/think"),
+                    Option("LoComo (reflect mode)", value="/locomo/reflect"),
                     Option("LongMemEval", value="/longmemeval"),
                     onchange="if(this.value) window.location.href = this.value;",
                     cls="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
@@ -234,7 +234,7 @@ def get_locomo(mode: str, filter_type: str = "all", category_filter: str = "all"
                     elif result.get("is_correct"):
                         category_stats[category]["correct"] += 1
 
-    mode_label = " (Think Mode)" if mode == "think" else " (Search Mode)"
+    mode_label = " (Reflect Mode)" if mode == "reflect" else " (Search Mode)"
 
     # Overall stats
     stats_html = Div(
@@ -550,7 +550,7 @@ def get_locomo_item(mode: str, item_idx: int, filter_type: str = "all", category
             category_stats[cat_id]["invalid"] = stats.get("invalid", 0)
 
     # Overall stats for this item
-    mode_label = " (Think Mode)" if mode == "think" else " (Search Mode)"
+    mode_label = " (Reflect Mode)" if mode == "reflect" else " (Search Mode)"
     stats_html = Div(
         H3(f"{item_id}{mode_label} - Performance", cls="text-2xl font-bold text-foreground mb-6"),
         Div(
@@ -759,6 +759,7 @@ def get_locomo_item(mode: str, item_idx: int, filter_type: str = "all", category
         correct_answer = result.get("correct_answer", "")
         predicted_answer = result.get("predicted_answer", "")
         category = get_category_name(result.get("category", "Unknown"))
+        question_index = result.get("question_index", q_idx)
 
         icon = "⚠️" if is_invalid else ("✅" if is_correct else "❌")
         border_class = (
@@ -771,7 +772,7 @@ def get_locomo_item(mode: str, item_idx: int, filter_type: str = "all", category
             Div(
                 # Header
                 Div(
-                    P(f"{icon} Question {q_idx + 1}", cls="text-lg font-semibold text-foreground"),
+                    P(f"{icon} Question #{question_index}", cls="text-lg font-semibold text-foreground"),
                     P(f"Category: {category}", cls="text-sm text-muted-foreground"),
                     cls="mb-4",
                 ),
@@ -1317,6 +1318,7 @@ def get_longmemeval_item(item_idx: int, filter_type: str = "all"):
         correct_answer = result.get("correct_answer", "")
         predicted_answer = result.get("predicted_answer", "")
         category = result.get("category", "Unknown")
+        question_index = result.get("question_index", q_idx)
 
         icon = "⚠️" if is_invalid else ("✅" if is_correct else "❌")
         border_class = (
@@ -1329,7 +1331,7 @@ def get_longmemeval_item(item_idx: int, filter_type: str = "all"):
             Div(
                 # Header
                 Div(
-                    P(f"{icon} Question {q_idx + 1}", cls="text-lg font-semibold text-foreground"),
+                    P(f"{icon} Question #{question_index}", cls="text-lg font-semibold text-foreground"),
                     P(f"Category: {category}", cls="text-sm text-muted-foreground"),
                     cls="mb-4",
                 ),

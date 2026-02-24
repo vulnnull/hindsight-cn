@@ -185,27 +185,23 @@ Answer:
             return f"Error generating answer: {str(e)}", "Error occurred during answer generation.", None
 
 
-class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
-    """LoComo answer generator using the think API instead of search + LLM.
+class LoComoReflectAnswerGenerator(LLMAnswerGenerator):
+    """LoComo answer generator using the reflect API instead of search + LLM.
 
-    This generator performs its own retrieval internally via the think API,
+    This generator performs its own retrieval internally via the reflect API,
     so it doesn't need external search to be performed by the benchmark runner.
     """
 
-    def __init__(self, memory: "MemoryEngine", agent_id: str, thinking_budget: int = 500):
-        """Initialize with memory instance and agent_id.
+    def __init__(self, memory: "MemoryEngine"):
+        """Initialize with memory instance.
 
         Args:
             memory: MemoryEngine instance
-            agent_id: Agent identifier for think queries
-            thinking_budget: Budget for memory exploration
         """
         self.memory = memory
-        self.agent_id = agent_id
-        self.thinking_budget = thinking_budget
 
     def needs_external_search(self) -> bool:
-        """Think API does its own retrieval, so no external search needed."""
+        """Reflect API does its own retrieval, so no external search needed."""
         return False
 
     async def generate_answer(
@@ -217,72 +213,88 @@ class LoComoThinkAnswerGenerator(LLMAnswerGenerator):
         bank_id: Optional[str] = None,
     ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
         """
-        Generate answer using the integrated think API.
+        Generate answer using the integrated reflect API.
 
-        The think API performs both search and answer generation in a single call,
-        combining agent facts, world facts, and opinions to formulate a response.
+        The reflect API performs both search and answer generation in a single call,
+        combining world facts, experience facts, and mental models to formulate a response.
 
         Args:
             question: Question to answer
-            recall_result: Not used (empty dict), as think does its own retrieval
-            question_date: Date when the question was asked (currently not used by think API)
-            question_type: Question category (unused in think API)
-            bank_id: Not used - think API uses self.agent_id from constructor
+            recall_result: Not used (empty dict), as reflect does its own retrieval
+            question_date: Date when the question was asked (currently not used by reflect API)
+            question_type: Question category (unused in reflect API)
+            bank_id: Bank ID to query
 
         Returns:
             Tuple of (answer, reasoning, retrieved_memories)
-            - retrieved_memories: Combined list of all facts from based_on (world, agent, opinion)
+            - retrieved_memories: Combined list of all facts from based_on
         """
+        from hindsight_api.models import RequestContext
+
         try:
-            # Use the think API which does both search and answer generation
-            result = await self.memory.think_async(
-                agent_id=self.agent_id,
-                query=question,
-                thinking_budget=self.thinking_budget,
+            question_date_str = ""
+            if question_date:
+                question_date_str = f"\n# CURRENT DATE:\nThe question is being asked on: {question_date.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+
+            query = f"""
+# CONTEXT:
+You have access to facts and entities from a conversation.
+{question_date_str}
+# INSTRUCTIONS:
+1. Search thoroughly across all available memories before answering - do not stop at the first result
+2. Keep searching with different queries until you have a comprehensive answer
+3. Carefully analyze all provided memories
+4. Pay special attention to the timestamps to determine the answer
+5. If the question asks about a specific event or fact, look for direct evidence in the memories
+6. If the memories contain contradictory information or multiple instances of an event, say them all
+7. Always convert relative time references to specific dates, months, or years.
+8. Be as specific as possible when talking about people, places, and events
+9. If the answer is not explicitly stated in the memories, use logical reasoning based on the information available to answer (e.g. calculate duration of an event from different memories).
+
+Question: {question}
+"""
+
+            from hindsight_api.engine.memory_engine import Budget
+
+            result = await self.memory.reflect_async(
+                bank_id=bank_id,
+                query=query,
+                budget=Budget.HIGH,
+                request_context=RequestContext(),
             )
 
-            # Extract answer and reasoning
             answer = result.text
 
-            # Extract memories from based_on
+            # Flatten all facts from based_on into retrieved_memories
             based_on = result.based_on
-            world_facts = based_on.get("world", [])
-            agent_facts = based_on.get("agent", [])
-            opinion_facts = based_on.get("opinion", [])
-
-            # Combine all facts into retrieved_memories
             retrieved_memories = []
+            for facts in based_on.values():
+                if isinstance(facts, list):
+                    for fact in facts:
+                        if hasattr(fact, "model_dump"):
+                            retrieved_memories.append(fact.model_dump())
+                        elif isinstance(fact, dict):
+                            retrieved_memories.append(fact)
 
-            # Add world facts
-            for fact in world_facts:
-                retrieved_memories.append(fact.model_dump())
-
-            for fact in agent_facts:
-                retrieved_memories.append(fact.model_dump())
-            for fact in opinion_facts:
-                retrieved_memories.append(fact.model_dump())
-            # Build reasoning summary
-            num_world = len(world_facts)
-            num_agent = len(agent_facts)
-            num_opinion = len(opinion_facts)
-
-            reasoning = f"Think API: {num_world} world facts, {num_agent} agent facts, {num_opinion} opinions"
+            counts = {k: len(v) for k, v in based_on.items() if isinstance(v, list)}
+            reasoning = "Reflect API: " + ", ".join(f"{v} {k}" for k, v in counts.items())
 
             return answer, reasoning, retrieved_memories
         except Exception as e:
-            return f"Error generating answer: {str(e)}", "Error occurred during think API call.", []
+            return f"Error generating answer: {str(e)}", "Error occurred during reflect API call.", []
 
 
 async def run_benchmark(
     max_conversations: int = None,
     max_questions_per_conv: int = None,
     skip_ingestion: bool = False,
-    use_think: bool = False,
+    use_reflect: bool = False,
     conversation: str = None,
     api_url: str = None,
     max_concurrent_questions_override: int = None,
     only_failed: bool = False,
     only_invalid: bool = False,
+    question_index: int = None,
 ):
     """
     Run the LoComo benchmark.
@@ -291,11 +303,12 @@ async def run_benchmark(
         max_conversations: Maximum number of conversations to evaluate (None for all)
         max_questions_per_conv: Maximum questions per conversation (None for all)
         skip_ingestion: Whether to skip ingestion and use existing data
-        use_think: Whether to use the think API instead of search + LLM
+        use_reflect: Whether to use the reflect API instead of search + LLM
         conversation: Specific conversation ID to run (e.g., "conv-26")
         api_url: Optional API URL to connect to (default: use local memory)
         only_failed: If True, only run conversations that have failed questions (is_correct=False)
         only_invalid: If True, only run conversations that have invalid questions (is_invalid=True)
+        question_index: Run only the question at this index (0-based) within each conversation
     """
     from rich.console import Console
 
@@ -305,7 +318,7 @@ async def run_benchmark(
     failed_conversation_ids = set()
     invalid_conversation_ids = set()
     if only_failed or only_invalid:
-        suffix = "_think" if use_think else ""
+        suffix = "_reflect" if use_reflect else ""
         results_filename = f"benchmark_results{suffix}.json"
         results_path = Path(__file__).parent / "results" / results_filename
 
@@ -358,11 +371,9 @@ async def run_benchmark(
         memory = await create_memory_engine()
 
     # Select answer generator based on mode
-    from hindsight_api.engine.memory_engine import Budget
-
-    if use_think:
-        console.print("[blue]Mode: think (using think API)[/blue]")
-        answer_generator = LoComoThinkAnswerGenerator(memory=memory, agent_id="locomo", thinking_budget=500)
+    if use_reflect:
+        console.print("[blue]Mode: reflect (using reflect API)[/blue]")
+        answer_generator = LoComoReflectAnswerGenerator(memory=memory)
         max_concurrent_questions = max_concurrent_questions_override or 4
         eval_semaphore_size = 4
     else:
@@ -398,8 +409,25 @@ async def run_benchmark(
 
         dataset.load = filtered_load
 
+    # Filter to a single question by index if requested
+    if question_index is not None:
+        original_get_qa_pairs = dataset.get_qa_pairs
+
+        def filtered_get_qa_pairs(item: Dict) -> List[Dict[str, Any]]:
+            pairs = original_get_qa_pairs(item)
+            if question_index >= len(pairs):
+                console.print(
+                    f"[red]Error: question index {question_index} out of range (conversation has {len(pairs)} questions)[/red]"
+                )
+                return []
+            selected = pairs[question_index]
+            console.print(f"[cyan]Running single question [{question_index}]: {selected['question']}[/cyan]")
+            return [selected]
+
+        dataset.get_qa_pairs = filtered_get_qa_pairs
+
     # Determine output filename based on mode
-    suffix = "_think" if use_think else ""
+    suffix = "_reflect" if use_reflect else ""
     results_filename = f"benchmark_results{suffix}.json"
     output_path = Path(__file__).parent / "results" / results_filename
 
@@ -440,12 +468,12 @@ async def run_benchmark(
     console.print(f"\n[green]✓[/green] Results saved incrementally to {output_path}")
 
     # Generate markdown table
-    generate_markdown_table(results, use_think=use_think)
+    generate_markdown_table(results, use_reflect=use_reflect)
 
     return results
 
 
-def generate_markdown_table(results: dict, use_think: bool = False):
+def generate_markdown_table(results: dict, use_reflect: bool = False):
     """
     Generate a markdown table with benchmark results.
 
@@ -463,7 +491,7 @@ def generate_markdown_table(results: dict, use_think: bool = False):
 
     # Build markdown content
     lines = []
-    mode_str = " (Think Mode)" if use_think else ""
+    mode_str = " (Reflect Mode)" if use_reflect else ""
     lines.append(f"# LoComo Benchmark Results{mode_str}")
     lines.append("")
 
@@ -514,7 +542,7 @@ def generate_markdown_table(results: dict, use_think: bool = False):
         )
 
     # Write to file with suffix
-    suffix = "_think" if use_think else ""
+    suffix = "_reflect" if use_reflect else ""
     output_file = Path(__file__).parent / "results" / f"results_table{suffix}.md"
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text("\n".join(lines))
@@ -531,7 +559,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-conversations", type=int, default=None, help="Maximum conversations to evaluate")
     parser.add_argument("--max-questions", type=int, default=None, help="Maximum questions per conversation")
     parser.add_argument("--skip-ingestion", action="store_true", help="Skip ingestion and use existing data")
-    parser.add_argument("--use-think", action="store_true", help="Use think API instead of search + LLM")
+    parser.add_argument("--use-reflect", action="store_true", help="Use reflect API instead of search + LLM")
     parser.add_argument(
         "--conversation", type=str, default=None, help='Run only specific conversation (e.g., "conv-26")'
     )
@@ -557,6 +585,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Only run conversations that have invalid questions (is_invalid=True). Requires existing results file.",
     )
+    parser.add_argument(
+        "--question-index",
+        type=int,
+        default=None,
+        help="Run only the question at this 0-based index within each conversation (e.g., 11)",
+    )
 
     args = parser.parse_args()
 
@@ -569,11 +603,12 @@ if __name__ == "__main__":
             max_conversations=args.max_conversations,
             max_questions_per_conv=args.max_questions,
             skip_ingestion=args.skip_ingestion,
-            use_think=args.use_think,
+            use_reflect=args.use_reflect,
             conversation=args.conversation,
             api_url=args.api_url,
             max_concurrent_questions_override=args.max_concurrent_questions,
             only_failed=args.only_failed,
             only_invalid=args.only_invalid,
+            question_index=args.question_index,
         )
     )

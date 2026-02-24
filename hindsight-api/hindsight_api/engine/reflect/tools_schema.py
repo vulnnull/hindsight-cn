@@ -96,6 +96,10 @@ TOOL_RECALL = {
                     "type": "integer",
                     "description": "Optional limit on result size (default 2048). Use higher values for broader searches.",
                 },
+                "max_chunk_tokens": {
+                    "type": "integer",
+                    "description": "Maximum tokens for raw source chunk text included alongside each memory fact (default 1000, min 1000). Chunks provide the surrounding context the fact was extracted from. Increase for broader context.",
+                },
             },
             "required": ["reason", "query"],
         },
