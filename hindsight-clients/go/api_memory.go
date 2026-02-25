@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"reflect"
 )
 
 
@@ -287,6 +288,9 @@ type ApiGetGraphRequest struct {
 	bankId string
 	type_ *string
 	limit *int32
+	q *string
+	tags *[]*string
+	tagsMatch *string
 	authorization *string
 }
 
@@ -297,6 +301,21 @@ func (r ApiGetGraphRequest) Type_(type_ string) ApiGetGraphRequest {
 
 func (r ApiGetGraphRequest) Limit(limit int32) ApiGetGraphRequest {
 	r.limit = &limit
+	return r
+}
+
+func (r ApiGetGraphRequest) Q(q string) ApiGetGraphRequest {
+	r.q = &q
+	return r
+}
+
+func (r ApiGetGraphRequest) Tags(tags []*string) ApiGetGraphRequest {
+	r.tags = &tags
+	return r
+}
+
+func (r ApiGetGraphRequest) TagsMatch(tagsMatch string) ApiGetGraphRequest {
+	r.tagsMatch = &tagsMatch
 	return r
 }
 
@@ -356,6 +375,26 @@ func (a *MemoryAPIService) GetGraphExecute(r ApiGetGraphRequest) (*GraphDataResp
 	} else {
 		var defaultValue int32 = 1000
 		r.limit = &defaultValue
+	}
+	if r.q != nil {
+		parameterAddToHeaderOrQuery(localVarQueryParams, "q", r.q, "form", "")
+	}
+	if r.tags != nil {
+		t := *r.tags
+		if reflect.TypeOf(t).Kind() == reflect.Slice {
+			s := reflect.ValueOf(t)
+			for i := 0; i < s.Len(); i++ {
+				parameterAddToHeaderOrQuery(localVarQueryParams, "tags", s.Index(i).Interface(), "form", "multi")
+			}
+		} else {
+			parameterAddToHeaderOrQuery(localVarQueryParams, "tags", t, "form", "multi")
+		}
+	}
+	if r.tagsMatch != nil {
+		parameterAddToHeaderOrQuery(localVarQueryParams, "tags_match", r.tagsMatch, "form", "")
+	} else {
+		var defaultValue string = "all_strict"
+		r.tagsMatch = &defaultValue
 	}
 	// to determine the Content-Type header
 	localVarHTTPContentTypes := []string{}

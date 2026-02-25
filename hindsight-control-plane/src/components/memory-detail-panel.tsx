@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { TagList } from "@/components/ui/tag-list";
 import { Copy, Check, X, Loader2, Calendar } from "lucide-react";
 import { DocumentChunkModal } from "./document-chunk-modal";
 import { MemoryDetailModal } from "./memory-detail-modal";
@@ -208,21 +209,7 @@ export function MemoryDetailPanel({
                 )}
 
               {/* Tags */}
-              {displayMemory.tags && displayMemory.tags.length > 0 && (
-                <div>
-                  <div className="text-xs font-bold text-muted-foreground uppercase mb-3">Tags</div>
-                  <div className="flex flex-wrap gap-2">
-                    {displayMemory.tags.map((tag: string, i: number) => (
-                      <span
-                        key={i}
-                        className="text-sm px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <TagList tags={displayMemory.tags} size="md" showLabel />
 
               {/* Source Memories (for observations) */}
               {displayMemory.source_memories && displayMemory.source_memories.length > 0 && (
@@ -472,16 +459,7 @@ export function MemoryDetailPanel({
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-2`}>
                   Tags
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {displayMemory.tags.map((tag: string, i: number) => (
-                    <span
-                      key={i}
-                      className={`${compact ? "text-[10px] px-1.5 py-0.5" : "text-xs px-2 py-1"} rounded bg-amber-500/10 text-amber-600 dark:text-amber-400`}
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
+                <TagList tags={displayMemory.tags} size={compact ? "xs" : "sm"} />
               </div>
             )}
 

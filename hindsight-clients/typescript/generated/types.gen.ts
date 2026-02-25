@@ -2165,6 +2165,18 @@ export type GetGraphData = {
      * Limit
      */
     limit?: number;
+    /**
+     * Q
+     */
+    q?: string | null;
+    /**
+     * Tags
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     */
+    tags_match?: string;
   };
   url: "/v1/default/banks/{bank_id}/graph";
 };

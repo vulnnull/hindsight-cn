@@ -186,6 +186,66 @@ response = client.recall(
 # [/docs:recall-tags-all]
 
 
+# [docs:recall-tags-any]
+response = client.recall(
+    bank_id="my-bank",
+    query="communication preferences",
+    tags=["user:alice"],
+    tags_match="any",  # default
+)
+# Returns:
+#   [match]    "Alice prefers async communication"     — has "user:alice"
+#   [no match] "Bob dislikes long meetings"             — no overlap with ["user:alice"]
+#   [match]    "Team uses Slack for announcements"      — has "user:alice"
+#   [match]    "Company policy: no meetings on Fridays" — untagged, included by default
+# [/docs:recall-tags-any]
+
+
+# [docs:recall-tags-any-strict]
+response = client.recall(
+    bank_id="my-bank",
+    query="communication preferences",
+    tags=["user:alice"],
+    tags_match="any_strict",
+)
+# Returns:
+#   [match]    "Alice prefers async communication"     — has "user:alice"
+#   [no match] "Bob dislikes long meetings"             — no overlap with ["user:alice"]
+#   [match]    "Team uses Slack for announcements"      — has "user:alice"
+#   [no match] "Company policy: no meetings on Fridays" — untagged, excluded
+# [/docs:recall-tags-any-strict]
+
+
+# [docs:recall-tags-all-mode]
+response = client.recall(
+    bank_id="my-bank",
+    query="communication tools",
+    tags=["user:alice", "team"],
+    tags_match="all",
+)
+# Returns:
+#   [no match] "Alice prefers async communication"     — missing "team"
+#   [no match] "Bob dislikes long meetings"             — missing both tags
+#   [match]    "Team uses Slack for announcements"      — has both "user:alice" and "team"
+#   [match]    "Company policy: no meetings on Fridays" — untagged, included by default
+# [/docs:recall-tags-all-mode]
+
+
+# [docs:recall-tags-all-strict]
+response = client.recall(
+    bank_id="my-bank",
+    query="communication tools",
+    tags=["user:alice", "team"],
+    tags_match="all_strict",
+)
+# Returns:
+#   [no match] "Alice prefers async communication"     — missing "team"
+#   [no match] "Bob dislikes long meetings"             — missing both tags
+#   [match]    "Team uses Slack for announcements"      — has both "user:alice" and "team"
+#   [no match] "Company policy: no meetings on Fridays" — untagged, excluded
+# [/docs:recall-tags-all-strict]
+
+
 # =============================================================================
 # Legacy snippets for v0.3 docs (kept for backward compatibility)
 # =============================================================================

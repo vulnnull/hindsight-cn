@@ -890,3 +890,40 @@ async def test_list_tags_ordered_by_count(api_client):
     # common (3) should come before medium (2) which should come before rare (1)
     assert tags.index("common") < tags.index("medium")
     assert tags.index("medium") < tags.index("rare")
+
+
+@pytest.mark.asyncio
+async def test_list_memories_includes_tags(api_client, test_bank_id):
+    """Test that list memories endpoint returns tags for each memory unit.
+
+    Regression test: tags were previously omitted from the SELECT query in
+    list_memory_units, causing the memory dialog in the UI to show no tags
+    even when memories had been stored with tags.
+    """
+    tags = ["user_alice", "session_xyz", "project_alpha", "team_eng", "env_prod", "region_us"]
+
+    response = await api_client.post(
+        f"/v1/default/banks/{test_bank_id}/memories",
+        json={
+            "items": [
+                {
+                    "content": "Alice is a senior engineer on the platform team.",
+                    "tags": tags,
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+
+    # List memories and verify all tags are returned
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/memories/list")
+    assert response.status_code == 200
+    result = response.json()
+
+    assert result["total"] > 0
+    memory_item = next((item for item in result["items"] if "Alice" in item["text"]), None)
+    assert memory_item is not None, "Should find the stored memory"
+    assert "tags" in memory_item, "Memory item must include a 'tags' field"
+    assert set(memory_item["tags"]) == set(tags), (
+        f"All {len(tags)} tags should be returned, got: {memory_item['tags']}"
+    )

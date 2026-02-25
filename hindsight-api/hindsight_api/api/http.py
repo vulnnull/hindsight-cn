@@ -1922,11 +1922,16 @@ def _register_routes(app: FastAPI):
         bank_id: str,
         type: str | None = None,
         limit: int = 1000,
+        q: str | None = None,
+        tags: list[str] | None = Query(None),
+        tags_match: str = "all_strict",
         request_context: RequestContext = Depends(get_request_context),
     ):
         """Get graph data from database, filtered by bank_id and optionally by type."""
         try:
-            data = await app.state.memory.get_graph_data(bank_id, type, limit=limit, request_context=request_context)
+            data = await app.state.memory.get_graph_data(
+                bank_id, type, limit=limit, q=q, tags=tags, tags_match=tags_match, request_context=request_context
+            )
             return data
         except (AuthenticationError, HTTPException):
             raise

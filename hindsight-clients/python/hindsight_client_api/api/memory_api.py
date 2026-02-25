@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
 from pydantic import Field, StrictInt, StrictStr
-from typing import Any, Optional
+from typing import Any, List, Optional
 from typing_extensions import Annotated
 from hindsight_client_api.models.clear_memory_observations_response import ClearMemoryObservationsResponse
 from hindsight_client_api.models.delete_response import DeleteResponse
@@ -643,6 +643,9 @@ class MemoryApi:
         bank_id: StrictStr,
         type: Optional[StrictStr] = None,
         limit: Optional[StrictInt] = None,
+        q: Optional[StrictStr] = None,
+        tags: Optional[List[Optional[StrictStr]]] = None,
+        tags_match: Optional[StrictStr] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -667,6 +670,12 @@ class MemoryApi:
         :type type: str
         :param limit:
         :type limit: int
+        :param q:
+        :type q: str
+        :param tags:
+        :type tags: List[Optional[str]]
+        :param tags_match:
+        :type tags_match: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -695,6 +704,9 @@ class MemoryApi:
             bank_id=bank_id,
             type=type,
             limit=limit,
+            q=q,
+            tags=tags,
+            tags_match=tags_match,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -723,6 +735,9 @@ class MemoryApi:
         bank_id: StrictStr,
         type: Optional[StrictStr] = None,
         limit: Optional[StrictInt] = None,
+        q: Optional[StrictStr] = None,
+        tags: Optional[List[Optional[StrictStr]]] = None,
+        tags_match: Optional[StrictStr] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -747,6 +762,12 @@ class MemoryApi:
         :type type: str
         :param limit:
         :type limit: int
+        :param q:
+        :type q: str
+        :param tags:
+        :type tags: List[Optional[str]]
+        :param tags_match:
+        :type tags_match: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -775,6 +796,9 @@ class MemoryApi:
             bank_id=bank_id,
             type=type,
             limit=limit,
+            q=q,
+            tags=tags,
+            tags_match=tags_match,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -803,6 +827,9 @@ class MemoryApi:
         bank_id: StrictStr,
         type: Optional[StrictStr] = None,
         limit: Optional[StrictInt] = None,
+        q: Optional[StrictStr] = None,
+        tags: Optional[List[Optional[StrictStr]]] = None,
+        tags_match: Optional[StrictStr] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -827,6 +854,12 @@ class MemoryApi:
         :type type: str
         :param limit:
         :type limit: int
+        :param q:
+        :type q: str
+        :param tags:
+        :type tags: List[Optional[str]]
+        :param tags_match:
+        :type tags_match: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -855,6 +888,9 @@ class MemoryApi:
             bank_id=bank_id,
             type=type,
             limit=limit,
+            q=q,
+            tags=tags,
+            tags_match=tags_match,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -878,6 +914,9 @@ class MemoryApi:
         bank_id,
         type,
         limit,
+        q,
+        tags,
+        tags_match,
         authorization,
         _request_auth,
         _content_type,
@@ -888,6 +927,7 @@ class MemoryApi:
         _host = None
 
         _collection_formats: Dict[str, str] = {
+            'tags': 'multi',
         }
 
         _path_params: Dict[str, str] = {}
@@ -910,6 +950,18 @@ class MemoryApi:
         if limit is not None:
             
             _query_params.append(('limit', limit))
+            
+        if q is not None:
+            
+            _query_params.append(('q', q))
+            
+        if tags is not None:
+            
+            _query_params.append(('tags', tags))
+            
+        if tags_match is not None:
+            
+            _query_params.append(('tags_match', tags_match))
             
         # process the header parameters
         if authorization is not None:

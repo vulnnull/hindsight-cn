@@ -452,7 +452,7 @@ impl ApiClient {
         _verbose: bool,
     ) -> Result<types::GraphDataResponse> {
         self.runtime.block_on(async {
-            let response = self.client.get_graph(bank_id, limit, type_filter, None).await?;
+            let response = self.client.get_graph(bank_id, limit, type_filter, None, None, None, None).await?;
             Ok(response.into_inner())
         })
     }

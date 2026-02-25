@@ -14,6 +14,8 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get("type") || searchParams.get("fact_type") || undefined;
     const limitParam = searchParams.get("limit");
     const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+    const q = searchParams.get("q") || undefined;
+    const tags = searchParams.getAll("tags");
 
     const response = await sdk.getGraph({
       client: lowLevelClient,
@@ -21,6 +23,9 @@ export async function GET(request: NextRequest) {
       query: {
         type: type,
         limit: limit,
+        q,
+        tags: tags.length > 0 ? tags : undefined,
+        tags_match: tags.length > 0 ? "all_strict" : undefined,
       },
     });
 

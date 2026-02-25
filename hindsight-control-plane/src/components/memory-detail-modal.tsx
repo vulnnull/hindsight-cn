@@ -5,7 +5,8 @@ import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Calendar, Tag, Users, FileText, Layers } from "lucide-react";
+import { Loader2, Calendar, Users, FileText, Layers } from "lucide-react";
+import { TagList } from "@/components/ui/tag-list";
 import { Button } from "@/components/ui/button";
 
 interface SourceMemory {
@@ -212,24 +213,7 @@ export function MemoryDetailModal({ memoryId, onClose }: MemoryDetailModalProps)
                 )}
 
                 {/* Tags */}
-                {memory.tags && memory.tags.length > 0 && (
-                  <div>
-                    <div className="text-xs font-bold text-muted-foreground uppercase mb-2 flex items-center gap-1">
-                      <Tag className="w-3 h-3" />
-                      Tags
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {memory.tags.map((tag, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded text-xs"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <TagList tags={memory.tags} showLabel />
 
                 {/* Source Memories */}
                 {memory.source_memories && memory.source_memories.length > 0 && (
@@ -407,24 +391,7 @@ export function MemoryDetailModal({ memoryId, onClose }: MemoryDetailModalProps)
                     )}
 
                     {/* Tags */}
-                    {memory.tags && memory.tags.length > 0 && (
-                      <div>
-                        <div className="text-xs font-bold text-muted-foreground uppercase mb-2 flex items-center gap-1">
-                          <Tag className="w-3 h-3" />
-                          Tags
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {memory.tags.map((tag, idx) => (
-                            <span
-                              key={idx}
-                              className="px-2 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded text-xs"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    <TagList tags={memory.tags} showLabel />
 
                     {/* ID */}
                     <div>
@@ -542,6 +509,12 @@ export function MemoryDetailModal({ memoryId, onClose }: MemoryDetailModalProps)
                               </div>
                             </div>
                           </>
+                        )}
+
+                        {document.tags && document.tags.length > 0 && (
+                          <div className="p-3 bg-muted rounded-lg">
+                            <TagList tags={document.tags} showLabel />
+                          </div>
                         )}
 
                         <div className="p-3 bg-muted rounded-lg">

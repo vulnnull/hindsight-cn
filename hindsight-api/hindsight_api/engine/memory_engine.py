@@ -3508,6 +3508,9 @@ class MemoryEngine(MemoryEngineInterface):
         fact_type: str | None = None,
         *,
         limit: int = 1000,
+        q: str | None = None,
+        tags: list[str] | None = None,
+        tags_match: str = "all_strict",
         request_context: "RequestContext",
     ):
         """
@@ -3517,6 +3520,9 @@ class MemoryEngine(MemoryEngineInterface):
             bank_id: Filter by bank ID
             fact_type: Filter by fact type (world, experience, opinion)
             limit: Maximum number of items to return (default: 1000)
+            q: Full-text search query (searches text and context fields)
+            tags: Filter by tags
+            tags_match: Tag matching mode (default: all_strict)
             request_context: Request context for authentication.
 
         Returns:
@@ -3539,6 +3545,20 @@ class MemoryEngine(MemoryEngineInterface):
                 param_count += 1
                 query_conditions.append(f"fact_type = ${param_count}")
                 query_params.append(fact_type)
+
+            if q:
+                param_count += 1
+                query_conditions.append(f"(text ILIKE ${param_count} OR context ILIKE ${param_count})")
+                query_params.append(f"%{q}%")
+
+            if tags:
+                from .search.tags import build_tags_where_clause_simple
+
+                tag_clause = build_tags_where_clause_simple(tags, param_count + 1, match=tags_match)
+                if tag_clause:
+                    query_conditions.append(tag_clause.removeprefix("AND "))
+                    param_count += 1
+                    query_params.append(tags)
 
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
 
@@ -3855,7 +3875,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             units = await conn.fetch(
                 f"""
-                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end, chunk_id, proof_count
+                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end, chunk_id, proof_count, tags
                 FROM {fq_table("memory_units")}
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, created_at DESC
@@ -3908,6 +3928,7 @@ class MemoryEngine(MemoryEngineInterface):
                         "entities": ", ".join(entities) if entities else "",
                         "chunk_id": row["chunk_id"] if row["chunk_id"] else None,
                         "proof_count": row["proof_count"] if row["proof_count"] is not None else 1,
+                        "tags": list(row["tags"]) if row["tags"] else [],
                     }
                 )
 

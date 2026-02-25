@@ -83,6 +83,34 @@ paths:
           title: Limit
           type: integer
         style: form
+      - explode: true
+        in: query
+        name: q
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: tags
+        required: false
+        schema:
+          items:
+            nullable: true
+            type: string
+          nullable: true
+          type: array
+        style: form
+      - explode: true
+        in: query
+        name: tags_match
+        required: false
+        schema:
+          default: all_strict
+          title: Tags Match
+          type: string
+        style: form
       - explode: false
         in: header
         name: authorization
