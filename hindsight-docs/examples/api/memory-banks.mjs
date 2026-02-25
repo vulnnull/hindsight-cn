@@ -32,6 +32,22 @@ await client.updateBankConfig('architect-bank', {
 // [/docs:bank-with-disposition]
 
 
+// [docs:bank-background]
+await client.createBank('my-bank');
+await client.updateBankConfig('my-bank', {
+    reflectMission: 'I am a research assistant specializing in machine learning.',
+});
+// [/docs:bank-background]
+
+
+// [docs:bank-mission]
+await client.createBank('my-bank');
+await client.updateBankConfig('my-bank', {
+    reflectMission: "You're a senior software architect - keep track of system designs, technology decisions, and architectural patterns.",
+});
+// [/docs:bank-mission]
+
+
 // [docs:update-bank-config]
 await client.updateBankConfig('my-bank', {
     retainMission: 'Always include technical decisions, API design choices, and architectural trade-offs. Ignore meeting logistics and social exchanges.',
