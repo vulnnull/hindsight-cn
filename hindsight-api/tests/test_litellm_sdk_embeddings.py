@@ -85,6 +85,7 @@ class TestLiteLLMSDKEmbeddings:
                 model="cohere/embed-english-v3.0",
                 input=["test"],
                 api_key="test_key",
+                encoding_format="float",
             )
 
     async def test_initialization_missing_package(self):
@@ -137,6 +138,7 @@ class TestLiteLLMSDKEmbeddings:
             model="cohere/embed-english-v3.0",
             input=["Hello world"],
             api_key="test_key",
+            encoding_format="float",
         )
 
     async def test_encode_multiple_texts(self, embeddings, mock_litellm):

@@ -794,6 +794,7 @@ class LiteLLMSDKEmbeddings(Embeddings):
                 "model": self.model,
                 "input": ["test"],
                 "api_key": self.api_key,
+                "encoding_format": "float",
             }
             if self.api_base:
                 embed_kwargs["api_base"] = self.api_base
@@ -840,6 +841,7 @@ class LiteLLMSDKEmbeddings(Embeddings):
                     "model": self.model,
                     "input": batch,
                     "api_key": self.api_key,
+                    "encoding_format": "float",
                 }
                 if self.api_base:
                     embed_kwargs["api_base"] = self.api_base
