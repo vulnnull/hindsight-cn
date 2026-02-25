@@ -101,7 +101,24 @@ def create_mcp_server(memory: MemoryEngine, multi_bank: bool = True) -> FastMCP:
             "update_mental_model",
             "delete_mental_model",
             "refresh_mental_model",
-        },  # Scoped tools for single-bank mode (excludes bank management: list_banks, create_bank)
+            "list_directives",
+            "create_directive",
+            "delete_directive",
+            "list_memories",
+            "get_memory",
+            "delete_memory",
+            "list_documents",
+            "get_document",
+            "delete_document",
+            "list_operations",
+            "get_operation",
+            "cancel_operation",
+            "list_tags",
+            "get_bank",
+            "update_bank",
+            "delete_bank",
+            "clear_memories",
+        },  # Scoped tools for single-bank mode (excludes multi-bank management: list_banks, create_bank, get_bank_stats)
         retain_fire_and_forget=False,  # HTTP MCP supports sync/async modes
     )
 
