@@ -40,16 +40,30 @@ class PostgreSQLFileStorage(FileStorage):
     For production/scale, consider S3FileStorage instead.
     """
 
-    def __init__(self, pool_getter: Callable[[], "asyncpg.Pool"], schema: str | None = None):
+    def __init__(
+        self,
+        pool_getter: Callable[[], "asyncpg.Pool"],
+        schema: str | None = None,
+        schema_getter: Callable[[], str] | None = None,
+    ):
         """
         Initialize PostgreSQL file storage.
 
         Args:
             pool_getter: Function that returns asyncpg connection pool
-            schema: Database schema (for multi-tenant support)
+            schema: Static database schema (fallback for single-tenant / tests)
+            schema_getter: Callable returning current schema at query time (for multi-tenant)
         """
         self._pool_getter = pool_getter
-        self._schema = schema
+        self._static_schema = schema
+        self._schema_getter = schema_getter
+
+    @property
+    def _schema(self) -> str | None:
+        """Resolve schema dynamically per-request when schema_getter is provided."""
+        if self._schema_getter:
+            return self._schema_getter()
+        return self._static_schema
 
     async def store(
         self,

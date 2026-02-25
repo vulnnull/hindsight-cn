@@ -1366,7 +1366,7 @@ class MemoryEngine(MemoryEngineInterface):
         self._file_storage = create_file_storage(
             storage_type=config.file_storage_type,
             pool_getter=lambda: self._pool,
-            schema=get_current_schema() if get_current_schema() != config.database_schema else None,
+            schema_getter=get_current_schema,
         )
         logger.debug(f"File storage initialized ({config.file_storage_type})")
 

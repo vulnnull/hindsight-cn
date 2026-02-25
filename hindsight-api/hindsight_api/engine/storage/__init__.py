@@ -12,6 +12,7 @@ def create_file_storage(
     storage_type: str,
     pool_getter: Callable | None = None,
     schema: str | None = None,
+    schema_getter: Callable | None = None,
     **kwargs,
 ) -> FileStorage:
     """
@@ -20,7 +21,8 @@ def create_file_storage(
     Args:
         storage_type: "native" (PostgreSQL BYTEA) or "s3" (S3-compatible object storage)
         pool_getter: Database pool getter (required for native)
-        schema: Database schema (for native multi-tenant)
+        schema: Static database schema (for native single-tenant)
+        schema_getter: Callable returning current schema at query time (for native multi-tenant)
         **kwargs: Additional args passed to storage backend
 
     Returns:
@@ -32,7 +34,7 @@ def create_file_storage(
     if storage_type == "native":
         if not pool_getter:
             raise ValueError("pool_getter required for native (PostgreSQL) storage")
-        return PostgreSQLFileStorage(pool_getter=pool_getter, schema=schema)
+        return PostgreSQLFileStorage(pool_getter=pool_getter, schema=schema, schema_getter=schema_getter)
     elif storage_type == "s3":
         from ...config import get_config
         from .s3 import S3FileStorage
