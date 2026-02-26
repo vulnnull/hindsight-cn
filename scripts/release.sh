@@ -164,6 +164,16 @@ else
     print_warn "File $AI_SDK_PKG not found, skipping"
 fi
 
+# Update Chat SDK integration
+CHAT_SDK_PKG="hindsight-integrations/chat/package.json"
+if [ -f "$CHAT_SDK_PKG" ]; then
+    print_info "Updating $CHAT_SDK_PKG"
+    sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$CHAT_SDK_PKG"
+    rm "${CHAT_SDK_PKG}.bak"
+else
+    print_warn "File $CHAT_SDK_PKG not found, skipping"
+fi
+
 # Update documentation version (creates new version or syncs to existing)
 print_info "Updating documentation for version $VERSION..."
 if [ -f "scripts/update-docs-version.sh" ]; then
@@ -213,6 +223,7 @@ COMMIT_MSG="Release v$VERSION
 - Control Plane: hindsight-control-plane
 - OpenClaw integration: hindsight-integrations/openclaw
 - AI SDK integration: hindsight-integrations/ai-sdk
+- Chat SDK integration: hindsight-integrations/chat
 - Helm chart"
 
 # Add docs update note
