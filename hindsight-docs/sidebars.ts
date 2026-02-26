@@ -212,6 +212,14 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/chat',
+          label: 'Vercel Chat SDK',
+          customProps: {
+            icon: "/img/icons/vercel.png"
+          }
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/crewai',
           label: 'CrewAI',
           customProps: {
