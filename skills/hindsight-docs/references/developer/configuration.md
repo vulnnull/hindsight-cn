@@ -408,7 +408,7 @@ Supported OpenAI embedding dimensions:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, `cohere`, `flashrank`, `litellm`, `litellm-sdk`, or `rrf` | `local` |
+| `HINDSIGHT_API_RERANKER_PROVIDER` | Provider: `local`, `tei`, `cohere`, `zeroentropy`, `flashrank`, `litellm`, `litellm-sdk`, or `rrf` | `local` |
 | `HINDSIGHT_API_RERANKER_LOCAL_MODEL` | Model for local provider | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `HINDSIGHT_API_RERANKER_LOCAL_MAX_CONCURRENT` | Max concurrent local reranking (prevents CPU thrashing under load) | `4` |
 | `HINDSIGHT_API_RERANKER_LOCAL_TRUST_REMOTE_CODE` | Allow loading models with custom code (security risk, disabled by default) | `false` |
@@ -424,6 +424,8 @@ Supported OpenAI embedding dimensions:
 | `HINDSIGHT_API_RERANKER_LITELLM_SDK_API_KEY` | LiteLLM **SDK** API key for direct reranking (no proxy needed) | - |
 | `HINDSIGHT_API_RERANKER_LITELLM_SDK_MODEL` | LiteLLM SDK rerank model (e.g., `deepinfra/Qwen3-reranker-8B`) | `cohere/rerank-english-v3.0` |
 | `HINDSIGHT_API_RERANKER_LITELLM_SDK_API_BASE` | Custom API base URL for LiteLLM SDK (optional) | - |
+| `HINDSIGHT_API_RERANKER_ZEROENTROPY_API_KEY` | ZeroEntropy API key for reranking | - |
+| `HINDSIGHT_API_RERANKER_ZEROENTROPY_MODEL` | ZeroEntropy rerank model (`zerank-2`, `zerank-2-small`) | `zerank-2` |
 | `HINDSIGHT_API_RERANKER_FLASHRANK_MODEL` | FlashRank model for fast CPU-based reranking | `ms-marco-MiniLM-L-12-v2` |
 | `HINDSIGHT_API_RERANKER_FLASHRANK_CACHE_DIR` | Cache directory for FlashRank models | System default |
 
@@ -452,6 +454,11 @@ export HINDSIGHT_API_RERANKER_PROVIDER=cohere
 export HINDSIGHT_API_RERANKER_COHERE_API_KEY=your-azure-api-key
 export HINDSIGHT_API_RERANKER_COHERE_MODEL=rerank-english-v3.0
 export HINDSIGHT_API_RERANKER_COHERE_BASE_URL=https://your-azure-cohere-endpoint.com
+
+# ZeroEntropy - cloud-based reranking (state-of-the-art accuracy)
+export HINDSIGHT_API_RERANKER_PROVIDER=zeroentropy
+export HINDSIGHT_API_RERANKER_ZEROENTROPY_API_KEY=your-api-key
+export HINDSIGHT_API_RERANKER_ZEROENTROPY_MODEL=zerank-2  # or zerank-2-small
 
 # LiteLLM proxy - unified gateway for multiple reranking providers (requires running LiteLLM proxy server)
 export HINDSIGHT_API_RERANKER_PROVIDER=litellm
@@ -540,42 +547,51 @@ Controls the retain (memory ingestion) pipeline.
 | `HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS` | Max completion tokens for fact extraction LLM calls | `64000` |
 | `HINDSIGHT_API_RETAIN_CHUNK_SIZE` | Max characters per chunk for fact extraction. Larger chunks extract fewer LLM calls but may lose context. | `3000` |
 | `HINDSIGHT_API_RETAIN_EXTRACTION_MODE` | Fact extraction mode: `concise`, `verbose`, or `custom` | `concise` |
-| `HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS` | Custom extraction guidelines (only used when mode is `custom`) | - |
+| `HINDSIGHT_API_RETAIN_MISSION` | What this bank should pay attention to during extraction. Steers the LLM without replacing the extraction rules — works alongside any extraction mode. | - |
+| `HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS` | Full prompt override for fact extraction (only used when mode is `custom`). Replaces built-in extraction rules entirely. | - |
 | `HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS` | Extract causal relationships between facts | `true` |
 | `HINDSIGHT_API_RETAIN_BATCH_ENABLED` | Use LLM Batch API for fact extraction (50% cost savings, only with async operations) | `false` |
 | `HINDSIGHT_API_RETAIN_BATCH_POLL_INTERVAL_SECONDS` | Batch API polling interval in seconds | `60` |
 
-#### Extraction Modes
+#### Customizing retain: when to use what
 
-The extraction mode controls how aggressively facts are extracted from content:
+There are three levels of customization for the retain pipeline. Start with the simplest that covers your needs:
 
-- **`concise`** (default): Selective extraction that focuses on significant, long-term valuable facts. Filters out greetings, filler, and trivial information. Produces fewer but higher-quality facts with better performance.
+| Goal | Use |
+|------|-----|
+| Steer what topics to focus on or deprioritize | `HINDSIGHT_API_RETAIN_MISSION` |
+| Extract more detail per fact | `HINDSIGHT_API_RETAIN_EXTRACTION_MODE=verbose` |
+| Completely replace the extraction rules | `HINDSIGHT_API_RETAIN_EXTRACTION_MODE=custom` + `HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS` |
 
-- **`verbose`**: Detailed extraction that captures every piece of information with maximum verbosity. Produces more facts with extensive detail but slower performance and higher token usage.
+**`HINDSIGHT_API_RETAIN_MISSION` — steer extraction without replacing it (recommended starting point)**
 
-- **`custom`**: Inject your own extraction guidelines while keeping the structural parts of the prompt (output format, coreference resolution, temporal handling, etc.) intact. Useful for A/B testing different extraction strategies or domain-specific customization.
-
-**Example: Custom Extraction Mode**
+Tell the bank what to pay attention to during extraction, in plain language. The mission is injected into the extraction prompt alongside the built-in rules — it narrows focus without replacing the underlying logic. Works with any extraction mode (`concise`, `verbose`, `custom`).
 
 ```bash
-# Set mode to custom
-export HINDSIGHT_API_RETAIN_EXTRACTION_MODE=custom
+export HINDSIGHT_API_RETAIN_MISSION="Focus on technical decisions, architecture choices, and team member expertise. Deprioritize social or personal information."
+```
 
-# Define custom guidelines (multi-line is fine)
+**`HINDSIGHT_API_RETAIN_EXTRACTION_MODE=verbose` — more detail per fact**
+
+Use when you need richer facts with full context, relationships, and verbosity. Slower and uses more tokens than `concise`.
+
+**`HINDSIGHT_API_RETAIN_EXTRACTION_MODE=custom` + `HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS` — full control**
+
+Replaces the built-in selectivity rules entirely. The structural parts of the prompt (output format, temporal handling, coreference resolution) remain intact — only the extraction guidelines are replaced.
+
+Use this when `retain_mission` isn't sufficient and you need strict inclusion/exclusion logic.
+
+```bash
+export HINDSIGHT_API_RETAIN_EXTRACTION_MODE=custom
 export HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS="ONLY extract facts that are:
 ✅ Technical decisions and their rationale
 ✅ Architecture patterns and design choices
 ✅ Performance metrics and benchmarks
-✅ Code reviews and feedback
 
 DO NOT extract:
-❌ Generic greetings or pleasantries
+❌ Greetings or social conversation
 ❌ Process chatter (\"let me check\", \"one moment\")
-❌ Repeated information already captured
-
-CONSOLIDATE related technical discussions into ONE fact when possible.
-
-Ask yourself: 'Would this technical context be useful in 6 months?' If no, skip it."
+❌ Anything that would not be useful in 6 months"
 ```
 
 ### File Processing
@@ -717,12 +733,64 @@ Observations are consolidated knowledge synthesized from facts.
 | `HINDSIGHT_API_ENABLE_OBSERVATIONS` | Enable observation consolidation | `true` |
 | `HINDSIGHT_API_CONSOLIDATION_BATCH_SIZE` | Memories to load per batch (internal optimization) | `50` |
 | `HINDSIGHT_API_CONSOLIDATION_MAX_TOKENS` | Max tokens for recall when finding related observations during consolidation | `1024` |
+| `HINDSIGHT_API_CONSOLIDATION_LLM_BATCH_SIZE` | Number of facts sent to the LLM in a single consolidation call. Higher values reduce LLM calls and improve throughput at the cost of larger prompts. Set to `1` to disable batching. | `8` |
+| `HINDSIGHT_API_OBSERVATIONS_MISSION` | What this bank should synthesise into durable observations. Replaces the built-in consolidation rules — leave unset to use the server default. | - |
+
+#### Customizing observations: when to use what
+
+| Goal | Use |
+|------|-----|
+| Default behavior: durable specific facts, no ephemeral state | Leave unset |
+| Change what observations *are* for this bank (different shape, different purpose) | `HINDSIGHT_API_OBSERVATIONS_MISSION` |
+
+**`HINDSIGHT_API_OBSERVATIONS_MISSION` — redefine what this bank synthesises**
+
+By default, observations are durable, specific facts synthesized from memories — the kind of knowledge that stays true over time (preferences, skills, relationships, recurring patterns). Ephemeral state is filtered out. Contradictions are tracked with temporal markers.
+
+Set `HINDSIGHT_API_OBSERVATIONS_MISSION` to replace this definition entirely. Write a plain-language description of what observations should be for your use case. The LLM will use this instead of the default rules when deciding what to create or update. Leave it unset to keep the server default.
+
+:::tip When to use observations_mission
+Use it when the default durable-knowledge behavior doesn't match your use case. Common scenarios:
+- You want **broader event summaries** rather than isolated facts
+- You want observations **grouped by time period** (weekly, monthly)
+- You want a **different granularity** (one observation per project rather than per fact)
+- You have a **domain-specific** notion of what's worth remembering
+:::
+
+**Example: Weekly event summaries**
+
+```bash
+export HINDSIGHT_API_OBSERVATIONS_MISSION="Observations are broad summaries of project events grouped by week. Each observation should capture what happened, what was decided, and what was blocked — not individual facts. Merge related events into cohesive weekly narratives."
+```
+
+**Example: Person-centric knowledge**
+
+```bash
+export HINDSIGHT_API_OBSERVATIONS_MISSION="Observations are durable facts about specific named people: their preferences, skills, relationships, and behavioral patterns. Only create observations for facts that are stable over time and tied to a named individual."
+```
+
+**Example: Support ticket patterns**
+
+```bash
+export HINDSIGHT_API_OBSERVATIONS_MISSION="Observations are recurring patterns in customer support interactions: common failure modes, frequently requested features, and pain points that appear across multiple tickets."
+```
 
 ### Reflect
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_REFLECT_MAX_ITERATIONS` | Max tool call iterations before forcing a response | `10` |
+| `HINDSIGHT_API_REFLECT_MISSION` | Global reflect mission (identity and reasoning framing). Overridden per bank via config API. | - |
+
+#### Disposition
+
+Disposition traits control how the bank reasons during reflect operations. Each trait is on a scale of 1–5. These are hierarchical — they can be overridden per bank via the [config API](./configuration.md#hierarchical-configuration).
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_DISPOSITION_SKEPTICISM` | How skeptical vs trusting (1=trusting, 5=skeptical) | `3` |
+| `HINDSIGHT_API_DISPOSITION_LITERALISM` | How literally to interpret information (1=flexible, 5=literal) | `3` |
+| `HINDSIGHT_API_DISPOSITION_EMPATHY` | How much to consider emotional context (1=detached, 5=empathetic) | `3` |
 
 ### MCP Server
 
@@ -731,9 +799,35 @@ Configuration for MCP server endpoints.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_MCP_ENABLED` | Enable MCP server at `/mcp/{bank_id}/` | `true` |
+| `HINDSIGHT_API_MCP_ENABLED_TOOLS` | Comma-separated allowlist of MCP tools to expose globally (empty = all tools) | - |
 | `HINDSIGHT_API_MCP_AUTH_TOKEN` | Bearer token for MCP authentication (optional) | - |
 | `HINDSIGHT_API_MCP_LOCAL_BANK_ID` | Memory bank ID for local MCP | `mcp` |
 | `HINDSIGHT_API_MCP_INSTRUCTIONS` | Additional instructions appended to retain/recall tool descriptions | - |
+
+**Tool Access Control:**
+
+`HINDSIGHT_API_MCP_ENABLED_TOOLS` restricts which MCP tools are registered at the server level. This is useful for read-only deployments or limiting surface area:
+
+```bash
+# Expose only recall (read-only deployment)
+export HINDSIGHT_API_MCP_ENABLED_TOOLS=recall
+
+# Expose recall and reflect only
+export HINDSIGHT_API_MCP_ENABLED_TOOLS=recall,reflect
+```
+
+Available tool names: `retain`, `recall`, `reflect`, `list_banks`, `create_bank`, `list_mental_models`, `get_mental_model`, `create_mental_model`, `update_mental_model`, `delete_mental_model`, `refresh_mental_model`, `list_directives`, `create_directive`, `delete_directive`, `list_memories`, `get_memory`, `delete_memory`, `list_documents`, `get_document`, `delete_document`, `list_operations`, `get_operation`, `cancel_operation`, `list_tags`, `get_bank`, `get_bank_stats`, `update_bank`, `delete_bank`, `clear_memories`.
+
+This can also be overridden per bank via the [config API](#hierarchical-configuration):
+
+```bash
+# Restrict a specific bank to read-only MCP access
+curl -X PATCH http://localhost:8888/v1/default/banks/my-bank/config \
+  -H "Content-Type: application/json" \
+  -d '{"updates": {"mcp_enabled_tools": ["recall"]}}'
+```
+
+When a bank-level `mcp_enabled_tools` is set, tools not in the list return a clear error when invoked (they still appear in the tools list for MCP protocol compatibility).
 
 **MCP Authentication:**
 
@@ -913,8 +1007,9 @@ This design prevents bugs where global defaults are used instead of bank overrid
 Configuration fields are categorized for security:
 
 1. **Configurable Fields** - Safe behavioral settings that can be customized per-bank:
-   - Retention: `retain_chunk_size`, `retain_extraction_mode`, `retain_custom_instructions`
-   - Consolidation: `enable_observations`
+   - Retention: `retain_chunk_size`, `retain_extraction_mode`, `retain_mission`, `retain_custom_instructions`
+   - Observations: `enable_observations`, `observations_mission`
+   - MCP access control: `mcp_enabled_tools`
 
 2. **Credential Fields** - NEVER exposed or configurable via API:
    - API keys: `*_api_key` (all LLM API keys)

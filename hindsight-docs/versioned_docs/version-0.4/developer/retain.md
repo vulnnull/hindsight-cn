@@ -176,6 +176,29 @@ All stored in your isolated **memory bank**, ready for `recall()` and `reflect()
 
 ---
 
+## Steering Extraction with a Mission
+
+By default, `retain()` extracts all significant facts from the content. You can narrow this focus with a **retain mission** (`retain_mission`) — a plain-language description of what this bank should pay attention to.
+
+```
+e.g. Always include technical decisions, API design choices, and architectural trade-offs.
+     Ignore meeting logistics, greetings, and social exchanges.
+```
+
+The mission is injected into the extraction prompt alongside the built-in rules — it steers the LLM without replacing the extraction logic. It works with any extraction mode (`concise`, `verbose`, `custom`).
+
+For finer control, you can also change the **extraction mode**:
+
+| Mode | When to use |
+|------|-------------|
+| `concise` *(default)* | General-purpose — selective, fast |
+| `verbose` | When you need richer facts with full context and relationships |
+| `custom` | When you want to write your own extraction rules entirely |
+
+Set `retain_mission` and `retain_extraction_mode` via the [bank config API](/developer/api/memory-banks#retain-configuration) or the [`HINDSIGHT_API_RETAIN_MISSION`](/developer/configuration#retain) environment variable.
+
+---
+
 ## Observation Consolidation
 
 After `retain()` completes, Hindsight automatically triggers **observation consolidation** in the background. This process:

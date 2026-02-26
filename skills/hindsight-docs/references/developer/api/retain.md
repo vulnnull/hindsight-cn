@@ -136,7 +136,7 @@ hindsight memory retain my-bank "Alice got promoted" \
 
 ### metadata
 
-Arbitrary key-value string pairs attached to every fact extracted from this item. For example: `{"source": "slack", "channel": "engineering", "thread_id": "T123"}`. The LLM never sees this field — it is passed through as-is and stored on each memory unit. During recall, every returned memory includes its metadata, which lets you do client-side filtering or static enrichment without extra lookups — for example, linking a memory back to its source URL, thread ID, or any application-specific identifier.
+Arbitrary key-value string pairs that provide context about this item. For example: `{"source": "slack", "channel": "engineering", "thread_id": "T123"}`. Metadata is included in the fact extraction prompt, so the LLM can use it as additional context when extracting facts — for instance, knowing the document title or source can improve accuracy. It is also stored on each memory unit and returned with every recalled memory, letting you do client-side filtering or static enrichment without extra lookups — for example, linking a memory back to its source URL, thread ID, or any application-specific identifier.
 
 ### document_id
 
@@ -158,7 +158,7 @@ Tags control **visibility scoping** — which memories are visible during recall
 
 Use consistent naming patterns to keep tag filtering predictable. Common conventions: `user:<id>` for per-user scoping, `session:<id>` for session isolation, `room:<id>` for chat rooms, `topic:<name>` for category filtering. The bank also exposes a list-tags endpoint that returns all tags with their memory counts, useful for UI autocomplete or wildcard expansion.
 
-See [Recall API](./recall#filter-by-tags) for filtering by tags during retrieval.
+See [Recall API](./recall#tags) for filtering by tags during retrieval.
 
 ### Response
 
@@ -211,16 +211,13 @@ Upload files directly — Hindsight converts them to text and extracts memories 
 
 ```bash
 # Upload a single file (PDF, DOCX, PPTX, XLSX, images, audio, and more)
-hindsight memory retain-files my-bank report.pdf
+hindsight memory retain-files my-bank "$SAMPLE_FILE"
 
 # Upload a directory of files
-hindsight memory retain-files my-bank ./documents/
-
-# Upload and wait for processing to complete (polls until done)
-hindsight memory retain-files my-bank report.pdf
+hindsight memory retain-files my-bank "$SCRIPT_DIR/"
 
 # Queue files for background processing (returns immediately)
-hindsight memory retain-files my-bank ./documents/ --async
+hindsight memory retain-files my-bank "$SCRIPT_DIR/" --async
 ```
 
 ### HTTP
@@ -228,7 +225,7 @@ hindsight memory retain-files my-bank ./documents/ --async
 ```bash
 # Via HTTP API (multipart/form-data)
 curl -X POST "${HINDSIGHT_URL}/v1/default/banks/my-bank/files/retain" \
-    -F "files=@report.pdf;type=application/octet-stream" \
+    -F "files=@${SAMPLE_FILE};type=application/octet-stream" \
     -F "request={\"files_metadata\": [{\"context\": \"quarterly report\"}]}"
 ```
 

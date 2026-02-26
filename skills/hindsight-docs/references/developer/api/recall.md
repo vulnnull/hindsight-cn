@@ -232,47 +232,107 @@ Filters recall to only memories that match the specified tags. When omitted, all
 
 The `tags_match` parameter controls the filtering logic:
 
-- `any` (default) — memory matches if it has at least one of the specified tags, or has no tags at all. Use this for "user-specific + shared global" patterns.
-- `any_strict` — memory matches if it has at least one of the specified tags, and untagged memories are excluded. Use this when you want only explicitly scoped memories.
-- `all` — memory matches if it has every specified tag, or has no tags at all.
-- `all_strict` — memory matches if it has every specified tag, and untagged memories are excluded.
+| Mode | Untagged memories | Match condition |
+|------|-------------------|-----------------|
+| `any` (default) | Included | Memory has **at least one** of the specified tags |
+| `any_strict` | Excluded | Memory has **at least one** of the specified tags |
+| `all` | Included | Memory has **all** of the specified tags |
+| `all_strict` | Excluded | Memory has **all** of the specified tags |
 
-### Python
+#### Scenario setup
+
+Consider a bank with these four memories:
+
+| Memory | Tags |
+|--------|------|
+| "Alice prefers async communication" | `["user:alice"]` |
+| "Bob dislikes long meetings" | `["user:bob"]` |
+| "Team uses Slack for announcements" | `["user:alice", "team"]` |
+| "Company policy: no meetings on Fridays" | *(untagged)* |
+
+#### `any` — OR matching, includes untagged (default)
+
+Returns memories that have **at least one** matching tag, plus untagged memories.
 
 ```python
-# Filter recall to only memories tagged for a specific user
 response = client.recall(
     bank_id="my-bank",
-    query="What feedback did the user give?",
+    query="communication preferences",
     tags=["user:alice"],
-    tags_match="any"  # OR matching, includes untagged (default)
+    tags_match="any",  # default
 )
+# Returns:
+#   [match]    "Alice prefers async communication"     — has "user:alice"
+#   [no match] "Bob dislikes long meetings"             — no overlap with ["user:alice"]
+#   [match]    "Team uses Slack for announcements"      — has "user:alice"
+#   [match]    "Company policy: no meetings on Fridays" — untagged, included by default
 ```
 
-### Python
+Use this for **shared global knowledge + user-specific** patterns, where untagged memories represent information everyone should see.
+
+#### `any_strict` — OR matching, excludes untagged
+
+Same as `any` but untagged memories are excluded.
 
 ```python
-# Strict mode: only return memories that have matching tags (exclude untagged)
 response = client.recall(
     bank_id="my-bank",
-    query="What did the user say?",
+    query="communication preferences",
     tags=["user:alice"],
-    tags_match="any_strict"  # OR matching, excludes untagged memories
+    tags_match="any_strict",
 )
+# Returns:
+#   [match]    "Alice prefers async communication"     — has "user:alice"
+#   [no match] "Bob dislikes long meetings"             — no overlap with ["user:alice"]
+#   [match]    "Team uses Slack for announcements"      — has "user:alice"
+#   [no match] "Company policy: no meetings on Fridays" — untagged, excluded
 ```
 
-### Python
+Use this when memories are **fully partitioned by tags** and untagged memories should never be visible.
+
+#### `all` — AND matching, includes untagged
+
+Returns memories that have **every** specified tag, plus untagged memories.
 
 ```python
-# AND matching: require ALL specified tags to be present
 response = client.recall(
     bank_id="my-bank",
-    query="What bugs were reported?",
-    tags=["user:alice", "bug-report"],
-    tags_match="all_strict"  # Memory must have BOTH tags
+    query="communication tools",
+    tags=["user:alice", "team"],
+    tags_match="all",
 )
+# Returns:
+#   [no match] "Alice prefers async communication"     — missing "team"
+#   [no match] "Bob dislikes long meetings"             — missing both tags
+#   [match]    "Team uses Slack for announcements"      — has both "user:alice" and "team"
+#   [match]    "Company policy: no meetings on Fridays" — untagged, included by default
 ```
 
+Use this when memories must belong to a **specific intersection** of scopes (e.g., only memories relevant to both a user and a project), while still surfacing shared global knowledge.
+
+#### `all_strict` — AND matching, excludes untagged
+
+Returns memories that have **every** specified tag, and excludes untagged memories.
+
+```python
+response = client.recall(
+    bank_id="my-bank",
+    query="communication tools",
+    tags=["user:alice", "team"],
+    tags_match="all_strict",
+)
+# Returns:
+#   [no match] "Alice prefers async communication"     — missing "team"
+#   [no match] "Bob dislikes long meetings"             — missing both tags
+#   [match]    "Team uses Slack for announcements"      — has both "user:alice" and "team"
+#   [no match] "Company policy: no meetings on Fridays" — untagged, excluded
+```
+
+Use this for strict scope enforcement where a memory must explicitly belong to **all** specified contexts.
+
+> **💡 Extra tags are fine**
+> 
+A memory with tags `["user:alice", "team", "project:x"]` will still match a filter of `["user:alice", "team"]` under `all_strict` — extra tags on the memory are not a problem. The filter only requires the memory to contain **at least** the specified tags.
 ### trace
 
 When set to `true`, the response includes a detailed debug trace covering the query embedding, entry points, per-strategy retrieval results, RRF fusion candidates, reranked results, temporal constraints detected, and per-phase timings. Has no effect on the retrieval logic itself. Useful for understanding why specific memories were or were not returned.

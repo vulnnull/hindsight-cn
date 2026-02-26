@@ -112,26 +112,27 @@ When you create a memory bank, you can configure its disposition using three tra
 
 ### Mission: Natural Language Identity
 
-Beyond numeric traits, you can provide a natural language **mission** that describes the bank's identity:
+Beyond numeric traits, you can provide a natural language **mission** that describes the bank's identity and reasoning context:
 
 ```python
-client.create_bank(
-    bank_id="architect-bank",
-    mission="You're a senior software architect - keep track of system designs, "
+client.create_bank(bank_id="architect-bank")
+client.update_bank_config(
+    "architect-bank",
+    reflect_mission="You're a senior software architect - keep track of system designs, "
             "technology decisions, and architectural patterns. Prefer simplicity over cutting-edge.",
-    disposition={
-        "skepticism": 4,   # Questions new technologies
-        "literalism": 4,   # Focuses on concrete specs
-        "empathy": 2       # Prioritizes technical facts
-    }
+    disposition_skepticism=4,   # Questions new technologies
+    disposition_literalism=4,   # Focuses on concrete specs
+    disposition_empathy=2,      # Prioritizes technical facts
 )
 ```
 
-The mission tells Hindsight what knowledge to prioritize and shapes how disposition traits are applied:
-- "keep track of system designs" → focuses consolidation on architectural decisions
-- "prefer simplicity over cutting-edge" + high skepticism → questions complex solutions
-- Explicit guidance → consistent memory focus across conversations
+The reflect mission frames how the agent reasons and responds:
+- Provides identity context: who the agent is and what it cares about
+- Shapes how disposition traits are applied in practice
+- Keeps reasoning consistent across conversations
 
+:::info Per-operation missions
+The reflect mission only affects `reflect()`. To steer what gets extracted during `retain()`, use [`retain_mission`](/developer/api/memory-banks#retain-configuration). To control what gets synthesised into observations, use [`observations_mission`](/developer/api/memory-banks#observations-configuration).
 ---
 
 ## Disposition Shapes Reasoning

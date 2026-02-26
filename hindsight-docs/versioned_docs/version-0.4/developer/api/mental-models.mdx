@@ -244,6 +244,34 @@ curl -X DELETE "http://localhost:8888/v1/default/banks/my-bank/mental-models/{me
 
 ---
 
+## Tags and Visibility
+
+Mental models support the same tag system as memories. When you assign tags to a mental model, those tags control both **which memories it reads** during refresh and **when it is surfaced** during reflect.
+
+### How tags affect mental model refresh
+
+When a mental model is refreshed (manually or automatically), it runs an internal reflect call to regenerate its content. If the mental model has tags, that reflect call uses `all_strict` tag matching — meaning it will only read memories that carry **all** of the mental model's tags. Untagged memories are excluded.
+
+```
+Mental model tags: ["user:alice"]
+
+During refresh, it reads:
+  ✅ "Alice prefers async communication"     — has "user:alice"
+  ✅ "Team uses Slack for announcements"      — has "user:alice" (plus other tags)
+  ❌ "Company policy: no meetings on Fridays" — untagged, excluded
+  ❌ "Bob dislikes long meetings"             — no "user:alice" tag
+```
+
+This means a mental model tagged `["user:alice"]` will also pick up memories tagged `["user:alice", "team"]` — extra tags on a memory don't disqualify it. Only the mental model's own tags are required to be present.
+
+### How tags affect mental model lookup during reflect
+
+When you call `reflect` with tags, those same tags are used to filter which mental models the agent can see. A mental model is visible only if its tags overlap with the tags on the reflect request.
+
+For more details on tag matching modes (`any`, `any_strict`, `all`, `all_strict`) and worked examples, see the [Recall tags reference](./recall#tags).
+
+---
+
 ## Use Cases
 
 | Use Case | Example |

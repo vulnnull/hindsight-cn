@@ -724,7 +724,7 @@ export HINDSIGHT_API_FILE_STORAGE_AZURE_ACCOUNT_KEY=base64encodedkey==
 For production deployments, use `s3`, `gcs`, or `azure` to avoid storing large binary files in your PostgreSQL database. Set `HINDSIGHT_API_FILE_DELETE_AFTER_RETAIN=true` (the default) to delete files after memory extraction, which minimizes storage costs.
 :::
 
-### Observations (Experimental)
+### Observations (Experimental) {#observations}
 
 Observations are consolidated knowledge synthesized from facts.
 

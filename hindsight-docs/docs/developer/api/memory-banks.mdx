@@ -54,9 +54,9 @@ hindsight bank create my-bank
 
 ## Bank Configuration
 
-Each memory bank can be configured independently per operation. Configuration can be set via the [bank config API](#updating-configuration), the [Control Plane UI](/developer/index), or [server-wide environment variables](/developer/configuration).
+Each memory bank can be configured independently per operation. Configuration can be set via the [bank config API](#updating-configuration), the [Control Plane UI](/), or [server-wide environment variables](/developer/configuration).
 
-### retain_mission
+### retain_mission {#retain-configuration}
 
 A plain-language description of what this bank should pay attention to during extraction. The mission is injected into the extraction prompt alongside the built-in rules — it steers focus without replacing the extraction logic.
 
@@ -83,7 +83,7 @@ Only active when `retain_extraction_mode` is `custom`. Replaces the built-in ext
 
 See [Retain configuration](/developer/configuration#retain) for environment variable names and defaults.
 
-### enable_observations
+### enable_observations {#observations-configuration}
 
 Toggles automatic observation consolidation on or off. Defaults to `true` when the observations feature is enabled on the server.
 
@@ -199,7 +199,7 @@ The response distinguishes:
 
 This removes all bank-level overrides. The bank reverts to server-wide defaults (set via environment variables).
 
-You can also update configuration directly from the [Control Plane UI](/developer/index) — navigate to a bank and open the **Configuration** tab.
+You can also update configuration directly from the [Control Plane UI](/) — navigate to a bank and open the **Configuration** tab.
 
 ---
 

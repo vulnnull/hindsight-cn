@@ -27,86 +27,218 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 ### Python
 
 ```python
-client.create_bank(
-    bank_id="my-bank",
-    name="Research Assistant",
-    mission="You're a research assistant specializing in machine learning - keep track of papers, methods, and findings.",
-    disposition={
-        "skepticism": 4,
-        "literalism": 3,
-        "empathy": 3
-    }
-)
+client.create_bank(bank_id="my-bank")
 ```
 
 ### Node.js
 
 ```javascript
-await client.createBank('my-bank', {
-    name: 'Research Assistant',
-    mission: 'I am a research assistant specializing in machine learning',
-    disposition: {
-        skepticism: 4,
-        literalism: 3,
-        empathy: 3
-    }
-});
+await client.createBank('my-bank');
 ```
 
 ### CLI
 
 ```bash
-# Set mission
-hindsight bank mission my-bank "I am a research assistant specializing in ML"
-
-# Set disposition
-hindsight bank disposition my-bank \
-    --skepticism 4 \
-    --literalism 3 \
-    --empathy 3
+hindsight bank create my-bank
 ```
 
-## Mission and Disposition
+## Bank Configuration
 
-Mission and disposition are optional settings that influence how the bank reasons during [reflect](./reflect) operations.
+Each memory bank can be configured independently per operation. Configuration can be set via the [bank config API](#updating-configuration), the [Control Plane UI](/developer/index), or [server-wide environment variables](/developer/configuration).
 
-:::info
-Mission and disposition only affect the `reflect` operation. They do not impact `retain`, `recall`, or other memory operations.
-### Mission
+### retain_mission
 
-The mission is a first-person narrative providing context for reasoning:
+A plain-language description of what this bank should pay attention to during extraction. The mission is injected into the extraction prompt alongside the built-in rules — it steers focus without replacing the extraction logic.
+
+```
+e.g. Always include technical decisions, API design choices, and architectural trade-offs.
+     Ignore meeting logistics, greetings, and social exchanges.
+```
+
+Works alongside any extraction mode. Leave blank for general-purpose extraction.
+
+### retain_extraction_mode
+
+Controls how aggressively facts are extracted:
+
+| Mode | Description |
+|------|-------------|
+| `concise` *(default)* | Selective — only facts worth remembering long-term |
+| `verbose` | Captures more detail per fact; slower and uses more tokens |
+| `custom` | Write your own extraction rules via `retain_custom_instructions` |
+
+### retain_custom_instructions
+
+Only active when `retain_extraction_mode` is `custom`. Replaces the built-in extraction rules entirely with your own instructions.
+
+See [Retain configuration](/developer/configuration#retain) for environment variable names and defaults.
+
+### enable_observations
+
+Toggles automatic observation consolidation on or off. Defaults to `true` when the observations feature is enabled on the server.
+
+### observations_mission
+
+Defines what this bank should synthesise into durable observations. Replaces the built-in consolidation rules entirely — leave blank to use the server default.
+
+```
+e.g. Observations are stable facts about people and projects.
+     Always include preferences, skills, and recurring patterns.
+     Ignore one-off events and ephemeral state.
+```
+
+See [Observations configuration](/developer/configuration#observations) for environment variable names and defaults.
+
+### mission
+
+A first-person narrative that provides identity and framing context for `reflect`. The agent uses this to ground its reasoning and apply a consistent perspective.
+
+```
+e.g. You are a senior engineering assistant.
+     Always ground answers in documented decisions and rationale.
+     Ignore speculation. Be direct and precise.
+```
+
+### disposition_skepticism
+
+How skeptical vs trusting the bank is when evaluating claims during `reflect`. Scale 1–5.
 
 ### Python
 
 ```python
-client.create_bank(
-    bank_id="financial-advisor",
-    name="Financial Advisor",
-    mission="""You're a conservative financial advisor - keep track of client risk tolerance,
-    investment preferences, and market conditions. Prioritize capital preservation over growth."""
+client.create_bank(bank_id="architect-bank")
+client.update_bank_config(
+    "architect-bank",
+    reflect_mission="You're a senior software architect - keep track of system designs, "
+            "technology decisions, and architectural patterns. Prefer simplicity over cutting-edge.",
+    disposition_skepticism=4,   # Questions new technologies
+    disposition_literalism=4,   # Focuses on concrete specs
+    disposition_empathy=2,      # Prioritizes technical facts
 )
 ```
 
 ### Node.js
 
 ```javascript
-await client.createBank('financial-advisor', {
-    name: 'Financial Advisor',
-    mission: `I am a conservative financial advisor with 20 years of experience.
-    I prioritize capital preservation over aggressive growth.
-    I have seen multiple market crashes and believe in diversification.`
+await client.createBank('architect-bank');
+await client.updateBankConfig('architect-bank', {
+    reflectMission: "You're a senior software architect - keep track of system designs, technology decisions, and architectural patterns.",
+    dispositionSkepticism: 4,   // Questions new technologies
+    dispositionLiteralism: 4,   // Focuses on concrete specs
+    dispositionEmpathy: 2,      // Prioritizes technical facts
 });
 ```
 
-### Disposition Traits
+| Value | Behaviour |
+|-------|-----------|
+| `1` | Trusting — accepts information at face value |
+| `3` *(default)* | Balanced |
+| `5` | Skeptical — questions and doubts claims |
 
-Disposition traits influence how reasoning is performed during reflection. Each trait is scored 1 to 5:
+### disposition_literalism
 
-| Trait | Low (1) | High (5) |
-|-------|---------|----------|
-| **Skepticism** | Trusting, accepts information at face value | Skeptical, questions and doubts claims |
-| **Literalism** | Flexible interpretation, reads between the lines | Literal interpretation, takes things exactly as stated |
-| **Empathy** | Detached, focuses on facts and logic | Empathetic, considers emotional context |
+How literally to interpret information during `reflect`. Scale 1–5.
+
+| Value | Behaviour |
+|-------|-----------|
+| `1` | Flexible — reads between the lines, considers context |
+| `3` *(default)* | Balanced |
+| `5` | Literal — takes things exactly as stated |
+
+### disposition_empathy
+
+How much to weight emotional context when reasoning during `reflect`. Scale 1–5.
+
+| Value | Behaviour |
+|-------|-----------|
+| `1` | Detached — focuses on facts and logic |
+| `3` *(default)* | Balanced |
+| `5` | Empathetic — considers emotional context |
+
+:::info
+Disposition traits and `mission` only affect the `reflect` operation. `retain_mission` and `observations_mission` are separate per-operation settings.
+---
+
+## Updating Configuration
+
+Bank configuration fields (retain mission, extraction mode, observations mission, etc.) are managed via a **separate config API**, not the `create_bank` call. This lets you change operational settings independently from the bank's identity and disposition.
+
+### Setting Configuration Overrides
+
+### Python
+
+```python
+client.update_bank_config(
+    "my-bank",
+    retain_mission="Always include technical decisions, API design choices, and architectural trade-offs. Ignore meeting logistics and social exchanges.",
+    retain_extraction_mode="verbose",
+    observations_mission="Observations are stable facts about people and projects. Always include preferences, skills, and recurring patterns. Ignore one-off events.",
+    disposition_skepticism=4,
+    disposition_literalism=4,
+    disposition_empathy=2,
+)
+```
+
+### Node.js
+
+```javascript
+await client.updateBankConfig('my-bank', {
+    retainMission: 'Always include technical decisions, API design choices, and architectural trade-offs. Ignore meeting logistics and social exchanges.',
+    retainExtractionMode: 'verbose',
+    observationsMission: 'Observations are stable facts about people and projects. Always include preferences, skills, and recurring patterns. Ignore one-off events.',
+    dispositionSkepticism: 4,
+    dispositionLiteralism: 4,
+    dispositionEmpathy: 2,
+});
+```
+
+You can update any subset of fields — only the keys you provide are changed.
+
+### Reading the Current Configuration
+
+### Python
+
+```python
+# Returns resolved config (server defaults merged with bank overrides) and the raw overrides
+data = client.get_bank_config("my-bank")
+# data["config"]     — full resolved configuration
+# data["overrides"]  — only fields overridden at the bank level
+```
+
+### Node.js
+
+```javascript
+// Returns resolved config (server defaults merged with bank overrides) and the raw overrides
+const { config, overrides } = await client.getBankConfig('my-bank');
+// config    — full resolved configuration
+// overrides — only fields overridden at the bank level
+```
+
+The response distinguishes:
+- **`config`** — the fully resolved configuration (server defaults merged with bank overrides)
+- **`overrides`** — only the fields explicitly overridden for this bank
+
+### Resetting to Defaults
+
+### Python
+
+```python
+# Remove all bank-level overrides, reverting to server defaults
+client.reset_bank_config("my-bank")
+```
+
+### Node.js
+
+```javascript
+// Remove all bank-level overrides, reverting to server defaults
+await client.resetBankConfig('my-bank');
+```
+
+This removes all bank-level overrides. The bank reverts to server-wide defaults (set via environment variables).
+
+You can also update configuration directly from the [Control Plane UI](/developer/index) — navigate to a bank and open the **Configuration** tab.
+
+---
 
 ## Directives
 

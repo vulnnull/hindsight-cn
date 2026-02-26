@@ -6,8 +6,8 @@
 
 Learn how to build with Hindsight through practical examples:
 
-- **[Recipes](#recipes)** - Step-by-step guides and patterns for common use cases
-- **[Applications](#applications)** - Complete, runnable applications demonstrating Hindsight integration
+- **Recipes** - Step-by-step guides and patterns for common use cases
+- **Applications** - Complete, runnable applications demonstrating Hindsight integration
 
 <RecipeCarousel
   title="Recipes"

@@ -66,21 +66,73 @@ claude mcp add --transport http hindsight http://localhost:8888/mcp/my-bank/
 
 ## Available Tools
 
-The local server exposes the full tool set:
+The local server exposes the full tool set (29 tools in multi-bank mode, 26 in single-bank mode):
+
+**Core Memory**
 
 | Tool | Description |
 |------|-------------|
-| `retain` | Store information to long-term memory (fire-and-forget) |
-| `recall` | Search memories with natural language |
-| `reflect` | Synthesize memories into a reasoned answer |
-| `list_banks` | List all memory banks |
-| `create_bank` | Create or configure a memory bank |
+| `retain` | Store information to long-term memory with optional tags, metadata, and document association |
+| `recall` | Search memories with natural language, configurable budget, type filters, and tag filters |
+| `reflect` | Synthesize memories into a reasoned answer with optional structured output |
+
+**Mental Models**
+
+| Tool | Description |
+|------|-------------|
 | `list_mental_models` | List pinned reflections for a bank |
 | `get_mental_model` | Get a specific mental model |
-| `create_mental_model` | Create a new mental model |
+| `create_mental_model` | Create a new mental model with optional auto-refresh trigger |
 | `update_mental_model` | Update a mental model's metadata |
 | `delete_mental_model` | Delete a mental model |
 | `refresh_mental_model` | Regenerate a mental model's content |
+
+**Directives**
+
+| Tool | Description |
+|------|-------------|
+| `list_directives` | List directives that guide memory processing |
+| `create_directive` | Create a new directive |
+| `delete_directive` | Delete a directive |
+
+**Memory Browsing**
+
+| Tool | Description |
+|------|-------------|
+| `list_memories` | Browse memories with filtering and pagination |
+| `get_memory` | Get a specific memory by ID |
+| `delete_memory` | Delete a specific memory |
+
+**Documents**
+
+| Tool | Description |
+|------|-------------|
+| `list_documents` | List ingested documents |
+| `get_document` | Get a specific document |
+| `delete_document` | Delete a document and its linked memories |
+
+**Operations**
+
+| Tool | Description |
+|------|-------------|
+| `list_operations` | List async operations with status filtering |
+| `get_operation` | Check operation status and progress |
+| `cancel_operation` | Cancel a pending or running operation |
+
+**Tags & Bank Management**
+
+| Tool | Description |
+|------|-------------|
+| `list_tags` | List unique tags used in a bank |
+| `get_bank` | Get bank profile (name, mission, disposition) |
+| `get_bank_stats` | Get bank statistics (multi-bank only) |
+| `update_bank` | Update bank name or mission |
+| `delete_bank` | Delete an entire bank and all its data |
+| `clear_memories` | Clear memories without deleting the bank |
+| `list_banks` | List all memory banks (multi-bank only) |
+| `create_bank` | Create or configure a memory bank (multi-bank only) |
+
+For detailed parameter documentation, see the [MCP Server reference](/developer/mcp-server#available-tools).
 
 ## Environment Variables
 

@@ -139,32 +139,64 @@ This ensures responses stay accurate even as the underlying data changes.
 
 ---
 
-## Mission-Oriented Consolidation
+## Observations Mission
 
-The bank's **mission** directly influences what knowledge gets consolidated into observations. When you set a mission on your memory bank, the consolidation engine focuses on extracting knowledge that serves that mission.
+You can define exactly what this bank should synthesise by setting an **observations mission** (`observations_mission`). This replaces the built-in durable-knowledge rules with your own instructions, letting you control what shape observations take.
 
-**Example:**
-
-```python
-client.create_bank(
-    bank_id="support-agent",
-    mission="You're a customer support agent - keep track of "
-            "customer preferences, past issues, and communication styles."
-)
+```
+e.g. Observations are stable facts about people and projects.
+     Always include preferences, skills, and recurring patterns.
+     Ignore one-off events and ephemeral state.
 ```
 
-With this mission, the consolidation engine will:
-- **Prioritize** customer preferences, issue patterns, and communication styles
-- **Skip** ephemeral details that don't serve support goals
-- **Synthesize** observations focused on helping customers
+Leave it blank to use the server default — durable, specific facts that stay true over time (preferences, skills, relationships, recurring patterns), with ephemeral state filtered out.
 
-Without a mission, the engine performs general-purpose consolidation. With a mission, it becomes focused and efficient — extracting only knowledge that matters for your use case.
+**Examples:**
 
-| Mission | Observations Focus |
-|---------|-------------------|
-| *Customer support agent* | Customer preferences, issue patterns, resolution history |
-| *Code review assistant* | Coding patterns, team conventions, common mistakes |
-| *Research assistant* | Topic expertise, source reliability, methodology preferences |
+| `observations_mission` | What gets synthesised |
+|------------------------|----------------------|
+| *(unset — default)* | Durable facts: preferences, skills, relationships, recurring patterns |
+| *"Observations are weekly summaries of sprint outcomes and blockers"* | Broad event summaries grouped by time period |
+| *"Observations are stable facts about named individuals only"* | Person-centric knowledge, tied to specific people |
+| *"Observations are recurring patterns in customer support interactions"* | Failure modes, common requests, pain points |
+
+Set `observations_mission` via the [bank config API](/developer/api/memory-banks#observations-configuration) or the [`HINDSIGHT_API_OBSERVATIONS_MISSION`](/developer/configuration#observations) environment variable.
+
+---
+
+## Observation Lifecycle & Invalidation
+
+### When Memories Are Deleted
+
+Observations are derived from source memories. When source memories are removed, Hindsight automatically keeps observations consistent:
+
+| Action | Effect on observations |
+|--------|----------------------|
+| Delete a document | All observations derived from the document's memories are deleted |
+| Delete individual memories (by type) | Observations sourced from those memories are deleted |
+| Delete an entire bank | All observations are deleted along with everything else |
+
+After deletion, the **remaining source memories** that fed the affected observations have their consolidation state reset, so they will be re-consolidated on the next consolidation run and produce fresh observations.
+
+### Clearing Observations for a Specific Memory
+
+You can clear all observations derived from a single memory without deleting the memory itself. This is useful when you want to force re-synthesis of a memory's contribution to consolidated knowledge.
+
+Use the `DELETE /v1/default/banks/{bank_id}/memories/{memory_id}/observations` endpoint. This will:
+1. Delete all observations that list the memory as a source
+2. Reset `consolidated_at` on the memory itself and any other source memories that contributed to those observations
+3. Trigger a consolidation job so fresh observations are produced automatically
+
+### Resetting All Observations
+
+To wipe all consolidated knowledge and start over:
+
+```python
+# Clear all observations for a bank
+client.clear_observations(bank_id="my-bank")
+```
+
+This resets the consolidation state for all source memories in the bank, so the next consolidation run will re-derive all observations from scratch.
 
 ---
 

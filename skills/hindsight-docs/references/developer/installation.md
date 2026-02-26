@@ -107,7 +107,7 @@ Install it with: pip install sentence-transformers
 ```
 :::
 
-See [Configuration](./configuration#embeddings-and-reranking) for all embedding provider options.
+See [Configuration](./configuration#embeddings) for all embedding provider options.
 
 ### Available Tags
 

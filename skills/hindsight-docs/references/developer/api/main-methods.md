@@ -194,21 +194,23 @@ Generate disposition-aware responses using memories and observations.
 # Basic reflect
 response = client.reflect(
     bank_id="my-bank",
-    query="Should we adopt TypeScript for our backend?"
+    query="Should we adopt TypeScript for our backend?",
+    include_facts=True,
 )
 
 print(response.text)
-print("\nBased on:", len(response.based_on or []), "facts")
+print("\nBased on:", len(response.based_on.memories if response.based_on else []), "facts")
 
 # Reflect with options
 response = client.reflect(
     bank_id="my-bank",
     query="What are Alice's strengths for the team lead role?",
-    budget="high"  # More thorough reasoning
+    budget="high",  # More thorough reasoning
+    include_facts=True,
 )
 
 # See which facts influenced the response
-for fact in response.based_on or []:
+for fact in (response.based_on.memories if response.based_on else []):
     print(f"- {fact.text}")
 ```
 

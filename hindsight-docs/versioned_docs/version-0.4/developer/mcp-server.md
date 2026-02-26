@@ -100,12 +100,12 @@ The MCP server operates in two modes depending on the URL:
 
 | Mode | URL | Tools | bank_id |
 |------|-----|-------|---------|
-| **Single-bank** | `/mcp/{bank_id}/` | Memory + mental model tools | Implicit from URL |
-| **Multi-bank** | `/mcp/` | All tools including bank management | Explicit `bank_id` parameter on each tool |
+| **Single-bank** | `/mcp/{bank_id}/` | 26 tools (memory, mental models, directives, documents, operations, tags, bank management) | Implicit from URL |
+| **Multi-bank** | `/mcp/` | All 29 tools including `list_banks`, `create_bank`, `get_bank_stats` | Explicit `bank_id` parameter on each tool |
 
 **Single-bank mode** (recommended) scopes all operations to the bank in the URL. Tools don't expose a `bank_id` parameter.
 
-**Multi-bank mode** exposes all tools with an optional `bank_id` parameter, plus bank management tools (`list_banks`, `create_bank`).
+**Multi-bank mode** exposes all tools with an optional `bank_id` parameter, plus bank management tools (`list_banks`, `create_bank`, `get_bank_stats`).
 
 ---
 
@@ -120,6 +120,9 @@ Store information to long-term memory.
 | `content` | string | Yes | The fact or memory to store |
 | `context` | string | No | Category for the memory (default: `general`) |
 | `timestamp` | string | No | ISO 8601 timestamp for when the event occurred |
+| `tags` | list[string] | No | Tags for organizing and filtering this memory |
+| `metadata` | object | No | Key-value metadata to attach (e.g., `{"source": "slack"}`) |
+| `document_id` | string | No | Associate this memory with an existing document |
 
 **Example:**
 ```json
@@ -127,7 +130,8 @@ Store information to long-term memory.
   "name": "retain",
   "arguments": {
     "content": "User prefers Python over JavaScript for backend development",
-    "context": "programming_preferences"
+    "context": "programming_preferences",
+    "tags": ["user:alice", "preferences"]
   }
 }
 ```
@@ -148,13 +152,20 @@ Search memories to provide personalized responses.
 |-----------|------|----------|-------------|
 | `query` | string | Yes | Natural language search query |
 | `max_tokens` | integer | No | Maximum tokens to return (default: 4096) |
+| `budget` | string | No | Search thoroughness: `low`, `mid`, or `high` (default: `high`) |
+| `types` | list[string] | No | Filter by fact type: `world`, `experience`, `opinion`. Defaults to all |
+| `tags` | list[string] | No | Filter memories by tags |
+| `tags_match` | string | No | Tag matching mode: `any` (default) or `all` |
+| `query_timestamp` | string | No | ISO 8601 timestamp — recall as if asking at this point in time |
 
 **Example:**
 ```json
 {
   "name": "recall",
   "arguments": {
-    "query": "What are the user's programming language preferences?"
+    "query": "What are the user's programming language preferences?",
+    "tags": ["preferences"],
+    "budget": "high"
   }
 }
 ```
@@ -176,6 +187,10 @@ Generate thoughtful analysis by synthesizing stored memories with the bank's per
 | `query` | string | Yes | The question or topic to reflect on |
 | `context` | string | No | Optional context about why this reflection is needed |
 | `budget` | string | No | Search budget: `low`, `mid`, or `high` (default: `low`) |
+| `max_tokens` | integer | No | Maximum tokens in the response (default: 4096) |
+| `response_schema` | object | No | JSON Schema for structured output. When provided, the response includes a `structured_output` field |
+| `tags` | list[string] | No | Filter memories by tags before reflecting |
+| `tags_match` | string | No | Tag matching mode: `any` (default) or `all` |
 
 **Example:**
 ```json
@@ -183,7 +198,8 @@ Generate thoughtful analysis by synthesizing stored memories with the bank's per
   "name": "reflect",
   "arguments": {
     "query": "Based on my past decisions, what architectural style do I prefer?",
-    "budget": "mid"
+    "budget": "mid",
+    "tags": ["architecture"]
   }
 }
 ```
@@ -206,6 +222,7 @@ Create a mental model — a living document that stays current with your memorie
 | `mental_model_id` | string | No | Custom ID (alphanumeric lowercase with hyphens). Auto-generated if not provided |
 | `tags` | list[string] | No | Tags for organizing and filtering models |
 | `max_tokens` | integer | No | Maximum tokens for model content (default: 2048) |
+| `trigger_refresh_after_consolidation` | boolean | No | Auto-refresh this model after memory consolidation (default: `false`) |
 
 **Example:**
 ```json
@@ -254,6 +271,7 @@ Update a mental model's metadata or settings.
 | `source_query` | string | No | New source query |
 | `tags` | list[string] | No | New tags |
 | `max_tokens` | integer | No | New max tokens |
+| `trigger_refresh_after_consolidation` | boolean | No | Auto-refresh after consolidation. Only set when you want to change this setting |
 
 ---
 
@@ -292,6 +310,186 @@ Create a new memory bank or retrieve an existing one.
 | `bank_id` | string | Yes | The ID for the new bank |
 | `name` | string | No | Human-friendly name for the bank |
 | `mission` | string | No | Mission describing who the agent is and what they're trying to accomplish |
+
+---
+
+### list_directives
+
+List all directives in a bank. Directives are instructions that guide how the memory system processes and responds to queries.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `tags` | list[string] | No | Filter directives by tags |
+| `active_only` | boolean | No | Only return active directives (default: `true`) |
+
+---
+
+### create_directive
+
+Create a new directive in a bank.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Human-readable name for the directive |
+| `content` | string | Yes | The directive content/instruction |
+| `priority` | integer | No | Priority level (higher = more important) |
+| `is_active` | boolean | No | Whether the directive is active (default: `true`) |
+| `tags` | list[string] | No | Tags for organizing directives |
+
+---
+
+### delete_directive
+
+Delete a directive by ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `directive_id` | string | Yes | The ID of the directive to delete |
+
+---
+
+### list_memories
+
+Browse stored memories with optional filtering and pagination.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `type` | string | No | Filter by fact type: `world`, `experience`, or `opinion` |
+| `q` | string | No | Search query to filter memories |
+| `limit` | integer | No | Maximum number of results (default: 100) |
+| `offset` | integer | No | Number of results to skip for pagination (default: 0) |
+
+---
+
+### get_memory
+
+Retrieve a specific memory by ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `memory_id` | string | Yes | The ID of the memory to retrieve |
+
+---
+
+### delete_memory
+
+Permanently delete a specific memory.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `memory_id` | string | Yes | The ID of the memory to delete |
+
+---
+
+### list_documents
+
+List documents that have been ingested into the memory bank.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `q` | string | No | Search query to filter documents |
+| `limit` | integer | No | Maximum number of results (default: 100) |
+
+---
+
+### get_document
+
+Retrieve a specific document by ID, including its metadata.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `document_id` | string | Yes | The ID of the document to retrieve |
+
+---
+
+### delete_document
+
+Delete a document and all memories linked to it.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `document_id` | string | Yes | The ID of the document to delete |
+
+---
+
+### list_operations
+
+List async operations (retain processing, mental model refresh, etc.) with optional status filtering.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | string | No | Filter by status: `pending`, `running`, `completed`, `failed`, `cancelled` |
+| `limit` | integer | No | Maximum number of results (default: 100) |
+
+---
+
+### get_operation
+
+Get the status and details of an async operation.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `operation_id` | string | Yes | The ID of the operation to check |
+
+---
+
+### cancel_operation
+
+Cancel a pending or running async operation.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `operation_id` | string | Yes | The ID of the operation to cancel |
+
+---
+
+### list_tags
+
+List all unique tags used in a bank, optionally filtered by pattern.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `q` | string | No | Glob pattern to filter tags (e.g., `project:*`) |
+| `limit` | integer | No | Maximum number of results (default: 100) |
+
+---
+
+### get_bank
+
+Get information about a memory bank, including its name, mission, and disposition.
+
+---
+
+### get_bank_stats (multi-bank mode only)
+
+Get statistics for a memory bank (node/link counts).
+
+---
+
+### update_bank
+
+Update a memory bank's metadata.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | New human-friendly name for the bank |
+| `mission` | string | No | New mission describing who the agent is and what they're trying to accomplish |
+
+---
+
+### delete_bank
+
+Permanently delete a memory bank and all its data (memories, documents, entities, mental models).
+
+---
+
+### clear_memories
+
+Clear all memories from a bank without deleting the bank itself. Optionally filter by fact type to only clear specific kinds of memories.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `type` | string | No | Fact type to clear: `world`, `experience`, or `opinion`. If not specified, clears all |
 
 ---
 
