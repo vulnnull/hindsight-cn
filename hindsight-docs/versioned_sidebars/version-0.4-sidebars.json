@@ -231,12 +231,5 @@
         }
       ]
     }
-  ],
-  "cookbookSidebar": [
-    {
-      "type": "doc",
-      "id": "cookbook/index",
-      "label": "Cookbook"
-    }
   ]
 }

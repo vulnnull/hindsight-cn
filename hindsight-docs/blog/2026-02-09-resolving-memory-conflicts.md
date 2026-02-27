@@ -4,6 +4,7 @@ description: Learn how Hindsight handles contradictory information by tracking t
 authors: [hindsight]
 image: /img/blog/2026-02-09/consolidation-pipeline.png
 date: 2026-02-09
+hide_table_of_contents: true
 ---
 
 # How We Solved Memory Conflicts in Hindsight

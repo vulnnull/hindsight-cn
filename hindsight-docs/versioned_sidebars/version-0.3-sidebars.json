@@ -187,56 +187,5 @@
         }
       ]
     }
-  ],
-  "cookbookSidebar": [
-    {
-      "type": "doc",
-      "id": "cookbook/index",
-      "label": "Overview"
-    },
-    {
-      "type": "category",
-      "label": "Recipes",
-      "collapsible": false,
-      "items": [
-        {
-          "type": "doc",
-          "id": "cookbook/recipes/quickstart",
-          "label": "Hindsight Quickstart"
-        },
-        {
-          "type": "doc",
-          "id": "cookbook/recipes/per-user-memory",
-          "label": "Per-User Memory"
-        },
-        {
-          "type": "doc",
-          "id": "cookbook/recipes/support-agent-shared-knowledge",
-          "label": "Support Agent with Shared Knowledge"
-        },
-        {
-          "type": "doc",
-          "id": "cookbook/recipes/litellm-memory-demo",
-          "label": "Memory with LiteLLM"
-        },
-        {
-          "type": "doc",
-          "id": "cookbook/recipes/tool-learning-demo",
-          "label": "Routing Tool Learning"
-        }
-      ]
-    },
-    {
-      "type": "category",
-      "label": "Applications",
-      "collapsible": false,
-      "items": [
-        {
-          "type": "doc",
-          "id": "cookbook/applications/openai-fitness-coach",
-          "label": "OpenAI Agent + Hindsight Memory Integration"
-        }
-      ]
-    }
   ]
 }

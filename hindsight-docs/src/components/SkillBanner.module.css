@@ -92,6 +92,43 @@
   display: block;
 }
 
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copyPageButton {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 3px 7px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.copyPageButton:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: white;
+}
+
+.copyPageButton:active {
+  transform: scale(0.95);
+}
+
+.copyPageButton.copyPageCopied {
+  background: rgba(255, 255, 255, 0.22);
+  color: white;
+}
+
 /* Dark mode - make it stand out even more */
 html[data-theme='dark'] .banner {
   box-shadow: 0 4px 12px rgba(0, 116, 217, 0.2),

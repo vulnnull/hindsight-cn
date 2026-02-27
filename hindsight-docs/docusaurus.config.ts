@@ -117,8 +117,7 @@ const config: Config = {
           blogTitle: 'Hindsight Blog',
           blogDescription: 'Updates, insights, and deep dives into agent memory',
           postsPerPage: 10,
-          blogSidebarTitle: 'Recent posts',
-          blogSidebarCount: 'ALL',
+          blogSidebarCount: 0,
         },
         theme: {
           customCss: './src/css/custom.css',
@@ -235,8 +234,7 @@ const config: Config = {
           className: 'navbar-item-resources',
           items: [
             {
-              type: 'doc',
-              docId: 'cookbook/index',
+              to: '/cookbook',
               label: 'Cookbook',
             },
             {
@@ -247,22 +245,22 @@ const config: Config = {
               to: '/api-reference',
               label: 'API Reference',
             },
+            {
+              href: 'https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg',
+              label: 'Community',
+            },
           ],
         },
         {
           href: 'https://ui.hindsight.vectorize.io/signup',
           position: 'right',
-          label: 'Hindsight Cloud',
+          label: 'Cloud',
           className: 'navbar-item-cloud',
         },
         {
           type: 'docsVersionDropdown',
           position: 'right',
-        },
-        {
-          href: 'https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg',
-          position: 'right',
-          label: 'Community',
+          className: 'navbar-item-version',
         },
         {
           href: 'https://github.com/vectorize-io/hindsight',

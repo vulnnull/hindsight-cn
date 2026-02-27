@@ -234,13 +234,6 @@ const sidebars: SidebarsConfig = {
       ],
     },
   ],
-  cookbookSidebar: [
-    {
-      type: 'doc',
-      id: 'cookbook/index',
-      label: 'Cookbook',
-    },
-  ],
 };
 
 export default sidebars;
