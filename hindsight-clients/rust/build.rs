@@ -47,43 +47,42 @@ fn convert_anyof_to_nullable(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(obj) => {
             // Check if this object has anyOf with null and process it
-            let should_convert = obj.get("anyOf")
+            let has_null_in_anyof = obj.get("anyOf")
                 .and_then(|v| v.as_array())
                 .map(|array| {
-                    if array.len() == 2 {
-                        let has_null = array.iter().any(|v| {
-                            v.get("type")
-                                .and_then(|t| t.as_str())
-                                .map(|s| s == "null")
-                                .unwrap_or(false)
-                        });
-                        has_null
-                    } else {
-                        false
-                    }
+                    array.iter().any(|v| {
+                        v.get("type")
+                            .and_then(|t| t.as_str())
+                            .map(|s| s == "null")
+                            .unwrap_or(false)
+                    })
                 })
                 .unwrap_or(false);
 
-            if should_convert {
+            if has_null_in_anyof {
                 // Clone the anyOf array to avoid borrow issues
                 if let Some(any_of) = obj.get("anyOf").cloned() {
                     if let Some(array) = any_of.as_array() {
-                        // Find the non-null schema
-                        if let Some(non_null_schema) = array.iter().find(|v| {
+                        let non_null_schemas: Vec<_> = array.iter().filter(|v| {
                             v.get("type")
                                 .and_then(|t| t.as_str())
                                 .map(|s| s != "null")
                                 .unwrap_or(true)
-                        }).cloned() {
-                            // Replace anyOf with the non-null schema + nullable: true
-                            obj.remove("anyOf");
-                            if let Some(non_null_obj) = non_null_schema.as_object() {
+                        }).cloned().collect();
+
+                        obj.remove("anyOf");
+                        if non_null_schemas.len() == 1 {
+                            // Single non-null type: inline it with nullable: true
+                            if let Some(non_null_obj) = non_null_schemas[0].as_object() {
                                 for (k, v) in non_null_obj.iter() {
                                     obj.insert(k.clone(), v.clone());
                                 }
                             }
-                            obj.insert("nullable".to_string(), serde_json::json!(true));
+                        } else {
+                            // Multiple non-null types: keep anyOf with nulls removed
+                            obj.insert("anyOf".to_string(), serde_json::json!(non_null_schemas));
                         }
+                        obj.insert("nullable".to_string(), serde_json::json!(true));
                     }
                 }
             }

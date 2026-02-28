@@ -233,6 +233,35 @@ class TestFilterResultsByTags:
         assert len(filtered) == 1
         assert filtered[0].tags == ["a", "b", "c"]  # Has a, b, AND c
 
+    def test_all_strict_superset_observation_matches_incoming_memory_tags(self):
+        """
+        Consolidation scenario: an incoming memory with tags ['user:bob', 'session:id1']
+        uses all_strict matching to find existing observations.
+
+        An observation tagged ['user:bob', 'session:id1', 'place:online'] IS matched
+        because it contains all of the incoming memory's tags (superset).
+        This is NOT exact matching — an observation with extra tags is still a valid match.
+        """
+        # Incoming memory tags (e.g. from a new retain call)
+        incoming_tags = ["user:bob", "session:id1"]
+
+        # Candidate observations with different tag sets
+        exact_match = MockResult(["user:bob", "session:id1"])
+        superset_match = MockResult(["session:id1", "user:bob", "place:online"])
+        different_user = MockResult(["user:alice", "session:id1"])
+        missing_session = MockResult(["user:bob"])
+
+        results = [exact_match, superset_match, different_user, missing_session]
+        filtered = filter_results_by_tags(results, incoming_tags, match="all_strict")
+
+        # Both exact_match and superset_match have all incoming tags → both match
+        assert len(filtered) == 2
+        assert exact_match in filtered
+        assert superset_match in filtered
+        # different_user and missing_session are excluded because they lack at least one tag
+        assert different_user not in filtered
+        assert missing_session not in filtered
+
 
 # ============================================================================
 # Integration Tests for tags in retain/recall/reflect

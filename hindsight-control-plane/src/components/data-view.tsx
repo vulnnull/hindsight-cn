@@ -681,21 +681,22 @@ export function DataView({ factType }: DataViewProps) {
                               <TableHeader>
                                 <TableRow className="bg-muted/50">
                                   <TableHead
-                                    className={factType === "observation" ? "w-[40%]" : "w-[45%]"}
+                                    className={factType === "observation" ? "w-[35%]" : "w-[38%]"}
                                   >
                                     {factType === "observation" ? "Observation" : "Memory"}
                                   </TableHead>
-                                  <TableHead className="w-[20%]">Entities</TableHead>
+                                  <TableHead className="w-[15%]">Entities</TableHead>
+                                  <TableHead className="w-[15%]">Tags</TableHead>
                                   {factType === "observation" && (
                                     <TableHead className="w-[10%]">Sources</TableHead>
                                   )}
                                   <TableHead
-                                    className={factType === "observation" ? "w-[15%]" : "w-[17%]"}
+                                    className={factType === "observation" ? "w-[12%]" : "w-[16%]"}
                                   >
                                     Occurred
                                   </TableHead>
                                   <TableHead
-                                    className={factType === "observation" ? "w-[15%]" : "w-[18%]"}
+                                    className={factType === "observation" ? "w-[13%]" : "w-[16%]"}
                                   >
                                     Mentioned
                                   </TableHead>
@@ -751,6 +752,29 @@ export function DataView({ factType }: DataViewProps) {
                                             {row.entities.split(", ").length > 2 && (
                                               <span className="text-[10px] text-muted-foreground">
                                                 +{row.entities.split(", ").length - 2}
+                                              </span>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground">-</span>
+                                        )}
+                                      </TableCell>
+                                      <TableCell className="py-2">
+                                        {row.tags && row.tags.length > 0 ? (
+                                          <div className="flex gap-1 flex-wrap">
+                                            {(row.tags as string[])
+                                              .slice(0, 2)
+                                              .map((tag: string, i: number) => (
+                                                <span
+                                                  key={i}
+                                                  className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 border border-amber-500/20 font-medium font-mono"
+                                                >
+                                                  #{tag}
+                                                </span>
+                                              ))}
+                                            {row.tags.length > 2 && (
+                                              <span className="text-[10px] text-muted-foreground">
+                                                +{row.tags.length - 2}
                                               </span>
                                             )}
                                           </div>

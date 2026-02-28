@@ -395,6 +395,16 @@ class MemoryItem(BaseModel):
         default=None,
         description="Optional tags for visibility scoping. Memories with tags can be filtered during recall.",
     )
+    observation_scopes: Literal["per_tag", "combined", "all_combinations"] | list[list[str]] | None = Field(
+        default=None,
+        title="ObservationScopes",
+        description=(
+            "How to scope observations during consolidation. "
+            "'per_tag' runs one consolidation pass per individual tag, creating separate observations for each tag. "
+            "'combined' (default) runs a single pass with all tags together. "
+            "A list of tag lists runs one pass per inner list, giving full control over which combinations to use."
+        ),
+    )
 
     @field_validator("timestamp", mode="before")
     @classmethod
@@ -3784,6 +3794,8 @@ def _register_routes(app: FastAPI):
                     content_dict["entities"] = [{"text": e.text, "type": e.type or "CONCEPT"} for e in item.entities]
                 if item.tags:
                     content_dict["tags"] = item.tags
+                if item.observation_scopes is not None:
+                    content_dict["observation_scopes"] = item.observation_scopes
                 contents.append(content_dict)
 
             if request.async_:

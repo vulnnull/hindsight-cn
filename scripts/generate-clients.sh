@@ -106,8 +106,10 @@ echo "Generating new client with openapi-generator..."
 cd "$PYTHON_CLIENT_DIR"
 
 # Run openapi-generator via Docker (pinned version for reproducibility)
+# Use --platform linux/amd64 to ensure identical output on both macOS (arm64) and Linux CI (amd64)
 # Use --user to match current user's UID/GID so generated files are writable
 docker run --rm \
+    --platform linux/amd64 \
     --user "$(id -u):$(id -g)" \
     -v "$OPENAPI_SPEC:/local/openapi.json" \
     -v "$PYTHON_CLIENT_DIR:/local/out" \
@@ -344,20 +346,9 @@ GO_CLIENT_DIR="$CLIENTS_DIR/go"
 if ! command -v go &> /dev/null; then
     echo "⚠ Go not found, skipping Go client generation"
     echo "  Install Go 1.25+ from https://go.dev/dl/"
-elif ! command -v java &> /dev/null; then
-    echo "⚠ Java not found, skipping Go client generation"
-    echo "  Install Java 11+ from https://adoptium.net/"
 else
-    echo "Regenerating Go client (via OpenAPI Generator)..."
+    echo "Regenerating Go client (via OpenAPI Generator Docker)..."
     cd "$GO_CLIENT_DIR"
-
-    # Download OpenAPI Generator if not present
-    OPENAPI_GEN_VERSION="7.10.0"
-    OPENAPI_GEN_JAR="openapi-generator-cli.jar"
-    if [ ! -f "$OPENAPI_GEN_JAR" ]; then
-        echo "Downloading OpenAPI Generator ${OPENAPI_GEN_VERSION}..."
-        curl -L "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/${OPENAPI_GEN_VERSION}/openapi-generator-cli-${OPENAPI_GEN_VERSION}.jar" -o "$OPENAPI_GEN_JAR"
-    fi
 
     # Save maintained files to temp
     TEMP_DIR=$(mktemp -d)
@@ -374,12 +365,17 @@ else
     rm -rf docs/ .openapi-generator/
     rm -f go.mod go.sum
 
-    # Generate new client
+    # Generate new client via Docker (--platform linux/amd64 ensures identical output on macOS and Linux CI)
     echo "Generating client from OpenAPI spec..."
-    java -jar "$OPENAPI_GEN_JAR" generate \
-        -i "$OPENAPI_SPEC" \
+    docker run --rm \
+        --platform linux/amd64 \
+        --user "$(id -u):$(id -g)" \
+        -v "$OPENAPI_SPEC:/local/openapi.json" \
+        -v "$GO_CLIENT_DIR:/local/out" \
+        "openapitools/openapi-generator-cli:${OPENAPI_GENERATOR_VERSION}" generate \
+        -i /local/openapi.json \
         -g go \
-        -o . \
+        -o /local/out \
         --package-name hindsight \
         --git-user-id vectorize-io \
         --git-repo-id hindsight/hindsight-clients/go \

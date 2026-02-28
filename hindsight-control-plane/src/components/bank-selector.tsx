@@ -31,16 +31,24 @@ import {
   Moon,
   Sun,
   Github,
-  Tag,
   Upload,
   X,
   Lock,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { useTheme } from "@/lib/theme-context";
 import Image from "next/image";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 function BankSelectorInner() {
@@ -62,11 +70,30 @@ function BankSelectorInner() {
   const [docEventDate, setDocEventDate] = React.useState("");
   const [docDocumentId, setDocDocumentId] = React.useState("");
   const [docTags, setDocTags] = React.useState("");
+  const [docObservationScopes, setDocObservationScopes] = React.useState<
+    "per_tag" | "combined" | "all_combinations" | "custom"
+  >("combined");
+  const [docObservationScopesCustom, setDocObservationScopesCustom] = React.useState("");
+  const [docMetadata, setDocMetadata] = React.useState("");
+  const [docEntities, setDocEntities] = React.useState("");
+  const [docAdvancedTab, setDocAdvancedTab] = React.useState<"document" | "tags" | "source">(
+    "document"
+  );
   const [docAsync, setDocAsync] = React.useState(false);
   const [isCreatingDoc, setIsCreatingDoc] = React.useState(false);
 
   // File upload state
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
+  const [filesMetadata, setFilesMetadata] = React.useState<
+    {
+      context: string;
+      timestamp: string;
+      document_id: string;
+      tags: string;
+      metadata: string;
+      expanded: boolean;
+    }[]
+  >([]);
   const [uploadProgress, setUploadProgress] = React.useState<string>("");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -110,10 +137,71 @@ function BankSelectorInner() {
     }
   };
 
+  const parseMetadata = (s: string): Record<string, string> | undefined => {
+    const result: Record<string, string> = {};
+    for (const line of s.split("\n")) {
+      const idx = line.indexOf(":");
+      if (idx > 0) {
+        const key = line.slice(0, idx).trim();
+        const val = line.slice(idx + 1).trim();
+        if (key) result[key] = val;
+      }
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+  };
+
+  const parseEntities = (s: string) => {
+    const items = s
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    if (items.length === 0) return undefined;
+    return items.map((t) => ({ text: t }));
+  };
+
+  const scopeLabel = (tags: string[]) => tags.join(", ");
+
+  const scopeQuestion = (tags: string[]): string => {
+    if (tags.length === 1) return `What happened with ${tags[0]}?`;
+    const allButLast = tags.slice(0, -1).join(", ");
+    return `What happened with ${allButLast} and ${tags[tags.length - 1]}?`;
+  };
+
+  const computeScopes = (
+    tags: string[],
+    mode: "per_tag" | "combined" | "all_combinations"
+  ): string[][] => {
+    if (tags.length === 0) return [];
+    if (mode === "per_tag") return tags.map((t) => [t]);
+    if (mode === "combined") return [tags];
+    // all_combinations: every non-empty subset
+    const result: string[][] = [];
+    for (let size = 1; size <= tags.length; size++) {
+      const combine = (start: number, combo: string[]) => {
+        if (combo.length === size) {
+          result.push([...combo]);
+          return;
+        }
+        for (let i = start; i < tags.length; i++) combine(i + 1, [...combo, tags[i]]);
+      };
+      combine(0, []);
+    }
+    return result;
+  };
+
+  const emptyFileMeta = () => ({
+    context: "",
+    timestamp: "",
+    document_id: "",
+    tags: "",
+    metadata: "",
+    expanded: false,
+  });
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     setSelectedFiles((prev) => [...prev, ...files]);
-    // Reset input to allow selecting same file again
+    setFilesMetadata((prev) => [...prev, ...files.map(emptyFileMeta)]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -121,6 +209,21 @@ function BankSelectorInner() {
 
   const removeFile = (index: number) => {
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+    setFilesMetadata((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateFileMeta = (
+    index: number,
+    field: "context" | "timestamp" | "document_id" | "tags" | "metadata",
+    value: string
+  ) => {
+    setFilesMetadata((prev) => prev.map((m, i) => (i === index ? { ...m, [field]: value } : m)));
+  };
+
+  const toggleFileExpanded = (index: number) => {
+    setFilesMetadata((prev) =>
+      prev.map((m, i) => (i === index ? { ...m, expanded: !m.expanded } : m))
+    );
   };
 
   const handleUploadFiles = async () => {
@@ -130,31 +233,39 @@ function BankSelectorInner() {
     setUploadProgress("");
 
     try {
-      const parsedTags = docTags
-        .split(",")
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0);
-
       setUploadProgress(`Uploading ${selectedFiles.length} file(s)...`);
 
-      // Use the new file upload API (always async, converter configured server-side)
+      const perFileMeta = filesMetadata.map((meta) => ({
+        ...(meta.context && { context: meta.context }),
+        ...(meta.timestamp && { timestamp: meta.timestamp + ":00" }),
+        ...(meta.document_id && { document_id: meta.document_id }),
+        ...(meta.tags && {
+          tags: meta.tags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean),
+        }),
+        ...(meta.metadata && { metadata: parseMetadata(meta.metadata) }),
+      }));
+
       await client.uploadFiles({
         bank_id: currentBank,
         files: selectedFiles,
-        document_tags: parsedTags.length > 0 ? parsedTags : undefined,
         async: true,
+        files_metadata: perFileMeta,
       });
 
       // Reset form and close dialog
       setDocDialogOpen(false);
       setSelectedFiles([]);
+      setFilesMetadata([]);
       setDocTags("");
       setDocAsync(false);
       setUploadProgress("");
 
       // Navigate to documents view
       router.push(`/banks/${currentBank}?view=documents`);
-    } catch (error) {
+    } catch {
       // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsCreatingDoc(false);
@@ -168,31 +279,53 @@ function BankSelectorInner() {
     setIsCreatingDoc(true);
 
     try {
-      // Parse tags from comma-separated string
       const parsedTags = docTags
         .split(",")
         .map((t) => t.trim())
-        .filter((t) => t.length > 0);
+        .filter(Boolean);
 
-      const item: any = { content: docContent };
+      const item: {
+        content: string;
+        context?: string;
+        timestamp?: string;
+        document_id?: string;
+        tags?: string[];
+        observation_scopes?: "per_tag" | "combined" | "all_combinations" | string[][];
+        metadata?: Record<string, string>;
+        entities?: Array<{ text: string }>;
+      } = { content: docContent };
       if (docContext) item.context = docContext;
-      // datetime-local gives "2024-01-15T10:30", add seconds for proper ISO format
       if (docEventDate) item.timestamp = docEventDate + ":00";
+      if (docDocumentId) item.document_id = docDocumentId;
       if (parsedTags.length > 0) item.tags = parsedTags;
+      if (docObservationScopes === "per_tag") {
+        item.observation_scopes = "per_tag";
+      } else if (docObservationScopes === "combined") {
+        item.observation_scopes = "combined";
+      } else if (docObservationScopes === "all_combinations") {
+        item.observation_scopes = "all_combinations";
+      } else if (docObservationScopes === "custom") {
+        const customScopes = docObservationScopesCustom
+          .split("\n")
+          .map((line) =>
+            line
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean)
+          )
+          .filter((scope) => scope.length > 0);
+        if (customScopes.length > 0) item.observation_scopes = customScopes;
+      }
+      const parsedMeta = parseMetadata(docMetadata);
+      if (parsedMeta) item.metadata = parsedMeta;
+      const parsedEntities = parseEntities(docEntities);
+      if (parsedEntities) item.entities = parsedEntities;
 
-      const params: any = {
+      await client.retain({
         bank_id: currentBank,
         items: [item],
-      };
-
-      if (docDocumentId) params.document_id = docDocumentId;
-      if (parsedTags.length > 0) params.document_tags = parsedTags;
-
-      if (docAsync) {
-        await client.retain({ ...params, async: true });
-      } else {
-        await client.retain(params);
-      }
+        async: docAsync,
+      });
 
       // Reset form and close dialog
       setDocDialogOpen(false);
@@ -201,11 +334,16 @@ function BankSelectorInner() {
       setDocEventDate("");
       setDocDocumentId("");
       setDocTags("");
+      setDocObservationScopes("combined");
+      setDocObservationScopesCustom("");
+      setDocMetadata("");
+      setDocEntities("");
+      setDocAdvancedTab("document");
       setDocAsync(false);
 
       // Navigate to documents view to see the new document
       router.push(`/banks/${currentBank}?view=documents`);
-    } catch (error) {
+    } catch {
       // Error toast is shown automatically by the API client interceptor
     } finally {
       setIsCreatingDoc(false);
@@ -375,7 +513,7 @@ function BankSelectorInner() {
         </Dialog>
 
         <Dialog open={docDialogOpen} onOpenChange={setDocDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="sm:max-w-[750px] max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>Add New Document</DialogTitle>
               <p className="text-sm text-muted-foreground">
@@ -384,28 +522,29 @@ function BankSelectorInner() {
               </p>
             </DialogHeader>
 
-            <Tabs value={docTab} onValueChange={(v) => setDocTab(v as "text" | "upload")}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="text" className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Text
-                </TabsTrigger>
-                <TabsTrigger
-                  value="upload"
-                  className="flex items-center gap-2"
-                  disabled={fileUploadEnabled === false}
-                >
-                  {fileUploadEnabled === false ? (
-                    <Lock className="h-4 w-4" />
-                  ) : (
-                    <Upload className="h-4 w-4" />
-                  )}
-                  Upload Files
-                </TabsTrigger>
-              </TabsList>
+            <div className="space-y-4 overflow-y-auto flex-1 px-1 -mx-1">
+              {/* Content — tab-switched input only */}
+              <Tabs value={docTab} onValueChange={(v) => setDocTab(v as "text" | "upload")}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="text" className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Text
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="upload"
+                    className="flex items-center gap-2"
+                    disabled={fileUploadEnabled === false}
+                  >
+                    {fileUploadEnabled === false ? (
+                      <Lock className="h-4 w-4" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                    Upload Files
+                  </TabsTrigger>
+                </TabsList>
 
-              <TabsContent value="text" className="space-y-4 mt-4">
-                <div>
+                <TabsContent value="text" className="mt-3">
                   <label className="font-bold block mb-1 text-sm text-foreground">Content *</label>
                   <Textarea
                     value={docContent}
@@ -414,92 +553,27 @@ function BankSelectorInner() {
                     className="min-h-[150px] resize-y"
                     autoFocus
                   />
-                </div>
+                </TabsContent>
 
-                <div>
-                  <label className="font-bold block mb-1 text-sm text-foreground">Context</label>
-                  <Input
-                    type="text"
-                    value={docContext}
-                    onChange={(e) => setDocContext(e.target.value)}
-                    placeholder="Optional context about this document..."
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="font-bold block mb-1 text-sm text-foreground">
-                      Event Date
-                    </label>
-                    <Input
-                      type="datetime-local"
-                      value={docEventDate}
-                      onChange={(e) => setDocEventDate(e.target.value)}
-                      className="text-foreground"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold block mb-1 text-sm text-foreground">
-                      Document ID
-                    </label>
-                    <Input
-                      type="text"
-                      value={docDocumentId}
-                      onChange={(e) => setDocDocumentId(e.target.value)}
-                      placeholder="Optional document identifier..."
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="font-bold block mb-1 text-sm text-foreground flex items-center gap-2">
-                    <Tag className="h-4 w-4" />
-                    Tags
-                  </label>
-                  <Input
-                    type="text"
-                    value={docTags}
-                    onChange={(e) => setDocTags(e.target.value)}
-                    placeholder="user_alice, session_123, project_x"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Comma-separated tags for filtering during recall/reflect
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="async-doc"
-                    checked={docAsync}
-                    onCheckedChange={(checked) => setDocAsync(checked as boolean)}
-                  />
-                  <label htmlFor="async-doc" className="text-sm cursor-pointer text-foreground">
-                    Process in background (async)
-                  </label>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="upload" className="space-y-4 mt-4">
-                {fileUploadEnabled === false ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-center space-y-3">
-                    <Lock className="h-12 w-12 text-muted-foreground/50" />
-                    <div>
-                      <p className="font-semibold text-foreground">File Upload API Disabled</p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        File upload is not enabled on this server.
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        To enable, set{" "}
-                        <code className="bg-muted px-1 py-0.5 rounded">
-                          HINDSIGHT_API_ENABLE_FILE_UPLOAD_API=true
-                        </code>
-                      </p>
+                <TabsContent value="upload" className="mt-3">
+                  {fileUploadEnabled === false ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center space-y-3">
+                      <Lock className="h-12 w-12 text-muted-foreground/50" />
+                      <div>
+                        <p className="font-semibold text-foreground">File Upload API Disabled</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          File upload is not enabled on this server.
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          To enable, set{" "}
+                          <code className="bg-muted px-1 py-0.5 rounded">
+                            HINDSIGHT_API_ENABLE_FILE_UPLOAD_API=true
+                          </code>
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <>
-                    <div>
+                  ) : (
+                    <>
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -517,63 +591,340 @@ function BankSelectorInner() {
                           Click to select files or drag and drop
                         </span>
                       </label>
-                    </div>
 
-                    {selectedFiles.length > 0 && (
-                      <div className="space-y-2">
-                        <label className="font-bold block text-sm text-foreground">
-                          Selected Files ({selectedFiles.length})
-                        </label>
-                        <div className="max-h-[150px] overflow-y-auto space-y-1">
-                          {selectedFiles.map((file, index) => (
-                            <div
-                              key={`${file.name}-${index}`}
-                              className="flex items-center justify-between p-2 bg-muted rounded-md"
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                                <span className="text-sm truncate">{file.name}</span>
-                                <span className="text-xs text-muted-foreground">
-                                  ({(file.size / 1024).toFixed(1)} KB)
-                                </span>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 w-6 p-0"
-                                onClick={() => removeFile(index)}
+                      {selectedFiles.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                          {selectedFiles.map((file, index) => {
+                            const meta = filesMetadata[index];
+                            const hasData =
+                              meta &&
+                              (meta.context ||
+                                meta.timestamp ||
+                                meta.document_id ||
+                                meta.tags ||
+                                meta.metadata);
+                            return (
+                              <div
+                                key={`${file.name}-${index}`}
+                                className="bg-muted rounded-md overflow-hidden"
                               >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ))}
+                                {/* File row header */}
+                                <div className="flex items-center gap-1 px-2 py-2">
+                                  <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 min-w-0 flex-1 text-left hover:opacity-75 transition-opacity"
+                                    onClick={() => toggleFileExpanded(index)}
+                                    title="Edit metadata for this file"
+                                  >
+                                    {meta?.expanded ? (
+                                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                    ) : (
+                                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                    )}
+                                    <FileText
+                                      className={`h-4 w-4 shrink-0 ${hasData ? "text-primary" : "text-muted-foreground"}`}
+                                    />
+                                    <span className="text-sm truncate">{file.name}</span>
+                                    <span className="text-xs text-muted-foreground shrink-0">
+                                      ({(file.size / 1024).toFixed(1)} KB)
+                                    </span>
+                                  </button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 shrink-0"
+                                    onClick={() => removeFile(index)}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+
+                                {/* Per-file metadata form */}
+                                {meta?.expanded && (
+                                  <div className="px-3 pb-3 space-y-2 border-t border-border/50">
+                                    <div className="mt-2">
+                                      <label className="font-bold block mb-1 text-sm text-foreground">
+                                        Context
+                                      </label>
+                                      <Input
+                                        value={meta.context}
+                                        onChange={(e) =>
+                                          updateFileMeta(index, "context", e.target.value)
+                                        }
+                                        placeholder="Optional context..."
+                                        className="h-8 text-sm"
+                                      />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="font-bold block mb-1 text-sm text-foreground">
+                                          Event Date
+                                        </label>
+                                        <Input
+                                          type="datetime-local"
+                                          value={meta.timestamp}
+                                          onChange={(e) =>
+                                            updateFileMeta(index, "timestamp", e.target.value)
+                                          }
+                                          className="h-8 text-sm text-foreground"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="font-bold block mb-1 text-sm text-foreground">
+                                          Document ID
+                                        </label>
+                                        <Input
+                                          value={meta.document_id}
+                                          onChange={(e) =>
+                                            updateFileMeta(index, "document_id", e.target.value)
+                                          }
+                                          placeholder="Optional ID..."
+                                          className="h-8 text-sm"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <label className="font-bold block mb-1 text-sm text-foreground">
+                                        Tags
+                                      </label>
+                                      <Input
+                                        value={meta.tags}
+                                        onChange={(e) =>
+                                          updateFileMeta(index, "tags", e.target.value)
+                                        }
+                                        placeholder="tag1, tag2..."
+                                        className="h-8 text-sm"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="font-bold block mb-1 text-sm text-foreground">
+                                        Metadata
+                                      </label>
+                                      <Textarea
+                                        value={meta.metadata}
+                                        onChange={(e) =>
+                                          updateFileMeta(index, "metadata", e.target.value)
+                                        }
+                                        placeholder={"source: slack\nchannel: engineering"}
+                                        className="min-h-[52px] resize-y font-mono text-sm"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    <div>
-                      <label className="font-bold block mb-1 text-sm text-foreground flex items-center gap-2">
-                        <Tag className="h-4 w-4" />
-                        Tags (applied to all files)
-                      </label>
-                      <Input
-                        type="text"
-                        value={docTags}
-                        onChange={(e) => setDocTags(e.target.value)}
-                        placeholder="user_alice, session_123, project_x"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Comma-separated tags for filtering during recall/reflect
-                      </p>
+                      {uploadProgress && (
+                        <p className="text-sm text-muted-foreground mt-2">{uploadProgress}</p>
+                      )}
+                    </>
+                  )}
+                </TabsContent>
+              </Tabs>
+
+              {/* Context — text tab only */}
+              {docTab === "text" && (
+                <div>
+                  <label className="font-bold block mb-1 text-sm text-foreground">Context</label>
+                  <Input
+                    type="text"
+                    value={docContext}
+                    onChange={(e) => setDocContext(e.target.value)}
+                    placeholder="Optional context about this document..."
+                  />
+                </div>
+              )}
+
+              {/* Advanced section — text only */}
+              {docTab === "text" && (
+                <div>
+                  <Tabs
+                    value={docAdvancedTab}
+                    onValueChange={(v) => setDocAdvancedTab(v as "document" | "tags" | "source")}
+                  >
+                    <TabsList className="w-full border-b border-border bg-transparent h-8 p-0 gap-0 justify-start rounded-none">
+                      <TabsTrigger
+                        value="document"
+                        className="rounded-none h-full px-4 text-xs font-medium bg-transparent shadow-none text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary -mb-px"
+                      >
+                        Document
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="tags"
+                        className="rounded-none h-full px-4 text-xs font-medium bg-transparent shadow-none text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary -mb-px"
+                      >
+                        Tags
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="source"
+                        className="rounded-none h-full px-4 text-xs font-medium bg-transparent shadow-none text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary -mb-px"
+                      >
+                        Source
+                      </TabsTrigger>
+                    </TabsList>
+
+                    <div className="pt-3 space-y-3">
+                      <TabsContent value="document" className="mt-0 space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="font-bold block mb-1 text-sm text-foreground">
+                              Event Date
+                            </label>
+                            <Input
+                              type="datetime-local"
+                              value={docEventDate}
+                              onChange={(e) => setDocEventDate(e.target.value)}
+                              className="text-foreground"
+                            />
+                          </div>
+                          <div>
+                            <label className="font-bold block mb-1 text-sm text-foreground">
+                              Document ID
+                            </label>
+                            <Input
+                              type="text"
+                              value={docDocumentId}
+                              onChange={(e) => setDocDocumentId(e.target.value)}
+                              placeholder="Optional document identifier..."
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id="async-doc"
+                            checked={docAsync}
+                            onCheckedChange={(checked) => setDocAsync(checked as boolean)}
+                          />
+                          <label
+                            htmlFor="async-doc"
+                            className="text-sm cursor-pointer text-foreground"
+                          >
+                            Process in background (async)
+                          </label>
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="tags" className="mt-0 space-y-3">
+                        <div>
+                          <label className="font-bold block mb-1 text-sm text-foreground">
+                            Tags
+                          </label>
+                          <Input
+                            type="text"
+                            value={docTags}
+                            onChange={(e) => setDocTags(e.target.value)}
+                            placeholder="user_alice, session_123, project_x"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Comma-separated — used to filter memories during recall/reflect
+                          </p>
+                        </div>
+                        <div>
+                          <label className="font-bold block mb-1 text-sm text-foreground">
+                            Observation Scopes
+                          </label>
+                          <Select
+                            value={docObservationScopes}
+                            onValueChange={(v) =>
+                              setDocObservationScopes(
+                                v as "per_tag" | "combined" | "all_combinations" | "custom"
+                              )
+                            }
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="per_tag">Per tag</SelectItem>
+                              <SelectItem value="combined">Combined</SelectItem>
+                              <SelectItem value="all_combinations">All combinations</SelectItem>
+                              <SelectItem value="custom">Custom</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {docObservationScopes !== "custom" &&
+                            (() => {
+                              const tags = docTags
+                                .split(",")
+                                .map((t) => t.trim())
+                                .filter(Boolean);
+                              const scopes = computeScopes(tags, docObservationScopes);
+                              const MAX = 6;
+                              if (tags.length === 0) {
+                                return (
+                                  <p className="text-xs text-muted-foreground/60 mt-1.5 italic">
+                                    Add tags above to preview observation scopes
+                                  </p>
+                                );
+                              }
+                              return (
+                                <ul className="mt-2 space-y-1.5">
+                                  {scopes.slice(0, MAX).map((scope, i) => (
+                                    <li key={i} className="flex flex-col gap-0.5">
+                                      <span className="text-xs font-mono text-foreground">
+                                        {scopeLabel(scope)}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {scopeQuestion(scope)}
+                                      </span>
+                                    </li>
+                                  ))}
+                                  {scopes.length > MAX && (
+                                    <li className="text-xs text-muted-foreground">
+                                      +{scopes.length - MAX} more scopes
+                                    </li>
+                                  )}
+                                </ul>
+                              );
+                            })()}
+                          {docObservationScopes === "custom" && (
+                            <Textarea
+                              value={docObservationScopesCustom}
+                              onChange={(e) => setDocObservationScopesCustom(e.target.value)}
+                              placeholder={"user:alice\nuser:alice, place:online"}
+                              className="min-h-[72px] resize-y font-mono text-sm mt-2"
+                            />
+                          )}
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="source" className="mt-0 space-y-3">
+                        <div>
+                          <label className="font-bold block mb-1 text-sm text-foreground">
+                            Metadata
+                          </label>
+                          <Textarea
+                            value={docMetadata}
+                            onChange={(e) => setDocMetadata(e.target.value)}
+                            placeholder={"source: slack\nchannel: engineering"}
+                            className="min-h-[72px] resize-y font-mono text-sm"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            One <code className="bg-muted px-0.5 rounded">key: value</code> per line
+                          </p>
+                        </div>
+                        <div>
+                          <label className="font-bold block mb-1 text-sm text-foreground">
+                            Entities
+                          </label>
+                          <Input
+                            type="text"
+                            value={docEntities}
+                            onChange={(e) => setDocEntities(e.target.value)}
+                            placeholder="Alice, Google, ML model"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Comma-separated hints merged with auto-extracted entities
+                          </p>
+                        </div>
+                      </TabsContent>
                     </div>
-
-                    {uploadProgress && (
-                      <p className="text-sm text-muted-foreground">{uploadProgress}</p>
-                    )}
-                  </>
-                )}
-              </TabsContent>
-            </Tabs>
+                  </Tabs>
+                </div>
+              )}
+            </div>
 
             <DialogFooter>
               <Button
@@ -585,8 +936,14 @@ function BankSelectorInner() {
                   setDocEventDate("");
                   setDocDocumentId("");
                   setDocTags("");
+                  setDocObservationScopes("combined");
+                  setDocObservationScopesCustom("");
+                  setDocMetadata("");
+                  setDocEntities("");
+                  setDocAdvancedTab("document");
                   setDocAsync(false);
                   setSelectedFiles([]);
+                  setFilesMetadata([]);
                   setUploadProgress("");
                 }}
               >

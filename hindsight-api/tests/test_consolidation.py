@@ -2084,3 +2084,236 @@ async def test_consolidation_with_observations_mission(memory: "MemoryEngine", r
         else:
             os.environ["HINDSIGHT_API_OBSERVATIONS_MISSION"] = original
         clear_config_cache()
+
+
+
+@pytest.mark.asyncio
+async def test_observation_scopes_explicit_multi_pass(memory: MemoryEngine, request_context):
+    """Test that observation_scopes with an explicit list triggers separate consolidation passes.
+
+    A single memory stored with observation_scopes=[["user:alice"], ["teacher:ben"]]
+    must produce:
+      - At least one observation with tags containing ONLY "user:alice" (not "teacher:ben")
+      - At least one observation with tags containing ONLY "teacher:ben" (not "user:alice")
+
+    The two tag scopes must remain isolated — no observation should carry both tags,
+    which would indicate the scopes were incorrectly merged.
+    """
+    bank_id = f"test-obs-scopes-explicit-{uuid.uuid4().hex[:8]}"
+
+    await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+    # Retain a memory with two explicit observation scopes
+    await memory.retain_batch_async(
+        bank_id=bank_id,
+        contents=[
+            {
+                "content": "Alice, a student, worked hard in the lesson with teacher Ben.",
+                "observation_scopes": [["user:alice"], ["teacher:ben"]],
+            }
+        ],
+        request_context=request_context,
+    )
+
+    async with memory._pool.acquire() as conn:
+        observations = await conn.fetch(
+            """
+            SELECT id, text, tags
+            FROM memory_units
+            WHERE bank_id = $1 AND fact_type = 'observation'
+            ORDER BY created_at
+            """,
+            bank_id,
+        )
+
+    try:
+        # Must have at least 2 observations (one per tag scope)
+        assert len(observations) >= 2, (
+            f"Expected at least 2 observations (one per tag scope), got {len(observations)}: "
+            + str([dict(o) for o in observations])
+        )
+
+        tag_sets = [set(obs["tags"] or []) for obs in observations]
+
+        # There must be at least one observation scoped to user:alice only
+        alice_only = [ts for ts in tag_sets if "user:alice" in ts and "teacher:ben" not in ts]
+        assert alice_only, (
+            f"Expected an observation scoped to 'user:alice' only, got tag sets: {tag_sets}"
+        )
+
+        # There must be at least one observation scoped to teacher:ben only
+        ben_only = [ts for ts in tag_sets if "teacher:ben" in ts and "user:alice" not in ts]
+        assert ben_only, (
+            f"Expected an observation scoped to 'teacher:ben' only, got tag sets: {tag_sets}"
+        )
+
+        # No observation should carry both tags (scopes must not be merged)
+        both = [ts for ts in tag_sets if "user:alice" in ts and "teacher:ben" in ts]
+        assert not both, (
+            f"Found observation(s) with both tags — scopes were incorrectly merged: {both}"
+        )
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_observation_scopes_per_tag(memory: MemoryEngine, request_context):
+    """Test that observation_scopes='per_tag' derives one pass per individual tag.
+
+    A memory with tags=["user:alice", "teacher:ben"] and observation_scopes="per_tag"
+    must produce isolated observations — one scoped to "user:alice" and one to "teacher:ben".
+    """
+    bank_id = f"test-obs-scopes-pertag-{uuid.uuid4().hex[:8]}"
+
+    await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+    await memory.retain_batch_async(
+        bank_id=bank_id,
+        contents=[
+            {
+                "content": "Alice, a student, worked hard in the lesson with teacher Ben.",
+                "tags": ["user:alice", "teacher:ben"],
+                "observation_scopes": "per_tag",
+            }
+        ],
+        request_context=request_context,
+    )
+
+    async with memory._pool.acquire() as conn:
+        observations = await conn.fetch(
+            """
+            SELECT id, text, tags
+            FROM memory_units
+            WHERE bank_id = $1 AND fact_type = 'observation'
+            ORDER BY created_at
+            """,
+            bank_id,
+        )
+
+    try:
+        assert len(observations) >= 2, (
+            f"Expected at least 2 observations (one per tag), got {len(observations)}: "
+            + str([dict(o) for o in observations])
+        )
+
+        tag_sets = [set(obs["tags"] or []) for obs in observations]
+
+        alice_only = [ts for ts in tag_sets if "user:alice" in ts and "teacher:ben" not in ts]
+        assert alice_only, f"Expected an observation scoped to 'user:alice' only, got: {tag_sets}"
+
+        ben_only = [ts for ts in tag_sets if "teacher:ben" in ts and "user:alice" not in ts]
+        assert ben_only, f"Expected an observation scoped to 'teacher:ben' only, got: {tag_sets}"
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_observation_scopes_combined(memory: MemoryEngine, request_context):
+    """Test that observation_scopes='combined' produces a single observation with all tags.
+
+    A memory with tags=["user:alice", "teacher:ben"] and observation_scopes="combined"
+    must produce at least one observation that carries both tags together, and no
+    observation scoped to only one of them.
+    """
+    bank_id = f"test-obs-scopes-combined-{uuid.uuid4().hex[:8]}"
+
+    await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+    await memory.retain_batch_async(
+        bank_id=bank_id,
+        contents=[
+            {
+                "content": "Alice, a student, worked hard in the lesson with teacher Ben.",
+                "tags": ["user:alice", "teacher:ben"],
+                "observation_scopes": "combined",
+            }
+        ],
+        request_context=request_context,
+    )
+
+    async with memory._pool.acquire() as conn:
+        observations = await conn.fetch(
+            """
+            SELECT id, text, tags
+            FROM memory_units
+            WHERE bank_id = $1 AND fact_type = 'observation'
+            ORDER BY created_at
+            """,
+            bank_id,
+        )
+
+    try:
+        assert len(observations) >= 1, (
+            "Expected at least 1 observation, got 0"
+        )
+
+        tag_sets = [set(obs["tags"] or []) for obs in observations]
+
+        # All observations must carry both tags (combined scope)
+        combined = [ts for ts in tag_sets if "user:alice" in ts and "teacher:ben" in ts]
+        assert combined, f"Expected at least one observation with both tags, got: {tag_sets}"
+
+        # No observation should be scoped to only one tag
+        alice_only = [ts for ts in tag_sets if "user:alice" in ts and "teacher:ben" not in ts]
+        assert not alice_only, f"Expected no alice-only observation in combined mode, got: {tag_sets}"
+
+        ben_only = [ts for ts in tag_sets if "teacher:ben" in ts and "user:alice" not in ts]
+        assert not ben_only, f"Expected no ben-only observation in combined mode, got: {tag_sets}"
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_observation_scopes_all_combinations(memory: MemoryEngine, request_context):
+    """Test that observation_scopes='all_combinations' generates passes for every tag subset.
+
+    A memory with tags=["user:alice", "teacher:ben"] and observation_scopes="all_combinations"
+    must produce observations covering all subsets: ["user:alice"], ["teacher:ben"], and
+    ["user:alice", "teacher:ben"].
+    """
+    bank_id = f"test-obs-scopes-allcombos-{uuid.uuid4().hex[:8]}"
+
+    await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+    await memory.retain_batch_async(
+        bank_id=bank_id,
+        contents=[
+            {
+                "content": "Alice, a student, worked hard in the lesson with teacher Ben.",
+                "tags": ["user:alice", "teacher:ben"],
+                "observation_scopes": "all_combinations",
+            }
+        ],
+        request_context=request_context,
+    )
+
+    async with memory._pool.acquire() as conn:
+        observations = await conn.fetch(
+            """
+            SELECT id, text, tags
+            FROM memory_units
+            WHERE bank_id = $1 AND fact_type = 'observation'
+            ORDER BY created_at
+            """,
+            bank_id,
+        )
+
+    try:
+        # With 2 tags there are 3 subsets: {alice}, {ben}, {alice, ben}
+        assert len(observations) >= 3, (
+            f"Expected at least 3 observations (one per subset), got {len(observations)}: "
+            + str([dict(o) for o in observations])
+        )
+
+        tag_sets = [set(obs["tags"] or []) for obs in observations]
+
+        alice_only = [ts for ts in tag_sets if "user:alice" in ts and "teacher:ben" not in ts]
+        assert alice_only, f"Expected an observation scoped to 'user:alice' only, got: {tag_sets}"
+
+        ben_only = [ts for ts in tag_sets if "teacher:ben" in ts and "user:alice" not in ts]
+        assert ben_only, f"Expected an observation scoped to 'teacher:ben' only, got: {tag_sets}"
+
+        combined = [ts for ts in tag_sets if "user:alice" in ts and "teacher:ben" in ts]
+        assert combined, f"Expected an observation scoped to both tags, got: {tag_sets}"
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)

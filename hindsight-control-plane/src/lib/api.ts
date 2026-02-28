@@ -165,15 +165,17 @@ export class ControlPlaneClient {
       content: string;
       timestamp?: string;
       context?: string;
-      metadata?: Record<string, string>;
       document_id?: string;
+      metadata?: Record<string, string>;
       entities?: Array<{ text: string; type?: string }>;
+      tags?: string[];
+      observation_scopes?: "per_tag" | "combined" | "all_combinations" | string[][];
     }>;
     document_id?: string;
     async?: boolean;
   }) {
     const endpoint = params.async ? "/api/memories/retain_async" : "/api/memories/retain";
-    return this.fetchApi(endpoint, {
+    return this.fetchApi<{ message?: string }>(endpoint, {
       method: "POST",
       body: JSON.stringify(params),
     });
@@ -376,6 +378,7 @@ export class ControlPlaneClient {
       document_id: string | null;
       chunk_id: string | null;
       tags: string[];
+      observation_scopes: string | string[][] | null;
     }>(`/api/memories/${memoryId}?bank_id=${bankId}`);
   }
 

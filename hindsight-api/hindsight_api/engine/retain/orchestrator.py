@@ -142,6 +142,7 @@ async def retain_batch(
             metadata=item.get("metadata", {}),
             entities=item.get("entities", []),
             tags=merged_tags,
+            observation_scopes=item.get("observation_scopes"),
         )
         contents.append(content)
 

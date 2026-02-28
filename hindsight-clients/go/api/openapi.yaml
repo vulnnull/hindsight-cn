@@ -3500,6 +3500,8 @@ components:
             type: string
           nullable: true
           type: array
+        observation_scopes:
+          $ref: '#/components/schemas/ObservationScopes'
       required:
       - content
       title: MemoryItem
@@ -4457,6 +4459,25 @@ components:
       - api_version
       - features
       title: VersionResponse
+    ObservationScopes:
+      anyOf:
+      - enum:
+        - per_tag
+        - combined
+        - all_combinations
+        type: string
+      - items:
+          items:
+            type: string
+          type: array
+        type: array
+      description: "How to scope observations during consolidation. 'per_tag' runs\
+        \ one consolidation pass per individual tag, creating separate observations\
+        \ for each tag. 'combined' (default) runs a single pass with all tags together.\
+        \ A list of tag lists runs one pass per inner list, giving full control over\
+        \ which combinations to use."
+      nullable: true
+      title: ObservationScopes
     ValidationError_loc_inner:
       anyOf:
       - type: string

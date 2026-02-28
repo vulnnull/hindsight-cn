@@ -1195,6 +1195,17 @@ export type MemoryItem = {
    * Optional tags for visibility scoping. Memories with tags can be filtered during recall.
    */
   tags?: Array<string> | null;
+  /**
+   * ObservationScopes
+   *
+   * How to scope observations during consolidation. 'per_tag' runs one consolidation pass per individual tag, creating separate observations for each tag. 'combined' (default) runs a single pass with all tags together. A list of tag lists runs one pass per inner list, giving full control over which combinations to use.
+   */
+  observation_scopes?:
+    | "per_tag"
+    | "combined"
+    | "all_combinations"
+    | Array<Array<string>>
+    | null;
 };
 
 /**

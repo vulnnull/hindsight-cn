@@ -7,7 +7,7 @@ from content input to fact storage.
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TypedDict
+from typing import Literal, TypedDict
 from uuid import UUID
 
 
@@ -22,6 +22,9 @@ class RetainContentDict(TypedDict, total=False):
         document_id: Document ID for this content item (optional)
         entities: User-provided entities to merge with extracted entities (optional)
         tags: Visibility scope tags for this content item (optional)
+        observation_scopes: How to scope observations for consolidation (optional).
+            "per_tag" runs one pass per individual tag; "combined" (default) runs a
+            single pass with all tags; a list[list[str]] specifies exact passes.
     """
 
     content: str  # Required
@@ -31,6 +34,9 @@ class RetainContentDict(TypedDict, total=False):
     document_id: str
     entities: list[dict[str, str]]  # [{"text": "...", "type": "..."}]
     tags: list[str]  # Visibility scope tags
+    observation_scopes: (
+        Literal["per_tag", "combined", "all_combinations"] | list[list[str]]
+    )  # Observation scopes for consolidation
 
 
 def _now_utc() -> datetime:
@@ -52,6 +58,9 @@ class RetainContent:
     metadata: dict[str, str] = field(default_factory=dict)
     entities: list[dict[str, str]] = field(default_factory=list)  # User-provided entities
     tags: list[str] = field(default_factory=list)  # Visibility scope tags
+    observation_scopes: Literal["per_tag", "combined", "all_combinations"] | list[list[str]] | None = (
+        None  # Observation scopes
+    )
 
 
 @dataclass
@@ -117,6 +126,9 @@ class ExtractedFact:
     mentioned_at: datetime | None = None
     metadata: dict[str, str] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)  # Visibility scope tags
+    observation_scopes: Literal["per_tag", "combined", "all_combinations"] | list[list[str]] | None = (
+        None  # Observation scopes
+    )
 
 
 @dataclass
@@ -165,6 +177,9 @@ class ProcessedFact:
     # Visibility scope tags
     tags: list[str] = field(default_factory=list)
 
+    # Observation scopes for consolidation
+    observation_scopes: Literal["per_tag", "combined", "all_combinations"] | list[list[str]] | None = None
+
     @property
     def is_duplicate(self) -> bool:
         """Check if this fact was marked as a duplicate."""
@@ -209,6 +224,7 @@ class ProcessedFact:
             chunk_id=chunk_id,
             content_index=extracted_fact.content_index,
             tags=extracted_fact.tags,
+            observation_scopes=extracted_fact.observation_scopes,
         )
 
 

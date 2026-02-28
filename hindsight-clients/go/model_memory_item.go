@@ -29,6 +29,7 @@ type MemoryItem struct {
 	DocumentId NullableString `json:"document_id,omitempty"`
 	Entities []EntityInput `json:"entities,omitempty"`
 	Tags []string `json:"tags,omitempty"`
+	ObservationScopes NullableObservationScopes `json:"observation_scopes,omitempty"`
 }
 
 type _MemoryItem MemoryItem
@@ -300,6 +301,48 @@ func (o *MemoryItem) SetTags(v []string) {
 	o.Tags = v
 }
 
+// GetObservationScopes returns the ObservationScopes field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *MemoryItem) GetObservationScopes() ObservationScopes {
+	if o == nil || IsNil(o.ObservationScopes.Get()) {
+		var ret ObservationScopes
+		return ret
+	}
+	return *o.ObservationScopes.Get()
+}
+
+// GetObservationScopesOk returns a tuple with the ObservationScopes field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *MemoryItem) GetObservationScopesOk() (*ObservationScopes, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.ObservationScopes.Get(), o.ObservationScopes.IsSet()
+}
+
+// HasObservationScopes returns a boolean if a field has been set.
+func (o *MemoryItem) HasObservationScopes() bool {
+	if o != nil && o.ObservationScopes.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetObservationScopes gets a reference to the given NullableObservationScopes and assigns it to the ObservationScopes field.
+func (o *MemoryItem) SetObservationScopes(v ObservationScopes) {
+	o.ObservationScopes.Set(&v)
+}
+// SetObservationScopesNil sets the value for ObservationScopes to be an explicit nil
+func (o *MemoryItem) SetObservationScopesNil() {
+	o.ObservationScopes.Set(nil)
+}
+
+// UnsetObservationScopes ensures that no value is present for ObservationScopes, not even an explicit nil
+func (o *MemoryItem) UnsetObservationScopes() {
+	o.ObservationScopes.Unset()
+}
+
 func (o MemoryItem) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -328,6 +371,9 @@ func (o MemoryItem) ToMap() (map[string]interface{}, error) {
 	}
 	if o.Tags != nil {
 		toSerialize["tags"] = o.Tags
+	}
+	if o.ObservationScopes.IsSet() {
+		toSerialize["observation_scopes"] = o.ObservationScopes.Get()
 	}
 	return toSerialize, nil
 }

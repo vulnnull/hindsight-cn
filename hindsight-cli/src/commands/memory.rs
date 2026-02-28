@@ -387,6 +387,7 @@ pub fn retain(
         document_id: Some(doc_id.clone()),
         entities: None,
         tags: None,
+        observation_scopes: None,
     };
 
     let request = RetainRequest {

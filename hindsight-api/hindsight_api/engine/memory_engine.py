@@ -3646,7 +3646,7 @@ class MemoryEngine(MemoryEngineInterface):
                         # Only include if the target is visible
                         if to_id in unit_id_set or to_observations:
                             target = to_observations[0] if to_observations and to_id not in unit_id_set else to_id
-                            if target in unit_id_set:
+                            if target in unit_id_set and obs_id != target:
                                 copied_links.append(
                                     {
                                         "from_unit_id": obs_id,
@@ -3660,15 +3660,16 @@ class MemoryEngine(MemoryEngineInterface):
                 # If to_id is a source memory, copy links to its observations
                 if to_observations and from_id in unit_id_set:
                     for obs_id in to_observations:
-                        copied_links.append(
-                            {
-                                "from_unit_id": from_id,
-                                "to_unit_id": obs_id,
-                                "link_type": link["link_type"],
-                                "weight": link["weight"],
-                                "entity_name": link["entity_name"],
-                            }
-                        )
+                        if from_id != obs_id:
+                            copied_links.append(
+                                {
+                                    "from_unit_id": from_id,
+                                    "to_unit_id": obs_id,
+                                    "link_type": link["link_type"],
+                                    "weight": link["weight"],
+                                    "entity_name": link["entity_name"],
+                                }
+                            )
 
             # Keep only direct links between visible nodes
             direct_links = [
@@ -3737,9 +3738,63 @@ class MemoryEngine(MemoryEngineInterface):
                 }
             )
 
-        # Build edges (combine direct links and copied links from sources)
+        # Build observation-inferred links from inherited entities and shared source memories.
+        # Observations never have direct memory_links rows, so all their links must be derived.
+        observation_units = [unit for unit in units if unit["fact_type"] == "observation"]
+        observation_ids = {unit["id"] for unit in observation_units}
+
+        # Entity links: pair observations that share at least one inherited entity
+        entity_to_observations: dict[str, list] = {}
+        for obs_id in observation_ids:
+            for entity_name in entity_map.get(obs_id, []):
+                entity_to_observations.setdefault(entity_name, []).append(obs_id)
+
+        # Semantic links: pair observations that share at least one source memory
+        source_to_obs_for_semantic: dict = {}
+        for unit in observation_units:
+            if unit["source_memory_ids"]:
+                for src_id in unit["source_memory_ids"]:
+                    source_to_obs_for_semantic.setdefault(src_id, []).append(unit["id"])
+
+        observation_inferred_links = []
+        seen_inferred: set[tuple] = set()
+
+        for entity_name, obs_ids in entity_to_observations.items():
+            for i, obs_a in enumerate(obs_ids):
+                for obs_b in obs_ids[i + 1 :]:
+                    pair = (min(str(obs_a), str(obs_b)), max(str(obs_a), str(obs_b)), "entity", entity_name)
+                    if pair not in seen_inferred:
+                        seen_inferred.add(pair)
+                        observation_inferred_links.append(
+                            {
+                                "from_unit_id": obs_a,
+                                "to_unit_id": obs_b,
+                                "link_type": "entity",
+                                "weight": 1.0,
+                                "entity_name": entity_name,
+                            }
+                        )
+
+        for src_id, obs_ids in source_to_obs_for_semantic.items():
+            for i, obs_a in enumerate(obs_ids):
+                for obs_b in obs_ids[i + 1 :]:
+                    pair = (min(str(obs_a), str(obs_b)), max(str(obs_a), str(obs_b)), "semantic", "")
+                    if pair not in seen_inferred:
+                        seen_inferred.add(pair)
+                        observation_inferred_links.append(
+                            {
+                                "from_unit_id": obs_a,
+                                "to_unit_id": obs_b,
+                                "link_type": "semantic",
+                                "weight": 1.0,
+                                "entity_name": None,
+                            }
+                        )
+
+        # Build edges (combine direct links, copied links from sources, and observation-inferred links)
         edges = []
-        all_links = direct_links + copied_links
+        seen_edges: set[tuple] = set()
+        all_links = direct_links + copied_links + observation_inferred_links
         for row in all_links:
             from_id = str(row["from_unit_id"])
             to_id = str(row["to_unit_id"])
@@ -3760,6 +3815,11 @@ class MemoryEngine(MemoryEngineInterface):
             else:
                 color = "#999999"
                 line_style = "solid"
+
+            edge_key = (from_id, to_id, link_type, entity_name or "")
+            if edge_key in seen_edges:
+                continue
+            seen_edges.add(edge_key)
 
             edges.append(
                 {
@@ -3958,7 +4018,8 @@ class MemoryEngine(MemoryEngineInterface):
             row = await conn.fetchrow(
                 f"""
                 SELECT id, text, context, event_date, occurred_start, occurred_end,
-                       mentioned_at, fact_type, document_id, chunk_id, tags, source_memory_ids
+                       mentioned_at, fact_type, document_id, chunk_id, tags, source_memory_ids,
+                       observation_scopes
                 FROM {fq_table("memory_units")}
                 WHERE id = $1 AND bank_id = $2
                 """,
@@ -3981,6 +4042,19 @@ class MemoryEngine(MemoryEngineInterface):
             )
             entities = [r["canonical_name"] for r in entities_rows]
 
+            # For observations with no direct entities, inherit from source memories
+            if not entities and row["fact_type"] == "observation" and row["source_memory_ids"]:
+                source_entities_rows = await conn.fetch(
+                    f"""
+                    SELECT DISTINCT e.canonical_name
+                    FROM {fq_table("unit_entities")} ue
+                    JOIN {fq_table("entities")} e ON ue.entity_id = e.id
+                    WHERE ue.unit_id = ANY($1::uuid[])
+                    """,
+                    row["source_memory_ids"],
+                )
+                entities = [r["canonical_name"] for r in source_entities_rows]
+
             result = {
                 "id": str(row["id"]),
                 "text": row["text"],
@@ -3994,6 +4068,7 @@ class MemoryEngine(MemoryEngineInterface):
                 "document_id": row["document_id"] if row["document_id"] else None,
                 "chunk_id": str(row["chunk_id"]) if row["chunk_id"] else None,
                 "tags": row["tags"] if row["tags"] else [],
+                "observation_scopes": row["observation_scopes"] if row["observation_scopes"] else None,
             }
 
             # For observations, include source_memory_ids and fetch source_memories

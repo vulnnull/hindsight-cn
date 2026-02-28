@@ -17,6 +17,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import combinations
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -193,7 +194,8 @@ async def run_consolidation_job(
             t0 = time.time()
             memories = await conn.fetch(
                 f"""
-                SELECT id, text, fact_type, occurred_start, occurred_end, event_date, tags, mentioned_at
+                SELECT id, text, fact_type, occurred_start, occurred_end, event_date, tags, mentioned_at,
+                       observation_scopes
                 FROM {fq_table("memory_units")}
                 WHERE bank_id = $1
                   AND consolidated_at IS NULL
@@ -239,15 +241,84 @@ async def run_consolidation_job(
                     consolidated_tags.update(memory_tags)
 
             async with pool.acquire() as conn:
-                results = await _process_memory_batch(
-                    conn=conn,
-                    memory_engine=memory_engine,
-                    bank_id=bank_id,
-                    memories=llm_batch,
-                    request_context=request_context,
-                    perf=perf,
-                    config=config,
-                )
+                # Determine observation_scopes for this batch. All memories in a batch share
+                # the same tags (enforced by tag_groups), so we only check the first memory.
+                # asyncpg returns JSONB columns as raw JSON strings, so parse if needed.
+                _obs_raw = llm_batch[0].get("observation_scopes") if llm_batch else None
+                _obs_parsed = json.loads(_obs_raw) if isinstance(_obs_raw, str) else _obs_raw
+
+                # Resolve the scope spec into a concrete list[list[str]] (or None for combined).
+                if _obs_parsed == "per_tag":
+                    _memory_tags = llm_batch[0].get("tags") or []
+                    obs_tags_list = [[tag] for tag in _memory_tags] if _memory_tags else None
+                elif _obs_parsed == "all_combinations":
+                    _memory_tags = llm_batch[0].get("tags") or []
+                    obs_tags_list = (
+                        [
+                            list(combo)
+                            for r in range(1, len(_memory_tags) + 1)
+                            for combo in combinations(_memory_tags, r)
+                        ]
+                        if _memory_tags
+                        else None
+                    )
+                elif _obs_parsed == "combined" or _obs_parsed is None:
+                    obs_tags_list = None  # single combined pass (default behaviour)
+                else:
+                    # explicit list[list[str]]
+                    obs_tags_list = _obs_parsed
+
+                if obs_tags_list:
+                    # Multi-pass: run one observation consolidation pass per tag set
+                    results = []
+                    for obs_tags in obs_tags_list:
+                        pass_results = await _process_memory_batch(
+                            conn=conn,
+                            memory_engine=memory_engine,
+                            bank_id=bank_id,
+                            memories=llm_batch,
+                            request_context=request_context,
+                            perf=perf,
+                            config=config,
+                            obs_tags_override=obs_tags,
+                        )
+                        # Merge results: prefer non-skipped actions
+                        if not results:
+                            results = pass_results
+                        else:
+                            for i, (existing, new) in enumerate(zip(results, pass_results)):
+                                if existing.get("action") == "skipped" and new.get("action") != "skipped":
+                                    results[i] = new
+                                elif existing.get("action") != "skipped" and new.get("action") != "skipped":
+                                    # Both did something — combine into "multiple"
+                                    existing_created = existing.get(
+                                        "created", 1 if existing.get("action") == "created" else 0
+                                    )
+                                    existing_updated = existing.get(
+                                        "updated", 1 if existing.get("action") == "updated" else 0
+                                    )
+                                    new_created = new.get("created", 1 if new.get("action") == "created" else 0)
+                                    new_updated = new.get("updated", 1 if new.get("action") == "updated" else 0)
+                                    total = existing_created + existing_updated + new_created + new_updated
+                                    results[i] = {
+                                        "action": "multiple",
+                                        "created": existing_created + new_created,
+                                        "updated": existing_updated + new_updated,
+                                        "merged": 0,
+                                        "total_actions": total,
+                                    }
+                else:
+                    # Normal single pass using the memory's own tags
+                    results = await _process_memory_batch(
+                        conn=conn,
+                        memory_engine=memory_engine,
+                        bank_id=bank_id,
+                        memories=llm_batch,
+                        request_context=request_context,
+                        perf=perf,
+                        config=config,
+                    )
+
                 await conn.executemany(
                     f"UPDATE {fq_table('memory_units')} SET consolidated_at = NOW() WHERE id = $1",
                     [(m["id"],) for m in llm_batch],
@@ -441,6 +512,7 @@ async def _process_memory_batch(
     request_context: "RequestContext",
     perf: ConsolidationPerfLog | None = None,
     config: Any = None,
+    obs_tags_override: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Process a batch of memories in a single LLM call.
@@ -455,18 +527,26 @@ async def _process_memory_batch(
     Per-fact security: action execution validates each learning_id against the
     observations that were recalled specifically for that fact, so cross-tag
     updates cannot occur.
+
+    Args:
+        obs_tags_override: When set, use these tags for observation recall and
+            create/update instead of the memory's own tags. This enables multi-pass
+            consolidation where a single memory can contribute to observations
+            scoped at different tag levels (e.g., user-level vs session-level).
     """
     import asyncio
 
     # 1. Parallel recalls — one per fact
+    # When obs_tags_override is set, use it as the observation scope for all facts.
     t0 = time.time()
+    observation_scope_tags = obs_tags_override if obs_tags_override is not None else None
     recall_tasks = [
         _find_related_observations(
             memory_engine=memory_engine,
             bank_id=bank_id,
             query=m["text"],
             request_context=request_context,
-            tags=m.get("tags") or [],
+            tags=observation_scope_tags if observation_scope_tags is not None else (m.get("tags") or []),
         )
         for m in memories
     ]
@@ -510,8 +590,13 @@ async def _process_memory_batch(
     per_memory_created: set[str] = set()
     per_memory_updated: set[str] = set()
 
-    # All memories in the batch share the same tag set (enforced by batching)
-    fact_tags = memories[0].get("tags") or [] if memories else []
+    # Determine effective tag scope for observations.
+    # When obs_tags_override is set, use it; otherwise use the memory's own tags.
+    if obs_tags_override is not None:
+        fact_tags = obs_tags_override
+    else:
+        # All memories in the batch share the same tag set (enforced by batching)
+        fact_tags = memories[0].get("tags") or [] if memories else []
 
     mem_by_id = {str(m["id"]): m for m in memories}
 

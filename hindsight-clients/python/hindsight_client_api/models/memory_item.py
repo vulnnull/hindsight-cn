@@ -21,6 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from hindsight_client_api.models.entity_input import EntityInput
+from hindsight_client_api.models.observation_scopes import ObservationScopes
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -35,7 +36,8 @@ class MemoryItem(BaseModel):
     document_id: Optional[StrictStr] = None
     entities: Optional[List[EntityInput]] = None
     tags: Optional[List[StrictStr]] = None
-    __properties: ClassVar[List[str]] = ["content", "timestamp", "context", "metadata", "document_id", "entities", "tags"]
+    observation_scopes: Optional[ObservationScopes] = None
+    __properties: ClassVar[List[str]] = ["content", "timestamp", "context", "metadata", "document_id", "entities", "tags", "observation_scopes"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -83,6 +85,9 @@ class MemoryItem(BaseModel):
                 if _item_entities:
                     _items.append(_item_entities.to_dict())
             _dict['entities'] = _items
+        # override the default output from pydantic by calling `to_dict()` of observation_scopes
+        if self.observation_scopes:
+            _dict['observation_scopes'] = self.observation_scopes.to_dict()
         # set to None if timestamp (nullable) is None
         # and model_fields_set contains the field
         if self.timestamp is None and "timestamp" in self.model_fields_set:
@@ -113,6 +118,11 @@ class MemoryItem(BaseModel):
         if self.tags is None and "tags" in self.model_fields_set:
             _dict['tags'] = None
 
+        # set to None if observation_scopes (nullable) is None
+        # and model_fields_set contains the field
+        if self.observation_scopes is None and "observation_scopes" in self.model_fields_set:
+            _dict['observation_scopes'] = None
+
         return _dict
 
     @classmethod
@@ -131,7 +141,8 @@ class MemoryItem(BaseModel):
             "metadata": obj.get("metadata"),
             "document_id": obj.get("document_id"),
             "entities": [EntityInput.from_dict(_item) for _item in obj["entities"]] if obj.get("entities") is not None else None,
-            "tags": obj.get("tags")
+            "tags": obj.get("tags"),
+            "observation_scopes": ObservationScopes.from_dict(obj["observation_scopes"]) if obj.get("observation_scopes") is not None else None
         })
         return _obj
 

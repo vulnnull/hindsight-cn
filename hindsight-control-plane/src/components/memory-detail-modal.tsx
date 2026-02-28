@@ -5,7 +5,7 @@ import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Calendar, Users, FileText, Layers } from "lucide-react";
+import { Loader2, Calendar, Users, FileText, Layers, Tag } from "lucide-react";
 import { TagList } from "@/components/ui/tag-list";
 import { Button } from "@/components/ui/button";
 
@@ -31,6 +31,7 @@ interface MemoryDetail {
   document_id: string | null;
   chunk_id: string | null;
   tags: string[];
+  observation_scopes: string | string[][] | null;
   source_memories?: SourceMemory[];
 }
 
@@ -215,6 +216,27 @@ export function MemoryDetailModal({ memoryId, onClose }: MemoryDetailModalProps)
                 {/* Tags */}
                 <TagList tags={memory.tags} showLabel />
 
+                {/* Observation Scopes */}
+                {memory.observation_scopes && (
+                  <div>
+                    <div className="text-xs font-bold text-muted-foreground uppercase mb-2 flex items-center gap-1">
+                      <Tag className="w-3 h-3" />
+                      Observation Scopes
+                    </div>
+                    {typeof memory.observation_scopes === "string" ? (
+                      <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
+                        {memory.observation_scopes}
+                      </span>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {(memory.observation_scopes as string[][]).map((scope, i) => (
+                          <TagList key={i} tags={scope} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Source Memories */}
                 {memory.source_memories && memory.source_memories.length > 0 && (
                   <div className="border-t border-border pt-4">
@@ -392,6 +414,27 @@ export function MemoryDetailModal({ memoryId, onClose }: MemoryDetailModalProps)
 
                     {/* Tags */}
                     <TagList tags={memory.tags} showLabel />
+
+                    {/* Observation Scopes */}
+                    {memory.observation_scopes && (
+                      <div>
+                        <div className="text-xs font-bold text-muted-foreground uppercase mb-2 flex items-center gap-1">
+                          <Tag className="w-3 h-3" />
+                          Observation Scopes
+                        </div>
+                        {typeof memory.observation_scopes === "string" ? (
+                          <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
+                            {memory.observation_scopes}
+                          </span>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {(memory.observation_scopes as string[][]).map((scope, i) => (
+                              <TagList key={i} tags={scope} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* ID */}
                     <div>

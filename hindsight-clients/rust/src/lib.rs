@@ -71,6 +71,7 @@ mod tests {
                     timestamp: None,
                     entities: None,
                     tags: None,
+                    observation_scopes: None,
                 },
                 types::MemoryItem {
                     content: "Bob works with Alice on the search team".to_string(),
@@ -80,6 +81,7 @@ mod tests {
                     timestamp: None,
                     entities: None,
                     tags: None,
+                    observation_scopes: None,
                 },
             ],
             document_tags: None,

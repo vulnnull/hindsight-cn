@@ -1701,6 +1701,7 @@ async def extract_facts_from_contents_batch_api(
                 mentioned_at=content.event_date,
                 metadata=content.metadata,
                 tags=content.tags,
+                observation_scopes=content.observation_scopes,
             )
 
             extracted_facts.append(extracted_fact)
@@ -1831,6 +1832,7 @@ async def extract_facts_from_contents(
                         mentioned_at=content.event_date,
                         metadata=content.metadata,
                         tags=content.tags,
+                        observation_scopes=content.observation_scopes,
                     )
 
                     extracted_facts.append(extracted_fact)

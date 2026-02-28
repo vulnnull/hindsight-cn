@@ -60,6 +60,7 @@ hindsight_client_api/models/memory_item.py
 hindsight_client_api/models/mental_model_list_response.py
 hindsight_client_api/models/mental_model_response.py
 hindsight_client_api/models/mental_model_trigger.py
+hindsight_client_api/models/observation_scopes.py
 hindsight_client_api/models/operation_response.py
 hindsight_client_api/models/operation_status_response.py
 hindsight_client_api/models/operations_list_response.py
