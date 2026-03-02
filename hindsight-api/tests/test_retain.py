@@ -592,6 +592,125 @@ async def test_mentioned_at_from_context_string(memory, request_context):
 
 
 # ============================================================
+# No Timestamp Tests
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_retain_no_timestamp(memory, request_context):
+    """
+    Test retaining content with explicit "no timestamp" sentinel.
+
+    When event_date=None is passed explicitly in the dict (i.e. caller opted into
+    no timestamp), mentioned_at should be NULL in the DB rather than defaulting to now().
+    """
+    bank_id = f"test_no_timestamp_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Use retain_batch_async with explicit event_date=None key to signal "no timestamp"
+        unit_ids_list = await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[
+                {
+                    "content": "The capital of France is Paris. The Eiffel Tower is located in Paris.",
+                    "context": "general knowledge",
+                    "event_date": None,  # Explicit sentinel: no timestamp
+                }
+            ],
+            request_context=request_context,
+        )
+
+        assert len(unit_ids_list) > 0, "Should create at least one batch result"
+        unit_ids = unit_ids_list[0]
+        assert len(unit_ids) > 0, "Should have extracted and stored facts"
+
+        # Recall the facts
+        result = await memory.recall_async(
+            bank_id=bank_id,
+            query="Where is the Eiffel Tower?",
+            budget=Budget.LOW,
+            max_tokens=500,
+            fact_type=["world"],
+            request_context=request_context,
+        )
+
+        assert len(result.results) > 0, "Should recall the stored fact"
+
+        # All temporal fields should be None for temporally agnostic content
+        for fact in result.results:
+            assert fact.mentioned_at is None, (
+                f"mentioned_at should be None for no-timestamp content, got {fact.mentioned_at}"
+            )
+
+        print(f"\n✓ Test passed: mentioned_at is None for {len(result.results)} fact(s)")
+
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+@pytest.mark.asyncio
+async def test_retain_omit_timestamp_defaults_to_now(memory, request_context):
+    """
+    Backward-compatibility regression test: omitting event_date still stores a real datetime.
+
+    When event_date is absent from the content dict (key not present), the orchestrator
+    should default to utcnow() — preserving existing behavior.
+    """
+    bank_id = f"test_default_timestamp_{datetime.now(timezone.utc).timestamp()}"
+    before = datetime.now(timezone.utc)
+
+    try:
+        # Omit event_date entirely — should default to now()
+        unit_ids_list = await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[
+                {
+                    "content": "Alice is a software engineer who loves Python.",
+                    "context": "profile",
+                    # event_date intentionally omitted
+                }
+            ],
+            request_context=request_context,
+        )
+
+        after = datetime.now(timezone.utc)
+
+        assert len(unit_ids_list) > 0
+        unit_ids = unit_ids_list[0]
+        assert len(unit_ids) > 0, "Should have extracted and stored facts"
+
+        # Recall and verify mentioned_at is a real datetime close to now
+        result = await memory.recall_async(
+            bank_id=bank_id,
+            query="Who is Alice?",
+            budget=Budget.LOW,
+            max_tokens=500,
+            fact_type=["world"],
+            request_context=request_context,
+        )
+
+        assert len(result.results) > 0, "Should recall the fact"
+        fact = result.results[0]
+
+        assert fact.mentioned_at is not None, "mentioned_at should be set when event_date is omitted"
+
+        if isinstance(fact.mentioned_at, str):
+            mentioned_dt = datetime.fromisoformat(fact.mentioned_at.replace("Z", "+00:00"))
+        else:
+            mentioned_dt = fact.mentioned_at
+
+        # Should be within 60s of when we ran the test
+        assert before <= mentioned_dt <= after + timedelta(seconds=60), (
+            f"mentioned_at {mentioned_dt} should be close to now ({before} – {after})"
+        )
+
+        print(f"\n✓ Test passed: mentioned_at={mentioned_dt} is a real datetime (backward compat)")
+
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+# ============================================================
 # Context Tracking Tests
 # ============================================================
 

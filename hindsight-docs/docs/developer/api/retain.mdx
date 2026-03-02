@@ -66,9 +66,15 @@ The raw text to store. This is the only required field. Hindsight chunks the con
 
 ### timestamp
 
-When the event described in the content actually occurred. Accepts any ISO 8601 string (e.g., `"2024-01-15T10:30:00Z"`). If omitted, defaults to the current time at ingestion.
+When the event described in the content actually occurred. Three forms are accepted:
 
-The timestamp is injected verbatim into the LLM fact-extraction prompt so the model can resolve relative temporal references in the content — for example, if the content says "last Monday", the model uses the provided timestamp as the anchor to pin down the actual date. It also enables temporal recall queries like "What happened last spring?" to work correctly.
+| Value | Behaviour |
+|-------|-----------|
+| Omitted / `null` | Defaults to the current time at ingestion. |
+| ISO 8601 string (e.g. `"2024-01-15T10:30:00Z"`) | Uses the provided datetime. |
+| `"unset"` | Stores the content **without any timestamp**. Use this for timeless material such as reference documents, books, or fictional content where no real event time exists. |
+
+The timestamp is injected into the LLM fact-extraction prompt so the model can resolve relative temporal references in the content — for example, if the content says "last Monday", the model uses the provided timestamp as the anchor to pin down the actual date. When `"unset"` is passed the prompt shows `Event Date: Unknown`, allowing the model to correctly return `N/A` for the `when` field of every extracted fact. Providing a real timestamp also enables temporal recall queries like "What happened last spring?" to work correctly.
 
 ### context
 

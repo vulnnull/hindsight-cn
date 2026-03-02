@@ -237,7 +237,7 @@ class EntityResolver:
             rows = await conn.fetch(
                 f"""
                 INSERT INTO {fq_table("entities")} (bank_id, canonical_name, first_seen, last_seen, mention_count)
-                SELECT $1, name, event_date, event_date, cnt
+                SELECT $1, name, COALESCE(event_date, now()), COALESCE(event_date, now()), cnt
                 FROM unnest($2::text[], $3::timestamptz[], $4::int[]) AS t(name, event_date, cnt)
                 ON CONFLICT (bank_id, LOWER(canonical_name))
                 DO UPDATE SET
@@ -408,7 +408,7 @@ class EntityResolver:
         entity_id = await conn.fetchval(
             f"""
             INSERT INTO {fq_table("entities")} (bank_id, canonical_name, first_seen, last_seen, mention_count)
-            VALUES ($1, $2, $3, $4, 1)
+            VALUES ($1, $2, COALESCE($3, now()), COALESCE($4, now()), 1)
             ON CONFLICT (bank_id, LOWER(canonical_name))
             DO UPDATE SET
                 mention_count = {fq_table("entities")}.mention_count + 1,

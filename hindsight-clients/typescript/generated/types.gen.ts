@@ -1165,6 +1165,8 @@ export type MemoryItem = {
   content: string;
   /**
    * Timestamp
+   *
+   * When the content occurred. Accepts an ISO 8601 datetime string (e.g. '2024-01-15T10:30:00Z'), null/omitted (defaults to now), or the special string 'unset' to explicitly store without any timestamp (use this for timeless content such as fictional documents or static reference material).
    */
   timestamp?: string | null;
   /**

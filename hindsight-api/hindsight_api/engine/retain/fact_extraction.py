@@ -19,13 +19,16 @@ from ..llm_wrapper import LLMConfig, OutputTooLongError
 from ..response_models import TokenUsage
 
 
-def _infer_temporal_date(fact_text: str, event_date: datetime) -> str | None:
+def _infer_temporal_date(fact_text: str, event_date: datetime | None) -> str | None:
     """
     Infer a temporal date from fact text when LLM didn't provide occurred_start.
 
     This is a fallback for when the LLM fails to extract temporal information
     from relative time expressions like "last night", "yesterday", etc.
     """
+    if event_date is None:
+        return None
+
     fact_lower = fact_text.lower()
 
     # Map relative time expressions to day offsets
@@ -100,7 +103,6 @@ class Fact(BaseModel):
     # Optional temporal fields
     occurred_start: str | None = None
     occurred_end: str | None = None
-    mentioned_at: str | None = None
 
     # Optional location field
     where: str | None = Field(
@@ -747,7 +749,7 @@ def _build_user_message(
     chunk: str,
     chunk_index: int,
     total_chunks: int,
-    event_date: datetime,
+    event_date: datetime | None,
     context: str,
     metadata: dict[str, str] | None = None,
 ) -> str:
@@ -756,8 +758,12 @@ def _build_user_message(
 
     sanitized_chunk = _sanitize_text(chunk)
     sanitized_context = _sanitize_text(context) if context else "none"
-    event_date = parse_datetime_flexible(event_date)
-    event_date_formatted = event_date.strftime("%A, %B %d, %Y")
+
+    if event_date is not None:
+        event_date = parse_datetime_flexible(event_date)
+        event_date_str = f"{event_date.strftime('%A, %B %d, %Y')} ({event_date.isoformat()})"
+    else:
+        event_date_str = "Unknown"
 
     metadata_section = ""
     if metadata:
@@ -767,7 +773,7 @@ def _build_user_message(
     return f"""Extract facts from the following text chunk.
 
 Chunk: {chunk_index + 1}/{total_chunks}
-Event Date: {event_date_formatted} ({event_date.isoformat()})
+Event Date: {event_date_str}
 Context: {sanitized_context}{metadata_section}
 
 Text:
@@ -805,7 +811,7 @@ async def _extract_facts_from_chunk(
     chunk: str,
     chunk_index: int,
     total_chunks: int,
-    event_date: datetime,
+    event_date: datetime | None,
     context: str,
     llm_config: "LLMConfig",
     config,
@@ -1043,8 +1049,9 @@ async def _extract_facts_from_chunk(
                     if validated_relations:
                         fact_data["causal_relations"] = validated_relations
 
-                # Always set mentioned_at to the event_date (when the conversation/document occurred)
-                fact_data["mentioned_at"] = event_date.isoformat()
+                # Set mentioned_at to the event_date (when the conversation/document occurred),
+                # or None when the caller opted into no timestamp.
+                fact_data["mentioned_at"] = event_date.isoformat() if event_date is not None else None
 
                 # Build Fact model instance
                 try:
@@ -1107,7 +1114,7 @@ async def _extract_facts_with_auto_split(
     chunk: str,
     chunk_index: int,
     total_chunks: int,
-    event_date: datetime,
+    event_date: datetime | None,
     context: str,
     llm_config: LLMConfig,
     config,
@@ -1226,7 +1233,7 @@ async def _extract_facts_with_auto_split(
 
 async def extract_facts_from_text(
     text: str,
-    event_date: datetime,
+    event_date: datetime | None,
     llm_config: LLMConfig,
     agent_name: str,
     config,
@@ -1641,8 +1648,9 @@ async def extract_facts_from_contents_batch_api(
                 if validated_relations:
                     fact_data["causal_relations"] = validated_relations
 
-            # Always set mentioned_at
-            fact_data["mentioned_at"] = event_date.isoformat()
+            # Set mentioned_at to the event_date (when the conversation/document occurred),
+            # or None when the caller opted into no timestamp.
+            fact_data["mentioned_at"] = event_date.isoformat() if event_date is not None else None
 
             try:
                 fact = Fact(fact=combined_text, fact_type=fact_type, **fact_data)

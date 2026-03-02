@@ -12,7 +12,6 @@ package hindsight
 
 import (
 	"encoding/json"
-	"time"
 	"bytes"
 	"fmt"
 )
@@ -23,7 +22,7 @@ var _ MappedNullable = &MemoryItem{}
 // MemoryItem Single memory item for retain.
 type MemoryItem struct {
 	Content string `json:"content"`
-	Timestamp NullableTime `json:"timestamp,omitempty"`
+	Timestamp NullableTimestamp `json:"timestamp,omitempty"`
 	Context NullableString `json:"context,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
 	DocumentId NullableString `json:"document_id,omitempty"`
@@ -77,9 +76,9 @@ func (o *MemoryItem) SetContent(v string) {
 }
 
 // GetTimestamp returns the Timestamp field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *MemoryItem) GetTimestamp() time.Time {
+func (o *MemoryItem) GetTimestamp() Timestamp {
 	if o == nil || IsNil(o.Timestamp.Get()) {
-		var ret time.Time
+		var ret Timestamp
 		return ret
 	}
 	return *o.Timestamp.Get()
@@ -88,7 +87,7 @@ func (o *MemoryItem) GetTimestamp() time.Time {
 // GetTimestampOk returns a tuple with the Timestamp field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *MemoryItem) GetTimestampOk() (*time.Time, bool) {
+func (o *MemoryItem) GetTimestampOk() (*Timestamp, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -104,8 +103,8 @@ func (o *MemoryItem) HasTimestamp() bool {
 	return false
 }
 
-// SetTimestamp gets a reference to the given NullableTime and assigns it to the Timestamp field.
-func (o *MemoryItem) SetTimestamp(v time.Time) {
+// SetTimestamp gets a reference to the given NullableTimestamp and assigns it to the Timestamp field.
+func (o *MemoryItem) SetTimestamp(v Timestamp) {
 	o.Timestamp.Set(&v)
 }
 // SetTimestampNil sets the value for Timestamp to be an explicit nil

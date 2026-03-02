@@ -29,9 +29,12 @@ def augment_texts_with_dates(facts: list[ExtractedFact], format_date_fn) -> list
     for fact in facts:
         # Use occurred_start as the representative date
         fact_date = fact.occurred_start or fact.mentioned_at
-        readable_date = format_date_fn(fact_date)
-        # Augment text with date for embedding (but store original text in DB)
-        augmented_text = f"{fact.fact_text} (happened in {readable_date})"
+        if fact_date is not None:
+            readable_date = format_date_fn(fact_date)
+            # Augment text with date for embedding (but store original text in DB)
+            augmented_text = f"{fact.fact_text} (happened in {readable_date})"
+        else:
+            augmented_text = fact.fact_text
         augmented_texts.append(augmented_text)
     return augmented_texts
 

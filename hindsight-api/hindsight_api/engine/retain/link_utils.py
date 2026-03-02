@@ -47,6 +47,9 @@ def compute_temporal_links(
 
     links = []
     for unit_id, unit_event_date in new_units.items():
+        # Units without event_date can't form temporal links
+        if unit_event_date is None:
+            continue
         # Normalize unit_event_date for consistent comparison
         unit_event_date_norm = _normalize_datetime(unit_event_date)
 
@@ -96,7 +99,11 @@ def compute_temporal_query_bounds(
         return None, None
 
     # Normalize all dates to be timezone-aware to avoid comparison issues
-    all_dates = [_normalize_datetime(d) for d in new_units.values()]
+    # Filter out None values — units without event_date can't form temporal links
+    all_dates = [_normalize_datetime(d) for d in new_units.values() if d is not None]
+
+    if not all_dates:
+        return None, None
 
     try:
         min_date = min(all_dates) - timedelta(hours=time_window_hours)
@@ -432,20 +439,23 @@ async def create_temporal_links_batch_per_fact(
         min_date, max_date = compute_temporal_query_bounds(new_units, time_window_hours)
 
         fetch_neighbors_start = time_mod.time()
-        all_candidates = await conn.fetch(
-            f"""
-            SELECT id, event_date
-            FROM {fq_table("memory_units")}
-            WHERE bank_id = $1
-              AND event_date BETWEEN $2 AND $3
-              AND id::text != ALL($4)
-            ORDER BY event_date DESC
-            """,
-            bank_id,
-            min_date,
-            max_date,
-            unit_ids,
-        )
+        if min_date is not None and max_date is not None:
+            all_candidates = await conn.fetch(
+                f"""
+                SELECT id, event_date
+                FROM {fq_table("memory_units")}
+                WHERE bank_id = $1
+                  AND event_date BETWEEN $2 AND $3
+                  AND id::text != ALL($4)
+                ORDER BY event_date DESC
+                """,
+                bank_id,
+                min_date,
+                max_date,
+                unit_ids,
+            )
+        else:
+            all_candidates = []
         _log(
             log_buffer,
             f"      [7.2] Fetch {len(all_candidates)} candidate neighbors (1 query): {time_mod.time() - fetch_neighbors_start:.3f}s",
@@ -460,11 +470,15 @@ async def create_temporal_links_batch_per_fact(
             # Convert new_units dict to candidate format for within-batch linking
             new_unit_items = list(new_units.items())
             for i, (unit_id, event_date) in enumerate(new_unit_items):
+                if event_date is None:
+                    continue  # Skip units without event_date for temporal linking
                 unit_event_date_norm = _normalize_datetime(event_date)
 
                 # Compare with other new units (only those after this one to avoid duplicates)
                 for j in range(i + 1, len(new_unit_items)):
                     other_id, other_event_date = new_unit_items[j]
+                    if other_event_date is None:
+                        continue  # Skip units without event_date
                     other_event_date_norm = _normalize_datetime(other_event_date)
 
                     # Check if within time window

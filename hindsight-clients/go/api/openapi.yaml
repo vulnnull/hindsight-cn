@@ -3477,9 +3477,7 @@ components:
           title: Content
           type: string
         timestamp:
-          format: date-time
-          nullable: true
-          type: string
+          $ref: '#/components/schemas/Timestamp'
         context:
           nullable: true
           type: string
@@ -4459,6 +4457,17 @@ components:
       - api_version
       - features
       title: VersionResponse
+    Timestamp:
+      anyOf:
+      - format: date-time
+        type: string
+      - type: string
+      description: "When the content occurred. Accepts an ISO 8601 datetime string\
+        \ (e.g. '2024-01-15T10:30:00Z'), null/omitted (defaults to now), or the special\
+        \ string 'unset' to explicitly store without any timestamp (use this for timeless\
+        \ content such as fictional documents or static reference material)."
+      nullable: true
+      title: Timestamp
     ObservationScopes:
       anyOf:
       - enum:

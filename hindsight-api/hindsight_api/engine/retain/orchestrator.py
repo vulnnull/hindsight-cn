@@ -128,12 +128,14 @@ async def retain_batch(
         item_tags = item.get("tags", []) or []
         merged_tags = list(set(item_tags + (document_tags or [])))
 
-        # Handle event_date: parse flexibly (handles both datetime objects and ISO strings)
-        event_date_value = item.get("event_date")
-        if event_date_value:
-            event_date_value = parse_datetime_flexible(event_date_value)
+        # Handle event_date: distinguish "not provided" (default to now) from
+        # "explicitly None" (caller opted into no timestamp).
+        if "event_date" in item and item["event_date"] is None:
+            event_date_value = None  # Caller explicitly signalled "unknown date"
+        elif item.get("event_date"):
+            event_date_value = parse_datetime_flexible(item["event_date"])
         else:
-            event_date_value = utcnow()
+            event_date_value = utcnow()  # Backward-compatible default
 
         content = RetainContent(
             content=item["content"],
