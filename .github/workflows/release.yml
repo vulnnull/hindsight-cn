@@ -50,6 +50,10 @@ jobs:
       working-directory: ./hindsight-integrations/crewai
       run: uv build --out-dir dist
 
+    - name: Build hindsight-pydantic-ai
+      working-directory: ./hindsight-integrations/pydantic-ai
+      run: uv build --out-dir dist
+
     # Publish in order (client and api first, then hindsight-all which depends on them)
     - name: Publish hindsight-client to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
@@ -87,6 +91,12 @@ jobs:
         packages-dir: ./hindsight-integrations/crewai/dist
         skip-existing: true
 
+    - name: Publish hindsight-pydantic-ai to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: ./hindsight-integrations/pydantic-ai/dist
+        skip-existing: true
+
     # Upload artifacts for GitHub release
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -99,6 +109,7 @@ jobs:
           hindsight-integrations/litellm/dist/*
           hindsight-embed/dist/*
           hindsight-integrations/crewai/dist/*
+          hindsight-integrations/pydantic-ai/dist/*
         retention-days: 1
 
   release-typescript-client:
@@ -629,6 +640,7 @@ jobs:
         cp artifacts/python-packages/hindsight-api/dist/* release-assets/ || true
         cp artifacts/python-packages/hindsight/dist/* release-assets/ || true
         cp artifacts/python-packages/hindsight-integrations/litellm/dist/* release-assets/ || true
+        cp artifacts/python-packages/hindsight-integrations/pydantic-ai/dist/* release-assets/ || true
         cp artifacts/python-packages/hindsight-embed/dist/* release-assets/ || true
         # TypeScript client
         cp artifacts/typescript-client/*.tgz release-assets/ || true

@@ -228,6 +228,14 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/pydantic-ai',
+          label: 'Pydantic AI',
+          customProps: {
+            icon: "/img/icons/pydanticai.png"
+          }
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/skills',
           label: 'Skills',
         },

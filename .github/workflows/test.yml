@@ -1162,6 +1162,35 @@ jobs:
       working-directory: ./hindsight-integrations/litellm
       run: uv run pytest tests -v
 
+  test-pydantic-ai-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        prune-cache: false
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version-file: ".python-version"
+
+    - name: Build pydantic-ai integration
+      working-directory: ./hindsight-integrations/pydantic-ai
+      run: uv build
+
+    - name: Install dependencies
+      working-directory: ./hindsight-integrations/pydantic-ai
+      run: uv sync --frozen
+
+    - name: Run tests
+      working-directory: ./hindsight-integrations/pydantic-ai
+      run: uv run pytest tests -v
+
   test-embed:
     runs-on: ubuntu-latest
     env:
