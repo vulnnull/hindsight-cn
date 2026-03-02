@@ -67,7 +67,7 @@ func TestRetainWithContext(t *testing.T) {
 		Items: []MemoryItem{
 			{
 				Content:   "Bob went hiking in the mountains",
-				Timestamp: *NewNullableTime(PtrTime(timestamp)),
+				Timestamp: *NewNullableTimestamp(&Timestamp{TimeTime: &timestamp}),
 				Context:   *NewNullableString(PtrString("outdoor activities")),
 			},
 		},

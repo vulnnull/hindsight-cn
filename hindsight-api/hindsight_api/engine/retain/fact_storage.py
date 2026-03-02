@@ -48,6 +48,7 @@ async def insert_facts_batch(
     document_ids = []
     tags_list = []
     observation_scopes_list = []
+    text_signals_list = []
 
     for fact in facts:
         fact_texts.append(_sanitize_text(fact.fact_text))
@@ -73,6 +74,15 @@ async def insert_facts_batch(
         observation_scopes_list.append(
             json.dumps(fact.observation_scopes) if fact.observation_scopes is not None else None
         )
+        # Build text_signals: entity names + date tokens for enriched BM25 indexing
+        signal_parts = []
+        if fact.entities:
+            signal_parts.extend(e.name for e in fact.entities)
+        if fact.occurred_start:
+            signal_parts.append(fact.occurred_start.strftime("%B %-d %Y"))
+        if fact.occurred_end and fact.occurred_end != fact.occurred_start:
+            signal_parts.append(fact.occurred_end.strftime("%B %-d %Y"))
+        text_signals_list.append(" ".join(signal_parts) if signal_parts else None)
 
     # Batch insert all facts
     # Note: tags are passed as JSON strings and converted back to varchar[] via jsonb_array_elements_text + array_agg
@@ -80,18 +90,19 @@ async def insert_facts_batch(
     config = get_config()
     if config.text_search_extension == "vchord":
         # VectorChord: manually tokenize and insert search_vector
+        # text_signals (entity names etc.) are included in the tokenize input for enriched BM25
         query = f"""
             WITH input_data AS (
                 SELECT * FROM unnest(
                     $2::text[], $3::vector[], $4::timestamptz[], $5::timestamptz[], $6::timestamptz[], $7::timestamptz[],
-                    $8::text[], $9::text[], $10::float[], $11::jsonb[], $12::text[], $13::text[], $14::jsonb[], $15::jsonb[]
+                    $8::text[], $9::text[], $10::float[], $11::jsonb[], $12::text[], $13::text[], $14::jsonb[], $15::jsonb[], $16::text[]
                 ) AS t(text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
                        context, fact_type, confidence_score, metadata, chunk_id, document_id, tags_json,
-                       observation_scopes_json)
+                       observation_scopes_json, text_signals)
             )
             INSERT INTO {fq_table("memory_units")} (bank_id, text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
                                      context, fact_type, confidence_score, metadata, chunk_id, document_id, tags,
-                                     observation_scopes, search_vector)
+                                     observation_scopes, text_signals, search_vector)
             SELECT
                 $1,
                 text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
@@ -101,25 +112,29 @@ async def insert_facts_batch(
                     '{{}}'::varchar[]
                 ),
                 observation_scopes_json,
-                tokenize(COALESCE(text, '') || ' ' || COALESCE(context, ''), 'llmlingua2')::bm25_catalog.bm25vector
+                text_signals,
+                tokenize(
+                    COALESCE(text, '') || ' ' || COALESCE(context, '') || ' ' || COALESCE(text_signals, ''),
+                    'llmlingua2'
+                )::bm25_catalog.bm25vector
             FROM input_data
             RETURNING id
         """
     else:  # native or pg_textsearch
-        # Native PostgreSQL: search_vector is GENERATED ALWAYS, don't include it
+        # Native PostgreSQL: search_vector is GENERATED ALWAYS (expression includes text_signals), don't include it
         # pg_textsearch: indexes operate on base columns directly, don't populate search_vector
         query = f"""
             WITH input_data AS (
                 SELECT * FROM unnest(
                     $2::text[], $3::vector[], $4::timestamptz[], $5::timestamptz[], $6::timestamptz[], $7::timestamptz[],
-                    $8::text[], $9::text[], $10::float[], $11::jsonb[], $12::text[], $13::text[], $14::jsonb[], $15::jsonb[]
+                    $8::text[], $9::text[], $10::float[], $11::jsonb[], $12::text[], $13::text[], $14::jsonb[], $15::jsonb[], $16::text[]
                 ) AS t(text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
                        context, fact_type, confidence_score, metadata, chunk_id, document_id, tags_json,
-                       observation_scopes_json)
+                       observation_scopes_json, text_signals)
             )
             INSERT INTO {fq_table("memory_units")} (bank_id, text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
                                      context, fact_type, confidence_score, metadata, chunk_id, document_id, tags,
-                                     observation_scopes)
+                                     observation_scopes, text_signals)
             SELECT
                 $1,
                 text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
@@ -128,7 +143,8 @@ async def insert_facts_batch(
                     (SELECT array_agg(elem) FROM jsonb_array_elements_text(tags_json) AS elem),
                     '{{}}'::varchar[]
                 ),
-                observation_scopes_json
+                observation_scopes_json,
+                text_signals
             FROM input_data
             RETURNING id
         """
@@ -150,6 +166,7 @@ async def insert_facts_batch(
         document_ids,
         tags_list,
         observation_scopes_list,
+        text_signals_list,
     )
 
     unit_ids = [str(row["id"]) for row in results]

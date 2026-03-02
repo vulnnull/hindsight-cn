@@ -199,6 +199,90 @@ Set `retain_mission` and `retain_extraction_mode` via the [bank config API](/dev
 
 ---
 
+## Entity Labels
+
+**Entity labels** let you define a controlled vocabulary of classification labels that are extracted at retain time and stored as entities alongside regular named entities. Each label takes the form `key:value` (e.g. `pedagogy:scaffolding`, `engagement:active`).
+
+Because labels become entities, they automatically:
+- Appear in the **knowledge graph** — two memories with `pedagogy:scaffolding` are linked
+- Improve **semantic and BM25 retrieval** — label strings are included in both the dense embedding and the sparse `text_signals` field
+- Support **labels-only mode** — optionally disable free-form entity extraction so only labels are stored
+
+Labels are configured per bank via `entity_labels` in the bank config.
+
+### Defining Label Groups
+
+Each label group defines one classification dimension:
+
+```json
+{
+  "entity_labels": [
+    {
+      "key": "engagement",
+      "description": "Student engagement level during the session",
+      "type": "value",
+      "optional": true,
+      "values": [
+        { "value": "active",  "description": "Student is actively participating" },
+        { "value": "passive", "description": "Student is listening but not participating" }
+      ]
+    },
+    {
+      "key": "pedagogy",
+      "description": "Teaching strategies used",
+      "type": "multi-values",
+      "values": [
+        { "value": "scaffolding",           "description": "Breaking complex tasks into smaller steps" },
+        { "value": "direct_instruction",    "description": "Explicit explanation by the teacher" },
+        { "value": "socratic_questioning",  "description": "Guiding through questions rather than answers" }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `key` | — | Label group identifier. Becomes the prefix in `key:value` entities. |
+| `description` | `""` | Shown to the LLM to help it assign the right label. |
+| `type` | `"value"` | `"value"` → single enum value; `"multi-values"` → multiple enum values; `"text"` → free-form string. |
+| `values` | `[]` | Allowed values for `"value"` and `"multi-values"` types. Ignored for `"text"` type. |
+| `optional` | `true` | `true` → the LLM may skip this label if not applicable (default). `false` → LLM must always assign a value. Has no effect on `"multi-values"` groups (always optional). |
+| `tag` | `false` | `true` → also write extracted `key:value` entities as tags on the memory unit, enabling filtering via the standard `tags`/`tags_match` API parameters. |
+
+### Enum vs Free-text Labels
+
+**Enum groups** (`type: "value"` or `type: "multi-values"`): the LLM must pick from the predefined `values` list. Values not in the list are silently dropped. This is the most reliable option — the vocabulary is stable and graph clustering is tight. Use `"multi-values"` when a single fact can match multiple values.
+
+**Free-text groups** (`type: "text"`): the LLM can write any string value. The `values` field is ignored — use the `description` to provide examples and guidance instead.
+
+```json
+{
+  "key": "topic",
+  "description": "The specific subject being discussed. Examples: algebra, geometry, quadratic equations.",
+  "type": "text",
+  "optional": true,
+  "values": []
+}
+```
+
+The trade-off with free-text: the LLM may use different phrasings for the same concept across sessions (`topic:fractions` vs `topic:fraction arithmetic`), so graph linking is less reliable than with enum groups.
+
+### Labels-only Mode
+
+By default, entity labels are extracted **alongside** regular named entities (people, places, concepts). Set `entities_allow_free_form: false` to disable free-form extraction and store only label entities:
+
+```json
+{
+  "entity_labels": [...],
+  "entities_allow_free_form": false
+}
+```
+
+Configure both via the [bank config API](/developer/api/memory-banks#retain-configuration).
+
+---
+
 ## Observation Consolidation
 
 After `retain()` completes, Hindsight automatically triggers **observation consolidation** in the background. This process:

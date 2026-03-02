@@ -20,6 +20,7 @@ async def process_entities_batch(
     facts: list[ProcessedFact],
     log_buffer: list[str] = None,
     user_entities_per_content: dict[int, list[dict]] = None,
+    entity_labels: list | None = None,
 ) -> list[EntityLink]:
     """
     Process entities for all facts and create entity links.
@@ -90,6 +91,7 @@ async def process_entities_batch(
         fact_dates,
         entities_per_fact,
         log_buffer,  # Pass log_buffer for detailed logging
+        entity_labels=entity_labels,
     )
 
     return entity_links

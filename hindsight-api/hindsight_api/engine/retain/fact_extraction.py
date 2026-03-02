@@ -10,13 +10,20 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from ...config import get_config
 from ..llm_wrapper import LLMConfig, OutputTooLongError
 from ..response_models import TokenUsage
+from .entity_labels import (
+    EntityLabelsConfig,
+    build_labels_lookup,
+    build_labels_model,
+    is_label_entity,
+    parse_entity_labels,
+)
 
 
 def _infer_temporal_date(fact_text: str, event_date: datetime | None) -> str | None:
@@ -692,9 +699,61 @@ Example: "Lost job → couldn't pay rent → moved apartment"
 - Fact 2: Moved apartment, causal_relations: [{target_index: 1, relation_type: "caused_by"}]"""
 
 
+def _build_labels_prompt_section(labels_cfg: EntityLabelsConfig | list | None, free_form_entities: bool = True) -> str:
+    """Build the entity labels classification section for the extraction prompt."""
+    if labels_cfg is None:
+        return ""
+
+    # Accept raw list for backwards compatibility
+    if isinstance(labels_cfg, list):
+        if not labels_cfg:
+            return ""
+        labels_cfg = parse_entity_labels(labels_cfg)
+        if labels_cfg is None:
+            return ""
+
+    if not labels_cfg.attributes:
+        return ""
+
+    if free_form_entities:
+        entities_instruction = "Classify each fact using the structured 'labels' field below. Continue extracting regular named entities in the 'entities' field."
+    else:
+        entities_instruction = "Classify each fact using the structured 'labels' field below. Do NOT add regular named entities — labels-only mode."
+
+    lines = [
+        "\n\n══════════════════════════════════════════════════════════════════════════",
+        "ENTITY LABELS - CLASSIFICATION ATTRIBUTES",
+        "══════════════════════════════════════════════════════════════════════════",
+        "",
+        entities_instruction,
+        "",
+        "For each fact, fill the 'labels' object. Each field is a label group:",
+        "",
+    ]
+
+    for attr in labels_cfg.attributes:
+        if attr.type == "text":
+            # Free-text: no predefined values — LLM writes any relevant string or null
+            lines.append(f"- {attr.key} (free text or null): {attr.description}")
+        else:
+            mode = "multi-value (list)" if attr.type == "multi-values" else "single value or null"
+            lines.append(f"- {attr.key} ({mode}): {attr.description}")
+            for v in attr.values:
+                desc = f" — {v.description}" if v.description else ""
+                lines.append(f'    • "{v.value}"{desc}')
+        lines.append("")
+
+    lines.append("Only assign labels when clearly applicable. Leave null/empty if the fact does not match.")
+    return "\n".join(lines)
+
+
 def _build_extraction_prompt_and_schema(config) -> tuple[str, type]:
     """
     Build extraction prompt and response schema based on config.
+
+    When a taxonomy is configured, dynamically builds a Pydantic model with a
+    typed `taxonomy_entities` field using an Enum built from valid taxonomy values.
+    This enables JSON schema enforcement for structured outputs.
 
     Returns:
         Tuple of (prompt, response_schema)
@@ -738,9 +797,53 @@ def _build_extraction_prompt_and_schema(config) -> tuple[str, type]:
     # Add causal relationships section if enabled
     if extract_causal_links:
         prompt = prompt + CAUSAL_RELATIONSHIPS_SECTION
-        response_schema = FactExtractionResponseVerbose if extraction_mode == "verbose" else FactExtractionResponse
+        base_fact_class = ExtractedFactVerbose if extraction_mode == "verbose" else ExtractedFact
+        base_response_class = FactExtractionResponseVerbose if extraction_mode == "verbose" else FactExtractionResponse
     else:
-        response_schema = FactExtractionResponseNoCausal
+        base_fact_class = ExtractedFactNoCausal
+        base_response_class = FactExtractionResponseNoCausal
+
+    # Add entity labels section if configured and build dynamic schema
+    entity_labels_raw = getattr(config, "entity_labels", None)
+    labels_cfg = parse_entity_labels(entity_labels_raw)
+    free_form_entities = getattr(config, "entities_allow_free_form", True)
+    labels_section = _build_labels_prompt_section(labels_cfg, free_form_entities)
+    if labels_section:
+        prompt = prompt + labels_section
+
+    response_schema = base_response_class
+
+    if labels_cfg and labels_cfg.attributes:
+        LabelsModel = build_labels_model(labels_cfg)
+        if LabelsModel is not None:
+            dynamic_fields: dict = {
+                "labels": (
+                    LabelsModel,
+                    Field(
+                        description="Classification labels for this fact. Fill each applicable field; leave others null/empty."
+                    ),
+                )
+            }
+            if not free_form_entities:
+                dynamic_fields["entities"] = (
+                    list[Entity] | None,
+                    Field(default=None, description="Leave empty — labels-only mode"),
+                )
+            # Inherit parent's required fields and add 'labels' so it appears in the JSON schema
+            # required array (the base class json_schema_extra overrides required entirely)
+            base_extra = base_fact_class.model_config.get("json_schema_extra")
+            base_required = cast(dict, base_extra).get("required", []) if isinstance(base_extra, dict) else []
+            DynamicFact = create_model(
+                "LabelsFact",
+                __base__=base_fact_class,
+                __config__=ConfigDict(
+                    json_schema_mode="validation",
+                    json_schema_extra={"required": [*base_required, "labels"]},
+                ),
+                **dynamic_fields,
+            )
+            DynamicResponse = create_model("LabelsResponse", facts=(list[DynamicFact], ...))  # type: ignore[valid-type]
+            response_schema = DynamicResponse
 
     return prompt, response_schema
 
@@ -997,9 +1100,9 @@ async def _extract_facts_from_chunk(
                 # Add entities if present (validate as Entity objects)
                 # LLM sometimes returns strings instead of {"text": "..."} format
                 entities = get_value("entities")
+                validated_entities = []
                 if entities:
                     # Validate and normalize each entity
-                    validated_entities = []
                     for ent in entities:
                         if isinstance(ent, str):
                             # Normalize string to Entity object
@@ -1009,8 +1112,48 @@ async def _extract_facts_from_chunk(
                                 validated_entities.append(Entity.model_validate(ent))
                             except Exception as e:
                                 logger.warning(f"Invalid entity {ent}: {e}")
-                    if validated_entities:
-                        fact_data["entities"] = validated_entities
+
+                # Post-process label entities from structured labels object
+                entity_labels_raw = getattr(config, "entity_labels", None)
+                labels_cfg = parse_entity_labels(entity_labels_raw)
+                free_form_entities = getattr(config, "entities_allow_free_form", True)
+                if labels_cfg and labels_cfg.attributes:
+                    labels_lookup = build_labels_lookup(labels_cfg)
+                    labels_data = llm_fact.get("labels") or {}
+                    if isinstance(labels_data, dict):
+                        existing_texts_lower = {e.text.lower() for e in validated_entities}
+                        for group in labels_cfg.attributes:
+                            value = labels_data.get(group.key)
+                            if not value:
+                                continue
+                            values_list = value if isinstance(value, list) else [value]
+                            for v in values_list:
+                                if not isinstance(v, str) or not v.strip() or v.lower() in ("none", "null", "n/a"):
+                                    continue
+                                label_str = f"{group.key}:{v.strip()}"
+                                if group.type == "text":
+                                    if label_str.lower() not in existing_texts_lower:
+                                        validated_entities.append(Entity(text=label_str))
+                                        existing_texts_lower.add(label_str.lower())
+                                elif (
+                                    label_str.lower() in labels_lookup and label_str.lower() not in existing_texts_lower
+                                ):
+                                    validated_entities.append(Entity(text=label_str))
+                                    existing_texts_lower.add(label_str.lower())
+                                else:
+                                    logger.warning(f"Label '{label_str}' not in valid label values, skipping")
+
+                    # In labels-only mode, keep only label entities
+                    if not free_form_entities:
+                        validated_entities = [
+                            e for e in validated_entities if is_label_entity(e.text, labels_cfg, labels_lookup)
+                        ]
+                elif not free_form_entities:
+                    # No labels but free_form disabled: clear all entities
+                    validated_entities = []
+
+                if validated_entities:
+                    fact_data["entities"] = validated_entities
 
                 # Add per-fact causal relations (only if enabled in config)
                 if extract_causal_links:
@@ -1606,8 +1749,8 @@ async def extract_facts_from_contents_batch_api(
 
             # Entities
             entities = get_value("entities")
+            validated_entities = []
             if entities:
-                validated_entities = []
                 for ent in entities:
                     if isinstance(ent, str):
                         validated_entities.append(Entity(text=ent))
@@ -1616,8 +1759,45 @@ async def extract_facts_from_contents_batch_api(
                             validated_entities.append(Entity.model_validate(ent))
                         except Exception:
                             pass
-                if validated_entities:
-                    fact_data["entities"] = validated_entities
+
+            # Post-process label entities from structured labels object
+            entity_labels_raw = getattr(config, "entity_labels", None)
+            labels_cfg_batch = parse_entity_labels(entity_labels_raw)
+            free_form_entities_batch = getattr(config, "entities_allow_free_form", True)
+            if labels_cfg_batch and labels_cfg_batch.attributes:
+                labels_lookup_batch = build_labels_lookup(labels_cfg_batch)
+                labels_data = llm_fact.get("labels") or {}
+                if isinstance(labels_data, dict):
+                    existing_texts_lower = {e.text.lower() for e in validated_entities}
+                    for group in labels_cfg_batch.attributes:
+                        value = labels_data.get(group.key)
+                        if not value:
+                            continue
+                        values_list = value if isinstance(value, list) else [value]
+                        for v in values_list:
+                            if not isinstance(v, str) or not v.strip() or v.lower() in ("none", "null", "n/a"):
+                                continue
+                            label_str = f"{group.key}:{v.strip()}"
+                            if group.type == "text":
+                                if label_str.lower() not in existing_texts_lower:
+                                    validated_entities.append(Entity(text=label_str))
+                                    existing_texts_lower.add(label_str.lower())
+                            elif (
+                                label_str.lower() in labels_lookup_batch
+                                and label_str.lower() not in existing_texts_lower
+                            ):
+                                validated_entities.append(Entity(text=label_str))
+                                existing_texts_lower.add(label_str.lower())
+
+                if not free_form_entities_batch:
+                    validated_entities = [
+                        e for e in validated_entities if is_label_entity(e.text, labels_cfg_batch, labels_lookup_batch)
+                    ]
+            elif not free_form_entities_batch:
+                validated_entities = []
+
+            if validated_entities:
+                fact_data["entities"] = validated_entities
 
             # Causal relations
             if extract_causal_links:
@@ -1717,6 +1897,9 @@ async def extract_facts_from_contents_batch_api(
 
     # Step 7: Add temporal offsets
     _add_temporal_offsets(extracted_facts, contents)
+
+    # Step 8: Auto-tag facts from label groups with tag=True
+    _inject_label_tags(extracted_facts, config)
 
     logger.info(f"Batch API extracted {len(extracted_facts)} facts from {len(all_chunks_info)} chunks")
 
@@ -1850,6 +2033,9 @@ async def extract_facts_from_contents(
     # Step 4: Add time offsets to preserve ordering within each content
     _add_temporal_offsets(extracted_facts, contents)
 
+    # Step 5: Auto-tag facts from label groups with tag=True
+    _inject_label_tags(extracted_facts, config)
+
     return extracted_facts, chunks_metadata, total_usage
 
 
@@ -1905,3 +2091,24 @@ def _add_temporal_offsets(facts: list[ExtractedFactType], contents: list[RetainC
             fact.occurred_end = parse_datetime_flexible(fact.occurred_end) + offset
         if fact.mentioned_at:
             fact.mentioned_at = parse_datetime_flexible(fact.mentioned_at) + offset
+
+
+def _inject_label_tags(facts: list[ExtractedFactType], config) -> None:
+    """
+    For label groups with tag=True, add extracted key:value label entities
+    to each fact's tags list. Modifies facts in place.
+
+    This lets entity labels double as tags, enabling filtering via the
+    existing tags API without any extra query infrastructure.
+    """
+    labels_cfg = parse_entity_labels(getattr(config, "entity_labels", None))
+    if not labels_cfg:
+        return
+    tag_group_keys = {g.key.lower() for g in labels_cfg.attributes if g.tag}
+    if not tag_group_keys:
+        return
+    for fact in facts:
+        label_tags = [e for e in fact.entities if ":" in e and e.split(":", 1)[0].lower() in tag_group_keys]
+        if label_tags:
+            existing = set(fact.tags)
+            fact.tags = fact.tags + [t for t in label_tags if t not in existing]

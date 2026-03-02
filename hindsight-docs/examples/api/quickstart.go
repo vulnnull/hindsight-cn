@@ -62,7 +62,7 @@ func main() {
 			{
 				Content:   "Alice got promoted",
 				Context:   *hindsight.NewNullableString(hindsight.PtrString("career update")),
-				Timestamp: *hindsight.NewNullableTime(hindsight.PtrTime(timestamp)),
+				Timestamp: *hindsight.NewNullableTimestamp(&hindsight.Timestamp{TimeTime: hindsight.PtrTime(timestamp)}),
 				Tags:      []string{"career"},
 			},
 		},

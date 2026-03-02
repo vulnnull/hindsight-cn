@@ -180,16 +180,19 @@ class Hindsight:
             RetainResponse with success status and item count
         """
         from hindsight_client_api.models.entity_input import EntityInput
+        from hindsight_client_api.models.timestamp import Timestamp
 
         memory_items = []
         for item in items:
             entities = None
             if item.get("entities"):
                 entities = [EntityInput(text=e["text"], type=e.get("type")) for e in item["entities"]]
+            raw_ts = item.get("timestamp")
+            timestamp_val = Timestamp(actual_instance=raw_ts) if raw_ts is not None else None
             memory_items.append(
                 memory_item.MemoryItem(
                     content=item["content"],
-                    timestamp=item.get("timestamp"),
+                    timestamp=timestamp_val,
                     context=item.get("context"),
                     metadata=item.get("metadata"),
                     # Use item's document_id if provided, otherwise fall back to batch-level document_id
@@ -591,16 +594,19 @@ class Hindsight:
             RetainResponse with success status and item count
         """
         from hindsight_client_api.models.entity_input import EntityInput
+        from hindsight_client_api.models.timestamp import Timestamp
 
         memory_items = []
         for item in items:
             entities = None
             if item.get("entities"):
                 entities = [EntityInput(text=e["text"], type=e.get("type")) for e in item["entities"]]
+            raw_ts = item.get("timestamp")
+            timestamp_val = Timestamp(actual_instance=raw_ts) if raw_ts is not None else None
             memory_items.append(
                 memory_item.MemoryItem(
                     content=item["content"],
-                    timestamp=item.get("timestamp"),
+                    timestamp=timestamp_val,
                     context=item.get("context"),
                     metadata=item.get("metadata"),
                     # Use item's document_id if provided, otherwise fall back to batch-level document_id

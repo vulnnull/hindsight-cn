@@ -11,6 +11,7 @@ if [ -f "$ROOT_DIR/.env" ]; then
     set +a
 fi
 API_PORT="${HINDSIGHT_API_PORT:-8888}"
+CP_PORT="${HINDSIGHT_CP_PORT:-9999}"
 
 PIDS=()
 
@@ -70,7 +71,7 @@ echo ""
 echo "Hindsight is running!"
 echo ""
 echo "  API: http://localhost:${API_PORT}"
-echo "  Control Plane: http://localhost:9999"
+echo "  Control Plane: http://localhost:${CP_PORT}"
 echo ""
 echo "Press Ctrl+C to stop both services."
 echo ""

@@ -81,8 +81,12 @@ async def test_hierarchical_fields_categorization():
     assert "disposition_literalism" in configurable
     assert "disposition_empathy" in configurable
 
+    # Verify entity labels fields are included
+    assert "entities_allow_free_form" in configurable
+    assert "entity_labels" in configurable
+
     # Verify count is correct
-    assert len(configurable) == 11
+    assert len(configurable) == 13
 
     # Verify credential fields (NEVER exposed)
     assert "llm_api_key" in credentials

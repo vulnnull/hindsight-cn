@@ -472,6 +472,7 @@ async def retain_batch(
                 non_duplicate_facts,
                 log_buffer,
                 user_entities_per_content=user_entities_per_content,
+                entity_labels=getattr(config, "entity_labels", None),
             )
             log_buffer.append(f"[6] Process entities: {len(entity_links)} links in {time.time() - step_start:.3f}s")
 

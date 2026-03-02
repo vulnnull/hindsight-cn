@@ -28,6 +28,7 @@ fi
 
 # Map prefixed env vars to Next.js standard vars
 export HOSTNAME="${HINDSIGHT_CP_HOSTNAME:-0.0.0.0}"
+export PORT="${HINDSIGHT_CP_PORT:-9999}"
 
 # Run dev server
 npm run dev -w @vectorize-io/hindsight-control-plane

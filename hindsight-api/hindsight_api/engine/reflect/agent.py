@@ -431,7 +431,9 @@ async def run_reflect_agent(
 
         if is_last:
             # Force text response on last iteration - no tools
-            prompt = build_final_prompt(query, context_history, bank_profile, context, max_context_tokens=max_context_tokens)
+            prompt = build_final_prompt(
+                query, context_history, bank_profile, context, max_context_tokens=max_context_tokens
+            )
             llm_start = time.time()
             response, usage = await llm_config.call(
                 messages=[
@@ -486,7 +488,9 @@ async def run_reflect_agent(
                 f"[REFLECT {reflect_id}] Context budget exceeded on iteration {iteration + 1}: "
                 f"~{estimated_tokens} tokens >= {max_context_tokens} limit. Forcing final synthesis."
             )
-            prompt = build_final_prompt(query, context_history, bank_profile, context, max_context_tokens=max_context_tokens)
+            prompt = build_final_prompt(
+                query, context_history, bank_profile, context, max_context_tokens=max_context_tokens
+            )
             llm_start = time.time()
             response, usage = await llm_config.call(
                 messages=[
@@ -588,7 +592,9 @@ async def run_reflect_agent(
             # For other errors: retry if no evidence yet (but cap consecutive errors to avoid long hangs)
             elif not has_gathered_evidence and iteration < max_iterations - 1 and consecutive_errors < 2:
                 continue
-            prompt = build_final_prompt(query, context_history, bank_profile, context, max_context_tokens=max_context_tokens)
+            prompt = build_final_prompt(
+                query, context_history, bank_profile, context, max_context_tokens=max_context_tokens
+            )
             llm_start = time.time()
             response, usage = await llm_config.call(
                 messages=[
@@ -659,7 +665,9 @@ async def run_reflect_agent(
                     directives_applied=directives_applied,
                 )
             # Empty response, force final
-            prompt = build_final_prompt(query, context_history, bank_profile, context, max_context_tokens=max_context_tokens)
+            prompt = build_final_prompt(
+                query, context_history, bank_profile, context, max_context_tokens=max_context_tokens
+            )
             llm_start = time.time()
             response, usage = await llm_config.call(
                 messages=[

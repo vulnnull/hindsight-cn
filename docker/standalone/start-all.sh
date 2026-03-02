@@ -97,7 +97,7 @@ fi
 if [ "$ENABLE_CP" = "true" ]; then
     echo "🎛️  Starting Control Plane..."
     cd /app/control-plane
-    PORT=9999 node server.js &
+    PORT="${HINDSIGHT_CP_PORT:-9999}" node server.js &
     CP_PID=$!
     PIDS+=($CP_PID)
 else
@@ -110,7 +110,7 @@ echo "✅ Hindsight is running!"
 echo ""
 echo "📍 Access:"
 if [ "$ENABLE_CP" = "true" ]; then
-    echo "   Control Plane: http://localhost:9999"
+    echo "   Control Plane: http://localhost:${HINDSIGHT_CP_PORT:-9999}"
 fi
 if [ "$ENABLE_API" = "true" ]; then
     echo "   API:           http://localhost:8888"
