@@ -1,7 +1,7 @@
 ---
 title: Frequently Asked Questions
 description: Common questions and answers about Hindsight
-hide_table_of_contents: true
+hide_table_of_contents: false
 ---
 
 # Frequently Asked Questions
@@ -67,6 +67,16 @@ Configure your provider using the `HINDSIGHT_API_LLM_PROVIDER` environment varia
 
 ---
 
+### Which model should I use with Hindsight?
+
+The **[Model Leaderboard](https://benchmarks.hindsight.vectorize.io/)** benchmarks models across accuracy, speed, cost, and reliability for retain, reflect, and observation consolidation — it's the best place to find the right trade-off for your use case.
+
+[![Model Leaderboard](/img/leaderboard.png)](https://benchmarks.hindsight.vectorize.io/)
+
+See [Models](/developer/models) for the full list of supported and tested models, provider defaults, and configuration examples.
+
+---
+
 ### Do I need to host my own infrastructure?
 
 No! You have two options:
@@ -110,7 +120,8 @@ There are two approaches for multi-user applications:
 
 Choose per-user banks for simplicity and privacy, or single bank with tags if you need holistic reasoning across users. See [Memory Banks](/developer/api/memory-banks) for management details.
 
---- 
+---
+
 ### What's the difference between retain, recall, and reflect?
 
 Hindsight has three core operations:
@@ -174,7 +185,7 @@ Typical latencies:
 
 See [Performance](/developer/performance) for tuning options.
 
-
+---
 
 ### Does Hindsight support metadata filtering?
 
@@ -192,6 +203,30 @@ client.recall(bank_id="my-bank", query="...", tags=["user:alice"])
 ```
 
 See [Tags](/developer/api/retain#tags-and-document_tags) for full details including document-level tagging.
+
+**What about filtering by entities?**
+
+Entities (people, places, concepts) extracted from memories are stored in the knowledge graph and drive graph-based retrieval — so querying "tell me about Alice" will naturally surface Alice-related memories without any manual filtering.
+
+If you need explicit tag-based filtering on entity-like values, use **entity labels** with `tag: true`. Entity labels let you define a controlled vocabulary of `key:value` classifiers (e.g. `user:alice`, `topic:algebra`) extracted at retain time. Setting `tag: true` on a label group automatically writes each extracted label as a tag on the memory unit, making them available for standard `tags`/`tags_match` filtering:
+
+```python
+# Bank config: entity label group with tag: true
+{
+    "entity_labels": [{
+        "key": "user",
+        "type": "text",
+        "tag": True,
+        "description": "The user this memory belongs to"
+    }]
+}
+
+# The label "user:alice" is extracted and also written as a tag
+# Filter at recall time using the standard tags parameter
+client.recall(bank_id="my-bank", query="...", tags=["user:alice"])
+```
+
+See [Entity Labels](/developer/retain#entity-labels) for configuration details.
 
 **What about document `metadata`?**
 
