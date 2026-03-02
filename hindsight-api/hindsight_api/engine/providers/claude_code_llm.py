@@ -238,21 +238,24 @@ class ClaudeCodeLLM(LLMInterface):
                 )
 
                 # Record trace span
-                from hindsight_api.tracing import get_span_recorder
+                try:
+                    from hindsight_api.tracing import get_span_recorder
 
-                span_recorder = get_span_recorder()
-                span_recorder.record_llm_call(
-                    provider=self.provider,
-                    model=self.model,
-                    scope=scope,
-                    messages=messages,
-                    response_content=result if isinstance(result, str) else json.dumps(result),
-                    input_tokens=estimated_input,
-                    output_tokens=estimated_output,
-                    duration=duration,
-                    finish_reason=None,
-                    error=None,
-                )
+                    span_recorder = get_span_recorder()
+                    span_recorder.record_llm_call(
+                        provider=self.provider,
+                        model=self.model,
+                        scope=scope,
+                        messages=messages,
+                        response_content=result if isinstance(result, str) else result.model_dump_json(),
+                        input_tokens=estimated_input,
+                        output_tokens=estimated_output,
+                        duration=duration,
+                        finish_reason=None,
+                        error=None,
+                    )
+                except Exception:
+                    pass  # logging failure must never affect the operation
 
                 # Log slow calls
                 if duration > 10.0:
