@@ -140,6 +140,7 @@ beforeAll(async () => {
   const handle = createMockApi({
     dynamicBankId: true,
     excludeProviders: ['slack'],
+    retainEveryNTurns: 1, // retain every turn so individual tests aren't affected by chunking
     // No bankMission — keeps init lean
   });
   triggerHook = handle.trigger;

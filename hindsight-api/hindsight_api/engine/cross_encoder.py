@@ -566,7 +566,7 @@ class ZeroEntropyCrossEncoder(CrossEncoderModel):
     See: https://docs.zeroentropy.dev/models
     """
 
-    RERANK_URL = "https://api.zeroentropy.dev/models/rerank"
+    RERANK_URL = "https://api.zeroentropy.dev/v1/models/rerank"
 
     def __init__(
         self,

@@ -446,6 +446,7 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     bankIdPrefix: config.bankIdPrefix,
     excludeProviders: Array.isArray(config.excludeProviders) ? config.excludeProviders : [],
     autoRecall: config.autoRecall !== false, // Default: true (on) — backward compatible
+    retainEveryNTurns: config.retainEveryNTurns,
   };
 }
 

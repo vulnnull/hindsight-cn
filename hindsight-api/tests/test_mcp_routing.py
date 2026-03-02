@@ -46,16 +46,15 @@ async def test_mcp_tools_use_context_bank_id(mock_memory):
     assert "retain" in tools
     assert "recall" in tools
 
-    # Test retain with bank_id from context (use async_processing=False for synchronous test)
     token = _current_bank_id.set("context-bank-id")
     try:
         retain_tool = tools["retain"]
-        result = await retain_tool.fn(content="test content", context="test_context", async_processing=False)
-        assert "successfully" in result.lower()
+        result = await retain_tool.fn(content="test content", context="test_context")
+        assert result["status"] == "accepted"
 
         # Verify the memory was called with the context bank_id
-        mock_memory.retain_batch_async.assert_called_once()
-        call_kwargs = mock_memory.retain_batch_async.call_args.kwargs
+        mock_memory.submit_async_retain.assert_called_once()
+        call_kwargs = mock_memory.submit_async_retain.call_args.kwargs
         assert call_kwargs["bank_id"] == "context-bank-id"
     finally:
         _current_bank_id.reset(token)
@@ -133,12 +132,12 @@ async def test_mcp_tools_propagate_api_key(mock_memory):
     api_key_token = _current_api_key.set("test-bearer-token")
     try:
         retain_tool = tools["retain"]
-        result = await retain_tool.fn(content="test content", context="test_context", async_processing=False)
-        assert "successfully" in result.lower()
+        result = await retain_tool.fn(content="test content", context="test_context")
+        assert result["status"] == "accepted"
 
         # Verify the memory was called with request_context containing api_key
-        mock_memory.retain_batch_async.assert_called_once()
-        call_kwargs = mock_memory.retain_batch_async.call_args.kwargs
+        mock_memory.submit_async_retain.assert_called_once()
+        call_kwargs = mock_memory.submit_async_retain.call_args.kwargs
         assert call_kwargs["request_context"].api_key == "test-bearer-token"
     finally:
         _current_bank_id.reset(bank_token)
@@ -200,11 +199,11 @@ async def test_mcp_tools_propagate_tenant_id_and_api_key_id(mock_memory):
     key_id_token = _current_api_key_id.set("key-uuid-456")
     try:
         retain_tool = tools["retain"]
-        await retain_tool.fn(content="test content", context="test_context", async_processing=False)
+        await retain_tool.fn(content="test content", context="test_context")
 
         # Verify the RequestContext passed to memory engine has all auth fields
-        mock_memory.retain_batch_async.assert_called_once()
-        request_context = mock_memory.retain_batch_async.call_args.kwargs["request_context"]
+        mock_memory.submit_async_retain.assert_called_once()
+        request_context = mock_memory.submit_async_retain.call_args.kwargs["request_context"]
         assert request_context.api_key == "hsk_test_key"
         assert request_context.tenant_id == "org-billing-123"
         assert request_context.api_key_id == "key-uuid-456"
