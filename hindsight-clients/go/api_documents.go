@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"reflect"
 )
 
 
@@ -409,13 +410,28 @@ type ApiListDocumentsRequest struct {
 	ApiService *DocumentsAPIService
 	bankId string
 	q *string
+	tags *[]string
+	tagsMatch *string
 	limit *int32
 	offset *int32
 	authorization *string
 }
 
+// Case-insensitive substring filter on document ID (e.g. &#39;report&#39; matches &#39;report-2024&#39;)
 func (r ApiListDocumentsRequest) Q(q string) ApiListDocumentsRequest {
 	r.q = &q
+	return r
+}
+
+// Filter documents by tags
+func (r ApiListDocumentsRequest) Tags(tags []string) ApiListDocumentsRequest {
+	r.tags = &tags
+	return r
+}
+
+// How to match tags: &#39;any&#39;, &#39;all&#39;, &#39;any_strict&#39;, &#39;all_strict&#39;
+func (r ApiListDocumentsRequest) TagsMatch(tagsMatch string) ApiListDocumentsRequest {
+	r.tagsMatch = &tagsMatch
 	return r
 }
 
@@ -479,6 +495,23 @@ func (a *DocumentsAPIService) ListDocumentsExecute(r ApiListDocumentsRequest) (*
 
 	if r.q != nil {
 		parameterAddToHeaderOrQuery(localVarQueryParams, "q", r.q, "form", "")
+	}
+	if r.tags != nil {
+		t := *r.tags
+		if reflect.TypeOf(t).Kind() == reflect.Slice {
+			s := reflect.ValueOf(t)
+			for i := 0; i < s.Len(); i++ {
+				parameterAddToHeaderOrQuery(localVarQueryParams, "tags", s.Index(i).Interface(), "form", "multi")
+			}
+		} else {
+			parameterAddToHeaderOrQuery(localVarQueryParams, "tags", t, "form", "multi")
+		}
+	}
+	if r.tagsMatch != nil {
+		parameterAddToHeaderOrQuery(localVarQueryParams, "tags_match", r.tagsMatch, "form", "")
+	} else {
+		var defaultValue string = "any_strict"
+		r.tagsMatch = &defaultValue
 	}
 	if r.limit != nil {
 		parameterAddToHeaderOrQuery(localVarQueryParams, "limit", r.limit, "form", "")

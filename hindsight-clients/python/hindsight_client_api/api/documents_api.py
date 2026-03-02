@@ -16,8 +16,9 @@ from pydantic import validate_call, Field, StrictFloat, StrictStr, StrictInt
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
-from pydantic import StrictInt, StrictStr
-from typing import Optional
+from pydantic import Field, StrictInt, StrictStr
+from typing import List, Optional
+from typing_extensions import Annotated
 from hindsight_client_api.models.chunk_response import ChunkResponse
 from hindsight_client_api.models.delete_document_response import DeleteDocumentResponse
 from hindsight_client_api.models.document_response import DocumentResponse
@@ -909,7 +910,9 @@ class DocumentsApi:
     async def list_documents(
         self,
         bank_id: StrictStr,
-        q: Optional[StrictStr] = None,
+        q: Annotated[Optional[StrictStr], Field(description="Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')")] = None,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Filter documents by tags")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How to match tags: 'any', 'all', 'any_strict', 'all_strict'")] = None,
         limit: Optional[StrictInt] = None,
         offset: Optional[StrictInt] = None,
         authorization: Optional[StrictStr] = None,
@@ -932,8 +935,12 @@ class DocumentsApi:
 
         :param bank_id: (required)
         :type bank_id: str
-        :param q:
+        :param q: Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')
         :type q: str
+        :param tags: Filter documents by tags
+        :type tags: List[str]
+        :param tags_match: How to match tags: 'any', 'all', 'any_strict', 'all_strict'
+        :type tags_match: str
         :param limit:
         :type limit: int
         :param offset:
@@ -965,6 +972,8 @@ class DocumentsApi:
         _param = self._list_documents_serialize(
             bank_id=bank_id,
             q=q,
+            tags=tags,
+            tags_match=tags_match,
             limit=limit,
             offset=offset,
             authorization=authorization,
@@ -993,7 +1002,9 @@ class DocumentsApi:
     async def list_documents_with_http_info(
         self,
         bank_id: StrictStr,
-        q: Optional[StrictStr] = None,
+        q: Annotated[Optional[StrictStr], Field(description="Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')")] = None,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Filter documents by tags")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How to match tags: 'any', 'all', 'any_strict', 'all_strict'")] = None,
         limit: Optional[StrictInt] = None,
         offset: Optional[StrictInt] = None,
         authorization: Optional[StrictStr] = None,
@@ -1016,8 +1027,12 @@ class DocumentsApi:
 
         :param bank_id: (required)
         :type bank_id: str
-        :param q:
+        :param q: Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')
         :type q: str
+        :param tags: Filter documents by tags
+        :type tags: List[str]
+        :param tags_match: How to match tags: 'any', 'all', 'any_strict', 'all_strict'
+        :type tags_match: str
         :param limit:
         :type limit: int
         :param offset:
@@ -1049,6 +1064,8 @@ class DocumentsApi:
         _param = self._list_documents_serialize(
             bank_id=bank_id,
             q=q,
+            tags=tags,
+            tags_match=tags_match,
             limit=limit,
             offset=offset,
             authorization=authorization,
@@ -1077,7 +1094,9 @@ class DocumentsApi:
     async def list_documents_without_preload_content(
         self,
         bank_id: StrictStr,
-        q: Optional[StrictStr] = None,
+        q: Annotated[Optional[StrictStr], Field(description="Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')")] = None,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Filter documents by tags")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How to match tags: 'any', 'all', 'any_strict', 'all_strict'")] = None,
         limit: Optional[StrictInt] = None,
         offset: Optional[StrictInt] = None,
         authorization: Optional[StrictStr] = None,
@@ -1100,8 +1119,12 @@ class DocumentsApi:
 
         :param bank_id: (required)
         :type bank_id: str
-        :param q:
+        :param q: Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')
         :type q: str
+        :param tags: Filter documents by tags
+        :type tags: List[str]
+        :param tags_match: How to match tags: 'any', 'all', 'any_strict', 'all_strict'
+        :type tags_match: str
         :param limit:
         :type limit: int
         :param offset:
@@ -1133,6 +1156,8 @@ class DocumentsApi:
         _param = self._list_documents_serialize(
             bank_id=bank_id,
             q=q,
+            tags=tags,
+            tags_match=tags_match,
             limit=limit,
             offset=offset,
             authorization=authorization,
@@ -1157,6 +1182,8 @@ class DocumentsApi:
         self,
         bank_id,
         q,
+        tags,
+        tags_match,
         limit,
         offset,
         authorization,
@@ -1169,6 +1196,7 @@ class DocumentsApi:
         _host = None
 
         _collection_formats: Dict[str, str] = {
+            'tags': 'multi',
         }
 
         _path_params: Dict[str, str] = {}
@@ -1187,6 +1215,14 @@ class DocumentsApi:
         if q is not None:
             
             _query_params.append(('q', q))
+            
+        if tags is not None:
+            
+            _query_params.append(('tags', tags))
+            
+        if tags_match is not None:
+            
+            _query_params.append(('tags_match', tags_match))
             
         if limit is not None:
             

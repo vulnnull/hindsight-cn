@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from hindsight_api.engine.memory_engine import Budget
     from hindsight_api.engine.response_models import RecallResult, ReflectResult
+    from hindsight_api.engine.search.tags import TagsMatch
     from hindsight_api.models import RequestContext
 
 
@@ -337,6 +338,8 @@ class MemoryEngineInterface(ABC):
         bank_id: str,
         *,
         search_query: str | None = None,
+        tags: list[str] | None = None,
+        tags_match: "TagsMatch" = "any_strict",
         limit: int = 100,
         offset: int = 0,
         request_context: "RequestContext",
@@ -346,7 +349,9 @@ class MemoryEngineInterface(ABC):
 
         Args:
             bank_id: The memory bank ID.
-            search_query: Search query.
+            search_query: Case-insensitive substring filter on document ID.
+            tags: Filter by tags.
+            tags_match: How to match tags (any, all, any_strict, all_strict).
             limit: Maximum results.
             offset: Pagination offset.
             request_context: Request context for authentication.

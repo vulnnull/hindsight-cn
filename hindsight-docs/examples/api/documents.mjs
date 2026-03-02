@@ -44,6 +44,47 @@ await client.retain('my-bank', 'Project deadline: April 15 (extended)', {
 // [/docs:document-update]
 
 
+// [docs:document-list]
+const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
+
+// List all documents
+const { data: allDocs } = await sdk.listDocuments({
+    client: apiClient,
+    path: { bank_id: 'my-bank' }
+});
+console.log(`Total documents: ${allDocs.total}`);
+
+// Filter by document ID substring
+const { data: reportDocs } = await sdk.listDocuments({
+    client: apiClient,
+    path: { bank_id: 'my-bank' },
+    query: { q: 'report' }
+});
+
+// Filter by tags — only docs tagged with "team-a" (untagged excluded)
+const { data: taggedDocs } = await sdk.listDocuments({
+    client: apiClient,
+    path: { bank_id: 'my-bank' },
+    query: { tags: ['team-a'], tags_match: 'any_strict' }
+});
+
+// Combine ID search and tags
+const { data: filtered } = await sdk.listDocuments({
+    client: apiClient,
+    path: { bank_id: 'my-bank' },
+    query: { q: 'meeting', tags: ['team-a', 'team-b'], tags_match: 'all_strict' }
+});
+
+// Paginate
+const { data: page } = await sdk.listDocuments({
+    client: apiClient,
+    path: { bank_id: 'my-bank' },
+    query: { limit: 20, offset: 40 }
+});
+console.log(`Page items: ${page.items.length}`);
+// [/docs:document-list]
+
+
 // [docs:document-get]
 const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
 

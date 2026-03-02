@@ -184,7 +184,7 @@ from .retain import bank_utils, embedding_utils
 from .retain.types import RetainContentDict
 from .search import think_utils
 from .search.reranking import CrossEncoderReranker
-from .search.tags import TagsMatch
+from .search.tags import TagsMatch, build_tags_where_clause
 from .task_backend import BrokerTaskBackend, SyncTaskBackend, TaskBackend
 
 
@@ -4142,6 +4142,8 @@ class MemoryEngine(MemoryEngineInterface):
         bank_id: str,
         *,
         search_query: str | None = None,
+        tags: list[str] | None = None,
+        tags_match: "TagsMatch" = "any_strict",
         limit: int = 100,
         offset: int = 0,
         request_context: "RequestContext",
@@ -4152,6 +4154,8 @@ class MemoryEngine(MemoryEngineInterface):
         Args:
             bank_id: bank ID (required)
             search_query: Search in document ID
+            tags: Filter by tags
+            tags_match: How to match tags (any, all, any_strict, all_strict)
             limit: Maximum number of results
             offset: Offset for pagination
             request_context: Request context for authentication.
@@ -4182,7 +4186,16 @@ class MemoryEngine(MemoryEngineInterface):
                 query_conditions.append(f"id ILIKE ${param_count}")
                 query_params.append(f"%{search_query}%")
 
+            tags_clause, tags_params, next_param = build_tags_where_clause(
+                tags, param_offset=param_count + 1, match=tags_match
+            )
+            query_params.extend(tags_params)
+            param_count = next_param - 1  # next_param is next available; convert to last used
+
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
+            if tags_clause:
+                # tags_clause starts with "AND", append after WHERE conditions
+                where_clause = where_clause + " " + tags_clause if where_clause else "WHERE " + tags_clause[4:].lstrip()
 
             # Get total count
             count_query = f"""
@@ -6038,8 +6051,6 @@ class MemoryEngine(MemoryEngineInterface):
 
         async with acquire_with_retry(pool) as conn:
             # Build filters
-            from .search.tags import build_tags_where_clause
-
             filters = ["bank_id = $1"]
             params: list[Any] = [bank_id]
             param_idx = 2

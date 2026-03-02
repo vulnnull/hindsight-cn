@@ -3082,8 +3082,22 @@ export type ListDocumentsData = {
   query?: {
     /**
      * Q
+     *
+     * Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')
      */
     q?: string | null;
+    /**
+     * Tags
+     *
+     * Filter documents by tags
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     *
+     * How to match tags: 'any', 'all', 'any_strict', 'all_strict'
+     */
+    tags_match?: string;
     /**
      * Limit
      */

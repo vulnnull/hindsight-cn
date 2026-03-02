@@ -3064,7 +3064,13 @@ def _register_routes(app: FastAPI):
     )
     async def api_list_documents(
         bank_id: str,
-        q: str | None = None,
+        q: str | None = Query(
+            None, description="Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')"
+        ),
+        tags: list[str] | None = Query(None, description="Filter documents by tags"),
+        tags_match: str = Query(
+            "any_strict", description="How to match tags: 'any', 'all', 'any_strict', 'all_strict'"
+        ),
         limit: int = 100,
         offset: int = 0,
         request_context: RequestContext = Depends(get_request_context),
@@ -3074,13 +3080,21 @@ def _register_routes(app: FastAPI):
 
         Args:
             bank_id: Memory Bank ID (from path)
-            q: Search query (searches document ID and metadata)
+            q: Case-insensitive substring filter on document ID
+            tags: Filter documents by tags
+            tags_match: How to match tags (any, all, any_strict, all_strict)
             limit: Maximum number of results (default: 100)
             offset: Offset for pagination (default: 0)
         """
         try:
             data = await app.state.memory.list_documents(
-                bank_id=bank_id, search_query=q, limit=limit, offset=offset, request_context=request_context
+                bank_id=bank_id,
+                search_query=q,
+                tags=tags,
+                tags_match=tags_match,
+                limit=limit,
+                offset=offset,
+                request_context=request_context,
             )
             return data
         except OperationValidationError as e:
