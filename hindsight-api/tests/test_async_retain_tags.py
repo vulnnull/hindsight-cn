@@ -14,6 +14,7 @@ async def test_submit_async_retain_includes_document_tags_in_task_payload():
     engine = MemoryEngine.__new__(MemoryEngine)
     engine._initialized = True
     engine._authenticate_tenant = AsyncMock()
+    engine._operation_validator = None
     engine._submit_async_operation = AsyncMock(return_value={"operation_id": "op-1"})
 
     # Mock the pool and connection for parent operation creation

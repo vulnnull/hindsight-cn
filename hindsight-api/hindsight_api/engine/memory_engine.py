@@ -3120,6 +3120,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with document info or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_document", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             doc = await conn.fetchrow(
@@ -3168,6 +3173,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with counts of deleted items
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="delete_document", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         invalidated_obs = 0
         async with acquire_with_retry(pool) as conn:
@@ -3292,6 +3302,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with counts of deleted items
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="delete_bank", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         invalidated_obs = 0
         result: dict[str, int] = {}
@@ -3385,6 +3400,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with count of deleted observations
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="clear_observations", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
@@ -3438,6 +3458,13 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with count of deleted observations
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation="clear_observations_for_memory", request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         deleted_count = 0
 
@@ -3484,6 +3511,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with consolidation stats
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="run_consolidation", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
 
         from .consolidation import run_consolidation_job
 
@@ -3529,6 +3561,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with nodes, edges, table_rows, total_units, and limit
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_graph_data", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Get memory units, optionally filtered by bank_id and fact_type
@@ -3890,6 +3927,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with items (list of memory units) and total count
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_memory_units", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Build query conditions
@@ -4012,6 +4054,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with memory unit data or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_memory_unit", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Get the memory unit (include source_memory_ids for mental models)
@@ -4123,6 +4170,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with items (list of documents without original_text) and total count
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_documents", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Build query conditions
@@ -4269,6 +4321,12 @@ class MemoryEngine(MemoryEngineInterface):
             if not chunk:
                 return None
 
+            if self._operation_validator:
+                from hindsight_api.extensions import BankReadContext
+
+                ctx = BankReadContext(bank_id=chunk["bank_id"], operation="get_chunk", request_context=request_context)
+                await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+
             return {
                 "chunk_id": chunk["chunk_id"],
                 "document_id": chunk["document_id"],
@@ -4298,6 +4356,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with name, disposition traits, and mission
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_bank_profile", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         profile = await bank_utils.get_bank_profile(pool, bank_id)
 
@@ -4340,6 +4403,13 @@ class MemoryEngine(MemoryEngineInterface):
             request_context: Request context for authentication.
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation="update_bank_disposition", request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         await bank_utils.update_bank_disposition(pool, bank_id, disposition)
 
@@ -4362,6 +4432,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with bank_id and mission.
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="set_bank_mission", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         await bank_utils.set_bank_mission(pool, bank_id, mission)
         return {"bank_id": bank_id, "mission": mission}
@@ -4386,6 +4461,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with 'mission' (str) key
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="merge_bank_mission", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         return await bank_utils.merge_bank_mission(pool, self._reflect_llm_config, bank_id, new_info)
 
@@ -4405,7 +4485,15 @@ class MemoryEngine(MemoryEngineInterface):
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
-        return await bank_utils.list_banks(pool)
+        banks = await bank_utils.list_banks(pool)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankListContext
+
+            result = await self._operation_validator.filter_bank_list(
+                BankListContext(banks=banks, request_context=request_context)
+            )
+            banks = result.banks
+        return banks
 
     # ==================== Reflect Methods ====================
 
@@ -4813,6 +4901,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with items, total, limit, offset
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_entities", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Get total count
@@ -4900,6 +4993,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with items (list of {tag, count}), total, limit, offset
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_tags", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Build pattern filter if provided (convert * to % for ILIKE)
@@ -4976,6 +5074,11 @@ class MemoryEngine(MemoryEngineInterface):
             EntityState with empty observations (summaries now in mental models)
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_entity_state", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         return EntityState(entity_id=entity_id, canonical_name=entity_name, observations=[])
 
     # =========================================================================
@@ -4990,6 +5093,11 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any]:
         """Get statistics about memory nodes and links for a bank."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_bank_stats", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5072,6 +5180,11 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any] | None:
         """Get entity details including metadata and observations."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_entity", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5440,6 +5553,11 @@ class MemoryEngine(MemoryEngineInterface):
             List of pinned mental model dicts
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_mental_models", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5568,6 +5686,11 @@ class MemoryEngine(MemoryEngineInterface):
             The created pinned mental model dict
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="create_mental_model", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         # Generate embedding for the content
@@ -5745,6 +5868,11 @@ class MemoryEngine(MemoryEngineInterface):
             Updated pinned mental model dict or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="update_mental_model", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5830,6 +5958,11 @@ class MemoryEngine(MemoryEngineInterface):
             True if deleted, False if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="delete_mental_model", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5904,6 +6037,11 @@ class MemoryEngine(MemoryEngineInterface):
             List of directive dicts
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_directives", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5970,6 +6108,11 @@ class MemoryEngine(MemoryEngineInterface):
             Directive dict or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_directive", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -6011,6 +6154,11 @@ class MemoryEngine(MemoryEngineInterface):
             The created directive dict
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="create_directive", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -6060,6 +6208,11 @@ class MemoryEngine(MemoryEngineInterface):
             Updated directive dict or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="update_directive", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         # Build update query dynamically
@@ -6125,6 +6278,11 @@ class MemoryEngine(MemoryEngineInterface):
             True if deleted, False if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="delete_directive", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -6172,6 +6330,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with total count and list of operations, sorted by most recent first
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_operations", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -6253,6 +6416,11 @@ class MemoryEngine(MemoryEngineInterface):
             - child_operations: (for parent operations) list of child operation statuses
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_operation_status", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         op_uuid = uuid.UUID(operation_id)
@@ -6382,6 +6550,11 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any]:
         """Cancel a pending async operation."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="cancel_operation", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         op_uuid = uuid.UUID(operation_id)
@@ -6417,6 +6590,11 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any]:
         """Update bank name and/or mission."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="update_bank", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -6543,6 +6721,17 @@ class MemoryEngine(MemoryEngineInterface):
         into smaller sub-batches and creates a parent operation that tracks all children.
         """
         await self._authenticate_tenant(request_context)
+
+        # Run operation validator (bank access, credits, etc.) before queuing
+        if self._operation_validator:
+            from hindsight_api.extensions import RetainContext
+
+            ctx = RetainContext(
+                bank_id=bank_id,
+                contents=[dict(c) for c in contents],
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_retain(ctx))
 
         # Validate no duplicate document_ids in the batch
         # Having duplicate document_ids causes race conditions in document upserts during parallel processing
@@ -6787,6 +6976,13 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with operation_id
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation="submit_async_consolidation", request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
 
         # Pass tenant_id and api_key_id through task payload so the worker
         # can provide request context to extension hooks (e.g., usage metering

@@ -166,7 +166,6 @@ def create_mcp_server(memory: MemoryEngine, multi_bank: bool = True) -> FastMCP:
         api_key_id_resolver=get_current_api_key_id,  # Propagate api_key_id for usage metering
         include_bank_id_param=multi_bank,
         tools=base_tools,
-        retain_fire_and_forget=False,  # HTTP MCP supports sync/async modes
     )
 
     register_mcp_tools(mcp, memory, config)

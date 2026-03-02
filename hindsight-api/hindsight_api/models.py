@@ -22,6 +22,7 @@ class RequestContext:
     tenant_id: str | None = None  # Tenant identifier (set by extension after auth)
     internal: bool = False  # True for background/internal operations (skips extension auth)
     user_initiated: bool = False  # True for async operations that originated from a user request
+    allowed_bank_ids: list[str] | None = None  # None = unrestricted (all banks)
 
 
 from pgvector.sqlalchemy import Vector
