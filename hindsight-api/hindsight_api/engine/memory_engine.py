@@ -925,8 +925,6 @@ class MemoryEngine(MemoryEngineInterface):
         """
         task_type = task_dict.get("type")
         operation_id = task_dict.get("operation_id")
-        retry_count = task_dict.get("retry_count", 0)
-        max_retries = 3
 
         # Set schema context for multi-tenant task execution
         schema = task_dict.pop("_schema", None)
@@ -972,30 +970,22 @@ class MemoryEngine(MemoryEngineInterface):
                 await self._mark_operation_completed(operation_id)
 
         except Exception as e:
-            # Task failed - check if we should retry
-            logger.error(
-                f"Task execution failed (attempt {retry_count + 1}/{max_retries + 1}): {task_type}, error: {e}"
-            )
+            logger.error(f"Task execution failed: {task_type}, error: {e}")
             import traceback
 
             error_traceback = traceback.format_exc()
             traceback.print_exc()
 
-            # Don't retry file conversion - if conversion fails, it won't succeed on retry
-            # (missing OCR, corrupted file, unsupported format, etc.)
-            should_retry = retry_count < max_retries and task_type != "file_convert_retain"
-
-            if should_retry:
-                # Reschedule with incremented retry count
-                task_dict["retry_count"] = retry_count + 1
-                logger.info(f"Rescheduling task {task_type} (retry {retry_count + 1}/{max_retries})")
-                await self._task_backend.submit_task(task_dict)
-            else:
-                # Max retries exceeded or non-retryable task - mark operation as failed
-                reason = "non-retryable task type" if task_type == "file_convert_retain" else "max retries exceeded"
-                logger.error(f"Not retrying task {task_type} ({reason}), marking as failed")
+            if task_type == "file_convert_retain":
+                # Non-retryable: mark as failed immediately.
+                # Conversion failures won't improve on retry (missing OCR, corrupted file, etc.)
+                logger.error(f"Not retrying task {task_type} (non-retryable), marking as failed")
                 if operation_id:
                     await self._mark_operation_failed(operation_id, str(e), error_traceback)
+            else:
+                # Retryable: re-raise so the worker poller handles retry/fail via _retry_or_fail,
+                # which correctly resets status='pending' and increments the DB retry_count.
+                raise
 
     async def _delete_operation_record(self, operation_id: str):
         """Helper to delete an operation record from the database."""

@@ -268,24 +268,26 @@ class TestWorkerPoller:
         assert row["completed_at"] is not None
 
     @pytest.mark.asyncio
-    async def test_executor_exception_does_not_crash_poller(self, pool, clean_operations):
-        """Test that unexpected exceptions from executor are caught and don't crash the poller.
+    async def test_executor_exception_triggers_retry(self, pool, clean_operations):
+        """Test that exceptions from the executor trigger _retry_or_fail (not a crash).
 
-        If the executor raises an unexpected exception (which MemoryEngine.execute_task should NOT do,
-        but could happen from schema setup or other infrastructure issues), the poller should catch it
-        gracefully. Status remains 'processing' since neither executor nor poller handled it.
+        When the executor re-raises an exception (as MemoryEngine.execute_task does for
+        retryable task failures), the poller calls _retry_or_fail, which resets the task
+        back to 'pending' and increments retry_count so it can be reclaimed.
+
+        This is the fix for the consolidation deadlock: previously submit_task was called
+        with only a task_payload update, leaving status='processing' forever.
         """
         from hindsight_api.worker import WorkerPoller
         from hindsight_api.worker.poller import ClaimedTask
 
-        # Create a pending task
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
         op_id = uuid.uuid4()
-        payload = json.dumps({"type": "test_task", "operation_id": str(op_id), "bank_id": bank_id})
+        payload = json.dumps({"type": "consolidation", "operation_id": str(op_id), "bank_id": bank_id})
         await pool.execute(
             """
-            INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload, worker_id)
-            VALUES ($1, $2, 'test', 'processing', $3::jsonb, 'test-worker-1')
+            INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload, worker_id, claimed_at)
+            VALUES ($1, $2, 'consolidation', 'processing', $3::jsonb, 'test-worker-1', now())
             """,
             op_id,
             bank_id,
@@ -293,43 +295,100 @@ class TestWorkerPoller:
         )
 
         async def failing_executor(task_dict):
-            raise ValueError("Unexpected infrastructure failure")
+            raise ValueError("TimeoutError during recall")
 
         poller = WorkerPoller(
             pool=pool,
             worker_id="test-worker-1",
             executor=failing_executor,
+            max_retries=3,
         )
 
-        # Execute - should catch exception without crashing
         task_dict = json.loads(payload)
         claimed_task = ClaimedTask(operation_id=str(op_id), task_dict=task_dict, schema=None)
         await poller.execute_task(claimed_task)
 
-        # Wait for background task to complete
         completed = await poller.wait_for_active_tasks(timeout=5.0)
         assert completed, "Task did not complete within timeout"
 
-        # Status stays 'processing' since the poller no longer manages status
+        # Task must be reset to 'pending' with worker_id/claimed_at cleared — not left as
+        # 'processing', which would cause a permanent deadlock via the NOT EXISTS guard.
         row = await pool.fetchrow(
-            "SELECT status FROM async_operations WHERE operation_id = $1",
+            "SELECT status, worker_id, claimed_at, retry_count FROM async_operations WHERE operation_id = $1",
             op_id,
         )
-        assert row["status"] == "processing"
+        assert row["status"] == "pending", (
+            f"REGRESSION: Task status is '{row['status']}' instead of 'pending'. "
+            "A task stuck in 'processing' after a retry causes a consolidation deadlock."
+        )
+        assert row["worker_id"] is None, "worker_id must be cleared on retry"
+        assert row["claimed_at"] is None, "claimed_at must be cleared on retry"
+        assert row["retry_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_executor_exception_marks_failed_after_max_retries(self, pool, clean_operations):
+        """Test that a task is permanently marked 'failed' once retry_count hits max_retries.
+
+        After max_retries exhaustion the task must NOT be reset to 'pending' — it should
+        be marked 'failed' with an error message so it stops consuming retry budget.
+        """
+        from hindsight_api.worker import WorkerPoller
+        from hindsight_api.worker.poller import ClaimedTask
+
+        max_retries = 3
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        op_id = uuid.uuid4()
+        payload = json.dumps({"type": "consolidation", "operation_id": str(op_id), "bank_id": bank_id})
+        # Insert with retry_count already at the limit
+        await pool.execute(
+            """
+            INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload, worker_id, claimed_at, retry_count)
+            VALUES ($1, $2, 'consolidation', 'processing', $3::jsonb, 'test-worker-1', now(), $4)
+            """,
+            op_id,
+            bank_id,
+            payload,
+            max_retries,
+        )
+
+        async def failing_executor(task_dict):
+            raise ValueError("Still failing after all retries")
+
+        poller = WorkerPoller(
+            pool=pool,
+            worker_id="test-worker-1",
+            executor=failing_executor,
+            max_retries=max_retries,
+        )
+
+        task_dict = json.loads(payload)
+        claimed_task = ClaimedTask(operation_id=str(op_id), task_dict=task_dict, schema=None)
+        await poller.execute_task(claimed_task)
+
+        completed = await poller.wait_for_active_tasks(timeout=5.0)
+        assert completed, "Task did not complete within timeout"
+
+        row = await pool.fetchrow(
+            "SELECT status, error_message, retry_count FROM async_operations WHERE operation_id = $1",
+            op_id,
+        )
+        assert row["status"] == "failed", (
+            f"Expected 'failed' after max retries, got '{row['status']}'"
+        )
+        assert row["error_message"] is not None
+        assert "Max retries" in row["error_message"]
+        assert row["retry_count"] == max_retries  # not incremented further
 
     @pytest.mark.asyncio
     async def test_executor_failed_status_not_overridden(self, pool, clean_operations):
         """REGRESSION TEST: Verify poller does NOT overwrite executor's 'failed' status to 'completed'.
 
-        This test catches the bug where the poller always called _mark_completed() after executor
-        returned, overwriting the 'failed' status that the executor had already set.
-
-        Scenario:
-        1. Executor catches an internal error and marks the operation as 'failed' in the DB
-        2. Executor returns normally (does NOT re-raise) - this is how MemoryEngine.execute_task works
+        This test covers the non-retryable failure path (e.g., file_convert_retain):
+        1. Executor catches an internal error, marks the operation as 'failed' in the DB
+        2. Executor returns normally (does NOT re-raise) — so no exception reaches the poller
         3. The poller must NOT overwrite the 'failed' status to 'completed'
 
-        With the old buggy code, this test would FAIL (status would be 'completed').
+        Retryable failures re-raise instead (see test_executor_exception_triggers_retry).
         """
         from hindsight_api.worker import WorkerPoller
         from hindsight_api.worker.poller import ClaimedTask

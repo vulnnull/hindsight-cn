@@ -376,11 +376,13 @@ class WorkerPoller:
                         del self._in_flight_by_type[operation_type]
 
     async def _execute_task_inner(self, task: ClaimedTask):
-        """Inner task execution with error handling.
+        """Inner task execution with retry/fail handling.
 
-        Note: The executor (MemoryEngine.execute_task) handles status marking internally
-        (marking operations as completed/failed and handling retries). This method should
-        NOT override those status updates.
+        Retryable task failures are re-raised by the executor (MemoryEngine.execute_task)
+        and handled here via _retry_or_fail, which resets status='pending' (or marks as
+        'failed' after max retries). Non-retryable failures (e.g., file_convert_retain) are
+        handled by the executor internally — it marks the operation as failed and returns
+        normally, so no exception reaches here.
         """
         task_type = task.task_dict.get("type", "unknown")
         bank_id = task.task_dict.get("bank_id", "unknown")
@@ -393,10 +395,9 @@ class WorkerPoller:
             await self._executor(task.task_dict)
             logger.debug(f"Task {task.operation_id} execution finished")
         except Exception as e:
-            # The executor should handle its own errors, but if an unexpected exception
-            # propagates (e.g., from schema setup), log it as a warning
-            logger.error(f"Task {task.operation_id} raised unexpected exception: {e}")
+            logger.error(f"Task {task.operation_id} failed: {e}")
             traceback.print_exc()
+            await self._retry_or_fail(task.operation_id, str(e), task.schema)
 
     async def recover_own_tasks(self) -> int:
         """
