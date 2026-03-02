@@ -26,7 +26,7 @@ interface BankStats {
   failed_operations: number;
   last_consolidated_at: string | null;
   pending_consolidation: number;
-  total_mental_models: number;
+  total_observations: number;
 }
 
 export function BankStatsView() {
@@ -183,7 +183,7 @@ export function BankStatsView() {
               observationsEnabled ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
             }`}
           >
-            {observationsEnabled ? stats.total_mental_models || 0 : "—"}
+            {observationsEnabled ? stats.total_observations || 0 : "—"}
           </p>
         </div>
         <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-xl p-4 text-center">

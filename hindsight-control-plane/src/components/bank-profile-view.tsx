@@ -100,7 +100,7 @@ interface BankStats {
   // Consolidation stats
   last_consolidated_at: string | null;
   pending_consolidation: number;
-  total_mental_models: number;
+  total_observations: number;
 }
 
 interface Operation {
@@ -607,8 +607,8 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
                   This will delete all consolidated knowledge. Observations will be regenerated the
                   next time consolidation runs.
                 </p>
-                {stats && stats.total_mental_models > 0 && (
-                  <p>This will delete {stats.total_mental_models} observations.</p>
+                {stats && stats.total_observations > 0 && (
+                  <p>This will delete {stats.total_observations} observations.</p>
                 )}
               </div>
             </AlertDialogDescription>
