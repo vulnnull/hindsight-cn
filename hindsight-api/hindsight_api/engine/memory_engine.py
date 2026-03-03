@@ -1831,17 +1831,12 @@ class MemoryEngine(MemoryEngineInterface):
             # Resolve bank-specific config for this operation
             resolved_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
 
-            # Apply bank-specific Gemini safety settings for this request context
-            from .providers.gemini_llm import set_gemini_safety_settings
-
-            set_gemini_safety_settings(resolved_config.llm_gemini_safety_settings)
-
             # Create parent span for retain operation
             with create_operation_span("retain", bank_id):
                 return await orchestrator.retain_batch(
                     pool=pool,
                     embeddings_model=self.embeddings,
-                    llm_config=self._retain_llm_config,
+                    llm_config=self._retain_llm_config.with_config(resolved_config),
                     entity_resolver=self.entity_resolver,
                     format_date_fn=self._format_readable_date,
                     bank_id=bank_id,
@@ -4468,11 +4463,7 @@ class MemoryEngine(MemoryEngineInterface):
         # The agent can call lookup() to list available models if needed.
         # This is critical for banks with many mental models to avoid huge prompts.
 
-        # Apply bank-specific Gemini safety settings for this request context
         resolved_reflect_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
-        from .providers.gemini_llm import set_gemini_safety_settings
-
-        set_gemini_safety_settings(resolved_reflect_config.llm_gemini_safety_settings)
 
         # Compute max iterations based on budget
         config = get_config()
@@ -4576,7 +4567,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         try:
             agent_result = await run_reflect_agent(
-                llm_config=self._reflect_llm_config,
+                llm_config=self._reflect_llm_config.with_config(resolved_reflect_config),
                 bank_id=bank_id,
                 query=query,
                 bank_profile=profile,
