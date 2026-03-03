@@ -503,9 +503,14 @@ def _make_fact_callback() -> tuple[Callable[[list[dict], str], Any], list[int]]:
     """
     call_counter = [0]
 
+    # Realistic fact_type distribution matching production observations:
+    # ~60% world, ~30% experience, ~10% mental_model
+    _FACT_TYPE_CYCLE = (["world"] * 6 + ["experience"] * 3 + ["mental_model"] * 1) * 10  # 100-element cycle
+
     def callback(messages: list[dict], scope: str) -> Any:
         if scope == "retain_extract_facts":
             idx = call_counter[0] % len(FACT_TEMPLATES)
+            fact_type = _FACT_TYPE_CYCLE[call_counter[0] % len(_FACT_TYPE_CYCLE)]
             call_counter[0] += 1
             template = FACT_TEMPLATES[idx]
             fact_text = _fill_template(template)
@@ -521,7 +526,7 @@ def _make_fact_callback() -> tuple[Callable[[list[dict], str], Any], list[int]]:
                         "where": "N/A",
                         "who": "N/A",
                         "why": "N/A",
-                        "fact_type": "world",
+                        "fact_type": fact_type,
                         "entities": entities,
                     }
                 ]
@@ -736,12 +741,17 @@ async def cmd_benchmark(bank_id: str, query: str, iterations: int, concurrency: 
     all_phase_timings: dict[str, list[float]] = {}
 
     async def recall_one() -> float:
+        from hindsight_api.engine.memory_engine import Budget
+
         t0 = time.perf_counter()
         result = await engine.recall_async(
             bank_id=bank_id,
             query=query,
+            budget=Budget.HIGH,
             max_tokens=4096,
             enable_trace=True,
+            include_chunks=True,
+            include_entities=True,
             request_context=request_context,
             _quiet=True,
         )

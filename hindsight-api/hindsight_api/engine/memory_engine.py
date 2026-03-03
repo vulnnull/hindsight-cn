@@ -2648,66 +2648,47 @@ class MemoryEngine(MemoryEngineInterface):
                         seen_chunk_ids.add(chunk_id)
 
                 if chunk_ids_ordered:
-                    # Estimate batch size based on retain_chunk_size * 2 (rough estimate)
-                    # Chunk sizes vary per document, so we fetch in batches until budget is exhausted
-                    bank_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
-                    estimated_batch_size = max(1, (max_chunk_tokens // bank_config.retain_chunk_size) * 2)
-
                     chunks_dict = {}
                     encoding = _get_tiktoken_encoding()
-                    chunk_offset = 0
 
-                    # Fetch chunks in batches until we run out of budget or chunks
-                    while chunk_offset < len(chunk_ids_ordered) and total_chunk_tokens < max_chunk_tokens:
-                        # Get next batch of chunk IDs
-                        batch_chunk_ids = chunk_ids_ordered[chunk_offset : chunk_offset + estimated_batch_size]
-                        chunk_offset += estimated_batch_size
+                    # Fetch all candidate chunks in a single query. Token-budget accounting
+                    # happens in Python after the fetch — one round-trip is always faster
+                    # than multiple batched round-trips when the candidate set is large.
+                    async with acquire_with_retry(pool) as conn:
+                        chunks_rows = await conn.fetch(
+                            f"""
+                            SELECT chunk_id, chunk_text, chunk_index
+                            FROM {fq_table("chunks")}
+                            WHERE chunk_id = ANY($1::text[])
+                            """,
+                            chunk_ids_ordered,
+                        )
 
-                        # Fetch chunk data from database
-                        async with acquire_with_retry(pool) as conn:
-                            chunks_rows = await conn.fetch(
-                                f"""
-                                SELECT chunk_id, chunk_text, chunk_index
-                                FROM {fq_table("chunks")}
-                                WHERE chunk_id = ANY($1::text[])
-                                """,
-                                batch_chunk_ids,
-                            )
+                    chunks_lookup = {row["chunk_id"]: row for row in chunks_rows}
 
-                        # Create a lookup dict for fast access (preserves order from batch_chunk_ids)
-                        chunks_lookup = {row["chunk_id"]: row for row in chunks_rows}
+                    # Process chunks in relevance order, respecting token budget
+                    for chunk_id in chunk_ids_ordered:
+                        if chunk_id not in chunks_lookup:
+                            continue
 
-                        # Process chunks in order, respecting token budget
-                        for chunk_id in batch_chunk_ids:
-                            if chunk_id not in chunks_lookup:
-                                continue
+                        row = chunks_lookup[chunk_id]
+                        chunk_text = row["chunk_text"]
+                        chunk_tokens = len(encoding.encode(chunk_text))
 
-                            row = chunks_lookup[chunk_id]
-                            chunk_text = row["chunk_text"]
-                            chunk_tokens = len(encoding.encode(chunk_text))
-
-                            # Check if adding this chunk would exceed the limit
-                            if total_chunk_tokens + chunk_tokens > max_chunk_tokens:
-                                # Truncate the chunk to fit within the remaining budget
-                                remaining_tokens = max_chunk_tokens - total_chunk_tokens
-                                if remaining_tokens > 0:
-                                    # Truncate to remaining tokens
-                                    truncated_text = encoding.decode(encoding.encode(chunk_text)[:remaining_tokens])
-                                    chunks_dict[chunk_id] = ChunkInfo(
-                                        chunk_text=truncated_text, chunk_index=row["chunk_index"], truncated=True
-                                    )
-                                    total_chunk_tokens = max_chunk_tokens
-                                # Budget exhausted - stop fetching more batches
-                                break
-                            else:
+                        if total_chunk_tokens + chunk_tokens > max_chunk_tokens:
+                            remaining_tokens = max_chunk_tokens - total_chunk_tokens
+                            if remaining_tokens > 0:
+                                truncated_text = encoding.decode(encoding.encode(chunk_text)[:remaining_tokens])
                                 chunks_dict[chunk_id] = ChunkInfo(
-                                    chunk_text=chunk_text, chunk_index=row["chunk_index"], truncated=False
+                                    chunk_text=truncated_text, chunk_index=row["chunk_index"], truncated=True
                                 )
-                                total_chunk_tokens += chunk_tokens
-
-                        # If we hit the budget limit in this batch, stop fetching more batches
-                        if total_chunk_tokens >= max_chunk_tokens:
+                                total_chunk_tokens = max_chunk_tokens
                             break
+                        else:
+                            chunks_dict[chunk_id] = ChunkInfo(
+                                chunk_text=chunk_text, chunk_index=row["chunk_index"], truncated=False
+                            )
+                            total_chunk_tokens += chunk_tokens
 
             # Step 6: Token budget filtering
             step_start = time.time()
