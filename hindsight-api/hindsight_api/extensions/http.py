@@ -87,3 +87,15 @@ class HttpExtension(Extension, ABC):
             ```
         """
         pass
+
+    def get_root_router(self, memory: "MemoryEngine") -> APIRouter | None:
+        """
+        Return a FastAPI router with endpoints mounted at the app root.
+
+        Unlike get_router() which is mounted at /ext/, this router is mounted
+        directly on the application root. Use for well-known endpoints or other
+        paths that must be at specific locations.
+
+        Returns None by default (no root routes). Override to provide root-level routes.
+        """
+        return None

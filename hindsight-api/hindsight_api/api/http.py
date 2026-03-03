@@ -1830,6 +1830,12 @@ def create_app(
         app.include_router(extension_router, prefix="/ext", tags=["Extension"])
         logging.info("HTTP extension router mounted at /ext/")
 
+        # Mount root router if provided (for well-known endpoints, etc.)
+        root_router = http_extension.get_root_router(memory)
+        if root_router:
+            app.include_router(root_router)
+            logging.info("HTTP extension root router mounted")
+
     return app
 
 

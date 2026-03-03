@@ -331,7 +331,7 @@ class MCPMiddleware:
                 auth_tenant_id = auth_context.tenant_id
                 auth_api_key_id = auth_context.api_key_id
             except AuthenticationError as e:
-                await self._send_error(send, 401, str(e))
+                await self._send_error(send, 401, str(e), extra_headers=e.headers)
                 return
 
         # Set schema from tenant context so downstream DB queries use the correct schema
@@ -413,14 +413,17 @@ class MCPMiddleware:
             if schema_token is not None:
                 _current_schema.reset(schema_token)
 
-    async def _send_error(self, send, status: int, message: str):
+    async def _send_error(self, send, status: int, message: str, extra_headers: dict[str, str] | None = None):
         """Send an error response."""
         body = json.dumps({"error": message}).encode()
+        headers = [(b"content-type", b"application/json")]
+        for key, value in (extra_headers or {}).items():
+            headers.append((key.encode(), value.encode()))
         await send(
             {
                 "type": "http.response.start",
                 "status": status,
-                "headers": [(b"content-type", b"application/json")],
+                "headers": headers,
             }
         )
         await send(

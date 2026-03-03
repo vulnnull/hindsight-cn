@@ -11,8 +11,9 @@ from hindsight_api.models import RequestContext
 class AuthenticationError(Exception):
     """Raised when authentication fails."""
 
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, headers: dict[str, str] | None = None):
         self.reason = reason
+        self.headers = headers or {}
         super().__init__(f"Authentication failed: {reason}")
 
 
