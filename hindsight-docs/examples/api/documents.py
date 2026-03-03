@@ -91,12 +91,12 @@ async def list_documents_example():
     result = await api.list_documents(bank_id="my-bank", limit=20, offset=40)
     print(f"Page items: {len(result.items)}")
 
+import asyncio
 asyncio.run(list_documents_example())
 # [/docs:document-list]
 
 
 # [docs:document-get]
-import asyncio
 from hindsight_client_api import ApiClient, Configuration
 from hindsight_client_api.api import DocumentsApi
 

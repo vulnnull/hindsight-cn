@@ -171,6 +171,7 @@ def main():
             llm_vertexai_project_id=config.llm_vertexai_project_id,
             llm_vertexai_region=config.llm_vertexai_region,
             llm_vertexai_service_account_key=config.llm_vertexai_service_account_key,
+            llm_gemini_safety_settings=config.llm_gemini_safety_settings,
             retain_llm_provider=config.retain_llm_provider,
             retain_llm_api_key=config.retain_llm_api_key,
             retain_llm_model=config.retain_llm_model,

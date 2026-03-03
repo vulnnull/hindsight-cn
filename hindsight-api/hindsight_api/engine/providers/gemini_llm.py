@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import time
+from contextvars import ContextVar
 from typing import Any
 
 from google import genai
@@ -23,6 +24,25 @@ from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult,
 from hindsight_api.metrics import get_metrics_collector
 
 logger = logging.getLogger(__name__)
+
+# Context variable for per-request Gemini safety settings override (supports per-bank configuration)
+_safety_settings_ctx: ContextVar[list | None] = ContextVar("gemini_safety_settings", default=None)
+
+
+def set_gemini_safety_settings(settings: list | None) -> None:
+    """
+    Set Gemini safety settings for the current async context.
+
+    This allows per-bank safety settings to be applied without changing
+    the LLM provider interface. Call this before making LLM calls within
+    an operation that has resolved bank-specific configuration.
+
+    Args:
+        settings: List of safety setting dicts with 'category' and 'threshold' keys,
+                  or None to use the instance default (from env var).
+    """
+    _safety_settings_ctx.set(settings)
+
 
 # Vertex AI imports (optional)
 try:
@@ -57,6 +77,9 @@ class GeminiLLM(LLMInterface):
 
         self._client = None
         self._is_vertexai = self.provider == "vertexai"
+
+        # Safety settings: None means use Gemini's defaults
+        self._safety_settings: list | None = kwargs.get("gemini_safety_settings")
 
         if self._is_vertexai:
             self._init_vertexai(**kwargs)
@@ -215,6 +238,16 @@ class GeminiLLM(LLMInterface):
             config_kwargs["response_schema"] = response_format
         if temperature is not None:
             config_kwargs["temperature"] = temperature
+
+        # Apply safety settings: context var (per-request bank override) takes precedence over instance default
+        effective_safety_settings = _safety_settings_ctx.get()
+        if effective_safety_settings is None:
+            effective_safety_settings = self._safety_settings
+        if effective_safety_settings is not None:
+            config_kwargs["safety_settings"] = [
+                genai_types.SafetySetting(category=s["category"], threshold=s["threshold"])
+                for s in effective_safety_settings
+            ]
 
         generation_config = genai_types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
@@ -488,6 +521,16 @@ class GeminiLLM(LLMInterface):
                 function_calling_config=genai_types.FunctionCallingConfig(mode="NONE")
             )
         # "auto" is the default (no tool_config needed)
+
+        # Apply safety settings: context var (per-request bank override) takes precedence over instance default
+        effective_safety_settings = _safety_settings_ctx.get()
+        if effective_safety_settings is None:
+            effective_safety_settings = self._safety_settings
+        if effective_safety_settings is not None:
+            config_kwargs["safety_settings"] = [
+                genai_types.SafetySetting(category=s["category"], threshold=s["threshold"])
+                for s in effective_safety_settings
+            ]
 
         config = genai_types.GenerateContentConfig(**config_kwargs)
 

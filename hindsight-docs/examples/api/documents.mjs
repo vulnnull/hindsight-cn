@@ -86,8 +86,6 @@ console.log(`Page items: ${page.items.length}`);
 
 
 // [docs:document-get]
-const apiClient = createClient(createConfig({ baseUrl: 'http://localhost:8888' }));
-
 // Get document to expand context from recall results
 const { data: doc, error } = await sdk.getDocument({
     client: apiClient,

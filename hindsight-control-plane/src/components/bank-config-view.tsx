@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { useBank } from "@/lib/bank-context";
+import { useFeatures } from "@/lib/features-context";
 import { client } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +60,38 @@ type EntityLabelsEdits = {
 type MCPEdits = {
   mcp_enabled_tools: string[] | null;
 };
+
+type GeminiSafetySetting = {
+  category: string;
+  threshold: string;
+};
+
+type GeminiEdits = {
+  llm_gemini_safety_settings: GeminiSafetySetting[] | null;
+};
+
+// ─── Gemini safety settings catalogue ────────────────────────────────────────
+
+const GEMINI_HARM_CATEGORIES = [
+  { value: "HARM_CATEGORY_HARASSMENT", label: "Harassment" },
+  { value: "HARM_CATEGORY_HATE_SPEECH", label: "Hate Speech" },
+  { value: "HARM_CATEGORY_SEXUALLY_EXPLICIT", label: "Sexually Explicit" },
+  { value: "HARM_CATEGORY_DANGEROUS_CONTENT", label: "Dangerous Content" },
+] as const;
+
+const GEMINI_THRESHOLDS = [
+  { value: "HARM_BLOCK_THRESHOLD_UNSPECIFIED", label: "Unspecified (use Gemini default)" },
+  { value: "OFF", label: "Off (filter disabled)" },
+  { value: "BLOCK_NONE", label: "Block none" },
+  { value: "BLOCK_LOW_AND_ABOVE", label: "Block low & above" },
+  { value: "BLOCK_MEDIUM_AND_ABOVE", label: "Block medium & above" },
+  { value: "BLOCK_ONLY_HIGH", label: "Block only high" },
+] as const;
+
+const DEFAULT_GEMINI_SAFETY_SETTINGS: GeminiSafetySetting[] = GEMINI_HARM_CATEGORIES.map((c) => ({
+  category: c.value,
+  threshold: "BLOCK_NONE",
+}));
 
 // ─── MCP tool catalogue ───────────────────────────────────────────────────────
 
@@ -134,6 +167,12 @@ function mcpSlice(config: Record<string, any>): MCPEdits {
   };
 }
 
+function geminiSlice(config: Record<string, any>): GeminiEdits {
+  return {
+    llm_gemini_safety_settings: config.llm_gemini_safety_settings ?? null,
+  };
+}
+
 const DEFAULT_PROFILE: ProfileData = {
   reflect_mission: "",
   disposition_skepticism: 3,
@@ -145,6 +184,8 @@ const DEFAULT_PROFILE: ProfileData = {
 
 export function BankConfigView() {
   const { currentBank: bankId } = useBank();
+  const { features } = useFeatures();
+  const bankConfigEnabled = features?.bank_config_api ?? true; // optimistic default while loading
   const [loading, setLoading] = useState(true);
 
   // Source of truth
@@ -161,6 +202,7 @@ export function BankConfigView() {
   );
   const [reflectEdits, setReflectEdits] = useState<ProfileData>(DEFAULT_PROFILE);
   const [mcpEdits, setMcpEdits] = useState<MCPEdits>(mcpSlice({}));
+  const [geminiEdits, setGeminiEdits] = useState<GeminiEdits>(geminiSlice({}));
 
   // Per-section saving/error state
   const [retainSaving, setRetainSaving] = useState(false);
@@ -168,11 +210,13 @@ export function BankConfigView() {
   const [entityLabelsSaving, setEntityLabelsSaving] = useState(false);
   const [reflectSaving, setReflectSaving] = useState(false);
   const [mcpSaving, setMcpSaving] = useState(false);
+  const [geminiSaving, setGeminiSaving] = useState(false);
   const [retainError, setRetainError] = useState<string | null>(null);
   const [observationsError, setObservationsError] = useState<string | null>(null);
   const [entityLabelsError, setEntityLabelsError] = useState<string | null>(null);
   const [reflectError, setReflectError] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
+  const [geminiError, setGeminiError] = useState<string | null>(null);
 
   // Reset dialog
 
@@ -196,6 +240,10 @@ export function BankConfigView() {
   const mcpDirty = useMemo(
     () => JSON.stringify(mcpEdits) !== JSON.stringify(mcpSlice(baseConfig)),
     [mcpEdits, baseConfig]
+  );
+  const geminiDirty = useMemo(
+    () => JSON.stringify(geminiEdits) !== JSON.stringify(geminiSlice(baseConfig)),
+    [geminiEdits, baseConfig]
   );
 
   useEffect(() => {
@@ -226,6 +274,7 @@ export function BankConfigView() {
       setEntityLabelsEdits(entityLabelsSlice(cfg));
       setReflectEdits(prof);
       setMcpEdits(mcpSlice(cfg));
+      setGeminiEdits(geminiSlice(cfg));
     } catch (err) {
       console.error("Failed to load bank data:", err);
     } finally {
@@ -312,10 +361,39 @@ export function BankConfigView() {
     }
   };
 
+  const saveGemini = async () => {
+    if (!bankId) return;
+    setGeminiSaving(true);
+    setGeminiError(null);
+    try {
+      await client.updateBankConfig(bankId, geminiEdits);
+      setBaseConfig((prev) => ({ ...prev, ...geminiEdits }));
+    } catch (err: any) {
+      setGeminiError(err.message || "Failed to save Gemini settings");
+    } finally {
+      setGeminiSaving(false);
+    }
+  };
+
   if (!bankId) {
     return (
       <div className="flex items-center justify-center py-12">
         <p className="text-muted-foreground">No bank selected</p>
+      </div>
+    );
+  }
+
+  if (!bankConfigEnabled) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+        <p className="text-base font-medium text-foreground">Bank configuration is disabled</p>
+        <p className="text-sm text-muted-foreground max-w-sm">
+          Set{" "}
+          <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+            HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true
+          </code>{" "}
+          to enable per-bank configuration.
+        </p>
       </div>
     );
   }
@@ -551,6 +629,62 @@ export function BankConfigView() {
             />
           )}
         </ConfigSection>
+
+        {/* Models Section */}
+        <ConfigSection
+          title="Models"
+          description="Provider-specific model settings"
+          error={geminiError}
+          dirty={geminiDirty}
+          saving={geminiSaving}
+          onSave={saveGemini}
+        >
+          {/* Gemini subsection */}
+          <div className="px-6 py-4 space-y-4">
+            <p className="text-sm font-semibold">Gemini / Vertex AI</p>
+            <div className="pl-4 border-l-2 border-border/40 space-y-4">
+              <FieldRow
+                label="Safety settings"
+                description={
+                  <>
+                    When off, Gemini&apos;s default safety thresholds are used. When on, configure
+                    thresholds per harm category.{" "}
+                    <a
+                      href="https://ai.google.dev/gemini-api/docs/safety-settings"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-foreground transition-colors"
+                    >
+                      Learn more
+                    </a>
+                  </>
+                }
+              >
+                <div className="flex items-center gap-2 justify-end">
+                  <Switch
+                    checked={geminiEdits.llm_gemini_safety_settings !== null}
+                    onCheckedChange={(enabled) =>
+                      setGeminiEdits({
+                        llm_gemini_safety_settings: enabled
+                          ? [...DEFAULT_GEMINI_SAFETY_SETTINGS]
+                          : null,
+                      })
+                    }
+                  />
+                  <Label className="text-xs text-muted-foreground">
+                    {geminiEdits.llm_gemini_safety_settings !== null ? "Custom" : "Default"}
+                  </Label>
+                </div>
+              </FieldRow>
+              {geminiEdits.llm_gemini_safety_settings !== null && (
+                <GeminiSafetyEditor
+                  value={geminiEdits.llm_gemini_safety_settings}
+                  onChange={(settings) => setGeminiEdits({ llm_gemini_safety_settings: settings })}
+                />
+              )}
+            </div>
+          </div>
+        </ConfigSection>
       </div>
     </>
   );
@@ -712,7 +846,7 @@ function FieldRow({
   children,
 }: {
   label: string;
-  description?: string;
+  description?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -1026,6 +1160,67 @@ function EntityLabelsEditor({
         <Plus className="h-3.5 w-3.5" />
         Add attribute
       </button>
+    </div>
+  );
+}
+
+// ─── GeminiSafetyEditor ───────────────────────────────────────────────────────
+
+function GeminiSafetyEditor({
+  value,
+  onChange,
+}: {
+  value: GeminiSafetySetting[];
+  onChange: (settings: GeminiSafetySetting[]) => void;
+}) {
+  const getThreshold = (category: string): string => {
+    return value.find((s) => s.category === category)?.threshold ?? "BLOCK_MEDIUM_AND_ABOVE";
+  };
+
+  const setThreshold = (category: string, threshold: string) => {
+    const next = GEMINI_HARM_CATEGORIES.map((c) => ({
+      category: c.value,
+      threshold: c.value === category ? threshold : getThreshold(c.value),
+    }));
+    onChange(next);
+  };
+
+  return (
+    <div className="px-6 py-4 space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Set the blocking threshold for each harm category. "Off" disables the filter entirely
+        (default for Gemini 2.5+). Lower thresholds block more content.{" "}
+        <a
+          href="https://ai.google.dev/gemini-api/docs/safety-settings"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-foreground transition-colors"
+        >
+          Learn more
+        </a>
+      </p>
+      <div className="space-y-2">
+        {GEMINI_HARM_CATEGORIES.map((cat) => (
+          <div key={cat.value} className="flex items-center justify-between gap-4">
+            <span className="text-sm">{cat.label}</span>
+            <Select
+              value={getThreshold(cat.value)}
+              onValueChange={(v) => setThreshold(cat.value, v)}
+            >
+              <SelectTrigger className="w-48 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {GEMINI_THRESHOLDS.map((t) => (
+                  <SelectItem key={t.value} value={t.value} className="text-xs">
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

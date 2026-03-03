@@ -197,10 +197,15 @@ export default function BankPage() {
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         onClick={() => setShowResetConfigDialog(true)}
+                        disabled={!bankConfigEnabled}
                         className="text-amber-600 dark:text-amber-400 focus:text-amber-700 dark:focus:text-amber-300"
+                        title={!bankConfigEnabled ? "Bank Config API is disabled" : undefined}
                       >
                         <RotateCcw className="w-4 h-4 mr-2" />
                         Reset Configuration
+                        {!bankConfigEnabled && (
+                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
+                        )}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
@@ -230,19 +235,21 @@ export default function BankPage() {
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
                     </button>
-                    <button
-                      onClick={() => handleBankConfigTabChange("configuration")}
-                      className={`px-6 py-3 font-semibold text-sm transition-all relative ${
-                        bankConfigTab === "configuration"
-                          ? "text-primary"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      Configuration
-                      {bankConfigTab === "configuration" && (
-                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-                      )}
-                    </button>
+                    {bankConfigEnabled && (
+                      <button
+                        onClick={() => handleBankConfigTabChange("configuration")}
+                        className={`px-6 py-3 font-semibold text-sm transition-all relative ${
+                          bankConfigTab === "configuration"
+                            ? "text-primary"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        Configuration
+                        {bankConfigTab === "configuration" && (
+                          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -260,7 +267,7 @@ export default function BankPage() {
                       </div>
                     </div>
                   )}
-                  {bankConfigTab === "configuration" && (
+                  {bankConfigTab === "configuration" && bankConfigEnabled && (
                     <div className="space-y-6">
                       <BankConfigView />
                     </div>

@@ -124,6 +124,7 @@ def create_llm_provider(
     vertexai_project_id: str | None = None,
     vertexai_region: str | None = None,
     vertexai_credentials: Any = None,
+    gemini_safety_settings: list | None = None,
 ) -> Any:  # Returns LLMInterface
     """
     Factory function to create the appropriate LLM provider implementation.
@@ -192,6 +193,7 @@ def create_llm_provider(
             vertexai_project_id=vertexai_project_id,
             vertexai_region=vertexai_region,
             vertexai_credentials=vertexai_credentials,
+            gemini_safety_settings=gemini_safety_settings,
         )
 
     elif provider_lower == "anthropic":
@@ -234,6 +236,7 @@ class LLMProvider:
         reasoning_effort: str = "low",
         groq_service_tier: str | None = None,
         openai_service_tier: str | None = None,
+        gemini_safety_settings: list | None = None,
     ):
         """
         Initialize LLM provider.
@@ -246,6 +249,7 @@ class LLMProvider:
             reasoning_effort: Reasoning effort level for supported providers.
             groq_service_tier: Groq service tier ("on_demand", "flex", "auto") - from config.
             openai_service_tier: OpenAI service tier (None or "flex") - from config.
+            gemini_safety_settings: Safety settings for Gemini/VertexAI providers.
         """
         self.provider = provider.lower()
         self.api_key = api_key
@@ -255,6 +259,8 @@ class LLMProvider:
         # Service tiers from hierarchical config (not env vars)
         self.groq_service_tier = groq_service_tier
         self.openai_service_tier = openai_service_tier
+        # Gemini safety settings (instance default; can be overridden per-request via context var)
+        self.gemini_safety_settings = gemini_safety_settings
 
         # Validate provider
         valid_providers = [
@@ -323,6 +329,18 @@ class LLMProvider:
                 f"model={self.model}, auth={'service_account' if service_account_key else 'ADC'}"
             )
 
+        # For Gemini/VertexAI providers: read safety settings from global config if not explicitly provided
+        # Use _get_raw_config() to bypass StaticConfigProxy (which blocks configurable fields),
+        # since LLMProvider initialization legitimately needs the server-level default.
+        if self.provider in ("gemini", "vertexai") and self.gemini_safety_settings is None:
+            from ..config import _get_raw_config
+
+            try:
+                raw_config = _get_raw_config()
+                self.gemini_safety_settings = raw_config.llm_gemini_safety_settings
+            except Exception:
+                pass  # Config may not be initialized in test environments
+
         # Create provider implementation using factory
         self._provider_impl = create_llm_provider(
             provider=self.provider,
@@ -335,6 +353,7 @@ class LLMProvider:
             vertexai_project_id=vertexai_project_id,
             vertexai_region=vertexai_region,
             vertexai_credentials=vertexai_credentials,
+            gemini_safety_settings=self.gemini_safety_settings,
         )
 
         # Backward compatibility: Keep mock provider properties

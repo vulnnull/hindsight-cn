@@ -126,6 +126,12 @@ async def run_consolidation_job(
     """
     # Resolve bank-specific config with hierarchical overrides
     config = await memory_engine._config_resolver.resolve_full_config(bank_id, request_context)
+
+    # Apply bank-specific Gemini safety settings for this request context
+    from ..providers.gemini_llm import set_gemini_safety_settings
+
+    set_gemini_safety_settings(config.llm_gemini_safety_settings)
+
     perf = ConsolidationPerfLog(bank_id)
     max_memories_per_batch = config.consolidation_batch_size
     llm_batch_size = max(1, config.consolidation_llm_batch_size)

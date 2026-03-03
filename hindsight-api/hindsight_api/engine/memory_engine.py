@@ -1831,6 +1831,11 @@ class MemoryEngine(MemoryEngineInterface):
             # Resolve bank-specific config for this operation
             resolved_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
 
+            # Apply bank-specific Gemini safety settings for this request context
+            from .providers.gemini_llm import set_gemini_safety_settings
+
+            set_gemini_safety_settings(resolved_config.llm_gemini_safety_settings)
+
             # Create parent span for retain operation
             with create_operation_span("retain", bank_id):
                 return await orchestrator.retain_batch(
@@ -4481,6 +4486,12 @@ class MemoryEngine(MemoryEngineInterface):
         # NOTE: Mental models are NOT pre-loaded to keep the initial prompt small.
         # The agent can call lookup() to list available models if needed.
         # This is critical for banks with many mental models to avoid huge prompts.
+
+        # Apply bank-specific Gemini safety settings for this request context
+        resolved_reflect_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
+        from .providers.gemini_llm import set_gemini_safety_settings
+
+        set_gemini_safety_settings(resolved_reflect_config.llm_gemini_safety_settings)
 
         # Compute max iterations based on budget
         config = get_config()
