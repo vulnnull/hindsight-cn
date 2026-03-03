@@ -2385,148 +2385,32 @@ def _register_routes(app: FastAPI):
     ):
         """Get statistics about memory nodes and links for a memory bank."""
         try:
-            # Authenticate and set tenant schema
-            await app.state.memory._authenticate_tenant(request_context)
-            if app.state.memory._operation_validator:
-                from hindsight_api.extensions import BankReadContext
-
-                ctx = BankReadContext(bank_id=bank_id, operation="get_bank_stats", request_context=request_context)
-                await app.state.memory._validate_operation(
-                    app.state.memory._operation_validator.validate_bank_read(ctx)
-                )
-            pool = await app.state.memory._get_pool()
-            async with acquire_with_retry(pool) as conn:
-                # Get node counts by fact_type
-                node_stats = await conn.fetch(
-                    f"""
-                    SELECT fact_type, COUNT(*) as count
-                    FROM {fq_table("memory_units")}
-                    WHERE bank_id = $1
-                    GROUP BY fact_type
-                    """,
-                    bank_id,
-                )
-
-                # Get link counts by link_type
-                link_stats = await conn.fetch(
-                    f"""
-                    SELECT ml.link_type, COUNT(*) as count
-                    FROM {fq_table("memory_links")} ml
-                    JOIN {fq_table("memory_units")} mu ON ml.from_unit_id = mu.id
-                    WHERE mu.bank_id = $1
-                    GROUP BY ml.link_type
-                    """,
-                    bank_id,
-                )
-
-                # Get link counts by fact_type (from nodes)
-                link_fact_type_stats = await conn.fetch(
-                    f"""
-                    SELECT mu.fact_type, COUNT(*) as count
-                    FROM {fq_table("memory_links")} ml
-                    JOIN {fq_table("memory_units")} mu ON ml.from_unit_id = mu.id
-                    WHERE mu.bank_id = $1
-                    GROUP BY mu.fact_type
-                    """,
-                    bank_id,
-                )
-
-                # Get link counts by fact_type AND link_type
-                link_breakdown_stats = await conn.fetch(
-                    f"""
-                    SELECT mu.fact_type, ml.link_type, COUNT(*) as count
-                    FROM {fq_table("memory_links")} ml
-                    JOIN {fq_table("memory_units")} mu ON ml.from_unit_id = mu.id
-                    WHERE mu.bank_id = $1
-                    GROUP BY mu.fact_type, ml.link_type
-                    """,
-                    bank_id,
-                )
-
-                # Get pending and failed operations counts
-                ops_stats = await conn.fetch(
-                    f"""
-                    SELECT status, COUNT(*) as count
-                    FROM {fq_table("async_operations")}
-                    WHERE bank_id = $1
-                    GROUP BY status
-                    """,
-                    bank_id,
-                )
-                ops_by_status = {row["status"]: row["count"] for row in ops_stats}
-                pending_operations = ops_by_status.get("pending", 0)
-                failed_operations = ops_by_status.get("failed", 0)
-
-                # Get document count
-                doc_count_result = await conn.fetchrow(
-                    f"""
-                    SELECT COUNT(*) as count
-                    FROM {fq_table("documents")}
-                    WHERE bank_id = $1
-                    """,
-                    bank_id,
-                )
-                total_documents = doc_count_result["count"] if doc_count_result else 0
-
-                # Get consolidation stats from memory-level tracking
-                consolidation_stats = await conn.fetchrow(
-                    f"""
-                    SELECT
-                        MAX(consolidated_at) as last_consolidated_at,
-                        COUNT(*) FILTER (WHERE consolidated_at IS NULL AND fact_type IN ('experience', 'world')) as pending
-                    FROM {fq_table("memory_units")}
-                    WHERE bank_id = $1
-                    """,
-                    bank_id,
-                )
-                last_consolidated_at = consolidation_stats["last_consolidated_at"] if consolidation_stats else None
-                pending_consolidation = consolidation_stats["pending"] if consolidation_stats else 0
-
-                # Count total observations (consolidated knowledge)
-                observation_count_result = await conn.fetchrow(
-                    f"""
-                    SELECT COUNT(*) as count
-                    FROM {fq_table("memory_units")}
-                    WHERE bank_id = $1 AND fact_type = 'observation'
-                    """,
-                    bank_id,
-                )
-                total_observations = observation_count_result["count"] if observation_count_result else 0
-
-                # Format results
-                nodes_by_type = {row["fact_type"]: row["count"] for row in node_stats}
-                links_by_type = {row["link_type"]: row["count"] for row in link_stats}
-                links_by_fact_type = {row["fact_type"]: row["count"] for row in link_fact_type_stats}
-
-                # Build detailed breakdown: {fact_type: {link_type: count}}
-                links_breakdown = {}
-                for row in link_breakdown_stats:
-                    fact_type = row["fact_type"]
-                    link_type = row["link_type"]
-                    count = row["count"]
-                    if fact_type not in links_breakdown:
-                        links_breakdown[fact_type] = {}
-                    links_breakdown[fact_type][link_type] = count
-
-                total_nodes = sum(nodes_by_type.values())
-                total_links = sum(links_by_type.values())
-
-                return BankStatsResponse(
-                    bank_id=bank_id,
-                    total_nodes=total_nodes,
-                    total_links=total_links,
-                    total_documents=total_documents,
-                    nodes_by_fact_type=nodes_by_type,
-                    links_by_link_type=links_by_type,
-                    links_by_fact_type=links_by_fact_type,
-                    links_breakdown=links_breakdown,
-                    pending_operations=pending_operations,
-                    failed_operations=failed_operations,
-                    last_consolidated_at=(last_consolidated_at.isoformat() if last_consolidated_at else None),
-                    pending_consolidation=pending_consolidation,
-                    total_observations=total_observations,
-                )
-
+            stats = await app.state.memory.get_bank_stats(bank_id, request_context=request_context)
+            nodes_by_type = stats["node_counts"]
+            links_by_type = stats["link_counts"]
+            links_by_fact_type = stats["link_counts_by_fact_type"]
+            links_breakdown: dict[str, dict[str, int]] = {}
+            for row in stats["link_breakdown"]:
+                ft = row["fact_type"]
+                if ft not in links_breakdown:
+                    links_breakdown[ft] = {}
+                links_breakdown[ft][row["link_type"]] = row["count"]
+            ops = stats["operations"]
+            return BankStatsResponse(
+                bank_id=bank_id,
+                total_nodes=sum(nodes_by_type.values()),
+                total_links=sum(links_by_type.values()),
+                total_documents=stats["total_documents"],
+                nodes_by_fact_type=nodes_by_type,
+                links_by_link_type=links_by_type,
+                links_by_fact_type=links_by_fact_type,
+                links_breakdown=links_breakdown,
+                pending_operations=ops.get("pending", 0),
+                failed_operations=ops.get("failed", 0),
+                last_consolidated_at=stats["last_consolidated_at"],
+                pending_consolidation=stats["pending_consolidation"],
+                total_observations=stats["total_observations"],
+            )
         except OperationValidationError as e:
             raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):

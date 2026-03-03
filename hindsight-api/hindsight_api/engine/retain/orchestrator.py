@@ -55,7 +55,6 @@ def parse_datetime_flexible(value: Any) -> datetime:
 from ..response_models import TokenUsage
 from . import (
     chunk_storage,
-    deduplication,
     embedding_processing,
     entity_processing,
     fact_extraction,
@@ -73,7 +72,6 @@ async def retain_batch(
     llm_config,
     entity_resolver,
     format_date_fn,
-    duplicate_checker_fn,
     bank_id: str,
     contents_dicts: list[RetainContentDict],
     config,
@@ -94,7 +92,6 @@ async def retain_batch(
         llm_config: LLM configuration for fact extraction
         entity_resolver: Entity resolver for entity processing
         format_date_fn: Function to format datetime to readable string
-        duplicate_checker_fn: Function to check for duplicate facts
         bank_id: Bank identifier
         contents_dicts: List of content dictionaries
         config: Resolved HindsightConfig for this bank
@@ -165,8 +162,6 @@ async def retain_batch(
         docs_tracked = 0
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
-                await fact_storage.ensure_bank_exists(conn, bank_id)
-
                 # Group contents by document_id (consistent with normal path)
                 contents_by_doc_early = defaultdict(list)
                 for idx, content_dict in enumerate(contents_dicts):
@@ -284,9 +279,6 @@ async def retain_batch(
     # Step 4: Database transaction
     async with acquire_with_retry(pool) as conn:
         async with conn.transaction():
-            # Ensure bank exists
-            await fact_storage.ensure_bank_exists(conn, bank_id)
-
             # Handle document tracking for all documents
             step_start = time.time()
             # Map None document_id to generated UUIDs
@@ -438,20 +430,7 @@ async def retain_batch(
                         actual_doc_id = document_id
                     processed_fact.document_id = actual_doc_id
 
-            # Deduplication
-            step_start = time.time()
-            is_duplicate_flags = await deduplication.check_duplicates_batch(
-                conn, bank_id, processed_facts, duplicate_checker_fn
-            )
-            log_buffer.append(
-                f"[4] Deduplication: {sum(is_duplicate_flags)} duplicates in {time.time() - step_start:.3f}s"
-            )
-
-            # Filter out duplicates
-            non_duplicate_facts = deduplication.filter_duplicates(processed_facts, is_duplicate_flags)
-
-            if not non_duplicate_facts:
-                return [[] for _ in contents], usage
+            non_duplicate_facts = processed_facts
 
             # Insert facts (document_id is now stored per-fact)
             step_start = time.time()
@@ -503,7 +482,11 @@ async def retain_batch(
             log_buffer.append(f"[10] Causal links: {causal_link_count} links in {time.time() - step_start:.3f}s")
 
             # Map results back to original content items
-            result_unit_ids = _map_results_to_contents(contents, extracted_facts, is_duplicate_flags, unit_ids)
+            result_unit_ids = _map_results_to_contents(contents, extracted_facts, unit_ids)
+
+        # Flush entity stats (mention_count / last_seen) now that the transaction
+        # has committed.  Uses a fresh pool connection — no locks held.
+        await entity_resolver.flush_pending_stats()
 
         # Log final summary
         total_time = time.time() - start_time
@@ -521,28 +504,20 @@ async def retain_batch(
 def _map_results_to_contents(
     contents: list[RetainContent],
     extracted_facts: list[ExtractedFact],
-    is_duplicate_flags: list[bool],
     unit_ids: list[str],
 ) -> list[list[str]]:
-    """
-    Map created unit IDs back to original content items.
-
-    Accounts for duplicates when mapping back.
-    """
-    result_unit_ids = []
-    filtered_idx = 0
-
-    # Group facts by content_index
-    facts_by_content = {i: [] for i in range(len(contents))}
+    """Map created unit IDs back to original content items."""
+    facts_by_content: dict[int, list[int]] = {i: [] for i in range(len(contents))}
     for i, fact in enumerate(extracted_facts):
         facts_by_content[fact.content_index].append(i)
 
+    result_unit_ids = []
+    unit_idx = 0
     for content_index in range(len(contents)):
         content_unit_ids = []
-        for fact_idx in facts_by_content[content_index]:
-            if not is_duplicate_flags[fact_idx]:
-                content_unit_ids.append(unit_ids[filtered_idx])
-                filtered_idx += 1
+        for _ in facts_by_content[content_index]:
+            content_unit_ids.append(unit_ids[unit_idx])
+            unit_idx += 1
         result_unit_ids.append(content_unit_ids)
 
     return result_unit_ids

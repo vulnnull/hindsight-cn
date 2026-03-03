@@ -6,6 +6,7 @@ without making actual API calls to external LLM services.
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from ..llm_interface import LLMInterface
@@ -66,6 +67,7 @@ class MockLLM(LLMInterface):
         self._mock_calls: list[dict] = []
         self._mock_response: Any = None
         self._mock_exception: Exception | None = None
+        self._response_callback: Callable[[list[dict], str], Any] | None = None
 
     async def verify_connection(self) -> None:
         """
@@ -147,7 +149,9 @@ class MockLLM(LLMInterface):
         )
 
         # Return mock response
-        if self._mock_response is not None:
+        if self._response_callback is not None:
+            result = self._response_callback(messages, scope)
+        elif self._mock_response is not None:
             result = self._mock_response
         elif response_format is not None:
             # Try to create a minimal valid instance of the response format
@@ -214,7 +218,15 @@ class MockLLM(LLMInterface):
 
         span_recorder = get_span_recorder()
 
-        if self._mock_response is not None:
+        if self._response_callback is not None:
+            cb_result = self._response_callback(messages, scope)
+            if isinstance(cb_result, LLMToolCallResult):
+                result = cb_result
+            else:
+                result = LLMToolCallResult(
+                    content=str(cb_result) if cb_result is not None else "mock response", finish_reason="stop"
+                )
+        elif self._mock_response is not None:
             if isinstance(self._mock_response, LLMToolCallResult):
                 result = self._mock_response
             elif isinstance(self._mock_response, list):
@@ -257,6 +269,16 @@ class MockLLM(LLMInterface):
     async def cleanup(self) -> None:
         """Clean up resources (no-op for mock provider)."""
         pass
+
+    def set_response_callback(self, fn: Callable[[list[dict], str], Any]) -> None:
+        """
+        Set a callback invoked on each call() instead of _mock_response.
+
+        The callback receives (messages, scope) and returns the response.
+        Useful for returning different responses per call (e.g., cycling
+        through a corpus in a benchmark).
+        """
+        self._response_callback = fn
 
     def set_mock_response(self, response: Any) -> None:
         """

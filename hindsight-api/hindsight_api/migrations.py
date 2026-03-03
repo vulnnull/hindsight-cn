@@ -18,6 +18,7 @@ No alembic.ini required - all configuration is done programmatically.
 import hashlib
 import logging
 import os
+import time
 from pathlib import Path
 
 from alembic import command
@@ -220,13 +221,40 @@ def run_migrations(
         lock_id = _get_schema_lock_id(schema) if schema else MIGRATION_LOCK_ID
         schema_name = schema or "public"
 
-        # Use PostgreSQL advisory lock to coordinate between distributed workers
+        # Use PostgreSQL advisory lock to coordinate between distributed workers.
+        #
+        # IMPORTANT: We must avoid holding an open transaction on the advisory-lock
+        # connection while CREATE INDEX CONCURRENTLY runs inside a migration.
+        # CONCURRENTLY waits for ALL active transactions to finish before the index
+        # becomes valid.  If the advisory-lock connection (or any waiting worker's
+        # connection) holds an open transaction, CONCURRENTLY deadlocks:
+        #   - migration worker waits for other workers' transactions to close
+        #   - other workers wait for the advisory lock to be released
+        #
+        # Fix:
+        #   1. Use pg_try_advisory_lock (non-blocking) in a poll loop instead of
+        #      blocking pg_advisory_lock, so we can COMMIT the transaction between
+        #      retries.  Between retries the connection holds no open transaction.
+        #   2. After acquiring the lock, COMMIT the transaction on the advisory-lock
+        #      connection itself before running migrations.  pg_advisory_lock is
+        #      session-level, so the lock survives the COMMIT.
         engine = create_engine(database_url)
         with engine.connect() as conn:
-            # pg_advisory_lock blocks until the lock is acquired
-            # The lock is automatically released when the connection closes
             logger.debug(f"Acquiring migration advisory lock for schema '{schema_name}' (id={lock_id})...")
-            conn.execute(text(f"SELECT pg_advisory_lock({lock_id})"))
+            while True:
+                acquired = conn.execute(text(f"SELECT pg_try_advisory_lock({lock_id})")).scalar()
+                if acquired:
+                    break
+                # Commit the transaction so this connection holds no open snapshot
+                # while waiting.  This prevents blocking CREATE INDEX CONCURRENTLY
+                # that may be running in the migration worker.
+                conn.commit()
+                time.sleep(0.5)
+
+            # Commit AFTER acquiring the lock too.  pg_advisory_lock is session-level
+            # and survives the COMMIT, but the open transaction on this connection
+            # would otherwise block any CREATE INDEX CONCURRENTLY in the migration.
+            conn.commit()
             logger.debug("Migration advisory lock acquired")
 
             try:
@@ -346,6 +374,13 @@ def run_migrations(
                                     "pgvectorscale extension is required but not installed. "
                                     "Please install it with: CREATE EXTENSION vectorscale CASCADE;"
                                 ) from e
+
+                # Commit any pending transaction on the advisory-lock connection
+                # before running migrations.  Some code paths above (e.g., the
+                # pgvector extension check) may have started a transaction via
+                # SQLAlchemy's autobegin.  If we leave it open, CREATE INDEX
+                # CONCURRENTLY inside a migration will deadlock waiting for it.
+                conn.commit()
 
                 # Run migrations while holding the lock
                 _run_migrations_internal(database_url, script_location, schema=schema)

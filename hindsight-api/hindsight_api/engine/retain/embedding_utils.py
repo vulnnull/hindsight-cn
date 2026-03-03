@@ -41,10 +41,9 @@ async def generate_embeddings_batch(embeddings_backend, texts: list[str]) -> lis
         List of embeddings in same order as input texts
     """
     try:
-        # Run embeddings in thread pool to avoid blocking event loop
         loop = asyncio.get_event_loop()
         embeddings = await loop.run_in_executor(
-            None,  # Use default thread pool
+            None,
             embeddings_backend.encode,
             texts,
         )

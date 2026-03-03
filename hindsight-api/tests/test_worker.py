@@ -48,11 +48,11 @@ async def pool(pg0_db_url):
 @pytest_asyncio.fixture
 async def clean_operations(pool):
     """Clean up async_operations table before and after tests."""
-    # Clean before test
-    await pool.execute("DELETE FROM async_operations WHERE bank_id LIKE 'test-worker-%'")
+    # Clean before test - covers both 'test-worker-' and 'test_worker_recovery' patterns
+    await pool.execute("DELETE FROM async_operations WHERE bank_id LIKE 'test-worker-%' OR bank_id LIKE 'test_worker_%'")
     yield
     # Clean after test
-    await pool.execute("DELETE FROM async_operations WHERE bank_id LIKE 'test-worker-%'")
+    await pool.execute("DELETE FROM async_operations WHERE bank_id LIKE 'test-worker-%' OR bank_id LIKE 'test_worker_%'")
 
 
 class TestBrokerTaskBackend:

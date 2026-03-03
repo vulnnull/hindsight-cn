@@ -5,7 +5,6 @@ This package contains modular components for the retain operation:
 - types: Type definitions for retain pipeline
 - fact_extraction: Extract facts from content
 - embedding_processing: Augment texts and generate embeddings
-- deduplication: Check for duplicate facts
 - entity_processing: Process and resolve entities
 - link_creation: Create temporal, semantic, entity, and causal links
 - chunk_storage: Handle chunk storage
@@ -14,7 +13,6 @@ This package contains modular components for the retain operation:
 
 from . import (
     chunk_storage,
-    deduplication,
     embedding_processing,
     entity_processing,
     fact_extraction,
@@ -35,7 +33,6 @@ __all__ = [
     # Modules
     "fact_extraction",
     "embedding_processing",
-    "deduplication",
     "entity_processing",
     "link_creation",
     "chunk_storage",

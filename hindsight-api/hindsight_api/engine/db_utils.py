@@ -20,6 +20,7 @@ RETRYABLE_EXCEPTIONS = (
     asyncpg.exceptions.InterfaceError,
     asyncpg.exceptions.ConnectionDoesNotExistError,
     asyncpg.exceptions.TooManyConnectionsError,
+    asyncpg.exceptions.DeadlockDetectedError,
     OSError,
     ConnectionError,
     asyncio.TimeoutError,

@@ -498,14 +498,13 @@ async def create_temporal_links_batch_per_fact(
             # Batch inserts to avoid timeout on large batches
             BATCH_SIZE = 1000
             for batch_start in range(0, len(links), BATCH_SIZE):
-                batch = links[batch_start : batch_start + BATCH_SIZE]
                 await conn.executemany(
                     f"""
                     INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
                     VALUES ($1, $2, $3, $4, $5)
                     ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
                     """,
-                    batch,
+                    links[batch_start : batch_start + BATCH_SIZE],
                 )
             _log(log_buffer, f"      [7.4] Insert {len(links)} temporal links: {time_mod.time() - insert_start:.3f}s")
 
@@ -553,81 +552,45 @@ async def create_semantic_links_batch(
 
         import numpy as np
 
-        # Fetch ALL existing units with embeddings in ONE query
-        fetch_start = time_mod.time()
-        all_existing = await conn.fetch(
-            f"""
-            SELECT id, embedding
-            FROM {fq_table("memory_units")}
-            WHERE bank_id = $1
-              AND embedding IS NOT NULL
-              AND id::text != ALL($2)
-            """,
-            bank_id,
-            unit_ids,
-        )
-        _log(
-            log_buffer,
-            f"      [8.1] Fetch {len(all_existing)} existing embeddings (1 query): {time_mod.time() - fetch_start:.3f}s",
-        )
-
-        # Convert to numpy for vectorized similarity computation
-        compute_start = time_mod.time()
+        # Use pgvector ANN search (HNSW index) for each new unit instead of fetching
+        # all existing embeddings into Python. At large scale (100K+ units) the old
+        # approach would transfer 100K × 384 floats (~150 MB) per retain call; the
+        # ANN query completes in <5 ms and transfers only top_k rows.
+        ann_start = time_mod.time()
         all_links = []
 
-        if all_existing:
-            # Convert existing embeddings to numpy array
-            existing_ids = [str(row["id"]) for row in all_existing]
-            # Stack embeddings as 2D array: (num_embeddings, embedding_dim)
-            embedding_arrays = []
-            for row in all_existing:
-                raw_emb = row["embedding"]
-                # Handle different pgvector formats
-                if isinstance(raw_emb, str):
-                    # Parse string format: "[1.0, 2.0, ...]"
-                    import json
+        # Build UUID exclude list once for all ANN queries
+        import uuid as uuid_mod
 
-                    emb = np.array(json.loads(raw_emb), dtype=np.float32)
-                elif isinstance(raw_emb, (list, tuple)):
-                    emb = np.array(raw_emb, dtype=np.float32)
-                else:
-                    # Try direct conversion (works for numpy arrays, pgvector objects, etc.)
-                    emb = np.array(raw_emb, dtype=np.float32)
+        exclude_uuids = [uuid_mod.UUID(uid) if isinstance(uid, str) else uid for uid in unit_ids]
 
-                # Ensure it's 1D
-                if emb.ndim != 1:
-                    raise ValueError(f"Expected 1D embedding, got shape {emb.shape}")
-                embedding_arrays.append(emb)
+        for unit_id, new_embedding in zip(unit_ids, embeddings):
+            emb_str = str(list(new_embedding) if not isinstance(new_embedding, list) else new_embedding)
+            rows = await conn.fetch(
+                f"""
+                SELECT id::text,
+                       1 - (embedding <=> $1::vector) AS similarity
+                FROM {fq_table("memory_units")}
+                WHERE bank_id = $2
+                  AND embedding IS NOT NULL
+                  AND id != ALL($3::uuid[])
+                ORDER BY embedding <=> $1::vector
+                LIMIT $4
+                """,
+                emb_str,
+                bank_id,
+                exclude_uuids,
+                top_k,
+            )
+            for row in rows:
+                sim = float(min(1.0, max(0.0, row["similarity"])))
+                if sim >= threshold:
+                    all_links.append((unit_id, str(row["id"]), "semantic", sim, None))
 
-            if not embedding_arrays:
-                existing_embeddings = np.array([])
-            elif len(embedding_arrays) == 1:
-                # Single embedding: reshape to (1, dim)
-                existing_embeddings = embedding_arrays[0].reshape(1, -1)
-            else:
-                # Multiple embeddings: vstack
-                existing_embeddings = np.vstack(embedding_arrays)
-
-            # For each new unit, compute similarities with ALL existing units
-            for unit_id, new_embedding in zip(unit_ids, embeddings):
-                new_emb_array = np.array(new_embedding)
-
-                # Compute cosine similarities (dot product for normalized vectors)
-                similarities = np.dot(existing_embeddings, new_emb_array)
-
-                # Find top-k above threshold
-                # Get indices of similarities above threshold
-                above_threshold = np.where(similarities >= threshold)[0]
-
-                if len(above_threshold) > 0:
-                    # Sort by similarity (descending) and take top-k
-                    sorted_indices = above_threshold[np.argsort(-similarities[above_threshold])][:top_k]
-
-                    for idx in sorted_indices:
-                        similar_id = existing_ids[idx]
-                        # Clamp to [0, 1] to handle floating point precision issues
-                        similarity = float(min(1.0, max(0.0, similarities[idx])))
-                        all_links.append((unit_id, similar_id, "semantic", similarity, None))
+        _log(
+            log_buffer,
+            f"      [8.1] ANN search for {len(unit_ids)} new units → {len(all_links)} candidate links: {time_mod.time() - ann_start:.3f}s",
+        )
 
         # Also compute similarities WITHIN the new batch (new units to each other)
         # Apply the same top_k limit per unit as we do for existing units
@@ -659,7 +622,7 @@ async def create_semantic_links_batch(
 
         _log(
             log_buffer,
-            f"      [8.2] Compute similarities & generate {len(all_links)} semantic links: {time_mod.time() - compute_start:.3f}s",
+            f"      [8.2] Within-batch similarities added {len(all_links)} total semantic links",
         )
 
         if all_links:
@@ -667,14 +630,13 @@ async def create_semantic_links_batch(
             # Batch inserts to avoid timeout on large batches
             BATCH_SIZE = 1000
             for batch_start in range(0, len(all_links), BATCH_SIZE):
-                batch = all_links[batch_start : batch_start + BATCH_SIZE]
                 await conn.executemany(
                     f"""
                     INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
                     VALUES ($1, $2, $3, $4, $5)
                     ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
                     """,
-                    batch,
+                    all_links[batch_start : batch_start + BATCH_SIZE],
                 )
             _log(
                 log_buffer, f"      [8.3] Insert {len(all_links)} semantic links: {time_mod.time() - insert_start:.3f}s"
@@ -690,18 +652,18 @@ async def create_semantic_links_batch(
         raise
 
 
-async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: int = 50000):
+async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: int = 5000):
     """
-    Insert all entity links using COPY to temp table + INSERT for maximum speed.
+    Insert all entity links using COPY to temp table + chunked INSERT for reliability.
 
-    Uses PostgreSQL COPY (via copy_records_to_table) for bulk loading,
-    then INSERT ... ON CONFLICT from temp table. This is the fastest
-    method for bulk inserts with conflict handling.
+    Uses PostgreSQL COPY (via copy_records_to_table) for bulk loading into a
+    temp table, then INSERT ... ON CONFLICT in chunks of chunk_size. Chunking
+    prevents single-query timeouts on very large tables (100M+ rows).
 
     Args:
         conn: Database connection
         links: List of EntityLink objects
-        chunk_size: Number of rows per batch (default 50000)
+        chunk_size: Number of rows per INSERT chunk (default 5000)
     """
     if not links:
         return
@@ -710,10 +672,11 @@ async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: i
 
     total_start = time_mod.time()
 
-    # Create temp table for bulk loading
+    # Create temp table with serial for stable chunked access
     create_start = time_mod.time()
     await conn.execute("""
         CREATE TEMP TABLE IF NOT EXISTS _temp_entity_links (
+            _row_num SERIAL,
             from_unit_id uuid,
             to_unit_id uuid,
             link_type text,
@@ -730,9 +693,7 @@ async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: i
 
     # Convert EntityLink objects to tuples for COPY
     convert_start = time_mod.time()
-    records = []
-    for link in links:
-        records.append((link.from_unit_id, link.to_unit_id, link.link_type, link.weight, link.entity_id))
+    records = [(link.from_unit_id, link.to_unit_id, link.link_type, link.weight, link.entity_id) for link in links]
     logger.debug(f"      [9.3] Convert {len(records)} records: {time_mod.time() - convert_start:.3f}s")
 
     # Bulk load using COPY (fastest method)
@@ -744,15 +705,25 @@ async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: i
     )
     logger.debug(f"      [9.4] COPY {len(records)} records to temp table: {time_mod.time() - copy_start:.3f}s")
 
-    # Insert from temp table with ON CONFLICT (single query for all rows)
+    # Insert from temp table in chunks to avoid single-query timeouts on large tables
     insert_start = time_mod.time()
-    await conn.execute(f"""
-        INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
-        SELECT from_unit_id, to_unit_id, link_type, weight, entity_id
-        FROM _temp_entity_links
-        ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
-    """)
-    logger.debug(f"      [9.5] INSERT from temp table: {time_mod.time() - insert_start:.3f}s")
+    total_rows = len(records)
+    chunks = 0
+    for chunk_start in range(0, total_rows, chunk_size):
+        chunk_end = chunk_start + chunk_size
+        await conn.execute(
+            f"""
+            INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
+            SELECT from_unit_id, to_unit_id, link_type, weight, entity_id
+            FROM _temp_entity_links
+            WHERE _row_num > $1 AND _row_num <= $2
+            ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
+            """,
+            chunk_start,
+            chunk_end,
+        )
+        chunks += 1
+    logger.debug(f"      [9.5] INSERT {total_rows} rows in {chunks} chunks: {time_mod.time() - insert_start:.3f}s")
     logger.debug(f"      [9.TOTAL] Entity links batch insert: {time_mod.time() - total_start:.3f}s")
 
 

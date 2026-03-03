@@ -357,6 +357,7 @@ class MemoryEngine(MemoryEngineInterface):
         self._db_command_timeout = db_command_timeout if db_command_timeout is not None else config.db_command_timeout
         self._db_acquire_timeout = db_acquire_timeout if db_acquire_timeout is not None else config.db_acquire_timeout
         self._run_migrations = run_migrations
+        self._retain_entity_lookup = config.retain_entity_lookup
 
         # Initialize entity resolver (will be created in initialize())
         self.entity_resolver = None
@@ -1340,8 +1341,11 @@ class MemoryEngine(MemoryEngineInterface):
             timeout=self._db_acquire_timeout,  # Connection acquisition timeout (seconds)
         )
 
-        # Initialize entity resolver with pool
-        self.entity_resolver = EntityResolver(self._pool)
+        # Initialize entity resolver with pool and configured lookup strategy
+        self.entity_resolver = EntityResolver(
+            self._pool,
+            entity_lookup=self._retain_entity_lookup,
+        )
 
         # Initialize config resolver for hierarchical configuration
         from ..config_resolver import ConfigResolver
@@ -1484,110 +1488,6 @@ class MemoryEngine(MemoryEngineInterface):
         # For now, use "Month Year" format
         # Could check if day is significant (not 1st or 15th) and include it
         return f"{month_name} {year}"
-
-    async def _find_duplicate_facts_batch(
-        self,
-        conn,
-        bank_id: str,
-        texts: list[str],
-        embeddings: list[list[float]],
-        event_date: datetime,
-        time_window_hours: int = 24,
-        similarity_threshold: float = 0.95,
-    ) -> list[bool]:
-        """
-        Check which facts are duplicates using semantic similarity + temporal window.
-
-        For each new fact, checks if a semantically similar fact already exists
-        within the time window. Uses pgvector cosine similarity for efficiency.
-
-        Args:
-            conn: Database connection
-            bank_id: bank IDentifier
-            texts: List of fact texts to check
-            embeddings: Corresponding embeddings
-            event_date: Event date for temporal filtering
-            time_window_hours: Hours before/after event_date to search (default: 24)
-            similarity_threshold: Minimum cosine similarity to consider duplicate (default: 0.95)
-
-        Returns:
-            List of booleans - True if fact is a duplicate (should skip), False if new
-        """
-        if not texts:
-            return []
-
-        # Handle edge cases where event_date is at datetime boundaries
-        try:
-            time_lower = event_date - timedelta(hours=time_window_hours)
-        except OverflowError:
-            time_lower = datetime.min
-        try:
-            time_upper = event_date + timedelta(hours=time_window_hours)
-        except OverflowError:
-            time_upper = datetime.max
-
-        # Fetch ALL existing facts in time window ONCE (much faster than N queries)
-        import time as time_mod
-
-        fetch_start = time_mod.time()
-        existing_facts = await conn.fetch(
-            f"""
-            SELECT id, text, embedding
-            FROM {fq_table("memory_units")}
-            WHERE bank_id = $1
-              AND event_date BETWEEN $2 AND $3
-            """,
-            bank_id,
-            time_lower,
-            time_upper,
-        )
-
-        # If no existing facts, nothing is duplicate
-        if not existing_facts:
-            return [False] * len(texts)
-
-        # Compute similarities in Python (vectorized with numpy)
-        is_duplicate = []
-
-        # Convert existing embeddings to numpy for faster computation
-        embedding_arrays = []
-        for row in existing_facts:
-            raw_emb = row["embedding"]
-            # Handle different pgvector formats
-            if isinstance(raw_emb, str):
-                # Parse string format: "[1.0, 2.0, ...]"
-                import json
-
-                emb = np.array(json.loads(raw_emb), dtype=np.float32)
-            elif isinstance(raw_emb, (list, tuple)):
-                emb = np.array(raw_emb, dtype=np.float32)
-            else:
-                # Try direct conversion
-                emb = np.array(raw_emb, dtype=np.float32)
-            embedding_arrays.append(emb)
-
-        if not embedding_arrays:
-            existing_embeddings = np.array([])
-        elif len(embedding_arrays) == 1:
-            # Single embedding: reshape to (1, dim)
-            existing_embeddings = embedding_arrays[0].reshape(1, -1)
-        else:
-            # Multiple embeddings: vstack
-            existing_embeddings = np.vstack(embedding_arrays)
-
-        comp_start = time_mod.time()
-        for embedding in embeddings:
-            # Compute cosine similarity with all existing facts
-            emb_array = np.array(embedding)
-            # Cosine similarity = 1 - cosine distance
-            # For normalized vectors: cosine_sim = dot product
-            similarities = np.dot(existing_embeddings, emb_array)
-
-            # Check if any existing fact is too similar
-            max_similarity = np.max(similarities) if len(similarities) > 0 else 0
-            is_duplicate.append(max_similarity > similarity_threshold)
-
-        return is_duplicate
 
     def retain(
         self,
@@ -1939,7 +1839,6 @@ class MemoryEngine(MemoryEngineInterface):
                     llm_config=self._retain_llm_config,
                     entity_resolver=self.entity_resolver,
                     format_date_fn=self._format_readable_date,
-                    duplicate_checker_fn=self._find_duplicate_facts_batch,
                     bank_id=bank_id,
                     contents_dicts=contents,
                     document_id=document_id,
@@ -2575,6 +2474,11 @@ class MemoryEngine(MemoryEngineInterface):
                         "temporal_count": len(temporal_results) if temporal_results else 0,
                     },
                 )
+                # Also expose each retrieval method as its own phase so
+                # benchmarks can pinpoint which sub-query drives latency.
+                for _method, _dur in aggregated_timings.items():
+                    if _dur > 0:
+                        tracer.add_phase_metric(f"retrieval_{_method}", _dur)
 
             # Step 3: Merge with RRF
             step_start = time.time()
@@ -5117,31 +5021,8 @@ class MemoryEngine(MemoryEngineInterface):
                 bank_id,
             )
 
-            # Get link counts by link_type
-            link_stats = await conn.fetch(
-                f"""
-                SELECT ml.link_type, COUNT(*) as count
-                FROM {fq_table("memory_links")} ml
-                JOIN {fq_table("memory_units")} mu ON ml.from_unit_id = mu.id
-                WHERE mu.bank_id = $1
-                GROUP BY ml.link_type
-                """,
-                bank_id,
-            )
-
-            # Get link counts by fact_type (from nodes)
-            link_fact_type_stats = await conn.fetch(
-                f"""
-                SELECT mu.fact_type, COUNT(*) as count
-                FROM {fq_table("memory_links")} ml
-                JOIN {fq_table("memory_units")} mu ON ml.from_unit_id = mu.id
-                WHERE mu.bank_id = $1
-                GROUP BY mu.fact_type
-                """,
-                bank_id,
-            )
-
-            # Get link counts by fact_type AND link_type
+            # Single query for all link stats — avoids triple join on memory_links (can be 21M+ rows).
+            # link_counts and link_counts_by_fact_type are derived in Python from the breakdown.
             link_breakdown_stats = await conn.fetch(
                 f"""
                 SELECT mu.fact_type, ml.link_type, COUNT(*) as count
@@ -5153,7 +5034,14 @@ class MemoryEngine(MemoryEngineInterface):
                 bank_id,
             )
 
-            # Get pending and failed operations counts
+            link_counts: dict[str, int] = {}
+            link_counts_by_fact_type: dict[str, int] = {}
+            for row in link_breakdown_stats:
+                link_counts[row["link_type"]] = link_counts.get(row["link_type"], 0) + row["count"]
+                link_counts_by_fact_type[row["fact_type"]] = (
+                    link_counts_by_fact_type.get(row["fact_type"], 0) + row["count"]
+                )
+
             ops_stats = await conn.fetch(
                 f"""
                 SELECT status, COUNT(*) as count
@@ -5163,17 +5051,39 @@ class MemoryEngine(MemoryEngineInterface):
                 """,
                 bank_id,
             )
+            doc_count_row = await conn.fetchrow(
+                f"SELECT COUNT(*) as count FROM {fq_table('documents')} WHERE bank_id = $1",
+                bank_id,
+            )
+            consolidation_row = await conn.fetchrow(
+                f"""
+                SELECT
+                    MAX(consolidated_at) as last_consolidated_at,
+                    COUNT(*) FILTER (WHERE consolidated_at IS NULL AND fact_type IN ('experience', 'world')) as pending
+                FROM {fq_table("memory_units")}
+                WHERE bank_id = $1
+                """,
+                bank_id,
+            )
+
+            node_counts = {row["fact_type"]: row["count"] for row in node_stats}
+            ops_by_status = {row["status"]: row["count"] for row in ops_stats}
+            last_consolidated_at = consolidation_row["last_consolidated_at"] if consolidation_row else None
 
             return {
                 "bank_id": bank_id,
-                "node_counts": {row["fact_type"]: row["count"] for row in node_stats},
-                "link_counts": {row["link_type"]: row["count"] for row in link_stats},
-                "link_counts_by_fact_type": {row["fact_type"]: row["count"] for row in link_fact_type_stats},
+                "node_counts": node_counts,
+                "link_counts": link_counts,
+                "link_counts_by_fact_type": link_counts_by_fact_type,
                 "link_breakdown": [
                     {"fact_type": row["fact_type"], "link_type": row["link_type"], "count": row["count"]}
                     for row in link_breakdown_stats
                 ],
-                "operations": {row["status"]: row["count"] for row in ops_stats},
+                "operations": ops_by_status,
+                "total_documents": doc_count_row["count"] if doc_count_row else 0,
+                "last_consolidated_at": last_consolidated_at.isoformat() if last_consolidated_at else None,
+                "pending_consolidation": consolidation_row["pending"] if consolidation_row else 0,
+                "total_observations": node_counts.get("observation", 0),
             }
 
     async def get_entity(

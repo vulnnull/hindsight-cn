@@ -297,13 +297,20 @@ async def retrieve_temporal_combined(
     if tags:
         params.append(tags)
 
-    # Batch query: Get entry points for ALL fact types at once with window function
+    # Two-phase entry point query:
+    # Phase 1 (date_ranked): rank by date only — no embedding computation — for all units in
+    #   the temporal window. This lets the planner use date indexes for filtering.
+    # Phase 2 (sim_ranked): join back to memory_units for only the top-50-per-type candidates
+    #   and compute embedding similarity for that small set (≤ 50 × len(fact_types) rows).
+    # This avoids computing embedding distances for potentially thousands of date-range rows.
     entry_points = await conn.fetch(
         f"""
-        WITH ranked_entries AS (
-            SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags,
-                   1 - (embedding <=> $1::vector) AS similarity,
-                   ROW_NUMBER() OVER (PARTITION BY fact_type ORDER BY COALESCE(occurred_start, mentioned_at, occurred_end) DESC, embedding <=> $1::vector) AS rn
+        WITH date_ranked AS MATERIALIZED (
+            SELECT id, fact_type,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY fact_type
+                       ORDER BY COALESCE(occurred_start, mentioned_at, occurred_end) DESC NULLS LAST
+                   ) AS rn
             FROM {fq_table("memory_units")}
             WHERE bank_id = $2
               AND fact_type = ANY($3)
@@ -318,12 +325,20 @@ async def retrieve_temporal_combined(
                   OR
                   (occurred_end IS NOT NULL AND occurred_end BETWEEN $4 AND $5)
               )
-              AND (1 - (embedding <=> $1::vector)) >= $6
               {tags_clause}
+        ),
+        sim_ranked AS (
+            SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
+                   1 - (mu.embedding <=> $1::vector) AS similarity,
+                   ROW_NUMBER() OVER (PARTITION BY mu.fact_type ORDER BY mu.embedding <=> $1::vector) AS sim_rn
+            FROM date_ranked dr
+            JOIN {fq_table("memory_units")} mu ON mu.id = dr.id
+            WHERE dr.rn <= 50
+              AND (1 - (mu.embedding <=> $1::vector)) >= $6
         )
         SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags, similarity
-        FROM ranked_entries
-        WHERE rn <= 10
+        FROM sim_ranked
+        WHERE sim_rn <= 10
         """,
         *params,
     )
@@ -387,34 +402,52 @@ async def retrieve_temporal_combined(
         frontier = list(node_scores.keys())
         budget_remaining = budget - len(ft_entry_points)
         batch_size = 20
+        # Per-source neighbor limit: lets the planner use the composite index
+        # (from_unit_id, link_type, weight DESC) with early termination, avoiding
+        # a full scan of all links from all source nodes before sorting.
+        per_source_limit = 10
+        # Safety cap on BFS iterations to prevent runaway spreading in dense graphs.
+        max_iterations = 5
+        iteration = 0
 
-        # Build tags clause for spreading (use param 6 since 1-5 are used)
-        spreading_tags_clause = build_tags_where_clause_simple(tags, 6, table_alias="mu.", match=tags_match)
+        # Build tags clause for spreading (use param 7 since 1-6 are used)
+        spreading_tags_clause = build_tags_where_clause_simple(tags, 7, table_alias="mu.", match=tags_match)
 
-        while frontier and budget_remaining > 0:
+        while frontier and budget_remaining > 0 and iteration < max_iterations:
+            iteration += 1
             batch_ids = frontier[:batch_size]
             frontier = frontier[batch_size:]
 
-            spreading_params = [query_emb_str, batch_ids, ft, semantic_threshold, batch_size * 10]
+            # $1=query_emb, $2=batch_ids, $3=fact_type, $4=threshold, $5=per_source_limit, $6=bank_id, $7=tags
+            spreading_params = [query_emb_str, batch_ids, ft, semantic_threshold, per_source_limit, bank_id]
             if tags:
                 spreading_params.append(tags)
 
+            # LATERAL join: for each source node, fetch top-K neighbors by weight using
+            # the existing idx_memory_links_from_type_weight index with early-exit semantics.
+            # This avoids scanning all temporal links from all source nodes before sorting.
+            # bank_id on memory_units lets the planner use idx_memory_units_bank_fact_type.
             neighbors = await conn.fetch(
                 f"""
-                SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
-                       ml.weight, ml.link_type, ml.from_unit_id,
+                SELECT src.from_unit_id, mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
+                       l.weight, l.link_type,
                        1 - (mu.embedding <=> $1::vector) AS similarity
-                FROM {fq_table("memory_links")} ml
-                JOIN {fq_table("memory_units")} mu ON ml.to_unit_id = mu.id
-                WHERE ml.from_unit_id = ANY($2::uuid[])
-                  AND ml.link_type IN ('temporal', 'causes', 'caused_by', 'enables', 'prevents')
-                  AND ml.weight >= 0.1
+                FROM unnest($2::uuid[]) AS src(from_unit_id)
+                CROSS JOIN LATERAL (
+                    SELECT ml.to_unit_id, ml.weight, ml.link_type
+                    FROM {fq_table("memory_links")} ml
+                    WHERE ml.from_unit_id = src.from_unit_id
+                      AND ml.link_type IN ('temporal', 'causes', 'caused_by', 'enables', 'prevents')
+                      AND ml.weight >= 0.1
+                    ORDER BY ml.weight DESC
+                    LIMIT $5
+                ) l
+                JOIN {fq_table("memory_units")} mu ON mu.id = l.to_unit_id
+                WHERE mu.bank_id = $6
                   AND mu.fact_type = $3
                   AND mu.embedding IS NOT NULL
                   AND (1 - (mu.embedding <=> $1::vector)) >= $4
                   {spreading_tags_clause}
-                ORDER BY ml.weight DESC
-                LIMIT $5
                 """,
                 *spreading_params,
             )

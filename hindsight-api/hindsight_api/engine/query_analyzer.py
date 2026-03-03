@@ -92,11 +92,17 @@ class DateparserQueryAnalyzer(QueryAnalyzer):
         self._search_dates = None
 
     def load(self) -> None:
-        """Load dateparser (lazy import)."""
+        """Load dateparser and warm up internal data structures.
+
+        Triggers the real initialization cost (regex tables, timezone data) at
+        load time so the first actual recall doesn't pay the cold-start penalty.
+        """
         if self._search_dates is None:
             from dateparser.search import search_dates
 
             self._search_dates = search_dates
+            # Warm up: fire a dummy call to trigger lazy-loaded internal tables.
+            self._search_dates("today")
 
     def analyze(self, query: str, reference_date: datetime | None = None) -> QueryAnalysis:
         """
