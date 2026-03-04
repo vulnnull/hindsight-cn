@@ -307,6 +307,10 @@ def main():
             otel_exporter_otlp_headers=config.otel_exporter_otlp_headers,
             otel_service_name=config.otel_service_name,
             otel_deployment_environment=config.otel_deployment_environment,
+            webhook_url=config.webhook_url,
+            webhook_secret=config.webhook_secret,
+            webhook_event_types=config.webhook_event_types,
+            webhook_delivery_poll_interval_seconds=config.webhook_delivery_poll_interval_seconds,
         )
     config.configure_logging()
     if not args.daemon:

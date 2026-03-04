@@ -180,11 +180,12 @@ async def run_consolidation_job(
     perf.log(f"[1] Found {total_count} pending memories to consolidate")
 
     # Process each memory with individual commits for crash recovery
-    stats = {
+    stats: dict[str, int] = {
         "memories_processed": 0,
         "observations_created": 0,
         "observations_updated": 0,
         "observations_merged": 0,
+        "observations_deleted": 0,
         "actions_executed": 0,
         "skipped": 0,
     }
@@ -273,11 +274,12 @@ async def run_consolidation_job(
                     # explicit list[list[str]]
                     obs_tags_list = _obs_parsed
 
+                batch_deleted: int = 0
                 if obs_tags_list:
                     # Multi-pass: run one observation consolidation pass per tag set
                     results = []
                     for obs_tags in obs_tags_list:
-                        pass_results = await _process_memory_batch(
+                        pass_results, pass_deleted = await _process_memory_batch(
                             conn=conn,
                             memory_engine=memory_engine,
                             llm_config=llm_config,
@@ -288,6 +290,7 @@ async def run_consolidation_job(
                             config=config,
                             obs_tags_override=obs_tags,
                         )
+                        batch_deleted += pass_deleted
                         # Merge results: prefer non-skipped actions
                         if not results:
                             results = pass_results
@@ -315,7 +318,7 @@ async def run_consolidation_job(
                                     }
                 else:
                     # Normal single pass using the memory's own tags
-                    results = await _process_memory_batch(
+                    results, batch_deleted = await _process_memory_batch(
                         conn=conn,
                         memory_engine=memory_engine,
                         llm_config=llm_config,
@@ -325,6 +328,7 @@ async def run_consolidation_job(
                         perf=perf,
                         config=config,
                     )
+                stats["observations_deleted"] += batch_deleted
 
                 await conn.executemany(
                     f"UPDATE {fq_table('memory_units')} SET consolidated_at = NOW() WHERE id = $1",
@@ -521,7 +525,7 @@ async def _process_memory_batch(
     perf: ConsolidationPerfLog | None = None,
     config: Any = None,
     obs_tags_override: list[str] | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], int]:
     """
     Process a batch of memories in a single LLM call.
 
@@ -656,6 +660,7 @@ async def _process_memory_batch(
         for m in source_mems:
             per_memory_updated.add(str(m["id"]))
 
+    deleted_count = 0
     for delete in llm_result.deletes:
         # Security: the observation must be present in the unioned recall
         if not any(str(obs.id) == delete.observation_id for obs in union_observations):
@@ -664,6 +669,7 @@ async def _process_memory_batch(
             )
             continue
         await _execute_delete_action(conn=conn, bank_id=bank_id, observation_id=delete.observation_id)
+        deleted_count += 1
 
     # Build per-memory result dicts for the stats tracker in the outer loop
     results: list[dict[str, Any]] = []
@@ -680,7 +686,7 @@ async def _process_memory_batch(
         else:
             results.append({"action": "skipped", "reason": "no_durable_knowledge"})
 
-    return results
+    return results, deleted_count
 
 
 def _min_date(dates: "Any") -> "datetime | None":

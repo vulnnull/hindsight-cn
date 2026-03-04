@@ -654,7 +654,6 @@ async def cmd_generate(bank_id: str, scale: str, workers: int = 16) -> None:
         poll_interval_ms=200,
         max_slots=workers,
         consolidation_max_slots=0,
-        max_retries=20,
     )
     poller_task = asyncio.create_task(poller.run())
     console.print("  Worker     : started\n")
