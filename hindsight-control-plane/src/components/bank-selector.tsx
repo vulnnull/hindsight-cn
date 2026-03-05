@@ -367,7 +367,13 @@ function BankSelectorInner() {
         <div className="h-8 w-px bg-border" />
 
         {/* Memory Bank Selector */}
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover
+          open={open}
+          onOpenChange={(isOpen) => {
+            setOpen(isOpen);
+            if (isOpen) loadBanks();
+          }}
+        >
           <PopoverTrigger asChild>
             <Button
               variant="outline"
