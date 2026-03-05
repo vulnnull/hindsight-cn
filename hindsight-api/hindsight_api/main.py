@@ -389,6 +389,7 @@ def main():
         "ws": "wsproto",  # Use wsproto instead of websockets to avoid deprecation warnings
         "loop": loop_impl,  # Explicitly set event loop implementation
         "timeout_keep_alive": 30,  # Exceed aiohttp's 15s client timeout so the client always closes first
+        "timeout_graceful_shutdown": 5,  # Cap graceful shutdown at 5s; also enables force-kill on second Ctrl+C
     }
 
     # Add optional parameters if provided
