@@ -8,6 +8,28 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.4.16](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.16)
+
+**Features**
+
+- Added Webhooks with `consolidation.completed` and `retain.completed` events. ([`abbf874d`](https://github.com/vectorize-io/hindsight/commit/abbf874d))
+
+**Improvements**
+
+- Improved OpenClaw recall/retention controls. ([`d425e93c`](https://github.com/vectorize-io/hindsight/commit/d425e93c))
+- Improved search/reranking quality by switching combined scoring to multiplicative boosts. ([`aa8e5475`](https://github.com/vectorize-io/hindsight/commit/aa8e5475))
+- Improved performance of observation recall by 40x on large banks. ([`ad2cf72a`](https://github.com/vectorize-io/hindsight/commit/ad2cf72a))
+- Improved server shutdown behavior by capping graceful shutdown time and allowing a forced kill on a second Ctrl+C. ([`4c058b4b`](https://github.com/vectorize-io/hindsight/commit/4c058b4b))
+
+**Bug Fixes**
+
+- Fixed an async deadlock risk by running database schema migrations in a background thread during startup. ([`e0a2ac63`](https://github.com/vectorize-io/hindsight/commit/e0a2ac63))
+- Fixed webhook delivery/outbox processing so transactions don’t silently roll back due to using the wrong database schema name. ([`75b95106`](https://github.com/vectorize-io/hindsight/commit/75b95106))
+- Fixed observation results to correctly resolve and return related chunks using source_memory_ids. ([`cb6d1c46`](https://github.com/vectorize-io/hindsight/commit/cb6d1c46))
+- Fixed MCP bank-level tool filtering compatibility with FastMCP 3.x. ([`f17406fd`](https://github.com/vectorize-io/hindsight/commit/f17406fd))
+- Fixed crashes when an LLM returns invalid JSON across all retries (now handled cleanly instead of raising a TypeError). ([`66423b85`](https://github.com/vectorize-io/hindsight/commit/66423b85))
+- Fixed observations without source dates to preserve missing (None) temporal fields instead of incorrectly populating them. ([`891c33b1`](https://github.com/vectorize-io/hindsight/commit/891c33b1))
+
 ## [0.4.15](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.15)
 
 **Features**
