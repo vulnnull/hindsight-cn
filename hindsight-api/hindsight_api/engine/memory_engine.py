@@ -187,7 +187,7 @@ from .response_models import RecallResult as RecallResultModel
 from .retain import bank_utils, embedding_utils
 from .retain.types import RetainContentDict
 from .search import think_utils
-from .search.reranking import CrossEncoderReranker
+from .search.reranking import CrossEncoderReranker, apply_combined_scoring
 from .search.tags import TagsMatch, build_tags_where_clause
 from .task_backend import BrokerTaskBackend, SyncTaskBackend, TaskBackend
 
@@ -2858,57 +2858,12 @@ class MemoryEngine(MemoryEngineInterface):
                     rerank_span.set_attribute("hindsight.pre_filtered_count", pre_filtered_count)
                 rerank_span.end()
 
-            # Step 4.5: Combine cross-encoder score with retrieval signals
-            # This preserves retrieval work (RRF, temporal, recency) instead of pure cross-encoder ranking
+            # Step 4.5: Combine cross-encoder score with retrieval signals via multiplicative boosts.
+            # See apply_combined_scoring for the full rationale and formula.
             if scored_results:
-                # Normalize RRF scores to [0, 1] range using min-max normalization
-                rrf_scores = [sr.candidate.rrf_score for sr in scored_results]
-                max_rrf = max(rrf_scores) if rrf_scores else 0.0
-                min_rrf = min(rrf_scores) if rrf_scores else 0.0
-                rrf_range = max_rrf - min_rrf  # Don't force to 1.0, let fallback handle it
-
-                # Calculate recency based on occurred_start (more recent = higher score)
-                now = utcnow()
-                for sr in scored_results:
-                    # Normalize RRF score (0-1 range, 0.5 if all same)
-                    if rrf_range > 0:
-                        sr.rrf_normalized = (sr.candidate.rrf_score - min_rrf) / rrf_range
-                    else:
-                        # All RRF scores are the same, use neutral value
-                        sr.rrf_normalized = 0.5
-
-                    # Calculate recency (decay over 365 days, minimum 0.1)
-                    sr.recency = 0.5  # default for missing dates
-                    if sr.retrieval.occurred_start:
-                        occurred = sr.retrieval.occurred_start
-                        if hasattr(occurred, "tzinfo") and occurred.tzinfo is None:
-                            occurred = occurred.replace(tzinfo=UTC)
-                        days_ago = (now - occurred).total_seconds() / 86400
-                        sr.recency = max(0.1, 1.0 - (days_ago / 365))  # Linear decay over 1 year
-
-                    # Get temporal proximity if available (already 0-1)
-                    sr.temporal = (
-                        sr.retrieval.temporal_proximity if sr.retrieval.temporal_proximity is not None else 0.5
-                    )
-
-                    # Weighted combination
-                    # Cross-encoder: 60% (semantic relevance)
-                    # RRF: 20% (retrieval consensus)
-                    # Temporal proximity: 10% (time relevance for temporal queries)
-                    # Recency: 10% (prefer recent facts)
-                    sr.combined_score = (
-                        0.6 * sr.cross_encoder_score_normalized
-                        + 0.2 * sr.rrf_normalized
-                        + 0.1 * sr.temporal
-                        + 0.1 * sr.recency
-                    )
-                    sr.weight = sr.combined_score  # Update weight for final ranking
-
-                # Re-sort by combined score
+                apply_combined_scoring(scored_results, now=utcnow())
                 scored_results.sort(key=lambda x: x.weight, reverse=True)
-                log_buffer.append(
-                    "  [4.6] Combined scoring: cross_encoder(0.6) + rrf(0.2) + temporal(0.1) + recency(0.1)"
-                )
+                log_buffer.append("  [4.6] Combined scoring: ce * recency_boost(0.2) * temporal_boost(0.2)")
 
             # Add reranked results to tracer AFTER combined scoring (so normalized values are included)
             if tracer:
