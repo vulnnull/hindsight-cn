@@ -67,6 +67,42 @@ class _BatchLLMResult:
     prompt_chars: int = 0
 
 
+@dataclass
+class _SourceAggregation:
+    """Fields inherited by an observation from its source memories."""
+
+    event_date: datetime | None
+    occurred_start: datetime | None
+    occurred_end: datetime | None
+    mentioned_at: datetime | None
+    tags: list[str]
+
+
+def _aggregate_source_fields(source_mems: list[dict[str, Any]], tags: list[str] | None = None) -> _SourceAggregation:
+    """Compute the observation fields inherited from a set of source memories.
+
+    Temporal aggregation rules:
+    - ``event_date``    — earliest across sources (min)
+    - ``occurred_start`` — earliest across sources (min)
+    - ``occurred_end``   — latest across sources (max)
+    - ``mentioned_at``   — latest across sources (max)
+
+    Fields remain ``None`` when no source memory carries that information, so
+    observations are never stamped with an artificial timestamp.
+
+    ``tags`` defaults to those of the first source memory when not explicitly
+    provided (all memories in a consolidation batch share the same tag set).
+    """
+    effective_tags = tags if tags is not None else (source_mems[0].get("tags") or [] if source_mems else [])
+    return _SourceAggregation(
+        event_date=_min_date(m.get("event_date") for m in source_mems),
+        occurred_start=_min_date(m.get("occurred_start") for m in source_mems),
+        occurred_end=_max_date(m.get("occurred_end") for m in source_mems),
+        mentioned_at=_max_date(m.get("mentioned_at") for m in source_mems),
+        tags=effective_tags,
+    )
+
+
 class ConsolidationPerfLog:
     """Performance logging for consolidation operations."""
 
@@ -616,17 +652,18 @@ async def _process_memory_batch(
         source_mems = [mem_by_id[fid] for fid in create.source_fact_ids if fid in mem_by_id]
         if not source_mems:
             continue
+        agg = _aggregate_source_fields(source_mems, tags=fact_tags)
         await _execute_create_action(
             conn=conn,
             memory_engine=memory_engine,
             bank_id=bank_id,
             source_memory_ids=[m["id"] for m in source_mems],
             text=create.text,
-            source_fact_tags=fact_tags,
-            event_date=_min_date(m.get("event_date") for m in source_mems),
-            occurred_start=_min_date(m.get("occurred_start") for m in source_mems),
-            occurred_end=_max_date(m.get("occurred_end") for m in source_mems),
-            mentioned_at=_max_date(m.get("mentioned_at") for m in source_mems),
+            source_fact_tags=agg.tags,
+            event_date=agg.event_date,
+            occurred_start=agg.occurred_start,
+            occurred_end=agg.occurred_end,
+            mentioned_at=agg.mentioned_at,
             perf=perf,
         )
         for m in source_mems:
@@ -643,6 +680,7 @@ async def _process_memory_batch(
                 f"not in any source fact's recall"
             )
             continue
+        agg = _aggregate_source_fields(source_mems, tags=fact_tags)
         await _execute_update_action(
             conn=conn,
             memory_engine=memory_engine,
@@ -651,10 +689,10 @@ async def _process_memory_batch(
             observation_id=update.observation_id,
             new_text=update.text,
             observations=union_observations,
-            source_fact_tags=fact_tags,
-            source_occurred_start=_min_date(m.get("occurred_start") for m in source_mems),
-            source_occurred_end=_max_date(m.get("occurred_end") for m in source_mems),
-            source_mentioned_at=_max_date(m.get("mentioned_at") for m in source_mems),
+            source_fact_tags=agg.tags,
+            source_occurred_start=agg.occurred_start,
+            source_occurred_end=agg.occurred_end,
+            source_mentioned_at=agg.mentioned_at,
             perf=perf,
         )
         for m in source_mems:
@@ -1035,8 +1073,8 @@ async def _create_observation_directly(
     # Create the observation as a memory_unit
     now = datetime.now(timezone.utc)
     obs_event_date = event_date or now
-    obs_occurred_start = occurred_start or now
-    obs_occurred_end = occurred_end or now
+    obs_occurred_start = occurred_start
+    obs_occurred_end = occurred_end
     obs_mentioned_at = mentioned_at or now
     obs_tags = tags or []
 
