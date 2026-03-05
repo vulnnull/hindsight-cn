@@ -375,7 +375,7 @@ function BankSelectorInner() {
               aria-expanded={open}
               className="w-[250px] justify-between font-bold border-2 border-primary hover:bg-accent"
             >
-              {currentBank || "Select a memory bank..."}
+              <span className="truncate">{currentBank || "Select a memory bank..."}</span>
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
