@@ -96,6 +96,8 @@ class DefaultExtensionContext(ExtensionContext):
 
     async def run_migration(self, schema: str) -> None:
         """Run migrations for a specific schema."""
+        import asyncio
+
         from hindsight_api.config import get_config
         from hindsight_api.migrations import (
             ensure_embedding_dimension,
@@ -111,10 +113,14 @@ class DefaultExtensionContext(ExtensionContext):
             if engine_url:
                 db_url = engine_url
 
-        run_migrations(db_url, schema=schema)
-
-        # Get config for vector extension setting
+        # Run synchronous migration functions in a thread so the asyncio event loop
+        # remains free. This is critical for single-machine deployments where the
+        # worker runs in-process: if run_migrations() blocks the event loop, any
+        # in-flight asyncpg transactions cannot flush their COMMIT, and
+        # CREATE INDEX CONCURRENTLY inside the migration waits for those transactions
+        # forever — a deadlock.
         config = get_config()
+        await asyncio.to_thread(run_migrations, db_url, schema=schema)
 
         # Ensure embedding column dimension matches the model's dimension
         # This is needed because migrations create columns with default dimension
@@ -123,15 +129,23 @@ class DefaultExtensionContext(ExtensionContext):
             if embeddings is not None:
                 dimension = getattr(embeddings, "dimension", None)
                 if dimension is not None:
-                    ensure_embedding_dimension(
-                        db_url, dimension, schema=schema, vector_extension=config.vector_extension
+                    await asyncio.to_thread(
+                        ensure_embedding_dimension,
+                        db_url,
+                        dimension,
+                        schema=schema,
+                        vector_extension=config.vector_extension,
                     )
 
         # Ensure vector indexes match the configured extension
-        ensure_vector_extension(db_url, vector_extension=config.vector_extension, schema=schema)
+        await asyncio.to_thread(
+            ensure_vector_extension, db_url, vector_extension=config.vector_extension, schema=schema
+        )
 
         # Ensure text search columns/indexes match the configured extension
-        ensure_text_search_extension(db_url, text_search_extension=config.text_search_extension, schema=schema)
+        await asyncio.to_thread(
+            ensure_text_search_extension, db_url, text_search_extension=config.text_search_extension, schema=schema
+        )
 
     def get_memory_engine(self) -> "MemoryEngineInterface":
         """Get the memory engine interface."""
