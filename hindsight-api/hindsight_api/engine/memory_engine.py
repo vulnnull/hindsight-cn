@@ -2891,15 +2891,53 @@ class MemoryEngine(MemoryEngineInterface):
             if include_chunks and top_scored:
                 from .response_models import ChunkInfo
 
-                # Collect chunk_ids in order of fact relevance (preserving order from top_scored)
-                # Use a list to maintain order, but track seen chunks to avoid duplicates
-                chunk_ids_ordered = []
-                seen_chunk_ids = set()
+                # Collect chunk_ids in order of fact relevance (preserving order from top_scored).
+                # Observations have no direct chunk_id — use a placeholder so their source
+                # chunks end up at the observation's rank position, not appended at the end.
+                # ordered_items: list of ('chunk', chunk_id) | ('obs', sr.id)
+                ordered_items: list[tuple[str, str]] = []
+                seen_chunk_ids: set[str] = set()
+                observation_ids_ordered: list[uuid.UUID] = []
                 for sr in top_scored:
                     chunk_id = sr.retrieval.chunk_id
                     if chunk_id and chunk_id not in seen_chunk_ids:
-                        chunk_ids_ordered.append(chunk_id)
+                        ordered_items.append(("chunk", chunk_id))
                         seen_chunk_ids.add(chunk_id)
+                    elif not chunk_id and sr.retrieval.fact_type == "observation":
+                        ordered_items.append(("obs", sr.id))
+                        observation_ids_ordered.append(uuid.UUID(sr.id))
+
+                # Resolve source chunk_ids for all observations in a single query,
+                # ordered by observation rank so per-observation results stay grouped correctly.
+                obs_chunk_ids: dict[str, list[str]] = {}
+                if observation_ids_ordered:
+                    async with acquire_with_retry(pool) as obs_conn:
+                        obs_source_rows = await obs_conn.fetch(
+                            f"""
+                            SELECT obs.id AS obs_id, mu.chunk_id
+                            FROM {fq_table("memory_units")} obs
+                            JOIN {fq_table("memory_units")} mu
+                              ON mu.id = ANY(obs.source_memory_ids)
+                            WHERE obs.id = ANY($1::uuid[])
+                              AND mu.chunk_id IS NOT NULL
+                            ORDER BY array_position($1::uuid[], obs.id)
+                            """,
+                            observation_ids_ordered,
+                        )
+                    for row in obs_source_rows:
+                        obs_id = str(row["obs_id"])
+                        cid = row["chunk_id"]
+                        if cid not in seen_chunk_ids:
+                            obs_chunk_ids.setdefault(obs_id, []).append(cid)
+                            seen_chunk_ids.add(cid)
+
+                # Flatten ordered_items into chunk_ids_ordered, expanding obs placeholders
+                chunk_ids_ordered = []
+                for item_type, item_id in ordered_items:
+                    if item_type == "chunk":
+                        chunk_ids_ordered.append(item_id)
+                    else:
+                        chunk_ids_ordered.extend(obs_chunk_ids.get(item_id, []))
 
                 if chunk_ids_ordered:
                     chunks_dict = {}
