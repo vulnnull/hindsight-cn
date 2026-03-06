@@ -2137,7 +2137,7 @@ def _register_routes(app: FastAPI):
     @app.get(
         "/v1/default/banks/{bank_id}/memories/{memory_id}",
         summary="Get memory unit",
-        description="Get a single memory unit by ID with all its metadata including entities and tags.",
+        description="Get a single memory unit by ID with all its metadata including entities and tags. Note: the 'history' field is deprecated and always returns an empty list - use GET /memories/{memory_id}/history instead.",
         operation_id="get_memory",
         tags=["Memory"],
     )
@@ -2165,6 +2165,39 @@ def _register_routes(app: FastAPI):
 
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             logger.error(f"Error in /v1/default/banks/{bank_id}/memories/{memory_id}: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get(
+        "/v1/default/banks/{bank_id}/memories/{memory_id}/history",
+        summary="Get observation history",
+        description="Get the full history of an observation, with each change's source facts resolved to their text.",
+        operation_id="get_observation_history",
+        tags=["Memory"],
+    )
+    async def api_get_observation_history(
+        bank_id: str,
+        memory_id: str,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """Get the history of a single observation by ID."""
+        try:
+            data = await app.state.memory.get_observation_history(
+                bank_id=bank_id,
+                memory_id=memory_id,
+                request_context=request_context,
+            )
+            if data is None:
+                raise HTTPException(status_code=404, detail=f"Memory unit '{memory_id}' not found")
+            return data
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Error in /v1/default/banks/{bank_id}/memories/{memory_id}/history: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post(

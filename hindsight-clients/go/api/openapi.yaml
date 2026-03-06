@@ -210,8 +210,9 @@ paths:
       - Memory
   /v1/default/banks/{bank_id}/memories/{memory_id}:
     get:
-      description: Get a single memory unit by ID with all its metadata including
-        entities and tags.
+      description: "Get a single memory unit by ID with all its metadata including\
+        \ entities and tags. Note: the 'history' field is deprecated and always returns\
+        \ an empty list - use GET /memories/{memory_id}/history instead."
       operationId: get_memory
       parameters:
       - explode: false
@@ -251,6 +252,51 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Get memory unit
+      tags:
+      - Memory
+  /v1/default/banks/{bank_id}/memories/{memory_id}/history:
+    get:
+      description: "Get the full history of an observation, with each change's source\
+        \ facts resolved to their text."
+      operationId: get_observation_history
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: memory_id
+        required: true
+        schema:
+          title: Memory Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Get observation history
       tags:
       - Memory
   /v1/default/banks/{bank_id}/memories/recall:

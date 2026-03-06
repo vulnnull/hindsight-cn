@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { TagList } from "@/components/ui/tag-list";
-import { Copy, Check, X, Loader2, Calendar } from "lucide-react";
+import { Copy, Check, X, Loader2, Calendar, History } from "lucide-react";
 import { DocumentChunkModal } from "./document-chunk-modal";
 import { MemoryDetailModal } from "./memory-detail-modal";
 import { client } from "@/lib/api";
@@ -29,6 +29,7 @@ export function MemoryDetailPanel({
   const [fullMemory, setFullMemory] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [sourceMemoryModalId, setSourceMemoryModalId] = useState<string | null>(null);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
 
   // Fetch full memory data when panel opens
   // For mental models, use getMentalModel to get source memories
@@ -296,6 +297,20 @@ export function MemoryDetailPanel({
                 </div>
               )}
 
+              {/* View History button (observations only) */}
+              {isObservation && (
+                <div className="border-t border-border pt-5">
+                  <Button
+                    variant="outline"
+                    className="w-full flex items-center gap-2"
+                    onClick={() => setHistoryModalOpen(true)}
+                  >
+                    <History className="h-4 w-4" />
+                    View History
+                  </Button>
+                </div>
+              )}
+
               {/* Memory ID */}
               {memoryId && (
                 <div>
@@ -333,6 +348,15 @@ export function MemoryDetailPanel({
           memoryId={sourceMemoryModalId}
           onClose={() => setSourceMemoryModalId(null)}
         />
+
+        {/* History Modal */}
+        {historyModalOpen && memoryId && bankId && (
+          <MemoryDetailModal
+            memoryId={memoryId}
+            onClose={() => setHistoryModalOpen(false)}
+            initialTab="history"
+          />
+        )}
       </>
     );
   }

@@ -83,6 +83,9 @@ import type {
   GetMentalModelData,
   GetMentalModelErrors,
   GetMentalModelResponses,
+  GetObservationHistoryData,
+  GetObservationHistoryErrors,
+  GetObservationHistoryResponses,
   GetOperationStatusData,
   GetOperationStatusErrors,
   GetOperationStatusResponses,
@@ -252,7 +255,7 @@ export const listMemories = <ThrowOnError extends boolean = false>(
 /**
  * Get memory unit
  *
- * Get a single memory unit by ID with all its metadata including entities and tags.
+ * Get a single memory unit by ID with all its metadata including entities and tags. Note: the 'history' field is deprecated and always returns an empty list - use GET /memories/{memory_id}/history instead.
  */
 export const getMemory = <ThrowOnError extends boolean = false>(
   options: Options<GetMemoryData, ThrowOnError>,
@@ -262,6 +265,23 @@ export const getMemory = <ThrowOnError extends boolean = false>(
     GetMemoryErrors,
     ThrowOnError
   >({ url: "/v1/default/banks/{bank_id}/memories/{memory_id}", ...options });
+
+/**
+ * Get observation history
+ *
+ * Get the full history of an observation, with each change's source facts resolved to their text.
+ */
+export const getObservationHistory = <ThrowOnError extends boolean = false>(
+  options: Options<GetObservationHistoryData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetObservationHistoryResponses,
+    GetObservationHistoryErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/memories/{memory_id}/history",
+    ...options,
+  });
 
 /**
  * Recall memory

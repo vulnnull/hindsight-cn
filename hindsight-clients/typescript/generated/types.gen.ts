@@ -2549,6 +2549,45 @@ export type GetMemoryResponses = {
   200: unknown;
 };
 
+export type GetObservationHistoryData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Memory Id
+     */
+    memory_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/memories/{memory_id}/history";
+};
+
+export type GetObservationHistoryErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetObservationHistoryError =
+  GetObservationHistoryErrors[keyof GetObservationHistoryErrors];
+
+export type GetObservationHistoryResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
+
 export type RecallMemoriesData = {
   body: RecallRequest;
   headers?: {

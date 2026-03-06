@@ -4345,7 +4345,11 @@ class MemoryEngine(MemoryEngineInterface):
                 "observation_scopes": row["observation_scopes"] if row["observation_scopes"] else None,
             }
 
-            # For observations, include source_memory_ids and fetch source_memories
+            # For observations, include source_memory_ids
+            # history is deprecated here - use GET /memories/{id}/history instead
+            if row["fact_type"] == "observation":
+                result["history"] = []
+
             if row["fact_type"] == "observation" and row["source_memory_ids"]:
                 source_ids = row["source_memory_ids"]
                 result["source_memory_ids"] = [str(sid) for sid in source_ids]
@@ -4373,6 +4377,95 @@ class MemoryEngine(MemoryEngineInterface):
                 ]
 
             return result
+
+    async def get_observation_history(
+        self,
+        bank_id: str,
+        memory_id: str,
+        request_context: "RequestContext",
+    ) -> list[dict] | None:
+        """
+        Get the history of an observation, with source facts resolved to their text.
+
+        Returns None if the memory is not found or is not an observation.
+        Returns a list of history entries (most recent first), each with source_facts resolved.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_observation_history", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+        pool = await self._get_pool()
+        async with acquire_with_retry(pool) as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT fact_type, history, source_memory_ids
+                FROM {fq_table("memory_units")}
+                WHERE id = $1 AND bank_id = $2
+                """,
+                uuid.UUID(memory_id),
+                bank_id,
+            )
+            if not row:
+                return None
+            if row["fact_type"] != "observation":
+                return []
+
+            raw_history = row["history"]
+            if isinstance(raw_history, str):
+                raw_history = json.loads(raw_history)
+            if not raw_history:
+                return []
+
+            # Collect all source memory IDs (current full set + all historical new ones)
+            current_source_ids: list[str] = [str(sid) for sid in (row["source_memory_ids"] or [])]
+            all_source_ids: set[uuid.UUID] = set(uuid.UUID(sid) for sid in current_source_ids)
+            for entry in raw_history:
+                for sid in entry.get("new_source_memory_ids", []):
+                    try:
+                        all_source_ids.add(uuid.UUID(sid))
+                    except (ValueError, AttributeError):
+                        pass
+
+            # Resolve all source memories in one query
+            source_map: dict[str, dict] = {}
+            if all_source_ids:
+                source_rows = await conn.fetch(
+                    f"""
+                    SELECT id, text, fact_type, context
+                    FROM {fq_table("memory_units")}
+                    WHERE id = ANY($1::uuid[])
+                    """,
+                    list(all_source_ids),
+                )
+                for r in source_rows:
+                    source_map[str(r["id"])] = {
+                        "id": str(r["id"]),
+                        "text": r["text"],
+                        "type": r["fact_type"],
+                        "context": r["context"] or None,
+                    }
+
+            # Reconstruct cumulative source IDs per change by working backwards from current state.
+            # Source IDs are only ever accumulated (never removed), so:
+            #   after_change_N = before_change_N + new_source_memory_ids_N
+            cumulative_ids: list[str] = list(current_source_ids)
+            enriched: list[dict] = []
+            for entry in reversed(raw_history):
+                new_ids_in_entry: set[str] = set(entry.get("new_source_memory_ids", []))
+                source_facts = []
+                for sid in cumulative_ids:
+                    fact = source_map.get(sid, {"id": sid, "text": None, "type": None, "context": None})
+                    source_facts.append({**fact, "is_new": sid in new_ids_in_entry})
+                enriched_entry = dict(entry)
+                enriched_entry["source_facts"] = source_facts
+                enriched.append(enriched_entry)
+                # Step back: remove the new IDs added by this change to get the prior state
+                cumulative_ids = [sid for sid in cumulative_ids if sid not in new_ids_in_entry]
+
+            enriched.reverse()
+            return enriched
 
     async def list_documents(
         self,

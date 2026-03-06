@@ -18,6 +18,10 @@ echo "✅ SDK built successfully"
 echo ""
 
 echo "🚀 Starting Control Plane (Next.js dev server)..."
+# Save caller-provided values before .env can overwrite them
+_CALLER_PORT="${PORT:-}"
+_CALLER_DATAPLANE_URL="${HINDSIGHT_CP_DATAPLANE_API_URL:-}"
+
 if [ -f "$ROOT_DIR/.env" ]; then
   echo "📄 Loading environment from $ROOT_DIR/.env"
   # Load env vars from root .env file
@@ -28,7 +32,9 @@ fi
 
 # Map prefixed env vars to Next.js standard vars
 export HOSTNAME="${HINDSIGHT_CP_HOSTNAME:-0.0.0.0}"
-export PORT="${HINDSIGHT_CP_PORT:-9999}"
+# Caller-provided values take priority over .env
+export PORT="${_CALLER_PORT:-${HINDSIGHT_CP_PORT:-9999}}"
+export HINDSIGHT_CP_DATAPLANE_API_URL="${_CALLER_DATAPLANE_URL:-${HINDSIGHT_CP_DATAPLANE_API_URL:-http://localhost:8888}}"
 
 # Run dev server
 npm run dev -w @vectorize-io/hindsight-control-plane
