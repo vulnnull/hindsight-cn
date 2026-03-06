@@ -3082,6 +3082,45 @@ export type UpdateMentalModelResponses = {
 export type UpdateMentalModelResponse =
   UpdateMentalModelResponses[keyof UpdateMentalModelResponses];
 
+export type GetMentalModelHistoryData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Mental Model Id
+     */
+    mental_model_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/mental-models/{mental_model_id}/history";
+};
+
+export type GetMentalModelHistoryErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetMentalModelHistoryError =
+  GetMentalModelHistoryErrors[keyof GetMentalModelHistoryErrors];
+
+export type GetMentalModelHistoryResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
+
 export type RefreshMentalModelData = {
   body?: never;
   headers?: {

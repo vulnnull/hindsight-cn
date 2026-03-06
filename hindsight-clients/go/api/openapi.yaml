@@ -884,6 +884,51 @@ paths:
       summary: Update mental model
       tags:
       - Mental Models
+  /v1/default/banks/{bank_id}/mental-models/{mental_model_id}/history:
+    get:
+      description: "Get the refresh history of a mental model, showing content changes\
+        \ over time."
+      operationId: get_mental_model_history
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: mental_model_id
+        required: true
+        schema:
+          title: Mental Model Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Get mental model history
+      tags:
+      - Mental Models
   /v1/default/banks/{bank_id}/mental-models/{mental_model_id}/refresh:
     post:
       description: Submit an async task to re-run the source query through reflect

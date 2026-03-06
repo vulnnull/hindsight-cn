@@ -814,6 +814,18 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Get the refresh history of a mental model
+   */
+  async getMentalModelHistory(bankId: string, mentalModelId: string) {
+    return this.fetchApi<
+      {
+        previous_content: string | null;
+        changed_at: string;
+      }[]
+    >(`/api/banks/${bankId}/mental-models/${mentalModelId}/history`);
+  }
+
+  /**
    * Get API version and feature flags
    * Use this to check which capabilities are available in the dataplane
    */

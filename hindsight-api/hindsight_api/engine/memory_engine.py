@@ -16,7 +16,7 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import asyncpg
@@ -5999,6 +5999,39 @@ class MemoryEngine(MemoryEngineInterface):
 
         return result
 
+    async def get_mental_model_history(
+        self,
+        bank_id: str,
+        mental_model_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> list[dict] | None:
+        """Get the refresh history of a mental model.
+
+        Returns None if the mental model is not found.
+        Returns a list of history entries (most recent first), each with previous_content and changed_at.
+        """
+        await self._authenticate_tenant(request_context)
+        pool = await self._get_pool()
+        async with acquire_with_retry(pool) as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT history
+                FROM {fq_table("mental_models")}
+                WHERE bank_id = $1 AND id = $2
+                """,
+                bank_id,
+                mental_model_id,
+            )
+            if row is None:
+                return None
+            raw_history = row["history"]
+            if isinstance(raw_history, str):
+                raw_history = json.loads(raw_history)
+            if not raw_history:
+                return []
+            return list(reversed(raw_history))
+
     async def create_mental_model(
         self,
         bank_id: str,
@@ -6219,6 +6252,17 @@ class MemoryEngine(MemoryEngineInterface):
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
+            # If content is changing, fetch current content first to record history
+            previous_content: str | None = None
+            if content is not None:
+                current_row = await conn.fetchrow(
+                    f"SELECT content FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2",
+                    bank_id,
+                    mental_model_id,
+                )
+                if current_row:
+                    previous_content = current_row["content"]
+
             # Build dynamic update
             updates = []
             params: list[Any] = [bank_id, mental_model_id]
@@ -6234,6 +6278,14 @@ class MemoryEngine(MemoryEngineInterface):
                 params.append(content)
                 param_idx += 1
                 updates.append("last_refreshed_at = NOW()")
+                # Record history entry with the previous content
+                if get_config().enable_mental_model_history:
+                    history_entry = json.dumps(
+                        [{"previous_content": previous_content, "changed_at": datetime.now(timezone.utc).isoformat()}]
+                    )
+                    updates.append(f"history = COALESCE(history, '[]'::jsonb) || ${param_idx}::jsonb")
+                    params.append(history_entry)
+                    param_idx += 1
                 # Also update embedding (convert to string for asyncpg vector type)
                 embedding_text = f"{name or ''} {content}"
                 embedding = await embedding_utils.generate_embeddings_batch(self.embeddings, [embedding_text])

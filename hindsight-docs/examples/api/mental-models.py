@@ -110,6 +110,18 @@ if mental_model_id:
     # [/docs:update-mental-model]
 
 
+    # [docs:get-mental-model-history]
+    # Get the change history of a mental model
+    history = client.get_mental_model_history(
+        bank_id=BANK_ID,
+        mental_model_id=mental_model_id
+    )
+
+    for entry in history:
+        print(f"Changed at: {entry['changed_at']}")
+        print(f"Previous content: {entry['previous_content']}")
+    # [/docs:get-mental-model-history]
+
     # [docs:delete-mental-model]
     # Delete a mental model
     client.delete_mental_model(

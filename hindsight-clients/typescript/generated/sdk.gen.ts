@@ -82,6 +82,9 @@ import type {
   GetMemoryResponses,
   GetMentalModelData,
   GetMentalModelErrors,
+  GetMentalModelHistoryData,
+  GetMentalModelHistoryErrors,
+  GetMentalModelHistoryResponses,
   GetMentalModelResponses,
   GetObservationHistoryData,
   GetObservationHistoryErrors,
@@ -501,6 +504,23 @@ export const updateMentalModel = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+
+/**
+ * Get mental model history
+ *
+ * Get the refresh history of a mental model, showing content changes over time.
+ */
+export const getMentalModelHistory = <ThrowOnError extends boolean = false>(
+  options: Options<GetMentalModelHistoryData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetMentalModelHistoryResponses,
+    GetMentalModelHistoryErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/mental-models/{mental_model_id}/history",
+    ...options,
   });
 
 /**

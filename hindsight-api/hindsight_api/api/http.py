@@ -2748,6 +2748,41 @@ def _register_routes(app: FastAPI):
             logger.error(f"Error in GET /v1/default/banks/{bank_id}/mental-models/{mental_model_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.get(
+        "/v1/default/banks/{bank_id}/mental-models/{mental_model_id}/history",
+        summary="Get mental model history",
+        description="Get the refresh history of a mental model, showing content changes over time.",
+        operation_id="get_mental_model_history",
+        tags=["Mental Models"],
+    )
+    async def api_get_mental_model_history(
+        bank_id: str,
+        mental_model_id: str,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """Get the refresh history of a mental model."""
+        try:
+            data = await app.state.memory.get_mental_model_history(
+                bank_id=bank_id,
+                mental_model_id=mental_model_id,
+                request_context=request_context,
+            )
+            if data is None:
+                raise HTTPException(status_code=404, detail=f"Mental model '{mental_model_id}' not found")
+            return data
+        except (AuthenticationError, HTTPException):
+            raise
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except Exception as e:
+            import traceback
+
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(
+                f"Error in GET /v1/default/banks/{bank_id}/mental-models/{mental_model_id}/history: {error_detail}"
+            )
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.post(
         "/v1/default/banks/{bank_id}/mental-models",
         response_model=CreateMentalModelResponse,
