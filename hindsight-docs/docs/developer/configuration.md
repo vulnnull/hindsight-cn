@@ -603,10 +603,36 @@ Configuration for the file upload and conversion pipeline (used by `POST /v1/def
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_ENABLE_FILE_UPLOAD_API` | Enable the file upload API endpoint | `true` |
-| `HINDSIGHT_API_FILE_PARSER` | File parser to use (`markitdown`, `iris`) | `markitdown` |
+| `HINDSIGHT_API_FILE_PARSER` | Server-side default parser or fallback chain (comma-separated, e.g. `iris,markitdown`) | `markitdown` |
+| `HINDSIGHT_API_FILE_PARSER_ALLOWLIST` | Comma-separated list of parsers clients are allowed to request. If not set, all registered parsers are allowed. | — |
 | `HINDSIGHT_API_FILE_CONVERSION_MAX_BATCH_SIZE` | Max files per upload request | `10` |
 | `HINDSIGHT_API_FILE_CONVERSION_MAX_BATCH_SIZE_MB` | Max total upload size per request (MB) | `100` |
 | `HINDSIGHT_API_FILE_DELETE_AFTER_RETAIN` | Delete stored files after memory extraction completes | `true` |
+
+#### Parser selection
+
+Clients can override the server default by passing `parser` in the request body of `POST /v1/default/banks/{bank_id}/files/retain`. Both the server default and the per-request field accept a single parser name or an ordered **fallback chain** — each parser is tried in sequence until one succeeds.
+
+```bash
+# Server default: try iris first, fall back to markitdown if iris fails
+export HINDSIGHT_API_FILE_PARSER=iris,markitdown
+
+# Restrict what clients may request (optional — defaults to all registered parsers)
+export HINDSIGHT_API_FILE_PARSER_ALLOWLIST=markitdown,iris
+```
+
+```json
+// Per-request override (in the JSON body of the file retain endpoint)
+{
+  "parser": "iris",
+  "files_metadata": [
+    { "document_id": "report" },
+    { "document_id": "fallback_doc", "parser": ["iris", "markitdown"] }
+  ]
+}
+```
+
+Clients that request a parser not in the allowlist receive HTTP 400.
 
 #### Parser: markitdown (default)
 
@@ -626,10 +652,13 @@ Cloud-based extraction via [Vectorize Iris](https://docs.vectorize.io/build-depl
 **Supported formats:** PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, images (JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP), HTML, TXT, MD, CSV.
 
 ```bash
-# Use iris parser (requires Vectorize account)
+# Use iris as the only parser
 export HINDSIGHT_API_FILE_PARSER=iris
 export HINDSIGHT_API_FILE_PARSER_IRIS_TOKEN=your-vectorize-token
 export HINDSIGHT_API_FILE_PARSER_IRIS_ORG_ID=your-org-id
+
+# Or: try iris first, fall back to markitdown if iris fails or rejects the file type
+export HINDSIGHT_API_FILE_PARSER=iris,markitdown
 ```
 
 ```bash
