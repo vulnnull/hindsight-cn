@@ -35,8 +35,25 @@ Compare the facts against existing observations:
 _BATCH_OUTPUT_FORMAT = """
 Output a JSON object with three arrays.
 
-Example (showing the required UUID format for all IDs):
-{{"creates": [{{"text": "Alice lives in Berlin", "source_fact_ids": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890", "b2c3d4e5-f6a7-8901-bcde-f12345678901"]}}],
+## EXAMPLE
+
+Input facts:
+[a1b2c3d4-e5f6-7890-abcd-ef1234567890] Alice mentioned she works long hours, often past midnight | Involving: Alice (occurred_start=2024-01-15, mentioned_at=2024-01-15)
+[b2c3d4e5-f6a7-8901-bcde-f12345678901] Alice said she's exhausted from the project deadlines | Involving: Alice (occurred_start=2024-01-20, mentioned_at=2024-01-20)
+
+Good observation text — clean prose, no metadata, each fact tracked distinctly:
+  "Alice works long hours, often past midnight."
+  "Alice feels exhausted from project deadlines."
+
+Bad observation text — NEVER do this (verbatim copy of fact text with metadata):
+  "Alice mentioned she works long hours, often past midnight | Involving: Alice (occurred_start=2024-01-15, mentioned_at=2024-01-15)"
+
+Observation text rules:
+- Write clean prose — NEVER copy raw fact lines or their metadata (temporal fields, "Involving:", "When:" labels, UUIDs).
+- Parenthesized metadata like (occurred_start=...) and pipe-separated labels like "| Involving: ..." are fact formatting — strip them entirely from observation text.
+- How many observations to create and how much to aggregate is driven by the MISSION above.
+
+{{"creates": [{{"text": "Alice works long hours, often past midnight.", "source_fact_ids": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890"]}}, {{"text": "Alice feels exhausted from project deadlines.", "source_fact_ids": ["b2c3d4e5-f6a7-8901-bcde-f12345678901"]}}],
   "updates": [{{"text": "Alice works at Acme Corp as a senior engineer", "observation_id": "c3d4e5f6-a7b8-9012-cdef-123456789012", "source_fact_ids": ["d4e5f6a7-b8c9-0123-defa-234567890123"]}}],
   "deletes": [{{"observation_id": "e5f6a7b8-c9d0-1234-efab-345678901234"}}]}}
 

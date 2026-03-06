@@ -1960,9 +1960,15 @@ export type SourceFactsIncludeOptions = {
   /**
    * Max Tokens
    *
-   * Maximum tokens for source facts
+   * Maximum total tokens for source facts across all observations (-1 = unlimited)
    */
   max_tokens?: number;
+  /**
+   * Max Tokens Per Observation
+   *
+   * Maximum tokens of source facts per observation (-1 = unlimited)
+   */
+  max_tokens_per_observation?: number;
 };
 
 /**

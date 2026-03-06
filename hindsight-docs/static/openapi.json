@@ -7210,8 +7210,14 @@
           "max_tokens": {
             "type": "integer",
             "title": "Max Tokens",
-            "description": "Maximum tokens for source facts",
+            "description": "Maximum total tokens for source facts across all observations (-1 = unlimited)",
             "default": 4096
+          },
+          "max_tokens_per_observation": {
+            "type": "integer",
+            "title": "Max Tokens Per Observation",
+            "description": "Maximum tokens of source facts per observation (-1 = unlimited)",
+            "default": -1
           }
         },
         "type": "object",

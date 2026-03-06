@@ -100,7 +100,12 @@ class ChunkIncludeOptions(BaseModel):
 class SourceFactsIncludeOptions(BaseModel):
     """Options for including source facts for observation-type results."""
 
-    max_tokens: int = Field(default=4096, description="Maximum tokens for source facts")
+    max_tokens: int = Field(
+        default=4096, description="Maximum total tokens for source facts across all observations (-1 = unlimited)"
+    )
+    max_tokens_per_observation: int = Field(
+        default=-1, description="Maximum tokens of source facts per observation (-1 = unlimited)"
+    )
 
 
 class IncludeOptions(BaseModel):
@@ -2224,6 +2229,9 @@ def _register_routes(app: FastAPI):
             # Determine source facts inclusion settings
             include_source_facts = request.include.source_facts is not None
             max_source_facts_tokens = request.include.source_facts.max_tokens if include_source_facts else 4096
+            max_source_facts_tokens_per_observation = (
+                request.include.source_facts.max_tokens_per_observation if include_source_facts else -1
+            )
 
             pre_recall = time.time() - handler_start
             # Run recall with tracing (record metrics)
@@ -2245,6 +2253,7 @@ def _register_routes(app: FastAPI):
                     max_chunk_tokens=max_chunk_tokens,
                     include_source_facts=include_source_facts,
                     max_source_facts_tokens=max_source_facts_tokens,
+                    max_source_facts_tokens_per_observation=max_source_facts_tokens_per_observation,
                     request_context=request_context,
                     tags=request.tags,
                     tags_match=request.tags_match,

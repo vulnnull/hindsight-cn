@@ -4591,8 +4591,14 @@ components:
       properties:
         max_tokens:
           default: 4096
-          description: Maximum tokens for source facts
+          description: Maximum total tokens for source facts across all observations
+            (-1 = unlimited)
           title: Max Tokens
+          type: integer
+        max_tokens_per_observation:
+          default: -1
+          description: Maximum tokens of source facts per observation (-1 = unlimited)
+          title: Max Tokens Per Observation
           type: integer
       title: SourceFactsIncludeOptions
     TagItem:

@@ -26,8 +26,9 @@ class SourceFactsIncludeOptions(BaseModel):
     """
     Options for including source facts for observation-type results.
     """ # noqa: E501
-    max_tokens: Optional[StrictInt] = Field(default=4096, description="Maximum tokens for source facts")
-    __properties: ClassVar[List[str]] = ["max_tokens"]
+    max_tokens: Optional[StrictInt] = Field(default=4096, description="Maximum total tokens for source facts across all observations (-1 = unlimited)")
+    max_tokens_per_observation: Optional[StrictInt] = Field(default=-1, description="Maximum tokens of source facts per observation (-1 = unlimited)")
+    __properties: ClassVar[List[str]] = ["max_tokens", "max_tokens_per_observation"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,7 +81,8 @@ class SourceFactsIncludeOptions(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "max_tokens": obj.get("max_tokens") if obj.get("max_tokens") is not None else 4096
+            "max_tokens": obj.get("max_tokens") if obj.get("max_tokens") is not None else 4096,
+            "max_tokens_per_observation": obj.get("max_tokens_per_observation") if obj.get("max_tokens_per_observation") is not None else -1
         })
         return _obj
 

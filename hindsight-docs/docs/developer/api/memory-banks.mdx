@@ -170,6 +170,18 @@ e.g. Observations are stable facts about people and projects.
      Ignore one-off events and ephemeral state.
 ```
 
+### consolidation_llm_batch_size
+
+Number of facts sent to the LLM in a single consolidation call. Higher values reduce LLM calls and improve throughput at the cost of larger prompts. Set to `1` to disable batching. Leave unset to use the server default (`8`).
+
+### consolidation_source_facts_max_tokens
+
+Total token budget for source facts included with observations in the consolidation prompt. Source facts give the LLM evidence to compare new facts against existing observations. `-1` = unlimited. Leave unset to use the server default (`-1`).
+
+### consolidation_source_facts_max_tokens_per_observation
+
+Per-observation token cap for source facts in the consolidation prompt. Each observation independently gets at most this many tokens of source facts, preventing a single observation with many source facts from consuming the entire budget. `-1` = unlimited. Leave unset to use the server default (`256`).
+
 See [Observations configuration](/developer/configuration#observations) for environment variable names and defaults.
 
 ### reflect_mission

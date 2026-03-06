@@ -278,6 +278,8 @@ def main():
             consolidation_batch_size=config.consolidation_batch_size,
             consolidation_llm_batch_size=config.consolidation_llm_batch_size,
             consolidation_max_tokens=config.consolidation_max_tokens,
+            consolidation_source_facts_max_tokens=config.consolidation_source_facts_max_tokens,
+            consolidation_source_facts_max_tokens_per_observation=config.consolidation_source_facts_max_tokens_per_observation,
             observations_mission=config.observations_mission,
             entity_labels=config.entity_labels,
             entities_allow_free_form=config.entities_allow_free_form,

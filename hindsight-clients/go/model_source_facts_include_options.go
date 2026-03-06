@@ -19,8 +19,10 @@ var _ MappedNullable = &SourceFactsIncludeOptions{}
 
 // SourceFactsIncludeOptions Options for including source facts for observation-type results.
 type SourceFactsIncludeOptions struct {
-	// Maximum tokens for source facts
+	// Maximum total tokens for source facts across all observations (-1 = unlimited)
 	MaxTokens *int32 `json:"max_tokens,omitempty"`
+	// Maximum tokens of source facts per observation (-1 = unlimited)
+	MaxTokensPerObservation *int32 `json:"max_tokens_per_observation,omitempty"`
 }
 
 // NewSourceFactsIncludeOptions instantiates a new SourceFactsIncludeOptions object
@@ -31,6 +33,8 @@ func NewSourceFactsIncludeOptions() *SourceFactsIncludeOptions {
 	this := SourceFactsIncludeOptions{}
 	var maxTokens int32 = 4096
 	this.MaxTokens = &maxTokens
+	var maxTokensPerObservation int32 = -1
+	this.MaxTokensPerObservation = &maxTokensPerObservation
 	return &this
 }
 
@@ -41,6 +45,8 @@ func NewSourceFactsIncludeOptionsWithDefaults() *SourceFactsIncludeOptions {
 	this := SourceFactsIncludeOptions{}
 	var maxTokens int32 = 4096
 	this.MaxTokens = &maxTokens
+	var maxTokensPerObservation int32 = -1
+	this.MaxTokensPerObservation = &maxTokensPerObservation
 	return &this
 }
 
@@ -76,6 +82,38 @@ func (o *SourceFactsIncludeOptions) SetMaxTokens(v int32) {
 	o.MaxTokens = &v
 }
 
+// GetMaxTokensPerObservation returns the MaxTokensPerObservation field value if set, zero value otherwise.
+func (o *SourceFactsIncludeOptions) GetMaxTokensPerObservation() int32 {
+	if o == nil || IsNil(o.MaxTokensPerObservation) {
+		var ret int32
+		return ret
+	}
+	return *o.MaxTokensPerObservation
+}
+
+// GetMaxTokensPerObservationOk returns a tuple with the MaxTokensPerObservation field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *SourceFactsIncludeOptions) GetMaxTokensPerObservationOk() (*int32, bool) {
+	if o == nil || IsNil(o.MaxTokensPerObservation) {
+		return nil, false
+	}
+	return o.MaxTokensPerObservation, true
+}
+
+// HasMaxTokensPerObservation returns a boolean if a field has been set.
+func (o *SourceFactsIncludeOptions) HasMaxTokensPerObservation() bool {
+	if o != nil && !IsNil(o.MaxTokensPerObservation) {
+		return true
+	}
+
+	return false
+}
+
+// SetMaxTokensPerObservation gets a reference to the given int32 and assigns it to the MaxTokensPerObservation field.
+func (o *SourceFactsIncludeOptions) SetMaxTokensPerObservation(v int32) {
+	o.MaxTokensPerObservation = &v
+}
+
 func (o SourceFactsIncludeOptions) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -88,6 +126,9 @@ func (o SourceFactsIncludeOptions) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	if !IsNil(o.MaxTokens) {
 		toSerialize["max_tokens"] = o.MaxTokens
+	}
+	if !IsNil(o.MaxTokensPerObservation) {
+		toSerialize["max_tokens_per_observation"] = o.MaxTokensPerObservation
 	}
 	return toSerialize, nil
 }

@@ -292,6 +292,10 @@ ENV_ENABLE_OBSERVATIONS = "HINDSIGHT_API_ENABLE_OBSERVATIONS"
 ENV_CONSOLIDATION_BATCH_SIZE = "HINDSIGHT_API_CONSOLIDATION_BATCH_SIZE"
 ENV_CONSOLIDATION_LLM_BATCH_SIZE = "HINDSIGHT_API_CONSOLIDATION_LLM_BATCH_SIZE"
 ENV_CONSOLIDATION_MAX_TOKENS = "HINDSIGHT_API_CONSOLIDATION_MAX_TOKENS"
+ENV_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS = "HINDSIGHT_API_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS"
+ENV_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS_PER_OBSERVATION = (
+    "HINDSIGHT_API_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS_PER_OBSERVATION"
+)
 ENV_OBSERVATIONS_MISSION = "HINDSIGHT_API_OBSERVATIONS_MISSION"
 
 # Webhook configuration (global, static - server-level only)
@@ -446,6 +450,12 @@ DEFAULT_ENABLE_OBSERVATIONS = True  # Observations enabled by default
 DEFAULT_CONSOLIDATION_BATCH_SIZE = 50  # Memories to load per batch (internal memory optimization)
 DEFAULT_CONSOLIDATION_LLM_BATCH_SIZE = 8  # Facts per LLM call (1 = no batching; >1 = batch mode)
 DEFAULT_CONSOLIDATION_MAX_TOKENS = 512  # Max tokens for recall when finding related observations
+DEFAULT_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS = (
+    -1
+)  # Total token budget for source facts in consolidation recall (-1 = unlimited)
+DEFAULT_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS_PER_OBSERVATION = (
+    256  # Max tokens of source facts per observation in consolidation prompt (-1 = unlimited)
+)
 DEFAULT_OBSERVATIONS_MISSION = None  # Declarative spec of what observations are for this bank
 
 # Database migrations
@@ -712,6 +722,8 @@ class HindsightConfig:
     consolidation_batch_size: int
     consolidation_llm_batch_size: int
     consolidation_max_tokens: int
+    consolidation_source_facts_max_tokens: int
+    consolidation_source_facts_max_tokens_per_observation: int
     observations_mission: str | None
 
     # Entity labels (controlled vocabulary of key:value classification labels extracted at retain time)
@@ -812,6 +824,9 @@ class HindsightConfig:
         "entities_allow_free_form",
         # Consolidation settings
         "enable_observations",
+        "consolidation_llm_batch_size",
+        "consolidation_source_facts_max_tokens",
+        "consolidation_source_facts_max_tokens_per_observation",
         "observations_mission",
         # Reflect settings
         "reflect_mission",
@@ -1161,6 +1176,15 @@ class HindsightConfig:
             ),
             consolidation_max_tokens=int(
                 os.getenv(ENV_CONSOLIDATION_MAX_TOKENS, str(DEFAULT_CONSOLIDATION_MAX_TOKENS))
+            ),
+            consolidation_source_facts_max_tokens=int(
+                os.getenv(ENV_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS, str(DEFAULT_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS))
+            ),
+            consolidation_source_facts_max_tokens_per_observation=int(
+                os.getenv(
+                    ENV_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS_PER_OBSERVATION,
+                    str(DEFAULT_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS_PER_OBSERVATION),
+                )
             ),
             observations_mission=os.getenv(ENV_OBSERVATIONS_MISSION) or DEFAULT_OBSERVATIONS_MISSION,
             entity_labels=None,

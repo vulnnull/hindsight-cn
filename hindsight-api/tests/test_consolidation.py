@@ -6,12 +6,14 @@ Note: Consolidation runs automatically after retain via SyncTaskBackend in tests
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
+from hindsight_api.config import _get_raw_config
 from hindsight_api.engine.consolidation.consolidator import (
     _aggregate_source_fields,
+    _find_related_observations,
     run_consolidation_job,
 )
 from hindsight_api.engine.memory_engine import MemoryEngine
@@ -2418,3 +2420,81 @@ class TestAggregateSourceFields:
         assert agg.occurred_end == d
         assert agg.mentioned_at == d
         assert agg.tags == ["x"]
+
+
+class TestConsolidationSourceFactsConfig:
+    """Tests that consolidation uses the source_facts token config when calling recall."""
+
+    @pytest.fixture(autouse=True)
+    def enable_observations(self):
+        config = _get_raw_config()
+        original = config.enable_observations
+        config.enable_observations = True
+        yield
+        config.enable_observations = original
+
+    @pytest.mark.asyncio
+    async def test_consolidation_passes_source_facts_max_tokens_to_recall(
+        self, memory: MemoryEngine, request_context
+    ):
+        """consolidation_source_facts_max_tokens from config is forwarded to recall_async."""
+        bank_id = f"test-sf-config-total-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        raw = _get_raw_config()
+        fake_config = type(raw)(**{
+            **{f: getattr(raw, f) for f in raw.__dataclass_fields__},
+            "consolidation_source_facts_max_tokens": 999,
+            "consolidation_source_facts_max_tokens_per_observation": -1,
+        })
+
+        try:
+            with (
+                patch.object(memory._config_resolver, "resolve_full_config", return_value=fake_config),
+                patch.object(memory, "recall_async", wraps=memory.recall_async) as mock_recall,
+            ):
+                await _find_related_observations(
+                    memory_engine=memory,
+                    bank_id=bank_id,
+                    query="test query",
+                    request_context=request_context,
+                )
+                assert mock_recall.called
+                _, kwargs = mock_recall.call_args
+                assert kwargs.get("max_source_facts_tokens") == 999
+                assert kwargs.get("max_source_facts_tokens_per_observation") == -1
+        finally:
+            await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_consolidation_passes_source_facts_per_obs_tokens_to_recall(
+        self, memory: MemoryEngine, request_context
+    ):
+        """consolidation_source_facts_max_tokens_per_observation from config is forwarded to recall_async."""
+        bank_id = f"test-sf-config-per-obs-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        raw = _get_raw_config()
+        fake_config = type(raw)(**{
+            **{f: getattr(raw, f) for f in raw.__dataclass_fields__},
+            "consolidation_source_facts_max_tokens": -1,
+            "consolidation_source_facts_max_tokens_per_observation": 128,
+        })
+
+        try:
+            with (
+                patch.object(memory._config_resolver, "resolve_full_config", return_value=fake_config),
+                patch.object(memory, "recall_async", wraps=memory.recall_async) as mock_recall,
+            ):
+                await _find_related_observations(
+                    memory_engine=memory,
+                    bank_id=bank_id,
+                    query="test query",
+                    request_context=request_context,
+                )
+                assert mock_recall.called
+                _, kwargs = mock_recall.call_args
+                assert kwargs.get("max_source_facts_tokens") == -1
+                assert kwargs.get("max_source_facts_tokens_per_observation") == 128
+        finally:
+            await memory.delete_bank(bank_id, request_context=request_context)

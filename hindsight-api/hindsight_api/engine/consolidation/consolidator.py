@@ -913,10 +913,9 @@ async def _find_related_observations(
     """
     # Use recall to find related observations with token budget
     # max_tokens naturally limits how many observations are returned
-    from ...config import get_config
     from ...tracing import get_tracer, is_tracing_enabled
 
-    config = get_config()
+    config = await memory_engine._config_resolver.resolve_full_config(bank_id, request_context)
 
     # SECURITY: Use all_strict matching if tags provided to prevent cross-scope consolidation
     tags_match = "all_strict" if tags else "any"
@@ -941,7 +940,8 @@ async def _find_related_observations(
             tags=tags,  # Filter by source memory's tags
             tags_match=tags_match,  # Use strict matching for security
             include_source_facts=True,  # Embed source facts so we avoid a separate DB fetch
-            max_source_facts_tokens=-1,  # No token limit — we need all source facts for consolidation
+            max_source_facts_tokens=config.consolidation_source_facts_max_tokens,
+            max_source_facts_tokens_per_observation=config.consolidation_source_facts_max_tokens_per_observation,
             _quiet=True,  # Suppress logging
         )
     finally:
@@ -1005,14 +1005,17 @@ async def _consolidate_batch_with_llm(
         observations_text = "[]"
 
     def _fact_line(m: dict[str, Any]) -> str:
-        parts = [f"[{m['id']}] {m['text']}"]
+        text = f"[{m['id']}] {m['text']}"
+        temporal_parts = []
         if m.get("occurred_start"):
-            parts.append(f"occurred_start={m['occurred_start']}")
+            temporal_parts.append(f"occurred_start={m['occurred_start']}")
         if m.get("occurred_end"):
-            parts.append(f"occurred_end={m['occurred_end']}")
+            temporal_parts.append(f"occurred_end={m['occurred_end']}")
         if m.get("mentioned_at"):
-            parts.append(f"mentioned_at={m['mentioned_at']}")
-        return " | ".join(parts)
+            temporal_parts.append(f"mentioned_at={m['mentioned_at']}")
+        if temporal_parts:
+            text += f" ({', '.join(temporal_parts)})"
+        return text
 
     facts_lines = "\n".join(_fact_line(m) for m in memories)
 
