@@ -1321,6 +1321,11 @@ jobs:
 
   test-doc-examples:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, node, cli, go]
+    name: test-doc-examples (${{ matrix.language }})
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
       HINDSIGHT_API_LLM_VERTEXAI_SERVICE_ACCOUNT_KEY: /tmp/gcp-credentials.json
@@ -1339,9 +1344,11 @@ jobs:
         echo "HINDSIGHT_API_LLM_VERTEXAI_PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
 
     - name: Install Rust
+      if: matrix.language == 'cli'
       uses: dtolnay/rust-toolchain@stable
 
     - name: Cache cargo
+      if: matrix.language == 'cli'
       uses: actions/cache@v4
       with:
         path: |
@@ -1351,6 +1358,7 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Build CLI
+      if: matrix.language == 'cli'
       working-directory: hindsight-cli
       run: |
         cargo build --release
@@ -1368,6 +1376,7 @@ jobs:
         python-version-file: ".python-version"
 
     - name: Set up Node.js
+      if: matrix.language == 'node'
       uses: actions/setup-node@v4
       with:
         node-version: '20'
@@ -1381,10 +1390,12 @@ jobs:
         uv sync --frozen --no-install-project --index-strategy unsafe-best-match
 
     - name: Install Python client dependencies
+      if: matrix.language == 'python'
       working-directory: ./hindsight-clients/python
       run: uv sync --frozen --extra test --index-strategy unsafe-best-match
 
     - name: Install TypeScript client
+      if: matrix.language == 'node'
       run: |
         npm ci --workspace=hindsight-clients/typescript
         npm run build --workspace=hindsight-clients/typescript
@@ -1436,10 +1447,11 @@ jobs:
         done
 
     - name: Configure CLI
+      if: matrix.language == 'cli'
       run: hindsight configure --api-url http://localhost:8888
 
-    - name: Run all doc examples
-      run: ./scripts/test-doc-examples.sh
+    - name: Run doc examples (${{ matrix.language }})
+      run: ./scripts/test-doc-examples.sh --lang ${{ matrix.language }}
 
     - name: Show API server logs
       if: always()

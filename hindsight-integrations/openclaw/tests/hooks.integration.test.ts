@@ -2,7 +2,7 @@
  * Integration tests for the OpenClaw plugin hooks.
  *
  * Loads the plugin with a mock MoltbotPluginAPI in HTTP mode, then triggers
- * `before_agent_start` and `agent_end` hooks with realistic event payloads.
+ * `before_prompt_build` and `agent_end` hooks with realistic event payloads.
  * Client methods (recall / retain) are spied on to verify the plugin
  * orchestrates them correctly without requiring a full LLM pipeline.
  *
@@ -134,6 +134,7 @@ beforeAll(async () => {
   process.env.HINDSIGHT_EMBED_API_URL = HINDSIGHT_API_URL;
 
   const mod = await import('../src/index.js');
+  const { HindsightClient } = await import('../src/client.js');
   const pluginFn = mod.default;
   const getClient = mod.getClient;
 
@@ -156,11 +157,11 @@ beforeAll(async () => {
   await handle.startServices();
 
   // After startServices the client must be ready.
-  const c = getClient();
-  if (!c) throw new Error('[Hooks Integration] Client not initialized after service start');
+  if (!getClient()) throw new Error('[Hooks Integration] Client not initialized after service start');
 
-  recallSpy = vi.spyOn(c, 'recall') as ReturnType<typeof vi.spyOn<HindsightClient, 'recall'>>;
-  retainSpy = vi.spyOn(c, 'retain') as ReturnType<typeof vi.spyOn<HindsightClient, 'retain'>>;
+  // Spy on the prototype so all per-bank instances created by getClientForContext are intercepted.
+  recallSpy = vi.spyOn(HindsightClient.prototype, 'recall') as ReturnType<typeof vi.spyOn<HindsightClient, 'recall'>>;
+  retainSpy = vi.spyOn(HindsightClient.prototype, 'retain') as ReturnType<typeof vi.spyOn<HindsightClient, 'retain'>>;
 }, 30_000);
 
 afterAll(async () => {
@@ -181,13 +182,13 @@ afterEach(() => {
 // before_agent_start
 // ---------------------------------------------------------------------------
 
-describe('before_agent_start hook', () => {
+describe('before_prompt_build hook', () => {
   it('skips recall for excluded providers and returns undefined', async () => {
     if (!apiReachable) return;
 
     const result = await triggerHook(
-      'before_agent_start',
-      { rawMessage: 'What are my preferences?', prompt: 'What are my preferences?' },
+      'before_prompt_build',
+      { rawMessage: 'What are my preferences?', prompt: 'What are my preferences?', messages: [] },
       { messageProvider: 'slack', senderId: 'U001' },
     );
 
@@ -199,8 +200,8 @@ describe('before_agent_start hook', () => {
     if (!apiReachable) return;
 
     const result = await triggerHook(
-      'before_agent_start',
-      { rawMessage: 'Hi', prompt: 'Hi' },
+      'before_prompt_build',
+      { rawMessage: 'Hi', prompt: 'Hi', messages: [] },
       { messageProvider: 'telegram', senderId: 'U001' },
     );
 
@@ -213,8 +214,8 @@ describe('before_agent_start hook', () => {
     recallSpy.mockResolvedValue(EMPTY_RECALL);
 
     const result = await triggerHook(
-      'before_agent_start',
-      { rawMessage: 'What programming language do I like?', prompt: '' },
+      'before_prompt_build',
+      { rawMessage: 'What programming language do I like?', prompt: '', messages: [] },
       { messageProvider: 'telegram', senderId: 'U002' },
     );
 
@@ -232,8 +233,8 @@ describe('before_agent_start hook', () => {
     });
 
     const result = (await triggerHook(
-      'before_agent_start',
-      { rawMessage: 'What programming language do I prefer?', prompt: '' },
+      'before_prompt_build',
+      { rawMessage: 'What programming language do I prefer?', prompt: '', messages: [] },
       { messageProvider: 'telegram', senderId: 'U003' },
     )) as { prependContext: string };
 
@@ -256,8 +257,8 @@ describe('before_agent_start hook', () => {
     });
 
     const result = (await triggerHook(
-      'before_agent_start',
-      { rawMessage: 'Do I prefer dark or light mode?', prompt: '' },
+      'before_prompt_build',
+      { rawMessage: 'Do I prefer dark or light mode?', prompt: '', messages: [] },
       { messageProvider: 'telegram', senderId: 'U004' },
     )) as { prependContext: string };
 
@@ -273,8 +274,8 @@ describe('before_agent_start hook', () => {
 
     const envelopePrompt = '[Telegram Chat]\nWhat is my favorite food?\n[from: Alice]';
     await triggerHook(
-      'before_agent_start',
-      { rawMessage: '', prompt: envelopePrompt },
+      'before_prompt_build',
+      { rawMessage: '', prompt: envelopePrompt, messages: [] },
       { messageProvider: 'telegram', senderId: 'U005' },
     );
 
@@ -317,8 +318,8 @@ describe('before_agent_start hook', () => {
     recallSpy.mockResolvedValue(EMPTY_RECALL);
 
     await triggerHook(
-      'before_agent_start',
-      { rawMessage: 'Tell me about my hobbies please.', prompt: '' },
+      'before_prompt_build',
+      { rawMessage: 'Tell me about my hobbies please.', prompt: '', messages: [] },
       { messageProvider: 'telegram', senderId: 'U006' },
     );
 
@@ -327,7 +328,7 @@ describe('before_agent_start hook', () => {
     expect(callArgs.max_tokens).toBeGreaterThan(0);
   });
 
-  it('includes the user message in the prependContext block', async () => {
+  it('includes recalled memories in the prependContext block', async () => {
     if (!apiReachable) return;
     recallSpy.mockResolvedValue({
       results: [makeMemoryResult('User loves hiking')],
@@ -337,12 +338,13 @@ describe('before_agent_start hook', () => {
     });
 
     const result = (await triggerHook(
-      'before_agent_start',
-      { rawMessage: 'What outdoor activities do I enjoy?', prompt: '' },
+      'before_prompt_build',
+      { rawMessage: 'What outdoor activities do I enjoy?', prompt: '', messages: [] },
       { messageProvider: 'telegram', senderId: 'U007' },
     )) as { prependContext: string };
 
-    expect(result.prependContext).toContain('What outdoor activities do I enjoy?');
+    expect(result.prependContext).toContain('User loves hiking');
+    expect(result.prependContext).toContain('<hindsight_memories>');
   });
 });
 
