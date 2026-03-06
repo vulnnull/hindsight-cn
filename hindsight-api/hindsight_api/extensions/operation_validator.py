@@ -289,6 +289,28 @@ class MentalModelRefreshResult:
     error: str | None = None
 
 
+# =============================================================================
+# File Conversion Post-operation Context
+# =============================================================================
+
+
+@dataclass
+class FileConvertResult:
+    """Result context for post-file-conversion hook.
+
+    Fired after a file is converted to markdown, before the retain step.
+    """
+
+    bank_id: str
+    parser_name: str
+    filename: str
+    output_chars: int
+    output_text: str
+    request_context: "RequestContext"
+    success: bool = True
+    error: str | None = None
+
+
 class OperationValidatorExtension(Extension, ABC):
     """
     Validates and hooks into retain/recall/reflect/consolidate operations.
@@ -492,6 +514,31 @@ class OperationValidatorExtension(Extension, ABC):
                 - created: Number of mental models created
                 - updated: Number of mental models updated
                 - success: Whether the operation succeeded
+                - error: Error message (if failed)
+        """
+        pass
+
+    # =========================================================================
+    # File Conversion - Post-operation hook (optional - override to implement)
+    # =========================================================================
+
+    async def on_file_convert_complete(self, result: FileConvertResult) -> None:
+        """
+        Called after a file is converted to markdown (before the retain step).
+
+        Override to implement post-conversion logic such as:
+        - Billing for premium parsers (e.g., Iris)
+        - Usage tracking
+        - Audit logging
+
+        Args:
+            result: Result context containing:
+                - bank_id: Bank identifier
+                - parser_name: Name of the parser used (e.g., 'markitdown', 'iris')
+                - filename: Original filename
+                - output_chars: Character count of the converted markdown
+                - request_context: Request context with auth info
+                - success: Whether the conversion succeeded
                 - error: Error message (if failed)
         """
         pass

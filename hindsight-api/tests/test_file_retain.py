@@ -2,11 +2,21 @@
 End-to-end tests for file retain (upload, convert, retain) functionality.
 """
 
+import asyncio
 import io
 import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+from hindsight_api.extensions import FileConvertResult, OperationValidatorExtension, ValidationResult
+from hindsight_api.extensions.operation_validator import (
+    RecallContext,
+    RecallResult,
+    ReflectContext,
+    RetainContext,
+    RetainResult,
+)
 
 
 @pytest.fixture
@@ -551,3 +561,206 @@ async def test_file_conversion_failure_sets_status_to_failed(memory_no_llm_verif
     assert operation["error_message"] is not None
     assert "Mock conversion error" in operation["error_message"]
     assert "test.fail" in operation["error_message"]
+
+
+class FileConvertTrackingValidator(OperationValidatorExtension):
+    """Validator that tracks on_file_convert_complete hook calls."""
+
+    def __init__(self):
+        super().__init__({})
+        self.convert_calls: list[FileConvertResult] = []
+
+    async def validate_retain(self, ctx: RetainContext) -> ValidationResult:
+        return ValidationResult.accept()
+
+    async def validate_recall(self, ctx: RecallContext) -> ValidationResult:
+        return ValidationResult.accept()
+
+    async def validate_reflect(self, ctx: ReflectContext) -> ValidationResult:
+        return ValidationResult.accept()
+
+    async def on_retain_complete(self, result: RetainResult) -> None:
+        pass
+
+    async def on_recall_complete(self, result: RecallResult) -> None:
+        pass
+
+    async def on_file_convert_complete(self, result: FileConvertResult) -> None:
+        self.convert_calls.append(result)
+
+
+@pytest.mark.asyncio
+async def test_on_file_convert_complete_hook_called(memory_no_llm_verify, sample_txt_content):
+    """Test that on_file_convert_complete hook is called after file conversion with correct parameters."""
+    from hindsight_api.models import RequestContext
+
+    bank_id = "test_file_convert_hook_bank"
+    validator = FileConvertTrackingValidator()
+    memory_no_llm_verify._operation_validator = validator
+
+    context = RequestContext(internal=True, api_key_id="test-key-id", tenant_id="test-tenant")
+    await memory_no_llm_verify.get_bank_profile(bank_id, request_context=context)
+
+    class MockFile:
+        def __init__(self, content, filename, content_type):
+            self.content = content
+            self.filename = filename
+            self.content_type = content_type
+
+        async def read(self):
+            return self.content
+
+    mock_file = MockFile(sample_txt_content, "report.txt", "text/plain")
+
+    file_items = [
+        {
+            "file": mock_file,
+            "document_id": "hook_test_doc",
+            "context": "test context",
+            "metadata": {},
+            "tags": [],
+            "timestamp": None,
+        }
+    ]
+
+    await memory_no_llm_verify.submit_async_file_retain(
+        bank_id=bank_id,
+        file_items=file_items,
+        parser="markitdown",
+        document_tags=None,
+        request_context=context,
+    )
+
+    await asyncio.sleep(0.1)
+
+    assert len(validator.convert_calls) == 1
+    result = validator.convert_calls[0]
+    assert result.bank_id == bank_id
+    assert result.filename == "report.txt"
+    assert result.parser_name == "markitdown"
+    assert result.output_chars > 0
+    assert result.output_text is not None
+    assert len(result.output_text) == result.output_chars
+    assert result.success is True
+    assert result.error is None
+    assert result.request_context is not None
+    assert result.request_context.api_key_id == "test-key-id"
+    assert result.request_context.tenant_id == "test-tenant"
+
+
+@pytest.mark.asyncio
+async def test_on_file_convert_complete_hook_called_for_each_file(memory_no_llm_verify, sample_txt_content):
+    """Test that on_file_convert_complete is called once per file when uploading multiple files."""
+    from hindsight_api.models import RequestContext
+
+    bank_id = "test_file_convert_hook_multi_bank"
+    validator = FileConvertTrackingValidator()
+    memory_no_llm_verify._operation_validator = validator
+
+    context = RequestContext(internal=True)
+    await memory_no_llm_verify.get_bank_profile(bank_id, request_context=context)
+
+    class MockFile:
+        def __init__(self, content, filename, content_type):
+            self.content = content
+            self.filename = filename
+            self.content_type = content_type
+
+        async def read(self):
+            return self.content
+
+    file_items = [
+        {
+            "file": MockFile(b"First document content", "first.txt", "text/plain"),
+            "document_id": "doc_1",
+            "context": None,
+            "metadata": {},
+            "tags": [],
+            "timestamp": None,
+        },
+        {
+            "file": MockFile(b"Second document content", "second.txt", "text/plain"),
+            "document_id": "doc_2",
+            "context": None,
+            "metadata": {},
+            "tags": [],
+            "timestamp": None,
+        },
+    ]
+
+    await memory_no_llm_verify.submit_async_file_retain(
+        bank_id=bank_id,
+        file_items=file_items,
+        parser="markitdown",
+        document_tags=None,
+        request_context=context,
+    )
+
+    await asyncio.sleep(0.2)
+
+    assert len(validator.convert_calls) == 2
+    filenames = {r.filename for r in validator.convert_calls}
+    assert filenames == {"first.txt", "second.txt"}
+    for result in validator.convert_calls:
+        assert result.bank_id == bank_id
+        assert result.parser_name == "markitdown"
+        assert result.output_chars > 0
+        assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_on_file_convert_complete_hook_not_called_on_conversion_failure(memory_no_llm_verify, sample_txt_content):
+    """Test that on_file_convert_complete is NOT called when file conversion fails."""
+    from hindsight_api.engine.parsers.base import FileParser
+    from hindsight_api.models import RequestContext
+
+    bank_id = "test_file_convert_hook_fail_bank"
+    validator = FileConvertTrackingValidator()
+    memory_no_llm_verify._operation_validator = validator
+
+    class FailingParser(FileParser):
+        async def convert(self, file_data: bytes, filename: str) -> str:
+            raise RuntimeError("Mock conversion failure")
+
+        def supports(self, filename: str, content_type: str | None = None) -> bool:
+            return filename.endswith(".hookfail")
+
+        def name(self) -> str:
+            return "hookfail_parser"
+
+    memory_no_llm_verify._parser_registry.register(FailingParser())
+
+    context = RequestContext(internal=True)
+    await memory_no_llm_verify.get_bank_profile(bank_id, request_context=context)
+
+    class MockFile:
+        def __init__(self, content, filename, content_type):
+            self.content = content
+            self.filename = filename
+            self.content_type = content_type
+
+        async def read(self):
+            return self.content
+
+    file_items = [
+        {
+            "file": MockFile(sample_txt_content, "bad.hookfail", "application/octet-stream"),
+            "document_id": "fail_hook_doc",
+            "context": None,
+            "metadata": {},
+            "tags": [],
+            "timestamp": None,
+        }
+    ]
+
+    await memory_no_llm_verify.submit_async_file_retain(
+        bank_id=bank_id,
+        file_items=file_items,
+        parser="hookfail_parser",
+        document_tags=None,
+        request_context=context,
+    )
+
+    await asyncio.sleep(0.2)
+
+    assert len(validator.convert_calls) == 0

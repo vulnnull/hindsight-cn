@@ -75,9 +75,10 @@ class IrisParser(FileParser):
             upload_url: str = init_data["uploadUrl"]
 
             # Step 2: Upload the file bytes to the presigned URL (no auth header)
+            # Ensure file_data is plain bytes (GCS storage may return obstore.Bytes)
             upload_resp = await client.put(
                 upload_url,
-                content=file_data,
+                content=bytes(file_data),
                 headers={"Content-Type": content_type},
             )
             _raise_for_status(upload_resp, filename, "file upload")

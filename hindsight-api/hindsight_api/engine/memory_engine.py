@@ -671,6 +671,31 @@ class MemoryEngine(MemoryEngineInterface):
             f"document_id={document_id}, {len(markdown_content)} chars. Submitting retain task."
         )
 
+        # Fire file conversion hook (e.g., for Iris billing)
+        if self._operation_validator:
+            try:
+                from hindsight_api.extensions.operation_validator import FileConvertResult
+                from hindsight_api.models import RequestContext
+
+                convert_context = RequestContext(
+                    internal=True,
+                    user_initiated=True,
+                    tenant_id=task_dict.get("_tenant_id"),
+                    api_key_id=task_dict.get("_api_key_id"),
+                )
+                await self._operation_validator.on_file_convert_complete(
+                    FileConvertResult(
+                        bank_id=bank_id,
+                        parser_name=task_dict.get("parser", "unknown"),
+                        filename=filename,
+                        output_chars=len(markdown_content),
+                        output_text=markdown_content,
+                        request_context=convert_context,
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"[FILE_CONVERT_RETAIN] on_file_convert_complete hook failed: {e}")
+
         # Build retain task payload
         retain_contents = [
             {
