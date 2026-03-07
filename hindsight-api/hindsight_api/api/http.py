@@ -1206,6 +1206,30 @@ class DocumentResponse(BaseModel):
     tags: list[str] = FieldWithDefault(list, description="Tags associated with this document")
 
 
+class UpdateDocumentRequest(BaseModel):
+    """Request model for updating a document's mutable fields."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "tags": ["team-a", "team-b"],
+            }
+        }
+    )
+
+    tags: list[str] | None = Field(
+        default=None,
+        description="New tags for the document and its memory units. "
+        "Triggers observation invalidation and re-consolidation.",
+    )
+
+
+class UpdateDocumentResponse(BaseModel):
+    """Response model for update document endpoint."""
+
+    success: bool = True
+
+
 class DeleteDocumentResponse(BaseModel):
     """Response model for delete document endpoint."""
 
@@ -3302,6 +3326,55 @@ def _register_routes(app: FastAPI):
 
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             logger.error(f"Error in /v1/default/chunks/{chunk_id}: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.patch(
+        "/v1/default/banks/{bank_id}/documents/{document_id:path}",
+        response_model=UpdateDocumentResponse,
+        summary="Update document",
+        description="Update mutable fields on a document without re-processing its content.\n\n"
+        "**Tags** (`tags`): Propagated to all associated memory units. Observations derived from "
+        "those units are invalidated and queued for re-consolidation under the new tags. "
+        "Co-source memories from other documents that shared those observations are also reset.\n\n"
+        "At least one field must be provided.",
+        operation_id="update_document",
+        tags=["Documents"],
+    )
+    async def api_update_document(
+        bank_id: str,
+        document_id: str,
+        body: UpdateDocumentRequest,
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """
+        Update mutable fields on a document without re-processing its content.
+
+        Args:
+            bank_id: Memory Bank ID (from path)
+            document_id: Document ID (from path)
+            body: Fields to update (tags, metadata, context)
+        """
+        if body.tags is None:
+            raise HTTPException(status_code=422, detail="At least one field (tags) must be provided")
+        try:
+            result = await app.state.memory.update_document(
+                document_id,
+                bank_id,
+                tags=body.tags,
+                request_context=request_context,
+            )
+            if not result:
+                raise HTTPException(status_code=404, detail="Document not found")
+            return UpdateDocumentResponse(success=True)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Error in PATCH /v1/default/banks/{bank_id}/documents/{document_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.delete(

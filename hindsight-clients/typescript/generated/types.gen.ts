@@ -2082,6 +2082,32 @@ export type UpdateDispositionRequest = {
 };
 
 /**
+ * UpdateDocumentRequest
+ *
+ * Request model for updating a document's mutable fields.
+ */
+export type UpdateDocumentRequest = {
+  /**
+   * Tags
+   *
+   * New tags for the document and its memory units. Triggers observation invalidation and re-consolidation.
+   */
+  tags?: Array<string> | null;
+};
+
+/**
+ * UpdateDocumentResponse
+ *
+ * Response model for update document endpoint.
+ */
+export type UpdateDocumentResponse = {
+  /**
+   * Success
+   */
+  success?: boolean;
+};
+
+/**
  * UpdateMentalModelRequest
  *
  * Request model for updating a mental model.
@@ -3534,6 +3560,48 @@ export type GetDocumentResponses = {
 
 export type GetDocumentResponse =
   GetDocumentResponses[keyof GetDocumentResponses];
+
+export type UpdateDocumentData = {
+  body: UpdateDocumentRequest;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Document Id
+     */
+    document_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/documents/{document_id}";
+};
+
+export type UpdateDocumentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type UpdateDocumentError =
+  UpdateDocumentErrors[keyof UpdateDocumentErrors];
+
+export type UpdateDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  200: UpdateDocumentResponse;
+};
+
+export type UpdateDocumentResponse2 =
+  UpdateDocumentResponses[keyof UpdateDocumentResponses];
 
 export type ListTagsData = {
   body?: never;

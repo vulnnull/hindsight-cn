@@ -23,7 +23,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { X, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import {
+  X,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Pencil,
+  Check,
+} from "lucide-react";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -43,6 +52,11 @@ export function DocumentsView() {
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
   const [loadingDocument, setLoadingDocument] = useState(false);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+
+  // Tag editing state
+  const [editingTags, setEditingTags] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const [savingTags, setSavingTags] = useState(false);
 
   // Delete confirmation dialog state
   const [documentToDelete, setDocumentToDelete] = useState<{
@@ -85,6 +99,8 @@ export function DocumentsView() {
 
     setLoadingDocument(true);
     setSelectedDocument({ id: documentId }); // Set placeholder to show loading
+    setEditingTags(false);
+    setTagInput("");
 
     try {
       const doc: any = await client.getDocument(documentId, currentBank);
@@ -131,6 +147,41 @@ export function DocumentsView() {
 
   const requestDeleteDocument = (documentId: string, memoryCount?: number) => {
     setDocumentToDelete({ id: documentId, memoryCount });
+  };
+
+  const startEditTags = () => {
+    setTagInput((selectedDocument?.tags ?? []).join(", "));
+    setEditingTags(true);
+  };
+
+  const cancelEditTags = () => {
+    setEditingTags(false);
+    setTagInput("");
+  };
+
+  const saveDocumentTags = async () => {
+    if (!currentBank || !selectedDocument) return;
+
+    const newTags = tagInput
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+
+    setSavingTags(true);
+    try {
+      await client.updateDocument(selectedDocument.id, currentBank, newTags);
+      setSelectedDocument({ ...selectedDocument, tags: newTags });
+      // Update tags in the documents list too
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === selectedDocument.id ? { ...d, tags: newTags } : d))
+      );
+      setEditingTags(false);
+      setTagInput("");
+    } catch (error) {
+      console.error("Error updating document tags:", error);
+    } finally {
+      setSavingTags(false);
+    }
   };
 
   // Auto-load documents when component mounts or bank changes
@@ -417,11 +468,64 @@ export function DocumentsView() {
                 )}
 
                 {/* Tags */}
-                {selectedDocument.tags && selectedDocument.tags.length > 0 && (
-                  <div className="p-4 bg-muted/50 rounded-lg">
-                    <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                      Tags
+                <div className="p-4 bg-muted/50 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-bold text-muted-foreground uppercase">Tags</div>
+                    {!editingTags && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={startEditTags}
+                        className="h-6 px-2 gap-1 text-xs"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Edit
+                      </Button>
+                    )}
+                  </div>
+                  {editingTags ? (
+                    <div className="space-y-2">
+                      <Input
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        placeholder="tag1, tag2, tag3"
+                        className="text-sm h-8"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveDocumentTags();
+                          if (e.key === "Escape") cancelEditTags();
+                        }}
+                        autoFocus
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Comma-separated. Leave empty to remove all tags.
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          onClick={saveDocumentTags}
+                          disabled={savingTags}
+                          className="h-7 px-3 gap-1 text-xs"
+                        >
+                          {savingTags ? (
+                            <span className="animate-spin">⏳</span>
+                          ) : (
+                            <Check className="h-3 w-3" />
+                          )}
+                          Save
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={cancelEditTags}
+                          disabled={savingTags}
+                          className="h-7 px-3 gap-1 text-xs"
+                        >
+                          <X className="h-3 w-3" />
+                          Cancel
+                        </Button>
+                      </div>
                     </div>
+                  ) : selectedDocument.tags && selectedDocument.tags.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       {selectedDocument.tags.map((tag: string, i: number) => (
                         <span
@@ -432,8 +536,10 @@ export function DocumentsView() {
                         </span>
                       ))}
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No tags</div>
+                  )}
+                </div>
 
                 {/* Delete Button */}
                 <div className="pt-2 border-t border-border">

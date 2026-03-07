@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sdk, lowLevelClient } from "@/lib/hindsight-client";
+import { sdk, lowLevelClient, DATAPLANE_URL, getDataplaneHeaders } from "@/lib/hindsight-client";
 
 export async function GET(
   request: NextRequest,
@@ -23,6 +23,42 @@ export async function GET(
   } catch (error) {
     console.error("Error fetching document:", error);
     return NextResponse.json({ error: "Failed to fetch document" }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ documentId: string }> }
+) {
+  try {
+    const { documentId } = await params;
+    const searchParams = request.nextUrl.searchParams;
+    const bankId = searchParams.get("bank_id");
+
+    if (!bankId) {
+      return NextResponse.json({ error: "bank_id is required" }, { status: 400 });
+    }
+
+    const body = await request.json();
+    const response = await fetch(
+      `${DATAPLANE_URL}/v1/default/banks/${bankId}/documents/${documentId}`,
+      {
+        method: "PATCH",
+        headers: getDataplaneHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      return NextResponse.json(error, { status: response.status });
+    }
+
+    const data = await response.json();
+    return NextResponse.json(data, { status: 200 });
+  } catch (error) {
+    console.error("Error updating document tags:", error);
+    return NextResponse.json({ error: "Failed to update document tags" }, { status: 500 });
   }
 }
 

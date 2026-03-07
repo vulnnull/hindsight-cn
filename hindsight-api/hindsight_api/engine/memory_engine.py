@@ -3440,6 +3440,140 @@ class MemoryEngine(MemoryEngineInterface):
 
         return result
 
+    async def update_document(
+        self,
+        document_id: str,
+        bank_id: str,
+        *,
+        tags: list[str] | None = None,
+        request_context: "RequestContext",
+    ) -> bool:
+        """
+        Update mutable fields on a document without re-processing its content.
+
+        Tag changes propagate to all associated memory units and trigger observation
+        invalidation + re-consolidation (same semantics as delete_document):
+        - Observations referencing the document's memory units are deleted.
+        - The document's own units and any co-source memories from other documents
+          have consolidated_at reset so they are re-consolidated under the new tags.
+
+        Args:
+            document_id: Document ID to update
+            bank_id: Bank ID that owns the document
+            tags: New tags to apply to the document and all its memory units (optional)
+            request_context: Request context for authentication.
+
+        Returns:
+            True if the document was found and updated, False if not found
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="update_document", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+        pool = await self._get_pool()
+        invalidated_obs = 0
+        async with acquire_with_retry(pool) as conn:
+            async with conn.transaction():
+                set_parts: list[str] = ["updated_at = now()"]
+                params: list[Any] = []
+                p = 1
+
+                if tags is not None:
+                    set_parts.append(f"tags = ${p}")
+                    params.append(tags)
+                    p += 1
+
+                params.extend([document_id, bank_id])
+                doc_id_found = await conn.fetchval(
+                    f"""
+                    UPDATE {fq_table("documents")}
+                    SET {", ".join(set_parts)}
+                    WHERE id = ${p} AND bank_id = ${p + 1}
+                    RETURNING id
+                    """,
+                    *params,
+                )
+                if not doc_id_found:
+                    return False
+
+                if tags is not None:
+                    unit_rows = await conn.fetch(
+                        f"SELECT id FROM {fq_table('memory_units')} WHERE document_id = $1 AND fact_type IN ('experience', 'world')",
+                        document_id,
+                    )
+                    unit_ids = [str(row["id"]) for row in unit_rows]
+
+                    await conn.execute(
+                        f"UPDATE {fq_table('memory_units')} SET tags = $1 WHERE document_id = $2",
+                        tags,
+                        document_id,
+                    )
+
+                    if unit_ids:
+                        import uuid as uuid_module
+
+                        unit_uuids = [uuid_module.UUID(uid) for uid in unit_ids]
+                        unit_uuid_set = {str(u) for u in unit_uuids}
+                        affected_obs = await conn.fetch(
+                            f"""
+                            SELECT id, source_memory_ids FROM {fq_table("memory_units")}
+                            WHERE bank_id = $1
+                              AND fact_type = 'observation'
+                              AND source_memory_ids && $2::uuid[]
+                            """,
+                            bank_id,
+                            unit_uuids,
+                        )
+                        if affected_obs:
+                            obs_ids = [obs["id"] for obs in affected_obs]
+
+                            seen: set[str] = set()
+                            other_source_uuids: list[uuid_module.UUID] = []
+                            for obs in affected_obs:
+                                for src_id in obs["source_memory_ids"] or []:
+                                    src_str = str(src_id)
+                                    if src_str not in unit_uuid_set and src_str not in seen:
+                                        other_source_uuids.append(src_id)
+                                        seen.add(src_str)
+
+                            await conn.execute(
+                                f"DELETE FROM {fq_table('memory_units')} WHERE id = ANY($1::uuid[])",
+                                obs_ids,
+                            )
+                            await conn.execute(
+                                f"""
+                                UPDATE {fq_table("memory_units")}
+                                SET consolidated_at = NULL
+                                WHERE id = ANY($1::uuid[])
+                                  AND fact_type IN ('experience', 'world')
+                                """,
+                                unit_uuids,
+                            )
+                            if other_source_uuids:
+                                await conn.execute(
+                                    f"""
+                                    UPDATE {fq_table("memory_units")}
+                                    SET consolidated_at = NULL
+                                    WHERE id = ANY($1::uuid[])
+                                      AND fact_type IN ('experience', 'world')
+                                    """,
+                                    other_source_uuids,
+                                )
+                            invalidated_obs = len(obs_ids)
+                            logger.info(
+                                f"[OBSERVATIONS] Deleted {invalidated_obs} observations, reset "
+                                f"{len(unit_ids)} document source memories and "
+                                f"{len(other_source_uuids)} co-source memories for re-consolidation "
+                                f"after document update on '{document_id}' in bank {bank_id}"
+                            )
+
+        if invalidated_obs > 0:
+            await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+
+        return True
+
     async def delete_memory_unit(
         self,
         unit_id: str,

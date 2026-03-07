@@ -455,3 +455,281 @@ class TestClearObservationsForMemory:
             assert await _get_consolidated_at(conn, m2) is None
 
         await memory.delete_bank(bank_id, request_context=request_context)
+
+
+# ---------------------------------------------------------------------------
+# Tests: update_document
+# ---------------------------------------------------------------------------
+
+
+async def _insert_document_with_memories(
+    conn, bank_id: str, doc_id: str, memories: list[tuple[str, str]]
+) -> list[uuid.UUID]:
+    """Insert a document and attach memory units to it. Returns list of memory UUIDs."""
+    await conn.execute(
+        """
+        INSERT INTO documents (id, bank_id, original_text, content_hash, created_at, updated_at)
+        VALUES ($1, $2, 'some doc', 'hash123', NOW(), NOW())
+        """,
+        doc_id,
+        bank_id,
+    )
+    mem_ids = []
+    for text, fact_type in memories:
+        mem_id = uuid.uuid4()
+        await conn.execute(
+            """
+            INSERT INTO memory_units (id, bank_id, text, fact_type, event_date, document_id, created_at, updated_at, consolidated_at)
+            VALUES ($1, $2, $3, $4, NOW(), $5, NOW(), NOW(), NOW())
+            """,
+            mem_id,
+            bank_id,
+            text,
+            fact_type,
+            doc_id,
+        )
+        mem_ids.append(mem_id)
+    return mem_ids
+
+
+class TestUpdateDocumentTagsObservationCleanup:
+
+    @pytest.mark.asyncio
+    async def test_update_tags_returns_updated_document(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """update_document returns the updated document with new tags."""
+        bank_id = f"test-tag-update-basic-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+            await _insert_document_with_memories(conn, bank_id, doc_id, [("Alice loves hiking.", "experience")])
+
+        result = await memory.update_document(
+            doc_id, bank_id, tags=["new-tag"], request_context=request_context
+        )
+
+        assert result is True
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_tags_returns_none_for_missing_document(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """update_document returns False when document does not exist."""
+        bank_id = f"test-tag-update-missing-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        result = await memory.update_document(
+            "nonexistent-doc", bank_id, tags=["tag"], request_context=request_context
+        )
+
+        assert result is False
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_tags_propagates_to_memory_units(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """Changing document tags also updates all associated memory unit tags."""
+        bank_id = f"test-tag-update-propagate-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+            mem_ids = await _insert_document_with_memories(
+                conn, bank_id, doc_id, [("Alice loves hiking.", "experience"), ("Alice hikes weekly.", "world")]
+            )
+
+        with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
+            await memory.update_document(
+                doc_id, bank_id, tags=["new-tag"], request_context=request_context
+            )
+
+        async with pool.acquire() as conn:
+            for mem_id in mem_ids:
+                tags = await conn.fetchval(
+                    "SELECT tags FROM memory_units WHERE id = $1", mem_id
+                )
+                assert list(tags) == ["new-tag"], f"Memory unit {mem_id} should have updated tags"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_tags_invalidates_observations(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """Observations referencing the document's memory units are deleted on tag change."""
+        bank_id = f"test-tag-update-obs-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+            mem_ids = await _insert_document_with_memories(
+                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+            )
+            obs_id = await _insert_observation(conn, bank_id, "Alice is a hiker.", mem_ids)
+
+        with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
+            await memory.update_document(
+                doc_id, bank_id, tags=["new-tag"], request_context=request_context
+            )
+
+        async with pool.acquire() as conn:
+            obs_ids = await _get_observation_ids(conn, bank_id)
+            assert str(obs_id) not in obs_ids, "Observation should have been invalidated"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_tags_resets_consolidated_at_on_affected_units(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """Affected memory units get consolidated_at reset for re-consolidation under new tags."""
+        bank_id = f"test-tag-update-reset-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+            mem_ids = await _insert_document_with_memories(
+                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+            )
+            obs_id = await _insert_observation(conn, bank_id, "Alice is a hiker.", mem_ids)
+
+            # Verify memory starts consolidated
+            assert await _get_consolidated_at(conn, mem_ids[0]) is not None
+
+        with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
+            await memory.update_document(
+                doc_id, bank_id, tags=["new-tag"], request_context=request_context
+            )
+
+        async with pool.acquire() as conn:
+            consolidated_at = await _get_consolidated_at(conn, mem_ids[0])
+            assert consolidated_at is None, "Memory unit should be reset for re-consolidation"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_tags_triggers_consolidation_when_observations_invalidated(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """submit_async_consolidation is called when observations are invalidated."""
+        bank_id = f"test-tag-update-cons-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+            mem_ids = await _insert_document_with_memories(
+                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+            )
+            await _insert_observation(conn, bank_id, "Alice is a hiker.", mem_ids)
+
+        with patch.object(memory, "submit_async_consolidation", new=AsyncMock()) as mock_consolidate:
+            await memory.update_document(
+                doc_id, bank_id, tags=["new-tag"], request_context=request_context
+            )
+            mock_consolidate.assert_awaited_once()
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_tags_no_consolidation_when_no_observations(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """submit_async_consolidation is NOT called when no observations are invalidated."""
+        bank_id = f"test-tag-update-nocons-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+            await _insert_document_with_memories(
+                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+            )
+            # No observations inserted
+
+        with patch.object(memory, "submit_async_consolidation", new=AsyncMock()) as mock_consolidate:
+            await memory.update_document(
+                doc_id, bank_id, tags=["new-tag"], request_context=request_context
+            )
+            mock_consolidate.assert_not_awaited()
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_tags_resets_co_source_memories_from_other_documents(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """Co-source memories from other documents that shared an invalidated observation are also reset."""
+        bank_id = f"test-tag-update-cosource-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+            doc_mem_ids = await _insert_document_with_memories(
+                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+            )
+            # Unrelated memory from another document — co-sourced in the same observation
+            other_mem = await _insert_memory(conn, bank_id, "Alice also rock-climbs.")
+            obs_id = await _insert_observation(
+                conn, bank_id, "Alice loves outdoor activities.", doc_mem_ids + [other_mem]
+            )
+
+            # Verify other_mem starts consolidated
+            assert await _get_consolidated_at(conn, other_mem) is not None
+
+        with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
+            await memory.update_document(
+                doc_id, bank_id, tags=["new-tag"], request_context=request_context
+            )
+
+        async with pool.acquire() as conn:
+            obs_ids = await _get_observation_ids(conn, bank_id)
+            assert str(obs_id) not in obs_ids, "Observation should have been invalidated"
+
+            # other_mem (co-source from another document) must also be reset
+            consolidated_at = await _get_consolidated_at(conn, other_mem)
+            assert consolidated_at is None, "Co-source memory from other document should be reset"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_tags_does_not_affect_unrelated_observations(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        """Observations referencing memories from a different document are not affected."""
+        bank_id = f"test-tag-update-unrelated-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+            mem_ids = await _insert_document_with_memories(
+                conn, bank_id, doc_id, [("Alice loves hiking.", "experience")]
+            )
+            # Unrelated memory not in the document
+            unrelated = await _insert_memory(conn, bank_id, "Bob likes cycling.")
+            unrelated_obs_id = await _insert_observation(
+                conn, bank_id, "Bob is a cyclist.", [unrelated]
+            )
+
+        with patch.object(memory, "submit_async_consolidation", new=AsyncMock()):
+            await memory.update_document(
+                doc_id, bank_id, tags=["new-tag"], request_context=request_context
+            )
+
+        async with pool.acquire() as conn:
+            obs_ids = await _get_observation_ids(conn, bank_id)
+            assert str(unrelated_obs_id) in obs_ids, "Unrelated observation should remain untouched"
+
+        await memory.delete_bank(bank_id, request_context=request_context)

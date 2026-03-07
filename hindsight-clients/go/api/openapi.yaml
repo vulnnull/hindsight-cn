@@ -1435,6 +1435,61 @@ paths:
       summary: Get document details
       tags:
       - Documents
+    patch:
+      description: |-
+        Update mutable fields on a document without re-processing its content.
+
+        **Tags** (`tags`): Propagated to all associated memory units. Observations derived from those units are invalidated and queued for re-consolidation under the new tags. Co-source memories from other documents that shared those observations are also reset.
+
+        At least one field must be provided.
+      operationId: update_document
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: document_id
+        required: true
+        schema:
+          title: Document Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDocumentRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDocumentResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Update document
+      tags:
+      - Documents
   /v1/default/banks/{bank_id}/tags:
     get:
       description: "List all unique tags in a memory bank with usage counts. Supports\
@@ -4791,6 +4846,29 @@ components:
       required:
       - disposition
       title: UpdateDispositionRequest
+    UpdateDocumentRequest:
+      description: Request model for updating a document's mutable fields.
+      example:
+        tags:
+        - team-a
+        - team-b
+      properties:
+        tags:
+          items:
+            type: string
+          nullable: true
+          type: array
+      title: UpdateDocumentRequest
+    UpdateDocumentResponse:
+      description: Response model for update document endpoint.
+      example:
+        success: true
+      properties:
+        success:
+          default: true
+          title: Success
+          type: boolean
+      title: UpdateDocumentResponse
     UpdateMentalModelRequest:
       description: Request model for updating a mental model.
       example:

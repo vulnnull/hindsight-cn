@@ -88,6 +88,8 @@ hindsight_client_api/models/token_usage.py
 hindsight_client_api/models/tool_calls_include_options.py
 hindsight_client_api/models/update_directive_request.py
 hindsight_client_api/models/update_disposition_request.py
+hindsight_client_api/models/update_document_request.py
+hindsight_client_api/models/update_document_response.py
 hindsight_client_api/models/update_mental_model_request.py
 hindsight_client_api/models/update_webhook_request.py
 hindsight_client_api/models/validation_error.py

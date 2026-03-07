@@ -337,6 +337,20 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Update tags on a document and its associated memory units
+   */
+  async updateDocument(documentId: string, bankId: string, tags: string[]) {
+    return this.fetchApi<{ success: boolean }>(
+      `/api/documents/${encodeURIComponent(documentId)}?bank_id=${bankId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags }),
+      }
+    );
+  }
+
+  /**
    * Delete document and all its associated memory units
    */
   async deleteDocument(documentId: string, bankId: string) {

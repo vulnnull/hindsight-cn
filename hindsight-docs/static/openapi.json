@@ -2048,6 +2048,82 @@
           }
         }
       },
+      "patch": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Update document",
+        "description": "Update mutable fields on a document without re-processing its content.\n\n**Tags** (`tags`): Propagated to all associated memory units. Observations derived from those units are invalidated and queued for re-consolidation under the new tags. Co-source memories from other documents that shared those observations are also reset.\n\nAt least one field must be provided.",
+        "operationId": "update_document",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDocumentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateDocumentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "Documents"
@@ -7502,6 +7578,46 @@
         ],
         "title": "UpdateDispositionRequest",
         "description": "Request model for updating disposition traits."
+      },
+      "UpdateDocumentRequest": {
+        "properties": {
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "New tags for the document and its memory units. Triggers observation invalidation and re-consolidation."
+          }
+        },
+        "type": "object",
+        "title": "UpdateDocumentRequest",
+        "description": "Request model for updating a document's mutable fields.",
+        "example": {
+          "tags": [
+            "team-a",
+            "team-b"
+          ]
+        }
+      },
+      "UpdateDocumentResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "UpdateDocumentResponse",
+        "description": "Response model for update document endpoint."
       },
       "UpdateMentalModelRequest": {
         "properties": {
