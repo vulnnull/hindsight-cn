@@ -75,7 +75,7 @@ def drop_schema(db_url: str, schema_name: str):
         conn.commit()
 
 
-def get_column_dimension(db_url: str, schema: str = "public") -> int | None:
+def get_column_dimension(db_url: str, schema: str = "public", table: str = "memory_units") -> int | None:
     """Get the current embedding column dimension from the database."""
     engine = create_engine(db_url)
     with engine.connect() as conn:
@@ -86,10 +86,10 @@ def get_column_dimension(db_url: str, schema: str = "public") -> int | None:
                 JOIN pg_class c ON a.attrelid = c.oid
                 JOIN pg_namespace n ON c.relnamespace = n.oid
                 WHERE n.nspname = :schema
-                  AND c.relname = 'memory_units'
+                  AND c.relname = :table
                   AND a.attname = 'embedding'
             """),
-            {"schema": schema},
+            {"schema": schema, "table": table},
         ).scalar()
         return result
 
@@ -122,6 +122,38 @@ def clear_embeddings(db_url: str, schema: str):
     engine = create_engine(db_url)
     with engine.connect() as conn:
         conn.execute(text(f"DELETE FROM {schema}.memory_units"))
+        conn.commit()
+
+
+def insert_test_mental_model_embedding(db_url: str, schema: str, dimension: int):
+    """Insert a test mental model row with a dummy embedding."""
+    engine = create_engine(db_url)
+    embedding = [0.1] * dimension
+    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+
+    with engine.connect() as conn:
+        # Ensure test bank exists
+        conn.execute(
+            text(f"""
+                INSERT INTO {schema}.banks (bank_id, name)
+                VALUES ('test-bank-mm', 'Test Bank')
+                ON CONFLICT (bank_id) DO NOTHING
+            """)
+        )
+        conn.execute(
+            text(f"""
+                INSERT INTO {schema}.mental_models (bank_id, name, source_query, content, embedding)
+                VALUES ('test-bank-mm', 'test model', 'test query', 'test content', '{embedding_str}'::vector)
+            """)
+        )
+        conn.commit()
+
+
+def clear_mental_model_embeddings(db_url: str, schema: str):
+    """Clear all rows from mental_models."""
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        conn.execute(text(f"DELETE FROM {schema}.mental_models"))
         conn.commit()
 
 
@@ -198,6 +230,49 @@ class TestEmbeddingDimension:
 
         # Cleanup
         clear_embeddings(db_url, schema)
+
+    def test_mental_models_dimension_matches_no_change(self, dimension_test_schema):
+        """When mental_models dimension matches, no changes should be made."""
+        db_url, schema = dimension_test_schema
+
+        initial_dim = get_column_dimension(db_url, schema, table="mental_models")
+        assert initial_dim == 384, f"Expected 384, got {initial_dim}"
+
+        ensure_embedding_dimension(db_url, 384, schema=schema)
+
+        assert get_column_dimension(db_url, schema, table="mental_models") == 384
+
+    def test_mental_models_dimension_change_empty_table(self, dimension_test_schema):
+        """When mental_models is empty, dimension can be changed."""
+        db_url, schema = dimension_test_schema
+
+        clear_mental_model_embeddings(db_url, schema)
+
+        ensure_embedding_dimension(db_url, 768, schema=schema)
+
+        assert get_column_dimension(db_url, schema, table="mental_models") == 768
+
+        # Change back for other tests
+        ensure_embedding_dimension(db_url, 384, schema=schema)
+        assert get_column_dimension(db_url, schema, table="mental_models") == 384
+
+    def test_mental_models_dimension_change_blocked_with_data(self, dimension_test_schema):
+        """When mental_models has data, dimension change should be blocked."""
+        db_url, schema = dimension_test_schema
+
+        clear_mental_model_embeddings(db_url, schema)
+        insert_test_mental_model_embedding(db_url, schema, 384)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            ensure_embedding_dimension(db_url, 768, schema=schema)
+
+        assert "Cannot change embedding dimension" in str(exc_info.value)
+        assert "mental_models" in str(exc_info.value)
+
+        assert get_column_dimension(db_url, schema, table="mental_models") == 384
+
+        # Cleanup
+        clear_mental_model_embeddings(db_url, schema)
 
     def test_local_embeddings_dimension_detection(self, embeddings):
         """Test that LocalSTEmbeddings correctly detects dimension."""
