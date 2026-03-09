@@ -48,6 +48,28 @@ _llm_max_concurrent = int(os.getenv(ENV_LLM_MAX_CONCURRENT, str(DEFAULT_LLM_MAX_
 _global_llm_semaphore = asyncio.Semaphore(_llm_max_concurrent)
 
 
+def sanitize_llm_output(text: str | None) -> str | None:
+    """
+    Sanitize text by removing characters that break downstream systems.
+
+    Removes:
+    - ASCII control characters (0x00-0x08, 0x0B-0x0C, 0x0E-0x1F, 0x7F): break
+      json.loads and PostgreSQL UTF-8 encoding; tab (0x09), newline (0x0A), and
+      carriage return (0x0D) are preserved as they are valid in text and JSON.
+    - Unicode surrogates (U+D800-U+DFFF): Invalid in UTF-8, break LLM APIs
+
+    Surrogate characters are used in UTF-16 encoding but cannot be encoded
+    in UTF-8. They can appear in Python strings from improperly decoded data
+    (e.g., from JavaScript or broken files). Control characters commonly appear
+    in LLM output embedded inside JSON string values.
+    """
+    if text is None:
+        return None
+    if not text:
+        return text
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ud800-\udfff]", "", text)
+
+
 class OutputTooLongError(Exception):
     """
     Bridge exception raised when LLM output exceeds token limits.

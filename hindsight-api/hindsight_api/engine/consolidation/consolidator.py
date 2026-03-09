@@ -24,9 +24,10 @@ from datetime import datetime, timezone
 from itertools import combinations
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from ...config import get_config
+from ..llm_wrapper import sanitize_llm_output
 from ..memory_engine import fq_table
 from ..retain import embedding_utils
 from .prompts import build_batch_consolidation_prompt
@@ -45,11 +46,21 @@ class _CreateAction(BaseModel):
     text: str
     source_fact_ids: list[str]  # memory UUIDs from the NEW FACTS list
 
+    @field_validator("text", mode="before")
+    @classmethod
+    def sanitize_text(cls, v: str) -> str:
+        return sanitize_llm_output(v) or ""
+
 
 class _UpdateAction(BaseModel):
     text: str
     observation_id: str  # UUID of the existing observation to update
     source_fact_ids: list[str]  # memory UUIDs from the NEW FACTS list
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def sanitize_text(cls, v: str) -> str:
+        return sanitize_llm_output(v) or ""
 
 
 class _DeleteAction(BaseModel):

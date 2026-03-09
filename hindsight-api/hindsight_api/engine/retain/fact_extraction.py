@@ -15,7 +15,7 @@ from typing import Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from ...config import get_config
-from ..llm_wrapper import LLMConfig, OutputTooLongError
+from ..llm_wrapper import LLMConfig, OutputTooLongError, sanitize_llm_output
 from ..response_models import TokenUsage
 from .entity_labels import (
     EntityLabelsConfig,
@@ -66,25 +66,7 @@ def _infer_temporal_date(fact_text: str, event_date: datetime | None) -> str | N
 
 
 def _sanitize_text(text: str | None) -> str | None:
-    """
-    Sanitize text by removing characters that break downstream systems.
-
-    Removes:
-    - Null bytes (\\x00): Invalid in PostgreSQL UTF-8 encoding
-    - Unicode surrogates (U+D800-U+DFFF): Invalid in UTF-8, break LLM APIs
-
-    Surrogate characters are used in UTF-16 encoding but cannot be encoded
-    in UTF-8. They can appear in Python strings from improperly decoded data
-    (e.g., from JavaScript or broken files). Null bytes commonly appear in
-    OCR output, PDF extraction, or copy-paste from binary sources.
-    """
-    if text is None:
-        return None
-    if not text:
-        return text
-    # Remove null bytes and surrogate characters
-    text = text.replace("\x00", "")
-    return re.sub(r"[\ud800-\udfff]", "", text)
+    return sanitize_llm_output(text)
 
 
 class Entity(BaseModel):

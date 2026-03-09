@@ -459,10 +459,12 @@ class EntityResolver:
             entity_dates = [g.event_date for _, g in sorted_groups]
 
             # INSERT ... ON CONFLICT DO NOTHING — no row lock on already-existing entities.
+            # mention_count starts at 0 here; flush_pending_stats() is the sole source of
+            # truth for mention counting (one stat per original mention in the batch).
             inserted_rows = await conn.fetch(
                 f"""
                 INSERT INTO {fq_table("entities")} (bank_id, canonical_name, first_seen, last_seen, mention_count)
-                SELECT $1, name, COALESCE(event_date, now()), COALESCE(event_date, now()), 1
+                SELECT $1, name, COALESCE(event_date, now()), COALESCE(event_date, now()), 0
                 FROM unnest($2::text[], $3::timestamptz[]) AS t(name, event_date)
                 ON CONFLICT (bank_id, LOWER(canonical_name))
                 DO NOTHING
@@ -489,13 +491,15 @@ class EntityResolver:
                 for row in existing_rows:
                     id_by_name[row["name_lower"]] = row["id"]
 
-            # Assign entity IDs back and queue for post-txn stats flush.
+            # Assign entity IDs back and queue one stat per original mention so that
+            # flush_pending_stats() increments mention_count by the true mention count,
+            # not just 1 per unique name.
             for name_lower, g in sorted_groups:
                 entity_id = id_by_name.get(name_lower)
                 if entity_id:
                     for original_idx in g.indices:
                         entity_ids[original_idx] = entity_id
-                    pending.append(_EntityStat(entity_id=entity_id, event_date=g.event_date))
+                        pending.append(_EntityStat(entity_id=entity_id, event_date=g.event_date))
 
         # Accumulate into the resolver's pending list; the orchestrator flushes
         # these with await entity_resolver.flush_pending_stats() after the txn.

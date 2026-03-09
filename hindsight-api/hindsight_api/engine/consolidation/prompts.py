@@ -29,7 +29,7 @@ Compare the facts against existing observations:
 - Same topic as an existing observation → UPDATE it (observation_id + source_fact_ids)
 - New topic with durable knowledge → CREATE a new observation (source_fact_ids)
 - Cross-reference facts within the batch: a later fact may resolve a vague reference in an earlier one
-- Purely ephemeral facts → omit them (no create/update needed)"""
+- Purely ephemeral facts → omit them unless the MISSION above explicitly targets such data (e.g. timestamped events, session state, screen content)"""
 
 # Output format — JSON braces escaped as {{ }} so .format() leaves them literal
 _BATCH_OUTPUT_FORMAT = """
