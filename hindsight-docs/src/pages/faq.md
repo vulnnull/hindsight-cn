@@ -238,6 +238,50 @@ Metadata is not a filter — use tags when you need recall to be scoped to a sub
 
 ---
 
+### What is the recommended format for retaining conversations?
+
+Pass the **entire conversation as a single document** and upsert it as the conversation grows — Hindsight chunks it automatically, so you don't need to split it yourself.
+
+**Preferred format: JSON array**
+
+```json
+[
+  {"role": "user",      "content": "I moved to Berlin last month."},
+  {"role": "assistant", "content": "How are you finding it?"},
+  {"role": "user",      "content": "Love it, especially the food scene."}
+]
+```
+
+Hindsight has internal chunking optimizations for the JSON array format, since it's the most common conversation shape.
+
+**Alternative: prefixed plain text**
+
+```
+[2025-06-01T10:32:00Z] user: I moved to Berlin last month.
+[2025-06-01T10:32:05Z] assistant: How are you finding it?
+[2025-06-01T10:32:20Z] user: Love it, especially the food scene.
+```
+
+Adding a username and timestamp prefix to each message improves extraction quality — the LLM uses those signals to attribute facts correctly and reason about timing.
+
+**Use a stable document ID to upsert:**
+
+```python
+await client.retain(
+    bank_id="my-bank",
+    documents=[{
+        "id": "chat-session-abc123",  # stable ID enables upsert
+        "content": conversation,       # full conversation so far
+    }]
+)
+```
+
+Re-retaining with the same `id` replaces the old document and its facts, so you won't accumulate duplicates as the conversation grows.
+
+**Don't pre-summarize or pre-extract facts.** Hindsight does this automatically and needs the full conversation for context — a message like "yes, exactly" or "I'll go with option 2" is meaningless without the surrounding exchange.
+
+---
+
 ## Still have questions?
 
 Join our [Slack community](https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg) or report issues on [GitHub](https://github.com/vectorize-io/hindsight/issues).
