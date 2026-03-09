@@ -522,6 +522,19 @@ class OpenAICompatibleLLM(LLMInterface):
         """
         start_time = time.time()
 
+        # Normalize named tool_choice dicts to "required" + filter tools.
+        # Some providers (e.g. LM Studio, Ollama) reject the OpenAI named format
+        # {"type": "function", "function": {"name": "..."}}.  The semantics are
+        # identical to tool_choice="required" with the tools list restricted to
+        # just the requested tool, so we apply that transformation universally.
+        if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+            forced_name = tool_choice.get("function", {}).get("name")
+            if forced_name:
+                filtered = [t for t in tools if t.get("function", {}).get("name") == forced_name]
+                if filtered:
+                    tools = filtered
+                tool_choice = "required"
+
         # Build call parameters
         call_params: dict[str, Any] = {
             "model": self.model,
