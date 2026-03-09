@@ -62,7 +62,7 @@ class IrisParser(FileParser):
         """
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=120.0)) as client:
             # Step 1: Request a presigned upload URL
             init_resp = await client.post(
                 f"{_IRIS_BASE_URL}/org/{self._org_id}/files",
