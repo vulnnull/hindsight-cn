@@ -88,6 +88,33 @@ Response:
 | `completed` | Operation finished successfully |
 | `failed` | Operation failed (check `error_message` for details) |
 
+## Managing Operations
+
+### Cancel a pending operation
+
+```bash
+curl -X DELETE "http://localhost:8000/v1/default/banks/my-bank/operations/550e8400-e29b-41d4-a716-446655440000"
+```
+
+### Retry a failed operation
+
+If an operation fails, you can manually re-queue it for execution:
+
+```bash
+curl -X POST "http://localhost:8000/v1/default/banks/my-bank/operations/550e8400-e29b-41d4-a716-446655440000/retry"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Operation 550e8400-e29b-41d4-a716-446655440000 queued for retry",
+  "operation_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+The operation status resets to `pending` and the worker picks it up again. Returns `409` if the operation is not in `failed` state.
+
 ## Next Steps
 
 - [**Documents**](./documents) — Track document sources

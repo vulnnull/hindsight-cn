@@ -179,6 +179,54 @@ console.log(`Created: ${doc.created_at}`);
 hindsight document get my-bank meeting-2024-03-15
 ```
 
+## Update Document
+
+Update mutable fields on an existing document without re-processing the content. Currently supports updating `tags`.
+
+### Python
+
+```python
+# Original
+client.retain(
+    bank_id="my-bank",
+    content="Project deadline: March 31",
+    document_id="project-plan"
+)
+
+# Update (deletes old facts, creates new ones)
+client.retain(
+    bank_id="my-bank",
+    content="Project deadline: April 15 (extended)",
+    document_id="project-plan"
+)
+```
+
+### Node.js
+
+```javascript
+// Original
+await client.retain('my-bank', 'Project deadline: March 31', {
+    document_id: 'project-plan'
+});
+
+// Update
+await client.retain('my-bank', 'Project deadline: April 15 (extended)', {
+    document_id: 'project-plan'
+});
+```
+
+### CLI
+
+```bash
+# Replace tags with new values
+hindsight document update-tags my-bank meeting-2024-03-15 --tags team-a --tags team-b
+
+# Remove all tags
+hindsight document update-tags my-bank meeting-2024-03-15
+```
+
+:::info Observations are re-consolidated
+When tags change, any consolidated observations derived from the document's memories are invalidated and queued for re-consolidation under the new tags. Co-source memories from other documents that shared those observations are also reset.
 ## Delete Document
 
 Remove a document and all its associated memories:

@@ -71,6 +71,12 @@ Controls how aggressively facts are extracted:
 
 Only active when `retain_extraction_mode` is `custom`. Replaces the built-in extraction rules entirely with your own instructions.
 
+### retain_chunk_size
+
+Maximum number of characters per chunk when splitting content for fact extraction. Larger chunks mean fewer LLM calls but may reduce extraction quality on long inputs; smaller chunks improve granularity at the cost of more calls.
+
+Default: `3000`
+
 See [Retain configuration](/developer/configuration#retain) for environment variable names and defaults.
 
 ### entity_labels {#entity-labels}
@@ -154,9 +160,21 @@ e.g. Observations are stable facts about people and projects.
      Ignore one-off events and ephemeral state.
 ```
 
+### consolidation_llm_batch_size
+
+Number of facts sent to the LLM in a single consolidation call. Higher values reduce LLM calls and improve throughput at the cost of larger prompts. Set to `1` to disable batching. Leave unset to use the server default (`8`).
+
+### consolidation_source_facts_max_tokens
+
+Total token budget for source facts included with observations in the consolidation prompt. Source facts give the LLM evidence to compare new facts against existing observations. `-1` = unlimited. Leave unset to use the server default (`-1`).
+
+### consolidation_source_facts_max_tokens_per_observation
+
+Per-observation token cap for source facts in the consolidation prompt. Each observation independently gets at most this many tokens of source facts, preventing a single observation with many source facts from consuming the entire budget. `-1` = unlimited. Leave unset to use the server default (`256`).
+
 See [Observations configuration](/developer/configuration#observations) for environment variable names and defaults.
 
-### mission
+### reflect_mission
 
 A first-person narrative that provides identity and framing context for `reflect`. The agent uses this to ground its reasoning and apply a consistent perspective.
 
@@ -223,7 +241,30 @@ How much to weight emotional context when reasoning during `reflect`. Scale 1–
 | `5` | Empathetic — considers emotional context |
 
 :::info
-Disposition traits and `mission` only affect the `reflect` operation. `retain_mission` and `observations_mission` are separate per-operation settings.
+Disposition traits and `reflect_mission` only affect the `reflect` operation. `retain_mission` and `observations_mission` are separate per-operation settings.
+### mcp_enabled_tools
+
+An allowlist of MCP tool names that are enabled for this bank. When set, only the listed tools can be invoked; any tool not in the list returns an error (tools still appear in the MCP tools list for protocol compatibility). Set to `null` (or omit) to allow all tools.
+
+```json
+["recall", "reflect"]
+```
+
+Available tool names: `retain`, `recall`, `reflect`, `list_banks`, `create_bank`, `list_mental_models`, `get_mental_model`, `create_mental_model`, `update_mental_model`, `delete_mental_model`, `refresh_mental_model`, `list_directives`, `create_directive`, `delete_directive`, `list_memories`, `get_memory`, `delete_memory`, `list_documents`, `get_document`, `delete_document`, `list_operations`, `get_operation`, `cancel_operation`, `list_tags`, `get_bank`, `get_bank_stats`, `update_bank`, `delete_bank`, `clear_memories`.
+
+### llm_gemini_safety_settings
+
+Controls content filtering thresholds for Gemini and VertexAI providers. Accepts a list of safety setting objects in the [Google AI safety settings format](https://ai.google.dev/api/generate-content#v1beta.SafetySetting). When `null` (default), Gemini's built-in safety defaults are used.
+
+```json
+[
+  {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+  {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"}
+]
+```
+
+Only applies when `HINDSIGHT_API_LLM_PROVIDER` is `gemini` or `vertexai`.
+
 ---
 
 ## Updating Configuration

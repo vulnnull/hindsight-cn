@@ -107,6 +107,34 @@ hindsight document get my-bank meeting-2024-03-15
 </TabItem>
 </Tabs>
 
+## Update Document
+
+Update mutable fields on an existing document without re-processing the content. Currently supports updating `tags`.
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={documentsPy} section="document-update" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={documentsMjs} section="document-update" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+# Replace tags with new values
+hindsight document update-tags my-bank meeting-2024-03-15 --tags team-a --tags team-b
+
+# Remove all tags
+hindsight document update-tags my-bank meeting-2024-03-15
+```
+
+</TabItem>
+</Tabs>
+
+:::info Observations are re-consolidated
+When tags change, any consolidated observations derived from the document's memories are invalidated and queued for re-consolidation under the new tags. Co-source memories from other documents that shared those observations are also reset.
+:::
+
 ## Delete Document
 
 Remove a document and all its associated memories:
