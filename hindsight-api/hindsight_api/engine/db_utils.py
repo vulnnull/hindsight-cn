@@ -58,10 +58,16 @@ async def retry_with_backoff(
             last_exception = e
             if attempt < max_retries:
                 delay = min(base_delay * (2**attempt), max_delay)
-                logger.warning(
-                    f"Database operation failed (attempt {attempt + 1}/{max_retries + 1}): {e}. "
-                    f"Retrying in {delay:.1f}s..."
-                )
+                if isinstance(e, asyncpg.exceptions.DeadlockDetectedError):
+                    logger.warning(
+                        f"Deadlock detected during parallel document processing — this is expected and will resolve automatically "
+                        f"(attempt {attempt + 1}/{max_retries + 1}, retrying in {delay:.1f}s)"
+                    )
+                else:
+                    logger.warning(
+                        f"Database operation failed (attempt {attempt + 1}/{max_retries + 1}): {e}. "
+                        f"Retrying in {delay:.1f}s..."
+                    )
                 await asyncio.sleep(delay)
             else:
                 logger.error(f"Database operation failed after {max_retries + 1} attempts: {e}")
