@@ -1,6 +1,6 @@
 ---
 title: "The Memory Upgrade Every OpenClaw User Needs"
-authors: [hindsight]
+authors: [benfrank241]
 date: 2026-03-06
 tags: [openclaw]
 image: /img/blog/adding-memory-to-openclaw-with-hindsight.png

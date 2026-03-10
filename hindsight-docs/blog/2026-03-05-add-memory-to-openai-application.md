@@ -1,6 +1,6 @@
 ---
 title: "Give Your OpenAI App a Memory in 5 Minutes"
-authors: [hindsight]
+authors: [benfrank241]
 date: 2026-03-05
 tags: [memory, openai, python, docker, rag, llm, vector, embedding]
 image: /img/blog/add-memory-to-openai-application.png

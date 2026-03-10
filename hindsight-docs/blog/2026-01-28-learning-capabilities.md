@@ -1,7 +1,7 @@
 ---
 slug: learning-capabilities
 title: "Agent memory that learns: observations and mental models"
-authors: [hindsight]
+authors: [nicoloboschi]
 image: /img/reflect-operation.webp
 hide_table_of_contents: true
 ---
