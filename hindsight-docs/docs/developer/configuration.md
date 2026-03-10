@@ -52,8 +52,10 @@ For high-concurrency workloads, increase `DB_POOL_MAX_SIZE`. Each concurrent rec
 To run migrations manually (e.g., before starting the API), use the admin CLI:
 
 ```bash
+# Migrate the base schema plus all discovered tenant schemas
 hindsight-admin run-db-migration
-# Or for a specific schema:
+
+# Or migrate a specific schema only:
 hindsight-admin run-db-migration --schema tenant_acme
 ```
 

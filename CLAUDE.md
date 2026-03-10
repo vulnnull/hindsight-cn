@@ -154,7 +154,7 @@ Key tables: `banks`, `memory_units`, `documents`, `entities`, `entity_links`
 
 3. **Run migrations locally**:
    ```bash
-   # Set database URL and run migrations
+   # Set database URL and run migrations for the base schema plus all tenants
    uv run hindsight-admin run-db-migration
 
    # Run on a specific tenant schema

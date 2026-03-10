@@ -16,7 +16,7 @@ uv add hindsight-api
 
 ### run-db-migration
 
-Run database migrations to the latest version. This is useful when you want to run migrations separately from API startup (e.g., in CI/CD pipelines or before deploying a new version).
+Run database migrations to the latest version. By default this migrates the base schema plus all tenant schemas discovered by the tenant extension. Use `--schema` for targeted migration of one schema. This is useful when you want to run migrations separately from API startup (e.g., in CI/CD pipelines or before deploying a new version).
 
 ```bash
 hindsight-admin run-db-migration [OPTIONS]
@@ -26,12 +26,12 @@ hindsight-admin run-db-migration [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--schema`, `-s` | Database schema to run migrations on | `public` |
+| `--schema`, `-s` | Database schema to run migrations on. If omitted, migrate the base schema plus all discovered tenant schemas. | All schemas |
 
 **Examples:**
 
 ```bash
-# Run migrations on the default public schema
+# Run migrations on the base schema plus all discovered tenant schemas
 hindsight-admin run-db-migration
 
 # Run migrations on a specific tenant schema
@@ -189,4 +189,3 @@ The admin CLI uses the same environment variables as the API service. The most i
 export HINDSIGHT_API_DATABASE_URL=postgresql://user:pass@localhost:5432/hindsight
 hindsight-admin backup /backups/mybackup.zip
 ```
-
