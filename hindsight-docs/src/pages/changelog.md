@@ -8,6 +8,35 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.4.17](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.17)
+
+**Features**
+
+- Added a manual retry option for failed asynchronous operations. ([`dcaacbe4`](https://github.com/vectorize-io/hindsight/commit/dcaacbe4))
+- You can now change/update tags on an existing document. ([`1b4ad7f4`](https://github.com/vectorize-io/hindsight/commit/1b4ad7f4))
+- Added history tracking and a diff view for mental model changes. ([`e2baca8b`](https://github.com/vectorize-io/hindsight/commit/e2baca8b))
+- Added observation history tracking with a UI diff view to review changes over time. ([`576473b6`](https://github.com/vectorize-io/hindsight/commit/576473b6))
+- File uploads can now choose a parser per request, with configurable fallback chains. ([`99220d05`](https://github.com/vectorize-io/hindsight/commit/99220d05))
+- Added an extension hook that runs after file-to-Markdown conversion completes. ([`1d17dea2`](https://github.com/vectorize-io/hindsight/commit/1d17dea2))
+
+**Improvements**
+
+- Operations view now supports filtering by operation type and has more reliable auto-refresh behavior. ([`f7a60f89`](https://github.com/vectorize-io/hindsight/commit/f7a60f89))
+- Added token limits for “source facts” used during consolidation and recall to better control context usage. ([`5d05962d`](https://github.com/vectorize-io/hindsight/commit/5d05962d))
+- Improved bank selector usability by truncating very long bank names in the dropdown. ([`1e40cd22`](https://github.com/vectorize-io/hindsight/commit/1e40cd22))
+
+**Bug Fixes**
+
+- Fixed webhook schema issues affecting multi-tenant retain webhooks. ([`32a4882a`](https://github.com/vectorize-io/hindsight/commit/32a4882a))
+- Fixed file ingestion failures by stripping null bytes from parsed file content before retaining. ([`cd3a6a22`](https://github.com/vectorize-io/hindsight/commit/cd3a6a22))
+- Fixed tool selection handling for OpenAI-compatible providers when using named tool_choice. ([`1cdfb7c2`](https://github.com/vectorize-io/hindsight/commit/1cdfb7c2))
+- Improved consolidation behavior to prioritize a bank’s mission over an ephemeral-state heuristic. ([`00ccf0b2`](https://github.com/vectorize-io/hindsight/commit/00ccf0b2))
+- Fixed database migrations to correctly handle mental model embedding dimension changes. ([`7accac94`](https://github.com/vectorize-io/hindsight/commit/7accac94))
+- Fixed file upload failures caused by an Iris parser httpx read timeout. ([`fa3501d4`](https://github.com/vectorize-io/hindsight/commit/fa3501d4))
+- Improved reliability of running migrations by serializing Alembic upgrades within the process. ([`f88b50a4`](https://github.com/vectorize-io/hindsight/commit/f88b50a4))
+- Fixed Google Cloud Storage authentication when using Workload Identity Federation credentials. ([`d2504ac5`](https://github.com/vectorize-io/hindsight/commit/d2504ac5))
+- Fixed the bank selector to refresh the bank list when the dropdown is opened. ([`0ad8c2d0`](https://github.com/vectorize-io/hindsight/commit/0ad8c2d0))
+
 ## [0.4.16](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.16)
 
 **Features**
