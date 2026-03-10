@@ -7118,6 +7118,64 @@ class MemoryEngine(MemoryEngineInterface):
                 "bank_id": bank_id,
             }
 
+    async def retry_operation(
+        self,
+        bank_id: str,
+        operation_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """Re-queue a failed async operation."""
+        await self._authenticate_tenant(request_context)
+        from hindsight_api.extensions import OperationValidationError
+
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="retry_operation", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+        pool = await self._get_pool()
+
+        op_uuid = uuid.UUID(operation_id)
+
+        async with acquire_with_retry(pool) as conn:
+            row = await conn.fetchrow(
+                f"SELECT bank_id, status FROM {fq_table('async_operations')} WHERE operation_id = $1 AND bank_id = $2",
+                op_uuid,
+                bank_id,
+            )
+
+            if not row:
+                raise ValueError(f"Operation {operation_id} not found for bank {bank_id}")
+
+            if row["status"] != "failed":
+                raise OperationValidationError(
+                    f"Operation {operation_id} cannot be retried: status is '{row['status']}', expected 'failed'",
+                    409,
+                )
+
+            await conn.execute(
+                f"""
+                UPDATE {fq_table("async_operations")}
+                SET status = 'pending',
+                    error_message = NULL,
+                    completed_at = NULL,
+                    next_retry_at = NULL,
+                    worker_id = NULL,
+                    claimed_at = NULL,
+                    retry_count = 0,
+                    updated_at = NOW()
+                WHERE operation_id = $1
+                """,
+                op_uuid,
+            )
+
+            return {
+                "success": True,
+                "message": f"Operation {operation_id} queued for retry",
+                "operation_id": operation_id,
+            }
+
     async def update_bank(
         self,
         bank_id: str,

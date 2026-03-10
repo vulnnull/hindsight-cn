@@ -1771,6 +1771,51 @@ paths:
       summary: Get operation status
       tags:
       - Operations
+  /v1/default/banks/{bank_id}/operations/{operation_id}/retry:
+    post:
+      description: Re-queue a failed async operation so the worker picks it up again
+      operationId: retry_operation
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: operation_id
+        required: true
+        schema:
+          title: Operation Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetryOperationResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Retry a failed async operation
+      tags:
+      - Operations
   /v1/default/banks/{bank_id}/profile:
     get:
       deprecated: true
@@ -4748,6 +4793,27 @@ components:
       - items_count
       - success
       title: RetainResponse
+    RetryOperationResponse:
+      description: Response model for retry operation endpoint.
+      example:
+        message: Operation 550e8400-e29b-41d4-a716-446655440000 queued for retry
+        operation_id: 550e8400-e29b-41d4-a716-446655440000
+        success: true
+      properties:
+        success:
+          title: Success
+          type: boolean
+        message:
+          title: Message
+          type: string
+        operation_id:
+          title: Operation Id
+          type: string
+      required:
+      - message
+      - operation_id
+      - success
+      title: RetryOperationResponse
     SourceFactsIncludeOptions:
       description: Options for including source facts for observation-type results.
       properties:

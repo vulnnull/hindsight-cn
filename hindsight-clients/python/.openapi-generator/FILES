@@ -81,6 +81,7 @@ hindsight_client_api/models/reflect_tool_call.py
 hindsight_client_api/models/reflect_trace.py
 hindsight_client_api/models/retain_request.py
 hindsight_client_api/models/retain_response.py
+hindsight_client_api/models/retry_operation_response.py
 hindsight_client_api/models/source_facts_include_options.py
 hindsight_client_api/models/tag_item.py
 hindsight_client_api/models/timestamp.py

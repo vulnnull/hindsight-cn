@@ -146,6 +146,9 @@ import type {
   RetainMemoriesData,
   RetainMemoriesErrors,
   RetainMemoriesResponses,
+  RetryOperationData,
+  RetryOperationErrors,
+  RetryOperationResponses,
   TriggerConsolidationData,
   TriggerConsolidationErrors,
   TriggerConsolidationResponses,
@@ -780,6 +783,23 @@ export const getOperationStatus = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/v1/default/banks/{bank_id}/operations/{operation_id}",
+    ...options,
+  });
+
+/**
+ * Retry a failed async operation
+ *
+ * Re-queue a failed async operation so the worker picks it up again
+ */
+export const retryOperation = <ThrowOnError extends boolean = false>(
+  options: Options<RetryOperationData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    RetryOperationResponses,
+    RetryOperationErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/operations/{operation_id}/retry",
     ...options,
   });
 

@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RefreshCw, Clock, AlertCircle, CheckCircle, Loader2, X } from "lucide-react";
+import { RefreshCw, Clock, AlertCircle, CheckCircle, Loader2, X, RotateCcw } from "lucide-react";
 
 interface Operation {
   id: string;
@@ -96,6 +96,7 @@ export function BankOperationsView() {
   const [limit] = useState(10);
   const [offset, setOffset] = useState(0);
   const [cancellingOpId, setCancellingOpId] = useState<string | null>(null);
+  const [retryingOpId, setRetryingOpId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedOperation, setSelectedOperation] = useState<OperationDetails | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -156,6 +157,20 @@ export function BankOperationsView() {
       // Error toast is shown automatically by the API client interceptor
     } finally {
       setCancellingOpId(null);
+    }
+  };
+
+  const handleRetryOperation = async (operationId: string) => {
+    if (!currentBank) return;
+
+    setRetryingOpId(operationId);
+    try {
+      await client.retryOperation(currentBank, operationId);
+      await loadOperations();
+    } catch (error) {
+      // Error toast is shown automatically by the API client interceptor
+    } finally {
+      setRetryingOpId(null);
     }
   };
 
@@ -322,6 +337,25 @@ export function BankOperationsView() {
                               <X className="w-3 h-3 mr-1" />
                             )}
                             {cancellingOpId === op.id ? "" : "Cancel"}
+                          </Button>
+                        )}
+                        {op.status === "failed" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRetryOperation(op.id);
+                            }}
+                            disabled={retryingOpId === op.id}
+                          >
+                            {retryingOpId === op.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <RotateCcw className="w-3 h-3 mr-1" />
+                            )}
+                            {retryingOpId === op.id ? "" : "Retry"}
                           </Button>
                         )}
                       </TableCell>

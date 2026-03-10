@@ -287,6 +287,19 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Retry a failed operation
+   */
+  async retryOperation(bankId: string, operationId: string) {
+    return this.fetchApi<{
+      success: boolean;
+      message: string;
+      operation_id: string;
+    }>(`/api/banks/${bankId}/operations/${operationId}`, {
+      method: "POST",
+    });
+  }
+
+  /**
    * List entities
    */
   async listEntities(params: { bank_id: string; limit?: number; offset?: number }) {

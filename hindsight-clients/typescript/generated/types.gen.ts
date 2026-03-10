@@ -1952,6 +1952,26 @@ export type RetainResponse = {
 };
 
 /**
+ * RetryOperationResponse
+ *
+ * Response model for retry operation endpoint.
+ */
+export type RetryOperationResponse = {
+  /**
+   * Success
+   */
+  success: boolean;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Operation Id
+   */
+  operation_id: string;
+};
+
+/**
  * SourceFactsIncludeOptions
  *
  * Options for including source facts for observation-type results.
@@ -3840,6 +3860,48 @@ export type GetOperationStatusResponses = {
 
 export type GetOperationStatusResponse =
   GetOperationStatusResponses[keyof GetOperationStatusResponses];
+
+export type RetryOperationData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Operation Id
+     */
+    operation_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/operations/{operation_id}/retry";
+};
+
+export type RetryOperationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type RetryOperationError =
+  RetryOperationErrors[keyof RetryOperationErrors];
+
+export type RetryOperationResponses = {
+  /**
+   * Successful Response
+   */
+  200: RetryOperationResponse;
+};
+
+export type RetryOperationResponse2 =
+  RetryOperationResponses[keyof RetryOperationResponses];
 
 export type GetBankProfileData = {
   body?: never;
