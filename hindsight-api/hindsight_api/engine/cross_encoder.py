@@ -1050,6 +1050,97 @@ class LiteLLMSDKCrossEncoder(CrossEncoderModel):
         return all_scores
 
 
+class JinaMLXCrossEncoder(CrossEncoderModel):
+    """
+    Jina Reranker v3 MLX implementation for Apple Silicon.
+
+    Uses jinaai/jina-reranker-v3-mlx — a 0.6B parameter multilingual listwise reranker
+    optimized for Apple Silicon via the MLX framework. No transformers/PyTorch dependency.
+
+    The model is downloaded automatically from HuggingFace Hub on first use.
+    Requires: mlx>=0.31.0, mlx-lm>=0.31.1, safetensors>=0.6.2
+    """
+
+    HF_REPO_ID = "jinaai/jina-reranker-v3-mlx"
+
+    def __init__(self, model_path: str | None = None):
+        """
+        Args:
+            model_path: Local path to the downloaded model directory.
+                        If None, the model is downloaded from HuggingFace Hub.
+        """
+        self.model_path = model_path
+        self._reranker = None
+
+    @property
+    def provider_name(self) -> str:
+        return "jina-mlx"
+
+    async def initialize(self) -> None:
+        if self._reranker is not None:
+            return
+
+        try:
+            import mlx.core  # noqa: F401
+            import mlx_lm  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "mlx and mlx-lm are required for JinaMLXCrossEncoder. "
+                "Install with: pip install mlx>=0.31.0 mlx-lm>=0.31.1 safetensors>=0.6.2"
+            )
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._load_model)
+
+    def _load_model(self) -> None:
+        """Download (if needed) and load the MLX reranker. Runs in a thread."""
+        import os
+
+        from huggingface_hub import snapshot_download
+
+        from .jina_mlx_reranker import MLXReranker
+
+        model_path = self.model_path
+        if model_path is None:
+            logger.info(f"Reranker: downloading {self.HF_REPO_ID} from HuggingFace Hub...")
+            model_path = snapshot_download(repo_id=self.HF_REPO_ID)
+
+        logger.info(f"Reranker: loading jina-reranker-v3-mlx from {model_path}")
+        self._reranker = MLXReranker(
+            model_path=model_path,
+            projector_path=os.path.join(model_path, "projector.safetensors"),
+        )
+        logger.info("Reranker: jina-mlx provider initialized")
+
+    def _predict_sync(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """Score pairs grouped by query. Runs in a thread."""
+        if not pairs:
+            return []
+
+        query_groups: dict[str, list[tuple[int, str]]] = {}
+        for idx, (query, doc) in enumerate(pairs):
+            query_groups.setdefault(query, []).append((idx, doc))
+
+        all_scores = [0.0] * len(pairs)
+
+        for query, indexed_docs in query_groups.items():
+            docs = [doc for _, doc in indexed_docs]
+            indices = [idx for idx, _ in indexed_docs]
+            results = self._reranker.rerank(query, docs)
+            for result in results:
+                original_idx = result["index"]
+                all_scores[indices[original_idx]] = result["relevance_score"]
+
+        return all_scores
+
+    async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+        if self._reranker is None:
+            raise RuntimeError("Reranker not initialized. Call initialize() first.")
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._predict_sync, pairs)
+
+
 def create_cross_encoder_from_env() -> CrossEncoderModel:
     """
     Create a CrossEncoderModel instance based on configuration.
@@ -1122,7 +1213,9 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
         )
     elif provider == "rrf":
         return RRFPassthroughCrossEncoder()
+    elif provider == "jina-mlx":
+        return JinaMLXCrossEncoder()
     else:
         raise ValueError(
-            f"Unknown reranker provider: {provider}. Supported: 'local', 'tei', 'cohere', 'zeroentropy', 'flashrank', 'litellm', 'litellm-sdk', 'rrf'"
+            f"Unknown reranker provider: {provider}. Supported: 'local', 'tei', 'cohere', 'zeroentropy', 'flashrank', 'litellm', 'litellm-sdk', 'rrf', 'jina-mlx'"
         )

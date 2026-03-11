@@ -63,6 +63,9 @@ dependencies = [
     "aiohttp>=3.13.3", # Multiple DoS vulnerabilities
     "claude-agent-sdk>=0.1.27",
     "einops>=0.8.2",
+    "mlx>=0.31.0",
+    "mlx-lm>=0.31.1",
+    "safetensors>=0.6.2",
 ]
 
 [project.optional-dependencies]
