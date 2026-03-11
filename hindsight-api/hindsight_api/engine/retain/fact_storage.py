@@ -6,9 +6,11 @@ Handles insertion of facts into the database.
 
 import json
 import logging
+import uuid
 
 from ...config import get_config
 from ..memory_engine import fq_table
+from .bank_utils import DEFAULT_DISPOSITION, create_bank_hnsw_indexes
 from .fact_extraction import _sanitize_text
 from .types import ProcessedFact
 
@@ -183,17 +185,24 @@ async def ensure_bank_exists(conn, bank_id: str) -> None:
         conn: Database connection
         bank_id: Bank identifier
     """
-    await conn.execute(
+    # Generate internal_id here so we control the value and can use it
+    # immediately for HNSW index creation without a RETURNING round-trip.
+    internal_id = uuid.uuid4()
+    inserted = await conn.fetchval(
         f"""
-        INSERT INTO {fq_table("banks")} (bank_id, disposition, mission)
-        VALUES ($1, $2::jsonb, $3)
-        ON CONFLICT (bank_id) DO UPDATE
-        SET updated_at = NOW()
+        INSERT INTO {fq_table("banks")} (bank_id, disposition, mission, internal_id)
+        VALUES ($1, $2::jsonb, $3, $4)
+        ON CONFLICT (bank_id) DO NOTHING
+        RETURNING bank_id
         """,
         bank_id,
-        '{"skepticism": 3, "literalism": 3, "empathy": 3}',
+        json.dumps(DEFAULT_DISPOSITION),
         "",
+        internal_id,
     )
+    if inserted:
+        # Fresh insert — create per-bank HNSW indexes
+        await create_bank_hnsw_indexes(conn, bank_id, str(internal_id))
 
 
 async def handle_document_tracking(

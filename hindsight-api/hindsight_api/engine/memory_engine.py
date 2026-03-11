@@ -1634,6 +1634,15 @@ class MemoryEngine(MemoryEngineInterface):
         # Create connection pool
         # For read-heavy workloads with many parallel think/search operations,
         # we need a larger pool. Read operations don't need strong isolation.
+        async def _init_connection(conn: asyncpg.Connection) -> None:
+            # SET (not SET LOCAL) so it persists for the connection lifetime.
+            # ef_search=200 improves HNSW recall quality for the per-fact_type
+            # semantic queries in retrieve_semantic_bm25_combined().
+            try:
+                await conn.execute("SET hnsw.ef_search = 200")
+            except Exception:
+                logger.debug("Could not set hnsw.ef_search — extension may not support it")
+
         self._pool = await asyncpg.create_pool(
             self.db_url,
             min_size=self._pool_min_size,
@@ -1641,6 +1650,7 @@ class MemoryEngine(MemoryEngineInterface):
             command_timeout=self._db_command_timeout,
             statement_cache_size=0,  # Disable prepared statement cache
             timeout=self._db_acquire_timeout,  # Connection acquisition timeout (seconds)
+            init=_init_connection,
         )
 
         # Initialize entity resolver with pool and configured lookup strategy
@@ -3731,8 +3741,14 @@ class MemoryEngine(MemoryEngineInterface):
                         # Delete entities (cascades to unit_entities, entity_cooccurrences, memory_links with entity_id)
                         await conn.execute(f"DELETE FROM {fq_table('entities')} WHERE bank_id = $1", bank_id)
 
-                        # Delete the bank profile itself
-                        await conn.execute(f"DELETE FROM {fq_table('banks')} WHERE bank_id = $1", bank_id)
+                        # Delete the bank profile and retrieve internal_id for HNSW index cleanup
+                        internal_id = await conn.fetchval(
+                            f"DELETE FROM {fq_table('banks')} WHERE bank_id = $1 RETURNING internal_id", bank_id
+                        )
+
+                        # Drop per-bank HNSW indexes now that the bank row is gone
+                        if internal_id:
+                            await bank_utils.drop_bank_hnsw_indexes(conn, str(internal_id))
 
                         result = {
                             "memory_units_deleted": units_count,

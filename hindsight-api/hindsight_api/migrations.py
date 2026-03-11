@@ -717,6 +717,24 @@ def ensure_vector_extension(
             ).fetchone()
 
             if not current_index_info:
+                # Check whether per-bank partial HNSW indexes already cover this table
+                # (created by the bank_utils lifecycle — no global index needed in that case)
+                per_bank_index_count = conn.execute(
+                    text("""
+                        SELECT COUNT(*)
+                        FROM pg_indexes
+                        WHERE schemaname = :schema
+                          AND tablename = :table_name
+                          AND indexname LIKE 'idx_mu_emb_%'
+                    """),
+                    {"schema": schema_name, "table_name": table_name},
+                ).scalar()
+                if per_bank_index_count and per_bank_index_count > 0:
+                    logger.debug(
+                        f"No global embedding index on {table_name}, but {per_bank_index_count} "
+                        f"per-bank partial HNSW indexes exist — skipping global index creation"
+                    )
+                    continue
                 logger.warning(f"No embedding index found for {table_name}, will create it")
                 mismatched_tables.append((table_name, index_name, None))
                 continue
