@@ -1,6 +1,6 @@
 """Unit tests for async retain tag propagation."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -34,13 +34,14 @@ async def test_submit_async_retain_includes_document_tags_in_task_payload():
     contents = [{"content": "Async retain payload test."}]
     document_tags = ["scope:tools", "user:alice"]
 
-    result = await MemoryEngine.submit_async_retain(
-        engine,
-        bank_id="bank-1",
-        contents=contents,
-        document_tags=document_tags,
-        request_context=request_context,
-    )
+    with patch("hindsight_api.engine.memory_engine.bank_utils.get_bank_profile", new_callable=AsyncMock):
+        result = await MemoryEngine.submit_async_retain(
+            engine,
+            bank_id="bank-1",
+            contents=contents,
+            document_tags=document_tags,
+            request_context=request_context,
+        )
 
     # Check result structure
     assert "operation_id" in result

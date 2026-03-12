@@ -4091,6 +4091,10 @@ def _register_routes(app: FastAPI):
         try:
             pool = await app.state.memory._get_pool()
             from hindsight_api.engine.memory_engine import fq_table
+            from hindsight_api.engine.retain import bank_utils
+
+            # Ensure the bank row exists before inserting into webhooks (FK constraint).
+            await bank_utils.get_bank_profile(pool, bank_id)
 
             webhook_id = uuid.uuid4()
             now = datetime.utcnow().isoformat() + "Z"

@@ -135,6 +135,15 @@ async def webhook_manager(memory: MemoryEngine) -> WebhookManager:
     return WebhookManager(pool=memory._pool, global_webhooks=[])
 
 
+async def _ensure_bank(pool, bank_id: str) -> None:
+    """Upsert a minimal bank row so FK constraints on async_operations/webhooks pass."""
+    await pool.execute(
+        "INSERT INTO banks (bank_id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        bank_id,
+        bank_id,
+    )
+
+
 class TestFireEvent:
     """Integration tests for WebhookManager.fire_event()."""
 
@@ -147,6 +156,7 @@ class TestFireEvent:
         webhook_id = uuid.uuid4()
 
         async with memory._pool.acquire() as conn:
+            await _ensure_bank(memory._pool, bank_id)
             await conn.execute(
                 """
                 INSERT INTO webhooks (id, bank_id, url, secret, event_types, enabled, created_at, updated_at)
@@ -195,6 +205,7 @@ class TestFireEvent:
     ):
         """fire_event() also queues delivery tasks for global webhooks (not stored in DB)."""
         bank_id = f"wh-global-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory._pool, bank_id)
         global_webhook = WebhookConfig(
             id="",  # No DB row
             bank_id=None,
@@ -245,6 +256,7 @@ class TestFireEvent:
         bank_id = f"wh-mismatch-{uuid.uuid4().hex[:8]}"
         webhook_id = uuid.uuid4()
 
+        await _ensure_bank(memory._pool, bank_id)
         async with memory._pool.acquire() as conn:
             await conn.execute(
                 """
@@ -339,6 +351,7 @@ class TestHandleWebhookDelivery:
         operation_id = str(uuid.uuid4())
         bank_id = f"wh-exec-{uuid.uuid4().hex[:8]}"
 
+        await _ensure_bank(memory._pool, bank_id)
         # Insert a real async_operations row so _mark_operation_completed has something to update
         async with memory._pool.acquire() as conn:
             await conn.execute(
@@ -715,6 +728,7 @@ class TestRetainCompletedWebhook:
         bank_id = f"wh-retain-{uuid.uuid4().hex[:8]}"
         webhook_id = uuid.uuid4()
 
+        await _ensure_bank(memory._pool, bank_id)
         async with memory._pool.acquire() as conn:
             await conn.execute(
                 """

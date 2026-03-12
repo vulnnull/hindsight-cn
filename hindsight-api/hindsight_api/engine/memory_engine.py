@@ -820,6 +820,7 @@ class MemoryEngine(MemoryEngineInterface):
             memory_engine=self,
             bank_id=bank_id,
             request_context=internal_context,
+            operation_id=task_dict.get("operation_id"),
         )
 
         logger.info(f"[CONSOLIDATION] bank={bank_id} completed: {result.get('memories_processed', 0)} processed")
@@ -1249,6 +1250,24 @@ class MemoryEngine(MemoryEngineInterface):
         except Exception as e:
             logger.error(f"Failed to delete async operation record {operation_id}: {e}")
 
+    async def _check_op_alive(self, operation_id: str) -> bool:
+        """Return False if the operation row no longer exists (e.g. bank was deleted via CASCADE).
+
+        Long-running operations should call this at natural checkpoints (e.g. after each
+        committed batch) to detect bank deletion early and abort cleanly.
+        """
+        try:
+            pool = await self._get_pool()
+            async with acquire_with_retry(pool) as conn:
+                row = await conn.fetchrow(
+                    f"SELECT operation_id FROM {fq_table('async_operations')} WHERE operation_id = $1",
+                    uuid.UUID(operation_id),
+                )
+                return row is not None
+        except Exception as e:
+            logger.error(f"Failed to check operation liveness {operation_id}: {e}")
+            return True  # Assume alive on DB error to avoid false-positive aborts
+
     async def _mark_operation_failed(self, operation_id: str, error_message: str, error_traceback: str):
         """Helper to mark an operation as failed in the database.
 
@@ -1264,15 +1283,19 @@ class MemoryEngine(MemoryEngineInterface):
             async with acquire_with_retry(pool) as conn:
                 async with conn.transaction():
                     # Mark this operation as failed
-                    await conn.execute(
+                    row = await conn.fetchrow(
                         f"""
                         UPDATE {fq_table("async_operations")}
                         SET status = 'failed', error_message = $2, updated_at = NOW()
                         WHERE operation_id = $1
+                        RETURNING operation_id
                         """,
                         uuid.UUID(operation_id),
                         truncated_error,
                     )
+                    if row is None:
+                        logger.info(f"Operation {operation_id} no longer exists (bank deleted), skipping mark-failed")
+                        return
                     logger.info(f"Marked async operation as failed: {operation_id}")
 
                     # Check if this is a child operation and update parent if all siblings are done
@@ -1292,14 +1315,20 @@ class MemoryEngine(MemoryEngineInterface):
             async with acquire_with_retry(pool) as conn:
                 async with conn.transaction():
                     # Mark this operation as completed
-                    await conn.execute(
+                    row = await conn.fetchrow(
                         f"""
                         UPDATE {fq_table("async_operations")}
                         SET status = 'completed', updated_at = NOW(), completed_at = NOW()
                         WHERE operation_id = $1
+                        RETURNING operation_id
                         """,
                         uuid.UUID(operation_id),
                     )
+                    if row is None:
+                        logger.info(
+                            f"Operation {operation_id} no longer exists (bank deleted), skipping mark-completed"
+                        )
+                        return
                     logger.info(f"Marked async operation as completed: {operation_id}")
 
                     # Check if this is a child operation and update parent if all siblings are done
@@ -1329,14 +1358,20 @@ class MemoryEngine(MemoryEngineInterface):
             pool = await self._get_pool()
             async with acquire_with_retry(pool) as conn:
                 async with conn.transaction():
-                    await conn.execute(
+                    row = await conn.fetchrow(
                         f"""
                         UPDATE {fq_table("async_operations")}
                         SET status = 'completed', updated_at = NOW(), completed_at = NOW()
                         WHERE operation_id = $1
+                        RETURNING operation_id
                         """,
                         uuid.UUID(operation_id),
                     )
+                    if row is None:
+                        logger.info(
+                            f"Operation {operation_id} no longer exists (bank deleted), skipping mark-completed"
+                        )
+                        return
                     logger.info(f"Marked async operation as completed: {operation_id}")
                     await self._maybe_update_parent_operation(operation_id, conn)
 
@@ -2057,6 +2092,15 @@ class MemoryEngine(MemoryEngineInterface):
             # Process each sub-batch
             all_results = []
             for i, sub_batch in enumerate(sub_batches, 1):
+                # Checkpoint: abort if the operation was deleted (bank was deleted) between sub-batches.
+                if operation_id and not await self._check_op_alive(operation_id):
+                    logger.info(
+                        f"[BATCH_RETAIN] bank={bank_id} operation {operation_id} cancelled (bank deleted), stopping after {i - 1}/{len(sub_batches)} sub-batches"
+                    )
+                    if return_usage:
+                        return all_results, total_usage
+                    return all_results
+
                 sub_batch_tokens = sum(count_tokens(item.get("content", "")) for item in sub_batch)
                 logger.info(
                     f"Processing sub-batch {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_tokens:,} tokens"
@@ -7401,6 +7445,10 @@ class MemoryEngine(MemoryEngineInterface):
 
         parent_operation_id = uuid.uuid4()
         pool = await self._get_pool()
+
+        # Ensure the bank row exists before inserting async_operations (which now has a FK).
+        # Banks are created lazily on first retain, but the FK requires the row to exist first.
+        await bank_utils.get_bank_profile(pool, bank_id)
 
         # Create typed metadata for parent operation
         parent_metadata = BatchRetainParentMetadata(

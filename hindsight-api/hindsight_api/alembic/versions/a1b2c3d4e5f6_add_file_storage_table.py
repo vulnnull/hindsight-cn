@@ -34,7 +34,7 @@ def upgrade() -> None:
     # Create file_storage table (minimal: just key + data)
     op.execute(
         f"""
-        CREATE TABLE {schema}file_storage (
+        CREATE TABLE IF NOT EXISTS {schema}file_storage (
             storage_key TEXT PRIMARY KEY,
             data BYTEA NOT NULL
         )

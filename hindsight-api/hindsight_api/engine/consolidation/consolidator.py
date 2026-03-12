@@ -161,6 +161,7 @@ async def run_consolidation_job(
     memory_engine: "MemoryEngine",
     bank_id: str,
     request_context: "RequestContext",
+    operation_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Run consolidation job for a bank.
@@ -385,6 +386,13 @@ async def run_consolidation_job(
                     f"UPDATE {fq_table('memory_units')} SET consolidated_at = NOW() WHERE id = $1",
                     [(m["id"],) for m in llm_batch],
                 )
+
+            # Checkpoint: abort if the operation (and thus the bank) was deleted mid-run.
+            if operation_id and not await memory_engine._check_op_alive(operation_id):
+                logger.info(
+                    f"[CONSOLIDATION] bank={bank_id} operation {operation_id} cancelled (bank deleted), stopping early"
+                )
+                return {"status": "cancelled", "bank_id": bank_id, **stats}
 
             for result in results:
                 stats["memories_processed"] += 1

@@ -9,6 +9,15 @@ import pytest
 from hindsight_api.extensions import RequestContext
 
 
+async def _ensure_bank(pool, bank_id: str) -> None:
+    """Upsert a minimal bank row so FK on async_operations passes."""
+    await pool.execute(
+        "INSERT INTO banks (bank_id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        bank_id,
+        bank_id,
+    )
+
+
 @pytest.mark.asyncio
 async def test_duplicate_document_ids_rejected_async(memory, request_context):
     """Test that async retain rejects batches with duplicate document_ids."""
@@ -156,6 +165,7 @@ async def test_parent_operation_status_aggregation_pending(memory, request_conte
     """Test that parent operation shows 'pending' when children are pending."""
     bank_id = "test_parent_pending"
     pool = await memory._get_pool()
+    await _ensure_bank(pool, bank_id)
 
     # Manually create a parent operation
     parent_id = uuid.uuid4()
@@ -230,6 +240,7 @@ async def test_parent_operation_status_aggregation_failed(memory, request_contex
     """Test that parent operation shows 'failed' when any child fails."""
     bank_id = "test_parent_failed"
     pool = await memory._get_pool()
+    await _ensure_bank(pool, bank_id)
 
     # Manually create a parent operation
     parent_id = uuid.uuid4()
@@ -309,6 +320,7 @@ async def test_parent_operation_status_aggregation_completed(memory, request_con
     """Test that parent operation shows 'completed' when all children are completed."""
     bank_id = "test_parent_completed"
     pool = await memory._get_pool()
+    await _ensure_bank(pool, bank_id)
 
     # Manually create a parent operation
     parent_id = uuid.uuid4()

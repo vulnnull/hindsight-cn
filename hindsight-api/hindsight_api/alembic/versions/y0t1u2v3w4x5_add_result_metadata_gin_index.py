@@ -35,7 +35,7 @@ def upgrade() -> None:
 
     # Add GIN index for JSONB containment queries (@> operator)
     op.execute(f"""
-        CREATE INDEX idx_async_operations_result_metadata
+        CREATE INDEX IF NOT EXISTS idx_async_operations_result_metadata
         ON {schema}async_operations
         USING gin(result_metadata)
     """)

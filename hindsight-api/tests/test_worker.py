@@ -20,6 +20,15 @@ import pytest_asyncio
 from hindsight_api.engine.task_backend import BrokerTaskBackend, SyncTaskBackend
 
 
+async def _ensure_bank(pool, bank_id: str) -> None:
+    """Upsert a minimal bank row so FK on async_operations passes."""
+    await pool.execute(
+        "INSERT INTO banks (bank_id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        bank_id,
+        bank_id,
+    )
+
+
 # Use loadgroup to ensure these tests run in the same worker
 # since they share database state
 pytestmark = pytest.mark.xdist_group("worker_tests")
@@ -64,6 +73,7 @@ class TestBrokerTaskBackend:
         # Create an operation record first
         operation_id = uuid.uuid4()
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
 
         await pool.execute(
             """
@@ -104,6 +114,7 @@ class TestBrokerTaskBackend:
         await backend.initialize()
 
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
         task_dict = {
             "type": "access_count_update",
             "bank_id": bank_id,
@@ -133,6 +144,7 @@ class TestWorkerPoller:
 
         # Create some pending tasks
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
         for i in range(3):
             op_id = uuid.uuid4()
             payload = json.dumps({"type": "test_task", "index": i, "bank_id": bank_id})
@@ -182,6 +194,7 @@ class TestWorkerPoller:
 
         # Create 10 pending tasks
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
         for i in range(10):
             op_id = uuid.uuid4()
             payload = json.dumps({"type": "test_task", "index": i, "bank_id": bank_id})
@@ -219,6 +232,7 @@ class TestWorkerPoller:
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
         op_id = uuid.uuid4()
         payload = json.dumps({"type": "test_task", "operation_id": str(op_id), "bank_id": bank_id})
+        await _ensure_bank(pool, bank_id)
         await pool.execute(
             """
             INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload, worker_id)
@@ -284,6 +298,7 @@ class TestWorkerPoller:
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
         op_id = uuid.uuid4()
         payload = json.dumps({"type": "consolidation", "operation_id": str(op_id), "bank_id": bank_id})
+        await _ensure_bank(pool, bank_id)
         await pool.execute(
             """
             INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload, worker_id, claimed_at)
@@ -341,6 +356,7 @@ class TestWorkerPoller:
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
         op_id = uuid.uuid4()
         payload = json.dumps({"type": "consolidation", "operation_id": str(op_id), "bank_id": bank_id})
+        await _ensure_bank(pool, bank_id)
         await pool.execute(
             """
             INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload, worker_id, claimed_at, retry_count)
@@ -394,6 +410,7 @@ class TestWorkerPoller:
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
         op_id = uuid.uuid4()
         payload = json.dumps({"type": "test_task", "operation_id": str(op_id), "bank_id": bank_id})
+        await _ensure_bank(pool, bank_id)
         await pool.execute(
             """
             INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload, worker_id)
@@ -452,6 +469,7 @@ class TestWorkerPoller:
         from hindsight_api.worker import WorkerPoller
 
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
 
         # Create a processing consolidation for bank
         processing_op_id = uuid.uuid4()
@@ -479,6 +497,7 @@ class TestWorkerPoller:
 
         # Create a pending consolidation for different bank (should be claimed)
         other_bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, other_bank_id)
         other_op_id = uuid.uuid4()
         await pool.execute(
             """
@@ -517,6 +536,7 @@ class TestWorkerPoller:
         from hindsight_api.worker import WorkerPoller
 
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
 
         # Create a processing consolidation for bank
         await pool.execute(
@@ -564,6 +584,7 @@ class TestWorkerRecovery:
 
         # Create tasks that were being processed by this worker (simulating a crash)
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
         worker_id = "crashed-worker"
         task_ids = []
 
@@ -608,6 +629,7 @@ class TestWorkerRecovery:
         from hindsight_api.worker import WorkerPoller
 
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
 
         # Create tasks for worker-1 (the one that will recover)
         for i in range(2):
@@ -688,6 +710,7 @@ class TestConcurrentWorkers:
 
         # Create 10 pending tasks
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
         task_ids = []
         for i in range(10):
             op_id = uuid.uuid4()
@@ -749,6 +772,7 @@ class TestConcurrentWorkers:
 
         # Create tasks - some pending, some already processing
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
 
         # Create 3 pending tasks
         for i in range(3):
@@ -804,6 +828,7 @@ class TestWorkerDecommission:
         """Test that decommissioning a worker releases all its processing tasks."""
         # Create tasks being processed by a worker
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
         worker_id = "worker-to-decommission"
 
         for i in range(5):
@@ -847,6 +872,7 @@ class TestWorkerDecommission:
     async def test_decommission_does_not_affect_other_workers(self, pool, clean_operations):
         """Test that decommissioning one worker doesn't affect another worker's tasks."""
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
 
         # Create tasks for worker-1
         for i in range(3):
@@ -964,6 +990,7 @@ class TestDynamicTenantDiscovery:
 
         # Create pending tasks in public schema
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
         for i in range(2):
             op_id = uuid.uuid4()
             payload = json.dumps({"type": "test_task", "index": i, "bank_id": bank_id})
@@ -1031,6 +1058,7 @@ class TestDynamicTenantDiscovery:
 
         # Create a task in public schema
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
         op_id = uuid.uuid4()
         payload = json.dumps({"type": "test_task", "bank_id": bank_id})
         await pool.execute(
@@ -1090,6 +1118,7 @@ class TestDynamicTenantDiscovery:
 
         # Create pending tasks
         bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
         for i in range(3):
             op_id = uuid.uuid4()
             payload = json.dumps({"type": "test_task", "index": i, "bank_id": bank_id})
@@ -1229,6 +1258,7 @@ async def test_worker_fire_and_forget_nonblocking(pool, clean_operations):
     )
 
     bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(pool, bank_id)
 
     # Submit initial 2 tasks
     task_ids = []
@@ -1331,6 +1361,7 @@ async def test_worker_slot_limits_enforced(pool, clean_operations):
 
     # Submit 10 tasks
     bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(pool, bank_id)
     for i in range(10):
         op_id = uuid.uuid4()
         payload = json.dumps({"type": "test", "operation_type": "retain", "operation_id": str(op_id), "bank_id": bank_id})
