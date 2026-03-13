@@ -282,6 +282,7 @@ pub fn recall(
         include,
         tags: None,
         tags_match: TagsMatch::Any,
+        tag_groups: None,
     };
 
     let response = client.recall(agent_id, &request, verbose);
@@ -340,6 +341,7 @@ pub fn reflect(
         response_schema,
         tags: None,
         tags_match: TagsMatch::Any,
+        tag_groups: None,
     };
 
     let response = client.reflect(agent_id, &request, verbose);

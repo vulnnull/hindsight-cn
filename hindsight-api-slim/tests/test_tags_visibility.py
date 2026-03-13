@@ -16,7 +16,16 @@ import pytest
 import pytest_asyncio
 
 from hindsight_api.api import create_app
-from hindsight_api.engine.search.tags import build_tags_where_clause_simple, filter_results_by_tags
+from hindsight_api.engine.search.tags import (
+    TagGroupAnd,
+    TagGroupLeaf,
+    TagGroupNot,
+    TagGroupOr,
+    build_tag_groups_where_clause,
+    build_tags_where_clause_simple,
+    filter_results_by_tag_groups,
+    filter_results_by_tags,
+)
 
 # ============================================================================
 # Unit Tests for tags SQL builder
@@ -261,6 +270,327 @@ class TestFilterResultsByTags:
         # different_user and missing_session are excluded because they lack at least one tag
         assert different_user not in filtered
         assert missing_session not in filtered
+
+
+# ============================================================================
+# Unit Tests for build_tag_groups_where_clause (SQL builder)
+# ============================================================================
+
+
+class TestBuildTagGroupsWhereClause:
+    """Unit tests for the compound tag group SQL builder."""
+
+    def test_none_returns_empty(self):
+        """None tag_groups returns empty clause."""
+        clause, params, next_offset = build_tag_groups_where_clause(None, 3)
+        assert clause == ""
+        assert params == []
+        assert next_offset == 3
+
+    def test_empty_list_returns_empty(self):
+        """Empty tag_groups list returns empty clause."""
+        clause, params, next_offset = build_tag_groups_where_clause([], 3)
+        assert clause == ""
+        assert params == []
+        assert next_offset == 3
+
+    def test_single_leaf_any_strict(self):
+        """Single any_strict leaf generates correct SQL."""
+        groups = [TagGroupLeaf(tags=["step:5", "step:8"], match="any_strict")]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 3)
+        assert clause.startswith("AND ")
+        assert "$3" in clause
+        assert "IS NOT NULL" in clause
+        assert "!= '{}'" in clause
+        assert "&&" in clause
+        assert params == [["step:5", "step:8"]]
+        assert next_offset == 4
+
+    def test_single_leaf_all_strict(self):
+        """Single all_strict leaf generates @> operator."""
+        groups = [TagGroupLeaf(tags=["user:alice"], match="all_strict")]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 1)
+        assert "@>" in clause
+        assert "IS NOT NULL" in clause
+        assert params == [["user:alice"]]
+        assert next_offset == 2
+
+    def test_single_leaf_any_includes_untagged(self):
+        """Single any (non-strict) leaf generates NULL-inclusive clause."""
+        groups = [TagGroupLeaf(tags=["user:alice"], match="any")]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 1)
+        assert "IS NULL" in clause
+        assert "= '{}'" in clause
+        assert "&&" in clause
+        assert params == [["user:alice"]]
+        assert next_offset == 2
+
+    def test_and_of_two_leaves(self):
+        """AND of two leaves generates AND-joined clause."""
+        groups = [
+            TagGroupAnd.model_validate(
+                {"and": [
+                    {"tags": ["step:5"], "match": "any_strict"},
+                    {"tags": ["user:ep_42"], "match": "all_strict"},
+                ]}
+            )
+        ]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 3)
+        assert "AND" in clause
+        assert "$3" in clause
+        assert "$4" in clause
+        assert len(params) == 2
+        assert params[0] == ["step:5"]
+        assert params[1] == ["user:ep_42"]
+        assert next_offset == 5
+
+    def test_or_of_two_leaves(self):
+        """OR of two leaves generates OR-joined clause."""
+        groups = [
+            TagGroupOr.model_validate(
+                {"or": [
+                    {"tags": ["step:5"], "match": "any_strict"},
+                    {"tags": ["priority:high"], "match": "all_strict"},
+                ]}
+            )
+        ]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 1)
+        assert "OR" in clause
+        assert "$1" in clause
+        assert "$2" in clause
+        assert len(params) == 2
+        assert next_offset == 3
+
+    def test_not_wraps_with_not(self):
+        """NOT group wraps child clause with NOT."""
+        groups = [
+            TagGroupNot.model_validate(
+                {"not": {"tags": ["archived"], "match": "any_strict"}}
+            )
+        ]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 2)
+        assert "NOT" in clause
+        assert "$2" in clause
+        assert len(params) == 1
+        assert next_offset == 3
+
+    def test_nested_and_containing_or(self):
+        """AND containing an OR generates correct nested SQL."""
+        groups = [
+            TagGroupAnd.model_validate(
+                {"and": [
+                    {"tags": ["user:alice"], "match": "all_strict"},
+                    {"or": [
+                        {"tags": ["step:5"], "match": "any_strict"},
+                        {"tags": ["priority:high"], "match": "all_strict"},
+                    ]},
+                ]}
+            )
+        ]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 1)
+        assert "AND" in clause
+        assert "OR" in clause
+        assert len(params) == 3
+        assert next_offset == 4
+
+    def test_param_numbering_sequential(self):
+        """Params are numbered sequentially starting from param_offset."""
+        groups = [
+            TagGroupAnd.model_validate(
+                {"and": [
+                    {"tags": ["a"], "match": "any_strict"},
+                    {"tags": ["b"], "match": "any_strict"},
+                    {"tags": ["c"], "match": "any_strict"},
+                ]}
+            )
+        ]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 5)
+        assert "$5" in clause
+        assert "$6" in clause
+        assert "$7" in clause
+        assert next_offset == 8
+        assert len(params) == 3
+
+    def test_table_alias_applied_to_leaves(self):
+        """Table alias is prefixed to column name in all leaf clauses."""
+        groups = [TagGroupLeaf(tags=["user:alice"], match="any_strict")]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 1, table_alias="mu.")
+        assert "mu.tags" in clause
+
+    def test_table_alias_propagates_to_nested(self):
+        """Table alias propagates to nested leaves (each leaf uses the alias)."""
+        groups = [
+            TagGroupAnd.model_validate(
+                {"and": [
+                    {"tags": ["a"], "match": "any_strict"},
+                    {"tags": ["b"], "match": "any_strict"},
+                ]}
+            )
+        ]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 1, table_alias="mu.")
+        # Each leaf of type any_strict references mu.tags three times (IS NOT NULL, != '{}', &&)
+        # We verify that 'tags' without alias is NOT present, proving the alias is always used
+        assert "mu.tags" in clause
+        # No bare 'tags' keyword without the alias prefix (other than inside the alias itself)
+        import re
+        bare_tags = re.findall(r"(?<!\.)tags", clause)
+        assert len(bare_tags) == 0, f"Found bare 'tags' references without alias: {bare_tags}"
+
+    def test_multiple_top_level_groups_are_anded(self):
+        """Multiple top-level groups are AND-ed together."""
+        groups = [
+            TagGroupLeaf(tags=["step:5"], match="any_strict"),
+            TagGroupLeaf(tags=["user:ep_42"], match="all_strict"),
+        ]
+        clause, params, next_offset = build_tag_groups_where_clause(groups, 1)
+        # Should start with AND and have two param refs joined by AND
+        assert clause.startswith("AND ")
+        assert " AND " in clause[4:]  # after the leading "AND "
+        assert "$1" in clause
+        assert "$2" in clause
+        assert len(params) == 2
+        assert next_offset == 3
+
+
+# ============================================================================
+# Unit Tests for filter_results_by_tag_groups (Python-side)
+# ============================================================================
+
+
+class TestFilterResultsByTagGroups:
+    """Unit tests for the Python-side compound tag group filter."""
+
+    def test_none_returns_all(self):
+        """None tag_groups returns all results."""
+        results = [MockResult(["a"]), MockResult(["b"]), MockResult(None)]
+        filtered = filter_results_by_tag_groups(results, None)
+        assert len(filtered) == 3
+
+    def test_empty_list_returns_all(self):
+        """Empty tag_groups list returns all results."""
+        results = [MockResult(["a"]), MockResult(None)]
+        filtered = filter_results_by_tag_groups(results, [])
+        assert len(filtered) == 2
+
+    def test_single_leaf_any_strict_excludes_untagged(self):
+        """Single any_strict leaf excludes untagged results."""
+        groups = [TagGroupLeaf(tags=["step:5"], match="any_strict")]
+        results = [MockResult(["step:5"]), MockResult(["step:9"]), MockResult(None)]
+        filtered = filter_results_by_tag_groups(results, groups)
+        assert len(filtered) == 1
+        assert filtered[0].tags == ["step:5"]
+
+    def test_single_leaf_all_strict_matches_superset(self):
+        """Single all_strict leaf matches results that contain all tags."""
+        groups = [TagGroupLeaf(tags=["user:alice", "step:5"], match="all_strict")]
+        results = [
+            MockResult(["user:alice", "step:5"]),
+            MockResult(["user:alice", "step:5", "extra"]),
+            MockResult(["user:alice"]),
+            MockResult(None),
+        ]
+        filtered = filter_results_by_tag_groups(results, groups)
+        assert len(filtered) == 2
+
+    def test_and_both_conditions_must_match(self):
+        """AND group: both leaf conditions must match."""
+        groups = [
+            TagGroupAnd.model_validate(
+                {"and": [
+                    {"tags": ["user:alice"], "match": "all_strict"},
+                    {"tags": ["step:5"], "match": "any_strict"},
+                ]}
+            )
+        ]
+        results = [
+            MockResult(["user:alice", "step:5"]),  # matches both
+            MockResult(["user:alice"]),              # only matches first
+            MockResult(["step:5"]),                  # only matches second
+            MockResult(None),
+        ]
+        filtered = filter_results_by_tag_groups(results, groups)
+        assert len(filtered) == 1
+        assert filtered[0].tags == ["user:alice", "step:5"]
+
+    def test_or_either_condition_matches(self):
+        """OR group: either condition matching is sufficient."""
+        groups = [
+            TagGroupOr.model_validate(
+                {"or": [
+                    {"tags": ["step:5"], "match": "any_strict"},
+                    {"tags": ["priority:high"], "match": "all_strict"},
+                ]}
+            )
+        ]
+        results = [
+            MockResult(["step:5"]),
+            MockResult(["priority:high"]),
+            MockResult(["step:5", "priority:high"]),
+            MockResult(["other"]),
+            MockResult(None),
+        ]
+        filtered = filter_results_by_tag_groups(results, groups)
+        # step:5, priority:high, and step:5+priority:high all match
+        assert len(filtered) == 3
+
+    def test_not_negation(self):
+        """NOT group: inverts the child match."""
+        groups = [
+            TagGroupNot.model_validate(
+                {"not": {"tags": ["archived"], "match": "any_strict"}}
+            )
+        ]
+        results = [
+            MockResult(["archived"]),
+            MockResult(["active"]),
+            MockResult(["archived", "active"]),
+            MockResult(None),
+        ]
+        filtered = filter_results_by_tag_groups(results, groups)
+        # "archived" and "archived+active" should be excluded
+        # "active" and None pass (None is untagged, "any_strict" for "archived" would exclude
+        # untagged, so NOT(exclude untagged) = include untagged)
+        tags_in_filtered = [r.tags for r in filtered]
+        assert ["archived"] not in tags_in_filtered
+        assert ["archived", "active"] not in tags_in_filtered
+
+    def test_nested_and_containing_or(self):
+        """AND containing OR: nested boolean logic works correctly."""
+        groups = [
+            TagGroupAnd.model_validate(
+                {"and": [
+                    {"tags": ["user:alice"], "match": "all_strict"},
+                    {"or": [
+                        {"tags": ["step:5"], "match": "any_strict"},
+                        {"tags": ["priority:high"], "match": "any_strict"},
+                    ]},
+                ]}
+            )
+        ]
+        results = [
+            MockResult(["user:alice", "step:5"]),          # user:alice AND (step:5 OR ...)
+            MockResult(["user:alice", "priority:high"]),   # user:alice AND (... OR priority:high)
+            MockResult(["user:alice"]),                     # user:alice but neither step nor priority
+            MockResult(["step:5"]),                         # step:5 but not user:alice
+            MockResult(None),
+        ]
+        filtered = filter_results_by_tag_groups(results, groups)
+        assert len(filtered) == 2
+
+    def test_multiple_top_level_groups_are_anded(self):
+        """Multiple top-level tag groups are AND-ed."""
+        groups = [
+            TagGroupLeaf(tags=["user:alice"], match="all_strict"),
+            TagGroupLeaf(tags=["step:5"], match="any_strict"),
+        ]
+        results = [
+            MockResult(["user:alice", "step:5"]),  # both match
+            MockResult(["user:alice"]),              # only first
+            MockResult(["step:5"]),                  # only second
+        ]
+        filtered = filter_results_by_tag_groups(results, groups)
+        assert len(filtered) == 1
+        assert filtered[0].tags == ["user:alice", "step:5"]
 
 
 # ============================================================================
@@ -956,3 +1286,218 @@ async def test_list_memories_includes_tags(api_client, test_bank_id):
     assert set(memory_item["tags"]) == set(tags), (
         f"All {len(tags)} tags should be returned, got: {memory_item['tags']}"
     )
+
+
+# ============================================================================
+# Integration Tests for tag_groups compound filtering
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_tag_groups_validation_rejects_both_tags_and_tag_groups(api_client, test_bank_id):
+    """Passing both tags and tag_groups must be rejected (422)."""
+    response = await api_client.post(
+        f"/v1/default/banks/{test_bank_id}/memories/recall",
+        json={
+            "query": "anything",
+            "tags": ["user:alice"],
+            "tag_groups": [{"tags": ["user:alice"], "match": "any_strict"}],
+        },
+    )
+    assert response.status_code == 422, (
+        f"Expected 422 when both tags and tag_groups are set, got {response.status_code}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tag_groups_leaf_and_filter(api_client):
+    """
+    Two leaf groups at top level (implicit AND): step filter AND user scope.
+
+    Retain:
+      - Memory A: tags=[step:5, user:alice]   ← should match
+      - Memory B: tags=[step:5, user:bob]     ← excluded (wrong user)
+      - Memory C: tags=[step:9, user:alice]   ← excluded (wrong step)
+
+    tag_groups = [{tags:[step:5], match:any_strict}, {tags:[user:alice], match:all_strict}]
+    Expected: only A.
+    """
+    bank_id = f"tg_and_{datetime.now().timestamp()}"
+
+    retain = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories",
+        json={
+            "items": [
+                {"content": "Alice completed step 5 of the onboarding process.", "tags": ["step:5", "user:alice"]},
+                {"content": "Bob completed step 5 of the onboarding process.", "tags": ["step:5", "user:bob"]},
+                {"content": "Alice completed step 9 of the onboarding process.", "tags": ["step:9", "user:alice"]},
+            ]
+        },
+    )
+    assert retain.status_code == 200
+
+    response = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories/recall",
+        json={
+            "query": "onboarding step completion",
+            "budget": "mid",
+            "tag_groups": [
+                {"tags": ["step:5"], "match": "any_strict"},
+                {"tags": ["user:alice"], "match": "all_strict"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    texts = [r["text"] for r in response.json()["results"]]
+
+    assert any("Alice" in t and "step 5" in t for t in texts), "Should find Alice step:5 memory"
+    assert not any("Bob" in t for t in texts), "Should NOT find Bob (wrong user)"
+    assert not any("step 9" in t for t in texts), "Should NOT find step 9 (wrong step)"
+
+
+@pytest.mark.asyncio
+async def test_tag_groups_or_compound(api_client):
+    """
+    OR compound: match user:alice OR user:bob, but not user:carol.
+
+    Retain:
+      - Memory A: tags=[user:alice]
+      - Memory B: tags=[user:bob]
+      - Memory C: tags=[user:carol]
+
+    tag_groups = [{or: [{tags:[user:alice]}, {tags:[user:bob]}]}]
+    Expected: A and B, not C.
+    """
+    bank_id = f"tg_or_{datetime.now().timestamp()}"
+
+    retain = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories",
+        json={
+            "items": [
+                {"content": "Alice is a machine learning engineer.", "tags": ["user:alice"]},
+                {"content": "Bob is a backend software engineer.", "tags": ["user:bob"]},
+                {"content": "Carol is a product manager.", "tags": ["user:carol"]},
+            ]
+        },
+    )
+    assert retain.status_code == 200
+
+    response = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories/recall",
+        json={
+            "query": "what are the engineers working on",
+            "budget": "mid",
+            "tag_groups": [
+                {"or": [
+                    {"tags": ["user:alice"], "match": "any_strict"},
+                    {"tags": ["user:bob"], "match": "any_strict"},
+                ]},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    texts = [r["text"] for r in response.json()["results"]]
+
+    assert any("Alice" in t for t in texts), "Should find Alice (in OR)"
+    assert any("Bob" in t for t in texts), "Should find Bob (in OR)"
+    assert not any("Carol" in t for t in texts), "Should NOT find Carol (not in OR)"
+
+
+@pytest.mark.asyncio
+async def test_tag_groups_not_compound(api_client):
+    """
+    NOT compound: user:alice AND NOT archived.
+
+    Retain:
+      - Memory A: tags=[user:alice]            ← should match
+      - Memory B: tags=[user:alice, archived]  ← excluded (archived)
+      - Memory C: tags=[user:bob]              ← excluded (wrong user)
+
+    tag_groups = [{tags:[user:alice], match:any_strict}, {not: {tags:[archived], match:any_strict}}]
+    Expected: only A.
+    """
+    bank_id = f"tg_not_{datetime.now().timestamp()}"
+
+    retain = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories",
+        json={
+            "items": [
+                {"content": "Alice joined the data science team this quarter.", "tags": ["user:alice"]},
+                {"content": "Alice left the previous analytics project last year.", "tags": ["user:alice", "archived"]},
+                {"content": "Bob joined the platform engineering team.", "tags": ["user:bob"]},
+            ]
+        },
+    )
+    assert retain.status_code == 200
+
+    response = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories/recall",
+        json={
+            "query": "team membership",
+            "budget": "mid",
+            "tag_groups": [
+                {"tags": ["user:alice"], "match": "any_strict"},
+                {"not": {"tags": ["archived"], "match": "any_strict"}},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    texts = [r["text"] for r in response.json()["results"]]
+
+    assert any("data science" in t for t in texts), "Should find Alice's active memory"
+    assert not any("analytics project" in t for t in texts), "Should NOT find archived memory"
+    assert not any("Bob" in t for t in texts), "Should NOT find Bob (wrong user)"
+
+
+@pytest.mark.asyncio
+async def test_tag_groups_nested_and_containing_or(api_client):
+    """
+    Nested: user:alice AND (step:5 OR step:8).
+
+    Retain:
+      - Memory A: tags=[user:alice, step:5]   ← should match
+      - Memory B: tags=[user:alice, step:8]   ← should match
+      - Memory C: tags=[user:alice, step:9]   ← excluded (wrong step)
+      - Memory D: tags=[user:bob,   step:5]   ← excluded (wrong user)
+
+    tag_groups = [{and: [{tags:[user:alice]}, {or:[{tags:[step:5]},{tags:[step:8]}]}]}]
+    Expected: A and B only.
+    """
+    bank_id = f"tg_nested_{datetime.now().timestamp()}"
+
+    retain = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories",
+        json={
+            "items": [
+                {"content": "Alice passed the verification at step 5.", "tags": ["user:alice", "step:5"]},
+                {"content": "Alice passed the verification at step 8.", "tags": ["user:alice", "step:8"]},
+                {"content": "Alice passed the verification at step 9.", "tags": ["user:alice", "step:9"]},
+                {"content": "Bob passed the verification at step 5.", "tags": ["user:bob", "step:5"]},
+            ]
+        },
+    )
+    assert retain.status_code == 200
+
+    response = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories/recall",
+        json={
+            "query": "verification step completion",
+            "budget": "mid",
+            "tag_groups": [
+                {"and": [
+                    {"tags": ["user:alice"], "match": "all_strict"},
+                    {"or": [
+                        {"tags": ["step:5"], "match": "any_strict"},
+                        {"tags": ["step:8"], "match": "any_strict"},
+                    ]},
+                ]},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    texts = [r["text"] for r in response.json()["results"]]
+
+    assert any("Alice" in t and "step 5" in t for t in texts), "Should find Alice step:5"
+    assert any("Alice" in t and "step 8" in t for t in texts), "Should find Alice step:8"
+    assert not any("step 9" in t for t in texts), "Should NOT find step 9"
+    assert not any("Bob" in t for t in texts), "Should NOT find Bob"

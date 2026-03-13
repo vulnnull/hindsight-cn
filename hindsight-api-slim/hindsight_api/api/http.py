@@ -34,7 +34,7 @@ def _parse_metadata(metadata: Any) -> dict[str, Any]:
 
 from typing import Callable
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from hindsight_api import MemoryEngine
 
@@ -73,7 +73,7 @@ def FieldWithDefault(default_factory: Callable, **kwargs) -> Any:
 from hindsight_api.config import get_config
 from hindsight_api.engine.memory_engine import Budget, _current_schema, _get_tiktoken_encoding, fq_table
 from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES, MemoryFact, TokenUsage
-from hindsight_api.engine.search.tags import TagsMatch
+from hindsight_api.engine.search.tags import TagGroup, TagsMatch
 from hindsight_api.extensions import HttpExtension, OperationValidationError, load_extension
 from hindsight_api.metrics import create_metrics_collector, get_metrics_collector, initialize_metrics
 from hindsight_api.models import RequestContext
@@ -163,6 +163,17 @@ class RecallRequest(BaseModel):
         description="How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), "
         "'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).",
     )
+    tag_groups: list[TagGroup] | None = Field(
+        default=None,
+        description="Compound tag filter using boolean groups. Groups in the list are AND-ed. "
+        "Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}.",
+    )
+
+    @model_validator(mode="after")
+    def validate_tags_exclusive(self) -> "RecallRequest":
+        if self.tags is not None and self.tag_groups is not None:
+            raise ValueError("'tags' and 'tag_groups' are mutually exclusive. Use 'tag_groups' for compound filtering.")
+        return self
 
 
 class RecallResult(BaseModel):
@@ -639,6 +650,17 @@ class ReflectRequest(BaseModel):
         description="How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), "
         "'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).",
     )
+    tag_groups: list[TagGroup] | None = Field(
+        default=None,
+        description="Compound tag filter using boolean groups. Groups in the list are AND-ed. "
+        "Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}.",
+    )
+
+    @model_validator(mode="after")
+    def validate_tags_exclusive(self) -> "ReflectRequest":
+        if self.tags is not None and self.tag_groups is not None:
+            raise ValueError("'tags' and 'tag_groups' are mutually exclusive. Use 'tag_groups' for compound filtering.")
+        return self
 
 
 class ReflectFact(BaseModel):
@@ -2324,6 +2346,7 @@ def _register_routes(app: FastAPI):
                     request_context=request_context,
                     tags=request.tags,
                     tags_match=request.tags_match,
+                    tag_groups=request.tag_groups,
                 )
 
             # Convert core MemoryFact objects to API RecallResult objects (excluding internal metrics)
@@ -2459,6 +2482,7 @@ def _register_routes(app: FastAPI):
                     request_context=request_context,
                     tags=request.tags,
                     tags_match=request.tags_match,
+                    tag_groups=request.tag_groups,
                 )
 
             # Build based_on (memories + mental_models + directives) if facts are requested

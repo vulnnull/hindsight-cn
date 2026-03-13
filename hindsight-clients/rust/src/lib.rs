@@ -103,6 +103,7 @@ mod tests {
             types: None,
             tags: None,
             tags_match: types::TagsMatch::Any,
+            tag_groups: None,
         };
         let recall_response = client
             .recall_memories(&bank_id, None, &recall_request)
