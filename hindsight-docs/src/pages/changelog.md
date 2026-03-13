@@ -8,6 +8,27 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.4.18](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.18)
+
+**Features**
+
+- Add compound tag filtering using tag groups. ([`5de793ee`](https://github.com/vectorize-io/hindsight/commit/5de793ee))
+- Publish new slim Python packages (hindsight-api-slim and hindsight-all-slim) for smaller installs. ([`15ea23d5`](https://github.com/vectorize-io/hindsight/commit/15ea23d5))
+- Add MiniMax as a supported LLM provider. ([`2344484f`](https://github.com/vectorize-io/hindsight/commit/2344484f))
+- Add Jina MLX reranker provider optimized for Apple Silicon. ([`1caf5ec9`](https://github.com/vectorize-io/hindsight/commit/1caf5ec9))
+
+**Improvements**
+
+- Allow configuring maximum recall query tokens via an environment variable. ([`66dedb8d`](https://github.com/vectorize-io/hindsight/commit/66dedb8d))
+- Improve retrieval performance by switching to per-bank HNSW indexes. ([`43b3efc4`](https://github.com/vectorize-io/hindsight/commit/43b3efc4))
+
+**Bug Fixes**
+
+- Prevent reranking failures by truncating long documents that exceed LiteLLM reranker context limits. ([`eeb938fc`](https://github.com/vectorize-io/hindsight/commit/eeb938fc))
+- Ensure recalled memories are injected as system context for OpenClaw. ([`b17f338e`](https://github.com/vectorize-io/hindsight/commit/b17f338e))
+- Ensure embedded profiles are registered in CLI metadata when the daemon starts. ([`06b0f74a`](https://github.com/vectorize-io/hindsight/commit/06b0f74a))
+- Cancel in-flight async operations when a bank is deleted to avoid dangling work. ([`0560f626`](https://github.com/vectorize-io/hindsight/commit/0560f626))
+
 ## [0.4.17](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.17)
 
 **Features**
