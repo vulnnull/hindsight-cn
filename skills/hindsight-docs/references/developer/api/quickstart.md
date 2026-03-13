@@ -5,6 +5,10 @@ Get up and running with Hindsight in 60 seconds.
 
 {/* Import raw source files */}
 
+## Clients
+
+<ClientsGrid />
+
 ## Start the API Server
 
 ### pip (API only)
@@ -112,6 +116,10 @@ hindsight memory reflect my-bank "Tell me about Alice"
 | **Reflect** | Retrieved memories are used to generate a disposition-aware response |
 
 ---
+
+## Integrations
+
+<IntegrationsGrid />
 
 ## Next Steps
 

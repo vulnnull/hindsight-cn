@@ -246,5 +246,5 @@ See the [Python SDK](../sdks/python.md) for the full API reference.
 ## Next Steps
 
 - [Configuration](./configuration.md) — Environment variables and settings
-- [Models](./models.md) — ML models and providers
+- [Models](./models.mdx) — ML models and providers
 - [Monitoring](./monitoring.md) — Metrics and observability

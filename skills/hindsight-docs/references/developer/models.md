@@ -1,16 +1,15 @@
+
 # Models
 
 Hindsight uses several machine learning models for different tasks.
 
 ## Overview
 
-| Model Type | Purpose | Default | Configurable |
-|------------|---------|---------|--------------|
-| **LLM** | Fact extraction, reasoning, generation | Provider-specific | Yes |
-| **Embedding** | Vector representations for semantic search | `BAAI/bge-small-en-v1.5` | Yes |
-| **Cross-Encoder** | Reranking search results | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Yes |
+- **LLM** — Fact extraction, reasoning, and generation. Provider-specific, fully configurable.
+- **Embedding** — Vector representations for semantic search. Default: `BAAI/bge-small-en-v1.5`.
+- **Cross-Encoder** — Reranking search results. Default: `cross-encoder/ms-marco-MiniLM-L-6-v2`.
 
-All local models (embedding, cross-encoder) are automatically downloaded from HuggingFace on first run.
+Embedding and cross-encoder models are downloaded automatically from HuggingFace on first run.
 
 ---
 
@@ -18,14 +17,17 @@ All local models (embedding, cross-encoder) are automatically downloaded from Hu
 
 Used for fact extraction, entity resolution, mental model consolidation, and answer synthesis.
 
-**Supported providers:** OpenAI, Anthropic, Gemini, Groq, Ollama, LM Studio, and **any OpenAI-compatible API**
+**Supported providers:**
 
-:::tip OpenAI-Compatible Providers
+<LLMProvidersGrid />
+
+Also supports **any OpenAI-compatible API** (e.g., Azure OpenAI, Together AI, Fireworks).
+
+> **💡 OpenAI-Compatible Providers**
+> 
 Hindsight works with any provider that exposes an OpenAI-compatible API (e.g., Azure OpenAI). Simply set `HINDSIGHT_API_LLM_PROVIDER=openai` and configure `HINDSIGHT_API_LLM_BASE_URL` to point to your provider's endpoint.
 
 See [Configuration](./configuration#llm-provider) for setup examples.
-:::
-
 ### Benchmarks
 
 Not sure which model to use? The **[Model Leaderboard](https://benchmarks.hindsight.vectorize.io/)** benchmarks models across accuracy, speed, cost, and reliability for retain, reflect, and observation consolidation so you can pick the right trade-off for your use case.
@@ -63,6 +65,7 @@ Each provider has a recommended default model that's used when `HINDSIGHT_API_LL
 | `anthropic` | `claude-haiku-4-5-20251001` |
 | `gemini` | `gemini-2.5-flash` |
 | `groq` | `openai/gpt-oss-120b` |
+| `minimax` | `MiniMax-M2.5` |
 | `ollama` | `gemma3:12b` |
 | `lmstudio` | `local-model` |
 | `vertexai` | `gemini-2.0-flash-001` |
@@ -97,7 +100,8 @@ export HINDSIGHT_API_RETAIN_LLM_PROVIDER=anthropic
 
 Other LLM models not listed above may work with Hindsight, but they must support **at least 65,000 output tokens** to ensure reliable fact extraction. If you need support for a specific model that doesn't meet this requirement, please [open an issue](https://github.com/hindsight-ai/hindsight/issues) to request an exception.
 
-:::tip Models with Limited Output Tokens
+> **💡 Models with Limited Output Tokens**
+> 
 If your model only supports 32k or fewer output tokens (e.g., some older models), you can reduce the retain completion token limit:
 
 ```bash
@@ -109,8 +113,6 @@ export HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS=16000
 ```
 
 **Important:** `HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS` must be greater than `HINDSIGHT_API_RETAIN_CHUNK_SIZE` (default: 3000). The system will validate this on startup and provide an error message if the configuration is invalid.
-:::
-
 ### Configuration
 
 ```bash
@@ -143,6 +145,11 @@ export HINDSIGHT_API_LLM_MODEL=llama3
 export HINDSIGHT_API_LLM_PROVIDER=lmstudio
 export HINDSIGHT_API_LLM_BASE_URL=http://localhost:1234/v1
 export HINDSIGHT_API_LLM_MODEL=your-local-model
+
+# MiniMax (204K context window)
+export HINDSIGHT_API_LLM_PROVIDER=minimax
+export HINDSIGHT_API_LLM_API_KEY=your-minimax-api-key
+export HINDSIGHT_API_LLM_MODEL=MiniMax-M2.5
 
 # Vertex AI (Google Cloud)
 export HINDSIGHT_API_LLM_PROVIDER=vertexai
@@ -210,8 +217,8 @@ You can use any model supported by OpenAI Codex CLI
 
 Use your Claude Pro or Max subscription for Hindsight without separate Anthropic API costs.
 
-
-:::warning Terms of Service Notice
+> **⚠️ Terms of Service Notice**
+> 
 
 This integration uses the Claude Agent SDK with your personal Claude Pro/Max subscription
 credentials. You must be logged into Claude Code on your own machine before using this provider.
@@ -234,9 +241,6 @@ credentials. You must be logged into Claude Code on your own machine before usin
 
 For production or team use, we recommend using `HINDSIGHT_API_LLM_PROVIDER=anthropic` with
 an API key from the [Anthropic Console](https://console.anthropic.com/).
-
-:::
-
 
 **Prerequisites:**
 - Active Claude Pro or Max subscription
@@ -281,7 +285,6 @@ You can use any model supported by Claude Code CLI.
 - Credentials managed securely by Claude Code
 - Usage billed to your Claude subscription (not separate API costs)
 - For personal development use only (see Claude Terms of Service)
-
 
 ---
 
@@ -376,10 +379,9 @@ Converts text into dense vector representations for semantic similarity search.
 | `embed-english-v3.0` | 1024 | English text |
 | `embed-multilingual-v3.0` | 1024 | 100+ languages |
 
-:::warning Embedding Dimensions
+> **⚠️ Embedding Dimensions**
+> 
 Hindsight automatically detects the embedding dimension at startup and adjusts the database schema. Once memories are stored, you cannot change dimensions without losing data.
-:::
-
 **Configuration Examples:**
 
 ```bash

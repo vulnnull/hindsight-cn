@@ -1,7 +1,4 @@
----
-sidebar_position: 1
-slug: /
----
+
 
 # Overview
 
@@ -113,6 +110,14 @@ Memory banks can be configured to shape how the agent reasons during `reflect`:
 The **mission** tells Hindsight what knowledge to prioritize and provides context for reasoning. **Directives** are guardrails and compliance rules that must never be violated. **Disposition traits** subtly influence interpretation style.
 
 These settings only affect the `reflect` operation, not `recall`.
+
+## Clients & Languages
+
+<ClientsGrid />
+
+## Integrations
+
+<IntegrationsGrid />
 
 ## Next Steps
 
