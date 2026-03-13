@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["hindsight", "hindsight-api", "hindsight-dev", "hindsight-mcp-server", "hindsight-clients/python", "hindsight-embed"]
+members = ["hindsight-all", "hindsight-api", "hindsight-api-slim", "hindsight-all-slim", "hindsight-dev", "hindsight-mcp-server", "hindsight-clients/python", "hindsight-embed"]
 
 [tool.uv]
 # Allow uv to search all configured indexes for packages, not just the first one

@@ -91,7 +91,7 @@ class DaemonEmbedManager(EmbedManager):
     def _find_api_command(self) -> list[str]:
         """Find the command to run hindsight-api."""
         # Check if we're in development mode
-        dev_api_path = Path(__file__).parent.parent.parent / "hindsight-api"
+        dev_api_path = Path(__file__).parent.parent.parent / "hindsight-api-slim"
         if dev_api_path.exists() and (dev_api_path / "pyproject.toml").exists():
             return ["uv", "run", "--project", str(dev_api_path), "hindsight-api"]
 

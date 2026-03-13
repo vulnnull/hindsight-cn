@@ -42,25 +42,22 @@ RUN apt-get update && apt-get install -y \
     && pip install --no-cache-dir uv
 
 # Copy dependency files and README (required by pyproject.toml)
-COPY hindsight-api/pyproject.toml ./api/
-COPY hindsight-api/README.md ./api/
+COPY hindsight-api-slim/pyproject.toml ./api/
+COPY hindsight-api-slim/README.md ./api/
 
 WORKDIR /app/api
 
-# Remove local ML model dependencies if INCLUDE_LOCAL_MODELS=false
-# This creates a smaller image when using external providers (TEI, OpenAI, Cohere)
-RUN if [ "$INCLUDE_LOCAL_MODELS" != "true" ]; then \
-        echo "Removing local-models dependencies (sentence-transformers, torch, transformers)..." && \
-        sed -i '/"sentence-transformers/d' pyproject.toml && \
-        sed -i '/"transformers/d' pyproject.toml && \
-        sed -i '/"torch/d' pyproject.toml; \
+# Sync dependencies using appropriate extras based on INCLUDE_LOCAL_MODELS
+# local-ml: torch, sentence-transformers, transformers, einops, flashrank, mlx (optional)
+# embedded-db: pg0-embedded (always included for embedded PostgreSQL support)
+RUN if [ "$INCLUDE_LOCAL_MODELS" = "true" ]; then \
+        uv sync --extra local-ml --extra embedded-db; \
+    else \
+        uv sync --extra embedded-db; \
     fi
 
-# Sync dependencies (will create lock file if needed)
-RUN uv sync
-
 # Copy source code (alembic migrations are inside hindsight_api/)
-COPY hindsight-api/hindsight_api ./hindsight_api
+COPY hindsight-api-slim/hindsight_api ./hindsight_api
 
 # Install the local package (uv sync only installed dependencies, not the package itself)
 RUN uv pip install -e .

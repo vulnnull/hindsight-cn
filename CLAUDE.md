@@ -17,20 +17,20 @@ Hindsight is an agent memory system that provides long-term memory for AI agents
 ./scripts/dev/start-api.sh
 
 # Run all tests (parallelized with pytest-xdist)
-cd hindsight-api && uv run pytest tests/
+cd hindsight-api-slim && uv run pytest tests/
 
 # Run specific test file
-cd hindsight-api && uv run pytest tests/test_http_api_integration.py -v
+cd hindsight-api-slim && uv run pytest tests/test_http_api_integration.py -v
 
 # Run single test function
-cd hindsight-api && uv run pytest tests/test_retain.py::test_retain_simple -v
+cd hindsight-api-slim && uv run pytest tests/test_retain.py::test_retain_simple -v
 
 # Lint and format
-cd hindsight-api && uv run ruff check .
-cd hindsight-api && uv run ruff format .
+cd hindsight-api-slim && uv run ruff check .
+cd hindsight-api-slim && uv run ruff format .
 
 # Type checking (uses ty - extremely fast type checker from Astral)
-cd hindsight-api && uv run ty check hindsight_api/
+cd hindsight-api-slim && uv run ty check hindsight_api/
 ```
 
 ### Control Plane (Next.js)
@@ -72,7 +72,7 @@ cd hindsight-control-plane && npm run dev
 ## Architecture
 
 ### Monorepo Structure
-- **hindsight-api/**: Core FastAPI server with memory engine (Python, uv)
+- **hindsight-api-slim/**: Core FastAPI server with memory engine (Python, uv)
 - **hindsight/**: Embedded Python bundle (hindsight-all package)
 - **hindsight-control-plane/**: Admin UI (Next.js, npm)
 - **hindsight-cli/**: CLI tool (Rust, cargo, uses progenitor for API client)
@@ -81,7 +81,7 @@ cd hindsight-control-plane && npm run dev
 - **hindsight-integrations/**: Framework integrations (LiteLLM, OpenAI)
 - **hindsight-dev/**: Development tools and benchmarks
 
-### Core Engine (hindsight-api/hindsight_api/engine/)
+### Core Engine (hindsight-api-slim/hindsight_api/engine/)
 - `memory_engine.py`: Main orchestrator (~170KB) for retain/recall/reflect operations
 - `llm_wrapper.py`: LLM abstraction supporting OpenAI, Anthropic, Gemini, Groq, MiniMax, Ollama, LM Studio
 - `embeddings.py`: Embedding generation (local sentence-transformers or TEI)
@@ -101,7 +101,7 @@ cd hindsight-control-plane && npm run dev
 - `fusion.py`: Reciprocal rank fusion for combining results
 - `reranking.py`: Cross-encoder reranking
 
-### API Layer (hindsight-api/hindsight_api/api/)
+### API Layer (hindsight-api-slim/hindsight_api/api/)
 - `http.py`: FastAPI HTTP routers (~80KB) for all REST endpoints
 - `mcp.py`: Model Context Protocol server implementation
 
@@ -111,13 +111,13 @@ Main operations:
 - **Reflect**: Disposition-aware reasoning using memories and mental models.
 
 ### Database
-PostgreSQL with pgvector. Schema managed via Alembic migrations in `hindsight-api/hindsight_api/alembic/`. Migrations run automatically on API startup.
+PostgreSQL with pgvector. Schema managed via Alembic migrations in `hindsight-api-slim/hindsight_api/alembic/`. Migrations run automatically on API startup.
 
 Key tables: `banks`, `memory_units`, `documents`, `entities`, `entity_links`
 
 ### Adding Database Migrations
 
-1. **Create a new migration file** in `hindsight-api/hindsight_api/alembic/versions/`:
+1. **Create a new migration file** in `hindsight-api-slim/hindsight_api/alembic/versions/`:
    - File name format: `<revision_id>_<description>.py` (e.g., `f1a2b3c4d5e6_add_new_index.py`)
    - Use a unique hex revision ID (12 chars)
    - Set `down_revision` to the previous migration's revision ID
@@ -251,7 +251,7 @@ Fields must be categorized as either **hierarchical** (can be overridden per-ten
 
 #### Adding a New Configuration Field
 
-1. **config.py** (`hindsight-api/hindsight_api/config.py`):
+1. **config.py** (`hindsight-api-slim/hindsight_api/config.py`):
    - Add `ENV_*` constant for the environment variable name (e.g., `ENV_MY_SETTING = "HINDSIGHT_API_MY_SETTING"`)
    - Add `DEFAULT_*` constant for the default value
    - Add field to `HindsightConfig` dataclass with type annotation
@@ -268,7 +268,7 @@ Fields must be categorized as either **hierarchical** (can be overridden per-ten
    # Static field - just don't add to _HIERARCHICAL_FIELDS
    ```
 
-2. **main.py** (`hindsight-api/hindsight_api/main.py`):
+2. **main.py** (`hindsight-api-slim/hindsight_api/main.py`):
    - Add field to the manual `HindsightConfig()` constructor call (search for "CLI override")
 
 3. **Use hierarchical config in MemoryEngine**:
@@ -308,7 +308,7 @@ cp .env.example .env
 # Edit .env with LLM API key
 
 # Python deps
-uv sync --directory hindsight-api/
+uv sync --directory hindsight-api-slim/
 
 # Node deps (uses npm workspaces)
 npm install

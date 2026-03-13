@@ -42,10 +42,10 @@ echo "  Running lints in parallel..."
 run_task "eslint" "$REPO_ROOT/hindsight-control-plane" "npx eslint --fix src/**/*.{ts,tsx}"
 run_task "prettier" "$REPO_ROOT/hindsight-control-plane" "npx prettier --write src/**/*.{ts,tsx}"
 
-# Python hindsight-api tasks
-run_task "ruff-api-check" "$REPO_ROOT/hindsight-api" "uv run ruff check --fix ."
-run_task "ruff-api-format" "$REPO_ROOT/hindsight-api" "uv run ruff format ."
-run_task "ty-api" "$REPO_ROOT/hindsight-api" "uv run ty check hindsight_api"
+# Python hindsight-api-slim tasks
+run_task "ruff-api-check" "$REPO_ROOT/hindsight-api-slim" "uv run ruff check --fix ."
+run_task "ruff-api-format" "$REPO_ROOT/hindsight-api-slim" "uv run ruff format ."
+run_task "ty-api" "$REPO_ROOT/hindsight-api-slim" "uv run ty check hindsight_api"
 
 # Python hindsight-dev tasks
 run_task "ruff-dev-check" "$REPO_ROOT/hindsight-dev" "uv run ruff check --fix ."

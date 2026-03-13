@@ -30,7 +30,7 @@ HINDSIGHT_API_TENANT_SUPABASE_URL=https://your-project.supabase.co
 HINDSIGHT_API_TENANT_SUPABASE_SERVICE_KEY=your-service-role-key
 ```
 
-See the [source code](https://github.com/vectorize-io/hindsight/blob/main/hindsight-api/hindsight_api/extensions/builtin/supabase_tenant.py) for complete configuration options and implementation details.
+See the [source code](https://github.com/vectorize-io/hindsight/blob/main/hindsight-api-slim/hindsight_api/extensions/builtin/supabase_tenant.py) for complete configuration options and implementation details.
 
 For other multi-tenant setups with separate schemas per tenant (e.g., custom JWT-based auth), implement a custom `TenantExtension`.
 

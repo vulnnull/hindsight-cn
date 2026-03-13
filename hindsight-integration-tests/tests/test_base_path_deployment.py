@@ -26,7 +26,7 @@ import pytest
 
 # Paths
 REPO_ROOT = Path(__file__).parent.parent.parent
-API_PATH = REPO_ROOT / "hindsight-api"
+API_PATH = REPO_ROOT / "hindsight-api-slim"
 COMPOSE_EXAMPLES_PATH = REPO_ROOT / "docker" / "docker-compose" / "nginx"
 
 # Add hindsight-api to path for direct API testing

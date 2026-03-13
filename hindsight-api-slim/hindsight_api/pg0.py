@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
-from pg0 import Pg0
+if TYPE_CHECKING:
+    from pg0 import Pg0
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,13 @@ class EmbeddedPostgres:
 
     def _get_pg0(self) -> Pg0:
         if self._pg0 is None:
+            try:
+                from pg0 import Pg0
+            except ImportError:
+                raise ImportError(
+                    "pg0-embedded is required for embedded PostgreSQL. "
+                    "Install it with: pip install 'hindsight-api-slim[embedded-db]'"
+                )
             kwargs = {
                 "name": self.name,
                 "username": self.username,
