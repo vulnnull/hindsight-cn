@@ -470,9 +470,11 @@ class GeminiLLM(LLMInterface):
                         fn_name = fn.get("name", "")
                         fn_args_str = fn.get("arguments", "{}")
                         fn_args = parse_llm_json(fn_args_str)
-                        parts.append(
-                            genai_types.Part(function_call=genai_types.FunctionCall(name=fn_name, args=fn_args))
-                        )
+                        thought_signature = tc.get("thought_signature")
+                        fc_kwargs: dict[str, Any] = {"name": fn_name, "args": fn_args}
+                        if thought_signature:
+                            fc_kwargs["thought_signature"] = thought_signature
+                        parts.append(genai_types.Part(function_call=genai_types.FunctionCall(**fc_kwargs)))
                     gemini_contents.append(genai_types.Content(role="model", parts=parts))
                 else:
                     gemini_contents.append(genai_types.Content(role="model", parts=[genai_types.Part(text=content)]))
@@ -545,11 +547,13 @@ class GeminiLLM(LLMInterface):
                                 content = part.text
                             if hasattr(part, "function_call") and part.function_call:
                                 fc = part.function_call
+                                thought_signature = getattr(fc, "thought_signature", None)
                                 tool_calls.append(
                                     LLMToolCall(
                                         id=f"gemini_{len(tool_calls)}",
                                         name=fc.name,
                                         arguments=dict(fc.args) if fc.args else {},
+                                        thought_signature=thought_signature,
                                     )
                                 )
 

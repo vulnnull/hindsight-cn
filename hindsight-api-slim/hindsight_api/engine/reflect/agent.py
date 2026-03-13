@@ -895,7 +895,7 @@ async def run_reflect_agent(
 
 def _tool_call_to_dict(tc: "LLMToolCall") -> dict[str, Any]:
     """Convert LLMToolCall to OpenAI message format."""
-    return {
+    d: dict[str, Any] = {
         "id": tc.id,
         "type": "function",
         "function": {
@@ -903,6 +903,9 @@ def _tool_call_to_dict(tc: "LLMToolCall") -> dict[str, Any]:
             "arguments": json.dumps(tc.arguments),
         },
     }
+    if tc.thought_signature is not None:
+        d["thought_signature"] = tc.thought_signature
+    return d
 
 
 async def _process_done_tool(
