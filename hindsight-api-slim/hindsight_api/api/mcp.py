@@ -381,6 +381,15 @@ class MCPMiddleware:
             # Clear root_path since we're passing directly to the app
             new_scope["root_path"] = ""
 
+            # Ensure Accept header includes required MIME types for MCP SDK.
+            # Some clients (e.g., Claude Code) don't send Accept, causing
+            # the SDK to reject with 406 Not Acceptable.
+            accept_header = self._get_header(new_scope, "accept")
+            if not accept_header or "text/event-stream" not in accept_header:
+                headers = [(k, v) for k, v in new_scope.get("headers", []) if k.lower() != b"accept"]
+                headers.append((b"accept", b"application/json, text/event-stream"))
+                new_scope["headers"] = headers
+
             # Wrap send to rewrite the SSE endpoint URL to include bank_id if using path-based routing.
             # Only rewrite SSE (text/event-stream) responses to avoid corrupting tool results
             # that might contain the literal string "data: /messages".
