@@ -122,6 +122,12 @@ const sidebars: SidebarsConfig = {
           label: 'Webhooks',
           customProps: { icon: 'lu-webhook' },
         },
+        {
+          type: 'link',
+          href: '/api-reference',
+          label: 'API Reference',
+          customProps: { icon: 'lu-book-open', iconAfter: 'lu-arrow-up-right' },
+        },
       ],
     },
     {
@@ -222,6 +228,12 @@ const sidebars: SidebarsConfig = {
       collapsible: false,
       items: [
         {
+          type: 'link',
+          href: 'https://ui.hindsight.vectorize.io/signup',
+          label: 'Cloud',
+          customProps: { icon: 'lu-cloud', iconAfter: 'lu-arrow-up-right' },
+        },
+        {
           type: 'doc',
           id: 'developer/installation',
           label: 'Installation',
@@ -268,6 +280,55 @@ const sidebars: SidebarsConfig = {
           id: 'developer/mcp-server',
           label: 'MCP Server',
           customProps: { icon: 'lu-network' },
+        },
+      ],
+    },
+    {
+      type: 'category',
+      label: 'More',
+      collapsible: false,
+      items: [
+        {
+          type: 'link',
+          href: '/cookbook',
+          label: 'Cookbook',
+          customProps: { icon: 'lu-book', iconAfter: 'lu-arrow-up-right' },
+        },
+        {
+          type: 'link',
+          href: '/blog',
+          label: 'Blog',
+          customProps: { icon: 'lu-rss', iconAfter: 'lu-arrow-up-right' },
+        },
+        {
+          type: 'link',
+          href: 'https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg',
+          label: 'Community',
+          customProps: { icon: 'si-slack', iconAfter: 'lu-arrow-up-right' },
+        },
+        {
+          type: 'link',
+          href: 'https://github.com/vectorize-io/hindsight',
+          label: 'GitHub',
+          customProps: { icon: 'si-github', iconAfter: 'lu-arrow-up-right' },
+        },
+        {
+          type: 'link',
+          href: 'https://benchmarks.hindsight.vectorize.io/',
+          label: 'Benchmarks',
+          customProps: { icon: 'lu-chart-bar', iconAfter: 'lu-arrow-up-right' },
+        },
+        {
+          type: 'link',
+          href: 'https://benchmarks.hindsight.vectorize.io/',
+          label: 'Which Model Should I Use?',
+          customProps: { icon: 'lu-cpu', iconAfter: 'lu-arrow-up-right' },
+        },
+        {
+          type: 'link',
+          href: 'https://arxiv.org/abs/2512.12818',
+          label: 'Paper',
+          customProps: { icon: 'lu-file-text', iconAfter: 'lu-arrow-up-right' },
         },
       ],
     },

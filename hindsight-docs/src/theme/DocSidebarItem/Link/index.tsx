@@ -9,9 +9,11 @@ import {
   LuZap, LuDatabase, LuGitCompare, LuRocket, LuMemoryStick,
   LuWebhook, LuFileText, LuServer, LuSettings, LuTerminal,
   LuActivity, LuPlug, LuShield, LuPackage, LuBook,
-  LuNetwork, LuCode2, LuLayers, LuCpu,
+  LuNetwork, LuCode, LuLayers, LuCpu,
+  LuArrowUpRight, LuBookOpen, LuRss, LuCloud, LuMessageCircle,
+  LuChartBar, LuChartColumn,
 } from 'react-icons/lu';
-import {SiGo, SiPython} from 'react-icons/si';
+import {SiGo, SiPython, SiGithub, SiSlack} from 'react-icons/si';
 
 const ICON_MAP: Record<string, IconType> = {
   'lu-brain':       LuBrain,
@@ -35,11 +37,20 @@ const ICON_MAP: Record<string, IconType> = {
   'lu-package':     LuPackage,
   'lu-book':        LuBook,
   'lu-network':     LuNetwork,
-  'lu-code':        LuCode2,
+  'lu-code':        LuCode,
   'lu-layers':      LuLayers,
   'lu-cpu':         LuCpu,
   'si-go':          SiGo,
   'si-python':      SiPython,
+  'si-github':      SiGithub,
+  'si-slack':       SiSlack,
+  'lu-chart-bar':   LuChartBar,
+  'lu-chart-column': LuChartColumn,
+  'lu-arrow-up-right': LuArrowUpRight,
+  'lu-book-open':   LuBookOpen,
+  'lu-rss':         LuRss,
+  'lu-cloud':       LuCloud,
+  'lu-message-circle': LuMessageCircle,
 };
 
 type Props = WrapperProps<typeof LinkType>;
@@ -47,23 +58,32 @@ type Props = WrapperProps<typeof LinkType>;
 export default function LinkWrapper(props: Props): JSX.Element {
   const {item} = props;
   const icon = item.customProps?.icon as string | undefined;
+  const iconAfter = item.customProps?.iconAfter as string | undefined;
 
-  if (!icon) {
+  if (!icon && !iconAfter) {
     return <Link {...props} />;
   }
 
-  const IconComponent = ICON_MAP[icon];
+  const IconComponent = icon ? ICON_MAP[icon] : undefined;
+  const IconAfterComponent = iconAfter ? ICON_MAP[iconAfter] : undefined;
 
-  const iconNode = IconComponent
-    ? <IconComponent size={16} style={{flexShrink: 0, opacity: 0.65}} />
-    : <img src={icon} alt="" style={{width: '16px', height: '16px', flexShrink: 0, objectFit: 'contain'}} />;
+  const iconNode = icon
+    ? IconComponent
+      ? <IconComponent size={16} style={{flexShrink: 0, opacity: 0.65}} />
+      : <img src={icon} alt="" style={{width: '16px', height: '16px', flexShrink: 0, objectFit: 'contain'}} />
+    : null;
+
+  const iconAfterNode = IconAfterComponent
+    ? <IconAfterComponent size={13} style={{flexShrink: 0, opacity: 0.45}} />
+    : null;
 
   const modifiedItem = {
     ...item,
     label: (
       <span style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
         {iconNode}
-        <span>{item.label}</span>
+        <span style={{flex: 1}}>{item.label}</span>
+        {iconAfterNode}
       </span>
     ),
   };

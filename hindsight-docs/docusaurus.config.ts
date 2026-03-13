@@ -238,20 +238,44 @@ const config: Config = {
             {
               to: '/cookbook',
               label: 'Cookbook',
+              customProps: { icon: 'lu-book' },
             },
             {
               to: '/blog',
               label: 'Blog',
+              customProps: { icon: 'lu-rss' },
             },
             {
               to: '/api-reference',
               label: 'API Reference',
+              customProps: { icon: 'lu-book-open' },
             },
             {
               href: 'https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg',
               label: 'Community',
+              customProps: { icon: 'si-slack' },
+            },
+            {
+              href: 'https://benchmarks.hindsight.vectorize.io/',
+              label: 'Benchmarks',
+              customProps: { icon: 'lu-chart-bar' },
+            },
+            {
+              href: 'https://benchmarks.hindsight.vectorize.io/',
+              label: 'Which Model Should I Use?',
+              customProps: { icon: 'lu-cpu' },
+            },
+            {
+              href: 'https://arxiv.org/abs/2512.12818',
+              label: 'Paper',
+              customProps: { icon: 'lu-file-text' },
             },
           ],
+        },
+        {
+          type: 'docsVersionDropdown',
+          position: 'right',
+          className: 'navbar-item-version',
         },
         {
           href: 'https://ui.hindsight.vectorize.io/signup',
@@ -260,15 +284,10 @@ const config: Config = {
           className: 'navbar-item-cloud',
         },
         {
-          type: 'docsVersionDropdown',
-          position: 'right',
-          className: 'navbar-item-version',
-        },
-        {
           href: 'https://github.com/vectorize-io/hindsight',
           position: 'right',
+          label: 'GitHub',
           className: 'header-github-link',
-          'aria-label': 'GitHub repository',
         },
       ],
     },
