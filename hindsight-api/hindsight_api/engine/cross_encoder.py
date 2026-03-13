@@ -20,6 +20,7 @@ from ..config import (
     DEFAULT_RERANKER_COHERE_MODEL,
     DEFAULT_RERANKER_FLASHRANK_CACHE_DIR,
     DEFAULT_RERANKER_FLASHRANK_MODEL,
+    DEFAULT_RERANKER_LITELLM_MAX_TOKENS_PER_DOC,
     DEFAULT_RERANKER_LITELLM_MODEL,
     DEFAULT_RERANKER_LITELLM_SDK_MODEL,
     DEFAULT_RERANKER_LOCAL_FORCE_CPU,
@@ -820,6 +821,17 @@ class FlashRankCrossEncoder(CrossEncoderModel):
         return await loop.run_in_executor(FlashRankCrossEncoder._executor, self._predict_sync, pairs)
 
 
+def _truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to at most max_tokens using the shared tiktoken encoder."""
+    from .memory_engine import _get_tiktoken_encoding
+
+    enc = _get_tiktoken_encoding()
+    tokens = enc.encode(text)
+    if len(tokens) <= max_tokens:
+        return text
+    return enc.decode(tokens[:max_tokens])
+
+
 class LiteLLMCrossEncoder(CrossEncoderModel):
     """
     LiteLLM cross-encoder implementation using LiteLLM proxy's /rerank endpoint.
@@ -843,6 +855,7 @@ class LiteLLMCrossEncoder(CrossEncoderModel):
         api_key: str | None = None,
         model: str = DEFAULT_RERANKER_LITELLM_MODEL,
         timeout: float = 60.0,
+        max_tokens_per_doc: int | None = DEFAULT_RERANKER_LITELLM_MAX_TOKENS_PER_DOC,
     ):
         """
         Initialize LiteLLM cross-encoder client.
@@ -853,11 +866,15 @@ class LiteLLMCrossEncoder(CrossEncoderModel):
             model: Reranking model name (default: cohere/rerank-english-v3.0)
                    Use provider prefix (e.g., cohere/, together_ai/, voyage/)
             timeout: Request timeout in seconds (default: 60.0)
+            max_tokens_per_doc: If set, truncate each document to this many tokens before
+                                sending to the reranker (uses tiktoken cl100k_base encoding).
+                                Useful for models with small context windows (e.g. 1024 tokens).
         """
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.max_tokens_per_doc = max_tokens_per_doc
         self._async_client: httpx.AsyncClient | None = None
 
     @property
@@ -905,6 +922,8 @@ class LiteLLMCrossEncoder(CrossEncoderModel):
 
         for query, indexed_texts in query_groups.items():
             texts = [text for _, text in indexed_texts]
+            if self.max_tokens_per_doc is not None:
+                texts = [_truncate_to_tokens(t, self.max_tokens_per_doc) for t in texts]
             indices = [idx for idx, _ in indexed_texts]
 
             # LiteLLM /rerank follows Cohere API format
@@ -950,6 +969,7 @@ class LiteLLMSDKCrossEncoder(CrossEncoderModel):
         model: str = DEFAULT_RERANKER_LITELLM_SDK_MODEL,
         api_base: str | None = None,
         timeout: float = 60.0,
+        max_tokens_per_doc: int | None = DEFAULT_RERANKER_LITELLM_MAX_TOKENS_PER_DOC,
     ):
         """
         Initialize LiteLLM SDK cross-encoder client.
@@ -959,11 +979,15 @@ class LiteLLMSDKCrossEncoder(CrossEncoderModel):
             model: Model name with provider prefix (e.g., "deepinfra/Qwen3-reranker-8B")
             api_base: Custom base URL for API (optional)
             timeout: Request timeout in seconds (default: 60.0)
+            max_tokens_per_doc: If set, truncate each document to this many tokens before
+                                sending to the reranker (uses tiktoken cl100k_base encoding).
+                                Useful for models with small context windows (e.g. 1024 tokens).
         """
         self.api_key = api_key
         self.model = model
         self.api_base = api_base
         self.timeout = timeout
+        self.max_tokens_per_doc = max_tokens_per_doc
         self._initialized = False
         self._litellm = None  # Will be set during initialization
 
@@ -1017,6 +1041,8 @@ class LiteLLMSDKCrossEncoder(CrossEncoderModel):
 
         for query, indexed_texts in query_groups.items():
             texts = [text for _, text in indexed_texts]
+            if self.max_tokens_per_doc is not None:
+                texts = [_truncate_to_tokens(t, self.max_tokens_per_doc) for t in texts]
             indices = [idx for idx, _ in indexed_texts]
 
             # Build kwargs for rerank call
@@ -1189,6 +1215,7 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
             api_base=config.reranker_litellm_api_base,
             api_key=config.reranker_litellm_api_key,
             model=config.reranker_litellm_model,
+            max_tokens_per_doc=config.reranker_litellm_max_tokens_per_doc,
         )
     elif provider == "litellm-sdk":
         api_key = config.reranker_litellm_sdk_api_key
@@ -1200,6 +1227,7 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
             api_key=api_key,
             model=config.reranker_litellm_sdk_model,
             api_base=config.reranker_litellm_sdk_api_base,
+            max_tokens_per_doc=config.reranker_litellm_max_tokens_per_doc,
         )
     elif provider == "zeroentropy":
         api_key = config.reranker_zeroentropy_api_key

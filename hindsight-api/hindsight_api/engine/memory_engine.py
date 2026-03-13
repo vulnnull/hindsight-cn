@@ -51,13 +51,9 @@ def get_current_schema() -> str:
     return schema
 
 
-# Initialize tiktoken encoder once at module level for efficiency
-_tiktoken_encoder = tiktoken.get_encoding("cl100k_base")  # GPT-4/GPT-3.5-turbo encoding
-
-
 def count_tokens(text: str) -> int:
     """Count tokens in text using tiktoken (cl100k_base encoding for GPT-4/3.5)."""
-    return len(_tiktoken_encoder.encode(text))
+    return len(_get_tiktoken_encoding().encode(text))
 
 
 def fq_table(table_name: str) -> str:
@@ -207,8 +203,6 @@ def utcnow():
 
 # Logger for memory system
 logger = logging.getLogger(__name__)
-
-import tiktoken
 
 from .db_utils import acquire_with_retry
 

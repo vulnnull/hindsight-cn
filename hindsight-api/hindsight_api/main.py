@@ -229,6 +229,7 @@ def main():
             reranker_litellm_api_base=config.reranker_litellm_api_base,
             reranker_litellm_api_key=config.reranker_litellm_api_key,
             reranker_litellm_model=config.reranker_litellm_model,
+            reranker_litellm_max_tokens_per_doc=config.reranker_litellm_max_tokens_per_doc,
             reranker_litellm_sdk_api_key=config.reranker_litellm_sdk_api_key,
             reranker_litellm_sdk_model=config.reranker_litellm_sdk_model,
             reranker_litellm_sdk_api_base=config.reranker_litellm_sdk_api_base,
