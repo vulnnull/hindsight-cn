@@ -1249,7 +1249,7 @@ jobs:
       working-directory: ./hindsight-api-slim
       run: uv sync --frozen --extra embedded-db --index-strategy unsafe-best-match
 
-    - name: Start API server and smoke test
+    - name: Start API server
       working-directory: ./hindsight-api-slim
       run: |
         uv run hindsight-api --port 8888 > /tmp/slim-api-server.log 2>&1 &
@@ -1265,7 +1265,9 @@ jobs:
           fi
           sleep 1
         done
-        echo "PASS: slim pip package smoke test (server started and healthy)"
+
+    - name: Smoke test - retain and recall
+      run: ./scripts/smoke-test-slim.sh http://localhost:8888
 
     - name: Show API server logs
       if: always()

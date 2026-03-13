@@ -49,6 +49,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -178,6 +181,21 @@ for i in $(seq 1 "$TIMEOUT"); do
         echo "=== Health Response ==="
         curl -s "http://localhost:${HEALTH_PORT}${HEALTH_PATH}" | python3 -m json.tool 2>/dev/null || curl -s "http://localhost:${HEALTH_PORT}${HEALTH_PATH}"
         echo ""
+
+        # Run retain/recall smoke test for API targets
+        if [ "$TARGET" != "cp-only" ]; then
+            echo ""
+            echo "=== Retain/Recall Smoke Test ==="
+            if ! "$REPO_ROOT/scripts/smoke-test-slim.sh" "http://localhost:${HEALTH_PORT}"; then
+                echo ""
+                echo "=== Container Logs (last 50 lines) ==="
+                docker logs "$CONTAINER_NAME" 2>&1 | tail -50
+                echo ""
+                echo -e "${RED}Smoke test FAILED${NC}"
+                exit 1
+            fi
+        fi
+
         echo ""
         echo "=== Container Logs (last 50 lines) ==="
         docker logs "$CONTAINER_NAME" 2>&1 | tail -50
