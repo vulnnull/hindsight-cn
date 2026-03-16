@@ -195,10 +195,15 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         # create_position_ids_from_input_ids as a module-level function; the custom
         # code in these models still references it. This monkey-patch restores it.
         try:
-            from transformers.models.xlm_roberta.modeling_xlm_roberta import XLMRobertaEmbeddings
             import transformers.models.xlm_roberta.modeling_xlm_roberta as xlm_module
-            if not hasattr(xlm_module, 'create_position_ids_from_input_ids'):
-                xlm_module.create_position_ids_from_input_ids = XLMRobertaEmbeddings.create_position_ids_from_input_ids
+            from transformers.models.xlm_roberta.modeling_xlm_roberta import XLMRobertaEmbeddings
+
+            if not hasattr(xlm_module, "create_position_ids_from_input_ids"):
+                setattr(
+                    xlm_module,
+                    "create_position_ids_from_input_ids",
+                    XLMRobertaEmbeddings.create_position_ids_from_input_ids,
+                )
                 logger.info("Reranker: applied transformers 5.x compatibility patch for XLM-RoBERTa")
         except Exception:
             pass
@@ -260,9 +265,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             sorted_indices = sorted(range(len(pairs)), key=lambda i: lengths[i])
             sorted_pairs = [pairs[i] for i in sorted_indices]
 
-            sorted_scores = self._model.predict(
-                sorted_pairs, batch_size=self.batch_size, show_progress_bar=False
-            )
+            sorted_scores = self._model.predict(sorted_pairs, batch_size=self.batch_size, show_progress_bar=False)
             sorted_scores = sorted_scores.tolist() if hasattr(sorted_scores, "tolist") else list(sorted_scores)
 
             # Restore original order
