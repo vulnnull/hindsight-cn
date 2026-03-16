@@ -111,6 +111,7 @@ fi
 if [ "$ENABLE_CP" = "true" ]; then
     echo "🎛️  Starting Control Plane..."
     cd /app/control-plane
+    export HOSTNAME="${HINDSIGHT_CP_HOSTNAME:-0.0.0.0}"
     PORT="${HINDSIGHT_CP_PORT:-9999}" node server.js &
     CP_PID=$!
     PIDS+=($CP_PID)
