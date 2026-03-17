@@ -62,6 +62,7 @@ export default function BankPage() {
   const [showClearObservationsDialog, setShowClearObservationsDialog] = useState(false);
   const [isClearingObservations, setIsClearingObservations] = useState(false);
   const [isConsolidating, setIsConsolidating] = useState(false);
+  const [isRecoveringConsolidation, setIsRecoveringConsolidation] = useState(false);
   const [showResetConfigDialog, setShowResetConfigDialog] = useState(false);
   const [isResettingConfig, setIsResettingConfig] = useState(false);
 
@@ -137,6 +138,22 @@ export default function BankPage() {
     }
   };
 
+  const handleRecoverConsolidation = async () => {
+    if (!bankId) return;
+
+    setIsRecoveringConsolidation(true);
+    try {
+      const result = await client.recoverConsolidation(bankId);
+      toast.success(
+        `Recovered ${result.retried_count} failed ${result.retried_count === 1 ? "memory" : "memories"} for re-consolidation`
+      );
+    } catch (error) {
+      // Error toast is shown automatically by the API client interceptor
+    } finally {
+      setIsRecoveringConsolidation(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <BankSelector />
@@ -177,6 +194,23 @@ export default function BankPage() {
                           <Brain className="w-4 h-4 mr-2" />
                         )}
                         {isConsolidating ? "Consolidating..." : "Run Consolidation"}
+                        {!observationsEnabled && (
+                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={handleRecoverConsolidation}
+                        disabled={isRecoveringConsolidation || !observationsEnabled}
+                        title={
+                          !observationsEnabled ? "Observations feature is not enabled" : undefined
+                        }
+                      >
+                        {isRecoveringConsolidation ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <RotateCcw className="w-4 h-4 mr-2" />
+                        )}
+                        {isRecoveringConsolidation ? "Recovering..." : "Recover Consolidation"}
                         {!observationsEnabled && (
                           <span className="ml-auto text-xs text-muted-foreground">Off</span>
                         )}

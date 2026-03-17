@@ -633,7 +633,7 @@ class LLMProvider:
             # Reduce Claude Agent SDK logging verbosity
             import logging as sdk_logging
 
-            from claude_agent_sdk import query  # noqa: F401
+            from claude_agent_sdk import query  # noqa: F401  # type: ignore[unresolved-import]
 
             sdk_logging.getLogger("claude_agent_sdk").setLevel(sdk_logging.WARNING)
             sdk_logging.getLogger("claude_agent_sdk._internal").setLevel(sdk_logging.WARNING)

@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
@@ -1326,6 +1326,14 @@ class ClearMemoryObservationsResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"deleted_count": 3}})
 
     deleted_count: int
+
+
+class RecoverConsolidationResponse(BaseModel):
+    """Response model for recovering failed consolidation."""
+
+    model_config = ConfigDict(json_schema_extra={"example": {"retried_count": 42}})
+
+    retried_count: int
 
 
 class BankStatsResponse(BaseModel):
@@ -3902,6 +3910,34 @@ def _register_routes(app: FastAPI):
             logger.error(f"Error in DELETE /v1/default/banks/{bank_id}/observations: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.post(
+        "/v1/default/banks/{bank_id}/consolidation/recover",
+        response_model=RecoverConsolidationResponse,
+        summary="Recover failed consolidation",
+        description=(
+            "Reset all memories that were permanently marked as failed during consolidation "
+            "(after exhausting all LLM retries and adaptive batch splitting) so they are "
+            "picked up again on the next consolidation run. Does not delete any observations."
+        ),
+        operation_id="recover_consolidation",
+        tags=["Banks"],
+    )
+    async def api_recover_consolidation(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
+        """Reset consolidation-failed memories for recovery."""
+        try:
+            result = await app.state.memory.retry_failed_consolidation(bank_id, request_context=request_context)
+            return RecoverConsolidationResponse(retried_count=result["retried_count"])
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Error in POST /v1/default/banks/{bank_id}/consolidation/recover: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.delete(
         "/v1/default/banks/{bank_id}/memories/{memory_id}/observations",
         response_model=ClearMemoryObservationsResponse,
@@ -4135,7 +4171,7 @@ def _register_routes(app: FastAPI):
             await bank_utils.get_bank_profile(pool, bank_id)
 
             webhook_id = uuid.uuid4()
-            now = datetime.utcnow().isoformat() + "Z"
+            now = datetime.now(timezone.utc).isoformat()
             row = await pool.fetchrow(
                 f"""
                 INSERT INTO {fq_table("webhooks")}

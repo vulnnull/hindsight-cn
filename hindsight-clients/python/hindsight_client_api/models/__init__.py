@@ -70,6 +70,7 @@ from hindsight_client_api.models.recall_request import RecallRequest
 from hindsight_client_api.models.recall_request_tag_groups_inner import RecallRequestTagGroupsInner
 from hindsight_client_api.models.recall_response import RecallResponse
 from hindsight_client_api.models.recall_result import RecallResult
+from hindsight_client_api.models.recover_consolidation_response import RecoverConsolidationResponse
 from hindsight_client_api.models.reflect_based_on import ReflectBasedOn
 from hindsight_client_api.models.reflect_directive import ReflectDirective
 from hindsight_client_api.models.reflect_fact import ReflectFact

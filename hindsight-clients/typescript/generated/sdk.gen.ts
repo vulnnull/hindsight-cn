@@ -131,6 +131,9 @@ import type {
   RecallMemoriesData,
   RecallMemoriesErrors,
   RecallMemoriesResponses,
+  RecoverConsolidationData,
+  RecoverConsolidationErrors,
+  RecoverConsolidationResponses,
   ReflectData,
   ReflectErrors,
   ReflectResponses,
@@ -934,6 +937,20 @@ export const clearObservations = <ThrowOnError extends boolean = false>(
     ClearObservationsErrors,
     ThrowOnError
   >({ url: "/v1/default/banks/{bank_id}/observations", ...options });
+
+/**
+ * Recover failed consolidation
+ *
+ * Reset all memories that were permanently marked as failed during consolidation (after exhausting all LLM retries and adaptive batch splitting) so they are picked up again on the next consolidation run. Does not delete any observations.
+ */
+export const recoverConsolidation = <ThrowOnError extends boolean = false>(
+  options: Options<RecoverConsolidationData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    RecoverConsolidationResponses,
+    RecoverConsolidationErrors,
+    ThrowOnError
+  >({ url: "/v1/default/banks/{bank_id}/consolidation/recover", ...options });
 
 /**
  * Clear observations for a memory

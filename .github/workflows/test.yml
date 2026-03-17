@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -199,7 +200,6 @@ jobs:
       HINDSIGHT_API_LLM_MODEL: google/gemini-2.5-flash-lite
       HINDSIGHT_API_URL: http://localhost:8888
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -421,7 +421,6 @@ jobs:
       HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Prefer CPU-only PyTorch in CI (but keep PyPI for everything else)
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -484,7 +483,6 @@ jobs:
       HINDSIGHT_API_URL: http://localhost:8888
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Prefer CPU-only PyTorch in CI (but keep PyPI for everything else)
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -587,7 +585,6 @@ jobs:
       HINDSIGHT_API_URL: http://localhost:8888
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Prefer CPU-only PyTorch in CI (but keep PyPI for everything else)
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -719,7 +716,6 @@ jobs:
       HINDSIGHT_API_URL: http://localhost:8888
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Prefer CPU-only PyTorch in CI (but keep PyPI for everything else)
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -826,7 +822,6 @@ jobs:
       HINDSIGHT_API_URL: http://localhost:8888
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Prefer CPU-only PyTorch in CI (but keep PyPI for everything else)
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -931,7 +926,6 @@ jobs:
       HINDSIGHT_API_URL: http://localhost:8888
       HINDSIGHT_EMBED_PACKAGE_PATH: ${{ github.workspace }}/hindsight-embed
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -1038,7 +1032,6 @@ jobs:
       HINDSIGHT_API_LLM_MODEL: google/gemini-2.5-flash-lite
       HINDSIGHT_API_URL: http://localhost:8888
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -1282,7 +1275,6 @@ jobs:
       HINDSIGHT_API_LLM_VERTEXAI_SERVICE_ACCOUNT_KEY: /tmp/gcp-credentials.json
       HINDSIGHT_API_LLM_MODEL: google/gemini-2.5-flash-lite
       # Prefer CPU-only PyTorch in CI
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -1340,7 +1332,6 @@ jobs:
       HINDSIGHT_LLM_VERTEXAI_SERVICE_ACCOUNT_KEY: /tmp/gcp-credentials.json
       HINDSIGHT_LLM_MODEL: google/gemini-2.5-flash-lite
       # Prefer CPU-only PyTorch in CI
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -1396,7 +1387,6 @@ jobs:
       HINDSIGHT_API_LLM_MODEL: google/gemini-2.5-flash-lite
       HINDSIGHT_API_URL: http://localhost:8888
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -1530,7 +1520,6 @@ jobs:
       HINDSIGHT_API_LLM_VERTEXAI_SERVICE_ACCOUNT_KEY: /tmp/gcp-credentials.json
       HINDSIGHT_API_LLM_MODEL: google/gemini-2.5-flash-lite
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
 
     steps:
     - uses: actions/checkout@v6
@@ -1603,9 +1592,6 @@ jobs:
 
   verify-generated-files:
     runs-on: ubuntu-latest
-    env:
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
-
     steps:
     - uses: actions/checkout@v6
 
@@ -1675,9 +1661,6 @@ jobs:
 
   check-openapi-compatibility:
     runs-on: ubuntu-latest
-    env:
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
-
     steps:
     - uses: actions/checkout@v6
       with:

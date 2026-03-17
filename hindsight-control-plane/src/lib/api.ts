@@ -418,6 +418,17 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Recover failed consolidation for a bank (reset memories marked consolidation_failed_at)
+   */
+  async recoverConsolidation(bankId: string) {
+    return this.fetchApi<{
+      retried_count: number;
+    }>(`/api/banks/${bankId}/consolidation-recover`, {
+      method: "POST",
+    });
+  }
+
+  /**
    * Get chunk
    */
   async getChunk(chunkId: string) {

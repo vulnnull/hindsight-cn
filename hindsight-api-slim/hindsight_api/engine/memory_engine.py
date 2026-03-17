@@ -3878,6 +3878,58 @@ class MemoryEngine(MemoryEngineInterface):
 
                 return {"deleted_count": count or 0}
 
+    async def retry_failed_consolidation(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> dict[str, int]:
+        """
+        Reset memories that previously failed consolidation so they are retried on the next
+        consolidation run.
+
+        Clears consolidation_failed_at (and consolidated_at) for all memories in the bank
+        that were marked as permanently failed after exhausting all LLM retries and adaptive
+        batch splitting. Does not delete any observations.
+
+        Args:
+            bank_id: Bank ID
+            request_context: Request context for authentication.
+
+        Returns:
+            Dictionary with count of memories queued for retry.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation="retry_failed_consolidation", request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+        pool = await self._get_pool()
+        async with acquire_with_retry(pool) as conn:
+            count = await conn.fetchval(
+                f"""
+                SELECT COUNT(*) FROM {fq_table("memory_units")}
+                WHERE bank_id = $1
+                  AND consolidation_failed_at IS NOT NULL
+                  AND fact_type IN ('experience', 'world')
+                """,
+                bank_id,
+            )
+            await conn.execute(
+                f"""
+                UPDATE {fq_table("memory_units")}
+                SET consolidation_failed_at = NULL, consolidated_at = NULL
+                WHERE bank_id = $1
+                  AND consolidation_failed_at IS NOT NULL
+                  AND fact_type IN ('experience', 'world')
+                """,
+                bank_id,
+            )
+            return {"retried_count": count or 0}
+
     async def clear_observations_for_memory(
         self,
         bank_id: str,

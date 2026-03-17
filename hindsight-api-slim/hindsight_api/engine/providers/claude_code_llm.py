@@ -68,7 +68,7 @@ class ClaudeCodeLLM(LLMInterface):
             # Reduce Claude Agent SDK logging verbosity
             import logging as sdk_logging
 
-            from claude_agent_sdk import query  # noqa: F401
+            from claude_agent_sdk import query  # noqa: F401  # type: ignore[unresolved-import]
 
             sdk_logging.getLogger("claude_agent_sdk").setLevel(sdk_logging.WARNING)
             sdk_logging.getLogger("claude_agent_sdk._internal").setLevel(sdk_logging.WARNING)
@@ -141,7 +141,12 @@ class ClaudeCodeLLM(LLMInterface):
             OutputTooLongError: If output exceeds token limits (not supported by Claude Agent SDK).
             Exception: Re-raises API errors after retries exhausted.
         """
-        from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
+        from claude_agent_sdk import (  # type: ignore[unresolved-import]
+            AssistantMessage,
+            ClaudeAgentOptions,
+            TextBlock,
+            query,
+        )
 
         start_time = time.time()
 
@@ -331,7 +336,7 @@ class ClaudeCodeLLM(LLMInterface):
         Returns:
             LLMToolCallResult with content and/or tool_calls.
         """
-        from claude_agent_sdk import (
+        from claude_agent_sdk import (  # type: ignore[unresolved-import]
             AssistantMessage,
             ClaudeAgentOptions,
             ClaudeSDKClient,

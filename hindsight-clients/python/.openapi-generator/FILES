@@ -71,6 +71,7 @@ hindsight_client_api/models/recall_request.py
 hindsight_client_api/models/recall_request_tag_groups_inner.py
 hindsight_client_api/models/recall_response.py
 hindsight_client_api/models/recall_result.py
+hindsight_client_api/models/recover_consolidation_response.py
 hindsight_client_api/models/reflect_based_on.py
 hindsight_client_api/models/reflect_directive.py
 hindsight_client_api/models/reflect_fact.py

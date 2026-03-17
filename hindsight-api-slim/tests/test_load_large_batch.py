@@ -149,6 +149,16 @@ class TestLargeBatchRetain:
         call_tracker = {"count": 0, "facts": 0}
 
         async def mock_llm_call(*args, **kwargs):
+            from hindsight_api.engine.consolidation.consolidator import _ConsolidationBatchResponse
+
+            # Consolidation calls expect a _ConsolidationBatchResponse (not a raw dict),
+            # because consolidation does NOT use skip_validation=True.
+            if kwargs.get("scope") == "consolidation":
+                return_usage = kwargs.get("return_usage", False)
+                if return_usage:
+                    return _ConsolidationBatchResponse(), TokenUsage(input_tokens=0, output_tokens=0)
+                return _ConsolidationBatchResponse()
+
             call_tracker["count"] += 1
 
             # Extract the content from the user message to generate proportional facts
@@ -157,7 +167,7 @@ class TestLargeBatchRetain:
             mock_facts = create_mock_facts_from_content(user_msg, ratio=1.5)
             call_tracker["facts"] += len(mock_facts)
 
-            # Return a dict (parsed JSON) since skip_validation=True but the code expects a dict
+            # Return a dict (parsed JSON) — fact extraction uses skip_validation=True
             response_dict = {"facts": mock_facts}
 
             return_usage = kwargs.get("return_usage", False)
@@ -236,6 +246,14 @@ class TestLargeBatchRetain:
         logger.info(f"Created {num_items} items with {actual_total_chars:,} chars (should trigger chunking)")
 
         async def mock_llm_call(*args, **kwargs):
+            from hindsight_api.engine.consolidation.consolidator import _ConsolidationBatchResponse
+
+            if kwargs.get("scope") == "consolidation":
+                return_usage = kwargs.get("return_usage", False)
+                if return_usage:
+                    return _ConsolidationBatchResponse(), TokenUsage(input_tokens=0, output_tokens=0)
+                return _ConsolidationBatchResponse()
+
             messages = kwargs.get("messages", args[0] if args else [])
             user_msg = messages[-1]["content"] if messages else ""
             mock_facts = create_mock_facts_from_content(user_msg, ratio=1.0)

@@ -3125,6 +3125,65 @@
         }
       }
     },
+    "/v1/default/banks/{bank_id}/consolidation/recover": {
+      "post": {
+        "tags": [
+          "Banks"
+        ],
+        "summary": "Recover failed consolidation",
+        "description": "Reset all memories that were permanently marked as failed during consolidation (after exhausting all LLM retries and adaptive batch splitting) so they are picked up again on the next consolidation run. Does not delete any observations.",
+        "operationId": "recover_consolidation",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoverConsolidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/default/banks/{bank_id}/memories/{memory_id}/observations": {
       "delete": {
         "tags": [
@@ -6899,6 +6958,23 @@
           ],
           "text": "Alice works at Google on the AI team",
           "type": "world"
+        }
+      },
+      "RecoverConsolidationResponse": {
+        "properties": {
+          "retried_count": {
+            "type": "integer",
+            "title": "Retried Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "retried_count"
+        ],
+        "title": "RecoverConsolidationResponse",
+        "description": "Response model for recovering failed consolidation.",
+        "example": {
+          "retried_count": 42
         }
       },
       "ReflectBasedOn": {

@@ -1609,6 +1609,18 @@ export type RecallResult = {
 };
 
 /**
+ * RecoverConsolidationResponse
+ *
+ * Response model for recovering failed consolidation.
+ */
+export type RecoverConsolidationResponse = {
+  /**
+   * Retried Count
+   */
+  retried_count: number;
+};
+
+/**
  * ReflectBasedOn
  *
  * Evidence the response is based on: memories, mental models, and directives.
@@ -4244,6 +4256,44 @@ export type ClearObservationsResponses = {
 
 export type ClearObservationsResponse =
   ClearObservationsResponses[keyof ClearObservationsResponses];
+
+export type RecoverConsolidationData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/consolidation/recover";
+};
+
+export type RecoverConsolidationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type RecoverConsolidationError =
+  RecoverConsolidationErrors[keyof RecoverConsolidationErrors];
+
+export type RecoverConsolidationResponses = {
+  /**
+   * Successful Response
+   */
+  200: RecoverConsolidationResponse;
+};
+
+export type RecoverConsolidationResponse2 =
+  RecoverConsolidationResponses[keyof RecoverConsolidationResponses];
 
 export type ClearMemoryObservationsData = {
   body?: never;

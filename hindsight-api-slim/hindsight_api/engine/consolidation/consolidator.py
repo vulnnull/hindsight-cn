@@ -80,6 +80,7 @@ class _BatchLLMResult:
     deletes: list[_DeleteAction] = field(default_factory=list)
     obs_count: int = 0
     prompt_chars: int = 0
+    failed: bool = False
 
 
 @dataclass
@@ -219,6 +220,7 @@ async def run_consolidation_job(
             FROM {fq_table("memory_units")}
             WHERE bank_id = $1
               AND consolidated_at IS NULL
+              AND consolidation_failed_at IS NULL
               AND fact_type IN ('experience', 'world')
             """,
             bank_id,
@@ -240,6 +242,7 @@ async def run_consolidation_job(
         "observations_deleted": 0,
         "actions_executed": 0,
         "skipped": 0,
+        "memories_failed": 0,
     }
 
     # Track all unique tags from consolidated memories for mental model refresh filtering
@@ -257,6 +260,7 @@ async def run_consolidation_job(
                 FROM {fq_table("memory_units")}
                 WHERE bank_id = $1
                   AND consolidated_at IS NULL
+                  AND consolidation_failed_at IS NULL
                   AND fact_type IN ('experience', 'world')
                 ORDER BY created_at ASC
                 LIMIT $2
@@ -298,94 +302,141 @@ async def run_consolidation_job(
                 if memory_tags:
                     consolidated_tags.update(memory_tags)
 
-            async with pool.acquire() as conn:
-                # Determine observation_scopes for this batch. All memories in a batch share
-                # the same tags (enforced by tag_groups), so we only check the first memory.
-                # asyncpg returns JSONB columns as raw JSON strings, so parse if needed.
-                _obs_raw = llm_batch[0].get("observation_scopes") if llm_batch else None
-                _obs_parsed = json.loads(_obs_raw) if isinstance(_obs_raw, str) else _obs_raw
+            # Process llm_batch with adaptive splitting: on LLM failure, halve the sub-batch
+            # and retry, down to batch_size=1. Only if a single-memory batch still fails is
+            # the memory marked with consolidation_failed_at and excluded from future runs
+            # until explicitly retried via the API.
+            all_results: list[dict[str, Any]] = []
+            all_deleted = 0
+            succeeded_ids: list[Any] = []
+            failed_ids: list[Any] = []
 
-                # Resolve the scope spec into a concrete list[list[str]] (or None for combined).
-                if _obs_parsed == "per_tag":
-                    _memory_tags = llm_batch[0].get("tags") or []
-                    obs_tags_list = [[tag] for tag in _memory_tags] if _memory_tags else None
-                elif _obs_parsed == "all_combinations":
-                    _memory_tags = llm_batch[0].get("tags") or []
-                    obs_tags_list = (
-                        [
-                            list(combo)
-                            for r in range(1, len(_memory_tags) + 1)
-                            for combo in combinations(_memory_tags, r)
-                        ]
-                        if _memory_tags
-                        else None
-                    )
-                elif _obs_parsed == "combined" or _obs_parsed is None:
-                    obs_tags_list = None  # single combined pass (default behaviour)
-                else:
-                    # explicit list[list[str]]
-                    obs_tags_list = _obs_parsed
+            pending: list[list[dict[str, Any]]] = [llm_batch]
+            while pending:
+                sub_batch = pending.pop(0)
 
-                batch_deleted: int = 0
-                if obs_tags_list:
-                    # Multi-pass: run one observation consolidation pass per tag set
-                    results = []
-                    for obs_tags in obs_tags_list:
-                        pass_results, pass_deleted = await _process_memory_batch(
+                async with pool.acquire() as conn:
+                    # Determine observation_scopes for this sub-batch. All memories share
+                    # the same tags (enforced by tag_groups), so we only check the first memory.
+                    # asyncpg returns JSONB columns as raw JSON strings, so parse if needed.
+                    _obs_raw = sub_batch[0].get("observation_scopes") if sub_batch else None
+                    _obs_parsed = json.loads(_obs_raw) if isinstance(_obs_raw, str) else _obs_raw
+
+                    # Resolve the scope spec into a concrete list[list[str]] (or None for combined).
+                    if _obs_parsed == "per_tag":
+                        _memory_tags = sub_batch[0].get("tags") or []
+                        obs_tags_list = [[tag] for tag in _memory_tags] if _memory_tags else None
+                    elif _obs_parsed == "all_combinations":
+                        _memory_tags = sub_batch[0].get("tags") or []
+                        obs_tags_list = (
+                            [
+                                list(combo)
+                                for r in range(1, len(_memory_tags) + 1)
+                                for combo in combinations(_memory_tags, r)
+                            ]
+                            if _memory_tags
+                            else None
+                        )
+                    elif _obs_parsed == "combined" or _obs_parsed is None:
+                        obs_tags_list = None  # single combined pass (default behaviour)
+                    else:
+                        # explicit list[list[str]]
+                        obs_tags_list = _obs_parsed
+
+                    sub_deleted: int = 0
+                    sub_llm_failed = False
+                    if obs_tags_list:
+                        # Multi-pass: run one observation consolidation pass per tag set
+                        sub_results: list[dict[str, Any]] = []
+                        for obs_tags in obs_tags_list:
+                            pass_results, pass_deleted, pass_failed = await _process_memory_batch(
+                                conn=conn,
+                                memory_engine=memory_engine,
+                                llm_config=llm_config,
+                                bank_id=bank_id,
+                                memories=sub_batch,
+                                request_context=request_context,
+                                perf=perf,
+                                config=config,
+                                obs_tags_override=obs_tags,
+                            )
+                            sub_deleted += pass_deleted
+                            sub_llm_failed = sub_llm_failed or pass_failed
+                            # Merge results: prefer non-skipped actions
+                            if not sub_results:
+                                sub_results = pass_results
+                            else:
+                                for i, (existing, new) in enumerate(zip(sub_results, pass_results)):
+                                    if existing.get("action") == "skipped" and new.get("action") != "skipped":
+                                        sub_results[i] = new
+                                    elif existing.get("action") != "skipped" and new.get("action") != "skipped":
+                                        # Both did something — combine into "multiple"
+                                        existing_created = existing.get(
+                                            "created", 1 if existing.get("action") == "created" else 0
+                                        )
+                                        existing_updated = existing.get(
+                                            "updated", 1 if existing.get("action") == "updated" else 0
+                                        )
+                                        new_created = new.get("created", 1 if new.get("action") == "created" else 0)
+                                        new_updated = new.get("updated", 1 if new.get("action") == "updated" else 0)
+                                        total = existing_created + existing_updated + new_created + new_updated
+                                        sub_results[i] = {
+                                            "action": "multiple",
+                                            "created": existing_created + new_created,
+                                            "updated": existing_updated + new_updated,
+                                            "merged": 0,
+                                            "total_actions": total,
+                                        }
+                    else:
+                        # Normal single pass using the memory's own tags
+                        sub_results, sub_deleted, sub_llm_failed = await _process_memory_batch(
                             conn=conn,
                             memory_engine=memory_engine,
                             llm_config=llm_config,
                             bank_id=bank_id,
-                            memories=llm_batch,
+                            memories=sub_batch,
                             request_context=request_context,
                             perf=perf,
                             config=config,
-                            obs_tags_override=obs_tags,
                         )
-                        batch_deleted += pass_deleted
-                        # Merge results: prefer non-skipped actions
-                        if not results:
-                            results = pass_results
-                        else:
-                            for i, (existing, new) in enumerate(zip(results, pass_results)):
-                                if existing.get("action") == "skipped" and new.get("action") != "skipped":
-                                    results[i] = new
-                                elif existing.get("action") != "skipped" and new.get("action") != "skipped":
-                                    # Both did something — combine into "multiple"
-                                    existing_created = existing.get(
-                                        "created", 1 if existing.get("action") == "created" else 0
-                                    )
-                                    existing_updated = existing.get(
-                                        "updated", 1 if existing.get("action") == "updated" else 0
-                                    )
-                                    new_created = new.get("created", 1 if new.get("action") == "created" else 0)
-                                    new_updated = new.get("updated", 1 if new.get("action") == "updated" else 0)
-                                    total = existing_created + existing_updated + new_created + new_updated
-                                    results[i] = {
-                                        "action": "multiple",
-                                        "created": existing_created + new_created,
-                                        "updated": existing_updated + new_updated,
-                                        "merged": 0,
-                                        "total_actions": total,
-                                    }
-                else:
-                    # Normal single pass using the memory's own tags
-                    results, batch_deleted = await _process_memory_batch(
-                        conn=conn,
-                        memory_engine=memory_engine,
-                        llm_config=llm_config,
-                        bank_id=bank_id,
-                        memories=llm_batch,
-                        request_context=request_context,
-                        perf=perf,
-                        config=config,
-                    )
-                stats["observations_deleted"] += batch_deleted
 
-                await conn.executemany(
-                    f"UPDATE {fq_table('memory_units')} SET consolidated_at = NOW() WHERE id = $1",
-                    [(m["id"],) for m in llm_batch],
-                )
+                all_deleted += sub_deleted
+
+                if sub_llm_failed and len(sub_batch) > 1:
+                    # Split and retry with smaller batches
+                    mid = len(sub_batch) // 2
+                    logger.warning(
+                        f"[CONSOLIDATION] bank={bank_id} LLM failed for sub-batch of {len(sub_batch)},"
+                        f" splitting into {mid}/{len(sub_batch) - mid}"
+                    )
+                    pending[0:0] = [sub_batch[:mid], sub_batch[mid:]]
+                elif sub_llm_failed:
+                    # batch_size=1 and still failing — mark as permanently failed for now
+                    failed_ids.append(sub_batch[0]["id"])
+                    all_results.append({"action": "failed"})
+                    logger.warning(
+                        f"[CONSOLIDATION] bank={bank_id} LLM failed for single memory"
+                        f" {sub_batch[0]['id']}, marking consolidation_failed_at"
+                    )
+                else:
+                    succeeded_ids.extend(m["id"] for m in sub_batch)
+                    all_results.extend(sub_results)
+
+            # Commit consolidated_at / consolidation_failed_at in a single DB round-trip
+            async with pool.acquire() as conn:
+                if succeeded_ids:
+                    await conn.executemany(
+                        f"UPDATE {fq_table('memory_units')} SET consolidated_at = NOW() WHERE id = $1",
+                        [(mem_id,) for mem_id in succeeded_ids],
+                    )
+                if failed_ids:
+                    await conn.executemany(
+                        f"UPDATE {fq_table('memory_units')} SET consolidation_failed_at = NOW() WHERE id = $1",
+                        [(mem_id,) for mem_id in failed_ids],
+                    )
+
+            stats["observations_deleted"] += all_deleted
+            results = all_results
 
             # Checkpoint: abort if the operation (and thus the bank) was deleted mid-run.
             if operation_id and not await memory_engine._check_op_alive(operation_id):
@@ -413,6 +464,8 @@ async def run_consolidation_job(
                     stats["actions_executed"] += result.get("total_actions", 0)
                 elif action == "skipped":
                     stats["skipped"] += 1
+                elif action == "failed":
+                    stats["memories_failed"] += 1
 
             # Per-LLM-batch log
             llm_batch_time = time.time() - llm_batch_start
@@ -425,6 +478,7 @@ async def run_consolidation_job(
             batch_created = stats["observations_created"] - snap_stats["observations_created"]
             batch_updated = stats["observations_updated"] - snap_stats["observations_updated"]
             batch_skipped = stats["skipped"] - snap_stats["skipped"]
+            batch_failed = stats["memories_failed"] - snap_stats["memories_failed"]
             llm_calls_made = perf.llm_calls - snap_llm_calls
             logger.info(
                 f"[CONSOLIDATION] bank={bank_id} llm_batch #{llm_batch_num}"
@@ -432,7 +486,8 @@ async def run_consolidation_job(
                 f" | {stats['memories_processed']}/{total_count} processed"
                 f" | {', '.join(timing_parts)}"
                 f" | created={batch_created} updated={batch_updated} skipped={batch_skipped}"
-                f" | input_tokens=~{input_tokens}"
+                + (f" failed={batch_failed}" if batch_failed else "")
+                + f" | input_tokens=~{input_tokens}"
                 f" | avg={llm_batch_time / len(llm_batch):.3f}s/memory"
             )
 
@@ -584,7 +639,7 @@ async def _process_memory_batch(
     perf: ConsolidationPerfLog | None = None,
     config: Any = None,
     obs_tags_override: list[str] | None = None,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, bool]:
     """
     Process a batch of memories in a single LLM call.
 
@@ -747,7 +802,7 @@ async def _process_memory_batch(
         else:
             results.append({"action": "skipped", "reason": "no_durable_knowledge"})
 
-    return results, deleted_count
+    return results, deleted_count, llm_result.failed
 
 
 def _min_date(dates: "Any") -> "datetime | None":
@@ -1081,7 +1136,7 @@ async def _consolidate_batch_with_llm(
     logger.error(
         f"[CONSOLIDATION] LLM batch call failed after {max_attempts} attempts, skipping batch. Last error: {last_exc}"
     )
-    return _BatchLLMResult(obs_count=len(union_observations), prompt_chars=len(prompt))
+    return _BatchLLMResult(obs_count=len(union_observations), prompt_chars=len(prompt), failed=True)
 
 
 async def _create_observation_directly(
