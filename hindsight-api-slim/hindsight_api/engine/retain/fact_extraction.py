@@ -332,6 +332,43 @@ class FactExtractionResponseNoCausal(BaseModel):
     facts: list[ExtractedFactNoCausal] = Field(description="List of extracted factual statements")
 
 
+class VerbatimExtractedFact(BaseModel):
+    """
+    Schema for verbatim extraction mode.
+
+    Omits 'what' entirely — the original chunk text is used as fact_text in code.
+    The LLM only extracts metadata: entities, temporal info, location, people.
+    """
+
+    model_config = ConfigDict(
+        json_schema_mode="validation",
+        json_schema_extra={"required": ["when", "where", "who", "fact_type"]},
+    )
+
+    when: str = Field(description="When it happened. 'N/A' if unknown.")
+    where: str = Field(description="Location if relevant. 'N/A' if none.")
+    who: str = Field(description="People involved with relationships. 'N/A' if general.")
+
+    fact_kind: str = Field(default="conversation", description="'event' or 'conversation'")
+    occurred_start: str | None = Field(default=None, description="ISO timestamp for events")
+    occurred_end: str | None = Field(default=None, description="ISO timestamp for event end")
+    fact_type: Literal["world", "assistant"] = Field(description="'world' or 'assistant'")
+    entities: list[Entity] | None = Field(default=None, description="People, places, concepts")
+
+    @field_validator("entities", mode="before")
+    @classmethod
+    def ensure_entities_list(cls, v):
+        if v is None:
+            return []
+        return v
+
+
+class VerbatimFactExtractionResponse(BaseModel):
+    """Response for verbatim extraction mode (one entry per chunk, no fact text)."""
+
+    facts: list[VerbatimExtractedFact] = Field(description="List of metadata entries (one per chunk)")
+
+
 def chunk_text(text: str, max_chars: int) -> list[str]:
     """
     Split text into chunks, preserving conversation structure when possible.
@@ -552,6 +589,27 @@ CUSTOM_FACT_EXTRACTION_PROMPT = _BASE_FACT_EXTRACTION_PROMPT.format(
     examples="",  # No examples for custom mode
 )
 
+# Verbatim mode: preserve the original text exactly, but still extract metadata
+_VERBATIM_GUIDELINES = """══════════════════════════════════════════════════════════════════════════
+VERBATIM MODE — Extract metadata only
+══════════════════════════════════════════════════════════════════════════
+
+The original text will be stored as-is in code. Your ONLY job is to extract metadata.
+
+RULES:
+- Produce EXACTLY ONE entry per input chunk.
+- DO NOT include a "what" field — it is not part of the output schema.
+- Extract all entities (people, places, organizations, objects, concepts).
+- Extract temporal information (occurred_start, occurred_end, fact_kind, when).
+- Extract location (where) and people (who).
+- fact_type: use "world" unless the content is clearly an interaction with the assistant."""
+
+VERBATIM_FACT_EXTRACTION_PROMPT = _BASE_FACT_EXTRACTION_PROMPT.format(
+    retain_mission_section="{retain_mission_section}",
+    extraction_guidelines=_VERBATIM_GUIDELINES,
+    examples="",
+)
+
 
 # Verbose extraction prompt - detailed, comprehensive facts (legacy mode)
 VERBOSE_FACT_EXTRACTION_PROMPT = """Extract facts from text into structured format with FIVE required dimensions - BE EXTREMELY DETAILED.
@@ -770,6 +828,10 @@ def _build_extraction_prompt_and_schema(config) -> tuple[str, type]:
             )
     elif extraction_mode == "verbose":
         prompt = VERBOSE_FACT_EXTRACTION_PROMPT
+    elif extraction_mode == "verbatim":
+        prompt = VERBATIM_FACT_EXTRACTION_PROMPT.format(
+            retain_mission_section=retain_mission_section,
+        )
     else:
         base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
         prompt = base_prompt.format(
@@ -777,7 +839,11 @@ def _build_extraction_prompt_and_schema(config) -> tuple[str, type]:
         )
 
     # Add causal relationships section if enabled
-    if extract_causal_links:
+    # Verbatim mode never uses causal relations (no fact text to relate causally)
+    if extraction_mode == "verbatim":
+        base_fact_class = VerbatimExtractedFact
+        base_response_class = VerbatimFactExtractionResponse
+    elif extract_causal_links:
         prompt = prompt + CAUSAL_RELATIONSHIPS_SECTION
         base_fact_class = ExtractedFactVerbose if extraction_mode == "verbose" else ExtractedFact
         base_response_class = FactExtractionResponseVerbose if extraction_mode == "verbose" else FactExtractionResponse
@@ -1012,8 +1078,10 @@ async def _extract_facts_from_chunk(
                 if not what:
                     what = get_value("factual_core")
                 if not what:
-                    logger.warning(f"Skipping fact {i}: missing 'what' field")
-                    continue
+                    # In verbatim mode, 'what' is intentionally absent — text is backfilled from chunk
+                    if extraction_mode != "verbatim":
+                        logger.warning(f"Skipping fact {i}: missing 'what' field")
+                        continue
 
                 # Critical field: fact_type
                 # LLM uses "assistant" but we convert to "experience" for storage
@@ -1046,19 +1114,23 @@ async def _extract_facts_from_chunk(
                     fact_kind = "conversation"
 
                 # Build combined fact text from the 4 dimensions: what | when | who | why
+                # In verbatim mode, leave combined_text empty — _collapse_to_verbatim backfills it
                 fact_data = {}
-                combined_parts = [what]
+                if extraction_mode == "verbatim":
+                    combined_text = ""
+                else:
+                    combined_parts = [what]
 
-                if when:
-                    combined_parts.append(f"When: {when}")
+                    if when:
+                        combined_parts.append(f"When: {when}")
 
-                if who:
-                    combined_parts.append(f"Involving: {who}")
+                    if who:
+                        combined_parts.append(f"Involving: {who}")
 
-                if why:
-                    combined_parts.append(why)
+                    if why:
+                        combined_parts.append(why)
 
-                combined_text = " | ".join(combined_parts)
+                    combined_text = " | ".join(combined_parts)
 
                 # Add temporal fields
                 # For events: occurred_start/occurred_end (when the event happened)
@@ -1889,6 +1961,52 @@ async def extract_facts_from_contents_batch_api(
     return extracted_facts, chunks_metadata, total_usage
 
 
+def _extract_facts_chunks(
+    contents: list[RetainContent],
+    config,
+) -> tuple[list[ExtractedFactType], list[ChunkMetadata], TokenUsage]:
+    """
+    chunks mode: no LLM call, no entity extraction.
+
+    Each chunk becomes one memory unit with the raw text as fact_text.
+    User-provided entities from RetainContent.entities are picked up downstream
+    by entity_processing.py — they are the sole source of entity data in this mode.
+    """
+    extracted_facts: list[ExtractedFactType] = []
+    chunks_metadata: list[ChunkMetadata] = []
+    global_chunk_idx = 0
+
+    for content_index, content in enumerate(contents):
+        chunks = chunk_text(content.content, config.retain_chunk_size)
+        for chunk in chunks:
+            chunks_metadata.append(
+                ChunkMetadata(
+                    chunk_text=chunk,
+                    fact_count=1,
+                    content_index=content_index,
+                    chunk_index=global_chunk_idx,
+                )
+            )
+            extracted_facts.append(
+                ExtractedFactType(
+                    fact_text=chunk,
+                    fact_type="world",
+                    entities=[],
+                    content_index=content_index,
+                    chunk_index=global_chunk_idx,
+                    context=content.context,
+                    mentioned_at=content.event_date,
+                    metadata=content.metadata,
+                    tags=content.tags,
+                    observation_scopes=content.observation_scopes,
+                )
+            )
+            global_chunk_idx += 1
+
+    _add_temporal_offsets(extracted_facts, contents)
+    return extracted_facts, chunks_metadata, TokenUsage()
+
+
 async def extract_facts_from_contents(
     contents: list[RetainContent],
     llm_config,
@@ -1923,6 +2041,11 @@ async def extract_facts_from_contents(
     """
     if not contents:
         return [], [], TokenUsage()
+
+    # chunks mode: skip LLM entirely, store each chunk as-is
+    # Must come before the batch-API check so no LLM queue/locks are acquired
+    if config.retain_extraction_mode == "chunks":
+        return _extract_facts_chunks(contents, config)
 
     # Route to batch API if enabled
     if config.retain_batch_enabled:
@@ -2013,13 +2136,44 @@ async def extract_facts_from_contents(
                     global_fact_idx += 1
                     fact_idx_in_content += 1
 
-    # Step 4: Add time offsets to preserve ordering within each content
+    # Step 4: For verbatim mode, collapse to one fact per chunk with original text
+    if config.retain_extraction_mode == "verbatim":
+        extracted_facts = _collapse_to_verbatim(extracted_facts, chunks_metadata)
+
+    # Step 5: Add time offsets to preserve ordering within each content
     _add_temporal_offsets(extracted_facts, contents)
 
-    # Step 5: Auto-tag facts from label groups with tag=True
+    # Step 6: Auto-tag facts from label groups with tag=True
     _inject_label_tags(extracted_facts, config)
 
     return extracted_facts, chunks_metadata, total_usage
+
+
+def _collapse_to_verbatim(facts: list[ExtractedFactType], chunks: list[ChunkMetadata]) -> list[ExtractedFactType]:
+    """
+    For verbatim mode: ensure one fact per chunk with the original chunk text preserved.
+
+    The LLM prompt asks for exactly one fact per chunk, but if it returns more,
+    this collapses them: keeps the first fact as representative, overrides its
+    fact_text with the raw chunk text, and merges entities from any extra facts.
+    """
+    chunk_text_map = {c.chunk_index: c.chunk_text for c in chunks}
+    seen: dict[int, ExtractedFactType] = {}
+    result: list[ExtractedFactType] = []
+
+    for fact in facts:
+        if fact.chunk_index not in seen:
+            fact.fact_text = chunk_text_map.get(fact.chunk_index, fact.fact_text)
+            seen[fact.chunk_index] = fact
+            result.append(fact)
+        else:
+            # Merge entities from extra facts into the representative
+            representative = seen[fact.chunk_index]
+            for entity in fact.entities:
+                if entity not in representative.entities:
+                    representative.entities.append(entity)
+
+    return result
 
 
 def _parse_datetime(date_str: str):

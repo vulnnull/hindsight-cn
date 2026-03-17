@@ -27,6 +27,7 @@ type RetainResponse struct {
 	// Whether the operation was processed asynchronously
 	Async bool `json:"async"`
 	OperationId NullableString `json:"operation_id,omitempty"`
+	OperationIds []string `json:"operation_ids,omitempty"`
 	Usage NullableTokenUsage `json:"usage,omitempty"`
 }
 
@@ -191,6 +192,39 @@ func (o *RetainResponse) UnsetOperationId() {
 	o.OperationId.Unset()
 }
 
+// GetOperationIds returns the OperationIds field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *RetainResponse) GetOperationIds() []string {
+	if o == nil {
+		var ret []string
+		return ret
+	}
+	return o.OperationIds
+}
+
+// GetOperationIdsOk returns a tuple with the OperationIds field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *RetainResponse) GetOperationIdsOk() ([]string, bool) {
+	if o == nil || IsNil(o.OperationIds) {
+		return nil, false
+	}
+	return o.OperationIds, true
+}
+
+// HasOperationIds returns a boolean if a field has been set.
+func (o *RetainResponse) HasOperationIds() bool {
+	if o != nil && !IsNil(o.OperationIds) {
+		return true
+	}
+
+	return false
+}
+
+// SetOperationIds gets a reference to the given []string and assigns it to the OperationIds field.
+func (o *RetainResponse) SetOperationIds(v []string) {
+	o.OperationIds = v
+}
+
 // GetUsage returns the Usage field value if set, zero value otherwise (both if not set or set to explicit null).
 func (o *RetainResponse) GetUsage() TokenUsage {
 	if o == nil || IsNil(o.Usage.Get()) {
@@ -249,6 +283,9 @@ func (o RetainResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize["async"] = o.Async
 	if o.OperationId.IsSet() {
 		toSerialize["operation_id"] = o.OperationId.Get()
+	}
+	if o.OperationIds != nil {
+		toSerialize["operation_ids"] = o.OperationIds
 	}
 	if o.Usage.IsSet() {
 		toSerialize["usage"] = o.Usage.Get()

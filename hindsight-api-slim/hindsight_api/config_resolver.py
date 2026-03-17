@@ -10,7 +10,7 @@ multiple API servers.
 
 import json
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
 import asyncpg
@@ -239,6 +239,14 @@ class ConfigResolver:
                 logger.warning(f"Failed to check permissions for bank {bank_id}: {e}")
                 # Continue without permission check (fail open for backward compatibility)
 
+        # Validate retain_strategies: reject empty string keys
+        if "retain_strategies" in normalized_updates and normalized_updates["retain_strategies"]:
+            empty_keys = [k for k in normalized_updates["retain_strategies"] if not str(k).strip()]
+            if empty_keys:
+                raise ValueError(
+                    "Strategy names must not be empty strings. Remove entries with empty names before saving."
+                )
+
         # Merge with existing config (JSONB || operator)
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -273,3 +281,35 @@ class ConfigResolver:
             )
 
         logger.info(f"Reset bank config for {bank_id} to defaults")
+
+
+def apply_strategy(config: HindsightConfig, strategy_name: str) -> HindsightConfig:
+    """
+    Apply a named retain strategy's overrides on top of a resolved config.
+
+    A strategy is a named set of hierarchical field overrides stored in
+    config.retain_strategies. Any field in _HIERARCHICAL_FIELDS can be
+    overridden, including retain_extraction_mode, retain_chunk_size,
+    entity_labels, entities_allow_free_form, etc.
+
+    Unknown strategy names log a warning and return config unchanged.
+    Unknown or non-hierarchical fields in the strategy are silently ignored.
+    """
+    strategies = config.retain_strategies or {}
+    if strategy_name not in strategies:
+        logger.warning(f"Unknown retain strategy '{strategy_name}', using resolved config as-is")
+        return config
+
+    overrides = strategies[strategy_name]
+    if not isinstance(overrides, dict):
+        logger.warning(f"Retain strategy '{strategy_name}' is not a dict, skipping")
+        return config
+
+    configurable = HindsightConfig.get_configurable_fields()
+    filtered = {k: v for k, v in overrides.items() if k in configurable}
+
+    if not filtered:
+        return config
+
+    logger.debug(f"Applying retain strategy '{strategy_name}': {list(filtered.keys())}")
+    return replace(config, **filtered)

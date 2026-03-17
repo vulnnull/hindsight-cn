@@ -1,11 +1,13 @@
 """
 Test retain function and chunk storage.
 """
-import pytest
 import logging
-from datetime import datetime, timezone, timedelta
-from hindsight_api.engine.memory_engine import Budget
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
 from hindsight_api import RequestContext
+from hindsight_api.engine.memory_engine import Budget
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +62,7 @@ async def test_retain_with_chunks(memory, request_context):
             request_context=request_context,
         )
 
-        print(f"\n=== Recall Results (with chunks) ===")
+        print("\n=== Recall Results (with chunks) ===")
         print(f"Found {len(result.results)} results")
 
         assert len(result.results) > 0, "Should find facts about Alice"
@@ -149,7 +151,7 @@ async def test_chunks_and_entities_follow_fact_order(memory, request_context):
             request_context=request_context,
         )
 
-        print(f"\n=== Recall Results ===")
+        print("\n=== Recall Results ===")
         print(f"Found {len(result.results)} facts")
 
         # Extract the order of entities mentioned in facts
@@ -421,7 +423,7 @@ async def test_mentioned_at_vs_occurred(memory, request_context):
             # Verify it's the historical date, not today
             assert mentioned_dt.year == 2020, f"mentioned_at should be 2020, got {mentioned_dt.year}"
 
-        print(f"✓ Test passed: Historical conversation correctly ingested with event_date=2020")
+        print("✓ Test passed: Historical conversation correctly ingested with event_date=2020")
 
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -489,15 +491,15 @@ async def test_occurred_dates_not_defaulted(memory, request_context):
             # If occurred_start is set, it means the LLM extracted it
             # In this case, log it but don't fail (LLM behavior can vary)
             print(f"⚠ LLM extracted occurred_start: {fact.occurred_start}")
-            print(f"  This test expects None for present-tense observations")
+            print("  This test expects None for present-tense observations")
         else:
-            print(f"✓ occurred_start is correctly None (not defaulted to mentioned_at)")
+            print("✓ occurred_start is correctly None (not defaulted to mentioned_at)")
 
         if fact.occurred_end is not None:
             print(f"⚠ LLM extracted occurred_end: {fact.occurred_end}")
-            print(f"  This test expects None for present-tense observations")
+            print("  This test expects None for present-tense observations")
         else:
-            print(f"✓ occurred_end is correctly None (not defaulted to mentioned_at)")
+            print("✓ occurred_end is correctly None (not defaulted to mentioned_at)")
 
         # At least verify they're not equal to mentioned_at if they are set
         if fact.occurred_start is not None:
@@ -513,7 +515,7 @@ async def test_occurred_dates_not_defaulted(memory, request_context):
                     f"occurred_start={occurred_start_dt}, mentioned_at={mentioned_dt}"
                 )
 
-        print(f"✓ Test passed: occurred dates are not incorrectly defaulted to mentioned_at")
+        print("✓ Test passed: occurred dates are not incorrectly defaulted to mentioned_at")
 
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -585,7 +587,7 @@ async def test_mentioned_at_from_context_string(memory, request_context):
         else:
             print(f"⚠ LLM did not extract date from context, fell back to now(): {mentioned_dt}")
 
-        print(f"✓ mentioned_at is always set (never None)")
+        print("✓ mentioned_at is always set (never None)")
 
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -851,8 +853,8 @@ async def test_metadata_storage_and_retrieval(memory, request_context):
 
         assert len(result.results) > 0, "Should recall stored facts"
 
-        print(f"✓ Successfully stored and retrieved facts")
-        print(f"  (Note: Metadata support depends on API implementation)")
+        print("✓ Successfully stored and retrieved facts")
+        print("  (Note: Metadata support depends on API implementation)")
 
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -954,7 +956,7 @@ async def test_mixed_content_batch(memory, request_context):
         short_units = len(unit_ids[0])
         long_units = len(unit_ids[1])
 
-        print(f"✓ Mixed batch processed successfully")
+        print("✓ Mixed batch processed successfully")
         print(f"  Short content: {short_units} units")
         print(f"  Long content: {long_units} units")
 
@@ -1356,7 +1358,7 @@ async def test_chunks_truncation_behavior(memory, request_context):
             if truncated_chunks:
                 print(f"  {len(truncated_chunks)} chunks were truncated due to token limit")
             else:
-                print(f"  No chunks were truncated (content within limit)")
+                print("  No chunks were truncated (content within limit)")
 
         else:
             print("✓ No chunks returned (may be under token limit)")
@@ -2210,9 +2212,10 @@ async def test_custom_extraction_mode():
     custom guidelines while keeping structural parts intact.
     """
     import os
+
     from hindsight_api import LLMConfig
+    from hindsight_api.config import _get_raw_config, clear_config_cache
     from hindsight_api.engine.retain.fact_extraction import extract_facts_from_text
-    from hindsight_api.config import clear_config_cache, _get_raw_config
 
     # Save original env vars
     original_mode = os.getenv("HINDSIGHT_API_RETAIN_EXTRACTION_MODE")
@@ -2284,7 +2287,7 @@ If the text contains both Italian and English content, extract ONLY the Italian 
         if found_english_only:
             logger.warning(f"⚠ Found English-only keywords in facts: {found_english_only}")
             logger.warning(f"  Facts: {all_facts_text}")
-            logger.warning(f"  This may indicate the LLM is not strictly following language-specific custom guidelines")
+            logger.warning("  This may indicate the LLM is not strictly following language-specific custom guidelines")
             # Log but don't fail - LLM behavior can vary
         else:
             logger.info("✓ Successfully extracted only Italian facts, ignored English facts")
@@ -2312,6 +2315,213 @@ If the text contains both Italian and English content, extract ONLY the Italian 
             os.environ.pop("HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS", None)
 
         # Clear cache again to restore original config
+        clear_config_cache()
+
+
+def test_apply_strategy():
+    """
+    Unit test for apply_strategy:
+    - Known strategy applies overrides on top of resolved config
+    - Unknown strategy returns config unchanged with a warning
+    - Non-hierarchical fields in a strategy are silently ignored
+    - entity_labels and entities_allow_free_form are overridable
+    """
+    from hindsight_api.config import _get_raw_config, clear_config_cache
+    from hindsight_api.config_resolver import apply_strategy
+
+    clear_config_cache()
+    base_config = _get_raw_config()
+
+    strategies = {
+        "documents": {
+            "retain_extraction_mode": "chunks",
+            "retain_chunk_size": 800,
+            "entities_allow_free_form": False,
+        },
+        "bad_field": {
+            "database_url": "should-be-ignored",  # static field, not hierarchical
+            "retain_extraction_mode": "verbose",
+        },
+    }
+    config_with_strategies = base_config.__class__(
+        **{**base_config.__dict__, "retain_strategies": strategies}
+    )
+
+    # Known strategy: overrides applied
+    result = apply_strategy(config_with_strategies, "documents")
+    assert result.retain_extraction_mode == "chunks"
+    assert result.retain_chunk_size == 800
+    assert result.entities_allow_free_form is False
+
+    # Non-hierarchical field silently ignored, hierarchical one applied
+    result2 = apply_strategy(config_with_strategies, "bad_field")
+    assert result2.retain_extraction_mode == "verbose"
+    assert result2.database_url == base_config.database_url  # unchanged
+
+    # Unknown strategy: config returned unchanged
+    result3 = apply_strategy(config_with_strategies, "nonexistent")
+    assert result3.retain_extraction_mode == base_config.retain_extraction_mode
+
+
+def test_collapse_to_verbatim_single_fact_per_chunk():
+    """
+    Unit test for _collapse_to_verbatim:
+    - One fact per chunk → text overridden with original chunk text
+    - Two facts from same chunk → collapsed to one, entities merged
+    """
+    from hindsight_api.engine.retain.fact_extraction import _collapse_to_verbatim
+    from hindsight_api.engine.retain.types import ChunkMetadata, ExtractedFact
+
+    chunks = [
+        ChunkMetadata(chunk_text="Alice went to Paris.", fact_count=1, content_index=0, chunk_index=0),
+        ChunkMetadata(chunk_text="Bob fixed the bug yesterday.", fact_count=2, content_index=0, chunk_index=1),
+    ]
+
+    facts = [
+        ExtractedFact(fact_text="LLM paraphrase of Alice in Paris", fact_type="world", entities=["Alice", "Paris"], chunk_index=0, content_index=0),
+        ExtractedFact(fact_text="LLM first fact about Bob", fact_type="world", entities=["Bob"], chunk_index=1, content_index=0),
+        ExtractedFact(fact_text="LLM second fact about bug", fact_type="world", entities=["bug"], chunk_index=1, content_index=0),
+    ]
+
+    result = _collapse_to_verbatim(facts, chunks)
+
+    assert len(result) == 2, "Should produce exactly one fact per chunk"
+
+    # Chunk 0: text overridden with original chunk text
+    assert result[0].fact_text == "Alice went to Paris.", "Text must be the raw chunk text"
+    assert result[0].entities == ["Alice", "Paris"]
+
+    # Chunk 1: collapsed to one fact, entities merged from both LLM facts
+    assert result[1].fact_text == "Bob fixed the bug yesterday.", "Text must be the raw chunk text"
+    assert "Bob" in result[1].entities
+    assert "bug" in result[1].entities
+
+
+def test_chunks_extraction_mode():
+    """
+    Unit test for chunks mode: no LLM, chunks stored as-is, zero token usage.
+    """
+    import asyncio
+    import os
+
+    from hindsight_api.config import _get_raw_config, clear_config_cache
+    from hindsight_api.engine.retain.fact_extraction import extract_facts_from_contents
+    from hindsight_api.engine.retain.types import RetainContent
+
+    original_mode = os.getenv("HINDSIGHT_API_RETAIN_EXTRACTION_MODE")
+
+    try:
+        os.environ["HINDSIGHT_API_RETAIN_EXTRACTION_MODE"] = "chunks"
+        clear_config_cache()
+
+        contents = [
+            RetainContent(
+                content="Alice joined the infrastructure team on March 5, 2024.",
+                event_date=datetime(2024, 3, 10, tzinfo=timezone.utc),
+                entities=[{"text": "Alice"}, {"text": "infrastructure team"}],
+            ),
+            RetainContent(content="Bob fixed the critical bug in the payment service."),
+        ]
+
+        facts, chunks, usage = asyncio.get_event_loop().run_until_complete(
+            extract_facts_from_contents(
+                contents=contents,
+                llm_config=None,  # Must not be called
+                agent_name="TestAgent",
+                config=_get_raw_config(),
+            )
+        )
+
+        # One fact per chunk (both contents fit in one chunk each)
+        assert len(facts) == len(chunks) == 2
+
+        # Text preserved exactly
+        assert facts[0].fact_text == contents[0].content
+        assert facts[1].fact_text == contents[1].content
+
+        # No LLM-extracted entities (user-provided entities handled downstream)
+        assert facts[0].entities == []
+        assert facts[1].entities == []
+
+        # Zero token usage
+        assert usage.total_tokens == 0
+
+        logger.info("✓ chunks mode: no LLM call, chunks stored as-is, zero token usage")
+
+    finally:
+        if original_mode is not None:
+            os.environ["HINDSIGHT_API_RETAIN_EXTRACTION_MODE"] = original_mode
+        else:
+            os.environ.pop("HINDSIGHT_API_RETAIN_EXTRACTION_MODE", None)
+        clear_config_cache()
+
+
+@pytest.mark.asyncio
+async def test_verbatim_extraction_mode():
+    """
+    Integration test for verbatim extraction mode.
+
+    Verifies that:
+    1. Each chunk produces exactly one fact
+    2. The fact text is the original chunk text, not a paraphrase
+    3. Entities are still extracted by the LLM
+    4. Temporal info (occurred_start) is still extracted
+    """
+    import os
+
+    from hindsight_api import LLMConfig
+    from hindsight_api.config import _get_raw_config, clear_config_cache
+    from hindsight_api.engine.retain.fact_extraction import extract_facts_from_contents
+    from hindsight_api.engine.retain.types import RetainContent
+
+    original_mode = os.getenv("HINDSIGHT_API_RETAIN_EXTRACTION_MODE")
+
+    try:
+        os.environ["HINDSIGHT_API_RETAIN_EXTRACTION_MODE"] = "verbatim"
+        clear_config_cache()
+
+        text = (
+            "Alice joined the infrastructure team on March 5, 2024. "
+            "She holds a CKA certification and has 5 years of Kubernetes experience."
+        )
+
+        llm_config = LLMConfig.for_memory()
+        contents = [RetainContent(content=text, event_date=datetime(2024, 3, 10, tzinfo=timezone.utc), context="onboarding notes")]
+        facts, chunks, _ = await extract_facts_from_contents(
+            contents=contents,
+            llm_config=llm_config,
+            agent_name="TestAgent",
+            config=_get_raw_config(),
+        )
+
+        logger.info(f"Verbatim mode extracted {len(facts)} facts from {len(chunks)} chunks")
+        for i, f in enumerate(facts):
+            logger.info(f"  fact[{i}]: {f.fact_text!r}  entities={f.entities}")
+
+        # One fact per chunk
+        assert len(facts) == len(chunks), "Verbatim mode must produce exactly one fact per chunk"
+
+        # Text must match the original chunk exactly
+        for fact, chunk in zip(facts, chunks):
+            assert fact.fact_text == chunk.chunk_text, (
+                f"fact_text must equal original chunk text.\n"
+                f"  expected: {chunk.chunk_text!r}\n"
+                f"  got:      {fact.fact_text!r}"
+            )
+
+        # Entities should still be extracted
+        all_entities = [e for f in facts for e in f.entities]
+        assert any("alice" in e.lower() for e in all_entities), (
+            f"Expected entity 'Alice' to be extracted. Entities: {all_entities}"
+        )
+
+        logger.info("✓ Verbatim mode preserves chunk text and still extracts entities")
+
+    finally:
+        if original_mode is not None:
+            os.environ["HINDSIGHT_API_RETAIN_EXTRACTION_MODE"] = original_mode
+        else:
+            os.environ.pop("HINDSIGHT_API_RETAIN_EXTRACTION_MODE", None)
         clear_config_cache()
 
 
@@ -2349,7 +2559,7 @@ async def test_retain_batch_with_per_item_tags_on_document(memory, request_conte
         )
 
         assert len(result) > 0, "Should have retained content"
-        print(f"\n=== Retained content with tags ===")
+        print("\n=== Retained content with tags ===")
 
         # Retrieve the document
         doc = await memory.get_document(
@@ -2380,6 +2590,7 @@ async def test_retain_batch_with_per_item_tags_on_document(memory, request_conte
 def test_retain_mission_injected_into_prompt():
     """Test that retain_mission is injected as a FOCUS section into any extraction mode."""
     from unittest.mock import MagicMock
+
     from hindsight_api.engine.retain.fact_extraction import _build_extraction_prompt_and_schema
 
     spec = "Focus on technical decisions and architecture choices only."
@@ -2405,6 +2616,7 @@ def test_retain_mission_injected_into_prompt():
 def test_retain_mission_absent_when_not_set():
     """Test that no FOCUS section appears when retain_mission is not set."""
     from unittest.mock import MagicMock
+
     from hindsight_api.engine.retain.fact_extraction import _build_extraction_prompt_and_schema
 
     config = MagicMock()
@@ -2421,6 +2633,7 @@ def test_retain_mission_absent_when_not_set():
 def test_retain_mission_config_loaded_from_env():
     """Test that retain_mission is loaded from env and is a configurable field."""
     import os
+
     from hindsight_api.config import HindsightConfig, _get_raw_config, clear_config_cache
 
     original = os.getenv("HINDSIGHT_API_RETAIN_MISSION")
@@ -2436,3 +2649,141 @@ def test_retain_mission_config_loaded_from_env():
         else:
             os.environ["HINDSIGHT_API_RETAIN_MISSION"] = original
         clear_config_cache()
+
+
+def test_strategy_overrides_extraction_mode_for_chunks():
+    """
+    Unit test: a named strategy with retain_extraction_mode=chunks causes
+    extract_facts_from_contents to skip the LLM and return verbatim chunks.
+    """
+    import asyncio
+
+    from hindsight_api.config import _get_raw_config, clear_config_cache
+    from hindsight_api.config_resolver import apply_strategy
+    from hindsight_api.engine.retain.fact_extraction import extract_facts_from_contents
+    from hindsight_api.engine.retain.types import RetainContent
+
+    clear_config_cache()
+    base_config = _get_raw_config()
+
+    # Build a config that has a strategy overriding to chunks
+    strategies = {"fast": {"retain_extraction_mode": "chunks"}}
+    config_with_strategies = base_config.__class__(
+        **{**base_config.__dict__, "retain_strategies": strategies}
+    )
+    strategy_config = apply_strategy(config_with_strategies, "fast")
+    assert strategy_config.retain_extraction_mode == "chunks"
+
+    contents = [
+        RetainContent(content="Alice deployed the new API on Monday."),
+        RetainContent(content="Bob reviewed the pull request."),
+    ]
+
+    facts, chunks, usage = asyncio.get_event_loop().run_until_complete(
+        extract_facts_from_contents(
+            contents=contents,
+            llm_config=None,  # chunks must not call the LLM
+            agent_name="TestAgent",
+            config=strategy_config,
+        )
+    )
+
+    assert len(facts) == 2
+    assert facts[0].fact_text == contents[0].content
+    assert facts[1].fact_text == contents[1].content
+    assert usage.total_tokens == 0
+    logger.info("✓ strategy with chunks mode: no LLM, verbatim chunks, zero tokens")
+
+
+def test_retain_request_per_item_strategy_field():
+    """
+    Unit test: MemoryItem accepts a strategy field; items with different strategies
+    are grouped correctly by per-item strategy.
+    """
+    from hindsight_api.api.http import RetainRequest
+
+    request = RetainRequest.model_validate(
+        {
+            "items": [
+                {"content": "Alice joined.", "strategy": "fast"},
+                {"content": "Bob left.", "strategy": "detailed"},
+                {"content": "Carol arrived."},  # no strategy — falls back to bank default
+            ],
+        }
+    )
+
+    assert request.items[0].strategy == "fast"
+    assert request.items[1].strategy == "detailed"
+    assert request.items[2].strategy is None
+
+    # Simulate grouping logic from api_retain handler
+    strategy_groups: dict = {}
+    for item in request.items:
+        strategy_groups.setdefault(item.strategy, []).append(item.content)
+
+    assert set(strategy_groups.keys()) == {"fast", "detailed", None}
+    assert strategy_groups["fast"] == ["Alice joined."]
+    assert strategy_groups["detailed"] == ["Bob left."]
+    assert strategy_groups[None] == ["Carol arrived."]
+    logger.info("✓ per-item strategy grouping works correctly")
+
+
+@pytest.mark.asyncio
+async def test_named_strategy_applied_end_to_end(memory, request_context):
+    """
+    Integration test: a named strategy stored in bank config is actually applied
+    during retain_batch_async.
+
+    Regression test for the bug where strategy was passed through the HTTP layer
+    but the extraction mode override was silently ignored, always using the bank
+    default (e.g. 'concise') instead of the strategy's override (e.g. 'chunks').
+    """
+    from hindsight_api.config_resolver import ConfigResolver
+
+    bank_id = f"test_strategy_e2e_{datetime.now(timezone.utc).timestamp()}"
+
+    try:
+        # Seed the bank so the row exists before we write config to it
+        # (update_bank_config is a plain UPDATE — it silently no-ops on missing rows)
+        await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[{"content": "seed"}],
+            request_context=request_context,
+        )
+
+        # Now configure the bank with a named strategy that overrides to chunks
+        await memory._config_resolver.update_bank_config(
+            bank_id,
+            {
+                "retain_extraction_mode": "concise",  # bank default
+                "retain_strategies": {
+                    "chunks": {"retain_extraction_mode": "chunks"},
+                },
+            },
+            request_context,
+        )
+
+        contents = [{"content": "Alice deployed the new API on Monday."}]
+
+        # Retain using the named strategy
+        unit_ids_by_content, usage = await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=contents,
+            strategy="chunks",
+            request_context=request_context,
+            return_usage=True,
+        )
+
+        # chunks produces exactly one fact per chunk (verbatim) and calls no LLM
+        assert usage.total_tokens == 0, f"chunks should use zero LLM tokens, got {usage.total_tokens}"
+        assert len(unit_ids_by_content) == 1
+        assert len(unit_ids_by_content[0]) == 1, "chunks should produce exactly one fact per content item"
+
+        # Verify the stored fact is the verbatim content
+        facts = await memory.recall_async(bank_id, "Alice", request_context=request_context)
+        assert any("Alice" in f.text for f in facts.results), "Verbatim content should be retrievable"
+
+        logger.info("✓ named strategy 'chunks' with chunks applied end-to-end: no LLM, verbatim storage")
+
+    finally:
+        await memory.delete_bank(bank_id, request_context=request_context)

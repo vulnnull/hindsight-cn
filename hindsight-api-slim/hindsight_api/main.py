@@ -257,6 +257,8 @@ def main():
             retain_extraction_mode=config.retain_extraction_mode,
             retain_mission=config.retain_mission,
             retain_custom_instructions=config.retain_custom_instructions,
+            retain_default_strategy=config.retain_default_strategy,
+            retain_strategies=config.retain_strategies,
             retain_batch_tokens=config.retain_batch_tokens,
             retain_entity_lookup=config.retain_entity_lookup,
             retain_batch_enabled=config.retain_batch_enabled,

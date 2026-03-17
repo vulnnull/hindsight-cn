@@ -89,7 +89,7 @@ async def test_hierarchical_fields_categorization():
     assert "entity_labels" in configurable
 
     # Verify count is correct
-    assert len(configurable) == 17
+    assert len(configurable) == 19
 
     # Verify credential fields (NEVER exposed)
     assert "llm_api_key" in credentials

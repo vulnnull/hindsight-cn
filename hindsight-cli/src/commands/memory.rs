@@ -390,6 +390,7 @@ pub fn retain(
         entities: None,
         tags: None,
         observation_scopes: None,
+        strategy: None,
     };
 
     let request = RetainRequest {

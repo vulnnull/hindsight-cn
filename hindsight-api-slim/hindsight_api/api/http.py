@@ -425,6 +425,11 @@ class MemoryItem(BaseModel):
             "A list of tag lists runs one pass per inner list, giving full control over which combinations to use."
         ),
     )
+    strategy: str | None = Field(
+        default=None,
+        description="Named retain strategy for this item. Overrides the bank's default strategy for this item only. "
+        "Strategies are defined in the bank config under 'retain_strategies'.",
+    )
 
     @field_validator("timestamp", mode="before")
     @classmethod
@@ -491,6 +496,11 @@ class FileRetainMetadata(BaseModel):
         description="Parser or ordered fallback chain for this file (overrides request-level parser). "
         "E.g. 'iris' or ['iris', 'markitdown'].",
     )
+    strategy: str | None = Field(
+        default=None,
+        description="Named retain strategy for this file. Overrides the bank's default strategy. "
+        "Strategies are defined in the bank config under 'retain_strategies'.",
+    )
 
 
 class FileRetainRequest(BaseModel):
@@ -544,7 +554,11 @@ class RetainResponse(BaseModel):
     )
     operation_id: str | None = Field(
         default=None,
-        description="Operation ID for tracking async operations. Use GET /v1/default/banks/{bank_id}/operations to list operations. Only present when async=true.",
+        description="Operation ID for tracking async operations. Use GET /v1/default/banks/{bank_id}/operations to list operations. Only present when async=true. When items use different per-item strategies, use operation_ids instead.",
+    )
+    operation_ids: list[str] | None = Field(
+        default=None,
+        description="Operation IDs when items were submitted as multiple strategy groups (async=true with mixed per-item strategies). operation_id is set to the first entry for backward compatibility.",
     )
     usage: TokenUsage | None = Field(
         default=None,
@@ -4441,10 +4455,13 @@ def _register_routes(app: FastAPI):
         metrics = get_metrics_collector()
 
         try:
-            # Prepare contents for processing
-            contents = []
+            # Group items by strategy
+            strategy_groups: dict[str | None, list[dict]] = {}
             for item in request.items:
-                content_dict = {"content": item.content}
+                effective = item.strategy
+                if effective not in strategy_groups:
+                    strategy_groups[effective] = []
+                content_dict: dict = {"content": item.content}
                 if item.timestamp == "unset":
                     content_dict["event_date"] = None
                 elif item.timestamp:
@@ -4461,20 +4478,30 @@ def _register_routes(app: FastAPI):
                     content_dict["tags"] = item.tags
                 if item.observation_scopes is not None:
                     content_dict["observation_scopes"] = item.observation_scopes
-                contents.append(content_dict)
+                strategy_groups[effective].append(content_dict)
 
             if request.async_:
-                # Async processing: queue task and return immediately
-                result = await app.state.memory.submit_async_retain(
-                    bank_id, contents, document_tags=request.document_tags, request_context=request_context
-                )
+                # Async processing: one submit per strategy group
+                all_operation_ids = []
+                total_items_count = 0
+                for group_strategy, contents in strategy_groups.items():
+                    result = await app.state.memory.submit_async_retain(
+                        bank_id,
+                        contents,
+                        document_tags=request.document_tags,
+                        strategy=group_strategy,
+                        request_context=request_context,
+                    )
+                    all_operation_ids.append(result["operation_id"])
+                    total_items_count += result["items_count"]
                 return RetainResponse.model_validate(
                     {
                         "success": True,
                         "bank_id": bank_id,
-                        "items_count": result["items_count"],
+                        "items_count": total_items_count,
                         "async": True,
-                        "operation_id": result["operation_id"],
+                        "operation_id": all_operation_ids[0] if all_operation_ids else None,
+                        "operation_ids": all_operation_ids if len(all_operation_ids) > 1 else None,
                     }
                 )
             else:
@@ -4493,24 +4520,41 @@ def _register_routes(app: FastAPI):
                         ),
                     )
 
-                # Synchronous processing: wait for completion (record metrics)
+                # Synchronous processing: one batch per strategy group, aggregate results
+                total_items_count = 0
+                total_usage = TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
                 with metrics.record_operation("retain", bank_id=bank_id, source="api"):
-                    result, usage = await app.state.memory.retain_batch_async(
-                        bank_id=bank_id,
-                        contents=contents,
-                        document_tags=request.document_tags,
-                        request_context=request_context,
-                        return_usage=True,
-                        outbox_callback=app.state.memory._build_retain_outbox_callback(
+                    for group_strategy, contents in strategy_groups.items():
+                        result, usage = await app.state.memory.retain_batch_async(
                             bank_id=bank_id,
                             contents=contents,
-                            operation_id=None,
-                            schema=_current_schema.get(),
-                        ),
-                    )
+                            document_tags=request.document_tags,
+                            strategy=group_strategy,
+                            request_context=request_context,
+                            return_usage=True,
+                            outbox_callback=app.state.memory._build_retain_outbox_callback(
+                                bank_id=bank_id,
+                                contents=contents,
+                                operation_id=None,
+                                schema=_current_schema.get(),
+                            ),
+                        )
+                        total_items_count += len(contents)
+                        if usage:
+                            total_usage = TokenUsage(
+                                input_tokens=total_usage.input_tokens + usage.input_tokens,
+                                output_tokens=total_usage.output_tokens + usage.output_tokens,
+                                total_tokens=total_usage.total_tokens + usage.total_tokens,
+                            )
 
                 return RetainResponse.model_validate(
-                    {"success": True, "bank_id": bank_id, "items_count": len(contents), "async": False, "usage": usage}
+                    {
+                        "success": True,
+                        "bank_id": bank_id,
+                        "items_count": total_items_count,
+                        "async": False,
+                        "usage": total_usage,
+                    }
                 )
         except OperationValidationError as e:
             raise HTTPException(status_code=e.status_code, detail=e.reason)
@@ -4673,6 +4717,7 @@ def _register_routes(app: FastAPI):
                     "tags": file_meta.tags or [],
                     "timestamp": file_meta.timestamp,
                     "parser": parser_chain,
+                    "strategy": file_meta.strategy,
                 }
                 file_items.append(item)
 

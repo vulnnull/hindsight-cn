@@ -32,8 +32,9 @@ class RetainResponse(BaseModel):
     items_count: StrictInt
     var_async: StrictBool = Field(description="Whether the operation was processed asynchronously", alias="async")
     operation_id: Optional[StrictStr] = None
+    operation_ids: Optional[List[StrictStr]] = None
     usage: Optional[TokenUsage] = None
-    __properties: ClassVar[List[str]] = ["success", "bank_id", "items_count", "async", "operation_id", "usage"]
+    __properties: ClassVar[List[str]] = ["success", "bank_id", "items_count", "async", "operation_id", "operation_ids", "usage"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -82,6 +83,11 @@ class RetainResponse(BaseModel):
         if self.operation_id is None and "operation_id" in self.model_fields_set:
             _dict['operation_id'] = None
 
+        # set to None if operation_ids (nullable) is None
+        # and model_fields_set contains the field
+        if self.operation_ids is None and "operation_ids" in self.model_fields_set:
+            _dict['operation_ids'] = None
+
         # set to None if usage (nullable) is None
         # and model_fields_set contains the field
         if self.usage is None and "usage" in self.model_fields_set:
@@ -104,6 +110,7 @@ class RetainResponse(BaseModel):
             "items_count": obj.get("items_count"),
             "async": obj.get("async"),
             "operation_id": obj.get("operation_id"),
+            "operation_ids": obj.get("operation_ids"),
             "usage": TokenUsage.from_dict(obj["usage"]) if obj.get("usage") is not None else None
         })
         return _obj

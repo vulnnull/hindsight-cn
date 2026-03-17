@@ -29,6 +29,7 @@ type MemoryItem struct {
 	Entities []EntityInput `json:"entities,omitempty"`
 	Tags []string `json:"tags,omitempty"`
 	ObservationScopes NullableObservationScopes `json:"observation_scopes,omitempty"`
+	Strategy NullableString `json:"strategy,omitempty"`
 }
 
 type _MemoryItem MemoryItem
@@ -342,6 +343,48 @@ func (o *MemoryItem) UnsetObservationScopes() {
 	o.ObservationScopes.Unset()
 }
 
+// GetStrategy returns the Strategy field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *MemoryItem) GetStrategy() string {
+	if o == nil || IsNil(o.Strategy.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.Strategy.Get()
+}
+
+// GetStrategyOk returns a tuple with the Strategy field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *MemoryItem) GetStrategyOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.Strategy.Get(), o.Strategy.IsSet()
+}
+
+// HasStrategy returns a boolean if a field has been set.
+func (o *MemoryItem) HasStrategy() bool {
+	if o != nil && o.Strategy.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetStrategy gets a reference to the given NullableString and assigns it to the Strategy field.
+func (o *MemoryItem) SetStrategy(v string) {
+	o.Strategy.Set(&v)
+}
+// SetStrategyNil sets the value for Strategy to be an explicit nil
+func (o *MemoryItem) SetStrategyNil() {
+	o.Strategy.Set(nil)
+}
+
+// UnsetStrategy ensures that no value is present for Strategy, not even an explicit nil
+func (o *MemoryItem) UnsetStrategy() {
+	o.Strategy.Unset()
+}
+
 func (o MemoryItem) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -373,6 +416,9 @@ func (o MemoryItem) ToMap() (map[string]interface{}, error) {
 	}
 	if o.ObservationScopes.IsSet() {
 		toSerialize["observation_scopes"] = o.ObservationScopes.Get()
+	}
+	if o.Strategy.IsSet() {
+		toSerialize["strategy"] = o.Strategy.Get()
 	}
 	return toSerialize, nil
 }

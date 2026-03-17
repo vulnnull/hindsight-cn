@@ -37,7 +37,8 @@ class MemoryItem(BaseModel):
     entities: Optional[List[EntityInput]] = None
     tags: Optional[List[StrictStr]] = None
     observation_scopes: Optional[ObservationScopes] = None
-    __properties: ClassVar[List[str]] = ["content", "timestamp", "context", "metadata", "document_id", "entities", "tags", "observation_scopes"]
+    strategy: Optional[StrictStr] = None
+    __properties: ClassVar[List[str]] = ["content", "timestamp", "context", "metadata", "document_id", "entities", "tags", "observation_scopes", "strategy"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -126,6 +127,11 @@ class MemoryItem(BaseModel):
         if self.observation_scopes is None and "observation_scopes" in self.model_fields_set:
             _dict['observation_scopes'] = None
 
+        # set to None if strategy (nullable) is None
+        # and model_fields_set contains the field
+        if self.strategy is None and "strategy" in self.model_fields_set:
+            _dict['strategy'] = None
+
         return _dict
 
     @classmethod
@@ -145,7 +151,8 @@ class MemoryItem(BaseModel):
             "document_id": obj.get("document_id"),
             "entities": [EntityInput.from_dict(_item) for _item in obj["entities"]] if obj.get("entities") is not None else None,
             "tags": obj.get("tags"),
-            "observation_scopes": ObservationScopes.from_dict(obj["observation_scopes"]) if obj.get("observation_scopes") is not None else None
+            "observation_scopes": ObservationScopes.from_dict(obj["observation_scopes"]) if obj.get("observation_scopes") is not None else None,
+            "strategy": obj.get("strategy")
         })
         return _obj
 

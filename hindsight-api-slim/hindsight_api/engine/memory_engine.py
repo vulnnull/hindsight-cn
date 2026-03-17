@@ -561,6 +561,7 @@ class MemoryEngine(MemoryEngineInterface):
         contents = task_dict.get("contents", [])
         document_tags = task_dict.get("document_tags")
         operation_id = task_dict.get("operation_id")  # For batch API crash recovery
+        strategy = task_dict.get("strategy")
 
         logger.info(
             f"[BATCH_RETAIN_TASK] Starting background batch retain for bank_id={bank_id}, {len(contents)} items, operation_id={operation_id}"
@@ -584,6 +585,7 @@ class MemoryEngine(MemoryEngineInterface):
             document_tags=document_tags,
             request_context=context,
             operation_id=operation_id,
+            strategy=strategy,
             outbox_callback=self._build_retain_outbox_callback(
                 bank_id=bank_id,
                 contents=contents,
@@ -712,6 +714,8 @@ class MemoryEngine(MemoryEngineInterface):
         retain_task_payload: dict[str, Any] = {"contents": retain_contents}
         if document_tags:
             retain_task_payload["document_tags"] = document_tags
+        if task_dict.get("strategy"):
+            retain_task_payload["strategy"] = task_dict["strategy"]
 
         # Pass tenant/api_key context through to retain task
         if task_dict.get("_tenant_id"):
@@ -1953,6 +1957,7 @@ class MemoryEngine(MemoryEngineInterface):
         return_usage: bool = False,
         operation_id: str | None = None,
         outbox_callback: "Callable[[asyncpg.Connection], Awaitable[None]] | None" = None,
+        strategy: str | None = None,
     ):
         """
         Store multiple content items as memory units in ONE batch operation.
@@ -2110,6 +2115,7 @@ class MemoryEngine(MemoryEngineInterface):
                     confidence_score=confidence_score,
                     document_tags=document_tags,
                     operation_id=operation_id,
+                    strategy=strategy,
                     # Outbox callback runs inside the last sub-batch's transaction so the
                     # webhook delivery row is committed atomically with the final retain data.
                     outbox_callback=outbox_callback if i == len(sub_batches) else None,
@@ -2134,6 +2140,7 @@ class MemoryEngine(MemoryEngineInterface):
                 confidence_score=confidence_score,
                 document_tags=document_tags,
                 operation_id=operation_id,
+                strategy=strategy,
                 outbox_callback=outbox_callback,
             )
 
@@ -2186,6 +2193,7 @@ class MemoryEngine(MemoryEngineInterface):
         document_tags: list[str] | None = None,
         operation_id: str | None = None,
         outbox_callback: "Callable[[asyncpg.Connection], Awaitable[None]] | None" = None,
+        strategy: str | None = None,
     ) -> tuple[list[list[str]], "TokenUsage"]:
         """
         Internal method for batch processing without chunking logic.
@@ -2217,6 +2225,13 @@ class MemoryEngine(MemoryEngineInterface):
 
             # Resolve bank-specific config for this operation
             resolved_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
+
+            # Apply strategy overrides: explicit strategy > bank default strategy
+            from hindsight_api.config_resolver import apply_strategy
+
+            effective_strategy = strategy or resolved_config.retain_default_strategy
+            if effective_strategy:
+                resolved_config = apply_strategy(resolved_config, effective_strategy)
 
             # Create parent span for retain operation
             with create_operation_span("retain", bank_id):
@@ -7377,6 +7392,7 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         request_context: "RequestContext",
         document_tags: list[str] | None = None,
+        strategy: str | None = None,
     ) -> dict[str, Any]:
         """Submit a batch retain operation to run asynchronously.
 
@@ -7485,6 +7501,8 @@ class MemoryEngine(MemoryEngineInterface):
             task_payload: dict[str, Any] = {"contents": sub_batch}
             if document_tags:
                 task_payload["document_tags"] = document_tags
+            if strategy:
+                task_payload["strategy"] = strategy
             # Pass tenant_id and api_key_id through task payload
             if request_context.tenant_id:
                 task_payload["_tenant_id"] = request_context.tenant_id
@@ -7599,6 +7617,8 @@ class MemoryEngine(MemoryEngineInterface):
                 "document_tags": document_tags or [],
                 "timestamp": item.get("timestamp"),
             }
+            if item.get("strategy"):
+                task_payload["strategy"] = item["strategy"]
 
             # Pass tenant_id and api_key_id through task payload
             if request_context.tenant_id:

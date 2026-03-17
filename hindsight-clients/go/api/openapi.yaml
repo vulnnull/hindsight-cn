@@ -4014,6 +4014,9 @@ components:
           type: array
         observation_scopes:
           $ref: '#/components/schemas/ObservationScopes'
+        strategy:
+          nullable: true
+          type: string
       required:
       - content
       title: MemoryItem
@@ -4795,6 +4798,11 @@ components:
         operation_id:
           nullable: true
           type: string
+        operation_ids:
+          items:
+            type: string
+          nullable: true
+          type: array
         usage:
           $ref: '#/components/schemas/TokenUsage'
       required:

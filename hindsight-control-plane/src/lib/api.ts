@@ -204,6 +204,7 @@ export class ControlPlaneClient {
       entities?: Array<{ text: string; type?: string }>;
       tags?: string[];
       observation_scopes?: "per_tag" | "combined" | "all_combinations" | string[][];
+      strategy?: string;
     }>;
     document_id?: string;
     async?: boolean;
@@ -886,6 +887,7 @@ export class ControlPlaneClient {
       metadata?: Record<string, any>;
       tags?: string[];
       timestamp?: string;
+      strategy?: string;
     }>;
   }) {
     const formData = new FormData();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
 import { useBank } from "@/lib/bank-context";
 import { useFeatures } from "@/lib/features-context";
 import { client } from "@/lib/api";
@@ -15,6 +15,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -35,6 +45,13 @@ type RetainEdits = {
   retain_extraction_mode: string | null;
   retain_mission: string | null;
   retain_custom_instructions: string | null;
+  entities_allow_free_form: boolean | null;
+  entity_labels: LabelGroup[] | null;
+};
+
+type StrategiesEdits = {
+  retain_default_strategy: string | null;
+  retain_strategies: Record<string, Record<string, any>> | null;
 };
 
 type ObservationsEdits = {
@@ -53,11 +70,6 @@ type LabelGroup = {
   optional: boolean;
   tag: boolean;
   values: LabelValue[];
-};
-
-type EntityLabelsEdits = {
-  entity_labels: LabelGroup[] | null;
-  entities_allow_free_form: boolean;
 };
 
 type MCPEdits = {
@@ -134,12 +146,28 @@ const ALL_TOOLS: string[] = MCP_TOOL_GROUPS.flatMap((g) => g.tools);
 
 // ─── Slice helpers ────────────────────────────────────────────────────────────
 
+function parseEntityLabels(raw: unknown): LabelGroup[] | null {
+  if (Array.isArray(raw)) return raw as LabelGroup[];
+  if (raw && typeof raw === "object" && Array.isArray((raw as any).attributes))
+    return (raw as any).attributes as LabelGroup[];
+  return null;
+}
+
 function retainSlice(config: Record<string, any>): RetainEdits {
   return {
     retain_chunk_size: config.retain_chunk_size ?? null,
     retain_extraction_mode: config.retain_extraction_mode ?? null,
     retain_mission: config.retain_mission ?? null,
     retain_custom_instructions: config.retain_custom_instructions ?? null,
+    entities_allow_free_form: config.entities_allow_free_form ?? null,
+    entity_labels: parseEntityLabels(config.entity_labels),
+  };
+}
+
+function strategiesSlice(config: Record<string, any>): StrategiesEdits {
+  return {
+    retain_default_strategy: config.retain_default_strategy ?? null,
+    retain_strategies: config.retain_strategies ?? null,
   };
 }
 
@@ -151,20 +179,6 @@ function observationsSlice(config: Record<string, any>): ObservationsEdits {
     consolidation_source_facts_max_tokens_per_observation:
       config.consolidation_source_facts_max_tokens_per_observation ?? null,
     observations_mission: config.observations_mission ?? null,
-  };
-}
-
-function entityLabelsSlice(config: Record<string, any>): EntityLabelsEdits {
-  const raw = config.entity_labels;
-  let attrs: LabelGroup[] | null = null;
-  if (Array.isArray(raw)) {
-    attrs = raw as LabelGroup[];
-  } else if (raw && typeof raw === "object" && Array.isArray(raw.attributes)) {
-    attrs = raw.attributes as LabelGroup[];
-  }
-  return {
-    entity_labels: attrs,
-    entities_allow_free_form: config.entities_allow_free_form ?? true,
   };
 }
 
@@ -201,11 +215,9 @@ export function BankConfigView() {
 
   // Per-section local edits
   const [retainEdits, setRetainEdits] = useState<RetainEdits>(retainSlice({}));
+  const [strategiesEdits, setStrategiesEdits] = useState<StrategiesEdits>(strategiesSlice({}));
   const [observationsEdits, setObservationsEdits] = useState<ObservationsEdits>(
     observationsSlice({})
-  );
-  const [entityLabelsEdits, setEntityLabelsEdits] = useState<EntityLabelsEdits>(
-    entityLabelsSlice({})
   );
   const [reflectEdits, setReflectEdits] = useState<ProfileData>(DEFAULT_PROFILE);
   const [mcpEdits, setMcpEdits] = useState<MCPEdits>(mcpSlice({}));
@@ -214,31 +226,25 @@ export function BankConfigView() {
   // Per-section saving/error state
   const [retainSaving, setRetainSaving] = useState(false);
   const [observationsSaving, setObservationsSaving] = useState(false);
-  const [entityLabelsSaving, setEntityLabelsSaving] = useState(false);
   const [reflectSaving, setReflectSaving] = useState(false);
   const [mcpSaving, setMcpSaving] = useState(false);
   const [geminiSaving, setGeminiSaving] = useState(false);
   const [retainError, setRetainError] = useState<string | null>(null);
   const [observationsError, setObservationsError] = useState<string | null>(null);
-  const [entityLabelsError, setEntityLabelsError] = useState<string | null>(null);
   const [reflectError, setReflectError] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [geminiError, setGeminiError] = useState<string | null>(null);
 
-  // Reset dialog
-
   // Dirty tracking
   const retainDirty = useMemo(
-    () => JSON.stringify(retainEdits) !== JSON.stringify(retainSlice(baseConfig)),
-    [retainEdits, baseConfig]
+    () =>
+      JSON.stringify(retainEdits) !== JSON.stringify(retainSlice(baseConfig)) ||
+      JSON.stringify(strategiesEdits) !== JSON.stringify(strategiesSlice(baseConfig)),
+    [retainEdits, strategiesEdits, baseConfig]
   );
   const observationsDirty = useMemo(
     () => JSON.stringify(observationsEdits) !== JSON.stringify(observationsSlice(baseConfig)),
     [observationsEdits, baseConfig]
-  );
-  const entityLabelsDirty = useMemo(
-    () => JSON.stringify(entityLabelsEdits) !== JSON.stringify(entityLabelsSlice(baseConfig)),
-    [entityLabelsEdits, baseConfig]
   );
   const reflectDirty = useMemo(
     () => JSON.stringify(reflectEdits) !== JSON.stringify(baseProfile),
@@ -277,8 +283,8 @@ export function BankConfigView() {
       setBaseConfig(cfg);
       setBaseProfile(prof);
       setRetainEdits(retainSlice(cfg));
+      setStrategiesEdits(strategiesSlice(cfg));
       setObservationsEdits(observationsSlice(cfg));
-      setEntityLabelsEdits(entityLabelsSlice(cfg));
       setReflectEdits(prof);
       setMcpEdits(mcpSlice(cfg));
       setGeminiEdits(geminiSlice(cfg));
@@ -294,8 +300,9 @@ export function BankConfigView() {
     setRetainSaving(true);
     setRetainError(null);
     try {
-      await client.updateBankConfig(bankId, retainEdits);
-      setBaseConfig((prev) => ({ ...prev, ...retainEdits }));
+      const payload = { ...retainEdits, ...strategiesEdits };
+      await client.updateBankConfig(bankId, payload);
+      setBaseConfig((prev) => ({ ...prev, ...payload }));
     } catch (err: any) {
       setRetainError(err.message || "Failed to save retain settings");
     } finally {
@@ -314,24 +321,6 @@ export function BankConfigView() {
       setObservationsError(err.message || "Failed to save observations settings");
     } finally {
       setObservationsSaving(false);
-    }
-  };
-
-  const saveEntityLabels = async () => {
-    if (!bankId) return;
-    setEntityLabelsSaving(true);
-    setEntityLabelsError(null);
-    try {
-      const payload = {
-        entity_labels: entityLabelsEdits.entity_labels,
-        entities_allow_free_form: entityLabelsEdits.entities_allow_free_form,
-      };
-      await client.updateBankConfig(bankId, payload);
-      setBaseConfig((prev) => ({ ...prev, ...payload }));
-    } catch (err: any) {
-      setEntityLabelsError(err.message || "Failed to save entity labels settings");
-    } finally {
-      setEntityLabelsSaving(false);
     }
   };
 
@@ -416,111 +405,49 @@ export function BankConfigView() {
   return (
     <>
       <div className="space-y-8">
-        {/* Retain Section */}
+        {/* Retain + Strategies Section */}
         <ConfigSection
           title="Retain"
-          description="Control what gets extracted and stored from content"
+          description="Default extraction settings and named strategies. Pass a strategy name on retain requests to override defaults per-item."
           error={retainError}
           dirty={retainDirty}
           saving={retainSaving}
           onSave={saveRetain}
         >
           <FieldRow
-            label="Chunk Size"
-            description="Size of text chunks for processing (characters)"
-          >
-            <Input
-              type="number"
-              min={500}
-              max={8000}
-              value={retainEdits.retain_chunk_size ?? ""}
-              onChange={(e) =>
-                setRetainEdits((prev) => ({
-                  ...prev,
-                  retain_chunk_size: e.target.value ? parseFloat(e.target.value) : null,
-                }))
-              }
-            />
-          </FieldRow>
-          <TextareaRow
-            label="Mission"
-            description="What this bank should pay attention to during extraction. Steers the LLM without replacing the extraction rules — works alongside any extraction mode."
-            value={retainEdits.retain_mission ?? ""}
-            onChange={(v) => setRetainEdits((prev) => ({ ...prev, retain_mission: v || null }))}
-            placeholder="e.g. Always include technical decisions, API design choices, and architectural trade-offs. Ignore meeting logistics, greetings, and social exchanges."
-            rows={3}
-          />
-          <FieldRow
-            label="Extraction Mode"
-            description="How aggressively to extract facts: concise (default, selective), verbose (capture everything), custom (write your own extraction rules)"
+            label="Default strategy"
+            description="Applied automatically when no strategy is specified on a request."
           >
             <Select
-              value={retainEdits.retain_extraction_mode ?? ""}
-              onValueChange={(val) =>
-                setRetainEdits((prev) => ({ ...prev, retain_extraction_mode: val }))
+              value={strategiesEdits.retain_default_strategy ?? "__none__"}
+              onValueChange={(v) =>
+                setStrategiesEdits((prev) => ({
+                  ...prev,
+                  retain_default_strategy: v === "__none__" ? null : v,
+                }))
               }
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {["concise", "verbose", "custom"].map((opt) => (
-                  <SelectItem key={opt} value={opt}>
-                    {opt}
+                <SelectItem value="__none__">
+                  <span className="text-muted-foreground italic">Default</span>
+                </SelectItem>
+                {Object.keys(strategiesEdits.retain_strategies ?? {}).map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </FieldRow>
-          {retainEdits.retain_extraction_mode === "custom" && (
-            <TextareaRow
-              label="Custom Extraction Prompt"
-              description="Replaces the built-in extraction rules entirely. Only active when Extraction Mode is set to custom."
-              value={retainEdits.retain_custom_instructions ?? ""}
-              onChange={(v) =>
-                setRetainEdits((prev) => ({ ...prev, retain_custom_instructions: v || null }))
-              }
-              rows={5}
-            />
-          )}
-        </ConfigSection>
-
-        {/* Entity Labels Section */}
-        <ConfigSection
-          title="Entities"
-          description="Control entity extraction and define a controlled vocabulary of key:value classification labels (e.g. pedagogy:scaffolding, interest:active)"
-          error={entityLabelsError}
-          dirty={entityLabelsDirty}
-          saving={entityLabelsSaving}
-          onSave={saveEntityLabels}
-        >
-          <FieldRow
-            label="Free Form Entities"
-            description="Extract regular named entities (people, places, concepts) alongside entity labels. Disable to restrict extraction to entity labels only."
-          >
-            <div className="flex justify-end items-center gap-2">
-              <Label
-                htmlFor="entities-allow-free-form"
-                className="text-sm text-muted-foreground cursor-pointer select-none"
-              >
-                {entityLabelsEdits.entities_allow_free_form ? "Enabled" : "Disabled"}
-              </Label>
-              <Switch
-                id="entities-allow-free-form"
-                checked={entityLabelsEdits.entities_allow_free_form}
-                onCheckedChange={(v) =>
-                  setEntityLabelsEdits((prev) => ({ ...prev, entities_allow_free_form: v }))
-                }
-              />
-            </div>
-          </FieldRow>
-          <EntityLabelsEditor
-            value={entityLabelsEdits.entity_labels ?? []}
-            onChange={(attrs) =>
-              setEntityLabelsEdits((prev) => ({
-                ...prev,
-                entity_labels: attrs.length > 0 ? attrs : null,
-              }))
+          <RetainStrategiesPanel
+            defaultValues={retainEdits}
+            onDefaultChange={(patch) => setRetainEdits((prev) => ({ ...prev, ...patch }))}
+            strategies={strategiesEdits.retain_strategies}
+            onStrategiesChange={(v) =>
+              setStrategiesEdits((prev) => ({ ...prev, retain_strategies: v }))
             }
           />
         </ConfigSection>
@@ -752,6 +679,340 @@ export function BankConfigView() {
         </ConfigSection>
       </div>
     </>
+  );
+}
+
+// ─── Retain strategies panel ──────────────────────────────────────────────────
+
+type RetainFormValues = {
+  retain_extraction_mode: string | null;
+  retain_chunk_size: number | null;
+  retain_mission: string | null;
+  retain_custom_instructions: string | null;
+  entities_allow_free_form: boolean | null;
+  entity_labels: LabelGroup[] | null;
+};
+
+const EXTRACTION_MODES = ["concise", "verbose", "verbatim", "chunks", "custom"];
+const INHERIT_SENTINEL = "__inherit__";
+
+function RetainStrategyForm({
+  values,
+  onChange,
+  isOverride = false,
+}: {
+  values: RetainFormValues;
+  onChange: (patch: Partial<RetainFormValues>) => void;
+  isOverride?: boolean;
+}) {
+  const modeValue = values.retain_extraction_mode ?? (isOverride ? INHERIT_SENTINEL : "");
+  const showCustomField = values.retain_extraction_mode === "custom";
+
+  return (
+    <div className="divide-y divide-border/40">
+      <FieldRow
+        label="Extraction Mode"
+        description="How aggressively to extract facts. concise = selective, verbose = capture everything, verbatim = store chunks as-is (still extract entities/time), chunks = no LLM, custom = write your own rules."
+      >
+        <Select
+          value={modeValue}
+          onValueChange={(val) =>
+            onChange({ retain_extraction_mode: val === INHERIT_SENTINEL ? null : val || null })
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder={isOverride ? "Inherited from default" : undefined} />
+          </SelectTrigger>
+          <SelectContent>
+            {isOverride && (
+              <SelectItem value={INHERIT_SENTINEL}>
+                <span className="text-muted-foreground italic">inherited</span>
+              </SelectItem>
+            )}
+            {EXTRACTION_MODES.map((opt) => (
+              <SelectItem key={opt} value={opt}>
+                {opt}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FieldRow>
+      <FieldRow label="Chunk Size" description="Size of text chunks for processing (characters)">
+        <Input
+          type="number"
+          min={500}
+          max={8000}
+          value={values.retain_chunk_size ?? ""}
+          onChange={(e) =>
+            onChange({ retain_chunk_size: e.target.value ? parseFloat(e.target.value) : null })
+          }
+          placeholder={isOverride ? "Inherited from default" : undefined}
+        />
+      </FieldRow>
+      <TextareaRow
+        label="Mission"
+        description="What this bank should pay attention to during extraction. Steers the LLM without replacing the extraction rules."
+        value={values.retain_mission ?? ""}
+        onChange={(v) => onChange({ retain_mission: v || null })}
+        placeholder={
+          isOverride
+            ? "Inherited from default"
+            : "e.g. Always include technical decisions, API design choices, and architectural trade-offs."
+        }
+        rows={3}
+      />
+      {showCustomField && (
+        <TextareaRow
+          label="Custom Extraction Prompt"
+          description="Replaces the built-in extraction rules entirely. Only active when Extraction Mode is set to custom."
+          value={values.retain_custom_instructions ?? ""}
+          onChange={(v) => onChange({ retain_custom_instructions: v || null })}
+          rows={5}
+        />
+      )}
+      <FieldRow
+        label="Free Form Entities"
+        description="Extract regular named entities (people, places, concepts) alongside entity labels. Disable to restrict extraction to entity labels only."
+      >
+        <div className="flex justify-end items-center gap-2">
+          <Label className="text-sm text-muted-foreground cursor-pointer select-none">
+            {(values.entities_allow_free_form ?? true) ? "Enabled" : "Disabled"}
+          </Label>
+          <Switch
+            checked={values.entities_allow_free_form ?? true}
+            onCheckedChange={(v) => onChange({ entities_allow_free_form: v })}
+          />
+        </div>
+      </FieldRow>
+      <EntityLabelsEditor
+        value={values.entity_labels ?? []}
+        onChange={(attrs) => onChange({ entity_labels: attrs.length > 0 ? attrs : null })}
+      />
+    </div>
+  );
+}
+
+type LocalStrategy = { id: number; name: string; values: RetainFormValues };
+
+function fromStrategiesDict(dict: Record<string, Record<string, any>> | null): LocalStrategy[] {
+  if (!dict) return [];
+  return Object.entries(dict).map(([name, overrides], i) => ({
+    id: i,
+    name,
+    values: {
+      retain_extraction_mode: overrides.retain_extraction_mode ?? null,
+      retain_chunk_size: overrides.retain_chunk_size ?? null,
+      retain_mission: overrides.retain_mission ?? null,
+      retain_custom_instructions: overrides.retain_custom_instructions ?? null,
+      entities_allow_free_form: overrides.entities_allow_free_form ?? null,
+      entity_labels: parseEntityLabels(overrides.entity_labels),
+    },
+  }));
+}
+
+function toStrategiesDict(local: LocalStrategy[]): Record<string, Record<string, any>> | null {
+  const dict: Record<string, Record<string, any>> = {};
+  for (const s of local) {
+    if (!s.name.trim()) continue;
+    const overrides: Record<string, any> = {};
+    if (s.values.retain_extraction_mode !== null)
+      overrides.retain_extraction_mode = s.values.retain_extraction_mode;
+    if (s.values.retain_chunk_size !== null)
+      overrides.retain_chunk_size = s.values.retain_chunk_size;
+    if (s.values.retain_mission) overrides.retain_mission = s.values.retain_mission;
+    if (s.values.retain_custom_instructions)
+      overrides.retain_custom_instructions = s.values.retain_custom_instructions;
+    if (s.values.entities_allow_free_form !== null)
+      overrides.entities_allow_free_form = s.values.entities_allow_free_form;
+    if (s.values.entity_labels !== null) overrides.entity_labels = s.values.entity_labels;
+    dict[s.name.trim()] = overrides;
+  }
+  return Object.keys(dict).length > 0 ? dict : null;
+}
+
+function RetainStrategiesPanel({
+  defaultValues,
+  onDefaultChange,
+  strategies,
+  onStrategiesChange,
+}: {
+  defaultValues: RetainFormValues;
+  onDefaultChange: (patch: Partial<RetainFormValues>) => void;
+  strategies: Record<string, Record<string, any>> | null;
+  onStrategiesChange: (v: Record<string, Record<string, any>> | null) => void;
+}) {
+  const [local, setLocal] = useState<LocalStrategy[]>(() => fromStrategiesDict(strategies));
+  const [selectedTab, setSelectedTab] = useState<number | "default">("default");
+  const [pendingDelete, setPendingDelete] = useState<LocalStrategy | null>(null);
+  const skipSyncRef = useRef(false);
+
+  const strategiesKey = JSON.stringify(strategies);
+  useEffect(() => {
+    if (skipSyncRef.current) {
+      skipSyncRef.current = false;
+      return;
+    }
+    setLocal(fromStrategiesDict(strategies));
+  }, [strategiesKey]);
+
+  const updateLocal = (next: LocalStrategy[]) => {
+    skipSyncRef.current = true;
+    setLocal(next);
+    onStrategiesChange(toStrategiesDict(next));
+  };
+
+  const addStrategy = () => {
+    const id = Date.now();
+    const next = [
+      ...local,
+      {
+        id,
+        name: "",
+        values: {
+          retain_extraction_mode: null,
+          retain_chunk_size: null,
+          retain_mission: null,
+          retain_custom_instructions: null,
+          entities_allow_free_form: null,
+          entity_labels: null,
+        },
+      },
+    ];
+    updateLocal(next);
+    setSelectedTab(id);
+  };
+
+  const removeStrategy = (id: number) => {
+    const next = local.filter((s) => s.id !== id);
+    updateLocal(next);
+    if (selectedTab === id) setSelectedTab("default");
+  };
+
+  const updateStrategy = (id: number, patch: Partial<LocalStrategy>) => {
+    updateLocal(local.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  };
+
+  const activeStrategy = selectedTab !== "default" ? local.find((s) => s.id === selectedTab) : null;
+
+  return (
+    <div>
+      {/* Tab bar */}
+      <div className="border-b border-border px-6 flex items-stretch gap-1 flex-wrap">
+        {/* Default tab */}
+        <button
+          type="button"
+          onClick={() => setSelectedTab("default")}
+          className={`relative py-3 px-4 text-sm font-semibold transition-colors border-b-2 -mb-px ${
+            selectedTab === "default"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+          }`}
+        >
+          Default
+        </button>
+
+        {/* Named strategy tabs */}
+        {local.map((s) => (
+          <div
+            key={s.id}
+            className={`relative flex items-center gap-2 py-3 px-4 text-sm font-semibold transition-colors border-b-2 -mb-px cursor-pointer ${
+              selectedTab === s.id
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+            }`}
+            onClick={() => setSelectedTab(s.id)}
+          >
+            <span className="font-mono">
+              {s.name || <span className="italic font-normal opacity-50">unnamed</span>}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPendingDelete(s);
+              }}
+              className="opacity-40 hover:opacity-100 hover:text-destructive transition-opacity text-base leading-none"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={addStrategy}
+          className="py-3 px-3 text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add strategy
+        </button>
+      </div>
+
+      {/* Form */}
+      <div>
+        {selectedTab === "default" ? (
+          <RetainStrategyForm values={defaultValues} onChange={onDefaultChange} />
+        ) : activeStrategy ? (
+          <div>
+            <div className="px-6 py-3 flex items-center gap-3 border-b border-border/40">
+              <label className="text-xs text-muted-foreground shrink-0">Name</label>
+              <div className="flex flex-col gap-1">
+                <Input
+                  value={activeStrategy.name}
+                  onChange={(e) => updateStrategy(activeStrategy.id, { name: e.target.value })}
+                  placeholder="strategy name (e.g. fast)"
+                  className={`h-7 text-xs font-mono max-w-[200px] ${!activeStrategy.name.trim() ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                />
+                {!activeStrategy.name.trim() && (
+                  <p className="text-xs text-destructive">Name is required</p>
+                )}
+              </div>
+            </div>
+            <RetainStrategyForm
+              values={activeStrategy.values}
+              onChange={(patch) =>
+                updateStrategy(activeStrategy.id, {
+                  values: { ...activeStrategy.values, ...patch },
+                })
+              }
+              isOverride
+            />
+          </div>
+        ) : null}
+      </div>
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete strategy &ldquo;{pendingDelete?.name || "unnamed"}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the strategy and all its overrides. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (pendingDelete) {
+                  removeStrategy(pendingDelete.id);
+                  setPendingDelete(null);
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }
 
