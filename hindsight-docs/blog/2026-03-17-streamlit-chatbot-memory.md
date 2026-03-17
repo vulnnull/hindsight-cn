@@ -3,8 +3,11 @@ title: "I Built a Chatbot That Never Forgets — In 80 Lines of Python"
 authors: [benfrank241]
 date: 2026-03-17
 tags: [streamlit, tutorial, python, memory, chatbot, web-ui]
-slug: /blog/python-chatbot-memory-streamlit
+slug: python-chatbot-memory-streamlit
+image: /img/blog/streamlit-chatbot-memory.png
 ---
+
+![I Built a Chatbot That Never Forgets — In 80 Lines of Python](/img/blog/streamlit-chatbot-memory.png)
 
 Build a web chatbot with persistent memory using Streamlit and Hindsight. ~80 lines of Python, no frontend framework. Memory survives restarts, and a sidebar shows what the agent remembers.
 
