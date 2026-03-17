@@ -1,28 +1,6 @@
----
-title: Frequently Asked Questions
-description: Common questions and answers about Hindsight
-hide_table_of_contents: true
----
 
-import {ClientsGrid, IntegrationsGrid, LLMProvidersGrid} from '@site/src/components/SupportedGrids';
 
 # Frequently Asked Questions
-
-**Contents**
-- [What is Hindsight and how does it differ from RAG?](#what-is-hindsight-and-how-does-it-differ-from-rag)
-- [Why use Hindsight instead of other solutions?](#why-use-hindsight-instead-of-other-solutions)
-- [Supported clients, integrations, and LLM providers](#which-clients-and-languages-are-supported)
-- [Which model should I use?](#which-model-should-i-use-with-hindsight)
-- [Hosting and system requirements](#do-i-need-to-host-my-own-infrastructure)
-- [How do I isolate user data?](#how-do-i-isolate-user-data)
-- [Retain, recall, and reflect — what's the difference?](#whats-the-difference-between-retain-recall-and-reflect)
-- [When should I use recall vs reflect?](#when-should-i-use-recall-vs-reflect)
-- [When should I use mental models?](#when-should-i-use-mental-models)
-- [Latency expectations](#whats-the-typical-latency-for-recall-operations)
-- [Tags, metadata, and entity labels](#does-hindsight-support-metadata-filtering)
-- [Recommended format for conversations](#what-is-the-recommended-format-for-retaining-conversations)
-
----
 
 ### What is Hindsight and how does it differ from RAG?
 
@@ -58,7 +36,6 @@ Unlike vector databases (just search) or RAG systems (document retrieval), Hinds
 ### Which clients and languages are supported?
 
 <ClientsGrid />
-
 
 ---
 
@@ -184,7 +161,6 @@ See [Recall](/developer/api/recall) and [Reflect](/developer/reflect) for full A
 Mental models are automatically built during retain and used by reflect to provide richer, more contextual responses. See [Mental Models](/developer/api/mental-models).
 
 ---
-
 
 ### What's the typical latency for recall operations?
 

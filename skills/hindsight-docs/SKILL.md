@@ -26,6 +26,8 @@ All documentation is in `references/` organized by category:
 
 ```
 references/
+├── best-practices.md # START HERE — missions, tags, formats, anti-patterns
+├── faq.md            # Common questions and decisions
 ├── developer/
 │   ├── api/          # Core operations: retain, recall, reflect, memory banks
 │   └── *.md          # Architecture, configuration, deployment, performance
@@ -83,6 +85,14 @@ pattern: "def |async def "    # Find Python examples
 references/developer/api/retain.md
 references/sdks/python.md
 references/cookbook/recipes/per-user-memory.md
+```
+
+## Start Here: Best Practices
+
+Before reading API docs, read the best practices guide. It covers practical rules for missions, tags, content format, observation scopes, and anti-patterns — the fastest way to integrate correctly.
+
+```
+references/best-practices.md
 ```
 
 ## Key Concepts

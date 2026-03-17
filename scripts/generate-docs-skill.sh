@@ -7,6 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 DOCS_DIR="$ROOT_DIR/hindsight-docs/docs"
+PAGES_DIR="$ROOT_DIR/hindsight-docs/src/pages"
 EXAMPLES_DIR="$ROOT_DIR/hindsight-docs/examples"
 SKILL_DIR="$ROOT_DIR/skills/hindsight-docs"
 REFS_DIR="$SKILL_DIR/references"
@@ -156,6 +157,24 @@ find "$DOCS_DIR" -type f \( -name "*.md" -o -name "*.mdx" \) | while read -r fil
     process_file "$file"
 done
 
+# Process standalone pages (e.g. best-practices, faq) from src/pages/
+print_info "Processing standalone pages..."
+for page in best-practices faq; do
+    for ext in md mdx; do
+        src="$PAGES_DIR/$page.$ext"
+        if [ -f "$src" ]; then
+            dest="$REFS_DIR/$page.md"
+            mkdir -p "$(dirname "$dest")"
+            if [[ "$src" == *.mdx ]]; then
+                convert_mdx_to_md "$src" "$dest"
+            else
+                cp "$src" "$dest"
+            fi
+            print_info "Included page: $page.$ext"
+        fi
+    done
+done
+
 # Generate SKILL.md
 print_info "Generating SKILL.md..."
 cat > "$SKILL_DIR/SKILL.md" <<'EOF'
@@ -187,6 +206,8 @@ All documentation is in `references/` organized by category:
 
 ```
 references/
+├── best-practices.md # START HERE — missions, tags, formats, anti-patterns
+├── faq.md            # Common questions and decisions
 ├── developer/
 │   ├── api/          # Core operations: retain, recall, reflect, memory banks
 │   └── *.md          # Architecture, configuration, deployment, performance
@@ -244,6 +265,14 @@ pattern: "def |async def "    # Find Python examples
 references/developer/api/retain.md
 references/sdks/python.md
 references/cookbook/recipes/per-user-memory.md
+```
+
+## Start Here: Best Practices
+
+Before reading API docs, read the best practices guide. It covers practical rules for missions, tags, content format, observation scopes, and anti-patterns — the fastest way to integrate correctly.
+
+```
+references/best-practices.md
 ```
 
 ## Key Concepts

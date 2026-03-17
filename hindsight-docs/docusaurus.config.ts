@@ -236,6 +236,16 @@ const config: Config = {
           className: 'navbar-item-resources',
           items: [
             {
+              to: '/best-practices',
+              label: 'Best Practices',
+              customProps: { icon: 'lu-star' },
+            },
+            {
+              to: '/faq',
+              label: 'FAQ',
+              customProps: { icon: 'lu-circle-help' },
+            },
+            {
               to: '/cookbook',
               label: 'Cookbook',
               customProps: { icon: 'lu-book' },

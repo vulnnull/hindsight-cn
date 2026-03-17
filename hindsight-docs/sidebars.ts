@@ -285,6 +285,25 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Resources',
+      collapsible: false,
+      items: [
+        {
+          type: 'link',
+          href: '/best-practices',
+          label: 'Best Practices',
+          customProps: { icon: 'lu-star', iconAfter: 'lu-arrow-up-right' },
+        },
+        {
+          type: 'link',
+          href: '/faq',
+          label: 'FAQ',
+          customProps: { icon: 'lu-circle-help', iconAfter: 'lu-arrow-up-right' },
+        },
+      ],
+    },
+    {
+      type: 'category',
       label: 'More',
       collapsible: false,
       items: [

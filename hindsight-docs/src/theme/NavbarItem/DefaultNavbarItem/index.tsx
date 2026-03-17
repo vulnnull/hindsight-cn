@@ -6,7 +6,7 @@ import type {IconType} from 'react-icons';
 import {
   LuArrowUpRight, LuCode, LuCircleHelp, LuScrollText,
   LuLayoutGrid, LuCloud, LuBook, LuRss, LuBookOpen,
-  LuChartBar, LuCpu, LuFileText,
+  LuChartBar, LuCpu, LuFileText, LuStar,
 } from 'react-icons/lu';
 import {SiGithub, SiSlack} from 'react-icons/si';
 
@@ -22,6 +22,7 @@ const ICON_MAP: Record<string, IconType> = {
   'lu-chart-bar':    LuChartBar,
   'lu-cpu':          LuCpu,
   'lu-file-text':    LuFileText,
+  'lu-star':         LuStar,
   'si-github':       SiGithub,
   'si-slack':        SiSlack,
 };
