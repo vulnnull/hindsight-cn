@@ -24,7 +24,7 @@ Build a web chatbot with persistent memory using Streamlit and Hindsight. ~80 li
 
 ## The Problem: Terminal Chatbots Don't Ship
 
-You built a chatbot with memory using [OpenAI and Hindsight](/blog/give-your-openai-app-a-memory). It works in a terminal:
+You built a chatbot with memory using [OpenAI and Hindsight](/blog/2026/03/05/add-memory-to-openai-application). It works in a terminal:
 
 ```python
 user_input = input("You: ")
@@ -63,7 +63,7 @@ st.sidebar → show recalled facts + reflect button
 Three layers:
 
 - **`st.session_state`** — per-tab, ephemeral conversation history (lost on browser close)
-- **[Hindsight](https://hindsight.vectorize.io)** — persistent memory across restarts (facts, entities, [knowledge graph](/blog/spreading-activation-memory-graphs))
+- **[Hindsight](https://hindsight.vectorize.io)** — persistent memory across restarts (facts, entities, [knowledge graph](/blog/2026/03/12/spreading-activation-memory-graphs))
 - **OpenAI** — generates responses with memory-augmented context
 
 ---
@@ -140,7 +140,7 @@ export HINDSIGHT_API_LLM_API_KEY=YOUR_OPENAI_KEY
 hindsight-api
 ```
 
-> **Note:** You can also use [Hindsight Cloud](https://ui.hindsight.vectorize.io/signup) instead of self-hosting — just change the `base_url` to `https://api.hindsight.vectorize.io` and add your API key. See the [n8n integration guide](/blog/n8n-memory-persistent-workflows) for details on Cloud vs. self-hosted setup.
+> **Note:** You can also use [Hindsight Cloud](https://ui.hindsight.vectorize.io/signup) instead of self-hosting — just change the `base_url` to `https://api.hindsight.vectorize.io` and add your API key. See the [n8n integration guide](/blog/2026/03/16/n8n-memory-workflows) for details on Cloud vs. self-hosted setup.
 
 Now wire Hindsight into the chat. The key pattern: use [`@st.cache_resource`](https://docs.streamlit.io/develop/api-reference/caching-and-state/st.cache_resource) to initialize the client once, not on every re-run.
 
@@ -411,6 +411,6 @@ Streamlit handles the UI. Hindsight handles the memory. OpenAI handles the gener
 - **Show the knowledge graph** — use `include_entities=True` on recall and render entity connections
 - **Deploy with Streamlit Community Cloud** — add `OPENAI_API_KEY` and `HINDSIGHT_API_URL` as secrets
 - **Try [Hindsight Cloud](https://ui.hindsight.vectorize.io/signup)** for deployment without self-hosting the memory server
-- **Customize agent reasoning** — use [disposition traits](/blog/ai-agent-personality-disposition-model) to make your chatbot more empathetic, skeptical, or literal
+- **Customize agent reasoning** — use [disposition traits](/blog/2026/03/13/disposition-aware-agents) to make your chatbot more empathetic, skeptical, or literal
 
 A chatbot with memory is useful. A chatbot with memory you can inspect is a development tool.
