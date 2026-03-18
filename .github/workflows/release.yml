@@ -66,6 +66,10 @@ jobs:
       working-directory: ./hindsight-integrations/hermes
       run: uv build --out-dir dist
 
+    - name: Build hindsight-agno
+      working-directory: ./hindsight-integrations/agno
+      run: uv build --out-dir dist
+
     # Publish in order (client and api-slim first, then api/all wrappers which depend on them)
     - name: Publish hindsight-client to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
@@ -127,6 +131,12 @@ jobs:
         packages-dir: ./hindsight-integrations/hermes/dist
         skip-existing: true
 
+    - name: Publish hindsight-agno to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: ./hindsight-integrations/agno/dist
+        skip-existing: true
+
     # Upload artifacts for GitHub release
     - name: Upload artifacts
       uses: actions/upload-artifact@v7
@@ -143,6 +153,7 @@ jobs:
           hindsight-integrations/crewai/dist/*
           hindsight-integrations/pydantic-ai/dist/*
           hindsight-integrations/hermes/dist/*
+          hindsight-integrations/agno/dist/*
         retention-days: 1
 
   release-typescript-client:
@@ -681,6 +692,7 @@ jobs:
         cp artifacts/python-packages/hindsight-integrations/litellm/dist/* release-assets/ || true
         cp artifacts/python-packages/hindsight-integrations/pydantic-ai/dist/* release-assets/ || true
         cp artifacts/python-packages/hindsight-integrations/hermes/dist/* release-assets/ || true
+        cp artifacts/python-packages/hindsight-integrations/agno/dist/* release-assets/ || true
         cp artifacts/python-packages/hindsight-embed/dist/* release-assets/ || true
         # TypeScript client
         cp artifacts/typescript-client/*.tgz release-assets/ || true
