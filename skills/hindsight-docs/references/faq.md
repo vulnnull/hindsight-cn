@@ -2,6 +2,22 @@
 
 # Frequently Asked Questions
 
+**Contents**
+- [What is Hindsight and how does it differ from RAG?](#what-is-hindsight-and-how-does-it-differ-from-rag)
+- [Why use Hindsight instead of other solutions?](#why-use-hindsight-instead-of-other-solutions)
+- [Supported clients, integrations, and LLM providers](#which-clients-and-languages-are-supported)
+- [Which model should I use?](#which-model-should-i-use-with-hindsight)
+- [Hosting and system requirements](#do-i-need-to-host-my-own-infrastructure)
+- [How do I isolate user data?](#how-do-i-isolate-user-data)
+- [Retain, recall, and reflect — what's the difference?](#whats-the-difference-between-retain-recall-and-reflect)
+- [When should I use recall vs reflect?](#when-should-i-use-recall-vs-reflect)
+- [When should I use mental models?](#when-should-i-use-mental-models)
+- [Latency expectations](#whats-the-typical-latency-for-recall-operations)
+- [Tags, metadata, and entity labels](#does-hindsight-support-metadata-filtering)
+- [Recommended format for conversations](#what-is-the-recommended-format-for-retaining-conversations)
+
+---
+
 ### What is Hindsight and how does it differ from RAG?
 
 Hindsight is an agent memory system that provides long-term memory for AI agents using biomimetic data structures. Unlike traditional RAG (Retrieval-Augmented Generation), Hindsight:

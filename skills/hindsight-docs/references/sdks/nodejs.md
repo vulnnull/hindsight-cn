@@ -2,20 +2,30 @@
 sidebar_position: 2
 ---
 
-# TypeScript Client
+# TypeScript / JavaScript Client
 
-Official TypeScript/JavaScript client for the Hindsight API.
+Official TypeScript/JavaScript client for the Hindsight API. Supports **Node.js** and **Deno**.
 
 ## Installation
+
+### Node.js
 
 ```bash
 npm install @vectorize-io/hindsight-client
 ```
 
+### Deno
+
+No installation needed — import directly via the `npm:` specifier:
+
+```typescript
+import { HindsightClient } from "npm:@vectorize-io/hindsight-client";
+```
+
 ## Quick Start
 
 ```typescript
-const { HindsightClient } = require('@vectorize-io/hindsight-client');
+import { HindsightClient } from '@vectorize-io/hindsight-client';
 
 const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 

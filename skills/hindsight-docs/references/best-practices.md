@@ -3,6 +3,15 @@
 
 Practical guidance for agents and developers integrating Hindsight memory into production systems.
 
+**Contents**
+- [Core Concepts](#core-concepts) — Memory banks, taxonomy, memory types
+- [Bank Configuration](#bank-configuration) — Missions, dispositions, entity labels
+- [Retaining Data](#retaining-data) — Content format, context, document_id, [tags](#tags-naming-conventions), observation scopes
+- [Recalling Memories](#recalling-memories) — Budget, tag filtering, include options, query_timestamp
+- [Reflecting](#reflecting) — Recall vs reflect, response_schema, auditing
+- [Mental Models](#mental-models) — When to create, tag strategy, refresh
+- [Anti-patterns](#anti-patterns)
+
 ---
 
 ## Core Concepts
@@ -13,7 +22,7 @@ A **memory bank** is an isolated memory store — the unit of separation between
 
 - One bank per user is the most common pattern for multi-user applications
 - One bank per agent is common for agent-specific long-term memory
-- A shared bank with tags can work for cross-user analysis (see [Tags](#tags--naming-conventions))
+- A shared bank with tags can work for cross-user analysis (see [Tags](#tags-naming-conventions))
 
 Banks are auto-created on first use. Configure them before ingesting data to steer behavior.
 

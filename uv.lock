@@ -607,8 +607,8 @@ name = "claude-agent-sdk"
 version = "0.1.31"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", marker = "sys_platform != 'win32'" },
-    { name = "mcp", marker = "sys_platform != 'win32'" },
+    { name = "anyio", marker = "sys_platform == 'darwin'" },
+    { name = "mcp", marker = "sys_platform == 'darwin'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6d/df/071dce5803c4db8cd53708bcda3b6022c1c4b68fc00e9007593309515286/claude_agent_sdk-0.1.31.tar.gz", hash = "sha256:b68c681083d7cc985dd3e48f73aabf459f056c1a7e1c5b9c47033c6af94da1a1", size = 61191 }
 wheels = [
@@ -1434,7 +1434,7 @@ wheels = [
 
 [[package]]
 name = "hindsight-all"
-version = "0.4.18"
+version = "0.4.19"
 source = { editable = "hindsight-all" }
 dependencies = [
     { name = "hindsight-api-slim", extra = ["all"] },
@@ -1460,7 +1460,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "hindsight-all-slim"
-version = "0.4.18"
+version = "0.4.19"
 source = { editable = "hindsight-all-slim" }
 dependencies = [
     { name = "hindsight-api-slim" },
@@ -1486,7 +1486,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "hindsight-api"
-version = "0.4.18"
+version = "0.4.19"
 source = { editable = "hindsight-api" }
 dependencies = [
     { name = "hindsight-api-slim", extra = ["all"] },
@@ -1497,7 +1497,7 @@ requires-dist = [{ name = "hindsight-api-slim", extras = ["all"], editable = "hi
 
 [[package]]
 name = "hindsight-api-slim"
-version = "0.4.18"
+version = "0.4.19"
 source = { editable = "hindsight-api-slim" }
 dependencies = [
     { name = "aiohttp" },
@@ -1679,7 +1679,7 @@ dev = [
 
 [[package]]
 name = "hindsight-client"
-version = "0.4.18"
+version = "0.4.19"
 source = { editable = "hindsight-clients/python" }
 dependencies = [
     { name = "aiohttp" },
@@ -1713,7 +1713,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "hindsight-dev"
-version = "0.4.18"
+version = "0.4.19"
 source = { editable = "hindsight-dev" }
 dependencies = [
     { name = "hindsight-api" },
@@ -1761,7 +1761,7 @@ dev = [
 
 [[package]]
 name = "hindsight-embed"
-version = "0.4.18"
+version = "0.4.19"
 source = { editable = "hindsight-embed" }
 dependencies = [
     { name = "httpx" },
