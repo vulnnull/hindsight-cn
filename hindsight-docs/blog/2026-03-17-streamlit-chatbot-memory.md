@@ -140,7 +140,7 @@ export HINDSIGHT_API_LLM_API_KEY=YOUR_OPENAI_KEY
 hindsight-api
 ```
 
-> **Note:** You can also use [Hindsight Cloud](https://ui.hindsight.vectorize.io/signup) instead of self-hosting — just change the `base_url` to `https://api.hindsight.vectorize.io` and add your API key. See the [n8n integration guide](/blog/2026/03/16/n8n-memory-workflows) for details on Cloud vs. self-hosted setup.
+> **Note:** You can also use [Hindsight Cloud](https://ui.hindsight.vectorize.io/signup) instead of self-hosting — just change the `base_url` to `https://api.hindsight.vectorize.io` and add your API key.
 
 Now wire Hindsight into the chat. The key pattern: use [`@st.cache_resource`](https://docs.streamlit.io/develop/api-reference/caching-and-state/st.cache_resource) to initialize the client once, not on every re-run.
 

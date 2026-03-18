@@ -35,7 +35,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "test": "vitest run",
@@ -49,6 +49,7 @@
     "@types/node": "^22.0.0",
     "@vitest/ui": "^4.0.18",
     "chat": "^4.0.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
   },

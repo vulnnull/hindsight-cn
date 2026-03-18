@@ -333,6 +333,37 @@ echo "Generating from $OPENAPI_SPEC..."
 cd "$TYPESCRIPT_CLIENT_DIR"
 npm run generate
 
+# Patch client.gen.ts for Deno compatibility.
+# Deno's Request constructor rejects a 'client' field in RequestInit because
+# 'client' is a reserved Deno.HttpClient option name, causing a TypeError.
+# We destructure it out before spreading opts into RequestInit.
+echo "Patching client.gen.ts for Deno compatibility..."
+cd "$PROJECT_ROOT"
+python3 << PATCH_SCRIPT
+CLIENT_GEN = "$TYPESCRIPT_CLIENT_DIR/generated/client/client.gen.ts"
+with open(CLIENT_GEN) as f:
+    content = f.read()
+OLD = '''    const requestInit: ReqInit = {
+      redirect: "follow",
+      ...opts,
+      body: getValidRequestBody(opts),
+    };'''
+NEW = '''    // Exclude hey-api internal fields that conflict with Deno's RequestInit.client
+    const { client: _client, ...optsForRequest } = opts as typeof opts & { client?: unknown };
+    const requestInit: ReqInit = {
+      redirect: "follow",
+      ...optsForRequest,
+      body: getValidRequestBody(opts),
+    };'''
+if OLD in content:
+    content = content.replace(OLD, NEW)
+    with open(CLIENT_GEN, "w") as f:
+        f.write(content)
+    print("  ✓ client.gen.ts patched successfully")
+else:
+    print("  ⚠ Could not find expected pattern in client.gen.ts - skipping patch")
+PATCH_SCRIPT
+
 echo "✓ TypeScript client generated at $TYPESCRIPT_CLIENT_DIR"
 echo ""
 
