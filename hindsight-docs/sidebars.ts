@@ -216,6 +216,18 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/agno',
+          label: 'Agno',
+          customProps: { icon: '/img/icons/agno.png' },
+        },
+        {
+          type: 'doc',
+          id: 'sdks/integrations/hermes',
+          label: 'Hermes Agent',
+          customProps: { icon: '/img/icons/hermes.png' },
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/skills',
           label: 'Skills',
           customProps: { icon: '/img/icons/skills.png' },

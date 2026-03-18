@@ -646,8 +646,6 @@ client.retain(bank_id, items=[{"content": "...document text..."}], strategy="doc
 
 If no `strategy` is specified in a retain call, `retain_default_strategy` is used. If neither is set, the bank/global config applies directly.
 
-> **Note on chunk size and retrieval fairness**: When mixing strategies with very different chunk sizes in the same bank, `chunks` and `verbatim` memories participate only in semantic retrieval (not entity graph or temporal paths). Smaller chunk sizes (e.g., 800 chars) produce more targeted embeddings and are recommended for document strategies to keep scores comparable with LLM-extracted facts.
-
 **`HINDSIGHT_API_RETAIN_EXTRACTION_MODE=chunks` — zero LLM cost**
 
 Each chunk is stored as-is with no LLM call whatsoever. No entity extraction, no temporal indexing — only embeddings are generated for semantic search. User-provided entities passed via `RetainContent.entities` are the sole source of entity data. Use when ingestion speed and cost matter more than structured metadata.

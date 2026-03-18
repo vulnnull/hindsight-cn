@@ -8,6 +8,28 @@ This changelog highlights user-facing changes only. Internal maintenance, CI/CD,
 
 For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
 
+## [0.4.19](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.19)
+
+**Features**
+
+- TypeScript client now works in Deno environments. ([`72c25c97`](https://github.com/vectorize-io/hindsight/commit/72c25c97))
+- Added Agno integration to use Hindsight as a memory toolkit. ([`8c378b98`](https://github.com/vectorize-io/hindsight/commit/8c378b98))
+- Added Hermes Agent integration (hindsight-hermes) for persistent memory. ([`ef90842f`](https://github.com/vectorize-io/hindsight/commit/ef90842f))
+- Expanded retain behavior with new `verbatim` and `chunks` extraction modes and named retain strategies. ([`e4f8a157`](https://github.com/vectorize-io/hindsight/commit/e4f8a157))
+
+**Improvements**
+
+- Improved local reranker performance/efficiency with FP16 and bucketed batching, plus compatibility with Transformers 5.x. ([`e7da7d0e`](https://github.com/vectorize-io/hindsight/commit/e7da7d0e))
+
+**Bug Fixes**
+
+- Prevented silent memory loss when consolidation fails (failed consolidations are tracked and can be recovered). ([`28dac7c7`](https://github.com/vectorize-io/hindsight/commit/28dac7c7))
+- Fixed Docker control-plane startup to respect the configured control-plane hostname. ([`8a64dc8d`](https://github.com/vectorize-io/hindsight/commit/8a64dc8d))
+- Database cleanup migration now removes orphaned observation memory units to avoid inconsistent memory state. ([`f09ad9de`](https://github.com/vectorize-io/hindsight/commit/f09ad9de))
+- Deleting a document now also deletes linked memory units to prevent leftover/stale memory entries. ([`f27bd953`](https://github.com/vectorize-io/hindsight/commit/f27bd953))
+- Fixed MCP middleware to send an Accept header, preventing 406 response errors in some setups. ([`836fd81e`](https://github.com/vectorize-io/hindsight/commit/836fd81e))
+- Improved compatibility with Gemini tool-calling by preserving thought signature metadata to avoid failures on gemini-3.1-flash-lite-preview. ([`21f9f46c`](https://github.com/vectorize-io/hindsight/commit/21f9f46c))
+
 ## [0.4.18](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.18)
 
 **Features**
