@@ -4074,6 +4074,13 @@ components:
           id: id
           trigger:
             refresh_after_consolidation: false
+            fact_types:
+            - world
+            - world
+            exclude_mental_model_ids:
+            - exclude_mental_model_ids
+            - exclude_mental_model_ids
+            exclude_mental_models: false
           last_refreshed_at: last_refreshed_at
           content: content
           tags:
@@ -4089,6 +4096,13 @@ components:
           id: id
           trigger:
             refresh_after_consolidation: false
+            fact_types:
+            - world
+            - world
+            exclude_mental_model_ids:
+            - exclude_mental_model_ids
+            - exclude_mental_model_ids
+            exclude_mental_models: false
           last_refreshed_at: last_refreshed_at
           content: content
           tags:
@@ -4115,6 +4129,13 @@ components:
         id: id
         trigger:
           refresh_after_consolidation: false
+          fact_types:
+          - world
+          - world
+          exclude_mental_model_ids:
+          - exclude_mental_model_ids
+          - exclude_mental_model_ids
+          exclude_mental_models: false
         last_refreshed_at: last_refreshed_at
         content: content
         tags:
@@ -4169,6 +4190,13 @@ components:
       description: Trigger settings for a mental model.
       example:
         refresh_after_consolidation: false
+        fact_types:
+        - world
+        - world
+        exclude_mental_model_ids:
+        - exclude_mental_model_ids
+        - exclude_mental_model_ids
+        exclude_mental_models: false
       properties:
         refresh_after_consolidation:
           default: false
@@ -4176,6 +4204,26 @@ components:
             \ (real-time mode)"
           title: Refresh After Consolidation
           type: boolean
+        fact_types:
+          items:
+            enum:
+            - world
+            - experience
+            - observation
+            type: string
+          nullable: true
+          type: array
+        exclude_mental_models:
+          default: false
+          description: "If true, exclude all mental models from the reflect loop (skip\
+            \ search_mental_models tool)."
+          title: Exclude Mental Models
+          type: boolean
+        exclude_mental_model_ids:
+          items:
+            type: string
+          nullable: true
+          type: array
       title: MentalModelTrigger
     OperationResponse:
       description: Response model for a single async operation.
@@ -4682,6 +4730,26 @@ components:
         tag_groups:
           items:
             $ref: '#/components/schemas/RecallRequest_tag_groups_inner'
+          nullable: true
+          type: array
+        fact_types:
+          items:
+            enum:
+            - world
+            - experience
+            - observation
+            type: string
+          nullable: true
+          type: array
+        exclude_mental_models:
+          default: false
+          description: "If true, exclude all mental models from the reflect loop (skip\
+            \ search_mental_models tool)."
+          title: Exclude Mental Models
+          type: boolean
+        exclude_mental_model_ids:
+          items:
+            type: string
           nullable: true
           type: array
       required:

@@ -316,6 +316,8 @@ async def run_reflect_agent(
     response_schema: dict | None = None,
     directives: list[dict[str, Any]] | None = None,
     has_mental_models: bool = False,
+    include_observations: bool = True,
+    include_recall: bool = True,
     budget: str | None = None,
     max_context_tokens: int = 100_000,
 ) -> ReflectAgentResult:
@@ -355,7 +357,14 @@ async def run_reflect_agent(
     directive_rules = _extract_directive_rules(directives) if directives else None
 
     # Get tools for this agent (with directive compliance field if directives exist)
-    tools = get_reflect_tools(directive_rules=directive_rules)
+    tools = get_reflect_tools(
+        directive_rules=directive_rules,
+        include_mental_models=has_mental_models,
+        include_observations=include_observations,
+        include_recall=include_recall,
+    )
+    # Build set of enabled tool names to guard against LLM hallucinating disabled tool calls
+    enabled_tools: frozenset[str] = frozenset(t["function"]["name"] for t in tools if t.get("type") == "function")
 
     # Build initial messages (directives are injected into system prompt at START and END)
     system_prompt = build_system_prompt_for_tools(
@@ -538,19 +547,18 @@ async def run_reflect_agent(
         llm_start = time.time()
 
         # Determine tool_choice for this iteration.
-        # Force the full hierarchical retrieval path before allowing auto:
-        # With mental models:
-        #   0 → search_mental_models, 1 → search_observations, 2 → recall, 3+ → auto
-        # Without mental models:
-        #   0 → search_observations, 1 → recall, 2+ → auto
-        if iteration == 0 and has_mental_models:
-            iter_tool_choice: str | dict = {"type": "function", "function": {"name": "search_mental_models"}}
-        elif iteration == 0:
-            iter_tool_choice = {"type": "function", "function": {"name": "search_observations"}}
-        elif iteration == 1 and has_mental_models:
-            iter_tool_choice = {"type": "function", "function": {"name": "search_observations"}}
-        elif iteration == 1 or (iteration == 2 and has_mental_models):
-            iter_tool_choice = {"type": "function", "function": {"name": "recall"}}
+        # Force the full hierarchical retrieval path (only for enabled tools) before allowing auto.
+        # Build the forced sequence from the tools that are actually enabled.
+        forced_sequence = []
+        if has_mental_models:
+            forced_sequence.append("search_mental_models")
+        if include_observations:
+            forced_sequence.append("search_observations")
+        if include_recall:
+            forced_sequence.append("recall")
+
+        if iteration < len(forced_sequence):
+            iter_tool_choice: str | dict = {"type": "function", "function": {"name": forced_sequence[iteration]}}
         else:
             iter_tool_choice = "auto"
 
@@ -769,13 +777,40 @@ async def run_reflect_agent(
         # Execute other tools in parallel (exclude done tool in all its format variants)
         other_tools = [tc for tc in result.tool_calls if not _is_done_tool(tc.name)]
         if other_tools:
-            # Add assistant message with tool calls
+            # Partition into enabled vs hallucinated (not in enabled_tools set)
+            allowed_tools = []
+            hallucinated_tools = []
+            for tc in other_tools:
+                norm = _normalize_tool_name(tc.name)
+                if enabled_tools is not None and norm not in enabled_tools and norm not in ("done", "expand"):
+                    hallucinated_tools.append(tc)
+                else:
+                    allowed_tools.append(tc)
+
+            # Build assistant message with all tool calls (LLM requires them for history)
             messages.append(
                 {
                     "role": "assistant",
                     "tool_calls": [_tool_call_to_dict(tc) for tc in other_tools],
                 }
             )
+
+            # Immediately reject hallucinated tool calls without adding to trace
+            for tc in hallucinated_tools:
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "name": tc.name,
+                        "content": json.dumps(
+                            {
+                                "error": f"Tool '{_normalize_tool_name(tc.name)}' is not available. Use only the tools provided to you."
+                            }
+                        ),
+                    }
+                )
+
+            other_tools = allowed_tools
 
             # Execute tools in parallel
             tool_tasks = [
@@ -785,6 +820,7 @@ async def run_reflect_agent(
                     search_observations_fn,
                     recall_fn,
                     expand_fn,
+                    enabled_tools=enabled_tools,
                 )
                 for tc in other_tools
             ]
@@ -974,6 +1010,7 @@ async def _execute_tool_with_timing(
     search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     recall_fn: Callable[[str, int, int], Awaitable[dict[str, Any]]],
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
+    enabled_tools: frozenset[str] | None = None,
 ) -> tuple[dict[str, Any], int]:
     """Execute a tool call and return result with timing."""
     from hindsight_api.tracing import get_tracer
@@ -1007,6 +1044,7 @@ async def _execute_tool_with_timing(
                 search_observations_fn,
                 recall_fn,
                 expand_fn,
+                enabled_tools=enabled_tools,
             )
 
             # Set success attributes
@@ -1046,10 +1084,15 @@ async def _execute_tool(
     search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     recall_fn: Callable[[str, int, int], Awaitable[dict[str, Any]]],
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
+    enabled_tools: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Execute a single tool by name."""
     # Normalize tool name for various LLM output formats
     tool_name = _normalize_tool_name(tool_name)
+
+    # Guard against LLMs hallucinating calls to tools that were not provided
+    if enabled_tools is not None and tool_name not in enabled_tools and tool_name not in ("done", "expand"):
+        return {"error": f"Tool '{tool_name}' is not available. Use only the tools provided to you."}
 
     if tool_name == "search_mental_models":
         query = args.get("query")

@@ -485,3 +485,206 @@ class TestReflectUsesMentalModels:
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
+
+
+class TestMentalModelReflectOptions:
+    """Tests for fact_types and exclude_mental_models options stored in the trigger field."""
+
+    @pytest.mark.asyncio
+    async def test_trigger_stores_fact_types(self, memory: MemoryEngine, request_context):
+        """Trigger field persists fact_types and returns them via get_mental_model."""
+        bank_id = f"test-mm-trigger-ft-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Observations only",
+            source_query="Summarize observations",
+            content="content",
+            trigger={"refresh_after_consolidation": False, "fact_types": ["observation"]},
+            request_context=request_context,
+        )
+
+        fetched = await memory.get_mental_model(bank_id=bank_id, mental_model_id=mm["id"], request_context=request_context)
+        assert fetched["trigger"]["fact_types"] == ["observation"]
+        assert fetched["trigger"]["refresh_after_consolidation"] is False
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_trigger_stores_exclude_mental_models(self, memory: MemoryEngine, request_context):
+        """Trigger field persists exclude_mental_models flag."""
+        bank_id = f"test-mm-trigger-em-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="No mental models",
+            source_query="Summarize raw facts",
+            content="content",
+            trigger={"refresh_after_consolidation": False, "exclude_mental_models": True},
+            request_context=request_context,
+        )
+
+        fetched = await memory.get_mental_model(bank_id=bank_id, mental_model_id=mm["id"], request_context=request_context)
+        assert fetched["trigger"]["exclude_mental_models"] is True
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_trigger_stores_exclude_mental_model_ids(self, memory: MemoryEngine, request_context):
+        """Trigger field persists exclude_mental_model_ids list."""
+        bank_id = f"test-mm-trigger-eid-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        excluded_ids = ["mm-abc", "mm-xyz"]
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Exclude some models",
+            source_query="Summarize",
+            content="content",
+            trigger={"refresh_after_consolidation": False, "exclude_mental_model_ids": excluded_ids},
+            request_context=request_context,
+        )
+
+        fetched = await memory.get_mental_model(bank_id=bank_id, mental_model_id=mm["id"], request_context=request_context)
+        assert fetched["trigger"]["exclude_mental_model_ids"] == excluded_ids
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_trigger_reflect_options(self, memory: MemoryEngine, request_context):
+        """update_mental_model persists updated trigger reflect options."""
+        bank_id = f"test-mm-trigger-upd-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Initially no filter",
+            source_query="Summarize",
+            content="content",
+            trigger={"refresh_after_consolidation": False},
+            request_context=request_context,
+        )
+
+        updated = await memory.update_mental_model(
+            bank_id=bank_id,
+            mental_model_id=mm["id"],
+            trigger={
+                "refresh_after_consolidation": True,
+                "fact_types": ["world", "experience"],
+                "exclude_mental_models": False,
+                "exclude_mental_model_ids": ["mm-skip"],
+            },
+            request_context=request_context,
+        )
+
+        assert updated["trigger"]["refresh_after_consolidation"] is True
+        assert updated["trigger"]["fact_types"] == ["world", "experience"]
+        assert updated["trigger"]["exclude_mental_models"] is False
+        assert updated["trigger"]["exclude_mental_model_ids"] == ["mm-skip"]
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+class TestReflectFactTypeFiltering:
+    """Tests for fact_types and exclude_mental_models filtering in reflect_async."""
+
+    @pytest.mark.asyncio
+    async def test_exclude_mental_models_skips_search_mental_models_tool(
+        self, memory: MemoryEngine, request_context
+    ):
+        """When exclude_mental_models=True, search_mental_models is never called."""
+        bank_id = f"test-reflect-exmm-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        # Create a mental model so the bank has one
+        await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Existing Model",
+            source_query="Q",
+            content="Some content about the team",
+            request_context=request_context,
+        )
+
+        result = await memory.reflect_async(
+            bank_id=bank_id,
+            query="Tell me about the team",
+            request_context=request_context,
+            exclude_mental_models=True,
+        )
+
+        tool_names = [tc.tool for tc in result.tool_trace]
+        assert "search_mental_models" not in tool_names, (
+            f"search_mental_models should be excluded but found in: {tool_names}"
+        )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_exclude_observations_via_fact_types(self, memory: MemoryEngine, request_context):
+        """When fact_types excludes observation, search_observations is never called."""
+        bank_id = f"test-reflect-exobs-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        result = await memory.reflect_async(
+            bank_id=bank_id,
+            query="Tell me something",
+            request_context=request_context,
+            fact_types=["world", "experience"],
+        )
+
+        tool_names = [tc.tool for tc in result.tool_trace]
+        assert "search_observations" not in tool_names, (
+            f"search_observations should be excluded but found in: {tool_names}"
+        )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_observation_only_fact_types_skips_recall(self, memory: MemoryEngine, request_context):
+        """When fact_types=['observation'], recall is never called."""
+        bank_id = f"test-reflect-obsonly-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+
+        result = await memory.reflect_async(
+            bank_id=bank_id,
+            query="Tell me something",
+            request_context=request_context,
+            fact_types=["observation"],
+        )
+
+        tool_names = [tc.tool for tc in result.tool_trace]
+        assert "recall" not in tool_names, f"recall should be excluded but found in: {tool_names}"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+class TestReflectRequestValidation:
+    """Tests for ReflectRequest and MentalModelTrigger validation via the HTTP API."""
+
+    @pytest.mark.asyncio
+    async def test_reflect_empty_fact_types_rejected(self, api_client, test_bank_id):
+        """Passing fact_types=[] to reflect must return 422."""
+        await api_client.get(f"/v1/default/banks/{test_bank_id}/profile")
+
+        response = await api_client.post(
+            f"/v1/default/banks/{test_bank_id}/reflect",
+            json={"query": "test", "fact_types": []},
+        )
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_create_mental_model_empty_fact_types_rejected(self, api_client, test_bank_id):
+        """Passing fact_types=[] inside trigger must return 422."""
+        await api_client.get(f"/v1/default/banks/{test_bank_id}/profile")
+
+        response = await api_client.post(
+            f"/v1/default/banks/{test_bank_id}/mental-models",
+            json={
+                "name": "Test",
+                "source_query": "Q",
+                "trigger": {"refresh_after_consolidation": False, "fact_types": []},
+            },
+        )
+        assert response.status_code == 422

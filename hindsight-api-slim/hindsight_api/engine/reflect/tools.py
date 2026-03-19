@@ -200,6 +200,7 @@ async def tool_recall(
     tag_groups: "list | None" = None,
     connection_budget: int = 1,
     max_chunk_tokens: int = 1000,
+    fact_types: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Search memories using TEMPR retrieval.
@@ -217,15 +218,18 @@ async def tool_recall(
         tags_match: How to match tags - "any" (OR), "all" (AND), or "exact"
         connection_budget: Max DB connections for this recall (default 1 for internal ops)
         max_chunk_tokens: Maximum tokens for raw source chunk text (default 1000, always included)
+        fact_types: Optional filter for fact types to retrieve. Defaults to ["experience", "world"].
 
     Returns:
         Dict with list of matching memories including raw chunk text
     """
+    # Only world/experience are valid for raw recall (observation is handled by search_observations)
+    recall_fact_type = [ft for ft in (fact_types or ["experience", "world"]) if ft in ("world", "experience")]
     include_chunks = True
     result = await memory_engine.recall_async(
         bank_id=bank_id,
         query=query,
-        fact_type=["experience", "world"],
+        fact_type=recall_fact_type,
         max_tokens=max_tokens,
         enable_trace=False,
         request_context=request_context,

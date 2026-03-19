@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FactType, FactTypeFilter } from "@/components/fact-type-filter";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -33,7 +34,6 @@ import JsonView from "react18-json-view";
 import "react18-json-view/src/style.css";
 import { MemoryDetailPanel } from "./memory-detail-panel";
 
-type FactType = "world" | "experience" | "observation";
 type Budget = "low" | "mid" | "high";
 type TagsMatch = "any" | "all" | "any_strict" | "all_strict";
 type ViewMode = "results" | "trace" | "json";
@@ -157,10 +157,6 @@ export function SearchDebugView() {
     }
   };
 
-  const toggleFactType = (ft: FactType) => {
-    setFactTypes((prev) => (prev.includes(ft) ? prev.filter((t) => t !== ft) : [...prev, ft]));
-  };
-
   if (!currentBank) {
     return (
       <Card className="border-dashed">
@@ -197,28 +193,7 @@ export function SearchDebugView() {
 
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-6 mt-4 pt-4 border-t">
-            {/* Fact Types */}
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-medium text-muted-foreground">Types:</span>
-              <div className="flex gap-3">
-                {(["world", "experience"] as FactType[]).map((ft) => (
-                  <label key={ft} className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={factTypes.includes(ft)}
-                      onCheckedChange={() => toggleFactType(ft)}
-                    />
-                    <span className="text-sm capitalize">{ft}</span>
-                  </label>
-                ))}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    checked={factTypes.includes("observation")}
-                    onCheckedChange={() => toggleFactType("observation")}
-                  />
-                  <span className="text-sm">Observations</span>
-                </label>
-              </div>
-            </div>
+            <FactTypeFilter value={factTypes} onChange={setFactTypes} label="Types:" />
 
             <div className="h-6 w-px bg-border" />
 

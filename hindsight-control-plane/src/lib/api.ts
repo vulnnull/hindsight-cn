@@ -47,7 +47,12 @@ export interface MentalModel {
   content: string;
   tags: string[];
   max_tokens: number;
-  trigger: { refresh_after_consolidation: boolean };
+  trigger: {
+    refresh_after_consolidation: boolean;
+    fact_types?: Array<"world" | "experience" | "observation">;
+    exclude_mental_models?: boolean;
+    exclude_mental_model_ids?: string[];
+  };
   last_refreshed_at: string;
   created_at: string;
   reflect_response?: any;
@@ -183,6 +188,9 @@ export class ControlPlaneClient {
     include_tool_calls?: boolean;
     tags?: string[];
     tags_match?: "any" | "all" | "any_strict" | "all_strict";
+    fact_types?: Array<"world" | "experience" | "observation">;
+    exclude_mental_models?: boolean;
+    exclude_mental_model_ids?: string[];
   }) {
     return this.fetchApi("/api/reflect", {
       method: "POST",
@@ -757,7 +765,12 @@ export class ControlPlaneClient {
         content: string;
         tags: string[];
         max_tokens: number;
-        trigger: { refresh_after_consolidation: boolean };
+        trigger: {
+          refresh_after_consolidation: boolean;
+          fact_types?: Array<"world" | "experience" | "observation">;
+          exclude_mental_models?: boolean;
+          exclude_mental_model_ids?: string[];
+        };
         last_refreshed_at: string;
         created_at: string;
         reflect_response?: {
@@ -780,7 +793,12 @@ export class ControlPlaneClient {
       source_query: string;
       tags?: string[];
       max_tokens?: number;
-      trigger?: { refresh_after_consolidation: boolean };
+      trigger?: {
+        refresh_after_consolidation: boolean;
+        fact_types?: Array<"world" | "experience" | "observation">;
+        exclude_mental_models?: boolean;
+        exclude_mental_model_ids?: string[];
+      };
     }
   ) {
     return this.fetchApi<{
@@ -809,7 +827,12 @@ export class ControlPlaneClient {
       source_query?: string;
       max_tokens?: number;
       tags?: string[];
-      trigger?: { refresh_after_consolidation: boolean };
+      trigger?: {
+        refresh_after_consolidation: boolean;
+        fact_types?: Array<"world" | "experience" | "observation">;
+        exclude_mental_models?: boolean;
+        exclude_mental_model_ids?: string[];
+      };
     }
   ) {
     return this.fetchApi<{
@@ -820,7 +843,12 @@ export class ControlPlaneClient {
       content: string;
       tags: string[];
       max_tokens: number;
-      trigger: { refresh_after_consolidation: boolean };
+      trigger: {
+        refresh_after_consolidation: boolean;
+        fact_types?: Array<"world" | "experience" | "observation">;
+        exclude_mental_models?: boolean;
+        exclude_mental_model_ids?: string[];
+      };
       last_refreshed_at: string;
       created_at: string;
       reflect_response?: {

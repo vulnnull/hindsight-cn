@@ -48,7 +48,8 @@ def pg0_db_url(db_url, tmp_path_factory, worker_id):
     Session-scoped fixture that ensures pg0 is running, migrations are applied,
     and returns the database URL.
 
-    If HINDSIGHT_API_DATABASE_URL is set, uses that directly (no pg0 management).
+    If HINDSIGHT_API_DATABASE_URL is a plain postgresql:// URL, uses it directly.
+    If HINDSIGHT_API_DATABASE_URL is a pg0:// URL, resolves it to a real URL first.
     Otherwise, starts pg0 once for the entire test session.
 
     Uses filelock to ensure only one pytest-xdist worker starts pg0.
@@ -58,9 +59,22 @@ def pg0_db_url(db_url, tmp_path_factory, worker_id):
     Note: We don't stop pg0 at the end because pytest-xdist runs workers in separate
     processes that share the same pg0 instance. pg0 will persist for the next test run.
     """
-    if db_url:
-        # Use provided database URL directly
+    from hindsight_api.pg0 import parse_pg0_url as _parse_pg0_url
+
+    # Determine pg0 instance name/port from db_url (if it's a pg0:// URL) or use defaults
+    if db_url and not _parse_pg0_url(db_url)[0]:
+        # Plain postgresql:// URL - use it directly but still run migrations
+        from hindsight_api.migrations import run_migrations
+        run_migrations(db_url)
         return db_url
+
+    if db_url:
+        _, pg0_name, pg0_port = _parse_pg0_url(db_url)
+        pg0_instance_name = pg0_name or DEFAULT_PG0_INSTANCE_NAME
+        pg0_instance_port = pg0_port or DEFAULT_PG0_PORT
+    else:
+        pg0_instance_name = DEFAULT_PG0_INSTANCE_NAME
+        pg0_instance_port = DEFAULT_PG0_PORT
 
     # Get shared temp dir for coordination between xdist workers
     if worker_id == "master":
@@ -71,8 +85,8 @@ def pg0_db_url(db_url, tmp_path_factory, worker_id):
         root_tmp_dir = tmp_path_factory.getbasetemp().parent
 
     # Use a lock file to ensure only one worker starts pg0
-    lock_file = root_tmp_dir / "pg0_setup.lock"
-    url_file = root_tmp_dir / "pg0_url.txt"
+    lock_file = root_tmp_dir / f"pg0_setup_{pg0_instance_name}.lock"
+    url_file = root_tmp_dir / f"pg0_url_{pg0_instance_name}.txt"
 
     with filelock.FileLock(str(lock_file)):
         if url_file.exists():
@@ -80,7 +94,7 @@ def pg0_db_url(db_url, tmp_path_factory, worker_id):
             url = url_file.read_text().strip()
         else:
             # First worker - start pg0
-            pg0 = EmbeddedPostgres(name=DEFAULT_PG0_INSTANCE_NAME, port=DEFAULT_PG0_PORT)
+            pg0 = EmbeddedPostgres(name=pg0_instance_name, port=pg0_instance_port)
 
             # Run ensure_running in a new event loop
             loop = asyncio.new_event_loop()

@@ -669,6 +669,25 @@ class ReflectRequest(BaseModel):
         description="Compound tag filter using boolean groups. Groups in the list are AND-ed. "
         "Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}.",
     )
+    fact_types: list[Literal["world", "experience", "observation"]] | None = Field(
+        default=None,
+        description="Filter which fact types are retrieved during reflect. None means all types (world, experience, observation).",
+    )
+    exclude_mental_models: bool = Field(
+        default=False,
+        description="If true, exclude all mental models from the reflect loop (skip search_mental_models tool).",
+    )
+    exclude_mental_model_ids: list[str] | None = Field(
+        default=None,
+        description="Exclude specific mental models by ID from the reflect loop.",
+    )
+
+    @field_validator("fact_types")
+    @classmethod
+    def validate_reflect_fact_types(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None and len(v) == 0:
+            raise ValueError("fact_types must not be empty. Use null to include all fact types.")
+        return v
 
     @model_validator(mode="after")
     def validate_tags_exclusive(self) -> "ReflectRequest":
@@ -1435,6 +1454,25 @@ class MentalModelTrigger(BaseModel):
         default=False,
         description="If true, refresh this mental model after observations consolidation (real-time mode)",
     )
+    fact_types: list[Literal["world", "experience", "observation"]] | None = Field(
+        default=None,
+        description="Filter which fact types are retrieved during reflect. None means all types (world, experience, observation).",
+    )
+    exclude_mental_models: bool = Field(
+        default=False,
+        description="If true, exclude all mental models from the reflect loop (skip search_mental_models tool).",
+    )
+    exclude_mental_model_ids: list[str] | None = Field(
+        default=None,
+        description="Exclude specific mental models by ID from the reflect loop.",
+    )
+
+    @field_validator("fact_types")
+    @classmethod
+    def validate_fact_types(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None and len(v) == 0:
+            raise ValueError("fact_types must not be empty. Use null to include all fact types.")
+        return v
 
 
 class MentalModelResponse(BaseModel):
@@ -2505,6 +2543,9 @@ def _register_routes(app: FastAPI):
                     tags=request.tags,
                     tags_match=request.tags_match,
                     tag_groups=request.tag_groups,
+                    fact_types=request.fact_types,
+                    exclude_mental_models=request.exclude_mental_models,
+                    exclude_mental_model_ids=request.exclude_mental_model_ids,
                 )
 
             # Build based_on (memories + mental_models + directives) if facts are requested

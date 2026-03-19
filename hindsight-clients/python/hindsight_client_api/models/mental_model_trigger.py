@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
@@ -27,7 +27,21 @@ class MentalModelTrigger(BaseModel):
     Trigger settings for a mental model.
     """ # noqa: E501
     refresh_after_consolidation: Optional[StrictBool] = Field(default=False, description="If true, refresh this mental model after observations consolidation (real-time mode)")
-    __properties: ClassVar[List[str]] = ["refresh_after_consolidation"]
+    fact_types: Optional[List[StrictStr]] = None
+    exclude_mental_models: Optional[StrictBool] = Field(default=False, description="If true, exclude all mental models from the reflect loop (skip search_mental_models tool).")
+    exclude_mental_model_ids: Optional[List[StrictStr]] = None
+    __properties: ClassVar[List[str]] = ["refresh_after_consolidation", "fact_types", "exclude_mental_models", "exclude_mental_model_ids"]
+
+    @field_validator('fact_types')
+    def fact_types_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        for i in value:
+            if i not in set(['world', 'experience', 'observation']):
+                raise ValueError("each list item must be one of ('world', 'experience', 'observation')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -68,6 +82,16 @@ class MentalModelTrigger(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # set to None if fact_types (nullable) is None
+        # and model_fields_set contains the field
+        if self.fact_types is None and "fact_types" in self.model_fields_set:
+            _dict['fact_types'] = None
+
+        # set to None if exclude_mental_model_ids (nullable) is None
+        # and model_fields_set contains the field
+        if self.exclude_mental_model_ids is None and "exclude_mental_model_ids" in self.model_fields_set:
+            _dict['exclude_mental_model_ids'] = None
+
         return _dict
 
     @classmethod
@@ -80,7 +104,10 @@ class MentalModelTrigger(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "refresh_after_consolidation": obj.get("refresh_after_consolidation") if obj.get("refresh_after_consolidation") is not None else False
+            "refresh_after_consolidation": obj.get("refresh_after_consolidation") if obj.get("refresh_after_consolidation") is not None else False,
+            "fact_types": obj.get("fact_types"),
+            "exclude_mental_models": obj.get("exclude_mental_models") if obj.get("exclude_mental_models") is not None else False,
+            "exclude_mental_model_ids": obj.get("exclude_mental_model_ids")
         })
         return _obj
 

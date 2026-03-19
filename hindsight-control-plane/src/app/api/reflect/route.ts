@@ -14,6 +14,9 @@ export async function POST(request: NextRequest) {
       tags,
       tags_match,
       max_tokens,
+      fact_types,
+      exclude_mental_models,
+      exclude_mental_model_ids,
     } = body;
 
     const requestBody: any = {
@@ -22,6 +25,9 @@ export async function POST(request: NextRequest) {
       tags,
       tags_match,
       max_tokens: max_tokens || undefined,
+      fact_types: fact_types || undefined,
+      exclude_mental_models: exclude_mental_models || undefined,
+      exclude_mental_model_ids: exclude_mental_model_ids || undefined,
     };
 
     // Add include options if specified

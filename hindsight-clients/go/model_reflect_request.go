@@ -33,6 +33,10 @@ type ReflectRequest struct {
 	// How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).
 	TagsMatch *string `json:"tags_match,omitempty"`
 	TagGroups []RecallRequestTagGroupsInner `json:"tag_groups,omitempty"`
+	FactTypes []string `json:"fact_types,omitempty"`
+	// If true, exclude all mental models from the reflect loop (skip search_mental_models tool).
+	ExcludeMentalModels *bool `json:"exclude_mental_models,omitempty"`
+	ExcludeMentalModelIds []string `json:"exclude_mental_model_ids,omitempty"`
 }
 
 type _ReflectRequest ReflectRequest
@@ -48,6 +52,8 @@ func NewReflectRequest(query string) *ReflectRequest {
 	this.MaxTokens = &maxTokens
 	var tagsMatch string = "any"
 	this.TagsMatch = &tagsMatch
+	var excludeMentalModels bool = false
+	this.ExcludeMentalModels = &excludeMentalModels
 	return &this
 }
 
@@ -60,6 +66,8 @@ func NewReflectRequestWithDefaults() *ReflectRequest {
 	this.MaxTokens = &maxTokens
 	var tagsMatch string = "any"
 	this.TagsMatch = &tagsMatch
+	var excludeMentalModels bool = false
+	this.ExcludeMentalModels = &excludeMentalModels
 	return &this
 }
 
@@ -356,6 +364,104 @@ func (o *ReflectRequest) SetTagGroups(v []RecallRequestTagGroupsInner) {
 	o.TagGroups = v
 }
 
+// GetFactTypes returns the FactTypes field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ReflectRequest) GetFactTypes() []string {
+	if o == nil {
+		var ret []string
+		return ret
+	}
+	return o.FactTypes
+}
+
+// GetFactTypesOk returns a tuple with the FactTypes field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ReflectRequest) GetFactTypesOk() ([]string, bool) {
+	if o == nil || IsNil(o.FactTypes) {
+		return nil, false
+	}
+	return o.FactTypes, true
+}
+
+// HasFactTypes returns a boolean if a field has been set.
+func (o *ReflectRequest) HasFactTypes() bool {
+	if o != nil && !IsNil(o.FactTypes) {
+		return true
+	}
+
+	return false
+}
+
+// SetFactTypes gets a reference to the given []string and assigns it to the FactTypes field.
+func (o *ReflectRequest) SetFactTypes(v []string) {
+	o.FactTypes = v
+}
+
+// GetExcludeMentalModels returns the ExcludeMentalModels field value if set, zero value otherwise.
+func (o *ReflectRequest) GetExcludeMentalModels() bool {
+	if o == nil || IsNil(o.ExcludeMentalModels) {
+		var ret bool
+		return ret
+	}
+	return *o.ExcludeMentalModels
+}
+
+// GetExcludeMentalModelsOk returns a tuple with the ExcludeMentalModels field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ReflectRequest) GetExcludeMentalModelsOk() (*bool, bool) {
+	if o == nil || IsNil(o.ExcludeMentalModels) {
+		return nil, false
+	}
+	return o.ExcludeMentalModels, true
+}
+
+// HasExcludeMentalModels returns a boolean if a field has been set.
+func (o *ReflectRequest) HasExcludeMentalModels() bool {
+	if o != nil && !IsNil(o.ExcludeMentalModels) {
+		return true
+	}
+
+	return false
+}
+
+// SetExcludeMentalModels gets a reference to the given bool and assigns it to the ExcludeMentalModels field.
+func (o *ReflectRequest) SetExcludeMentalModels(v bool) {
+	o.ExcludeMentalModels = &v
+}
+
+// GetExcludeMentalModelIds returns the ExcludeMentalModelIds field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ReflectRequest) GetExcludeMentalModelIds() []string {
+	if o == nil {
+		var ret []string
+		return ret
+	}
+	return o.ExcludeMentalModelIds
+}
+
+// GetExcludeMentalModelIdsOk returns a tuple with the ExcludeMentalModelIds field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ReflectRequest) GetExcludeMentalModelIdsOk() ([]string, bool) {
+	if o == nil || IsNil(o.ExcludeMentalModelIds) {
+		return nil, false
+	}
+	return o.ExcludeMentalModelIds, true
+}
+
+// HasExcludeMentalModelIds returns a boolean if a field has been set.
+func (o *ReflectRequest) HasExcludeMentalModelIds() bool {
+	if o != nil && !IsNil(o.ExcludeMentalModelIds) {
+		return true
+	}
+
+	return false
+}
+
+// SetExcludeMentalModelIds gets a reference to the given []string and assigns it to the ExcludeMentalModelIds field.
+func (o *ReflectRequest) SetExcludeMentalModelIds(v []string) {
+	o.ExcludeMentalModelIds = v
+}
+
 func (o ReflectRequest) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -390,6 +496,15 @@ func (o ReflectRequest) ToMap() (map[string]interface{}, error) {
 	}
 	if o.TagGroups != nil {
 		toSerialize["tag_groups"] = o.TagGroups
+	}
+	if o.FactTypes != nil {
+		toSerialize["fact_types"] = o.FactTypes
+	}
+	if !IsNil(o.ExcludeMentalModels) {
+		toSerialize["exclude_mental_models"] = o.ExcludeMentalModels
+	}
+	if o.ExcludeMentalModelIds != nil {
+		toSerialize["exclude_mental_model_ids"] = o.ExcludeMentalModelIds
 	}
 	return toSerialize, nil
 }

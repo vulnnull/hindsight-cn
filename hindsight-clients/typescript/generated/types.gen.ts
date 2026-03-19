@@ -1331,6 +1331,24 @@ export type MentalModelTrigger = {
    * If true, refresh this mental model after observations consolidation (real-time mode)
    */
   refresh_after_consolidation?: boolean;
+  /**
+   * Fact Types
+   *
+   * Filter which fact types are retrieved during reflect. None means all types (world, experience, observation).
+   */
+  fact_types?: Array<"world" | "experience" | "observation"> | null;
+  /**
+   * Exclude Mental Models
+   *
+   * If true, exclude all mental models from the reflect loop (skip search_mental_models tool).
+   */
+  exclude_mental_models?: boolean;
+  /**
+   * Exclude Mental Model Ids
+   *
+   * Exclude specific mental models by ID from the reflect loop.
+   */
+  exclude_mental_model_ids?: Array<string> | null;
 };
 
 /**
@@ -1825,6 +1843,24 @@ export type ReflectRequest = {
   tag_groups?: Array<
     TagGroupLeaf | TagGroupAnd | TagGroupOr | TagGroupNot
   > | null;
+  /**
+   * Fact Types
+   *
+   * Filter which fact types are retrieved during reflect. None means all types (world, experience, observation).
+   */
+  fact_types?: Array<"world" | "experience" | "observation"> | null;
+  /**
+   * Exclude Mental Models
+   *
+   * If true, exclude all mental models from the reflect loop (skip search_mental_models tool).
+   */
+  exclude_mental_models?: boolean;
+  /**
+   * Exclude Mental Model Ids
+   *
+   * Exclude specific mental models by ID from the reflect loop.
+   */
+  exclude_mental_model_ids?: Array<string> | null;
 };
 
 /**

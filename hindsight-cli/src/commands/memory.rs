@@ -366,6 +366,9 @@ pub fn reflect(
         tags: if tags.is_empty() { None } else { Some(tags) },
         tags_match: parse_tags_match(&tags_match),
         tag_groups: None,
+        fact_types: None,
+        exclude_mental_models: false,
+        exclude_mental_model_ids: None,
     };
 
     let response = client.reflect(agent_id, &request, verbose);

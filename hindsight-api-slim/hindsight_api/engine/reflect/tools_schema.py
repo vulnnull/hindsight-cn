@@ -227,7 +227,12 @@ def _build_done_tool_with_directives(directive_rules: list[str]) -> dict:
     }
 
 
-def get_reflect_tools(directive_rules: list[str] | None = None) -> list[dict]:
+def get_reflect_tools(
+    directive_rules: list[str] | None = None,
+    include_mental_models: bool = True,
+    include_observations: bool = True,
+    include_recall: bool = True,
+) -> list[dict]:
     """
     Get the list of tools for the reflect agent.
 
@@ -239,16 +244,23 @@ def get_reflect_tools(directive_rules: list[str] | None = None) -> list[dict]:
     Args:
         directive_rules: Optional list of directive rule strings. If provided,
                         the done() tool will require directive compliance confirmation.
+        include_mental_models: Whether to include the search_mental_models tool.
+        include_observations: Whether to include the search_observations tool.
+        include_recall: Whether to include the recall tool.
 
     Returns:
         List of tool definitions in OpenAI format
     """
-    tools = [
-        TOOL_SEARCH_MENTAL_MODELS,
-        TOOL_SEARCH_OBSERVATIONS,
-        TOOL_RECALL,
-        TOOL_EXPAND,
-    ]
+    tools = []
+
+    if include_mental_models:
+        tools.append(TOOL_SEARCH_MENTAL_MODELS)
+    if include_observations:
+        tools.append(TOOL_SEARCH_OBSERVATIONS)
+    if include_recall:
+        tools.append(TOOL_RECALL)
+
+    tools.append(TOOL_EXPAND)
 
     # Use directive-aware done tool if directives are present
     if directive_rules:

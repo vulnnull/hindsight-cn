@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FactType, FactTypeFilter } from "@/components/fact-type-filter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Sparkles,
@@ -51,6 +52,9 @@ export function ThinkView() {
   const [loading, setLoading] = useState(false);
   const [tags, setTags] = useState("");
   const [tagsMatch, setTagsMatch] = useState<TagsMatch>("any");
+  const [factTypes, setFactTypes] = useState<FactType[]>([]);
+  const [excludeMentalModels, setExcludeMentalModels] = useState(false);
+  const [excludeMentalModelIds, setExcludeMentalModelIds] = useState("");
   const [feedback, setFeedback] = useState("");
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
@@ -151,6 +155,11 @@ export function ThinkView() {
         .map((t) => t.trim())
         .filter((t) => t.length > 0);
 
+      const excludeIds = excludeMentalModelIds
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
       const data: any = await client.reflect({
         bank_id: currentBank,
         query,
@@ -159,6 +168,9 @@ export function ThinkView() {
         include_facts: includeFacts,
         include_tool_calls: includeToolCalls,
         ...(parsedTags.length > 0 && { tags: parsedTags, tags_match: tagsMatch }),
+        ...(factTypes.length > 0 && { fact_types: factTypes }),
+        ...(excludeMentalModels && { exclude_mental_models: true }),
+        ...(excludeIds.length > 0 && { exclude_mental_model_ids: excludeIds }),
       });
       setResult(data);
     } catch (error) {
@@ -274,6 +286,29 @@ export function ThinkView() {
                 <SelectItem value="all_strict">All (strict)</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Fact Types & Mental Model Filters */}
+          <div className="flex flex-wrap items-center gap-6 mt-4 pt-4 border-t">
+            <FactTypeFilter value={factTypes} onChange={setFactTypes} />
+            <div className="h-6 w-px bg-border" />
+            <label className="flex items-center gap-2 cursor-pointer">
+              <Checkbox
+                checked={excludeMentalModels}
+                onCheckedChange={(c) => setExcludeMentalModels(c as boolean)}
+              />
+              <span className="text-sm">Exclude mental models</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Exclude IDs:</span>
+              <Input
+                type="text"
+                value={excludeMentalModelIds}
+                onChange={(e) => setExcludeMentalModelIds(e.target.value)}
+                placeholder="model-a, model-b"
+                className="h-8 w-48"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>

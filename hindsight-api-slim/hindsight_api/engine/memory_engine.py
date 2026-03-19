@@ -875,14 +875,23 @@ class MemoryEngine(MemoryEngineInterface):
         tags = mental_model.get("tags")
         tags_match = "all_strict" if tags else "any"
 
+        # Read reflect options from trigger (if stored)
+        trigger_data = mental_model.get("trigger") or {}
+        fact_types = trigger_data.get("fact_types")
+        exclude_mental_models = trigger_data.get("exclude_mental_models", False)
+        stored_exclude_ids: list[str] = trigger_data.get("exclude_mental_model_ids") or []
+
         # Run reflect to generate new content, excluding the mental model being refreshed
+        # Always add self to excluded IDs to prevent circular reference
         reflect_result = await self.reflect_async(
             bank_id=bank_id,
             query=source_query,
             request_context=internal_context,
             tags=tags,
             tags_match=tags_match,
-            exclude_mental_model_ids=[mental_model_id],
+            fact_types=fact_types,
+            exclude_mental_models=exclude_mental_models,
+            exclude_mental_model_ids=list({*stored_exclude_ids, mental_model_id}),
         )
 
         generated_content = reflect_result.text or "No content generated"
@@ -5120,6 +5129,8 @@ class MemoryEngine(MemoryEngineInterface):
         tags_match: TagsMatch = "any",
         tag_groups: list[TagGroup] | None = None,
         exclude_mental_model_ids: list[str] | None = None,
+        fact_types: list[str] | None = None,
+        exclude_mental_models: bool = False,
         _skip_span: bool = False,
     ) -> ReflectResult:
         """
@@ -5240,6 +5251,11 @@ class MemoryEngine(MemoryEngineInterface):
                 pending_consolidation=pending_consolidation,
             )
 
+        # Determine which tools to enable based on fact_types and exclude_mental_models
+        include_observations = fact_types is None or "observation" in fact_types
+        recall_fact_types = [ft for ft in (fact_types or ["world", "experience"]) if ft in ("world", "experience")]
+        include_recall = bool(recall_fact_types)
+
         async def recall_fn(q: str, max_tokens: int = 4096, max_chunk_tokens: int = 1000) -> dict[str, Any]:
             return await tool_recall(
                 self,
@@ -5251,6 +5267,7 @@ class MemoryEngine(MemoryEngineInterface):
                 tags_match=tags_match,
                 tag_groups=tag_groups,
                 max_chunk_tokens=max_chunk_tokens,
+                fact_types=recall_fact_types if fact_types is not None else None,
             )
 
         async def expand_fn(memory_ids: list[str], depth: str) -> dict[str, Any]:
@@ -5273,15 +5290,17 @@ class MemoryEngine(MemoryEngineInterface):
         if directives:
             logger.info(f"[REFLECT {reflect_id}] Loaded {len(directives)} directives")
 
-        # Check if the bank has any mental models
-        async with pool.acquire() as conn:
-            mental_model_count = await conn.fetchval(
-                f"SELECT COUNT(*) FROM {fq_table('mental_models')} WHERE bank_id = $1",
-                bank_id,
-            )
-        has_mental_models = mental_model_count > 0
-        if has_mental_models:
-            logger.info(f"[REFLECT {reflect_id}] Bank has {mental_model_count} mental models")
+        # Check if the bank has any mental models (skip check if all mental models are excluded)
+        has_mental_models = False
+        if not exclude_mental_models:
+            async with pool.acquire() as conn:
+                mental_model_count = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM {fq_table('mental_models')} WHERE bank_id = $1",
+                    bank_id,
+                )
+            has_mental_models = mental_model_count > 0
+            if has_mental_models:
+                logger.info(f"[REFLECT {reflect_id}] Bank has {mental_model_count} mental models")
 
         # Run the agent with parent span for reflect operation (skip if called from another operation)
         if not _skip_span:
@@ -5306,6 +5325,8 @@ class MemoryEngine(MemoryEngineInterface):
                 response_schema=response_schema,
                 directives=directives,
                 has_mental_models=has_mental_models,
+                include_observations=include_observations,
+                include_recall=include_recall,
                 budget=effective_budget,
                 max_context_tokens=max_context_tokens,
             )
@@ -6437,6 +6458,12 @@ class MemoryEngine(MemoryEngineInterface):
             tags = mental_model.get("tags")
             tags_match = "all_strict" if tags else "any"
 
+            # Read reflect options from trigger (if stored)
+            trigger_data = mental_model.get("trigger") or {}
+            fact_types = trigger_data.get("fact_types")
+            exclude_mental_models = trigger_data.get("exclude_mental_models", False)
+            stored_exclude_ids: list[str] = trigger_data.get("exclude_mental_model_ids") or []
+
             # Run reflect with the source query, excluding the mental model being refreshed
             # Skip creating a nested "hindsight.reflect" span since we already have "hindsight.mental_model_refresh"
             reflect_result = await self.reflect_async(
@@ -6445,7 +6472,9 @@ class MemoryEngine(MemoryEngineInterface):
                 request_context=request_context,
                 tags=tags,
                 tags_match=tags_match,
-                exclude_mental_model_ids=[mental_model_id],
+                fact_types=fact_types,
+                exclude_mental_models=exclude_mental_models,
+                exclude_mental_model_ids=list({*stored_exclude_ids, mental_model_id}),
                 _skip_span=True,
             )
 

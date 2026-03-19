@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from hindsight_client_api.models.budget import Budget
 from hindsight_client_api.models.recall_request_tag_groups_inner import RecallRequestTagGroupsInner
@@ -38,7 +38,10 @@ class ReflectRequest(BaseModel):
     tags: Optional[List[StrictStr]] = None
     tags_match: Optional[StrictStr] = Field(default='any', description="How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).")
     tag_groups: Optional[List[RecallRequestTagGroupsInner]] = None
-    __properties: ClassVar[List[str]] = ["query", "budget", "context", "max_tokens", "include", "response_schema", "tags", "tags_match", "tag_groups"]
+    fact_types: Optional[List[StrictStr]] = None
+    exclude_mental_models: Optional[StrictBool] = Field(default=False, description="If true, exclude all mental models from the reflect loop (skip search_mental_models tool).")
+    exclude_mental_model_ids: Optional[List[StrictStr]] = None
+    __properties: ClassVar[List[str]] = ["query", "budget", "context", "max_tokens", "include", "response_schema", "tags", "tags_match", "tag_groups", "fact_types", "exclude_mental_models", "exclude_mental_model_ids"]
 
     @field_validator('tags_match')
     def tags_match_validate_enum(cls, value):
@@ -48,6 +51,17 @@ class ReflectRequest(BaseModel):
 
         if value not in set(['any', 'all', 'any_strict', 'all_strict']):
             raise ValueError("must be one of enum values ('any', 'all', 'any_strict', 'all_strict')")
+        return value
+
+    @field_validator('fact_types')
+    def fact_types_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        for i in value:
+            if i not in set(['world', 'experience', 'observation']):
+                raise ValueError("each list item must be one of ('world', 'experience', 'observation')")
         return value
 
     model_config = ConfigDict(
@@ -119,6 +133,16 @@ class ReflectRequest(BaseModel):
         if self.tag_groups is None and "tag_groups" in self.model_fields_set:
             _dict['tag_groups'] = None
 
+        # set to None if fact_types (nullable) is None
+        # and model_fields_set contains the field
+        if self.fact_types is None and "fact_types" in self.model_fields_set:
+            _dict['fact_types'] = None
+
+        # set to None if exclude_mental_model_ids (nullable) is None
+        # and model_fields_set contains the field
+        if self.exclude_mental_model_ids is None and "exclude_mental_model_ids" in self.model_fields_set:
+            _dict['exclude_mental_model_ids'] = None
+
         return _dict
 
     @classmethod
@@ -139,7 +163,10 @@ class ReflectRequest(BaseModel):
             "response_schema": obj.get("response_schema"),
             "tags": obj.get("tags"),
             "tags_match": obj.get("tags_match") if obj.get("tags_match") is not None else 'any',
-            "tag_groups": [RecallRequestTagGroupsInner.from_dict(_item) for _item in obj["tag_groups"]] if obj.get("tag_groups") is not None else None
+            "tag_groups": [RecallRequestTagGroupsInner.from_dict(_item) for _item in obj["tag_groups"]] if obj.get("tag_groups") is not None else None,
+            "fact_types": obj.get("fact_types"),
+            "exclude_mental_models": obj.get("exclude_mental_models") if obj.get("exclude_mental_models") is not None else False,
+            "exclude_mental_model_ids": obj.get("exclude_mental_model_ids")
         })
         return _obj
 

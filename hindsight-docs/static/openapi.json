@@ -6299,6 +6299,47 @@
             "title": "Refresh After Consolidation",
             "description": "If true, refresh this mental model after observations consolidation (real-time mode)",
             "default": false
+          },
+          "fact_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "world",
+                    "experience",
+                    "observation"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fact Types",
+            "description": "Filter which fact types are retrieved during reflect. None means all types (world, experience, observation)."
+          },
+          "exclude_mental_models": {
+            "type": "boolean",
+            "title": "Exclude Mental Models",
+            "description": "If true, exclude all mental models from the reflect loop (skip search_mental_models tool).",
+            "default": false
+          },
+          "exclude_mental_model_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude Mental Model Ids",
+            "description": "Exclude specific mental models by ID from the reflect loop."
           }
         },
         "type": "object",
@@ -7299,6 +7340,47 @@
             ],
             "title": "Tag Groups",
             "description": "Compound tag filter using boolean groups. Groups in the list are AND-ed. Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}."
+          },
+          "fact_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "world",
+                    "experience",
+                    "observation"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fact Types",
+            "description": "Filter which fact types are retrieved during reflect. None means all types (world, experience, observation)."
+          },
+          "exclude_mental_models": {
+            "type": "boolean",
+            "title": "Exclude Mental Models",
+            "description": "If true, exclude all mental models from the reflect loop (skip search_mental_models tool).",
+            "default": false
+          },
+          "exclude_mental_model_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude Mental Model Ids",
+            "description": "Exclude specific mental models by ID from the reflect loop."
           }
         },
         "type": "object",
