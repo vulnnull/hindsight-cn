@@ -12,6 +12,9 @@ import CodeSnippet from '@site/src/components/CodeSnippet';
 
 {/* Import raw source files */}
 import mentalModelsPy from '!!raw-loader!@site/examples/api/mental-models.py';
+import mentalModelsMjs from '!!raw-loader!@site/examples/api/mental-models.mjs';
+import mentalModelsSh from '!!raw-loader!@site/examples/api/mental-models.sh';
+import mentalModelsGo from '!!raw-loader!@site/examples/api/mental-models.go';
 
 ## What Are Mental Models?
 
@@ -56,22 +59,14 @@ Creating a mental model runs a reflect operation in the background and saves the
 <TabItem value="python" label="Python">
 <CodeSnippet code={mentalModelsPy} section="create-mental-model" language="python" />
 </TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={mentalModelsMjs} section="create-mental-model" language="javascript" />
+</TabItem>
 <TabItem value="cli" label="CLI">
-
-```bash
-# Create a mental model (async operation)
-curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Team Communication Preferences",
-    "source_query": "How does the team prefer to communicate?",
-    "tags": ["team"]
-  }'
-
-# Response: {"operation_id": "op-123"}
-# Use the operations endpoint to check completion
-```
-
+<CodeSnippet code={mentalModelsSh} section="create-mental-model" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mentalModelsGo} section="create-mental-model" language="go" />
 </TabItem>
 </Tabs>
 
@@ -81,9 +76,35 @@ curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models" \
 |-----------|------|----------|-------------|
 | `name` | string | Yes | Human-readable name for the mental model |
 | `source_query` | string | Yes | The query to run to generate content |
+| `id` | string | No | Custom ID for the mental model (alphanumeric lowercase with hyphens). Auto-generated if omitted. |
 | `tags` | list | No | Tags for filtering during retrieval |
 | `max_tokens` | int | No | Maximum tokens for the mental model content |
 | `trigger` | object | No | Trigger settings (see [Automatic Refresh](#automatic-refresh)) |
+
+---
+
+## Create with Custom ID
+
+Assign a stable, human-readable ID to a mental model so you can retrieve or update it by name instead of relying on the auto-generated UUID:
+
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={mentalModelsPy} section="create-mental-model-with-id" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={mentalModelsMjs} section="create-mental-model-with-id" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={mentalModelsSh} section="create-mental-model-with-id" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mentalModelsGo} section="create-mental-model-with-id" language="go" />
+</TabItem>
+</Tabs>
+
+:::tip
+Custom IDs must be lowercase alphanumeric and may contain hyphens (e.g. `team-policies`, `q4-status`). If a mental model with that ID already exists, the request is rejected.
+:::
 
 ---
 
@@ -103,19 +124,14 @@ When `refresh_after_consolidation` is enabled, the mental model will be re-gener
 <TabItem value="python" label="Python">
 <CodeSnippet code={mentalModelsPy} section="create-mental-model-with-trigger" language="python" />
 </TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={mentalModelsMjs} section="create-mental-model-with-trigger" language="javascript" />
+</TabItem>
 <TabItem value="cli" label="CLI">
-
-```bash
-# Create a mental model with automatic refresh enabled
-curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Project Status",
-    "source_query": "What is the current project status?",
-    "trigger": {"refresh_after_consolidation": true}
-  }'
-```
-
+<CodeSnippet code={mentalModelsSh} section="create-mental-model-with-trigger" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mentalModelsGo} section="create-mental-model-with-trigger" language="go" />
 </TabItem>
 </Tabs>
 
@@ -140,12 +156,14 @@ Enable automatic refresh for mental models that need to stay current. Disable it
 <TabItem value="python" label="Python">
 <CodeSnippet code={mentalModelsPy} section="list-mental-models" language="python" />
 </TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={mentalModelsMjs} section="list-mental-models" language="javascript" />
+</TabItem>
 <TabItem value="cli" label="CLI">
-
-```bash
-curl "http://localhost:8888/v1/default/banks/my-bank/mental-models"
-```
-
+<CodeSnippet code={mentalModelsSh} section="list-mental-models" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mentalModelsGo} section="list-mental-models" language="go" />
 </TabItem>
 </Tabs>
 
@@ -157,12 +175,14 @@ curl "http://localhost:8888/v1/default/banks/my-bank/mental-models"
 <TabItem value="python" label="Python">
 <CodeSnippet code={mentalModelsPy} section="get-mental-model" language="python" />
 </TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={mentalModelsMjs} section="get-mental-model" language="javascript" />
+</TabItem>
 <TabItem value="cli" label="CLI">
-
-```bash
-curl "http://localhost:8888/v1/default/banks/my-bank/mental-models/{mental_model_id}"
-```
-
+<CodeSnippet code={mentalModelsSh} section="get-mental-model" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mentalModelsGo} section="get-mental-model" language="go" />
 </TabItem>
 </Tabs>
 
@@ -190,12 +210,14 @@ Re-run the source query to update the mental model with current knowledge:
 <TabItem value="python" label="Python">
 <CodeSnippet code={mentalModelsPy} section="refresh-mental-model" language="python" />
 </TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={mentalModelsMjs} section="refresh-mental-model" language="javascript" />
+</TabItem>
 <TabItem value="cli" label="CLI">
-
-```bash
-curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models/{mental_model_id}/refresh"
-```
-
+<CodeSnippet code={mentalModelsSh} section="refresh-mental-model" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mentalModelsGo} section="refresh-mental-model" language="go" />
 </TabItem>
 </Tabs>
 
@@ -214,14 +236,14 @@ Update the mental model's name:
 <TabItem value="python" label="Python">
 <CodeSnippet code={mentalModelsPy} section="update-mental-model" language="python" />
 </TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={mentalModelsMjs} section="update-mental-model" language="javascript" />
+</TabItem>
 <TabItem value="cli" label="CLI">
-
-```bash
-curl -X PATCH "http://localhost:8888/v1/default/banks/my-bank/mental-models/{mental_model_id}" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Updated Team Communication Preferences"}'
-```
-
+<CodeSnippet code={mentalModelsSh} section="update-mental-model" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mentalModelsGo} section="update-mental-model" language="go" />
 </TabItem>
 </Tabs>
 
@@ -233,12 +255,14 @@ curl -X PATCH "http://localhost:8888/v1/default/banks/my-bank/mental-models/{men
 <TabItem value="python" label="Python">
 <CodeSnippet code={mentalModelsPy} section="delete-mental-model" language="python" />
 </TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={mentalModelsMjs} section="delete-mental-model" language="javascript" />
+</TabItem>
 <TabItem value="cli" label="CLI">
-
-```bash
-curl -X DELETE "http://localhost:8888/v1/default/banks/my-bank/mental-models/{mental_model_id}"
-```
-
+<CodeSnippet code={mentalModelsSh} section="delete-mental-model" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mentalModelsGo} section="delete-mental-model" language="go" />
 </TabItem>
 </Tabs>
 
@@ -279,6 +303,15 @@ Every time a mental model's content changes (via refresh or manual update), the 
 <Tabs>
 <TabItem value="python" label="Python">
 <CodeSnippet code={mentalModelsPy} section="get-mental-model-history" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={mentalModelsMjs} section="get-mental-model-history" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={mentalModelsSh} section="get-mental-model-history" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mentalModelsGo} section="get-mental-model-history" language="go" />
 </TabItem>
 </Tabs>
 

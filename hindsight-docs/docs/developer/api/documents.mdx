@@ -13,6 +13,7 @@ import CodeSnippet from '@site/src/components/CodeSnippet';
 {/* Import raw source files */}
 import documentsPy from '!!raw-loader!@site/examples/api/documents.py';
 import documentsMjs from '!!raw-loader!@site/examples/api/documents.mjs';
+import documentsGo from '!!raw-loader!@site/examples/api/documents.go';
 
 :::tip Prerequisites
 Make sure you've completed the [Quick Start](./quickstart) and understand [how retain works](./retain).
@@ -61,6 +62,9 @@ hindsight memory retain-files my-bank docs/
 ```
 
 </TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={documentsGo} section="document-retain" language="go" />
+</TabItem>
 </Tabs>
 
 ## Update Documents
@@ -85,6 +89,9 @@ hindsight memory retain my-bank "Project deadline: April 15 (extended)" --doc-id
 ```
 
 </TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={documentsGo} section="document-update" language="go" />
+</TabItem>
 </Tabs>
 
 ## Get Document
@@ -104,6 +111,9 @@ Retrieve a document's original text and metadata. This is useful for expanding d
 hindsight document get my-bank meeting-2024-03-15
 ```
 
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={documentsGo} section="document-get" language="go" />
 </TabItem>
 </Tabs>
 
@@ -129,6 +139,9 @@ hindsight document update-tags my-bank meeting-2024-03-15
 ```
 
 </TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={documentsGo} section="document-update" language="go" />
+</TabItem>
 </Tabs>
 
 :::info Observations are re-consolidated
@@ -152,6 +165,9 @@ Remove a document and all its associated memories:
 hindsight document delete my-bank meeting-2024-03-15
 ```
 
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={documentsGo} section="document-delete" language="go" />
 </TabItem>
 </Tabs>
 
@@ -183,6 +199,9 @@ hindsight document list my-bank --q report
 hindsight document list my-bank --tags team-a --tags team-b
 ```
 
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={documentsGo} section="document-list" language="go" />
 </TabItem>
 </Tabs>
 

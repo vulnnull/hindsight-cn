@@ -60,14 +60,25 @@ const advisorResponse = await client.reflect('cautious-advisor', 'Should I inves
 
 
 // [docs:reflect-sources]
-const sourcesResponse = await client.reflect('my-bank', 'Tell me about Alice');
+const sourcesResponse = await client.reflect('my-bank', 'Tell me about Alice', {
+    includeFacts: true
+});
 
 console.log('Response:', sourcesResponse.text);
 console.log('\nBased on:');
-for (const fact of sourcesResponse.based_on || []) {
+for (const fact of (sourcesResponse.based_on?.memories || [])) {
     console.log(`  - [${fact.type}] ${fact.text}`);
 }
 // [/docs:reflect-sources]
+
+
+// [docs:reflect-with-tags]
+// Filter reflect to only use memories tagged for a specific user
+await client.reflect('my-bank', 'What feedback did the user give?', {
+    tags: ['user:alice'],
+    tagsMatch: 'any_strict'
+});
+// [/docs:reflect-with-tags]
 
 
 // [docs:reflect-structured-output]

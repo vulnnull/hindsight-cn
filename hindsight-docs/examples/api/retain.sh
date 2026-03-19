@@ -25,10 +25,35 @@ hindsight memory retain my-bank "Alice works at Google as a software engineer"
 # [/docs:retain-basic]
 
 
+# [docs:retain-conversation]
+# Retain an entire conversation as a single document.
+CONVERSATION="Alice (2024-03-15T09:00:00Z): Hi Bob! Did you end up going to the doctor last week?
+Bob (2024-03-15T09:01:00Z): Yes, finally. Turns out I have a mild peanut allergy.
+Alice (2024-03-15T09:02:00Z): Oh no! Are you okay?
+Bob (2024-03-15T09:03:00Z): Yeah, nothing serious. Just need to carry an antihistamine.
+Alice (2024-03-15T09:04:00Z): Good to know. We'll avoid peanuts at the team lunch."
+
+hindsight memory retain my-bank "$CONVERSATION" \
+    --context "team chat" \
+    --doc-id "chat-2024-03-15-alice-bob"
+# [/docs:retain-conversation]
+
+
 # [docs:retain-with-context]
 hindsight memory retain my-bank "Alice got promoted" \
     --context "career update"
 # [/docs:retain-with-context]
+
+
+# [docs:retain-batch]
+# Batch ingestion via individual retain calls (CLI processes items one at a time)
+hindsight memory retain my-bank "Alice works at Google" \
+    --context "career" --doc-id "conversation_001_msg_1"
+hindsight memory retain my-bank "Bob is a data scientist at Meta" \
+    --context "career" --doc-id "conversation_001_msg_2"
+hindsight memory retain my-bank "Alice and Bob are friends" \
+    --context "relationship" --doc-id "conversation_001_msg_3"
+# [/docs:retain-batch]
 
 
 # [docs:retain-async]

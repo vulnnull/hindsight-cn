@@ -61,6 +61,88 @@ for (const r of detailedResponse.results) {
 // [/docs:recall-with-options]
 
 
+// [docs:recall-world-only]
+await client.recall('my-bank', 'query', { types: ['world'] });
+// [/docs:recall-world-only]
+
+
+// [docs:recall-experience-only]
+await client.recall('my-bank', 'query', { types: ['experience'] });
+// [/docs:recall-experience-only]
+
+
+// [docs:recall-observations-only]
+await client.recall('my-bank', 'query', { types: ['observation'] });
+// [/docs:recall-observations-only]
+
+
+// [docs:recall-token-budget]
+// Fill up to 4K tokens of context with relevant memories
+await client.recall('my-bank', 'What do I know about Alice?', { maxTokens: 4096 });
+
+// Smaller budget for quick lookups
+await client.recall('my-bank', "Alice's email", { maxTokens: 500 });
+// [/docs:recall-token-budget]
+
+
+// [docs:recall-with-tags]
+// Filter recall to only memories tagged for a specific user
+await client.recall('my-bank', 'What feedback did the user give?', {
+    tags: ['user:alice']
+});
+// [/docs:recall-with-tags]
+
+
+// [docs:recall-tags-strict]
+// Strict: only memories that have matching tags (excludes untagged)
+await client.recall('my-bank', 'What did the user say?', {
+    tags: ['user:alice'],
+    tagsMatch: 'any_strict'
+});
+// [/docs:recall-tags-strict]
+
+
+// [docs:recall-tags-all]
+// AND matching: require ALL specified tags to be present
+await client.recall('my-bank', 'What bugs were reported?', {
+    tags: ['user:alice', 'bug-report'],
+    tagsMatch: 'all_strict'
+});
+// [/docs:recall-tags-all]
+
+
+// [docs:recall-tags-any]
+await client.recall('my-bank', 'communication preferences', {
+    tags: ['user:alice'],
+    tagsMatch: 'any'
+});
+// [/docs:recall-tags-any]
+
+
+// [docs:recall-tags-any-strict]
+await client.recall('my-bank', 'communication preferences', {
+    tags: ['user:alice'],
+    tagsMatch: 'any_strict'
+});
+// [/docs:recall-tags-any-strict]
+
+
+// [docs:recall-tags-all-mode]
+await client.recall('my-bank', 'communication tools', {
+    tags: ['user:alice', 'team'],
+    tagsMatch: 'all'
+});
+// [/docs:recall-tags-all-mode]
+
+
+// [docs:recall-tags-all-strict]
+await client.recall('my-bank', 'communication tools', {
+    tags: ['user:alice', 'team'],
+    tagsMatch: 'all_strict'
+});
+// [/docs:recall-tags-all-strict]
+
+
 // [docs:recall-source-facts]
 // Recall observations and include their source facts
 const obsResponse = await client.recall('my-bank', 'What patterns have I learned about Alice?', {

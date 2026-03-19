@@ -601,6 +601,13 @@ impl ApiClient {
         })
     }
 
+    pub fn get_mental_model_history(&self, bank_id: &str, mental_model_id: &str, _verbose: bool) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.get_mental_model_history(bank_id, mental_model_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
     // --- Directive Methods ---
 
     pub fn list_directives(&self, bank_id: &str, _verbose: bool) -> Result<types::DirectiveListResponse> {

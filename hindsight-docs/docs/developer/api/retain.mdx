@@ -16,6 +16,7 @@ import CodeSnippet from '@site/src/components/CodeSnippet';
 import retainPy from '!!raw-loader!@site/examples/api/retain.py';
 import retainMjs from '!!raw-loader!@site/examples/api/retain.mjs';
 import retainSh from '!!raw-loader!@site/examples/api/retain.sh';
+import retainGo from '!!raw-loader!@site/examples/api/retain.go';
 
 :::info How Retain Works
 Learn about fact extraction, entity resolution, and graph construction in the [Retain Architecture](/developer/retain) guide.
@@ -39,6 +40,9 @@ A single retain call accepts one or more **items**. Each item is a piece of raw 
 <TabItem value="cli" label="CLI">
 <CodeSnippet code={retainSh} section="retain-basic" language="bash" />
 </TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={retainGo} section="retain-basic" language="go" />
+</TabItem>
 </Tabs>
 
 ### Retaining a Conversation
@@ -51,6 +55,12 @@ A full conversation should be retained as a single item. The LLM can parse any f
 </TabItem>
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={retainMjs} section="retain-conversation" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={retainSh} section="retain-conversation" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={retainGo} section="retain-conversation" language="go" />
 </TabItem>
 </Tabs>
 
@@ -91,6 +101,9 @@ Providing context consistently is one of the highest-leverage things you can do 
 </TabItem>
 <TabItem value="cli" label="CLI">
 <CodeSnippet code={retainSh} section="retain-with-context" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={retainGo} section="retain-with-context" language="go" />
 </TabItem>
 </Tabs>
 
@@ -203,6 +216,12 @@ Multiple items can be submitted in a single request. Batch ingestion is the reco
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={retainMjs} section="retain-batch" language="javascript" />
 </TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={retainSh} section="retain-batch" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={retainGo} section="retain-batch" language="go" />
+</TabItem>
 </Tabs>
 
 
@@ -215,17 +234,17 @@ Upload files directly — Hindsight converts them to text and extracts memories 
 **Supported formats:** PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, images (JPG, PNG, GIF, etc. — OCR), audio (MP3, WAV, FLAC, etc. — transcription), HTML, and plain text formats (TXT, MD, CSV, JSON, YAML, etc.)
 
 <Tabs>
-<TabItem value="cli" label="CLI">
-<CodeSnippet code={retainSh} section="retain-files" language="bash" />
-</TabItem>
-<TabItem value="curl" label="HTTP">
-<CodeSnippet code={retainSh} section="retain-files-curl" language="bash" />
-</TabItem>
 <TabItem value="python" label="Python">
 <CodeSnippet code={retainPy} section="retain-files" language="python" />
 </TabItem>
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={retainMjs} section="retain-files" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={retainSh} section="retain-files" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={retainGo} section="retain-files" language="go" />
 </TabItem>
 </Tabs>
 
@@ -236,6 +255,15 @@ Upload up to 10 files per request (max 100 MB total). Each file becomes a separa
 <Tabs>
 <TabItem value="python" label="Python">
 <CodeSnippet code={retainPy} section="retain-files-batch" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={retainMjs} section="retain-files-batch" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={retainSh} section="retain-files" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={retainGo} section="retain-files" language="go" />
 </TabItem>
 </Tabs>
 
@@ -255,6 +283,12 @@ For large batches, use async ingestion to avoid blocking your application:
 </TabItem>
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={retainMjs} section="retain-async" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={retainSh} section="retain-async" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={retainGo} section="retain-async" language="go" />
 </TabItem>
 </Tabs>
 

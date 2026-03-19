@@ -149,11 +149,12 @@ pub fn update(
     directive_id: &str,
     name: Option<String>,
     content: Option<String>,
+    is_active: Option<bool>,
     verbose: bool,
     output_format: OutputFormat,
 ) -> Result<()> {
-    if name.is_none() && content.is_none() {
-        anyhow::bail!("At least one of --name or --content must be provided");
+    if name.is_none() && content.is_none() && is_active.is_none() {
+        anyhow::bail!("At least one of --name, --content, or --is-active must be provided");
     }
 
     let spinner = if output_format == OutputFormat::Pretty {
@@ -165,7 +166,7 @@ pub fn update(
     let request = types::UpdateDirectiveRequest {
         name,
         content,
-        is_active: None,
+        is_active,
         priority: None,
         tags: None,
     };

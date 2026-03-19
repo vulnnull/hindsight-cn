@@ -26,9 +26,29 @@ hindsight memory reflect my-bank "Should I learn Python?" --context "career advi
 # [/docs:reflect-with-context]
 
 
-# [docs:reflect-high-budget]
-hindsight memory reflect my-bank "Summarize my week" --budget high
-# [/docs:reflect-high-budget]
+# [docs:reflect-with-params]
+hindsight memory reflect my-bank "Summarize my week" --budget high --max-tokens 8192
+# [/docs:reflect-with-params]
+
+
+# [docs:reflect-disposition]
+hindsight bank set-config my-bank \
+  --disposition-skepticism 5 \
+  --disposition-literalism 4 \
+  --disposition-empathy 2
+hindsight memory reflect my-bank "Should I invest in crypto?"
+# [/docs:reflect-disposition]
+
+
+# [docs:reflect-sources]
+hindsight memory reflect my-bank "Tell me about Alice" --include-facts
+# [/docs:reflect-sources]
+
+
+# [docs:reflect-with-tags]
+hindsight memory reflect my-bank "What feedback did the user give?" \
+  --tags "user:alice" --tags-match any_strict
+# [/docs:reflect-with-tags]
 
 
 # [docs:reflect-structured-output]

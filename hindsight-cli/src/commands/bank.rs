@@ -717,6 +717,13 @@ pub fn set_config(
     llm_model: Option<String>,
     llm_api_key: Option<String>,
     llm_base_url: Option<String>,
+    retain_mission: Option<String>,
+    retain_extraction_mode: Option<String>,
+    observations_mission: Option<String>,
+    reflect_mission: Option<String>,
+    disposition_skepticism: Option<i64>,
+    disposition_literalism: Option<i64>,
+    disposition_empathy: Option<i64>,
     verbose: bool,
     output_format: OutputFormat,
 ) -> Result<()> {
@@ -736,9 +743,30 @@ pub fn set_config(
     if let Some(base_url) = llm_base_url {
         updates.insert("llm_base_url".to_string(), serde_json::Value::String(base_url));
     }
+    if let Some(mission) = retain_mission {
+        updates.insert("retain_mission".to_string(), serde_json::Value::String(mission));
+    }
+    if let Some(mode) = retain_extraction_mode {
+        updates.insert("retain_extraction_mode".to_string(), serde_json::Value::String(mode));
+    }
+    if let Some(mission) = observations_mission {
+        updates.insert("observations_mission".to_string(), serde_json::Value::String(mission));
+    }
+    if let Some(mission) = reflect_mission {
+        updates.insert("reflect_mission".to_string(), serde_json::Value::String(mission));
+    }
+    if let Some(skepticism) = disposition_skepticism {
+        updates.insert("disposition_skepticism".to_string(), serde_json::Value::Number(skepticism.into()));
+    }
+    if let Some(literalism) = disposition_literalism {
+        updates.insert("disposition_literalism".to_string(), serde_json::Value::Number(literalism.into()));
+    }
+    if let Some(empathy) = disposition_empathy {
+        updates.insert("disposition_empathy".to_string(), serde_json::Value::Number(empathy.into()));
+    }
 
     if updates.is_empty() {
-        return Err(anyhow!("No config updates provided. Use --llm-provider, --llm-model, --llm-api-key, or --llm-base-url".to_string()));
+        return Err(anyhow!("No config updates provided. Use --llm-provider, --llm-model, --retain-mission, --observations-mission, or other flags".to_string()));
     }
 
     let spinner = if output_format == OutputFormat::Pretty {

@@ -9,7 +9,7 @@ use crate::output::{self, OutputFormat};
 use crate::ui;
 
 // Import types from generated client
-use hindsight_client::types::{Budget, ChunkIncludeOptions, IncludeOptions, TagsMatch};
+use hindsight_client::types::{Budget, ChunkIncludeOptions, FactsIncludeOptions, IncludeOptions, ReflectIncludeOptions, TagsMatch};
 use serde::Deserialize;
 use serde_json;
 
@@ -40,6 +40,16 @@ fn parse_budget(budget: &str) -> Budget {
         "low" => Budget::Low,
         "high" => Budget::High,
         _ => Budget::Mid, // Default to mid
+    }
+}
+
+// Helper function to parse tags_match string to TagsMatch enum
+fn parse_tags_match(tags_match: &Option<String>) -> TagsMatch {
+    match tags_match.as_deref().unwrap_or("any").to_lowercase().as_str() {
+        "all" => TagsMatch::All,
+        "any_strict" => TagsMatch::AnyStrict,
+        "all_strict" => TagsMatch::AllStrict,
+        _ => TagsMatch::Any,
     }
 }
 
@@ -250,6 +260,8 @@ pub fn recall(
     trace: bool,
     include_chunks: bool,
     chunk_max_tokens: i64,
+    tags: Vec<String>,
+    tags_match: Option<String>,
     verbose: bool,
     output_format: OutputFormat,
 ) -> Result<()> {
@@ -280,8 +292,8 @@ pub fn recall(
         trace,
         query_timestamp: None,
         include,
-        tags: None,
-        tags_match: TagsMatch::Any,
+        tags: if tags.is_empty() { None } else { Some(tags) },
+        tags_match: parse_tags_match(&tags_match),
         tag_groups: None,
     };
 
@@ -312,6 +324,9 @@ pub fn reflect(
     context: Option<String>,
     max_tokens: Option<i64>,
     schema_path: Option<PathBuf>,
+    tags: Vec<String>,
+    tags_match: Option<String>,
+    include_facts: bool,
     verbose: bool,
     output_format: OutputFormat,
 ) -> Result<()> {
@@ -332,15 +347,24 @@ pub fn reflect(
         None
     };
 
+    let include = if include_facts {
+        Some(ReflectIncludeOptions {
+            facts: Some(FactsIncludeOptions(serde_json::Map::new())),
+            tool_calls: None,
+        })
+    } else {
+        None
+    };
+
     let request = ReflectRequest {
         query,
         budget: Some(parse_budget(&budget)),
         context,
         max_tokens: max_tokens.unwrap_or(4096),
-        include: None,
+        include,
         response_schema,
-        tags: None,
-        tags_match: TagsMatch::Any,
+        tags: if tags.is_empty() { None } else { Some(tags) },
+        tags_match: parse_tags_match(&tags_match),
         tag_groups: None,
     };
 

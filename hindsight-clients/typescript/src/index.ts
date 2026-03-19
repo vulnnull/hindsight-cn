@@ -628,6 +628,7 @@ export class HindsightClient {
         name: string,
         sourceQuery: string,
         options?: {
+            id?: string;
             tags?: string[];
             maxTokens?: number;
             trigger?: { refreshAfterConsolidation?: boolean };
@@ -637,6 +638,7 @@ export class HindsightClient {
             client: this.client,
             path: { bank_id: bankId },
             body: {
+                id: options?.id,
                 name,
                 source_query: sourceQuery,
                 tags: options?.tags,
@@ -725,6 +727,18 @@ export class HindsightClient {
         if (response.error) {
             throw new Error(`deleteMentalModel failed: ${JSON.stringify(response.error)}`);
         }
+    }
+
+    /**
+     * Get the change history of a mental model.
+     */
+    async getMentalModelHistory(bankId: string, mentalModelId: string): Promise<any> {
+        const response = await sdk.getMentalModelHistory({
+            client: this.client,
+            path: { bank_id: bankId, mental_model_id: mentalModelId },
+        });
+
+        return this.validateResponse(response, 'getMentalModelHistory');
     }
 }
 

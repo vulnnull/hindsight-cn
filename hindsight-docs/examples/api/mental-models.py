@@ -42,6 +42,18 @@ result = client.create_mental_model(
 print(f"Operation ID: {result.operation_id}")
 # [/docs:create-mental-model]
 
+# [docs:create-mental-model-with-id]
+# Create a mental model with a specific custom ID
+result_with_id = client.create_mental_model(
+    bank_id=BANK_ID,
+    name="Communication Policy",
+    source_query="What are the team's communication guidelines?",
+    id="communication-policy"
+)
+
+print(f"Created with custom ID: {result_with_id.operation_id}")
+# [/docs:create-mental-model-with-id]
+
 # Wait for the mental model to be created
 time.sleep(5)
 

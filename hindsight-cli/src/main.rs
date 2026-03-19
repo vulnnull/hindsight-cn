@@ -310,6 +310,34 @@ enum BankCommands {
         /// LLM base URL override
         #[arg(long)]
         llm_base_url: Option<String>,
+
+        /// Retain mission: what to focus on during fact extraction
+        #[arg(long)]
+        retain_mission: Option<String>,
+
+        /// Retain extraction mode (concise, verbose, custom)
+        #[arg(long)]
+        retain_extraction_mode: Option<String>,
+
+        /// Observations mission: what to synthesize into durable observations
+        #[arg(long)]
+        observations_mission: Option<String>,
+
+        /// Reflect mission: first-person identity for reflect operations
+        #[arg(long)]
+        reflect_mission: Option<String>,
+
+        /// Disposition skepticism trait (1-5)
+        #[arg(long, value_parser = clap::value_parser!(i64).range(1..=5))]
+        disposition_skepticism: Option<i64>,
+
+        /// Disposition literalism trait (1-5)
+        #[arg(long, value_parser = clap::value_parser!(i64).range(1..=5))]
+        disposition_literalism: Option<i64>,
+
+        /// Disposition empathy trait (1-5)
+        #[arg(long, value_parser = clap::value_parser!(i64).range(1..=5))]
+        disposition_empathy: Option<i64>,
     },
 
     /// Reset bank configuration to defaults (remove all overrides)
@@ -387,6 +415,14 @@ enum MemoryCommands {
         /// Maximum tokens for chunks (only used with --include-chunks)
         #[arg(long, default_value = "8192")]
         chunk_max_tokens: i64,
+
+        /// Filter by tags (comma-separated, e.g. user:alice,team)
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+
+        /// Tag matching mode: any, all, any_strict, all_strict (default: any)
+        #[arg(long)]
+        tags_match: Option<String>,
     },
 
     /// Generate answers using bank identity (reflect/reasoning)
@@ -412,6 +448,18 @@ enum MemoryCommands {
         /// Path to JSON schema file for structured output
         #[arg(short = 's', long)]
         schema: Option<PathBuf>,
+
+        /// Filter by tags (comma-separated, e.g. user:alice,team)
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+
+        /// Tag matching mode: any, all, any_strict, all_strict (default: any)
+        #[arg(long)]
+        tags_match: Option<String>,
+
+        /// Include source facts (based_on) in the response
+        #[arg(long)]
+        include_facts: bool,
     },
 
     /// Store (retain) a single memory
@@ -678,6 +726,15 @@ enum MentalModelCommands {
         /// Mental model ID
         mental_model_id: String,
     },
+
+    /// Get the change history of a mental model
+    History {
+        /// Bank ID
+        bank_id: String,
+
+        /// Mental model ID
+        mental_model_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -724,6 +781,10 @@ enum DirectiveCommands {
         /// New content
         #[arg(long)]
         content: Option<String>,
+
+        /// Enable or disable the directive
+        #[arg(long)]
+        is_active: Option<bool>,
     },
 
     /// Delete a directive
@@ -821,8 +882,8 @@ fn run() -> Result<()> {
             BankCommands::Config { bank_id, overrides_only } => {
                 commands::bank::config(&client, &bank_id, overrides_only, verbose, output_format)
             }
-            BankCommands::SetConfig { bank_id, llm_provider, llm_model, llm_api_key, llm_base_url } => {
-                commands::bank::set_config(&client, &bank_id, llm_provider, llm_model, llm_api_key, llm_base_url, verbose, output_format)
+            BankCommands::SetConfig { bank_id, llm_provider, llm_model, llm_api_key, llm_base_url, retain_mission, retain_extraction_mode, observations_mission, reflect_mission, disposition_skepticism, disposition_literalism, disposition_empathy } => {
+                commands::bank::set_config(&client, &bank_id, llm_provider, llm_model, llm_api_key, llm_base_url, retain_mission, retain_extraction_mode, observations_mission, reflect_mission, disposition_skepticism, disposition_literalism, disposition_empathy, verbose, output_format)
             }
             BankCommands::ResetConfig { bank_id, yes } => {
                 commands::bank::reset_config(&client, &bank_id, yes, verbose, output_format)
@@ -837,11 +898,11 @@ fn run() -> Result<()> {
             MemoryCommands::Get { bank_id, memory_id } => {
                 commands::memory::get(&client, &bank_id, &memory_id, verbose, output_format)
             }
-            MemoryCommands::Recall { bank_id, query, fact_type, budget, max_tokens, trace, include_chunks, chunk_max_tokens } => {
-                commands::memory::recall(&client, &bank_id, query, fact_type, budget, max_tokens, trace, include_chunks, chunk_max_tokens, verbose, output_format)
+            MemoryCommands::Recall { bank_id, query, fact_type, budget, max_tokens, trace, include_chunks, chunk_max_tokens, tags, tags_match } => {
+                commands::memory::recall(&client, &bank_id, query, fact_type, budget, max_tokens, trace, include_chunks, chunk_max_tokens, tags, tags_match, verbose, output_format)
             }
-            MemoryCommands::Reflect { bank_id, query, budget, context, max_tokens, schema } => {
-                commands::memory::reflect(&client, &bank_id, query, budget, context, max_tokens, schema, verbose, output_format)
+            MemoryCommands::Reflect { bank_id, query, budget, context, max_tokens, schema, tags, tags_match, include_facts } => {
+                commands::memory::reflect(&client, &bank_id, query, budget, context, max_tokens, schema, tags, tags_match, include_facts, verbose, output_format)
             }
             MemoryCommands::Retain { bank_id, content, doc_id, context, r#async } => {
                 commands::memory::retain(&client, &bank_id, content, doc_id, context, r#async, verbose, output_format)
@@ -930,6 +991,9 @@ fn run() -> Result<()> {
             MentalModelCommands::Refresh { bank_id, mental_model_id } => {
                 commands::mental_model::refresh(&client, &bank_id, &mental_model_id, verbose, output_format)
             }
+            MentalModelCommands::History { bank_id, mental_model_id } => {
+                commands::mental_model::history(&client, &bank_id, &mental_model_id, verbose, output_format)
+            }
         },
 
         // Directive commands
@@ -943,8 +1007,8 @@ fn run() -> Result<()> {
             DirectiveCommands::Create { bank_id, name, content } => {
                 commands::directive::create(&client, &bank_id, &name, &content, verbose, output_format)
             }
-            DirectiveCommands::Update { bank_id, directive_id, name, content } => {
-                commands::directive::update(&client, &bank_id, &directive_id, name, content, verbose, output_format)
+            DirectiveCommands::Update { bank_id, directive_id, name, content, is_active } => {
+                commands::directive::update(&client, &bank_id, &directive_id, name, content, is_active, verbose, output_format)
             }
             DirectiveCommands::Delete { bank_id, directive_id, yes } => {
                 commands::directive::delete(&client, &bank_id, &directive_id, yes, verbose, output_format)

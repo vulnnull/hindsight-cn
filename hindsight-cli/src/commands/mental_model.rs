@@ -272,6 +272,55 @@ pub fn refresh(
     }
 }
 
+/// Get the change history of a mental model
+pub fn history(
+    client: &ApiClient,
+    bank_id: &str,
+    mental_model_id: &str,
+    verbose: bool,
+    output_format: OutputFormat,
+) -> Result<()> {
+    let spinner = if output_format == OutputFormat::Pretty {
+        Some(ui::create_spinner("Fetching mental model history..."))
+    } else {
+        None
+    };
+
+    let response = client.get_mental_model_history(bank_id, mental_model_id, verbose);
+
+    if let Some(mut sp) = spinner {
+        sp.finish();
+    }
+
+    match response {
+        Ok(history) => {
+            if output_format == OutputFormat::Pretty {
+                ui::print_section_header(&format!("History: {}", mental_model_id));
+
+                if let Some(entries) = history.as_array() {
+                    if entries.is_empty() {
+                        println!("  {}", ui::dim("No history entries found."));
+                    } else {
+                        for entry in entries {
+                            let changed_at = entry.get("changed_at").and_then(|v| v.as_str()).unwrap_or("unknown");
+                            let previous = entry.get("previous_content").and_then(|v| v.as_str()).unwrap_or("(none)");
+                            println!("  {} {}", ui::dim("Changed at:"), changed_at);
+                            let preview: String = previous.chars().take(80).collect();
+                            let ellipsis = if previous.len() > 80 { "..." } else { "" };
+                            println!("  {} {}{}", ui::dim("Previous:"), ui::dim(&preview), ellipsis);
+                            println!();
+                        }
+                    }
+                }
+            } else {
+                output::print_output(&history, output_format)?;
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 // Helper function to print mental model details
 fn print_mental_model_detail(mental_model: &types::MentalModelResponse) {
     ui::print_section_header(&mental_model.name);

@@ -85,6 +85,21 @@ console.log(result.operation_ids);  // Track processing via the operations endpo
 // [/docs:retain-files]
 
 
+// [docs:retain-files-batch]
+// Upload multiple files with per-file metadata (up to 10 files per request)
+const batchResult = await client.retainFiles('my-bank', [
+    new File([pdfBytes], 'report.pdf'),
+    new File([pdfBytes], 'notes.pdf'),
+], {
+    filesMetadata: [
+        { context: 'quarterly report', document_id: 'q1-report', tags: ['project:alpha'] },
+        { context: 'meeting notes', document_id: 'q1-notes', tags: ['project:alpha'] },
+    ]
+});
+console.log(batchResult.operation_ids);  // One operation ID per file
+// [/docs:retain-files-batch]
+
+
 // =============================================================================
 // Cleanup (not shown in docs)
 // =============================================================================
