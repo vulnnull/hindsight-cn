@@ -1083,30 +1083,16 @@ async def _extract_facts_from_chunk(
                         logger.warning(f"Skipping fact {i}: missing 'what' field")
                         continue
 
-                # Critical field: fact_type
-                # LLM uses "assistant" but we convert to "experience" for storage
-                original_fact_type = llm_fact.get("fact_type")
-                fact_type = original_fact_type
-
-                # Convert "assistant" → "experience" for storage
-                if fact_type == "assistant":
+                # Critical field: fact_type — "assistant" maps to "experience", everything else is "world".
+                # If fact_type is unexpected, fall back to fact_kind before defaulting to "world".
+                raw_fact_type = llm_fact.get("fact_type")
+                if raw_fact_type == "assistant":
                     fact_type = "experience"
-
-                # Validate fact_type (after conversion)
-                if fact_type not in ["world", "experience", "opinion"]:
-                    # Try to fix common mistakes - check if they swapped fact_type and fact_kind
-                    fact_kind = llm_fact.get("fact_kind")
-                    if fact_kind == "assistant":
-                        fact_type = "experience"
-                    elif fact_kind in ["world", "experience", "opinion"]:
-                        fact_type = fact_kind
-                    else:
-                        # Default to 'world' if we can't determine
-                        fact_type = "world"
-                        logger.warning(
-                            f"Fact {i}: defaulting to fact_type='world' "
-                            f"(original fact_type={original_fact_type!r}, fact_kind={fact_kind!r})"
-                        )
+                elif raw_fact_type == "world":
+                    fact_type = "world"
+                else:
+                    raw_fact_kind = llm_fact.get("fact_kind")
+                    fact_type = "experience" if raw_fact_kind == "assistant" else "world"
 
                 # Get fact_kind for temporal handling (but don't store it)
                 fact_kind = llm_fact.get("fact_kind", "conversation")
@@ -1754,23 +1740,17 @@ async def extract_facts_from_contents_batch_api(
             who = get_value("who")
             why = get_value("why")
 
-            # Critical field: fact_type
-            original_fact_type = llm_fact.get("fact_type")
-            fact_type = original_fact_type
-
-            # Convert "assistant" → "experience"
-            if fact_type == "assistant":
+            # Critical field: fact_type — only "assistant" maps to "experience", everything else is "world"
+            # Critical field: fact_type — "assistant" maps to "experience", everything else is "world".
+            # If fact_type is unexpected, fall back to fact_kind before defaulting to "world".
+            raw_fact_type = llm_fact.get("fact_type")
+            if raw_fact_type == "assistant":
                 fact_type = "experience"
-
-            # Validate fact_type
-            if fact_type not in ["world", "experience", "opinion"]:
-                fact_kind = llm_fact.get("fact_kind")
-                if fact_kind == "assistant":
-                    fact_type = "experience"
-                elif fact_kind in ["world", "experience", "opinion"]:
-                    fact_type = fact_kind
-                else:
-                    fact_type = "world"
+            elif raw_fact_type == "world":
+                fact_type = "world"
+            else:
+                raw_fact_kind = llm_fact.get("fact_kind")
+                fact_type = "experience" if raw_fact_kind == "assistant" else "world"
 
             # Build combined fact text
             combined_parts = [what]
@@ -1933,7 +1913,7 @@ async def extract_facts_from_contents_batch_api(
         for fact_from_llm in chunk_facts:
             extracted_fact = ExtractedFactType(
                 fact_text=fact_from_llm.fact,
-                fact_type=fact_from_llm.fact_type,
+                fact_type="experience" if fact_from_llm.fact_type == "assistant" else "world",
                 entities=[e.text for e in (fact_from_llm.entities or [])],
                 occurred_start=_parse_datetime(fact_from_llm.occurred_start) if fact_from_llm.occurred_start else None,
                 occurred_end=_parse_datetime(fact_from_llm.occurred_end) if fact_from_llm.occurred_end else None,
@@ -2110,7 +2090,7 @@ async def extract_facts_from_contents(
                     # mentioned_at is always the event_date (when the conversation/document occurred)
                     extracted_fact = ExtractedFactType(
                         fact_text=fact_from_llm.fact,
-                        fact_type=fact_from_llm.fact_type,
+                        fact_type="experience" if fact_from_llm.fact_type == "assistant" else "world",
                         entities=[e.text for e in (fact_from_llm.entities or [])],
                         # occurred_start/end: from LLM only, leave None if not provided
                         occurred_start=_parse_datetime(fact_from_llm.occurred_start)
