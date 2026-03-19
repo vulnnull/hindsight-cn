@@ -32,6 +32,7 @@ dependencies = [
     # Transitive dependency security fixes
     "cryptography>=46.0.5", # Subgroup attack vulnerability fix
     "pillow>=12.1.1", # Out-of-bounds write in PSD image loading fix
+    "pyjwt>=2.12.0", # Accepts unknown crit header extensions fix
 ]
 
 [project.optional-dependencies]
