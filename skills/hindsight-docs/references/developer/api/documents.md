@@ -79,6 +79,12 @@ hindsight memory retain my-bank "Meeting notes content..." --doc-id notes-2024-0
 hindsight memory retain-files my-bank docs/
 ```
 
+### Go
+
+```go
+# Section 'document-retain' not found in api/documents.go
+```
+
 ## Update Documents
 
 Re-retaining with the same document_id **replaces** the old content:
@@ -123,6 +129,12 @@ hindsight memory retain my-bank "Project deadline: March 31" --doc-id project-pl
 
 # Update
 hindsight memory retain my-bank "Project deadline: April 15 (extended)" --doc-id project-plan
+```
+
+### Go
+
+```go
+# Section 'document-update' not found in api/documents.go
 ```
 
 ## Get Document
@@ -179,6 +191,12 @@ console.log(`Created: ${doc.created_at}`);
 hindsight document get my-bank meeting-2024-03-15
 ```
 
+### Go
+
+```go
+# Section 'document-get' not found in api/documents.go
+```
+
 ## Update Document
 
 Update mutable fields on an existing document without re-processing the content. Currently supports updating `tags`.
@@ -225,6 +243,12 @@ hindsight document update-tags my-bank meeting-2024-03-15 --tags team-a --tags t
 hindsight document update-tags my-bank meeting-2024-03-15
 ```
 
+### Go
+
+```go
+# Section 'document-update' not found in api/documents.go
+```
+
 :::info Observations are re-consolidated
 When tags change, any consolidated observations derived from the document's memories are invalidated and queued for re-consolidation under the new tags. Co-source memories from other documents that shared those observations are also reset.
 ## Delete Document
@@ -269,6 +293,12 @@ console.log(`Deleted ${deleteResult.memory_units_deleted} memories`);
 
 ```bash
 hindsight document delete my-bank meeting-2024-03-15
+```
+
+### Go
+
+```go
+# Section 'document-delete' not found in api/documents.go
 ```
 
 :::warning
@@ -371,6 +401,12 @@ hindsight document list my-bank --q report
 
 # Filter by tags
 hindsight document list my-bank --tags team-a --tags team-b
+```
+
+### Go
+
+```go
+# Section 'document-list' not found in api/documents.go
 ```
 
 ### Filtering Options

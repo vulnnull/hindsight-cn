@@ -28,7 +28,7 @@ Hindsight is an agent memory system that provides long-term memory for AI agents
 - **Supports temporal reasoning** with time-aware retrieval
 - **Enables disposition-aware reflection** for nuanced reasoning
 
-For a detailed comparison, see [RAG vs Memory](/developer/rag-vs-hindsight).
+For a detailed comparison, see [RAG vs Memory](developer/rag-vs-hindsight.md).
 
 ---
 
@@ -65,7 +65,7 @@ Unlike vector databases (just search) or RAG systems (document retrieval), Hinds
 
 <LLMProvidersGrid />
 
-See [Models](/developer/models) for the full list of supported providers, recommended models, and configuration examples.
+See [Models](developer/models.md) for the full list of supported providers, recommended models, and configuration examples.
 
 ---
 
@@ -73,9 +73,9 @@ See [Models](/developer/models) for the full list of supported providers, recomm
 
 The **[Model Leaderboard](https://benchmarks.hindsight.vectorize.io/)** benchmarks models across accuracy, speed, cost, and reliability for retain, reflect, and observation consolidation — it's the best place to find the right trade-off for your use case.
 
-[![Model Leaderboard](/img/leaderboard.png)](https://benchmarks.hindsight.vectorize.io/)
+[](https://benchmarks.hindsight.vectorize.io/)
 
-See [Models](/developer/models) for the full list of supported and tested models, provider defaults, and configuration examples.
+See [Models](developer/models.md) for the full list of supported and tested models, provider defaults, and configuration examples.
 
 ---
 
@@ -86,7 +86,7 @@ No! You have two options:
 1. **Hindsight Cloud** - Fully managed service at [ui.hindsight.vectorize.io](https://ui.hindsight.vectorize.io)
 2. **Self-hosted** - Deploy on your own infrastructure using Docker or direct installation
 
-See [Installation](/developer/installation) for self-hosting instructions.
+See [Installation](developer/installation.md) for self-hosting instructions.
 
 ---
 
@@ -97,7 +97,7 @@ For running the Hindsight API server locally:
 - 4GB RAM minimum (8GB recommended for production)
 - LLM API key (OpenAI, Anthropic, etc.) or local LLM setup
 
-See [Installation](/developer/installation) for setup instructions.
+See [Installation](developer/installation.md) for setup instructions.
 
 ---
 
@@ -120,7 +120,7 @@ There are two approaches for multi-user applications:
 - Filter by tags during recall/reflect for per-user queries
 - **Advantage**: Enables both per-user AND cross-user queries (e.g., analyze specific users or aggregate across all users)
 
-Choose per-user banks for simplicity and privacy, or single bank with tags if you need holistic reasoning across users. See [Memory Banks](/developer/api/memory-banks) for management details.
+Choose per-user banks for simplicity and privacy, or single bank with tags if you need holistic reasoning across users. See [Memory Banks](developer/api/memory-banks.md) for management details.
 
 ---
 
@@ -132,7 +132,7 @@ Hindsight has three core operations:
 - **Recall**: Search and retrieve raw memory data based on a query
 - **Reflect**: Use an AI agent to answer a query using retrieved memories
 
-See [Operations](/developer/api/operations) for API details.
+See [Operations](developer/api/operations.md) for API details.
 
 ---
 
@@ -162,7 +162,7 @@ reflect("What should I order for Alice?")
 → "I'd recommend a vegetarian sushi platter — Alice loves sushi and prefers vegetarian options."  # grounded answer
 ```
 
-See [Recall](/developer/api/recall) and [Reflect](/developer/reflect) for full API details.
+See [Recall](developer/api/recall.md) and [Reflect](developer/reflect.md) for full API details.
 
 ---
 
@@ -174,7 +174,7 @@ See [Recall](/developer/api/recall) and [Reflect](/developer/reflect) for full A
 - Long-term behavioral patterns (e.g., "Customer is price-sensitive but values quality")
 - Context for AI agent reasoning during **reflect** operations
 
-Mental models are automatically built during retain and used by reflect to provide richer, more contextual responses. See [Mental Models](/developer/api/mental-models).
+Mental models are automatically built during retain and used by reflect to provide richer, more contextual responses. See [Mental Models](developer/api/mental-models.md).
 
 ---
 
@@ -184,7 +184,7 @@ Typical latencies:
 - **Without reranking**: 50-100ms
 - **With reranking**: 200-500ms (depends on reranker model and installation)
 
-See [Performance](/developer/performance) for tuning options.
+See [Performance](developer/performance.md) for tuning options.
 
 ---
 
@@ -203,7 +203,7 @@ client.retain(bank_id="my-bank", items=[{
 client.recall(bank_id="my-bank", query="...", tags=["user:alice"])
 ```
 
-See [Tags](/developer/api/retain#tags-and-document_tags) for full details including document-level tagging.
+See [Tags](developer/api/retain.md#tags-and-document_tags) for full details including document-level tagging.
 
 **What about filtering by entities?**
 
@@ -227,7 +227,7 @@ If you need explicit tag-based filtering on entity-like values, use **entity lab
 client.recall(bank_id="my-bank", query="...", tags=["user:alice"])
 ```
 
-See [Entity Labels](/developer/retain#entity-labels) for configuration details.
+See [Entity Labels](developer/retain.md#entity-labels) for configuration details.
 
 **What about document `metadata`?**
 

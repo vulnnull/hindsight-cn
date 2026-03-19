@@ -8,7 +8,7 @@ When you **retain** content, Hindsight doesn't just store the raw text—it inte
 {/* Import raw source files */}
 
 :::info How Retain Works
-Learn about fact extraction, entity resolution, and graph construction in the [Retain Architecture](/developer/retain) guide.
+Learn about fact extraction, entity resolution, and graph construction in the [Retain Architecture](../retain.md) guide.
 > **💡 Prerequisites**
 > 
 Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
@@ -35,6 +35,12 @@ await client.retain('my-bank', 'Alice works at Google as a software engineer');
 
 ```bash
 hindsight memory retain my-bank "Alice works at Google as a software engineer"
+```
+
+### Go
+
+```go
+# Section 'retain-basic' not found in api/retain.go
 ```
 
 ### Retaining a Conversation
@@ -83,6 +89,27 @@ await client.retain('my-bank', conversation, {
     timestamp: '2024-03-15T09:04:00Z',
     documentId: 'chat-2024-03-15-alice-bob',
 });
+```
+
+### CLI
+
+```bash
+# Retain an entire conversation as a single document.
+CONVERSATION="Alice (2024-03-15T09:00:00Z): Hi Bob! Did you end up going to the doctor last week?
+Bob (2024-03-15T09:01:00Z): Yes, finally. Turns out I have a mild peanut allergy.
+Alice (2024-03-15T09:02:00Z): Oh no! Are you okay?
+Bob (2024-03-15T09:03:00Z): Yeah, nothing serious. Just need to carry an antihistamine.
+Alice (2024-03-15T09:04:00Z): Good to know. We'll avoid peanuts at the team lunch."
+
+hindsight memory retain my-bank "$CONVERSATION" \
+    --context "team chat" \
+    --doc-id "chat-2024-03-15-alice-bob"
+```
+
+### Go
+
+```go
+# Section 'retain-conversation' not found in api/retain.go
 ```
 
 When the conversation grows — a new message arrives — just retain again with the full updated content and the same `document_id`. Hindsight will delete the previous version and reprocess from scratch, so memories always reflect the latest state of the conversation.
@@ -138,6 +165,12 @@ await client.retain('my-bank', 'Alice got promoted to senior engineer', {
 ```bash
 hindsight memory retain my-bank "Alice got promoted" \
     --context "career update"
+```
+
+### Go
+
+```go
+# Section 'retain-with-context' not found in api/retain.go
 ```
 
 ### metadata
@@ -263,6 +296,24 @@ await client.retainBatch('my-bank', [
 ]);
 ```
 
+### CLI
+
+```bash
+# Batch ingestion via individual retain calls (CLI processes items one at a time)
+hindsight memory retain my-bank "Alice works at Google" \
+    --context "career" --doc-id "conversation_001_msg_1"
+hindsight memory retain my-bank "Bob is a data scientist at Meta" \
+    --context "career" --doc-id "conversation_001_msg_2"
+hindsight memory retain my-bank "Alice and Bob are friends" \
+    --context "relationship" --doc-id "conversation_001_msg_3"
+```
+
+### Go
+
+```go
+# Section 'retain-batch' not found in api/retain.go
+```
+
 ---
 
 ## Files
@@ -270,28 +321,6 @@ await client.retainBatch('my-bank', [
 Upload files directly — Hindsight converts them to text and extracts memories automatically. File processing always runs asynchronously and returns operation IDs for tracking.
 
 **Supported formats:** PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, images (JPG, PNG, GIF, etc. — OCR), audio (MP3, WAV, FLAC, etc. — transcription), HTML, and plain text formats (TXT, MD, CSV, JSON, YAML, etc.)
-
-### CLI
-
-```bash
-# Upload a single file (PDF, DOCX, PPTX, XLSX, images, audio, and more)
-hindsight memory retain-files my-bank "$SAMPLE_FILE"
-
-# Upload a directory of files
-hindsight memory retain-files my-bank "$SCRIPT_DIR/"
-
-# Queue files for background processing (returns immediately)
-hindsight memory retain-files my-bank "$SCRIPT_DIR/" --async
-```
-
-### HTTP
-
-```bash
-# Via HTTP API (multipart/form-data)
-curl -X POST "${HINDSIGHT_URL}/v1/default/banks/my-bank/files/retain" \
-    -F "files=@${SAMPLE_FILE};type=application/octet-stream" \
-    -F "request={\"files_metadata\": [{\"context\": \"quarterly report\"}]}"
-```
 
 ### Python
 
@@ -324,6 +353,25 @@ const result = await client.retainFiles('my-bank', [
 console.log(result.operation_ids);  // Track processing via the operations endpoint
 ```
 
+### CLI
+
+```bash
+# Upload a single file (PDF, DOCX, PPTX, XLSX, images, audio, and more)
+hindsight memory retain-files my-bank "$SAMPLE_FILE"
+
+# Upload a directory of files
+hindsight memory retain-files my-bank "$SCRIPT_DIR/"
+
+# Queue files for background processing (returns immediately)
+hindsight memory retain-files my-bank "$SCRIPT_DIR/" --async
+```
+
+### Go
+
+```go
+# Section 'retain-files' not found in api/retain.go
+```
+
 The file retain endpoint always returns asynchronously. The response contains `operation_ids` — one per uploaded file — which you can poll via `GET /v1/default/banks/{bank_id}/operations` to track progress.
 
 Upload up to 10 files per request (max 100 MB total). Each file becomes a separate document with optional per-file metadata:
@@ -345,6 +393,41 @@ result = client.retain_files(
     ],
 )
 print(result.operation_ids)  # One operation ID per file
+```
+
+### Node.js
+
+```javascript
+// Upload multiple files with per-file metadata (up to 10 files per request)
+const batchResult = await client.retainFiles('my-bank', [
+    new File([pdfBytes], 'report.pdf'),
+    new File([pdfBytes], 'notes.pdf'),
+], {
+    filesMetadata: [
+        { context: 'quarterly report', document_id: 'q1-report', tags: ['project:alpha'] },
+        { context: 'meeting notes', document_id: 'q1-notes', tags: ['project:alpha'] },
+    ]
+});
+console.log(batchResult.operation_ids);  // One operation ID per file
+```
+
+### CLI
+
+```bash
+# Upload a single file (PDF, DOCX, PPTX, XLSX, images, audio, and more)
+hindsight memory retain-files my-bank "$SAMPLE_FILE"
+
+# Upload a directory of files
+hindsight memory retain-files my-bank "$SCRIPT_DIR/"
+
+# Queue files for background processing (returns immediately)
+hindsight memory retain-files my-bank "$SCRIPT_DIR/" --async
+```
+
+### Go
+
+```go
+# Section 'retain-files' not found in api/retain.go
 ```
 
 :::info File Storage
@@ -382,6 +465,18 @@ await client.retainBatch('my-bank', [
 ], {
     async: true
 });
+```
+
+### CLI
+
+```bash
+hindsight memory retain my-bank "Meeting notes" --async
+```
+
+### Go
+
+```go
+# Section 'retain-async' not found in api/retain.go
 ```
 
 When `async: true`, the call returns immediately with an `operation_id`. Processing runs in the background via the worker service. No `usage` metrics are returned for async operations.

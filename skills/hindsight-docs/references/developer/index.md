@@ -122,22 +122,22 @@ These settings only affect the `reflect` operation, not `recall`.
 ## Next Steps
 
 ### Getting Started
-- [**Quick Start**](/developer/api/quickstart) — Install and get up and running in 60 seconds
-- [**RAG vs Hindsight**](/developer/rag-vs-hindsight) — See how Hindsight differs from traditional RAG with real examples
+- [**Quick Start**](api/quickstart.md) — Install and get up and running in 60 seconds
+- [**RAG vs Hindsight**](rag-vs-hindsight.md) — See how Hindsight differs from traditional RAG with real examples
 
 ### Core Concepts
-- [**Retain**](/developer/retain) — How memories are stored with multi-dimensional facts
-- [**Recall**](/developer/retrieval) — How TEMPR's 4-way search retrieves memories
-- [**Reflect**](/developer/reflect) — How mission, directives, and disposition shape reasoning
+- [**Retain**](retain.md) — How memories are stored with multi-dimensional facts
+- [**Recall**](retrieval.md) — How TEMPR's 4-way search retrieves memories
+- [**Reflect**](reflect.md) — How mission, directives, and disposition shape reasoning
 
 ### API Methods
-- [**Retain**](/developer/api/retain) — Store information in memory banks
-- [**Recall**](/developer/api/recall) — Search and retrieve memories
-- [**Reflect**](/developer/api/reflect) — Agentic reasoning with memory
-- [**Mental Models**](/developer/api/mental-models) — User-curated summaries for common queries
-- [**Memory Banks**](/developer/api/memory-banks) — Configure mission, directives, and disposition
-- [**Documents**](/developer/api/documents) — Manage document sources
-- [**Operations**](/developer/api/operations) — Monitor async tasks
+- [**Retain**](api/retain.md) — Store information in memory banks
+- [**Recall**](api/recall.md) — Search and retrieve memories
+- [**Reflect**](api/reflect.md) — Agentic reasoning with memory
+- [**Mental Models**](api/mental-models.md) — User-curated summaries for common queries
+- [**Memory Banks**](api/memory-banks.md) — Configure mission, directives, and disposition
+- [**Documents**](api/documents.md) — Manage document sources
+- [**Operations**](api/operations.md) — Monitor async tasks
 
 ### Deployment
-- [**Server Setup**](/developer/installation) — Deploy with Docker Compose, Helm, or pip
+- [**Server Setup**](installation.md) — Deploy with Docker Compose, Helm, or pip

@@ -8,7 +8,7 @@ When you **recall**, Hindsight runs four retrieval strategies in parallel — se
 {/* Import raw source files */}
 
 :::info How Recall Works
-Learn about the four retrieval strategies (semantic, keyword, graph, temporal) and RRF fusion in the [Recall Architecture](/developer/retrieval) guide.
+Learn about the four retrieval strategies (semantic, keyword, graph, temporal) and RRF fusion in the [Recall Architecture](../retrieval.md) guide.
 > **💡 Prerequisites**
 > 
 Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
@@ -72,6 +72,12 @@ const response = await client.recall('my-bank', 'What does Alice do?');
 hindsight memory recall my-bank "What does Alice do?"
 ```
 
+### Go
+
+```go
+# Section 'recall-basic' not found in api/recall.go
+```
+
 ---
 
 ## Parameters
@@ -113,10 +119,34 @@ observations = client.recall(
 )
 ```
 
+### Node.js
+
+```javascript
+await client.recall('my-bank', 'query', { types: ['world'] });
+```
+```javascript
+await client.recall('my-bank', 'query', { types: ['experience'] });
+```
+```javascript
+await client.recall('my-bank', 'query', { types: ['observation'] });
+```
+
 ### CLI
 
 ```bash
 hindsight memory recall my-bank "query" --fact-type world,observation
+```
+
+### Go
+
+```go
+# Section 'recall-world-only' not found in api/recall.go
+```
+```go
+# Section 'recall-experience-only' not found in api/recall.go
+```
+```go
+# Section 'recall-observations-only' not found in api/recall.go
 ```
 
 > **💡 About Observations**
@@ -146,6 +176,22 @@ const quickResults = await client.recall('my-bank', "Alice's email", { budget: '
 const deepResults = await client.recall('my-bank', 'How are Alice and Bob connected?', { budget: 'high' });
 ```
 
+### CLI
+
+```bash
+# Quick lookup
+hindsight memory recall my-bank "Alice's email" --budget low
+
+# Deep exploration
+hindsight memory recall my-bank "How are Alice and Bob connected?" --budget high
+```
+
+### Go
+
+```go
+# Section 'recall-budget-levels' not found in api/recall.go
+```
+
 ### max_tokens
 
 The maximum number of tokens the returned facts can collectively occupy. Defaults to `4096`. Only the `text` field of each fact is counted toward this budget — metadata, tags, entities, and other fields are not included. After reranking, facts are included in relevance order until this budget is exhausted — so you always get the most relevant memories that fit. Hindsight is designed for agents, which think in tokens rather than result counts: set `max_tokens` to however much of your context window you want to allocate to memories.
@@ -158,6 +204,32 @@ results = client.recall(bank_id="my-bank", query="What do I know about Alice?", 
 
 # Smaller budget for quick lookups
 results = client.recall(bank_id="my-bank", query="Alice's email", max_tokens=500)
+```
+
+### Node.js
+
+```javascript
+// Fill up to 4K tokens of context with relevant memories
+await client.recall('my-bank', 'What do I know about Alice?', { maxTokens: 4096 });
+
+// Smaller budget for quick lookups
+await client.recall('my-bank', "Alice's email", { maxTokens: 500 });
+```
+
+### CLI
+
+```bash
+# Fill up to 4K tokens of context with relevant memories
+hindsight memory recall my-bank "What do I know about Alice?" --max-tokens 4096
+
+# Smaller budget for quick lookups
+hindsight memory recall my-bank "Alice's email" --max-tokens 500
+```
+
+### Go
+
+```go
+# Section 'recall-token-budget' not found in api/recall.go
 ```
 
 ### query_timestamp
@@ -222,6 +294,20 @@ for (const obs of obsResponse.results) {
 }
 ```
 
+### CLI
+
+```bash
+# Recall observations with source facts
+hindsight memory recall my-bank "What patterns have I learned about Alice?" \
+  --fact-type observation
+```
+
+### Go
+
+```go
+# Section 'recall-source-facts' not found in api/recall.go
+```
+
 #### entities
 
 Enabled by default. When active, each returned fact includes the canonical names of entities associated with it. Set to `null` to skip the entity JOIN query and reduce response size. The `max_tokens` sub-option (default `500`) is a future-facing guard for entity data.
@@ -254,6 +340,8 @@ Consider a bank with these four memories:
 
 Returns memories that have **at least one** matching tag, plus untagged memories.
 
+### Python
+
 ```python
 response = client.recall(
     bank_id="my-bank",
@@ -268,11 +356,35 @@ response = client.recall(
 #   [match]    "Company policy: no meetings on Fridays" — untagged, included by default
 ```
 
+### Node.js
+
+```javascript
+await client.recall('my-bank', 'communication preferences', {
+    tags: ['user:alice'],
+    tagsMatch: 'any'
+});
+```
+
+### CLI
+
+```bash
+hindsight memory recall my-bank "communication preferences" \
+  --tags "user:alice" --tags-match any
+```
+
+### Go
+
+```go
+# Section 'recall-with-tags' not found in api/recall.go
+```
+
 Use this for **shared global knowledge + user-specific** patterns, where untagged memories represent information everyone should see.
 
 #### `any_strict` — OR matching, excludes untagged
 
 Same as `any` but untagged memories are excluded.
+
+### Python
 
 ```python
 response = client.recall(
@@ -288,11 +400,35 @@ response = client.recall(
 #   [no match] "Company policy: no meetings on Fridays" — untagged, excluded
 ```
 
+### Node.js
+
+```javascript
+await client.recall('my-bank', 'communication preferences', {
+    tags: ['user:alice'],
+    tagsMatch: 'any_strict'
+});
+```
+
+### CLI
+
+```bash
+hindsight memory recall my-bank "communication preferences" \
+  --tags "user:alice" --tags-match any_strict
+```
+
+### Go
+
+```go
+# Section 'recall-tags-strict' not found in api/recall.go
+```
+
 Use this when memories are **fully partitioned by tags** and untagged memories should never be visible.
 
 #### `all` — AND matching, includes untagged
 
 Returns memories that have **every** specified tag, plus untagged memories.
+
+### Python
 
 ```python
 response = client.recall(
@@ -308,11 +444,35 @@ response = client.recall(
 #   [match]    "Company policy: no meetings on Fridays" — untagged, included by default
 ```
 
+### Node.js
+
+```javascript
+await client.recall('my-bank', 'communication tools', {
+    tags: ['user:alice', 'team'],
+    tagsMatch: 'all'
+});
+```
+
+### CLI
+
+```bash
+hindsight memory recall my-bank "communication tools" \
+  --tags "user:alice,team" --tags-match all
+```
+
+### Go
+
+```go
+# Section 'recall-tags-all-mode' not found in api/recall.go
+```
+
 Use this when memories must belong to a **specific intersection** of scopes (e.g., only memories relevant to both a user and a project), while still surfacing shared global knowledge.
 
 #### `all_strict` — AND matching, excludes untagged
 
 Returns memories that have **every** specified tag, and excludes untagged memories.
+
+### Python
 
 ```python
 response = client.recall(
@@ -326,6 +486,28 @@ response = client.recall(
 #   [no match] "Bob dislikes long meetings"             — missing both tags
 #   [match]    "Team uses Slack for announcements"      — has both "user:alice" and "team"
 #   [no match] "Company policy: no meetings on Fridays" — untagged, excluded
+```
+
+### Node.js
+
+```javascript
+await client.recall('my-bank', 'communication tools', {
+    tags: ['user:alice', 'team'],
+    tagsMatch: 'all_strict'
+});
+```
+
+### CLI
+
+```bash
+hindsight memory recall my-bank "communication tools" \
+  --tags "user:alice,team" --tags-match all_strict
+```
+
+### Go
+
+```go
+# Section 'recall-tags-all' not found in api/recall.go
 ```
 
 Use this for strict scope enforcement where a memory must explicitly belong to **all** specified contexts.

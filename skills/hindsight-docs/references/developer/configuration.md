@@ -574,7 +574,7 @@ Controls the retain (memory ingestion) pipeline.
 | `HINDSIGHT_API_RETAIN_BATCH_ENABLED` | Use LLM Batch API for fact extraction (50% cost savings, only with async operations) | `false` |
 | `HINDSIGHT_API_RETAIN_BATCH_POLL_INTERVAL_SECONDS` | Batch API polling interval in seconds | `60` |
 
-> **Entity labels** (`entity_labels`) and **free-form entity extraction** (`entities_allow_free_form`) are configured per bank via the [bank config API](/developer/api/memory-banks#retain-configuration), not as global environment variables — each bank can have its own controlled vocabulary. See [Entity Labels](/developer/retain#entity-labels) for details.
+> **Entity labels** (`entity_labels`) and **free-form entity extraction** (`entities_allow_free_form`) are configured per bank via the [bank config API](api/memory-banks.md#retain-configuration), not as global environment variables — each bank can have its own controlled vocabulary. See [Entity Labels](retain.md#entity-labels) for details.
 
 #### Customizing retain: when to use what
 
@@ -645,8 +645,6 @@ client.retain(bank_id, items=[{"content": "...document text..."}], strategy="doc
 ```
 
 If no `strategy` is specified in a retain call, `retain_default_strategy` is used. If neither is set, the bank/global config applies directly.
-
-> **Note on chunk size and retrieval fairness**: When mixing strategies with very different chunk sizes in the same bank, `chunks` and `verbatim` memories participate only in semantic retrieval (not entity graph or temporal paths). Smaller chunk sizes (e.g., 800 chars) produce more targeted embeddings and are recommended for document strategies to keep scores comparable with LLM-extracted facts.
 
 **`HINDSIGHT_API_RETAIN_EXTRACTION_MODE=chunks` — zero LLM cost**
 

@@ -132,11 +132,11 @@ The local server exposes the full tool set (29 tools in multi-bank mode, 26 in s
 | `list_banks` | List all memory banks (multi-bank only) |
 | `create_bank` | Create or configure a memory bank (multi-bank only) |
 
-For detailed parameter documentation, see the [MCP Server reference](/developer/mcp-server#available-tools).
+For detailed parameter documentation, see the [MCP Server reference](../../developer/mcp-server.md#available-tools).
 
 ## Environment Variables
 
-All standard [Hindsight configuration variables](/developer/configuration) are supported. Key ones for local use:
+All standard [Hindsight configuration variables](../../developer/configuration.md) are supported. Key ones for local use:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|

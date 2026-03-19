@@ -175,6 +175,47 @@ for page in best-practices faq; do
     done
 done
 
+# Process changelog — may be a single file or a directory
+if [ -f "$PAGES_DIR/changelog.md" ] || [ -f "$PAGES_DIR/changelog.mdx" ]; then
+    for ext in md mdx; do
+        src="$PAGES_DIR/changelog.$ext"
+        if [ -f "$src" ]; then
+            dest="$REFS_DIR/changelog.md"
+            mkdir -p "$(dirname "$dest")"
+            if [[ "$src" == *.mdx ]]; then
+                convert_mdx_to_md "$src" "$dest"
+            else
+                cp "$src" "$dest"
+            fi
+            print_info "Included page: changelog.$ext"
+        fi
+    done
+elif [ -d "$PAGES_DIR/changelog" ]; then
+    find "$PAGES_DIR/changelog" -type f \( -name "*.md" -o -name "*.mdx" \) | while read -r file; do
+        rel="${file#$PAGES_DIR/}"
+        dest="$REFS_DIR/$rel"
+        if [[ "$file" == *.mdx ]]; then
+            dest="${dest%.mdx}.md"
+        fi
+        mkdir -p "$(dirname "$dest")"
+        if [[ "$file" == *.mdx ]]; then
+            convert_mdx_to_md "$file" "$dest"
+        else
+            cp "$file" "$dest"
+        fi
+        print_info "Included changelog: ${file#$PAGES_DIR/changelog/}"
+    done
+fi
+
+# Copy OpenAPI spec into the skill
+OPENAPI_SRC="$ROOT_DIR/hindsight-docs/static/openapi.json"
+if [ -f "$OPENAPI_SRC" ]; then
+    cp "$OPENAPI_SRC" "$REFS_DIR/openapi.json"
+    print_info "Included: openapi.json"
+else
+    print_warn "openapi.json not found at $OPENAPI_SRC — skipping"
+fi
+
 # Generate SKILL.md
 print_info "Generating SKILL.md..."
 cat > "$SKILL_DIR/SKILL.md" <<'EOF'
@@ -208,6 +249,8 @@ All documentation is in `references/` organized by category:
 references/
 ├── best-practices.md # START HERE — missions, tags, formats, anti-patterns
 ├── faq.md            # Common questions and decisions
+├── changelog/        # Release history and version changes (index.md + integrations/)
+├── openapi.json      # Full OpenAPI spec — endpoint schemas, request/response models
 ├── developer/
 │   ├── api/          # Core operations: retain, recall, reflect, memory banks
 │   └── *.md          # Architecture, configuration, deployment, performance
@@ -301,6 +344,107 @@ EOF
 print_info "✓ Generated skill at: $SKILL_DIR"
 print_info "✓ Documentation files: $(find "$REFS_DIR" -type f | wc -l | tr -d ' ')"
 print_info "✓ SKILL.md created with search guidance"
+
+# Rewrite Docusaurus absolute paths (e.g. /developer/foo) to relative paths
+print_info "Rewriting Docusaurus absolute paths to relative paths..."
+python3 - "$REFS_DIR" <<'PYTHON'
+import sys
+import re
+import os
+from pathlib import Path
+
+refs_dir = Path(sys.argv[1]).resolve()
+link_pattern = re.compile(r'\[([^\]]*)\]\((/[^)]*)\)')
+
+SPECIAL_MAPPINGS = {
+    '/api-reference': 'openapi.json',
+}
+
+def try_resolve(url_path, refs_dir):
+    """Try to find the file in refs_dir for a Docusaurus absolute path like /developer/foo."""
+    if url_path in SPECIAL_MAPPINGS:
+        candidate = refs_dir / SPECIAL_MAPPINGS[url_path]
+        return candidate if candidate.exists() else None
+    doc_path = url_path.lstrip('/')
+    for candidate in [
+        refs_dir / (doc_path + '.md'),
+        refs_dir / doc_path / 'index.md',
+        refs_dir / doc_path,
+    ]:
+        if candidate.exists():
+            return candidate
+    return None
+
+image_pattern = re.compile(r'!\[[^\]]*\]\([^)]*\)')
+html_img_pattern = re.compile(r'<img\b[^>]*/?>',  re.IGNORECASE)
+
+changed = 0
+for md_file in refs_dir.rglob("*.md"):
+    original_content = md_file.read_text()
+
+    # Strip images (markdown and HTML)
+    content = image_pattern.sub('', original_content)
+    content = html_img_pattern.sub('', content)
+
+    def rewrite(match):
+        text = match.group(1)
+        url = match.group(2)
+        anchor = ''
+        if '#' in url:
+            url, frag = url.split('#', 1)
+            anchor = '#' + frag
+        if not url or url == '/':
+            return text  # strip link, keep text
+        resolved = try_resolve(url, refs_dir)
+        if resolved is None:
+            return text  # strip unresolvable link, keep text
+        rel = os.path.relpath(resolved, md_file.parent)
+        return f'[{text}]({rel}{anchor})'
+
+    new_content = link_pattern.sub(rewrite, content)
+    if new_content != original_content:
+        md_file.write_text(new_content)
+        changed += 1
+
+print(f"[INFO] Rewrote Docusaurus links in {changed} file(s)")
+PYTHON
+
+# Validate: no links point outside the skill directory
+print_info "Validating links in generated skill files..."
+python3 - "$SKILL_DIR" <<'PYTHON'
+import sys
+import re
+from pathlib import Path
+
+skill_dir = Path(sys.argv[1]).resolve()
+errors = []
+
+# Find all markdown links: [text](url) — exclude images too
+link_pattern = re.compile(r'\[([^\]]*)\]\(([^)]+)\)')
+
+for md_file in skill_dir.rglob("*.md"):
+    content = md_file.read_text()
+    for match in link_pattern.finditer(content):
+        url = match.group(2).split("#")[0].strip()  # strip anchors
+        if not url:
+            continue
+        # Absolute URLs and anchors-only are fine
+        if url.startswith(("http://", "https://", "mailto:", "ftp://")):
+            continue
+        # Resolve relative to the file's directory
+        resolved = (md_file.parent / url).resolve()
+        if not str(resolved).startswith(str(skill_dir)):
+            errors.append(f"  {md_file.relative_to(skill_dir)}: '{url}' -> {resolved}")
+
+if errors:
+    print("ERROR: The following links point outside the skill directory.")
+    print("All links must be absolute URLs or relative paths within the skill.")
+    for e in errors:
+        print(e)
+    sys.exit(1)
+
+print(f"[INFO] Link validation passed ({skill_dir})")
+PYTHON
 
 echo ""
 print_info "Usage:"

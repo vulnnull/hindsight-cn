@@ -59,20 +59,34 @@ result = client.create_mental_model(
 print(f"Operation ID: {result.operation_id}")
 ```
 
+### Node.js
+
+```javascript
+// Create a mental model (runs reflect in background)
+const result = await client.createMentalModel(
+    BANK_ID,
+    'Team Communication Preferences',
+    'How does the team prefer to communicate?',
+    { tags: ['team', 'communication'] },
+);
+
+// Returns an operation_id — check operations endpoint for completion
+console.log(`Operation ID: ${result.operation_id}`);
+```
+
 ### CLI
 
 ```bash
-# Create a mental model (async operation)
-curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Team Communication Preferences",
-    "source_query": "How does the team prefer to communicate?",
-    "tags": ["team"]
-  }'
+# Create a mental model (runs reflect in background)
+hindsight mental-model create "$BANK_ID" \
+  "Team Communication Preferences" \
+  "How does the team prefer to communicate?"
+```
 
-# Response: {"operation_id": "op-123"}
-# Use the operations endpoint to check completion
+### Go
+
+```go
+# Section 'create-mental-model' not found in api/mental-models.go
 ```
 
 ### Parameters
@@ -81,10 +95,63 @@ curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models" \
 |-----------|------|----------|-------------|
 | `name` | string | Yes | Human-readable name for the mental model |
 | `source_query` | string | Yes | The query to run to generate content |
+| `id` | string | No | Custom ID for the mental model (alphanumeric lowercase with hyphens). Auto-generated if omitted. |
 | `tags` | list | No | Tags for filtering during retrieval |
 | `max_tokens` | int | No | Maximum tokens for the mental model content |
 | `trigger` | object | No | Trigger settings (see [Automatic Refresh](#automatic-refresh)) |
 
+---
+
+## Create with Custom ID
+
+Assign a stable, human-readable ID to a mental model so you can retrieve or update it by name instead of relying on the auto-generated UUID:
+
+### Python
+
+```python
+# Create a mental model with a specific custom ID
+result_with_id = client.create_mental_model(
+    bank_id=BANK_ID,
+    name="Communication Policy",
+    source_query="What are the team's communication guidelines?",
+    id="communication-policy"
+)
+
+print(f"Created with custom ID: {result_with_id.operation_id}")
+```
+
+### Node.js
+
+```javascript
+// Create a mental model with a specific custom ID
+const resultWithId = await client.createMentalModel(
+    BANK_ID,
+    'Communication Policy',
+    "What are the team's communication guidelines?",
+    { id: 'communication-policy' },
+);
+
+console.log(`Created with custom ID: ${resultWithId.operation_id}`);
+```
+
+### CLI
+
+```bash
+# Create a mental model with a specific custom ID
+hindsight mental-model create "$BANK_ID" \
+  "Communication Policy" \
+  "What are the team's communication guidelines?" \
+  --id communication-policy
+```
+
+### Go
+
+```go
+# Section 'create-mental-model-with-id' not found in api/mental-models.go
+```
+
+:::tip
+Custom IDs must be lowercase alphanumeric and may contain hyphens (e.g. `team-policies`, `q4-status`). If a mental model with that ID already exists, the request is rejected.
 ---
 
 ## Automatic Refresh
@@ -114,17 +181,34 @@ result = client.create_mental_model(
 print(f"Operation ID: {result.operation_id}")
 ```
 
+### Node.js
+
+```javascript
+// Create a mental model with automatic refresh enabled
+const result2 = await client.createMentalModel(
+    BANK_ID,
+    'Project Status',
+    'What is the current project status?',
+    { trigger: { refreshAfterConsolidation: true } },
+);
+
+// This mental model will automatically refresh when observations are updated
+console.log(`Operation ID: ${result2.operation_id}`);
+```
+
 ### CLI
 
 ```bash
-# Create a mental model with automatic refresh enabled
-curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Project Status",
-    "source_query": "What is the current project status?",
-    "trigger": {"refresh_after_consolidation": true}
-  }'
+# Create a mental model and get its ID for subsequent operations
+hindsight mental-model create "$BANK_ID" \
+  "Project Status" \
+  "What is the current project status?"
+```
+
+### Go
+
+```go
+# Section 'create-mental-model-with-trigger' not found in api/mental-models.go
 ```
 
 ### When to Use Automatic Refresh
@@ -152,10 +236,28 @@ for mental_model in mental_models.items:
     print(f"- {mental_model.name}: {mental_model.source_query}")
 ```
 
+### Node.js
+
+```javascript
+// List all mental models in a bank
+const mentalModels = await client.listMentalModels(BANK_ID);
+
+for (const mm of mentalModels.items) {
+    console.log(`- ${mm.name}: ${mm.source_query}`);
+}
+```
+
 ### CLI
 
 ```bash
-curl "http://localhost:8888/v1/default/banks/my-bank/mental-models"
+# List all mental models in a bank
+hindsight mental-model list "$BANK_ID"
+```
+
+### Go
+
+```go
+# Section 'list-mental-models' not found in api/mental-models.go
 ```
 
 ---
@@ -168,10 +270,27 @@ curl "http://localhost:8888/v1/default/banks/my-bank/mental-models"
 # Section 'get-mental-model' not found in api/mental-models.py
 ```
 
+### Node.js
+
+```javascript
+// Get a specific mental model
+const mentalModel = await client.getMentalModel(BANK_ID, mentalModelId);
+
+console.log(`Name: ${mentalModel.name}`);
+console.log(`Content: ${mentalModel.content}`);
+console.log(`Last refreshed: ${mentalModel.last_refreshed_at}`);
+```
+
 ### CLI
 
 ```bash
-curl "http://localhost:8888/v1/default/banks/my-bank/mental-models/{mental_model_id}"
+# Section 'get-mental-model' not found in api/mental-models.sh
+```
+
+### Go
+
+```go
+# Section 'get-mental-model' not found in api/mental-models.go
 ```
 
 ### Response Fields
@@ -200,10 +319,25 @@ Re-run the source query to update the mental model with current knowledge:
 # Section 'refresh-mental-model' not found in api/mental-models.py
 ```
 
+### Node.js
+
+```javascript
+// Refresh a mental model to update with current knowledge
+const refreshResult = await client.refreshMentalModel(BANK_ID, mentalModelId);
+
+console.log(`Refresh operation ID: ${refreshResult.operation_id}`);
+```
+
 ### CLI
 
 ```bash
-curl -X POST "http://localhost:8888/v1/default/banks/my-bank/mental-models/{mental_model_id}/refresh"
+# Section 'refresh-mental-model' not found in api/mental-models.sh
+```
+
+### Go
+
+```go
+# Section 'refresh-mental-model' not found in api/mental-models.go
 ```
 
 Refreshing is useful when:
@@ -223,12 +357,28 @@ Update the mental model's name:
 # Section 'update-mental-model' not found in api/mental-models.py
 ```
 
+### Node.js
+
+```javascript
+// Update a mental model's metadata
+const updated = await client.updateMentalModel(BANK_ID, mentalModelId, {
+    name: 'Updated Team Communication Preferences',
+    trigger: { refresh_after_consolidation: true },
+});
+
+console.log(`Updated name: ${updated.name}`);
+```
+
 ### CLI
 
 ```bash
-curl -X PATCH "http://localhost:8888/v1/default/banks/my-bank/mental-models/{mental_model_id}" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Updated Team Communication Preferences"}'
+# Section 'update-mental-model' not found in api/mental-models.sh
+```
+
+### Go
+
+```go
+# Section 'update-mental-model' not found in api/mental-models.go
 ```
 
 ---
@@ -241,10 +391,23 @@ curl -X PATCH "http://localhost:8888/v1/default/banks/my-bank/mental-models/{men
 # Section 'delete-mental-model' not found in api/mental-models.py
 ```
 
+### Node.js
+
+```javascript
+// Delete a mental model
+await client.deleteMentalModel(BANK_ID, mentalModelId);
+```
+
 ### CLI
 
 ```bash
-curl -X DELETE "http://localhost:8888/v1/default/banks/my-bank/mental-models/{mental_model_id}"
+# Section 'delete-mental-model' not found in api/mental-models.sh
+```
+
+### Go
+
+```go
+# Section 'delete-mental-model' not found in api/mental-models.go
 ```
 
 ---
@@ -287,6 +450,30 @@ Every time a mental model's content changes (via refresh or manual update), the 
 # Section 'get-mental-model-history' not found in api/mental-models.py
 ```
 
+### Node.js
+
+```javascript
+// Get the change history of a mental model
+const history = await client.getMentalModelHistory(BANK_ID, mentalModelId);
+
+for (const entry of history) {
+    console.log(`Changed at: ${entry.changed_at}`);
+    console.log(`Previous content: ${entry.previous_content}`);
+}
+```
+
+### CLI
+
+```bash
+# Section 'get-mental-model-history' not found in api/mental-models.sh
+```
+
+### Go
+
+```go
+# Section 'get-mental-model-history' not found in api/mental-models.go
+```
+
 ### Response
 
 The endpoint returns a list of history entries, most recent first:
@@ -316,5 +503,5 @@ History tracking is enabled by default. Set `HINDSIGHT_API_ENABLE_MENTAL_MODEL_H
 ## Next Steps
 
 - [**Reflect**](./reflect) — How the agentic loop uses mental models
-- [**Observations**](/developer/observations) — How knowledge is consolidated
+- [**Observations**](../observations.md) — How knowledge is consolidated
 - [**Operations**](./operations) — Track async mental model creation

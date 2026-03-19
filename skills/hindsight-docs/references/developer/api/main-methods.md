@@ -76,13 +76,19 @@ await client.retainBatch('my-bank', [
 
 ```bash
 # Store a single fact
-hindsight retain my-bank "Alice joined Google in March 2024 as a Senior ML Engineer"
+hindsight memory retain my-bank "Alice joined Google in March 2024 as a Senior ML Engineer"
 
 # Store from a file
-hindsight retain my-bank --file conversation.txt --context "Daily standup"
+hindsight memory retain-files my-bank conversation.txt --context "Daily standup"
 
 # Store multiple files
-hindsight retain my-bank --files docs/*.md
+hindsight memory retain-files my-bank docs/
+```
+
+### Go
+
+```go
+# Section 'main-retain' not found in api/main-methods.go
 ```
 
 **What happens:** Content is processed by an LLM to extract rich facts, identify entities, and build connections in a knowledge graph.
@@ -166,16 +172,22 @@ for (const [entityId, entity] of Object.entries(entityResults.entities || {})) {
 
 ```bash
 # Basic search
-hindsight recall my-bank "What does Alice do at Google?"
+hindsight memory recall my-bank "What does Alice do at Google?"
 
 # Search with options
-hindsight recall my-bank "What happened last spring?" \
+hindsight memory recall my-bank "What happened last spring?" \
     --budget high \
     --max-tokens 8192 \
-    --fact-type world
+    --fact-type world,experience
 
-# Verbose output (shows weights and sources)
-hindsight recall my-bank "Tell me about Alice" -v
+# Verbose output
+hindsight memory recall my-bank "Tell me about Alice" -v
+```
+
+### Go
+
+```go
+# Section 'main-recall' not found in api/main-methods.go
 ```
 
 **What happens:** Four search strategies (semantic, keyword, graph, temporal) run in parallel, results are fused and reranked.
@@ -238,13 +250,16 @@ for (const fact of detailedResponse.based_on || []) {
 
 ```bash
 # Basic reflect
-hindsight reflect my-bank "Should we adopt TypeScript for our backend?"
-
-# Verbose output (shows sources and observations)
-hindsight reflect my-bank "What are Alice's strengths for the team lead role?" -v
+hindsight memory reflect my-bank "Should we adopt TypeScript for our backend?"
 
 # With higher reasoning budget
-hindsight reflect my-bank "Analyze our tech stack" --budget high
+hindsight memory reflect my-bank "Analyze our tech stack" --budget high
+```
+
+### Go
+
+```go
+# Section 'main-reflect' not found in api/main-methods.go
 ```
 
 **What happens:** Memories and observations are recalled, bank disposition is applied, and the LLM reasons through the evidence to generate a response.

@@ -41,7 +41,7 @@ docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
 > **💡 LLM Provider**
 > 
 Hindsight requires an LLM with structured output support. Recommended: **Groq** with `gpt-oss-20b` for fast, cost-effective inference.
-See [LLM Providers](/developer/models#llm) for more details.
+See [LLM Providers](../models.md#llm) for more details.
 ---
 
 ## Use the Client
@@ -105,6 +105,16 @@ hindsight memory recall my-bank "What does Alice do?"
 hindsight memory reflect my-bank "Tell me about Alice"
 ```
 
+### Go
+
+```bash
+go get github.com/vectorize-io/hindsight/hindsight-clients/go
+```
+
+```go
+# Section 'quickstart-full' not found in api/quickstart.go
+```
+
 ---
 
 ## What's Happening
@@ -127,4 +137,4 @@ hindsight memory reflect my-bank "Tell me about Alice"
 - [**Recall**](./recall) — Search and retrieval strategies
 - [**Reflect**](./reflect) — Disposition-aware reasoning
 - [**Memory Banks**](./memory-banks) — Configure disposition and mission
-- [**Server Deployment**](/developer/installation) — Docker Compose, Helm, and production setup
+- [**Server Deployment**](../installation.md) — Docker Compose, Helm, and production setup

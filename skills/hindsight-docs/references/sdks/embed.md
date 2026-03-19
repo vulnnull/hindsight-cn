@@ -244,4 +244,4 @@ hindsight-embed configure
 - High-availability requirements
 - Multi-tenant applications
 
-For production deployments, use the [API Service](/developer/services) with external PostgreSQL instead.
+For production deployments, use the [API Service](../developer/services.md) with external PostgreSQL instead.

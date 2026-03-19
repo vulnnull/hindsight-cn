@@ -1775,6 +1775,9 @@ jobs:
     - name: Run generate-clients
       run: ./scripts/generate-clients.sh
 
+    - name: Run generate-docs-skill
+      run: ./scripts/generate-docs-skill.sh
+
     - name: Run lint
       run: ./scripts/hooks/lint.sh
 
@@ -1789,6 +1792,7 @@ jobs:
           echo "Please run the following commands locally and commit the changes:"
           echo "  ./scripts/generate-openapi.sh"
           echo "  ./scripts/generate-clients.sh"
+          echo "  ./scripts/generate-docs-skill.sh"
           echo "  ./scripts/hooks/lint.sh"
           echo ""
           git diff --stat

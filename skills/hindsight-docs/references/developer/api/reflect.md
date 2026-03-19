@@ -8,7 +8,7 @@ When you call **reflect**, Hindsight runs an agentic loop that autonomously sear
 {/* Import raw source files */}
 
 :::info How Reflect Works
-Learn about disposition-driven reasoning in the [Reflect Architecture](/developer/reflect) guide.
+Learn about disposition-driven reasoning in the [Reflect Architecture](../reflect.md) guide.
 > **💡 Prerequisites**
 > 
 Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
@@ -30,6 +30,12 @@ await client.reflect('my-bank', 'What should I know about Alice?');
 
 ```bash
 hindsight memory reflect my-bank "What do you know about Alice?"
+```
+
+### Go
+
+```go
+# Section 'reflect-basic' not found in api/reflect.go
 ```
 
 ---
@@ -61,6 +67,18 @@ const response = await client.reflect('my-bank', 'What do you think about remote
     budget: 'mid',
     context: "We're considering a hybrid work policy"
 });
+```
+
+### CLI
+
+```bash
+hindsight memory reflect my-bank "Summarize my week" --budget high --max-tokens 8192
+```
+
+### Go
+
+```go
+# Section 'reflect-with-params' not found in api/reflect.go
 ```
 
 ### max_tokens
@@ -147,6 +165,12 @@ hindsight memory reflect hiring-team \
 rm -f schema.json
 ```
 
+### Go
+
+```go
+# Section 'reflect-structured-output' not found in api/reflect.go
+```
+
 ### tags
 
 Filters which memories the agent can access during reflection. Works identically to [recall tags](./recall#tags) — only memories matching the specified tags are considered. The `tags_match` parameter controls the matching logic (`any`, `all`, `any_strict`, `all_strict`) with the same semantics as recall.
@@ -161,6 +185,29 @@ response = client.reflect(
     tags=["user:alice"],
     tags_match="any_strict"  # Only use memories tagged for this user
 )
+```
+
+### Node.js
+
+```javascript
+// Filter reflect to only use memories tagged for a specific user
+await client.reflect('my-bank', 'What feedback did the user give?', {
+    tags: ['user:alice'],
+    tagsMatch: 'any_strict'
+});
+```
+
+### CLI
+
+```bash
+hindsight memory reflect my-bank "What feedback did the user give?" \
+  --tags "user:alice" --tags-match any_strict
+```
+
+### Go
+
+```go
+# Section 'reflect-with-tags' not found in api/reflect.go
 ```
 
 ### include
@@ -185,6 +232,32 @@ print("Response:", response.text)
 print("\nBased on:")
 for fact in (response.based_on.memories if response.based_on else []):
     print(f"  - [{fact.type}] {fact.text}")
+```
+
+### Node.js
+
+```javascript
+const sourcesResponse = await client.reflect('my-bank', 'Tell me about Alice', {
+    includeFacts: true
+});
+
+console.log('Response:', sourcesResponse.text);
+console.log('\nBased on:');
+for (const fact of (sourcesResponse.based_on?.memories || [])) {
+    console.log(`  - [${fact.type}] ${fact.text}`);
+}
+```
+
+### CLI
+
+```bash
+hindsight memory reflect my-bank "Tell me about Alice" --include-facts
+```
+
+### Go
+
+```go
+# Section 'reflect-sources' not found in api/reflect.go
 ```
 
 #### include.tool_calls
