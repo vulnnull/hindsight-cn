@@ -1,0 +1,114 @@
+{
+  "integrations": [
+    {
+      "id": "litellm",
+      "name": "LiteLLM",
+      "description": "Add long-term memory to any LLM via LiteLLM proxy callbacks. Zero code changes — configure once and every model gets memory.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/litellm",
+      "icon": "/img/icons/litellm.png"
+    },
+    {
+      "id": "crewai",
+      "name": "CrewAI",
+      "description": "Give CrewAI agents persistent, cross-session memory. Facts learned in one run are available in every future run.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/crewai",
+      "icon": "/img/icons/crewai.png"
+    },
+    {
+      "id": "pydantic-ai",
+      "name": "Pydantic AI",
+      "description": "Integrate Hindsight memory into Pydantic AI agents with a simple dependency injection pattern.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/pydantic-ai",
+      "icon": "/img/icons/pydanticai.png"
+    },
+    {
+      "id": "vercel-ai-sdk",
+      "name": "Vercel AI SDK",
+      "description": "Add persistent memory to Vercel AI SDK applications. Works with any model provider supported by the AI SDK.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/ai-sdk",
+      "icon": "/img/icons/vercel.png"
+    },
+    {
+      "id": "vercel-chat",
+      "name": "Vercel Chat",
+      "description": "Drop-in memory layer for the Vercel AI Chatbot. Remembers users across sessions out of the box.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/chat",
+      "icon": "/img/icons/vercel.png"
+    },
+    {
+      "id": "agno",
+      "name": "Agno",
+      "description": "Plug Hindsight into Agno agents for structured, long-term memory storage and retrieval.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/agno",
+      "icon": "/img/icons/agno.png"
+    },
+    {
+      "id": "hermes",
+      "name": "Hermes",
+      "description": "Use Hindsight as the memory backend for the Hermes multi-agent messaging framework.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/hermes",
+      "icon": "/img/icons/hermes.png"
+    },
+    {
+      "id": "local-mcp",
+      "name": "MCP Server",
+      "description": "Expose Hindsight memory as a Model Context Protocol server. Compatible with Claude, Cursor, and any MCP client.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "mcp",
+      "link": "/sdks/integrations/local-mcp",
+      "icon": "/img/icons/mcp.png"
+    },
+    {
+      "id": "openclaw",
+      "name": "OpenClaw",
+      "description": "Integrate Hindsight with OpenClaw to add memory capabilities to Claude-based agent workflows.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/openclaw",
+      "icon": "/img/icons/openclaw.png"
+    },
+    {
+      "id": "skills",
+      "name": "Claude Code Skills",
+      "description": "Add Hindsight memory to Claude Code agents via the Skills integration. Persistent context across coding sessions.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "tool",
+      "link": "/sdks/integrations/skills",
+      "icon": "/img/icons/skills.png"
+    },
+    {
+      "id": "hindsight-openclaw-pro",
+      "name": "hindsight-openclaw-pro",
+      "description": "Production-grade Hindsight memory plugin for OpenClaw — per-agent config, multi-bank recall, and IaC bank management via the hoppro CLI.",
+      "type": "community",
+      "by": "mrkhachaturov",
+      "category": "framework",
+      "link": "https://github.com/mrkhachaturov/hindsight-openclaw-pro",
+      "icon": "/img/icons/openclaw.png"
+    }
+  ]
+}

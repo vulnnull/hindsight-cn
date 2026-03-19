@@ -1,7 +1,7 @@
 import React from 'react';
 import type {IconType} from 'react-icons';
 import {IconGrid} from './IconGrid';
-import {SiPython, SiGo, SiOpenai, SiAnthropic, SiGooglegemini, SiOllama, SiCrewai, SiPydantic, SiVercel} from 'react-icons/si';
+import {SiPython, SiGo, SiOpenai, SiAnthropic, SiGooglegemini, SiOllama} from 'react-icons/si';
 import {LuTerminal, LuPlug, LuZap, LuBrainCog, LuSparkles, LuGlobe} from 'react-icons/lu';
 
 const OpenAICompatibleIcon: IconType = ({size = 28, ...props}) => (
@@ -27,22 +27,6 @@ export function ClientsGrid() {
   );
 }
 
-export function IntegrationsGrid() {
-  return (
-    <IconGrid items={[
-      { label: 'Local MCP Server', imgSrc: '/img/icons/mcp.png',       href: '/sdks/integrations/local-mcp' },
-      { label: 'LiteLLM',         imgSrc: '/img/icons/litellm.png',    href: '/sdks/integrations/litellm' },
-      { label: 'OpenClaw',        imgSrc: '/img/icons/openclaw.png',    href: '/sdks/integrations/openclaw' },
-      { label: 'Vercel AI SDK',   icon: SiVercel,                       href: '/sdks/integrations/ai-sdk' },
-      { label: 'Vercel Chat SDK', icon: SiVercel,                       href: '/sdks/integrations/chat' },
-      { label: 'CrewAI',          imgSrc: '/img/icons/crewai.png',      href: '/sdks/integrations/crewai' },
-      { label: 'Pydantic AI',     imgSrc: '/img/icons/pydanticai.png',  href: '/sdks/integrations/pydantic-ai' },
-      { label: 'Skills',          imgSrc: '/img/icons/skills.png',      href: '/sdks/integrations/skills' },
-      { label: 'Agno',            imgSrc: '/img/icons/agno.png',        href: '/sdks/integrations/agno' },
-      { label: 'Hermes',          imgSrc: '/img/icons/hermes.png',      href: '/sdks/integrations/hermes' },
-    ]} />
-  );
-}
 
 export function LLMProvidersGrid() {
   return (

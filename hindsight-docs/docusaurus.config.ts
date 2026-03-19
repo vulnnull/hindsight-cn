@@ -209,10 +209,10 @@ const config: Config = {
           className: 'navbar-item-developer',
         },
         {
-          to: '/faq',
+          to: '/integrations',
           position: 'left',
-          label: 'FAQ',
-          className: 'navbar-item-faq',
+          label: 'Integrations',
+          className: 'navbar-item-integrations',
         },
         {
           to: '/changelog',

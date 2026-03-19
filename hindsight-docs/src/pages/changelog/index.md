@@ -2,22 +2,9 @@
 hide_table_of_contents: true
 ---
 
-# Changelog
+import PageHero from '@site/src/components/PageHero';
 
-This changelog highlights user-facing changes only. Internal maintenance, CI/CD, and infrastructure updates are omitted.
-
-For full release details, see [GitHub Releases](https://github.com/vectorize-io/hindsight/releases).
-
-## Integration Changelogs
-
-| Integration | Package | Description |
-|---|---|---|
-| [LiteLLM](/changelog/integrations/litellm) | `hindsight-litellm` | Universal LLM memory via LiteLLM (100+ providers) |
-| [Pydantic AI](/changelog/integrations/pydantic-ai) | `hindsight-pydantic-ai` | Persistent memory tools for Pydantic AI agents |
-| [CrewAI](/changelog/integrations/crewai) | `hindsight-crewai` | Persistent memory for CrewAI agents |
-| [AI SDK](/changelog/integrations/ai-sdk) | `@vectorize-io/hindsight-ai-sdk` | Memory integration for Vercel AI SDK |
-| [Chat SDK](/changelog/integrations/chat) | `@vectorize-io/hindsight-chat` | Memory integration for Vercel Chat SDK |
-| [OpenClaw](/changelog/integrations/openclaw) | `@vectorize-io/hindsight-openclaw` | Hindsight memory plugin for OpenClaw |
+<PageHero title="Changelog" subtitle="User-facing changes only. Internal maintenance and infrastructure updates are omitted." />
 
 ## [0.4.19](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.19)
 
@@ -606,3 +593,14 @@ For full release details, see [GitHub Releases](https://github.com/vectorize-io/
 **Bug Fixes**
 
 - Fixed the standalone Docker image so it builds/runs correctly. ([`1056a20`](https://github.com/vectorize-io/hindsight/commit/1056a20))
+
+## Integration Changelogs
+
+| Integration | Package | Description |
+|---|---|---|
+| [LiteLLM](/changelog/integrations/litellm) | `hindsight-litellm` | Universal LLM memory via LiteLLM (100+ providers) |
+| [Pydantic AI](/changelog/integrations/pydantic-ai) | `hindsight-pydantic-ai` | Persistent memory tools for Pydantic AI agents |
+| [CrewAI](/changelog/integrations/crewai) | `hindsight-crewai` | Persistent memory for CrewAI agents |
+| [AI SDK](/changelog/integrations/ai-sdk) | `@vectorize-io/hindsight-ai-sdk` | Memory integration for Vercel AI SDK |
+| [Chat SDK](/changelog/integrations/chat) | `@vectorize-io/hindsight-chat` | Memory integration for Vercel Chat SDK |
+| [OpenClaw](/changelog/integrations/openclaw) | `@vectorize-io/hindsight-openclaw` | Hindsight memory plugin for OpenClaw |

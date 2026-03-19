@@ -3,6 +3,7 @@ import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
 import type {Props} from '@theme/BlogListPage';
 import type {PropBlogPostContent} from '@docusaurus/plugin-content-blog';
+import PageHero from '@site/src/components/PageHero';
 import styles from './styles.module.css';
 
 const CLOUD_TAG = 'hindsight-cloud';
@@ -70,10 +71,7 @@ export default function BlogListPage({items, metadata}: Props): React.ReactEleme
   return (
     <Layout title={blogTitle} description={blogDescription}>
       <main className={styles.blogPage}>
-        <header className={styles.header}>
-          <h1 className={styles.headerTitle}>{blogTitle}</h1>
-          {blogDescription && <p className={styles.headerSubtitle}>{blogDescription}</p>}
-        </header>
+        <PageHero title={blogTitle} subtitle={blogDescription} />
 
         {cloudPosts.length > 0 && (
           <section className={styles.section}>
