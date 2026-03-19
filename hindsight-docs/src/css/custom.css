@@ -1267,3 +1267,8 @@ html.docs-wrapper article h3 {
   }
 }
 
+
+/* Remove right border from doc sidebar */
+.theme-doc-sidebar-container {
+  border-right: none !important;
+}

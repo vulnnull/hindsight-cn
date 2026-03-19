@@ -38,6 +38,8 @@ export function IntegrationsGrid() {
       { label: 'CrewAI',          imgSrc: '/img/icons/crewai.png',      href: '/sdks/integrations/crewai' },
       { label: 'Pydantic AI',     imgSrc: '/img/icons/pydanticai.png',  href: '/sdks/integrations/pydantic-ai' },
       { label: 'Skills',          imgSrc: '/img/icons/skills.png',      href: '/sdks/integrations/skills' },
+      { label: 'Agno',            imgSrc: '/img/icons/agno.png',        href: '/sdks/integrations/agno' },
+      { label: 'Hermes',          imgSrc: '/img/icons/hermes.png',      href: '/sdks/integrations/hermes' },
     ]} />
   );
 }
