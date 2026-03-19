@@ -5,6 +5,7 @@ End-to-end tests for file retain (upload, convert, retain) functionality.
 import asyncio
 import io
 import json
+from datetime import datetime, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -469,6 +470,77 @@ async def test_file_conversion_creates_separate_retain_operation(memory_no_llm_v
     assert doc["file_content_type"] == "text/plain"
     assert doc["original_text"] is not None
     assert len(doc["original_text"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_async_file_retain_serializes_datetime_timestamp(memory_no_llm_verify, sample_txt_content):
+    """Async file retain should accept Python datetimes in task payloads."""
+    from hindsight_api.engine.parsers.base import FileParser
+    from hindsight_api.models import RequestContext
+
+    bank_id = f"test_file_timestamp_bank_{datetime.now(timezone.utc).timestamp()}"
+    timestamp = datetime(2024, 1, 15, 10, 30, tzinfo=timezone.utc)
+
+    context = RequestContext(internal=True)
+    await memory_no_llm_verify.get_bank_profile(bank_id, request_context=context)
+
+    class MockFile:
+        def __init__(self, content, filename, content_type):
+            self.content = content
+            self.filename = filename
+            self.content_type = content_type
+
+        async def read(self):
+            return self.content
+
+    class TimestampParser(FileParser):
+        async def convert(self, file_data: bytes, filename: str) -> str:
+            return file_data.decode("utf-8")
+
+        def supports(self, filename: str, content_type: str | None = None) -> bool:
+            return filename.endswith(".txt")
+
+        def name(self) -> str:
+            return "timestamp_parser"
+
+    memory_no_llm_verify._parser_registry.register(TimestampParser())
+
+    mock_file = MockFile(sample_txt_content, "timestamped.txt", "text/plain")
+
+    result = await memory_no_llm_verify.submit_async_file_retain(
+        bank_id=bank_id,
+        file_items=[
+            {
+                "file": mock_file,
+                "document_id": "timestamped_doc",
+                "context": "timestamp test",
+                "metadata": {},
+                "tags": [],
+                "timestamp": timestamp,
+                "parser": ["timestamp_parser"],
+            }
+        ],
+        document_tags=None,
+        request_context=context,
+    )
+
+    operation_id = result["operation_ids"][0]
+    pool = await memory_no_llm_verify._get_pool()
+    from hindsight_api.engine.memory_engine import get_current_schema
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT status, task_payload->>'timestamp' AS timestamp
+            FROM {get_current_schema()}.async_operations
+            WHERE operation_id = $1
+            """,
+            operation_id,
+        )
+
+    assert row is not None
+    assert row["status"] == "completed"
+    assert row["timestamp"] == "2024-01-15T10:30:00+00:00"
 
 
 @pytest.mark.asyncio
