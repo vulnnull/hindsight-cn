@@ -477,19 +477,42 @@ class EntityResolver:
             id_by_name: dict[str, str] = {row["name_lower"]: row["id"] for row in inserted_rows}
 
             # Fallback SELECT for names that conflicted (another worker won the race).
-            missing = [n for n, _ in sorted_groups if n not in id_by_name]
-            if missing:
+            #
+            # IMPORTANT: we must let PostgreSQL do the lowercasing on BOTH sides of the
+            # comparison.  Python's str.lower() and PostgreSQL's LOWER() differ for some
+            # Unicode characters — most notably Turkish İ (U+0130):
+            #   Python:     'İstanbul'.lower()  == 'i\u0307stanbul'  (i + combining dot, 2 chars)
+            #   PostgreSQL: LOWER('İstanbul')   == 'istanbul'         (plain i, 1 char)
+            # Passing a Python-lowercased name to "LOWER(canonical_name) = ANY($2::text[])"
+            # would fail to match the stored entity, leaving entity_id as None and causing
+            # a NOT NULL constraint violation on unit_entities.entity_id.
+            #
+            # Fix: pass the original (mixed-case) input names and use
+            # "LOWER(canonical_name) = ANY(SELECT LOWER(n) FROM unnest($2) AS n)" so
+            # PostgreSQL lowercases both sides identically.  The query also returns the
+            # original input_name so we can index id_by_name by Python's lower() of that
+            # name, which is what the assignment loop below uses as its lookup key.
+            missing_original = [g.name for name_lower, g in sorted_groups if name_lower not in id_by_name]
+            if missing_original:
                 existing_rows = await conn.fetch(
                     f"""
-                    SELECT id, LOWER(canonical_name) AS name_lower
-                    FROM {fq_table("entities")}
-                    WHERE bank_id = $1 AND LOWER(canonical_name) = ANY($2::text[])
+                    SELECT e.id, LOWER(e.canonical_name) AS name_lower, inputs.input_name
+                    FROM {fq_table("entities")} e
+                    JOIN (
+                        SELECT LOWER(n) AS input_name_lower, n AS input_name
+                        FROM unnest($2::text[]) AS n
+                    ) AS inputs ON LOWER(e.canonical_name) = inputs.input_name_lower
+                    WHERE e.bank_id = $1
                     """,
                     bank_id,
-                    missing,
+                    missing_original,
                 )
                 for row in existing_rows:
                     id_by_name[row["name_lower"]] = row["id"]
+                    # Also index by Python's lower() of the original input name so the
+                    # assignment loop (which uses Python-lowercased keys) finds it even
+                    # when Python and PostgreSQL produce different lowercase strings.
+                    id_by_name[row["input_name"].lower()] = row["id"]
 
             # Assign entity IDs back and queue one stat per original mention so that
             # flush_pending_stats() increments mention_count by the true mention count,
