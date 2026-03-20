@@ -15,5 +15,11 @@ dependencies = [
 [tool.uv.sources]
 hindsight-api-slim = { workspace = true }
 
+[project.scripts]
+hindsight-api = "hindsight_api.main:main"
+hindsight-worker = "hindsight_api.worker.main:main"
+hindsight-local-mcp = "hindsight_api.mcp_local:main"
+hindsight-admin = "hindsight_api.admin.cli:main"
+
 [tool.setuptools]
 packages = []
