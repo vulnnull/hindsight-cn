@@ -13,6 +13,7 @@ import CodeSnippet from '@site/src/components/CodeSnippet';
 {/* Import raw source files */}
 import mainMethodsPy from '!!raw-loader!@site/examples/api/main-methods.py';
 import mainMethodsMjs from '!!raw-loader!@site/examples/api/main-methods.mjs';
+import mainMethodsGo from '!!raw-loader!@site/examples/api/main-methods.go';
 
 :::tip Prerequisites
 Make sure you've [installed Hindsight](../installation) and completed the [Quick Start](./quickstart).
@@ -33,15 +34,18 @@ Store conversations, documents, and facts into a memory bank.
 
 ```bash
 # Store a single fact
-hindsight retain my-bank "Alice joined Google in March 2024 as a Senior ML Engineer"
+hindsight memory retain my-bank "Alice joined Google in March 2024 as a Senior ML Engineer"
 
 # Store from a file
-hindsight retain my-bank --file conversation.txt --context "Daily standup"
+hindsight memory retain-files my-bank conversation.txt --context "Daily standup"
 
 # Store multiple files
-hindsight retain my-bank --files docs/*.md
+hindsight memory retain-files my-bank docs/
 ```
 
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mainMethodsGo} section="main-retain" language="go" />
 </TabItem>
 </Tabs>
 
@@ -66,18 +70,21 @@ Search for relevant memories using multi-strategy retrieval.
 
 ```bash
 # Basic search
-hindsight recall my-bank "What does Alice do at Google?"
+hindsight memory recall my-bank "What does Alice do at Google?"
 
 # Search with options
-hindsight recall my-bank "What happened last spring?" \
+hindsight memory recall my-bank "What happened last spring?" \
     --budget high \
     --max-tokens 8192 \
-    --fact-type world
+    --fact-type world,experience
 
-# Verbose output (shows weights and sources)
-hindsight recall my-bank "Tell me about Alice" -v
+# Verbose output
+hindsight memory recall my-bank "Tell me about Alice" -v
 ```
 
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mainMethodsGo} section="main-recall" language="go" />
 </TabItem>
 </Tabs>
 
@@ -102,15 +109,15 @@ Generate disposition-aware responses using memories and observations.
 
 ```bash
 # Basic reflect
-hindsight reflect my-bank "Should we adopt TypeScript for our backend?"
-
-# Verbose output (shows sources and observations)
-hindsight reflect my-bank "What are Alice's strengths for the team lead role?" -v
+hindsight memory reflect my-bank "Should we adopt TypeScript for our backend?"
 
 # With higher reasoning budget
-hindsight reflect my-bank "Analyze our tech stack" --budget high
+hindsight memory reflect my-bank "Analyze our tech stack" --budget high
 ```
 
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={mainMethodsGo} section="main-reflect" language="go" />
 </TabItem>
 </Tabs>
 

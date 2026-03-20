@@ -293,6 +293,22 @@
         },
         {
           "type": "doc",
+          "id": "sdks/integrations/langgraph",
+          "label": "LangGraph / LangChain",
+          "customProps": {
+            "icon": "/img/icons/langgraph.png"
+          }
+        },
+        {
+          "type": "doc",
+          "id": "sdks/integrations/nemoclaw",
+          "label": "NemoClaw",
+          "customProps": {
+            "icon": "/img/icons/nemoclaw.png"
+          }
+        },
+        {
+          "type": "doc",
           "id": "sdks/integrations/skills",
           "label": "Skills",
           "customProps": {

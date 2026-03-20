@@ -101,6 +101,26 @@
       "icon": "/img/icons/skills.png"
     },
     {
+      "id": "langgraph",
+      "name": "LangGraph / LangChain",
+      "description": "Add persistent memory to LangGraph and LangChain agents. Supports Memory Tools, Graph Nodes, and BaseStore adapter patterns.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/langgraph",
+      "icon": "/img/icons/langgraph.png"
+    },
+    {
+      "id": "nemoclaw",
+      "name": "NemoClaw",
+      "description": "Persistent memory for NemoClaw sandboxed agents. One-command setup — no code changes required.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/nemoclaw",
+      "icon": "/img/icons/nemoclaw.png"
+    },
+    {
       "id": "hindsight-openclaw-pro",
       "name": "hindsight-openclaw-pro",
       "description": "Production-grade Hindsight memory plugin for OpenClaw — per-agent config, multi-bank recall, and IaC bank management via the hoppro CLI.",

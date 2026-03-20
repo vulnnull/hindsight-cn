@@ -6,6 +6,8 @@ sidebar_position: 1
 
 Universal LLM memory integration via [LiteLLM](https://github.com/BerriAI/litellm). Add persistent memory to any LLM application with just a few lines of code.
 
+[View Changelog →](../../changelog/integrations/litellm.md)
+
 ## Features
 
 - **Universal LLM Support** - Works with 100+ LLM providers via LiteLLM (OpenAI, Anthropic, Groq, Azure, AWS Bedrock, Google Vertex AI, and more)

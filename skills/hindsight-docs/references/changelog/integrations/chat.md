@@ -2,10 +2,8 @@
 hide_table_of_contents: true
 ---
 
-# Chat SDK Integration Changelog
+import PageHero from '@site/src/components/PageHero';
 
-Changelog for [`@vectorize-io/hindsight-chat`](https://www.npmjs.com/package/@vectorize-io/hindsight-chat) — memory integration for Vercel Chat SDK.
+<PageHero title="Vercel Chat SDK Changelog" subtitle="@vectorize-io/hindsight-chat — memory integration for Vercel Chat SDK." />
 
-For the source code, see [`hindsight-integrations/chat`](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/chat).
-
-← [Back to main changelog](../index.md)
+[← Vercel Chat SDK integration](../../sdks/integrations/chat.md)

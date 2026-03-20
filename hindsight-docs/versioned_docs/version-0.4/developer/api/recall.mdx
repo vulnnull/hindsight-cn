@@ -16,6 +16,7 @@ import CodeSnippet from '@site/src/components/CodeSnippet';
 import recallPy from '!!raw-loader!@site/examples/api/recall.py';
 import recallMjs from '!!raw-loader!@site/examples/api/recall.mjs';
 import recallSh from '!!raw-loader!@site/examples/api/recall.sh';
+import recallGo from '!!raw-loader!@site/examples/api/recall.go';
 
 :::info How Recall Works
 Learn about the four retrieval strategies (semantic, keyword, graph, temporal) and RRF fusion in the [Recall Architecture](/developer/retrieval) guide.
@@ -36,6 +37,9 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 </TabItem>
 <TabItem value="cli" label="CLI">
 <CodeSnippet code={recallSh} section="recall-basic" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={recallGo} section="recall-basic" language="go" />
 </TabItem>
 </Tabs>
 
@@ -59,8 +63,18 @@ Each type runs the full four-strategy retrieval pipeline independently, so narro
 <CodeSnippet code={recallPy} section="recall-experience-only" language="python" />
 <CodeSnippet code={recallPy} section="recall-observations-only" language="python" />
 </TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={recallMjs} section="recall-world-only" language="javascript" />
+<CodeSnippet code={recallMjs} section="recall-experience-only" language="javascript" />
+<CodeSnippet code={recallMjs} section="recall-observations-only" language="javascript" />
+</TabItem>
 <TabItem value="cli" label="CLI">
 <CodeSnippet code={recallSh} section="recall-fact-type" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={recallGo} section="recall-world-only" language="go" />
+<CodeSnippet code={recallGo} section="recall-experience-only" language="go" />
+<CodeSnippet code={recallGo} section="recall-observations-only" language="go" />
 </TabItem>
 </Tabs>
 
@@ -79,6 +93,12 @@ Controls retrieval depth and breadth. Accepted values are `low`, `mid` (default)
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={recallMjs} section="recall-budget-levels" language="javascript" />
 </TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={recallSh} section="recall-budget-levels" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={recallGo} section="recall-budget-levels" language="go" />
+</TabItem>
 </Tabs>
 
 ### max_tokens
@@ -88,6 +108,15 @@ The maximum number of tokens the returned facts can collectively occupy. Default
 <Tabs>
 <TabItem value="python" label="Python">
 <CodeSnippet code={recallPy} section="recall-token-budget" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={recallMjs} section="recall-token-budget" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={recallSh} section="recall-token-budget" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={recallGo} section="recall-token-budget" language="go" />
 </TabItem>
 </Tabs>
 
@@ -117,6 +146,12 @@ When enabled and `types` includes `observation`, each observation result is acco
 </TabItem>
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={recallMjs} section="recall-source-facts" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={recallSh} section="recall-source-facts" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={recallGo} section="recall-source-facts" language="go" />
 </TabItem>
 </Tabs>
 
@@ -152,7 +187,20 @@ Consider a bank with these four memories:
 
 Returns memories that have **at least one** matching tag, plus untagged memories.
 
+<Tabs>
+<TabItem value="python" label="Python">
 <CodeSnippet code={recallPy} section="recall-tags-any" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={recallMjs} section="recall-tags-any" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={recallSh} section="recall-tags-any" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={recallGo} section="recall-with-tags" language="go" />
+</TabItem>
+</Tabs>
 
 Use this for **shared global knowledge + user-specific** patterns, where untagged memories represent information everyone should see.
 
@@ -160,7 +208,20 @@ Use this for **shared global knowledge + user-specific** patterns, where untagge
 
 Same as `any` but untagged memories are excluded.
 
+<Tabs>
+<TabItem value="python" label="Python">
 <CodeSnippet code={recallPy} section="recall-tags-any-strict" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={recallMjs} section="recall-tags-any-strict" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={recallSh} section="recall-tags-any-strict" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={recallGo} section="recall-tags-strict" language="go" />
+</TabItem>
+</Tabs>
 
 Use this when memories are **fully partitioned by tags** and untagged memories should never be visible.
 
@@ -168,7 +229,20 @@ Use this when memories are **fully partitioned by tags** and untagged memories s
 
 Returns memories that have **every** specified tag, plus untagged memories.
 
+<Tabs>
+<TabItem value="python" label="Python">
 <CodeSnippet code={recallPy} section="recall-tags-all-mode" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={recallMjs} section="recall-tags-all-mode" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={recallSh} section="recall-tags-all-mode" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={recallGo} section="recall-tags-all-mode" language="go" />
+</TabItem>
+</Tabs>
 
 Use this when memories must belong to a **specific intersection** of scopes (e.g., only memories relevant to both a user and a project), while still surfacing shared global knowledge.
 
@@ -176,7 +250,20 @@ Use this when memories must belong to a **specific intersection** of scopes (e.g
 
 Returns memories that have **every** specified tag, and excludes untagged memories.
 
+<Tabs>
+<TabItem value="python" label="Python">
 <CodeSnippet code={recallPy} section="recall-tags-all-strict" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={recallMjs} section="recall-tags-all-strict" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={recallSh} section="recall-tags-all-strict" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={recallGo} section="recall-tags-all" language="go" />
+</TabItem>
+</Tabs>
 
 Use this for strict scope enforcement where a memory must explicitly belong to **all** specified contexts.
 

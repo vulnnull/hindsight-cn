@@ -6,7 +6,7 @@ sidebar_position: 7
 
 Persistent long-term memory for [LangGraph](https://langchain-ai.github.io/langgraph/) and [LangChain](https://python.langchain.com/) agents via Hindsight. Three integration patterns at different abstraction levels — the tools pattern works with both LangChain and LangGraph, while nodes and the BaseStore adapter are LangGraph-specific.
 
-[View Changelog →](/changelog/integrations/langgraph)
+[View Changelog →](../../changelog/integrations/langgraph.md)
 
 ## Features
 

@@ -2,10 +2,8 @@
 hide_table_of_contents: true
 ---
 
-# OpenClaw Integration Changelog
+import PageHero from '@site/src/components/PageHero';
 
-Changelog for [`@vectorize-io/hindsight-openclaw`](https://www.npmjs.com/package/@vectorize-io/hindsight-openclaw) — Hindsight memory plugin for OpenClaw.
+<PageHero title="OpenClaw Changelog" subtitle="@vectorize-io/hindsight-openclaw — Hindsight memory plugin for OpenClaw." />
 
-For the source code, see [`hindsight-integrations/openclaw`](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/openclaw).
-
-← [Back to main changelog](/changelog)
+[← OpenClaw integration](/sdks/integrations/openclaw)

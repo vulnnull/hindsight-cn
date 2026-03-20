@@ -117,7 +117,7 @@ These settings only affect the `reflect` operation, not `recall`.
 
 ## Integrations
 
-<IntegrationsGrid />
+Browse all supported integrations in the Integrations Hub.
 
 ## Next Steps
 

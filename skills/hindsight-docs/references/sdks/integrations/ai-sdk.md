@@ -3,6 +3,8 @@
 
 The `@vectorize-io/hindsight-ai-sdk` package integrates [Hindsight](https://hindsight.vectorize.io) memory with the [Vercel AI SDK](https://ai-sdk.dev). It provides five ready-to-use tools for retaining, recalling, and reflecting on long-term memories.
 
+[View Changelog →](../../changelog/integrations/ai-sdk.md)
+
 ## Installation
 
 ```bash

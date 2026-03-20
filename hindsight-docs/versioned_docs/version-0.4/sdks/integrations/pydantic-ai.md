@@ -6,6 +6,8 @@ sidebar_position: 6
 
 Persistent memory tools for [Pydantic AI](https://ai.pydantic.dev/) agents via Hindsight. Give your agents long-term memory with retain, recall, and reflect — all async-native with no thread-pool hacks.
 
+[View Changelog →](/changelog/integrations/pydantic-ai)
+
 ## Features
 
 - **Async-Native Tools** — Uses Pydantic AI's async tool interface directly (`aretain`, `arecall`, `areflect`)

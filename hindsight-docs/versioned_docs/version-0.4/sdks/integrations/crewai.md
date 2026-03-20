@@ -6,6 +6,8 @@ sidebar_position: 5
 
 Persistent memory for AI agent crews via [CrewAI](https://github.com/crewAIInc/crewAI). Give your crews long-term memory with fact extraction, entity tracking, and temporal awareness.
 
+[View Changelog →](/changelog/integrations/crewai)
+
 ## Features
 
 - **Drop-in Storage Backend** - Implements CrewAI's `Storage` interface for `ExternalMemory`

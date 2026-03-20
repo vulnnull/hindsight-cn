@@ -13,8 +13,12 @@ import CodeSnippet from '@site/src/components/CodeSnippet';
 {/* Import raw source files */}
 import memoryBanksPy from '!!raw-loader!@site/examples/api/memory-banks.py';
 import memoryBanksMjs from '!!raw-loader!@site/examples/api/memory-banks.mjs';
+import memoryBanksSh from '!!raw-loader!@site/examples/api/memory-banks.sh';
+import memoryBanksGo from '!!raw-loader!@site/examples/api/memory-banks.go';
 import directivesPy from '!!raw-loader!@site/examples/api/directives.py';
 import directivesMjs from '!!raw-loader!@site/examples/api/directives.mjs';
+import directivesSh from '!!raw-loader!@site/examples/api/directives.sh';
+import directivesGo from '!!raw-loader!@site/examples/api/directives.go';
 
 ## What is a Memory Bank?
 
@@ -44,11 +48,10 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 <CodeSnippet code={memoryBanksMjs} section="create-bank" language="javascript" />
 </TabItem>
 <TabItem value="cli" label="CLI">
-
-```bash
-hindsight bank create my-bank
-```
-
+<CodeSnippet code={memoryBanksSh} section="create-bank" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={memoryBanksGo} section="create-bank" language="go" />
 </TabItem>
 </Tabs>
 
@@ -205,6 +208,12 @@ How skeptical vs trusting the bank is when evaluating claims during `reflect`. S
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={memoryBanksMjs} section="bank-with-disposition" language="javascript" />
 </TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={memoryBanksSh} section="bank-with-disposition" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={memoryBanksGo} section="bank-with-disposition" language="go" />
+</TabItem>
 </Tabs>
 
 | Value | Behaviour |
@@ -275,6 +284,12 @@ Bank configuration fields (retain mission, extraction mode, observations mission
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={memoryBanksMjs} section="update-bank-config" language="javascript" />
 </TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={memoryBanksSh} section="update-bank-config" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={memoryBanksGo} section="update-bank-config" language="go" />
+</TabItem>
 </Tabs>
 
 You can update any subset of fields — only the keys you provide are changed.
@@ -287,6 +302,12 @@ You can update any subset of fields — only the keys you provide are changed.
 </TabItem>
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={memoryBanksMjs} section="get-bank-config" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={memoryBanksSh} section="get-bank-config" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={memoryBanksGo} section="get-bank-config" language="go" />
 </TabItem>
 </Tabs>
 
@@ -302,6 +323,12 @@ The response distinguishes:
 </TabItem>
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={memoryBanksMjs} section="reset-bank-config" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={memoryBanksSh} section="reset-bank-config" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={memoryBanksGo} section="reset-bank-config" language="go" />
 </TabItem>
 </Tabs>
 
@@ -337,6 +364,12 @@ Use directives for rules that must never be violated:
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={directivesMjs} section="create-directive" language="javascript" />
 </TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={directivesSh} section="create-directive" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={directivesGo} section="create-directive" language="go" />
+</TabItem>
 </Tabs>
 
 ### Listing Directives
@@ -347,6 +380,12 @@ Use directives for rules that must never be violated:
 </TabItem>
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={directivesMjs} section="list-directives" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={directivesSh} section="list-directives" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={directivesGo} section="list-directives" language="go" />
 </TabItem>
 </Tabs>
 
@@ -359,6 +398,12 @@ Use directives for rules that must never be violated:
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={directivesMjs} section="update-directive" language="javascript" />
 </TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={directivesSh} section="update-directive" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={directivesGo} section="update-directive" language="go" />
+</TabItem>
 </Tabs>
 
 ### Deleting Directives
@@ -369,6 +414,12 @@ Use directives for rules that must never be violated:
 </TabItem>
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={directivesMjs} section="delete-directive" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={directivesSh} section="delete-directive" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={directivesGo} section="delete-directive" language="go" />
 </TabItem>
 </Tabs>
 

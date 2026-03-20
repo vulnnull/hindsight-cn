@@ -16,6 +16,7 @@ import CodeSnippet from '@site/src/components/CodeSnippet';
 import reflectPy from '!!raw-loader!@site/examples/api/reflect.py';
 import reflectMjs from '!!raw-loader!@site/examples/api/reflect.mjs';
 import reflectSh from '!!raw-loader!@site/examples/api/reflect.sh';
+import reflectGo from '!!raw-loader!@site/examples/api/reflect.go';
 
 :::info How Reflect Works
 Learn about disposition-driven reasoning in the [Reflect Architecture](/developer/reflect) guide.
@@ -36,6 +37,9 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 </TabItem>
 <TabItem value="cli" label="CLI">
 <CodeSnippet code={reflectSh} section="reflect-basic" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={reflectGo} section="reflect-basic" language="go" />
 </TabItem>
 </Tabs>
 
@@ -58,6 +62,12 @@ Controls how thoroughly the agent explores the memory bank before answering. Acc
 <TabItem value="node" label="Node.js">
 <CodeSnippet code={reflectMjs} section="reflect-with-params" language="javascript" />
 </TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={reflectSh} section="reflect-with-params" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={reflectGo} section="reflect-with-params" language="go" />
+</TabItem>
 </Tabs>
 
 ### max_tokens
@@ -78,6 +88,9 @@ An optional JSON Schema object. When provided, the LLM generates a response that
 <TabItem value="cli" label="CLI">
 <CodeSnippet code={reflectSh} section="reflect-structured-output" language="bash" />
 </TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={reflectGo} section="reflect-structured-output" language="go" />
+</TabItem>
 </Tabs>
 
 ### tags
@@ -87,6 +100,15 @@ Filters which memories the agent can access during reflection. Works identically
 <Tabs>
 <TabItem value="python" label="Python">
 <CodeSnippet code={reflectPy} section="reflect-with-tags" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={reflectMjs} section="reflect-with-tags" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={reflectSh} section="reflect-with-tags" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={reflectGo} section="reflect-with-tags" language="go" />
 </TabItem>
 </Tabs>
 
@@ -101,6 +123,15 @@ When enabled, the response includes a `based_on` object listing the memories, me
 <Tabs>
 <TabItem value="python" label="Python">
 <CodeSnippet code={reflectPy} section="reflect-sources" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={reflectMjs} section="reflect-sources" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={reflectSh} section="reflect-sources" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={reflectGo} section="reflect-sources" language="go" />
 </TabItem>
 </Tabs>
 

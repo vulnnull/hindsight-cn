@@ -8,7 +8,7 @@ Persistent memory for [NemoClaw](https://nemoclaw.ai) sandboxed agents using [Hi
 
 NemoClaw runs [OpenClaw](https://openclaw.ai) inside an OpenShell sandbox with controlled filesystem, process, and network egress policies. The `hindsight-nemoclaw` package automates adding Hindsight memory to a sandbox in one command — no code changes required.
 
-[View Changelog →](/changelog/integrations/nemoclaw)
+[View Changelog →](../../changelog/integrations/nemoclaw.md)
 
 ## Quick Start
 

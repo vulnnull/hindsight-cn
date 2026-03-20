@@ -129,7 +129,7 @@ go get github.com/vectorize-io/hindsight/hindsight-clients/go
 
 ## Integrations
 
-<IntegrationsGrid />
+Browse all supported integrations in the Integrations Hub.
 
 ## Next Steps
 

@@ -234,6 +234,12 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/nemoclaw',
+          label: 'NemoClaw',
+          customProps: { icon: '/img/icons/nemoclaw.png' },
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/skills',
           label: 'Skills',
           customProps: { icon: '/img/icons/skills.png' },

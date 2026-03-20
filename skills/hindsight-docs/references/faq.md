@@ -1,6 +1,6 @@
 
 
-# Frequently Asked Questions
+<PageHero title="FAQ" subtitle="Common questions and answers about Hindsight." />
 
 **Contents**
 - [What is Hindsight and how does it differ from RAG?](#what-is-hindsight-and-how-does-it-differ-from-rag)
@@ -57,7 +57,7 @@ Unlike vector databases (just search) or RAG systems (document retrieval), Hinds
 
 ### Which integrations are supported?
 
-<IntegrationsGrid />
+Browse all supported integrations in the Integrations Hub.
 
 ---
 

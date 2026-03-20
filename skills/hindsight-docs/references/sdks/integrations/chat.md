@@ -6,6 +6,8 @@ sidebar_position: 5
 
 We built `@vectorize-io/hindsight-chat` to give [Vercel Chat SDK](https://github.com/vercel/chat) bots persistent, per-user memory with a single handler wrapper. The integration works across Slack, Discord, Teams, Google Chat, GitHub, and Linear — no custom plumbing required.
 
+[View Changelog →](../../changelog/integrations/chat.md)
+
 ## Installation
 
 ```bash

@@ -15,6 +15,7 @@ import {ClientsGrid} from '@site/src/components/SupportedGrids';
 import quickstartPy from '!!raw-loader!@site/examples/api/quickstart.py';
 import quickstartMjs from '!!raw-loader!@site/examples/api/quickstart.mjs';
 import quickstartSh from '!!raw-loader!@site/examples/api/quickstart.sh';
+import quickstartGo from '!!raw-loader!@site/examples/api/quickstart.go';
 
 ## Clients
 
@@ -89,6 +90,15 @@ curl -fsSL https://hindsight.vectorize.io/get-cli | bash
 ```
 
 <CodeSnippet code={quickstartSh} section="quickstart-full" language="bash" />
+
+</TabItem>
+<TabItem value="go" label="Go">
+
+```bash
+go get github.com/vectorize-io/hindsight/hindsight-clients/go
+```
+
+<CodeSnippet code={quickstartGo} section="quickstart-full" language="go" />
 
 </TabItem>
 </Tabs>

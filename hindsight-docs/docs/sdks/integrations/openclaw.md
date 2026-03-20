@@ -8,6 +8,8 @@ Local, long term memory for [OpenClaw](https://openclaw.ai) agents using [Hindsi
 
 This plugin integrates [hindsight-embed](https://vectorize.io/hindsight/cli), a standalone daemon that bundles Hindsight's memory engine (API + PostgreSQL) into a single command. Everything runs locally on your machine, reuses the LLM you're already paying for, and costs nothing extra.
 
+[View Changelog →](/changelog/integrations/openclaw)
+
 ## Quick Start
 
 **Step 1: Set up LLM for memory extraction**
