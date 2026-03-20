@@ -2,6 +2,7 @@
 name = "hindsight-hermes"
 version = "0.4.19"
 description = "Hermes agent integration for Hindsight - persistent memory tools for AI agents"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
