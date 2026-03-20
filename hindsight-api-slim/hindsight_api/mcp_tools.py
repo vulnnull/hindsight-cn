@@ -42,6 +42,9 @@ class MCPToolsConfig:
     # How to resolve api_key_id for usage metering (set by MCP middleware after auth)
     api_key_id_resolver: Callable[[], str | None] | None = None
 
+    # How to resolve mcp_authenticated flag (set when MCP_AUTH_TOKEN validates)
+    mcp_authenticated_resolver: Callable[[], bool] | None = None
+
     # Whether to include bank_id as a parameter on tools (for multi-bank support)
     include_bank_id_param: bool = False
 
@@ -64,7 +67,10 @@ def _get_request_context(config: MCPToolsConfig) -> RequestContext:
     api_key = config.api_key_resolver() if config.api_key_resolver else None
     tenant_id = config.tenant_id_resolver() if config.tenant_id_resolver else None
     api_key_id = config.api_key_id_resolver() if config.api_key_id_resolver else None
-    return RequestContext(api_key=api_key, tenant_id=tenant_id, api_key_id=api_key_id)
+    mcp_authenticated = config.mcp_authenticated_resolver() if config.mcp_authenticated_resolver else False
+    return RequestContext(
+        api_key=api_key, tenant_id=tenant_id, api_key_id=api_key_id, mcp_authenticated=mcp_authenticated
+    )
 
 
 def parse_timestamp(timestamp: str) -> datetime | None:

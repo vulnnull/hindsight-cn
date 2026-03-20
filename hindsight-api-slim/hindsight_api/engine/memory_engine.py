@@ -545,6 +545,12 @@ class MemoryEngine(MemoryEngineInterface):
         if request_context.internal:
             return _current_schema.get()
 
+        # For MCP requests already authenticated via MCP_AUTH_TOKEN, skip tenant re-validation.
+        # The MCP transport layer already verified the token; re-validating against the tenant
+        # extension would fail when MCP_AUTH_TOKEN and TENANT_API_KEY differ.
+        if request_context.mcp_authenticated:
+            return _current_schema.get()
+
         # Authenticate through tenant extension (always set, may be default no-auth extension)
         tenant_context = await self._tenant_extension.authenticate(request_context)
 

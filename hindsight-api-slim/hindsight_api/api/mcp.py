@@ -83,6 +83,9 @@ _current_api_key: ContextVar[str | None] = ContextVar("current_api_key", default
 _current_tenant_id: ContextVar[str | None] = ContextVar("current_tenant_id", default=None)
 _current_api_key_id: ContextVar[str | None] = ContextVar("current_api_key_id", default=None)
 
+# Context variable for MCP pre-authentication flag (set when MCP_AUTH_TOKEN validates)
+_current_mcp_authenticated: ContextVar[bool] = ContextVar("current_mcp_authenticated", default=False)
+
 
 def get_current_bank_id() -> str | None:
     """Get the current bank_id from context."""
@@ -102,6 +105,11 @@ def get_current_tenant_id() -> str | None:
 def get_current_api_key_id() -> str | None:
     """Get the current api_key_id from context."""
     return _current_api_key_id.get()
+
+
+def get_current_mcp_authenticated() -> bool:
+    """Get whether the request was pre-authenticated by MCP transport auth."""
+    return _current_mcp_authenticated.get()
 
 
 def create_mcp_server(memory: MemoryEngine, multi_bank: bool = True) -> FastMCP:
@@ -164,6 +172,7 @@ def create_mcp_server(memory: MemoryEngine, multi_bank: bool = True) -> FastMCP:
         api_key_resolver=get_current_api_key,  # Propagate API key for tenant auth
         tenant_id_resolver=get_current_tenant_id,  # Propagate tenant_id for usage metering
         api_key_id_resolver=get_current_api_key_id,  # Propagate api_key_id for usage metering
+        mcp_authenticated_resolver=get_current_mcp_authenticated,  # Propagate MCP pre-auth flag
         include_bank_id_param=multi_bank,
         tools=base_tools,
     )
@@ -312,6 +321,7 @@ class MCPMiddleware:
         tenant_context = None
         auth_tenant_id: str | None = None
         auth_api_key_id: str | None = None
+        mcp_pre_authenticated = False
         if MCP_AUTH_TOKEN:
             # Legacy authentication mode - validate against static token
             if not auth_token:
@@ -320,8 +330,9 @@ class MCPMiddleware:
             if auth_token != MCP_AUTH_TOKEN:
                 await self._send_error(send, 401, "Invalid authentication token")
                 return
-            # Legacy mode doesn't use tenant schemas
+            # Legacy mode: mark as pre-authenticated so tenant extension won't re-validate
             tenant_context = None
+            mcp_pre_authenticated = True
         else:
             # Use TenantExtension.authenticate_mcp() for auth
             try:
@@ -368,13 +379,15 @@ class MCPMiddleware:
         # - Header/env bank_id → multi-bank app (bank_id param, all tools)
         target_app = self.single_bank_app if bank_id_from_path else self.multi_bank_app
 
-        # Set bank_id, api_key, tenant_id, and api_key_id context
+        # Set bank_id, api_key, tenant_id, api_key_id, and mcp_authenticated context
         bank_id_token = _current_bank_id.set(bank_id)
         # Store the auth token for tenant extension to validate
         api_key_token = _current_api_key.set(auth_token) if auth_token else None
         # Store tenant_id and api_key_id from authentication for usage metering
         tenant_id_token = _current_tenant_id.set(auth_tenant_id) if auth_tenant_id else None
         api_key_id_token = _current_api_key_id.set(auth_api_key_id) if auth_api_key_id else None
+        # Store MCP pre-authentication flag to skip tenant re-validation
+        mcp_auth_token = _current_mcp_authenticated.set(mcp_pre_authenticated)
         try:
             new_scope = scope.copy()
             new_scope["path"] = new_path
@@ -419,6 +432,7 @@ class MCPMiddleware:
                 _current_tenant_id.reset(tenant_id_token)
             if api_key_id_token is not None:
                 _current_api_key_id.reset(api_key_id_token)
+            _current_mcp_authenticated.reset(mcp_auth_token)
             if schema_token is not None:
                 _current_schema.reset(schema_token)
 

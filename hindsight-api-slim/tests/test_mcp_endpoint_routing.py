@@ -4,6 +4,9 @@ This test verifies that /mcp/ and /mcp/{bank_id}/ expose different tool sets,
 and that URLs with or without trailing slashes both work (no 307 redirect).
 """
 
+import json
+from unittest.mock import patch
+
 import httpx
 import pytest
 from mcp.client.session import ClientSession
@@ -278,3 +281,93 @@ async def test_mcp_bank_named_messages_routes_to_single_bank(memory):
 
                     assert "retain" in tools
                     assert "list_banks" not in tools, "Bank 'messages' should route to single-bank mode"
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_execution_with_different_mcp_and_tenant_tokens(memory):
+    """Test that MCP tool calls work when MCP_AUTH_TOKEN and TENANT_API_KEY differ.
+
+    Regression test for https://github.com/vectorize-io/hindsight/issues/627
+    When both HINDSIGHT_API_MCP_AUTH_TOKEN and ApiKeyTenantExtension are configured
+    with different values, tool calls should succeed because MCP transport auth
+    already validated the token — the tenant extension should not re-validate.
+    """
+    from httpx import ASGITransport
+
+    from hindsight_api.api import create_app
+    from hindsight_api.extensions import ApiKeyTenantExtension
+
+    mcp_token = "mcp-secret-token"
+    tenant_key = "tenant-secret-key"
+
+    # Configure ApiKeyTenantExtension with a different key than the MCP token
+    tenant_ext = ApiKeyTenantExtension({"api_key": tenant_key})
+    memory._tenant_extension = tenant_ext
+
+    # Patch MCP_AUTH_TOKEN so the MCP middleware uses legacy auth
+    with patch("hindsight_api.api.mcp.MCP_AUTH_TOKEN", mcp_token):
+        app = create_app(memory, mcp_api_enabled=True, initialize_memory=False)
+
+        async with app.router.lifespan_context(app):
+            # Pass auth header via the httpx client (streamable_http_client doesn't accept headers)
+            async with httpx.AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+                headers={"Authorization": f"Bearer {mcp_token}"},
+            ) as http_client:
+                async with streamable_http_client("http://test/mcp/", http_client=http_client) as (
+                    read_stream,
+                    write_stream,
+                    _,
+                ):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+
+                        # list_tools should work
+                        tools_result = await session.list_tools()
+                        tool_names = {t.name for t in tools_result.tools}
+                        assert "get_bank" in tool_names
+
+                        # Tool execution should work (this was failing before the fix)
+                        result = await session.call_tool("list_banks", arguments={})
+                        assert result is not None
+                        assert len(result.content) > 0
+                        parsed = json.loads(result.content[0].text)
+                        assert "banks" in parsed
+                        assert "error" not in parsed, f"Tool call failed with: {parsed.get('error')}"
+
+
+@pytest.mark.asyncio
+async def test_mcp_rejects_wrong_mcp_token_even_if_matches_tenant_key(memory):
+    """Test that an invalid MCP token is rejected even if it matches the tenant key.
+
+    When MCP_AUTH_TOKEN is set, the MCP middleware should validate against that token,
+    not the tenant API key.
+    """
+    from httpx import ASGITransport
+
+    from hindsight_api.api import create_app
+    from hindsight_api.extensions import ApiKeyTenantExtension
+
+    mcp_token = "mcp-secret-token"
+    tenant_key = "tenant-secret-key"
+
+    tenant_ext = ApiKeyTenantExtension({"api_key": tenant_key})
+    memory._tenant_extension = tenant_ext
+
+    with patch("hindsight_api.api.mcp.MCP_AUTH_TOKEN", mcp_token):
+        app = create_app(memory, mcp_api_enabled=True, initialize_memory=False)
+
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client:
+                # Try connecting with the tenant key (wrong for MCP auth)
+                response = await http_client.post(
+                    "http://test/mcp/",
+                    headers={
+                        "Authorization": f"Bearer {tenant_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                )
+                assert response.status_code == 401
