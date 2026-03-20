@@ -9,3 +9,9 @@ Changelog for [`hindsight-langgraph`](https://pypi.org/project/hindsight-langgra
 For the source code, see [`hindsight-integrations/langgraph`](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/langgraph).
 
 ← [Back to main changelog](/changelog)
+
+## [0.1.1](https://github.com/vectorize-io/hindsight/tree/integrations/langgraph/v0.1.1)
+
+**Features**
+
+- Added LangGraph integration for Hindsight. ([`b4320254`](https://github.com/vectorize-io/hindsight/commit/b4320254))
