@@ -13,7 +13,7 @@ print_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 print_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-VALID_INTEGRATIONS=("litellm" "pydantic-ai" "crewai" "ai-sdk" "chat" "openclaw")
+VALID_INTEGRATIONS=("litellm" "pydantic-ai" "crewai" "ai-sdk" "chat" "openclaw" "langgraph")
 
 usage() {
     print_error "Usage: $0 <integration> <version>"
