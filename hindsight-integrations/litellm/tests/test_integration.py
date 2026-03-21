@@ -356,6 +356,74 @@ class TestCallback:
         assert "Relevant Memories" in result[0]["content"]
         assert "What's my name?" in result[0]["content"]
 
+    def test_inject_memories_uses_last_user_message_when_no_hindsight_query(self):
+        """Regression test: inject_memories=True should not require hindsight_query.
+
+        The documented Quick Start example does not pass hindsight_query; the
+        injection path must fall back to the last user message automatically.
+        See: feat(litellm) #167 regression.
+        """
+        from unittest.mock import MagicMock, patch
+
+        callback = HindsightCallback()
+
+        configure(
+            hindsight_api_url="http://localhost:8888",
+            inject_memories=True,
+        )
+        set_defaults(bank_id="test-agent")
+
+        messages = [{"role": "user", "content": "What did we discuss about AI?"}]
+        kwargs = {}  # No hindsight_query provided — this is the regression scenario
+
+        mock_memory = MagicMock()
+        mock_memory.text = "AI is cool"
+        mock_memory.type = "world"
+        mock_memory.weight = 0.9
+
+        with patch.object(callback, "_recall_memories_sync", return_value=[mock_memory]) as mock_recall:
+            callback.log_pre_api_call(
+                model="gpt-4o-mini",
+                messages=messages,
+                kwargs=kwargs,
+            )
+            # Should have called recall with the last user message as query
+            mock_recall.assert_called_once()
+            query_used = mock_recall.call_args[0][0]
+            assert query_used == "What did we discuss about AI?"
+
+        # Memories should have been injected into messages
+        assert any("AI is cool" in str(m.get("content", "")) for m in messages)
+
+    def test_inject_memories_hindsight_query_takes_precedence(self):
+        """When hindsight_query is provided it should be used over the last user message."""
+        from unittest.mock import MagicMock, patch
+
+        callback = HindsightCallback()
+
+        configure(
+            hindsight_api_url="http://localhost:8888",
+            inject_memories=True,
+        )
+        set_defaults(bank_id="test-agent")
+
+        messages = [{"role": "user", "content": "Hello"}]
+        kwargs = {"hindsight_query": "What do I know about Alice?"}
+
+        mock_memory = MagicMock()
+        mock_memory.text = "Alice likes cats"
+        mock_memory.type = "world"
+        mock_memory.weight = 0.9
+
+        with patch.object(callback, "_recall_memories_sync", return_value=[mock_memory]) as mock_recall:
+            callback.log_pre_api_call(
+                model="gpt-4o-mini",
+                messages=messages,
+                kwargs=kwargs,
+            )
+            query_used = mock_recall.call_args[0][0]
+            assert query_used == "What do I know about Alice?"
+
     def test_should_skip_model_exact_match(self):
         """Test model exclusion with exact match."""
         callback = HindsightCallback()

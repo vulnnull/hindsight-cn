@@ -162,9 +162,7 @@ class HindsightCallback(CustomLogger):
                 logger.error(f"HTTP POST failed: {e}")
             raise HindsightError(f"Hindsight API request failed: {e}") from e
 
-    def _http_get(
-        self, url: str, config: HindsightConfig
-    ) -> Optional[dict]:
+    def _http_get(self, url: str, config: HindsightConfig) -> Optional[dict]:
         """Make a synchronous HTTP GET request.
 
         Returns:
@@ -736,16 +734,11 @@ class HindsightCallback(CustomLogger):
         if self._should_skip_model(model, config):
             return
 
-        # hindsight_query is required when inject_memories=True
+        # Use hindsight_query if provided, otherwise fall back to the last user message
         custom_query = kwargs.get("hindsight_query")
-        if not custom_query:
-            raise ValueError(
-                "hindsight_query is required when inject_memories=True. "
-                "Pass hindsight_query='your query' to specify what to search for in memory. "
-                "Example: hindsight_query=recipient_name or hindsight_query='What do I know about Alice?'"
-            )
-
-        user_query = custom_query
+        user_query = custom_query or self._extract_user_query(messages)
+        if not user_query:
+            return
 
         # Use reflect or recall based on settings
         if settings.use_reflect:
@@ -802,16 +795,11 @@ class HindsightCallback(CustomLogger):
         if self._should_skip_model(model, config):
             return
 
-        # hindsight_query is required when inject_memories=True
+        # Use hindsight_query if provided, otherwise fall back to the last user message
         custom_query = kwargs.get("hindsight_query")
-        if not custom_query:
-            raise ValueError(
-                "hindsight_query is required when inject_memories=True. "
-                "Pass hindsight_query='your query' to specify what to search for in memory. "
-                "Example: hindsight_query=recipient_name or hindsight_query='What do I know about Alice?'"
-            )
-
-        user_query = custom_query
+        user_query = custom_query or self._extract_user_query(messages)
+        if not user_query:
+            return
 
         # Use reflect or recall based on settings
         if settings.use_reflect:

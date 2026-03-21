@@ -262,15 +262,28 @@ def _inject_memories(
     if not messages:
         return messages
 
-    # hindsight_query is required when inject_memories=True
-    if not custom_query:
-        raise ValueError(
-            "hindsight_query is required when inject_memories=True. "
-            "Pass hindsight_query='your query' to specify what to search for in memory. "
-            "Example: hindsight_query=recipient_name or hindsight_query='What do I know about Alice?'"
-        )
-
-    user_query = custom_query
+    # Use custom_query if provided, otherwise fall back to the last user message
+    if custom_query:
+        user_query = custom_query
+    else:
+        user_query = None
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                content = msg.get("content")
+                if isinstance(content, str):
+                    user_query = content
+                    break
+                elif isinstance(content, list):
+                    text_parts = [
+                        item.get("text", "")
+                        for item in content
+                        if isinstance(item, dict) and item.get("type") == "text"
+                    ]
+                    if text_parts:
+                        user_query = " ".join(text_parts)
+                        break
+        if not user_query:
+            return messages
 
     # Use bank_id from defaults
     bank_id = defaults.bank_id
