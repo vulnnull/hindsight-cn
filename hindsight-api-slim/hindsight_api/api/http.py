@@ -169,6 +169,15 @@ class RecallRequest(BaseModel):
         "Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}.",
     )
 
+    @field_validator("query")
+    @classmethod
+    def validate_query_not_empty(cls, v: str) -> str:
+        from ..engine.search.retrieval import tokenize_query
+
+        if not tokenize_query(v):
+            raise ValueError("query must contain at least one word character after normalization")
+        return v
+
     @model_validator(mode="after")
     def validate_tags_exclusive(self) -> "RecallRequest":
         if self.tags is not None and self.tag_groups is not None:
