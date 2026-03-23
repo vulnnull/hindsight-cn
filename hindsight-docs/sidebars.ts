@@ -186,6 +186,12 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/claude-code',
+          label: 'Claude Code',
+          customProps: { icon: '/img/icons/claudecode.svg' },
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/openclaw',
           label: 'OpenClaw',
           customProps: { icon: '/img/icons/openclaw.png' },

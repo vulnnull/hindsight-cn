@@ -81,6 +81,16 @@
       "icon": "/img/icons/mcp.png"
     },
     {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "description": "Automatic long-term memory for Claude Code via Hindsight hooks. Captures every conversation, recalls relevant context on every prompt.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "tool",
+      "link": "/sdks/integrations/claude-code",
+      "icon": "/img/icons/claudecode.svg"
+    },
+    {
       "id": "openclaw",
       "name": "OpenClaw",
       "description": "Integrate Hindsight with OpenClaw to add memory capabilities to Claude-based agent workflows.",
