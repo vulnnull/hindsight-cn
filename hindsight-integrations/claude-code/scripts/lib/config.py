@@ -88,23 +88,44 @@ def _cast_env(value: str, typ):
         return None
 
 
+def _load_settings_file(path: str, config: dict) -> None:
+    """Merge a settings.json file into config in-place. Silently skips if missing."""
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path) as f:
+            file_config = json.load(f)
+        config.update({k: v for k, v in file_config.items() if v is not None})
+    except (json.JSONDecodeError, OSError) as e:
+        debug_log(config, f"Failed to load {path}: {e}")
+
+
+USER_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hindsight", "claude-code.json")
+
+
 def load_config() -> dict:
-    """Load plugin configuration from settings.json + env overrides."""
+    """Load plugin configuration from settings.json + env overrides.
+
+    Loading order (later entries win):
+      1. Built-in defaults
+      2. Plugin default settings.json  (CLAUDE_PLUGIN_ROOT/settings.json)
+      3. User config                   (~/.hindsight/claude-code.json)
+      4. Environment variable overrides
+
+    ~/.hindsight/claude-code.json is the recommended place to configure the
+    plugin — same convention as ~/.openclaw/openclaw.json. It is stable across
+    plugin updates and marketplace changes.
+    """
     config = dict(DEFAULTS)
 
-    # Find settings.json relative to plugin root
+    # 1. Plugin default settings.json (ships with the plugin, version-specific path)
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
     if not plugin_root:
         plugin_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    _load_settings_file(os.path.join(plugin_root, "settings.json"), config)
 
-    settings_path = os.path.join(plugin_root, "settings.json")
-    if os.path.exists(settings_path):
-        try:
-            with open(settings_path) as f:
-                file_config = json.load(f)
-            config.update({k: v for k, v in file_config.items() if v is not None})
-        except (json.JSONDecodeError, OSError) as e:
-            debug_log(config, f"Failed to load settings.json: {e}")
+    # 2. User config — stable, version-independent, matches openclaw convention
+    _load_settings_file(USER_CONFIG_PATH, config)
 
     # Apply environment variable overrides
     for env_name, (key, typ) in ENV_OVERRIDES.items():

@@ -75,6 +75,24 @@ jobs:
       working-directory: ./hindsight-integrations/openclaw
       run: npm run build
 
+  test-claude-code-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    - name: Install pytest
+      run: pip install pytest
+
+    - name: Run tests
+      working-directory: ./hindsight-integrations/claude-code
+      run: python -m pytest tests/ -v
+
   build-ai-sdk-integration:
     runs-on: ubuntu-latest
 

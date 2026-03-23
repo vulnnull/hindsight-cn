@@ -31,8 +31,10 @@ jobs:
       run: |
         if [ -f "hindsight-integrations/${{ steps.info.outputs.integration }}/pyproject.toml" ]; then
           echo "type=python" >> $GITHUB_OUTPUT
-        else
+        elif [ -f "hindsight-integrations/${{ steps.info.outputs.integration }}/package.json" ]; then
           echo "type=typescript" >> $GITHUB_OUTPUT
+        else
+          echo "type=plugin" >> $GITHUB_OUTPUT
         fi
 
     # ── Python integrations (litellm, pydantic-ai, crewai) ──────────────────
@@ -60,6 +62,16 @@ jobs:
       with:
         packages-dir: ./hindsight-integrations/${{ steps.info.outputs.integration }}/dist
         skip-existing: true
+
+    # ── TypeScript integrations (ai-sdk, chat, openclaw) ────────────────────
+
+    # ── Plugin integrations (claude-code) — no package to publish ───────────
+
+    - name: Plugin release
+      if: steps.type.outputs.type == 'plugin'
+      run: |
+        echo "Plugin integration ${{ steps.info.outputs.integration }} v${{ steps.info.outputs.version }} — no package to publish."
+        echo "Users install via: claude plugin marketplace add vectorize-io/hindsight --sparse hindsight-integrations"
 
     # ── TypeScript integrations (ai-sdk, chat, openclaw) ────────────────────
 
