@@ -2527,7 +2527,6 @@ def _register_routes(app: FastAPI):
         "5. Returns plain text answer and the facts used",
         operation_id="reflect",
         tags=["Memory"],
-        responses={504: {"description": "Reflect operation timed out"}},
     )
     async def api_reflect(
         bank_id: str, request: ReflectRequest, request_context: RequestContext = Depends(get_request_context)

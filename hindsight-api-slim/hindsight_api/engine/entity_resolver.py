@@ -207,9 +207,7 @@ class EntityResolver:
             # "full" strategy if the extension is not installed.  See #626.
             if not self._pg_trgm_checked:
                 self._pg_trgm_checked = True
-                has_trgm = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')"
-                )
+                has_trgm = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')")
                 if not has_trgm:
                     logger.warning(
                         "pg_trgm extension is not available — falling back to 'full' "
@@ -218,9 +216,7 @@ class EntityResolver:
                         "https://github.com/vectorize-io/hindsight/issues/626"
                     )
                     self.entity_lookup = "full"
-                    return await self._resolve_entities_batch_full(
-                        conn, bank_id, entities_data, unit_event_date
-                    )
+                    return await self._resolve_entities_batch_full(conn, bank_id, entities_data, unit_event_date)
             return await self._resolve_entities_batch_trigram(conn, bank_id, entities_data, unit_event_date)
         return await self._resolve_entities_batch_full(conn, bank_id, entities_data, unit_event_date)
 
