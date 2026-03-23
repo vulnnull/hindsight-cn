@@ -86,6 +86,19 @@ class EntityResolver:
         task = asyncio.current_task()
         return id(task) if task is not None else 0
 
+    def discard_pending_stats(self) -> None:
+        """
+        Discard accumulated entity stats and co-occurrence counts for the current task.
+
+        Call this on any exception path between resolve_entities_batch /
+        link_units_to_entities_batch and flush_pending_stats() to prevent the
+        per-task dicts from growing unbounded when tasks fail before flushing.
+        Safe to call even if no entries exist for the current task.
+        """
+        key = self._task_key()
+        self._pending_stats.pop(key, None)
+        self._pending_cooccurrences.pop(key, None)
+
     async def flush_pending_stats(self) -> None:
         """
         Flush accumulated entity stats and co-occurrence counts for the current task.

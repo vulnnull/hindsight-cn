@@ -292,6 +292,10 @@ async def retain_batch(
             pf.document_id = None
             pf.chunk_id = None
 
+        # Discard any leftover pending stats from a previous failed attempt so
+        # retries don't double-count or accumulate unbounded state.
+        entity_resolver.discard_pending_stats()
+
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
                 # Handle document tracking for all documents

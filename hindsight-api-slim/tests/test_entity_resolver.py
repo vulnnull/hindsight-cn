@@ -11,6 +11,50 @@ import pytest
 from hindsight_api.engine.entity_resolver import EntityResolver
 from hindsight_api.pg0 import resolve_database_url
 
+# ---------------------------------------------------------------------------
+# Unit tests for discard_pending_stats() — no database required
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_discard_pending_stats_clears_both_dicts():
+    """discard_pending_stats() must remove entries for the current task from
+    both _pending_stats and _pending_cooccurrences."""
+    resolver = EntityResolver(pool=None)  # type: ignore[arg-type]
+    key = resolver._task_key()
+
+    resolver._pending_stats[key] = [object()]  # type: ignore[list-item]
+    resolver._pending_cooccurrences[key] = [object()]  # type: ignore[list-item]
+
+    resolver.discard_pending_stats()
+
+    assert key not in resolver._pending_stats
+    assert key not in resolver._pending_cooccurrences
+
+
+@pytest.mark.asyncio
+async def test_discard_pending_stats_is_idempotent():
+    """Calling discard_pending_stats() when nothing is pending must not raise."""
+    resolver = EntityResolver(pool=None)  # type: ignore[arg-type]
+    resolver.discard_pending_stats()
+    resolver.discard_pending_stats()  # second call — still safe
+
+
+@pytest.mark.asyncio
+async def test_discard_pending_stats_does_not_affect_other_task_keys():
+    """discard_pending_stats() must only remove the current task's entries,
+    leaving entries keyed under other task IDs untouched."""
+    resolver = EntityResolver(pool=None)  # type: ignore[arg-type]
+    other_key = -1  # A fake key that can never be a real task id
+
+    resolver._pending_stats[other_key] = [object()]  # type: ignore[list-item]
+    resolver._pending_cooccurrences[other_key] = [object()]  # type: ignore[list-item]
+
+    resolver.discard_pending_stats()  # discards current task's key only
+
+    assert other_key in resolver._pending_stats, "other task's stats must be preserved"
+    assert other_key in resolver._pending_cooccurrences, "other task's cooccurrences must be preserved"
+
 
 @pytest.mark.asyncio
 async def test_resolve_entities_batch_handles_unicode_lower_conflicts(pg0_db_url):
