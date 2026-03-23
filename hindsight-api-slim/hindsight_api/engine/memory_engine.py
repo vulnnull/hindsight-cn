@@ -5228,6 +5228,7 @@ class MemoryEngine(MemoryEngineInterface):
         effective_budget = budget or Budget.LOW
         max_iterations = max(1, int(base_max_iterations * budget_multipliers.get(effective_budget, 1.0)))
         max_context_tokens = config.reflect_max_context_tokens
+        wall_timeout = config.reflect_wall_timeout
 
         # Run agentic loop - acquire connections only when needed for DB operations
         # (not held during LLM calls which can be slow)
@@ -5332,31 +5333,46 @@ class MemoryEngine(MemoryEngineInterface):
             span_context = None
 
         try:
-            agent_result = await run_reflect_agent(
-                llm_config=self._reflect_llm_config.with_config(resolved_reflect_config),
-                bank_id=bank_id,
-                query=query,
-                bank_profile=profile,
-                search_mental_models_fn=search_mental_models_fn,
-                search_observations_fn=search_observations_fn,
-                recall_fn=recall_fn,
-                expand_fn=expand_fn,
-                context=context,
-                max_iterations=max_iterations,
-                max_tokens=max_tokens,
-                response_schema=response_schema,
-                directives=directives,
-                has_mental_models=has_mental_models,
-                include_observations=include_observations,
-                include_recall=include_recall,
-                budget=effective_budget,
-                max_context_tokens=max_context_tokens,
-            )
+            try:
+                agent_result = await asyncio.wait_for(
+                    run_reflect_agent(
+                        llm_config=self._reflect_llm_config.with_config(resolved_reflect_config),
+                        bank_id=bank_id,
+                        query=query,
+                        bank_profile=profile,
+                        search_mental_models_fn=search_mental_models_fn,
+                        search_observations_fn=search_observations_fn,
+                        recall_fn=recall_fn,
+                        expand_fn=expand_fn,
+                        context=context,
+                        max_iterations=max_iterations,
+                        max_tokens=max_tokens,
+                        response_schema=response_schema,
+                        directives=directives,
+                        has_mental_models=has_mental_models,
+                        include_observations=include_observations,
+                        include_recall=include_recall,
+                        budget=effective_budget,
+                        max_context_tokens=max_context_tokens,
+                    ),
+                    timeout=wall_timeout,
+                )
+            except asyncio.TimeoutError:
+                total_time = time.time() - reflect_start
+                logger.error(
+                    "[REFLECT %s] Wall-clock timeout after %.1fs (limit: %ss) for query: %.50s...",
+                    reflect_id, total_time, wall_timeout, query,
+                )
+                raise TimeoutError(
+                    f"Reflect operation timed out after {wall_timeout} seconds. "
+                    f"Consider reducing the budget or simplifying the query."
+                )
 
             total_time = time.time() - reflect_start
             logger.info(
-                f"[REFLECT {reflect_id}] Complete: {len(agent_result.text)} chars, "
-                f"{agent_result.iterations} iterations, {agent_result.tools_called} tool calls | {total_time:.3f}s"
+                "[REFLECT %s] Complete: %d chars, %d iterations, %d tool calls | %.3fs",
+                reflect_id, len(agent_result.text), agent_result.iterations,
+                agent_result.tools_called, total_time,
             )
 
             # Convert agent tool trace to ToolCallTrace objects

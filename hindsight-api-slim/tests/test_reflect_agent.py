@@ -5,8 +5,10 @@ These tests verify:
 1. Tool name normalization for various LLM output formats
 2. Recovery from unknown tool calls
 3. Recovery from tool execution errors
+4. Wall-clock timeout enforcement
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -415,6 +417,32 @@ class TestReflectAgentMocked:
         # Should have a result even if no memories found
         assert result is not None
         assert result.iterations == 3
+
+    @pytest.mark.asyncio
+    async def test_wall_clock_timeout(self, mock_llm: MagicMock, mock_functions: dict[str, AsyncMock]) -> None:
+        """Test that asyncio.wait_for can enforce a wall-clock timeout on run_reflect_agent."""
+
+        async def slow_llm_call(*args: object, **kwargs: object) -> LLMToolCallResult:
+            await asyncio.sleep(10)  # Simulate a slow LLM call
+            return LLMToolCallResult(
+                tool_calls=[LLMToolCall(id="1", name="recall", arguments={"query": "test"})],
+                finish_reason="tool_calls",
+            )
+
+        mock_llm.call_with_tools.side_effect = slow_llm_call
+
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                run_reflect_agent(
+                    llm_config=mock_llm,
+                    bank_id="test-bank",
+                    query="test query",
+                    bank_profile={"name": "Test", "mission": "Testing"},
+                    max_iterations=5,
+                    **mock_functions,
+                ),
+                timeout=0.1,  # Very short timeout to trigger quickly
+            )
 
 
 class TestContextOverflowHelpers:
