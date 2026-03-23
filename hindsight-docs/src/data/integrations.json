@@ -121,14 +121,14 @@
       "icon": "/img/icons/nemoclaw.png"
     },
     {
-      "id": "hindsight-openclaw-pro",
-      "name": "hindsight-openclaw-pro",
-      "description": "Production-grade Hindsight memory plugin for OpenClaw — per-agent config, multi-bank recall, and IaC bank management via the hoppro CLI.",
+      "id": "hindclaw",
+      "name": "HindClaw",
+      "description": "Production memory infrastructure for AI agents — server-side access control via Hindsight extensions, Terraform provider for users/groups/banks/permissions, and an OpenClaw plugin with auto-managed embed.",
       "type": "community",
       "by": "mrkhachaturov",
       "category": "framework",
-      "link": "https://github.com/mrkhachaturov/hindsight-openclaw-pro",
-      "icon": "/img/icons/openclaw.png"
+      "link": "https://github.com/mrkhachaturov/hindclaw",
+      "icon": "/img/icons/hindclaw.png"
     }
   ]
 }
