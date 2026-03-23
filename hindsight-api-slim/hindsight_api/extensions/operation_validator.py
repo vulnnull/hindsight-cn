@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from hindsight_api.engine.memory_engine import Budget
     from hindsight_api.engine.response_models import RecallResult as RecallResultModel
     from hindsight_api.engine.response_models import ReflectResult
+    from hindsight_api.engine.search.tags import TagGroup, TagsMatch
     from hindsight_api.models import RequestContext
 
 
@@ -25,16 +26,50 @@ class OperationValidationError(Exception):
 
 @dataclass
 class ValidationResult:
-    """Result of an operation validation."""
+    """Result of an operation validation.
+
+    Validators return this to accept or reject an operation. When accepting,
+    validators can optionally return modified data that the engine will use
+    instead of the original request parameters. This enables context enrichment
+    (e.g., injecting tags or tag_groups).
+    """
 
     allowed: bool
     reason: str | None = None
     status_code: int = 403  # Default to Forbidden
+    # Optional enrichment fields — returned by validator, used by engine if present.
+    # None means "no modification" (engine uses original values).
+    contents: list[dict] | None = None  # Enriched retain contents (e.g., injected tags/strategy)
+    tags: list[str] | None = None  # Enriched recall tags
+    tags_match: "TagsMatch | None" = None  # Enriched recall tags match mode
+    tag_groups: "list[TagGroup] | None" = None  # Enriched recall tag_groups
 
     @classmethod
     def accept(cls) -> "ValidationResult":
-        """Create an accepted validation result."""
+        """Create an accepted validation result (no enrichment)."""
         return cls(allowed=True)
+
+    @classmethod
+    def accept_with(
+        cls,
+        *,
+        contents: list[dict] | None = None,
+        tags: list[str] | None = None,
+        tags_match: "TagsMatch | None" = None,
+        tag_groups: "list[TagGroup] | None" = None,
+    ) -> "ValidationResult":
+        """Create an accepted validation result with enriched data.
+
+        The engine will use the returned values instead of the original request
+        parameters. Only non-None fields are applied; None means "keep original".
+        """
+        return cls(
+            allowed=True,
+            contents=contents,
+            tags=tags,
+            tags_match=tags_match,
+            tag_groups=tag_groups,
+        )
 
     @classmethod
     def reject(cls, reason: str, status_code: int = 403) -> "ValidationResult":
@@ -52,10 +87,12 @@ class RetainContext:
     """Context for a retain operation validation (pre-operation).
 
     Contains ALL user-provided parameters for the retain operation.
+    To enrich contents (e.g., inject tags or strategy), return them
+    via ValidationResult.accept_with(contents=...).
     """
 
     bank_id: str
-    contents: list[dict]  # List of {content, context, event_date, document_id}
+    contents: list[dict]  # List of {content, context, event_date, document_id, tags, strategy}
     request_context: "RequestContext"
     document_id: str | None = None
     fact_type_override: str | None = None
@@ -67,6 +104,8 @@ class RecallContext:
     """Context for a recall operation validation (pre-operation).
 
     Contains ALL user-provided parameters for the recall operation.
+    To enrich tag filters (e.g., inject tag_groups), return them
+    via ValidationResult.accept_with(tag_groups=...).
     """
 
     bank_id: str
@@ -81,6 +120,9 @@ class RecallContext:
     max_entity_tokens: int = 500
     include_chunks: bool = False
     max_chunk_tokens: int = 8192
+    tags: list[str] | None = None
+    tags_match: "TagsMatch" = "any"
+    tag_groups: "list[TagGroup] | None" = None
 
 
 @dataclass

@@ -499,24 +499,28 @@ class MemoryEngine(MemoryEngineInterface):
         """The configured tenant extension, if any."""
         return self._tenant_extension
 
-    async def _validate_operation(self, validation_coro) -> None:
+    async def _validate_operation(self, validation_coro) -> "ValidationResult | None":
         """
         Run validation if an operation validator is configured.
 
         Args:
             validation_coro: Coroutine that returns a ValidationResult
 
+        Returns:
+            The ValidationResult (may contain enrichment fields), or None if no validator.
+
         Raises:
             OperationValidationError: If validation fails
         """
         if self._operation_validator is None:
-            return
+            return None
 
-        from hindsight_api.extensions import OperationValidationError
+        from hindsight_api.extensions import OperationValidationError, ValidationResult
 
         result = await validation_coro
         if not result.allowed:
             raise OperationValidationError(result.reason or "Operation not allowed", result.status_code)
+        return result
 
     async def _authenticate_tenant(self, request_context: "RequestContext | None") -> str:
         """
@@ -2052,7 +2056,9 @@ class MemoryEngine(MemoryEngineInterface):
                 fact_type_override=fact_type_override,
                 confidence_score=confidence_score,
             )
-            await self._validate_operation(self._operation_validator.validate_retain(ctx))
+            result = await self._validate_operation(self._operation_validator.validate_retain(ctx))
+            if result and result.contents is not None:
+                contents = result.contents
 
         # Apply batch-level document_id to contents that don't have their own (backwards compatibility)
         if document_id:
@@ -2419,8 +2425,18 @@ class MemoryEngine(MemoryEngineInterface):
                 max_entity_tokens=max_entity_tokens,
                 include_chunks=include_chunks,
                 max_chunk_tokens=max_chunk_tokens,
+                tags=tags,
+                tags_match=tags_match,
+                tag_groups=tag_groups,
             )
-            await self._validate_operation(self._operation_validator.validate_recall(ctx))
+            result = await self._validate_operation(self._operation_validator.validate_recall(ctx))
+            if result:
+                if result.tags is not None:
+                    tags = result.tags
+                if result.tags_match is not None:
+                    tags_match = result.tags_match
+                if result.tag_groups is not None:
+                    tag_groups = result.tag_groups
 
         # Map budget enum to thinking_budget number (default to MID if None)
         budget_mapping = {Budget.LOW: 100, Budget.MID: 300, Budget.HIGH: 1000}
@@ -7511,7 +7527,9 @@ class MemoryEngine(MemoryEngineInterface):
                 contents=[dict(c) for c in contents],
                 request_context=request_context,
             )
-            await self._validate_operation(self._operation_validator.validate_retain(ctx))
+            result = await self._validate_operation(self._operation_validator.validate_retain(ctx))
+            if result and result.contents is not None:
+                contents = result.contents
 
         # Validate no duplicate document_ids in the batch
         # Having duplicate document_ids causes race conditions in document upserts during parallel processing
