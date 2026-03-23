@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.client import HindsightClient
 from lib.config import debug_log, load_config
-from lib.daemon import get_api_url
+from lib.daemon import get_api_url, prestart_daemon_background
 
 
 def main():
@@ -45,8 +45,10 @@ def main():
         client = HindsightClient(api_url, config.get("hindsightApiToken"))
         debug_log(config, f"Hindsight server reachable at {api_url}")
     except (RuntimeError, ValueError) as e:
-        # Server not available — log but don't block session
-        debug_log(config, f"Hindsight not available at session start: {e}")
+        # Server not running — kick off background pre-start so it's ready
+        # by the time the first recall or retain hook fires.
+        debug_log(config, f"Hindsight not running, initiating background pre-start: {e}")
+        prestart_daemon_background(config, debug_fn=_dbg)
         return
 
 

@@ -209,7 +209,7 @@ def _ensure_daemon_running(config: dict, port: int, debug_fn=None):
             config,
             ["daemon", "--profile", PROFILE_NAME, "start"],
             daemon_env,
-            timeout=10,
+            timeout=30,
         )
         if debug_fn:
             debug_fn(f"Daemon start exit={result.returncode} stdout={result.stdout.strip()}")
@@ -240,6 +240,67 @@ def _ensure_daemon_running(config: dict, port: int, debug_fn=None):
         time.sleep(1)
 
     raise RuntimeError("Daemon failed to become ready within 30 seconds")
+
+
+def prestart_daemon_background(config: dict, debug_fn=None):
+    """Fire off daemon startup in the background — non-blocking.
+
+    Called from SessionStart hook to warm up the daemon before the first
+    recall or retain hook fires. Returns immediately; the daemon starts
+    asynchronously as a detached OS process.
+    """
+    if config.get("hindsightApiUrl"):
+        return  # External API mode — no local daemon needed
+
+    port = config.get("apiPort", 9077)
+    if _check_health(f"http://127.0.0.1:{port}"):
+        if debug_fn:
+            debug_fn(f"Daemon already running on port {port}, skipping pre-start")
+        return
+
+    if not _is_embed_available(config):
+        if debug_fn:
+            debug_fn("hindsight-embed not available, skipping pre-start")
+        return
+
+    try:
+        llm_config = detect_llm_config(config)
+    except RuntimeError as e:
+        if debug_fn:
+            debug_fn(f"No LLM configured, skipping daemon pre-start: {e}")
+        return
+
+    llm_env = get_llm_env_vars(llm_config)
+    daemon_env = dict(os.environ)
+    daemon_env.update(llm_env)
+    idle_timeout = config.get("daemonIdleTimeout", 300)
+    daemon_env["HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT"] = str(idle_timeout)
+    if platform.system() == "Darwin":
+        daemon_env["HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"] = "1"
+        daemon_env["HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU"] = "1"
+
+    embed_cmd = _get_embed_command(config)
+
+    profile_args = ["profile", "create", PROFILE_NAME, "--merge", "--port", str(port)]
+    for env_name, env_val in llm_env.items():
+        if env_val:
+            profile_args.extend(["--env", f"{env_name}={env_val}"])
+
+    import shlex
+    profile_str = shlex.join(embed_cmd + profile_args)
+    daemon_str = shlex.join(embed_cmd + ["daemon", "--profile", PROFILE_NAME, "start"])
+
+    import subprocess as _sp
+    _sp.Popen(
+        f"{profile_str} && {daemon_str}",
+        shell=True,
+        env=daemon_env,
+        stdout=_sp.DEVNULL,
+        stderr=_sp.DEVNULL,
+        start_new_session=True,
+    )
+    if debug_fn:
+        debug_fn(f"Daemon pre-start initiated in background (port {port})")
 
 
 def stop_daemon(config: dict, debug_fn=None):
