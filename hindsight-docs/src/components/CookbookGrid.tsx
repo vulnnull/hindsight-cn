@@ -30,6 +30,12 @@ function sdkIcon(sdk: string): string | null {
   if (sdk.includes('agno')) {
     return '/img/icons/agno.png';
   }
+  if (sdk.includes('smolagents')) {
+    return '/img/icons/smolagents.png';
+  }
+  if (sdk.includes('strands')) {
+    return '/img/icons/strands.png';
+  }
   if (sdk.includes('hindsight-client') || sdk.includes('hindsight-api') || sdk.includes('litellm') || sdk.includes('pydantic') || sdk.includes('crewai')) {
     return '/img/icons/python.svg';
   }

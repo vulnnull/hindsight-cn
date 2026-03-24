@@ -246,6 +246,12 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/strands',
+          label: 'Strands Agents',
+          customProps: { icon: '/img/icons/strands.png' },
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/skills',
           label: 'Skills',
           customProps: { icon: '/img/icons/skills.png' },

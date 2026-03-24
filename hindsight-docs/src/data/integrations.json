@@ -131,6 +131,16 @@
       "icon": "/img/icons/nemoclaw.png"
     },
     {
+      "id": "strands",
+      "name": "Strands Agents",
+      "description": "Give Strands agents persistent long-term memory with Hindsight retain, recall, and reflect tools.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/strands",
+      "icon": "/img/icons/strands.png"
+    },
+    {
       "id": "hindclaw",
       "name": "HindClaw",
       "description": "Production memory infrastructure for AI agents — server-side access control via Hindsight extensions, Terraform provider for users/groups/banks/permissions, and an OpenClaw plugin with auto-managed embed.",
