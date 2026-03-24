@@ -16,13 +16,13 @@ import os
 
 # Provider detection table — same order as Openclaw
 PROVIDER_DETECTION = [
-    {"name": "openai", "key_env": "OPENAI_API_KEY", "default_model": "gpt-4o-mini"},
-    {"name": "anthropic", "key_env": "ANTHROPIC_API_KEY", "default_model": "claude-3-5-haiku-20241022"},
-    {"name": "gemini", "key_env": "GEMINI_API_KEY", "default_model": "gemini-2.5-flash"},
-    {"name": "groq", "key_env": "GROQ_API_KEY", "default_model": "openai/gpt-oss-20b"},
-    {"name": "ollama", "key_env": "", "default_model": "llama3.2"},
-    {"name": "openai-codex", "key_env": "", "default_model": "gpt-5.2-codex"},
-    {"name": "claude-code", "key_env": "", "default_model": "claude-sonnet-4-5-20250929"},
+    {"name": "openai", "key_env": "OPENAI_API_KEY"},
+    {"name": "anthropic", "key_env": "ANTHROPIC_API_KEY"},
+    {"name": "gemini", "key_env": "GEMINI_API_KEY"},
+    {"name": "groq", "key_env": "GROQ_API_KEY"},
+    {"name": "ollama", "key_env": ""},
+    {"name": "openai-codex", "key_env": ""},
+    {"name": "claude-code", "key_env": ""},
 ]
 
 # Providers that don't require an API key
@@ -59,7 +59,7 @@ def detect_llm_config(config: dict) -> dict:
         return {
             "provider": override_provider,
             "api_key": override_key or "",
-            "model": override_model or (pinfo["default_model"] if pinfo else None),
+            "model": override_model,
             "base_url": override_base_url,
             "source": "HINDSIGHT_API_LLM_PROVIDER override",
         }
@@ -83,7 +83,7 @@ def detect_llm_config(config: dict) -> dict:
         return {
             "provider": cfg_provider,
             "api_key": api_key,
-            "model": config.get("llmModel") or override_model or (pinfo["default_model"] if pinfo else None),
+            "model": config.get("llmModel") or override_model,
             "base_url": override_base_url,
             "source": "plugin config",
         }
@@ -99,7 +99,7 @@ def detect_llm_config(config: dict) -> dict:
             return {
                 "provider": pinfo["name"],
                 "api_key": api_key,
-                "model": override_model or pinfo["default_model"],
+                "model": override_model,
                 "base_url": override_base_url,
                 "source": f"auto-detected from {pinfo['key_env']}",
             }
@@ -117,13 +117,14 @@ def detect_llm_config(config: dict) -> dict:
     raise RuntimeError(
         "No LLM configuration found for Hindsight.\n\n"
         "Option 1: Set a standard provider API key (auto-detect):\n"
-        "  export OPENAI_API_KEY=sk-your-key        # Uses gpt-4o-mini\n"
-        "  export ANTHROPIC_API_KEY=your-key         # Uses claude-3-5-haiku\n\n"
+        "  export OPENAI_API_KEY=sk-your-key\n"
+        "  export ANTHROPIC_API_KEY=your-key\n\n"
         "Option 2: Override with Hindsight-specific env vars:\n"
         "  export HINDSIGHT_API_LLM_PROVIDER=openai\n"
         "  export HINDSIGHT_API_LLM_API_KEY=sk-your-key\n\n"
         "Option 3: Use an external Hindsight API (server-side LLM):\n"
-        "  Set hindsightApiUrl in settings.json or HINDSIGHT_API_URL env var"
+        "  Set hindsightApiUrl in settings.json or HINDSIGHT_API_URL env var\n\n"
+        "The model will be selected automatically by Hindsight. To override: export HINDSIGHT_API_LLM_MODEL=your-model"
     )
 
 

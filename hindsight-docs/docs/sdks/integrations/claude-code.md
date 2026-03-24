@@ -74,12 +74,14 @@ The plugin automatically starts and stops `hindsight-embed` via `uvx`. Requires 
 
 Set an LLM provider:
 ```bash
-export OPENAI_API_KEY="sk-your-key"      # Auto-detected, uses gpt-4o-mini
+export OPENAI_API_KEY="sk-your-key"
 # or
-export ANTHROPIC_API_KEY="your-key"       # Auto-detected, uses claude-3-5-haiku
+export ANTHROPIC_API_KEY="your-key"
 # or
 export HINDSIGHT_LLM_PROVIDER=claude-code # No API key needed
 ```
+
+The model is selected automatically by the Hindsight API. To override, set `HINDSIGHT_API_LLM_MODEL`.
 
 ### 3. Existing Local Server
 

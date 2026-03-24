@@ -496,13 +496,13 @@ export function formatMemories(results: MemoryResult[]): string {
 
 // Provider detection from standard env vars
 const PROVIDER_DETECTION = [
-  { name: 'openai', keyEnv: 'OPENAI_API_KEY', defaultModel: 'gpt-4o-mini' },
-  { name: 'anthropic', keyEnv: 'ANTHROPIC_API_KEY', defaultModel: 'claude-3-5-haiku-20241022' },
-  { name: 'gemini', keyEnv: 'GEMINI_API_KEY', defaultModel: 'gemini-2.5-flash' },
-  { name: 'groq', keyEnv: 'GROQ_API_KEY', defaultModel: 'openai/gpt-oss-20b' },
-  { name: 'ollama', keyEnv: '', defaultModel: 'llama3.2' },
-  { name: 'openai-codex', keyEnv: '', defaultModel: 'gpt-5.2-codex' },
-  { name: 'claude-code', keyEnv: '', defaultModel: 'claude-sonnet-4-5-20250929' },
+  { name: 'openai', keyEnv: 'OPENAI_API_KEY' },
+  { name: 'anthropic', keyEnv: 'ANTHROPIC_API_KEY' },
+  { name: 'gemini', keyEnv: 'GEMINI_API_KEY' },
+  { name: 'groq', keyEnv: 'GROQ_API_KEY' },
+  { name: 'ollama', keyEnv: '' },
+  { name: 'openai-codex', keyEnv: '' },
+  { name: 'claude-code', keyEnv: '' },
 ];
 
 function detectLLMConfig(pluginConfig?: PluginConfig): {
@@ -529,11 +529,10 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
       );
     }
 
-    const providerInfo = PROVIDER_DETECTION.find(p => p.name === overrideProvider);
     return {
       provider: overrideProvider,
       apiKey: overrideKey || '',
-      model: overrideModel || (providerInfo?.defaultModel),
+      model: overrideModel,
       baseUrl: overrideBaseUrl,
       source: 'HINDSIGHT_API_LLM_PROVIDER override',
     };
@@ -565,7 +564,7 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
     return {
       provider: pluginConfig.llmProvider,
       apiKey,
-      model: pluginConfig.llmModel || overrideModel || providerInfo?.defaultModel,
+      model: pluginConfig.llmModel || overrideModel,
       baseUrl: overrideBaseUrl,
       source: 'plugin config',
     };
@@ -585,8 +584,8 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
       return {
         provider: providerInfo.name,
         apiKey,
-        model: overrideModel || providerInfo.defaultModel,
-        baseUrl: overrideBaseUrl, // Only use explicit HINDSIGHT_API_LLM_BASE_URL
+        model: overrideModel,
+        baseUrl: overrideBaseUrl,
         source: `auto-detected from ${providerInfo.keyEnv}`,
       };
     }
@@ -609,21 +608,20 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
   throw new Error(
     `No LLM configuration found for Hindsight memory plugin.\n\n` +
     `Option 1: Set a standard provider API key (auto-detect):\n` +
-    `  export OPENAI_API_KEY=sk-your-key        # Uses gpt-4o-mini\n` +
-    `  export ANTHROPIC_API_KEY=your-key       # Uses claude-3-5-haiku\n` +
-    `  export GEMINI_API_KEY=your-key          # Uses gemini-2.5-flash\n` +
-    `  export GROQ_API_KEY=your-key            # Uses openai/gpt-oss-20b\n\n` +
+    `  export OPENAI_API_KEY=sk-your-key\n` +
+    `  export ANTHROPIC_API_KEY=your-key\n` +
+    `  export GEMINI_API_KEY=your-key\n` +
+    `  export GROQ_API_KEY=your-key\n\n` +
     `Option 2: Use Codex or Claude Code (no API key needed):\n` +
     `  export HINDSIGHT_API_LLM_PROVIDER=openai-codex    # Requires 'codex auth login'\n` +
     `  export HINDSIGHT_API_LLM_PROVIDER=claude-code     # Requires Claude Code CLI\n\n` +
     `Option 3: Set llmProvider in openclaw.json plugin config:\n` +
-    `  "llmProvider": "openai", "llmModel": "gpt-4o-mini"\n\n` +
+    `  "llmProvider": "openai"\n\n` +
     `Option 4: Override with Hindsight-specific env vars:\n` +
     `  export HINDSIGHT_API_LLM_PROVIDER=openai\n` +
-    `  export HINDSIGHT_API_LLM_MODEL=gpt-4o-mini\n` +
     `  export HINDSIGHT_API_LLM_API_KEY=sk-your-key\n` +
     `  export HINDSIGHT_API_LLM_BASE_URL=https://openrouter.ai/api/v1  # Optional\n\n` +
-    `Tip: Use a cheap/fast model for memory extraction (e.g., gpt-4o-mini, claude-3-5-haiku, or free models on OpenRouter)`
+    `The model will be selected automatically by Hindsight. To override: export HINDSIGHT_API_LLM_MODEL=your-model`
   );
 }
 
