@@ -6,6 +6,42 @@ import PageHero from '@site/src/components/PageHero';
 
 <PageHero title="Changelog" subtitle="User-facing changes only. Internal maintenance and infrastructure updates are omitted." />
 
+## [0.4.20](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.20)
+
+**Features**
+
+- Add a one-command setup CLI package for the NemoClaw integration. ([`d284de28`](https://github.com/vectorize-io/hindsight/commit/d284de28))
+- Add a LangGraph integration for using Hindsight memory within LangGraph agents. ([`b4320254`](https://github.com/vectorize-io/hindsight/commit/b4320254))
+- Add reflect filters to exclude specific fact types and mental model content during reflection. ([`ea662d06`](https://github.com/vectorize-io/hindsight/commit/ea662d06))
+- Introduce independent versioning for integrations so they can be released separately from the core server. ([`31f1c53c`](https://github.com/vectorize-io/hindsight/commit/31f1c53c))
+- Add a Claude Code integration plugin. ([`f4390bdc`](https://github.com/vectorize-io/hindsight/commit/f4390bdc))
+
+**Improvements**
+
+- Add a wall-clock timeout to reflect operations so they don’t run indefinitely. ([`8ce06e3e`](https://github.com/vectorize-io/hindsight/commit/8ce06e3e))
+- Provide richer context when validating operations via the OperationValidator extension. ([`2eb1019d`](https://github.com/vectorize-io/hindsight/commit/2eb1019d))
+- Make the hindsight-api package runnable directly via uvx by adding script entry points. ([`97f7a365`](https://github.com/vectorize-io/hindsight/commit/97f7a365))
+- Support passing query parameters during OpenAI-compatible client initialization for broader provider compatibility. ([`20e17f28`](https://github.com/vectorize-io/hindsight/commit/20e17f28))
+- Upgrade the default MiniMax model from M2.5 to M2.7. ([`1f1462a5`](https://github.com/vectorize-io/hindsight/commit/1f1462a5))
+
+**Bug Fixes**
+
+- Prevent context overflow during observation search by disabling source facts in results. ([`8e2e2d5b`](https://github.com/vectorize-io/hindsight/commit/8e2e2d5b))
+- Fix Claude Code integration session startup by pre-starting the daemon in the background. ([`26944e25`](https://github.com/vectorize-io/hindsight/commit/26944e25))
+- Fix Claude Code integration installation and configuration experience so setup is more reliable. ([`35b2cbb6`](https://github.com/vectorize-io/hindsight/commit/35b2cbb6))
+- Fix a memory leak in entity resolution that could grow over time under load. ([`e6333719`](https://github.com/vectorize-io/hindsight/commit/e6333719))
+- Avoid crashes and retain failures when the Postgres pg_trgm extension is unavailable by handling detection/fallback correctly. ([`365fa3ce`](https://github.com/vectorize-io/hindsight/commit/365fa3ce))
+- Strip Markdown code fences from model outputs across all LLM providers for more consistent parsing. ([`2f2db2a6`](https://github.com/vectorize-io/hindsight/commit/2f2db2a6))
+- Return a clear 400 error for empty recall queries and fix a SQL parameterization issue. ([`5cdc714a`](https://github.com/vectorize-io/hindsight/commit/5cdc714a))
+- Ensure file retain requests include authentication headers so uploads work in authenticated deployments. ([`78aa7c53`](https://github.com/vectorize-io/hindsight/commit/78aa7c53))
+- Fix MCP tool calls when MCP_AUTH_TOKEN and TENANT_API_KEY differ. ([`8364b9c5`](https://github.com/vectorize-io/hindsight/commit/8364b9c5))
+- Allow claude-agent-sdk to install correctly on Linux/Docker environments. ([`3f31cbf5`](https://github.com/vectorize-io/hindsight/commit/3f31cbf5))
+- In LiteLLM mode, fall back to the last user message when no explicit hindsight query is provided. ([`5e8952c5`](https://github.com/vectorize-io/hindsight/commit/5e8952c5))
+- Fix non-atomic async operation creation to prevent inconsistent operation records. ([`94cf89b5`](https://github.com/vectorize-io/hindsight/commit/94cf89b5))
+- Prevent orphaned parent operations when a batch retain child fails unexpectedly. ([`43942455`](https://github.com/vectorize-io/hindsight/commit/43942455))
+- Fix failures for non-ASCII entity names by ensuring entity IDs are set correctly. ([`438ce98b`](https://github.com/vectorize-io/hindsight/commit/438ce98b))
+- Correctly store LLM facts labeled as "assistant" as "experience" in the database. ([`446c75f3`](https://github.com/vectorize-io/hindsight/commit/446c75f3))
+
 ## [0.4.19](https://github.com/vectorize-io/hindsight/releases/tag/v0.4.19)
 
 **Features**
