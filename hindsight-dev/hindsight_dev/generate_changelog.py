@@ -28,7 +28,7 @@ REPO_PATH = Path(__file__).parent.parent.parent
 CHANGELOG_PATH = REPO_PATH / "hindsight-docs" / "src" / "pages" / "changelog" / "index.md"
 INTEGRATION_CHANGELOG_DIR = REPO_PATH / "hindsight-docs" / "src" / "pages" / "changelog" / "integrations"
 
-VALID_INTEGRATIONS = ["litellm", "pydantic-ai", "crewai", "ai-sdk", "chat", "openclaw", "langgraph", "nemoclaw"]
+VALID_INTEGRATIONS = ["litellm", "pydantic-ai", "crewai", "ai-sdk", "chat", "openclaw", "langgraph", "nemoclaw", "strands"]
 
 
 class ChangelogEntry(BaseModel):
@@ -506,6 +506,7 @@ def _get_package_name(integration: str) -> str:
         "openclaw": "@vectorize-io/hindsight-openclaw",
         "langgraph": "hindsight-langgraph",
         "nemoclaw": "@vectorize-io/hindsight-nemoclaw",
+        "strands": "hindsight-strands",
     }
     return packages[integration]
 
@@ -526,6 +527,7 @@ def _integration_display_name(integration: str) -> str:
         "openclaw": "OpenClaw",
         "langgraph": "LangGraph",
         "nemoclaw": "NemoClaw",
+        "strands": "Strands",
     }
     return names.get(integration, integration)
 
