@@ -1,7 +1,7 @@
 ---
 title: "I Built a Chatbot That Never Forgets — In 80 Lines of Python"
 authors: [benfrank241]
-date: 2026-03-17
+date: 2026-03-17T12:00
 tags: [streamlit, tutorial, python, memory, chatbot, web-ui]
 slug: python-chatbot-memory-streamlit
 image: /img/blog/streamlit-chatbot-memory.png

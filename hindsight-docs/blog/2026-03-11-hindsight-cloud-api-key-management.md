@@ -1,7 +1,7 @@
 ---
 title: "What's New in Hindsight Cloud: Programmatic API Key Management"
 authors: [benfrank241]
-date: 2026-03-11
+date: 2026-03-11T12:00
 tags: [hindsight-cloud, release, api]
 hide_table_of_contents: true
 ---

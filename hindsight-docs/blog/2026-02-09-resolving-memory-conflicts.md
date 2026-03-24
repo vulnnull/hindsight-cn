@@ -4,7 +4,7 @@ description: Learn how Hindsight handles contradictory information by tracking t
 authors: [chrislatimer]
 
 image: /img/blog/2026-02-09/consolidation-pipeline.png
-date: 2026-02-09
+date: 2026-02-09T12:00
 hide_table_of_contents: true
 ---
 

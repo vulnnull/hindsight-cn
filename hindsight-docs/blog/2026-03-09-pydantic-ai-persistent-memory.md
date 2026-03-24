@@ -1,7 +1,7 @@
 ---
 title: "Pydantic AI Persistent Memory: Add It in 5 Lines of Code"
 authors: [benfrank241]
-date: 2026-03-09
+date: 2026-03-09T12:00
 tags: [memory, openai, anthropic, gemini, python, rust, agents, rag, vector, pydantic-ai, knowledge-graph]
 image: /img/blog/pydantic-ai-persistent-memory.png
 hide_table_of_contents: true

@@ -1,7 +1,7 @@
 ---
 title: "What's New in Hindsight Cloud: Document File Upload"
 authors: [benfrank241]
-date: 2026-03-09
+date: 2026-03-09T12:00
 tags: [hindsight-cloud, release, memory]
 hide_table_of_contents: true
 ---

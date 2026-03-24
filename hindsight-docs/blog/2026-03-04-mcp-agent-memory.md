@@ -2,7 +2,7 @@
 title: "The Open-Source MCP Memory Server Your AI Agent Is Missing"
 authors: [benfrank241]
 
-date: 2026-03-04
+date: 2026-03-04T12:00
 tags: [mcp, memory, agents, docker, tutorial]
 image: /img/blog/mcp-agent-memory.png
 hide_table_of_contents: true

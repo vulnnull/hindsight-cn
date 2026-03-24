@@ -1,7 +1,7 @@
 ---
 title: "Run Hindsight with Ollama: Local AI Memory, No API Keys Needed"
 authors: [hindsight]
-date: 2026-03-10
+date: 2026-03-10T12:00
 tags: [ollama, tutorial, python, memory, local, privacy, hindsight, llm, open-source]
 image: /img/blog/run-hindsight-with-ollama.png
 hide_table_of_contents: true

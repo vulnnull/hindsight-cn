@@ -1,7 +1,7 @@
 ---
 title: "How We Built Disposition-Aware Agents That Actually Think Differently"
 authors: [chrislatimer]
-date: 2026-03-13
+date: 2026-03-13T12:00
 tags: [disposition, personality, skepticism, empathy, reflect, agents]
 image: /img/blog/disposition-aware-agents.png
 ---

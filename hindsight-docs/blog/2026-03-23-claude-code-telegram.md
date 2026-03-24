@@ -1,7 +1,7 @@
 ---
 title: "OpenClaude: Build a Claude Code Agent with Long-Term Memory — and Take It Everywhere"
 authors: [fabioscarsi, nicoloboschi]
-date: 2026-03-25
+date: 2026-03-23T12:00
 tags: [claude-code, telegram, hindsight, memory, mcp, agents, tutorial]
 image: /img/blog/claude-code-telegram.png
 hide\_table\_of\_contents: true
