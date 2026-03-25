@@ -160,7 +160,7 @@ To switch between backends:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-codex`, `claude-code`, `anthropic`, `gemini`, `groq`, `minimax`, `ollama`, `lmstudio`, `vertexai`, `bedrock`, `litellm` | `openai` |
+| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-codex`, `claude-code`, `anthropic`, `gemini`, `groq`, `minimax`, `ollama`, `lmstudio`, `vertexai`, `bedrock`, `litellm`, `none` | `openai` |
 | `HINDSIGHT_API_LLM_API_KEY` | API key for LLM provider | - |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | `gpt-5-mini` |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default |
@@ -250,6 +250,13 @@ export HINDSIGHT_API_LLM_MODEL=azure/gpt-4o
 export HINDSIGHT_API_LLM_PROVIDER=litellm
 export HINDSIGHT_API_LLM_API_KEY=your-together-api-key
 export HINDSIGHT_API_LLM_MODEL=together_ai/meta-llama/Llama-3-70b-chat-hf
+
+# No LLM (chunk storage + semantic search only, no API key needed)
+export HINDSIGHT_API_LLM_PROVIDER=none
+# Retain automatically uses chunks mode (no fact extraction)
+# Recall works normally (semantic search, BM25, graph retrieval)
+# Reflect returns HTTP 400 (requires an LLM)
+# Consolidation/observations are disabled
 ```
 
 :::tip OpenAI Codex, Claude Code & Vertex AI Setup
