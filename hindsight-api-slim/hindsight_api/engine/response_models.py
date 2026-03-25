@@ -8,7 +8,7 @@ API stability even if internal models change.
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Valid fact types for recall operations (excludes 'opinion' which is deprecated)
 VALID_RECALL_FACT_TYPES = frozenset(["world", "experience", "observation"])
@@ -159,6 +159,19 @@ class MemoryFact(BaseModel):
     mentioned_at: str | None = Field(None, description="ISO format date when the fact was mentioned/learned")
     document_id: str | None = Field(None, description="ID of the document this memory belongs to")
     metadata: dict[str, str] | None = Field(None, description="User-defined metadata")
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def parse_metadata(cls, v: Any) -> dict[str, str] | None:
+        """Parse metadata from JSON string if needed (asyncpg may return JSONB as str)."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            import json
+
+            return json.loads(v)
+        return v
+
     chunk_id: str | None = Field(
         None, description="ID of the chunk this fact was extracted from (format: bank_id_document_id_chunk_index)"
     )

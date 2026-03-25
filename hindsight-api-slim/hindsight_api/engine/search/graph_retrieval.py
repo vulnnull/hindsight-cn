@@ -231,7 +231,7 @@ class BFSGraphRetriever(GraphRetriever):
                     f"""
                     SELECT mu.id, mu.text, mu.context, mu.occurred_start, mu.occurred_end,
                            mu.mentioned_at, mu.fact_type,
-                           mu.document_id, mu.chunk_id, mu.tags,
+                           mu.document_id, mu.chunk_id, mu.tags, mu.metadata,
                            ml.weight, ml.link_type, ml.from_unit_id
                     FROM {fq_table("memory_links")} ml
                     JOIN {fq_table("memory_units")} mu ON ml.to_unit_id = mu.id

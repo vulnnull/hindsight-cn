@@ -47,6 +47,7 @@ class RetrievalResult:
     document_id: str | None = None
     chunk_id: str | None = None
     tags: list[str] | None = None  # Visibility scope tags
+    metadata: dict[str, str] | None = None  # User-provided metadata
 
     # Retrieval-specific scores (only one will be set depending on retrieval method)
     similarity: float | None = None  # Semantic retrieval
@@ -70,6 +71,7 @@ class RetrievalResult:
             document_id=row.get("document_id"),
             chunk_id=row.get("chunk_id"),
             tags=row.get("tags"),
+            metadata=row.get("metadata"),
             similarity=row.get("similarity"),
             bm25_score=row.get("bm25_score"),
             activation=row.get("activation"),
@@ -153,6 +155,7 @@ class ScoredResult:
             "document_id": self.retrieval.document_id,
             "chunk_id": self.retrieval.chunk_id,
             "tags": self.retrieval.tags,
+            "metadata": self.retrieval.metadata,
             "semantic_similarity": self.retrieval.similarity,
             "bm25_score": self.retrieval.bm25_score,
         }

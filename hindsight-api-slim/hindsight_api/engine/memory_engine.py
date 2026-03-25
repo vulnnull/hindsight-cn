@@ -3234,7 +3234,7 @@ class MemoryEngine(MemoryEngineInterface):
                             source_rows = await sf_conn.fetch(
                                 f"""
                                 SELECT id, text, fact_type, context, occurred_start, occurred_end,
-                                       mentioned_at, document_id, chunk_id, tags
+                                       mentioned_at, document_id, chunk_id, tags, metadata
                                 FROM {fq_table("memory_units")}
                                 WHERE id = ANY($1::uuid[])
                                 """,
@@ -3255,6 +3255,7 @@ class MemoryEngine(MemoryEngineInterface):
                                     occurred_end=r["occurred_end"].isoformat() if r["occurred_end"] else None,
                                     mentioned_at=r["mentioned_at"].isoformat() if r["mentioned_at"] else None,
                                     document_id=r["document_id"],
+                                    metadata=r["metadata"],
                                     chunk_id=str(r["chunk_id"]) if r["chunk_id"] else None,
                                     tags=r["tags"] or None,
                                 )
@@ -3333,6 +3334,7 @@ class MemoryEngine(MemoryEngineInterface):
                         occurred_end=result_dict.get("occurred_end"),
                         mentioned_at=result_dict.get("mentioned_at"),
                         document_id=result_dict.get("document_id"),
+                        metadata=result_dict.get("metadata"),
                         chunk_id=result_dict.get("chunk_id"),
                         tags=result_dict.get("tags"),
                         source_fact_ids=source_fact_ids_by_obs.get(result_id) if include_source_facts else None,

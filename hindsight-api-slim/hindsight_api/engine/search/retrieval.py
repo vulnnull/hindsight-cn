@@ -148,7 +148,7 @@ async def retrieve_semantic_bm25_combined(
 
     cols = (
         "id, text, context, event_date, occurred_start, occurred_end, mentioned_at, "
-        "fact_type, document_id, chunk_id, tags"
+        "fact_type, document_id, chunk_id, tags, metadata"
     )
     table = fq_table("memory_units")
 
@@ -343,7 +343,7 @@ async def retrieve_temporal_combined(
               {groups_clause}
         ),
         sim_ranked AS (
-            SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
+            SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags, mu.metadata,
                    1 - (mu.embedding <=> $1::vector) AS similarity,
                    ROW_NUMBER() OVER (PARTITION BY mu.fact_type ORDER BY mu.embedding <=> $1::vector) AS sim_rn
             FROM date_ranked dr
@@ -351,7 +351,7 @@ async def retrieve_temporal_combined(
             WHERE dr.rn <= 50
               AND (1 - (mu.embedding <=> $1::vector)) >= $6
         )
-        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags, similarity
+        SELECT id, text, context, event_date, occurred_start, occurred_end, mentioned_at, fact_type, document_id, chunk_id, tags, metadata, similarity
         FROM sim_ranked
         WHERE sim_rn <= 10
         """,
@@ -449,7 +449,7 @@ async def retrieve_temporal_combined(
             # bank_id on memory_units lets the planner use idx_memory_units_bank_fact_type.
             neighbors = await conn.fetch(
                 f"""
-                SELECT src.from_unit_id, mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
+                SELECT src.from_unit_id, mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start, mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id, mu.chunk_id, mu.tags, mu.metadata,
                        l.weight, l.link_type,
                        1 - (mu.embedding <=> $1::vector) AS similarity
                 FROM unnest($2::uuid[]) AS src(from_unit_id)

@@ -814,34 +814,36 @@ async def test_context_with_batch(memory, request_context):
 @pytest.mark.asyncio
 async def test_metadata_storage_and_retrieval(memory, request_context):
     """
-    Test that user-defined metadata is preserved.
+    Test that user-defined metadata passed during retain is returned on recall.
     Metadata allows arbitrary key-value data to be stored with facts.
     """
     bank_id = f"test_metadata_{datetime.now(timezone.utc).timestamp()}"
 
     try:
-        # Store content with custom metadata
         custom_metadata = {
             "source": "slack",
             "channel": "engineering",
             "importance": "high",
-            "tags": "product,launch"
         }
 
-        # Note: retain_async doesn't directly support metadata parameter
-        # Metadata would need to be supported in the API layer
-        # For now, we test that the system handles content without errors
-        unit_ids = await memory.retain_async(
+        # Use retain_batch_async which supports the metadata parameter
+        unit_ids_list = await memory.retain_batch_async(
             bank_id=bank_id,
-            content="The product launch is scheduled for March 1st.",
-            context="planning meeting",
-            event_date=datetime(2024, 1, 15, tzinfo=timezone.utc),
+            contents=[
+                {
+                    "content": "The product launch is scheduled for March 1st.",
+                    "context": "planning meeting",
+                    "event_date": datetime(2024, 1, 15, tzinfo=timezone.utc),
+                    "metadata": custom_metadata,
+                }
+            ],
             request_context=request_context,
         )
 
-        assert len(unit_ids) > 0, "Should create memory units"
+        assert len(unit_ids_list) > 0, "Should create memory units"
+        assert len(unit_ids_list[0]) > 0, "Should have at least one unit ID"
 
-        # Recall to verify storage worked
+        # Recall and verify metadata is returned
         result = await memory.recall_async(
             bank_id=bank_id,
             query="When is the product launch?",
@@ -853,8 +855,12 @@ async def test_metadata_storage_and_retrieval(memory, request_context):
 
         assert len(result.results) > 0, "Should recall stored facts"
 
-        print("✓ Successfully stored and retrieved facts")
-        print("  (Note: Metadata support depends on API implementation)")
+        # Verify metadata is present on recalled facts
+        fact = result.results[0]
+        assert fact.metadata is not None, "Metadata should not be null on recall"
+        assert fact.metadata.get("source") == "slack"
+        assert fact.metadata.get("channel") == "engineering"
+        assert fact.metadata.get("importance") == "high"
 
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)
