@@ -10,7 +10,100 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      clients-ts: ${{ steps.filter.outputs.clients-ts }}
+      clients-python: ${{ steps.filter.outputs.clients-python }}
+      clients-rust: ${{ steps.filter.outputs.clients-rust }}
+      clients-go: ${{ steps.filter.outputs.clients-go }}
+      control-plane: ${{ steps.filter.outputs.control-plane }}
+      cli: ${{ steps.filter.outputs.cli }}
+      docker: ${{ steps.filter.outputs.docker }}
+      helm: ${{ steps.filter.outputs.helm }}
+      docs: ${{ steps.filter.outputs.docs }}
+      embed: ${{ steps.filter.outputs.embed }}
+      hindsight-all: ${{ steps.filter.outputs.hindsight-all }}
+      integration-tests: ${{ steps.filter.outputs.integration-tests }}
+      integrations-openclaw: ${{ steps.filter.outputs.integrations-openclaw }}
+      integrations-ai-sdk: ${{ steps.filter.outputs.integrations-ai-sdk }}
+      integrations-chat: ${{ steps.filter.outputs.integrations-chat }}
+      integrations-claude-code: ${{ steps.filter.outputs.integrations-claude-code }}
+      integrations-crewai: ${{ steps.filter.outputs.integrations-crewai }}
+      integrations-litellm: ${{ steps.filter.outputs.integrations-litellm }}
+      integrations-pydantic-ai: ${{ steps.filter.outputs.integrations-pydantic-ai }}
+      dev: ${{ steps.filter.outputs.dev }}
+      ci: ${{ steps.filter.outputs.ci }}
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: dorny/paths-filter@v3
+      id: filter
+      with:
+        filters: |
+          core:
+            - 'hindsight-api-slim/**'
+            - 'hindsight-api/**'
+            - 'scripts/**'
+            - '.python-version'
+            - '.env.example'
+          clients-ts:
+            - 'hindsight-clients/typescript/**'
+            - 'package.json'
+            - 'package-lock.json'
+          clients-python:
+            - 'hindsight-clients/python/**'
+          clients-rust:
+            - 'hindsight-clients/rust/**'
+          clients-go:
+            - 'hindsight-clients/go/**'
+          control-plane:
+            - 'hindsight-control-plane/**'
+            - 'package.json'
+            - 'package-lock.json'
+          cli:
+            - 'hindsight-cli/**'
+          docker:
+            - 'docker/**'
+          helm:
+            - 'helm/**'
+          docs:
+            - 'hindsight-docs/**'
+            - '*.md'
+          embed:
+            - 'hindsight-embed/**'
+          hindsight-all:
+            - 'hindsight-all/**'
+          integration-tests:
+            - 'hindsight-integration-tests/**'
+          integrations-openclaw:
+            - 'hindsight-integrations/openclaw/**'
+          integrations-ai-sdk:
+            - 'hindsight-integrations/ai-sdk/**'
+          integrations-chat:
+            - 'hindsight-integrations/chat/**'
+          integrations-claude-code:
+            - 'hindsight-integrations/claude-code/**'
+          integrations-crewai:
+            - 'hindsight-integrations/crewai/**'
+          integrations-litellm:
+            - 'hindsight-integrations/litellm/**'
+          integrations-pydantic-ai:
+            - 'hindsight-integrations/pydantic-ai/**'
+          dev:
+            - 'hindsight-dev/**'
+          ci:
+            - '.github/**'
+
   build-api-python-versions:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -34,6 +127,11 @@ jobs:
       run: uv build
 
   build-typescript-client:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.clients-ts == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -53,6 +151,11 @@ jobs:
       run: npm run build --workspace=hindsight-clients/typescript
 
   build-openclaw-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-openclaw == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -76,6 +179,11 @@ jobs:
       run: npm run build
 
   test-claude-code-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-claude-code == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -94,6 +202,11 @@ jobs:
       run: python -m pytest tests/ -v
 
   build-ai-sdk-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-ai-sdk == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -117,6 +230,11 @@ jobs:
       run: npm run build
 
   test-ai-sdk-integration-deno:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-ai-sdk == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -141,6 +259,11 @@ jobs:
       run: npm run test:deno
 
   build-chat-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-chat == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -164,6 +287,12 @@ jobs:
       run: npm run build
 
   build-control-plane:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.control-plane == 'true' ||
+      needs.detect-changes.outputs.clients-ts == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -216,6 +345,11 @@ jobs:
         fi
 
   build-docs:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.docs == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -235,6 +369,12 @@ jobs:
       run: npm run build --workspace=hindsight-docs
 
   test-rust-cli:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.cli == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -355,6 +495,11 @@ jobs:
         cat /tmp/api-server.log || echo "No API server log found"
 
   lint-helm-chart:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.helm == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -369,6 +514,13 @@ jobs:
       run: helm lint helm/hindsight
 
   build-docker-images:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.docker == 'true' ||
+      needs.detect-changes.outputs.control-plane == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     name: Build Docker (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
@@ -452,6 +604,11 @@ jobs:
       run: ./docker/test-image.sh "hindsight-${{ matrix.name }}:test" "${{ matrix.target }}"
 
   test-api:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -520,6 +677,12 @@ jobs:
       run: uv run pytest tests -v
 
   test-python-client:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.clients-python == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -622,6 +785,12 @@ jobs:
         cat /tmp/api-server.log || echo "No API server log found"
 
   test-typescript-client:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.clients-ts == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -729,6 +898,12 @@ jobs:
         cat /tmp/api-server.log || echo "No API server log found"
 
   test-typescript-client-deno:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.clients-ts == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -842,6 +1017,11 @@ jobs:
         cat /tmp/api-server.log || echo "No API server log found"
 
   build-rust-cli-arm64:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.cli == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-24.04-arm
 
     steps:
@@ -866,6 +1046,12 @@ jobs:
       run: cargo build --release --target aarch64-unknown-linux-gnu
 
   test-rust-client:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.clients-rust == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -972,6 +1158,12 @@ jobs:
         cat /tmp/api-server.log || echo "No API server log found"
 
   test-go-client:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.clients-go == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -1076,6 +1268,13 @@ jobs:
         cat /tmp/api-server.log || echo "No API server log found"
 
   test-openclaw-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.integrations-openclaw == 'true' ||
+      needs.detect-changes.outputs.embed == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -1183,6 +1382,12 @@ jobs:
         cat /tmp/api-server.log || echo "No API server log found"
 
   test-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.integration-tests == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -1280,6 +1485,11 @@ jobs:
         cat /tmp/api-server.log || echo "No API server log found"
 
   test-crewai-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-crewai == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -1309,6 +1519,11 @@ jobs:
       run: uv run pytest tests -v
 
   test-litellm-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-litellm == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -1338,6 +1553,11 @@ jobs:
       run: uv run pytest tests -v
 
   test-pydantic-ai-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-pydantic-ai == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -1367,6 +1587,11 @@ jobs:
       run: uv run pytest tests -v
 
   test-pip-slim:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -1427,6 +1652,12 @@ jobs:
         cat /tmp/slim-api-server.log 2>/dev/null || true
 
   test-embed:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.embed == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -1480,6 +1711,12 @@ jobs:
       run: ./test.sh
 
   test-hindsight-all:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.hindsight-all == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -1533,6 +1770,16 @@ jobs:
       run: uv run pytest tests/ -v
 
   test-doc-examples:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.clients-ts == 'true' ||
+      needs.detect-changes.outputs.clients-python == 'true' ||
+      needs.detect-changes.outputs.clients-go == 'true' ||
+      needs.detect-changes.outputs.cli == 'true' ||
+      needs.detect-changes.outputs.docs == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1672,6 +1919,12 @@ jobs:
         cat /tmp/api-server.log || echo "No API server log found"
 
   test-upgrade:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.dev == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -1822,6 +2075,11 @@ jobs:
         echo "✓ All generated files are up to date"
 
   check-openapi-compatibility:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
