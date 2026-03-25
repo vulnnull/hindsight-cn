@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hindsight_hermes.config import configure, reset_config
+from hindsight_hermes.config import DEFAULTS
 from hindsight_hermes.errors import HindsightError
 from hindsight_hermes.tools import (
     RECALL_SCHEMA,
@@ -26,10 +26,11 @@ from hindsight_hermes.tools import (
 
 
 @pytest.fixture(autouse=True)
-def _clean_config():
-    reset_config()
-    yield
-    reset_config()
+def _clean_env(monkeypatch):
+    """Ensure no stale env vars leak between tests."""
+    for key in ("HINDSIGHT_API_URL", "HINDSIGHT_API_KEY", "HINDSIGHT_API_TOKEN",
+                "HINDSIGHT_BANK_ID", "HINDSIGHT_AUTO_RETAIN", "HINDSIGHT_RECALL_BUDGET"):
+        monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture()
@@ -125,10 +126,9 @@ class TestResolveClient:
     def test_returns_provided_client(self, mock_client):
         assert _resolve_client(mock_client, None, None) is mock_client
 
-    def test_uses_global_config(self):
-        configure(hindsight_api_url="http://localhost:9999", api_key="key")
+    def test_creates_client_from_args(self):
         with patch("hindsight_hermes.tools.Hindsight") as MockH:
-            _resolve_client(None, None, None)
+            _resolve_client(None, "http://localhost:9999", "key")
             MockH.assert_called_once_with(base_url="http://localhost:9999", timeout=30.0, api_key="key")
 
     def test_raises_without_url(self):
@@ -222,11 +222,11 @@ class TestRegisterPlugin:
             register(ctx)
         assert ctx.register_tool.call_count == 3
 
-    def test_register_skips_without_config(self, monkeypatch):
-        monkeypatch.delenv("HINDSIGHT_API_URL", raising=False)
-        monkeypatch.delenv("HINDSIGHT_API_KEY", raising=False)
+    def test_register_skips_without_config(self):
+        empty_cfg = dict(DEFAULTS)  # no apiUrl, no apiToken
         ctx = MagicMock()
-        register(ctx)
+        with patch("hindsight_hermes.tools.load_config", return_value=empty_cfg):
+            register(ctx)
         ctx.register_tool.assert_not_called()
 
     def test_register_hooks(self, monkeypatch, mock_client):

@@ -14,7 +14,7 @@ from typing import Any
 
 from hindsight_client import Hindsight
 
-from .config import get_config
+from .config import load_config
 from .errors import HindsightError
 
 logger = logging.getLogger(__name__)
@@ -94,23 +94,19 @@ def _resolve_client(
     hindsight_api_url: str | None,
     api_key: str | None,
 ) -> Hindsight:
-    """Resolve a Hindsight client from explicit args or global config."""
+    """Resolve a Hindsight client from explicit args."""
     if client is not None:
         return client
 
-    config = get_config()
-    url = hindsight_api_url or (config.hindsight_api_url if config else None)
-    key = api_key or (config.api_key if config else None)
-
-    if url is None:
+    if hindsight_api_url is None:
         raise HindsightError(
             "No Hindsight API URL configured. "
-            "Pass client= or hindsight_api_url=, or call configure() first."
+            "Pass client= or hindsight_api_url=, or create ~/.hindsight/hermes.json."
         )
 
-    kwargs: dict[str, Any] = {"base_url": url, "timeout": 30.0}
-    if key:
-        kwargs["api_key"] = key
+    kwargs: dict[str, Any] = {"base_url": hindsight_api_url, "timeout": 30.0}
+    if api_key:
+        kwargs["api_key"] = api_key
     return Hindsight(**kwargs)
 
 
@@ -264,20 +260,23 @@ def register_tools(
 def register(ctx: Any) -> None:
     """Hermes plugin entry point — called via ``hermes_agent.plugins`` entry point.
 
-    Reads configuration from environment variables and registers tools
-    using ``ctx.register_tool()``.
+    Reads configuration from ``~/.hindsight/hermes.json`` and environment
+    variables (env vars take priority), then registers tools and hooks.
 
     Args:
         ctx: Hermes PluginContext.
     """
-    hindsight_api_url = os.environ.get("HINDSIGHT_API_URL")
-    api_key = os.environ.get("HINDSIGHT_API_KEY")
-    bank_id = os.environ.get("HINDSIGHT_BANK_ID")
-    budget = os.environ.get("HINDSIGHT_BUDGET", "mid")
+    cfg = load_config()
+
+    hindsight_api_url = cfg.get("hindsightApiUrl")
+    api_key = cfg.get("hindsightApiToken")
+    bank_id = cfg.get("bankId")
+    budget = cfg.get("recallBudget", "mid")
 
     if not hindsight_api_url and not api_key:
         logger.debug(
-            "Hindsight plugin: no API URL or key configured, skipping registration"
+            "Hindsight plugin: not configured (need hindsightApiUrl or hindsightApiToken). "
+            "Create ~/.hindsight/hermes.json or set HINDSIGHT_API_URL."
         )
         return
 
@@ -354,9 +353,10 @@ def register(ctx: Any) -> None:
     # When running on an older hermes-agent the hooks are simply never called,
     # so registering them is always safe.
 
-    recall_budget = os.environ.get("HINDSIGHT_RECALL_BUDGET", budget)
-    recall_max_tokens = int(os.environ.get("HINDSIGHT_RECALL_MAX_TOKENS", "4096"))
-    retain_enabled = os.environ.get("HINDSIGHT_AUTO_RETAIN", "true").lower() in {"1", "true", "yes", "on"}
+    recall_budget = cfg.get("recallBudget", budget)
+    recall_max_tokens = cfg.get("recallMaxTokens", 4096)
+    retain_enabled = cfg.get("autoRetain", True)
+    recall_preamble = cfg.get("recallPromptPreamble", "")
 
     async def _on_pre_llm_call(
         *,
@@ -381,12 +381,12 @@ def register(ctx: Any) -> None:
             if not response.results:
                 return None
             lines = [f"- {r.text}" for r in response.results]
-            context = (
+            header = recall_preamble or (
                 "# Hindsight Memory (persistent cross-session context)\n"
                 "Use this to answer questions about the user and prior sessions. "
-                "Do not call tools to look up information that is already present here.\n\n"
-                + "\n".join(lines)
+                "Do not call tools to look up information that is already present here."
             )
+            context = header + "\n\n" + "\n".join(lines)
             return {"context": context}
         except Exception as exc:
             logger.warning("Hindsight pre_llm_call recall failed: %s", exc)

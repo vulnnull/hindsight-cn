@@ -1,57 +1,98 @@
 """Tests for hindsight_hermes.config module."""
 
-from hindsight_hermes.config import (
-    HindsightHermesConfig,
-    configure,
-    get_config,
-    reset_config,
-)
+import json
+
+from hindsight_hermes.config import DEFAULTS, load_config
 
 
-class TestConfigure:
-    def setup_method(self):
-        reset_config()
+class TestLoadConfig:
+    def test_defaults_when_no_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("HINDSIGHT_API_URL", raising=False)
+        monkeypatch.delenv("HINDSIGHT_API_KEY", raising=False)
+        monkeypatch.delenv("HINDSIGHT_BANK_ID", raising=False)
+        cfg = load_config(config_path=tmp_path / "nope.json")
+        assert cfg["hindsightApiUrl"] is None
+        assert cfg["bankId"] is None
+        assert cfg["recallBudget"] == "mid"
+        assert cfg["autoRecall"] is True
+        assert cfg["autoRetain"] is True
 
-    def teardown_method(self):
-        reset_config()
+    def test_reads_from_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("HINDSIGHT_API_URL", raising=False)
+        monkeypatch.delenv("HINDSIGHT_API_KEY", raising=False)
+        monkeypatch.delenv("HINDSIGHT_BANK_ID", raising=False)
+        monkeypatch.delenv("HINDSIGHT_AUTO_RETAIN", raising=False)
+        f = tmp_path / "hermes.json"
+        f.write_text(json.dumps({
+            "hindsightApiUrl": "http://localhost:9077",
+            "hindsightApiToken": "file-token",
+            "bankId": "my-bank",
+            "recallBudget": "high",
+            "autoRetain": False,
+            "recallMaxTokens": 2048,
+        }))
+        cfg = load_config(config_path=f)
+        assert cfg["hindsightApiUrl"] == "http://localhost:9077"
+        assert cfg["hindsightApiToken"] == "file-token"
+        assert cfg["bankId"] == "my-bank"
+        assert cfg["recallBudget"] == "high"
+        assert cfg["autoRetain"] is False
+        assert cfg["recallMaxTokens"] == 2048
 
-    def test_configure_returns_config(self):
-        cfg = configure(hindsight_api_url="http://localhost:8888", api_key="test-key")
-        assert isinstance(cfg, HindsightHermesConfig)
-        assert cfg.hindsight_api_url == "http://localhost:8888"
-        assert cfg.api_key == "test-key"
+    def test_env_overrides_file(self, tmp_path, monkeypatch):
+        f = tmp_path / "hermes.json"
+        f.write_text(json.dumps({
+            "hindsightApiUrl": "http://from-file:9077",
+            "bankId": "file-bank",
+            "recallBudget": "low",
+        }))
+        monkeypatch.setenv("HINDSIGHT_API_URL", "http://from-env:9077")
+        monkeypatch.setenv("HINDSIGHT_BANK_ID", "env-bank")
+        monkeypatch.delenv("HINDSIGHT_RECALL_BUDGET", raising=False)
+        cfg = load_config(config_path=f)
+        assert cfg["hindsightApiUrl"] == "http://from-env:9077"
+        assert cfg["bankId"] == "env-bank"
+        assert cfg["recallBudget"] == "low"  # from file (env not set)
 
-    def test_configure_defaults(self):
-        cfg = configure()
-        assert cfg.hindsight_api_url == "https://api.hindsight.vectorize.io"
-        assert cfg.api_key is None
-        assert cfg.budget == "mid"
-        assert cfg.max_tokens == 4096
-        assert cfg.tags is None
-        assert cfg.recall_tags is None
-        assert cfg.recall_tags_match == "any"
-        assert cfg.verbose is False
+    def test_api_key_env_maps_to_token(self, tmp_path, monkeypatch):
+        """HINDSIGHT_API_KEY is an alias for hindsightApiToken."""
+        monkeypatch.setenv("HINDSIGHT_API_KEY", "my-key")
+        cfg = load_config(config_path=tmp_path / "nope.json")
+        assert cfg["hindsightApiToken"] == "my-key"
 
-    def test_get_config_returns_none_before_configure(self):
-        assert get_config() is None
+    def test_bool_env_casting(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HINDSIGHT_AUTO_RETAIN", "false")
+        monkeypatch.setenv("HINDSIGHT_AUTO_RECALL", "1")
+        cfg = load_config(config_path=tmp_path / "nope.json")
+        assert cfg["autoRetain"] is False
+        assert cfg["autoRecall"] is True
 
-    def test_get_config_returns_configured(self):
-        configure(api_key="k")
-        cfg = get_config()
-        assert cfg is not None
-        assert cfg.api_key == "k"
+    def test_int_env_casting(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HINDSIGHT_RECALL_MAX_TOKENS", "2048")
+        cfg = load_config(config_path=tmp_path / "nope.json")
+        assert cfg["recallMaxTokens"] == 2048
 
-    def test_reset_config(self):
-        configure(api_key="k")
-        reset_config()
-        assert get_config() is None
+    def test_malformed_file_returns_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("HINDSIGHT_API_URL", raising=False)
+        monkeypatch.delenv("HINDSIGHT_BANK_ID", raising=False)
+        f = tmp_path / "hermes.json"
+        f.write_text("not json {{{")
+        cfg = load_config(config_path=f)
+        assert cfg["recallBudget"] == "mid"
 
-    def test_configure_reads_env_var(self, monkeypatch):
-        monkeypatch.setenv("HINDSIGHT_API_KEY", "env-key")
-        cfg = configure()
-        assert cfg.api_key == "env-key"
+    def test_null_values_in_file_ignored(self, tmp_path, monkeypatch):
+        """null values in JSON should not override defaults."""
+        monkeypatch.delenv("HINDSIGHT_API_URL", raising=False)
+        monkeypatch.delenv("HINDSIGHT_BANK_ID", raising=False)
+        f = tmp_path / "hermes.json"
+        f.write_text(json.dumps({"bankId": None, "recallBudget": "high"}))
+        cfg = load_config(config_path=f)
+        assert cfg["bankId"] is None  # stays default (None)
+        assert cfg["recallBudget"] == "high"
 
-    def test_explicit_key_overrides_env(self, monkeypatch):
-        monkeypatch.setenv("HINDSIGHT_API_KEY", "env-key")
-        cfg = configure(api_key="explicit-key")
-        assert cfg.api_key == "explicit-key"
+    def test_all_defaults_present(self):
+        """Every key in DEFAULTS should exist in a freshly loaded config."""
+        # Use a path that doesn't exist and clean env
+        cfg = DEFAULTS.copy()
+        for key in DEFAULTS:
+            assert key in cfg

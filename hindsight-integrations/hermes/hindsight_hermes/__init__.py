@@ -12,8 +12,8 @@ Hermes build that supports lifecycle hooks, the plugin also:
 Plugin usage (auto-discovery)::
 
     pip install hindsight-hermes
-    export HINDSIGHT_API_URL=http://localhost:8888
-    export HINDSIGHT_BANK_ID=my-agent
+    # Configure via ~/.hindsight/hermes.json:
+    # {"hindsightApiUrl": "http://localhost:9077", "bankId": "my-agent"}
 
 Manual usage::
 
@@ -21,15 +21,14 @@ Manual usage::
 
     register_tools(
         bank_id="my-agent",
-        hindsight_api_url="http://localhost:8888",
+        hindsight_api_url="http://localhost:9077",
     )
 """
 
 from .config import (
-    HindsightHermesConfig,
-    configure,
-    get_config,
-    reset_config,
+    USER_CONFIG_PATH,
+    load_config,
+    write_config,
 )
 from .errors import HindsightError
 from .tools import (
@@ -42,10 +41,9 @@ from .tools import (
 __version__ = "0.1.0"
 
 __all__ = [
-    "configure",
-    "get_config",
-    "reset_config",
-    "HindsightHermesConfig",
+    "USER_CONFIG_PATH",
+    "load_config",
+    "write_config",
     "HindsightError",
     "register_tools",
     "register",
