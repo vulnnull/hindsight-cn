@@ -23,7 +23,7 @@ import asyncpg
 import httpx
 import tiktoken
 
-from ..config import get_config
+from ..config import DEFAULT_REFLECT_SOURCE_FACTS_MAX_TOKENS, get_config
 from ..metrics import get_metrics_collector
 from ..tracing import create_operation_span
 from ..utils import mask_network_location
@@ -5262,6 +5262,12 @@ class MemoryEngine(MemoryEngineInterface):
                     pending_consolidation=pending_consolidation,
                 )
 
+        # Get reflect source facts config (hierarchical: env → tenant → bank)
+        config_dict = await self._config_resolver.get_bank_config(bank_id, request_context)
+        reflect_source_facts_max_tokens = config_dict.get(
+            "reflect_source_facts_max_tokens", DEFAULT_REFLECT_SOURCE_FACTS_MAX_TOKENS
+        )
+
         async def search_observations_fn(q: str, max_tokens: int = 5000) -> dict[str, Any]:
             return await tool_search_observations(
                 self,
@@ -5274,6 +5280,7 @@ class MemoryEngine(MemoryEngineInterface):
                 tag_groups=tag_groups,
                 last_consolidated_at=last_consolidated_at,
                 pending_consolidation=pending_consolidation,
+                source_facts_max_tokens=reflect_source_facts_max_tokens,
             )
 
         # Determine which tools to enable based on fact_types and exclude_mental_models

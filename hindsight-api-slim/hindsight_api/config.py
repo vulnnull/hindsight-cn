@@ -340,6 +340,7 @@ ENV_REFLECT_MAX_ITERATIONS = "HINDSIGHT_API_REFLECT_MAX_ITERATIONS"
 ENV_REFLECT_MAX_CONTEXT_TOKENS = "HINDSIGHT_API_REFLECT_MAX_CONTEXT_TOKENS"
 ENV_REFLECT_WALL_TIMEOUT = "HINDSIGHT_API_REFLECT_WALL_TIMEOUT"
 ENV_REFLECT_MISSION = "HINDSIGHT_API_REFLECT_MISSION"
+ENV_REFLECT_SOURCE_FACTS_MAX_TOKENS = "HINDSIGHT_API_REFLECT_SOURCE_FACTS_MAX_TOKENS"
 
 # Disposition settings
 ENV_DISPOSITION_SKEPTICISM = "HINDSIGHT_API_DISPOSITION_SKEPTICISM"
@@ -503,6 +504,7 @@ DEFAULT_WORKER_CONSOLIDATION_MAX_SLOTS = 2  # Max concurrent consolidation tasks
 DEFAULT_REFLECT_MAX_ITERATIONS = 10  # Max tool call iterations before forcing response
 DEFAULT_REFLECT_MAX_CONTEXT_TOKENS = 100_000  # Max accumulated context tokens before forcing final prompt
 DEFAULT_REFLECT_WALL_TIMEOUT = 300  # Wall-clock timeout in seconds for the entire reflect operation (5 minutes)
+DEFAULT_REFLECT_SOURCE_FACTS_MAX_TOKENS = -1  # Token budget for source facts in search_observations (-1 = disabled)
 
 # Disposition defaults (None = not set, fall back to bank DB value or 3)
 DEFAULT_DISPOSITION_SKEPTICISM = None
@@ -774,6 +776,7 @@ class HindsightConfig:
 
     # Reflect agent settings
     reflect_mission: str | None
+    reflect_source_facts_max_tokens: int
 
     # Disposition settings (hierarchical - can be overridden per bank; None = fall back to DB)
     disposition_skepticism: int | None
@@ -872,6 +875,7 @@ class HindsightConfig:
         "observations_mission",
         # Reflect settings
         "reflect_mission",
+        "reflect_source_facts_max_tokens",
         # Disposition settings
         "disposition_skepticism",
         "disposition_literalism",
@@ -1281,6 +1285,9 @@ class HindsightConfig:
             ),
             reflect_wall_timeout=int(os.getenv(ENV_REFLECT_WALL_TIMEOUT, str(DEFAULT_REFLECT_WALL_TIMEOUT))),
             reflect_mission=os.getenv(ENV_REFLECT_MISSION) or None,
+            reflect_source_facts_max_tokens=int(
+                os.getenv(ENV_REFLECT_SOURCE_FACTS_MAX_TOKENS, str(DEFAULT_REFLECT_SOURCE_FACTS_MAX_TOKENS))
+            ),
             # Disposition settings (None = fall back to DB value)
             disposition_skepticism=int(os.getenv(ENV_DISPOSITION_SKEPTICISM))
             if os.getenv(ENV_DISPOSITION_SKEPTICISM)
