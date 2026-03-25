@@ -365,6 +365,7 @@ PROVIDER_DEFAULT_MODELS = {
     "openai-codex": "gpt-5.2-codex",
     "claude-code": "claude-sonnet-4-5-20250929",
     "mock": "mock-model",
+    "none": "none",
     "litellm": "gpt-4o-mini",
     "bedrock": "us.amazon.nova-2-lite-v1:0",
 }
@@ -958,9 +959,19 @@ class HindsightConfig:
                 f"Invalid text_search_extension: {self.text_search_extension}. Must be one of: {', '.join(valid_text_search)}"
             )
 
+        # When LLM provider is "none", force chunks-only mode and disable LLM-dependent features
+        if self.llm_provider == "none":
+            self.retain_extraction_mode = "chunks"
+            self.enable_observations = False
+            logger.info(
+                "LLM provider set to 'none': forcing retain_extraction_mode='chunks', "
+                "disabling observations/consolidation. Reflect will return HTTP 400."
+            )
+
         # RETAIN_MAX_COMPLETION_TOKENS must be greater than RETAIN_CHUNK_SIZE
         # to ensure the LLM has enough output capacity to extract facts from chunks
-        if self.retain_max_completion_tokens <= self.retain_chunk_size:
+        # (not applicable when provider is "none" since no LLM calls are made)
+        if self.llm_provider != "none" and self.retain_max_completion_tokens <= self.retain_chunk_size:
             raise ValueError(
                 f"Invalid configuration: HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS "
                 f"({self.retain_max_completion_tokens}) must be greater than "

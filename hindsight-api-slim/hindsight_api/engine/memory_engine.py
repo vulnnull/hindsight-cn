@@ -328,6 +328,10 @@ class MemoryEngine(MemoryEngineInterface):
         # Apply defaults from config
         db_url = db_url or config.database_url
         memory_llm_provider = memory_llm_provider or config.llm_provider
+
+        # Force skip LLM verification when provider is "none" (no LLM to verify)
+        if memory_llm_provider == "none":
+            self._skip_llm_verification = True
         memory_llm_api_key = memory_llm_api_key or config.llm_api_key
         if not memory_llm_api_key and requires_api_key(memory_llm_provider):
             raise ValueError("LLM API key is required. Set HINDSIGHT_API_LLM_API_KEY environment variable.")
@@ -819,6 +823,11 @@ class MemoryEngine(MemoryEngineInterface):
         bank_id = task_dict.get("bank_id")
         if not bank_id:
             raise ValueError("bank_id is required for consolidation task")
+
+        # Skip consolidation when LLM provider is "none"
+        if self._llm_config.provider == "none":
+            logger.info(f"[CONSOLIDATION] Skipping consolidation for bank {bank_id}: LLM provider is 'none'")
+            return {"memories_processed": 0, "skipped": True}
 
         from hindsight_api.models import RequestContext
 
@@ -2253,6 +2262,11 @@ class MemoryEngine(MemoryEngineInterface):
 
             # Resolve bank-specific config for this operation
             resolved_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
+
+            # Force chunks mode when LLM provider is "none" (no LLM available for fact extraction)
+            if self._llm_config.provider == "none":
+                resolved_config.retain_extraction_mode = "chunks"
+                resolved_config.enable_observations = False
 
             # Apply strategy overrides: explicit strategy > bank default strategy
             from hindsight_api.config_resolver import apply_strategy
@@ -5192,6 +5206,15 @@ class MemoryEngine(MemoryEngineInterface):
         if self._reflect_llm_config is None:
             raise ValueError("Memory LLM API key not set. Set HINDSIGHT_API_LLM_API_KEY environment variable.")
 
+        # Block reflect when LLM provider is "none"
+        if self._llm_config.provider == "none":
+            from .providers.none_llm import LLMNotAvailableError
+
+            raise LLMNotAvailableError(
+                "Reflect requires an LLM provider. Current provider is set to 'none'. "
+                "Set HINDSIGHT_API_LLM_PROVIDER to a real provider (e.g., openai, anthropic, gemini)."
+            )
+
         # Authenticate tenant and set schema in context (for fq_table())
         await self._authenticate_tenant(request_context)
 
@@ -7856,6 +7879,15 @@ class MemoryEngine(MemoryEngineInterface):
         Returns:
             Dict with operation_id
         """
+        # Block mental model refresh when LLM provider is "none"
+        if self._llm_config.provider == "none":
+            from .providers.none_llm import LLMNotAvailableError
+
+            raise LLMNotAvailableError(
+                "Mental model refresh requires an LLM provider. Current provider is set to 'none'. "
+                "Set HINDSIGHT_API_LLM_PROVIDER to a real provider (e.g., openai, anthropic, gemini)."
+            )
+
         await self._authenticate_tenant(request_context)
 
         # Pre-operation validation (credit check)

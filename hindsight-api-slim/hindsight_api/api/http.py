@@ -72,6 +72,7 @@ def FieldWithDefault(default_factory: Callable, **kwargs) -> Any:
 
 from hindsight_api.config import get_config
 from hindsight_api.engine.memory_engine import Budget, _current_schema, _get_tiktoken_encoding, fq_table
+from hindsight_api.engine.providers.none_llm import LLMNotAvailableError
 from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES, MemoryFact, TokenUsage
 from hindsight_api.engine.search.tags import TagGroup, TagsMatch
 from hindsight_api.extensions import HttpExtension, OperationValidationError, load_extension
@@ -2651,6 +2652,8 @@ def _register_routes(app: FastAPI):
             raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
+        except LLMNotAvailableError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         except TimeoutError as e:
             logger.error("Timeout in /v1/default/banks/%s/reflect: %s", bank_id, e)
             raise HTTPException(
@@ -3017,6 +3020,8 @@ def _register_routes(app: FastAPI):
                 request_context=request_context,
             )
             return AsyncOperationSubmitResponse(operation_id=result["operation_id"], status="queued")
+        except LLMNotAvailableError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except (AuthenticationError, HTTPException):
