@@ -28,7 +28,17 @@ REPO_PATH = Path(__file__).parent.parent.parent
 CHANGELOG_PATH = REPO_PATH / "hindsight-docs" / "src" / "pages" / "changelog" / "index.md"
 INTEGRATION_CHANGELOG_DIR = REPO_PATH / "hindsight-docs" / "src" / "pages" / "changelog" / "integrations"
 
-VALID_INTEGRATIONS = ["litellm", "pydantic-ai", "crewai", "ai-sdk", "chat", "openclaw", "langgraph", "nemoclaw", "strands"]
+VALID_INTEGRATIONS = [
+    "litellm",
+    "pydantic-ai",
+    "crewai",
+    "ai-sdk",
+    "chat",
+    "openclaw",
+    "langgraph",
+    "nemoclaw",
+    "strands",
+]
 
 
 class ChangelogEntry(BaseModel):

@@ -97,8 +97,8 @@ def test_per_operation_provider_default_model():
 
         # Retain should use Anthropic default
         assert (
-            config.retain_llm_model == "claude-haiku-4-5-20251001"
-        ), f"Expected claude-haiku-4-5-20251001, got {config.retain_llm_model}"
+            config.retain_llm_model == "claude-haiku-4-5"
+        ), f"Expected claude-haiku-4-5, got {config.retain_llm_model}"
 
     finally:
         clear_config_cache()

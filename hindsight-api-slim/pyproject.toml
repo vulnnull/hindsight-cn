@@ -40,7 +40,7 @@ dependencies = [
     "anthropic>=0.40.0",
     "typer>=0.9.0",
     "cohere>=5.0.0",
-    "litellm>=1.0.0",
+    "litellm>=1.0.0,<=1.82.6", # 1.82.7+ contains a supply chain attack (malicious .pth credential stealer)
     "markitdown[pdf,docx,pptx,xlsx,xls]>=0.1.4", # File to markdown conversion
     "obstore>=0.4.0", # S3/GCS/Azure object storage client (Rust-backed)
     "uvloop>=0.22.1",
