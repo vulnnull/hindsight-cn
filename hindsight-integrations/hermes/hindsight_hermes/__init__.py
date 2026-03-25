@@ -1,7 +1,13 @@
-"""Hindsight-Hermes: Persistent memory tools for Hermes agents.
+"""Hindsight-Hermes: Persistent memory for Hermes agents.
 
 Provides Hindsight retain/recall/reflect as native Hermes tools via the
-plugin system or manual ``register_tools()`` call.
+plugin system or manual ``register_tools()`` call.  When running on a
+Hermes build that supports lifecycle hooks, the plugin also:
+
+- **pre_llm_call** — recalls relevant memories and injects them into the
+  system prompt so the model has cross-session context on every turn.
+- **post_llm_call** — retains the user/assistant exchange so it can be
+  recalled in future sessions.
 
 Plugin usage (auto-discovery)::
 

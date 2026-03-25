@@ -180,29 +180,29 @@ def register_tools(
     resolved_client = _resolve_client(client, hindsight_api_url, api_key)
     created_banks: set[str] = set()
 
-    def _ensure_bank(bid: str) -> None:
+    async def _ensure_bank(bid: str) -> None:
         if bid in created_banks:
             return
         try:
-            resolved_client.create_bank(bank_id=bid, name=bid)
+            await resolved_client.acreate_bank(bank_id=bid, name=bid)
             created_banks.add(bid)
         except Exception:
             created_banks.add(bid)
 
-    def handle_retain(args: dict[str, Any], **kwargs: Any) -> str:
+    async def handle_retain(args: dict[str, Any], **kwargs: Any) -> str:
         try:
             bid = _resolve_bank_id(args, bank_id, bank_resolver)
-            _ensure_bank(bid)
+            await _ensure_bank(bid)
             retain_kwargs: dict[str, Any] = {"bank_id": bid, "content": args["content"]}
             if tags:
                 retain_kwargs["tags"] = tags
-            resolved_client.retain(**retain_kwargs)
+            await resolved_client.aretain(**retain_kwargs)
             return json.dumps({"result": "Memory stored successfully."})
         except Exception as e:
             logger.error(f"Retain failed: {e}")
             return json.dumps({"error": str(e)})
 
-    def handle_recall(args: dict[str, Any], **kwargs: Any) -> str:
+    async def handle_recall(args: dict[str, Any], **kwargs: Any) -> str:
         try:
             bid = _resolve_bank_id(args, bank_id, bank_resolver)
             recall_kwargs: dict[str, Any] = {
@@ -214,7 +214,7 @@ def register_tools(
             if recall_tags:
                 recall_kwargs["tags"] = recall_tags
                 recall_kwargs["tags_match"] = recall_tags_match
-            response = resolved_client.recall(**recall_kwargs)
+            response = await resolved_client.arecall(**recall_kwargs)
             if not response.results:
                 return json.dumps({"result": "No relevant memories found."})
             lines = []
@@ -225,7 +225,7 @@ def register_tools(
             logger.error(f"Recall failed: {e}")
             return json.dumps({"error": str(e)})
 
-    def handle_reflect(args: dict[str, Any], **kwargs: Any) -> str:
+    async def handle_reflect(args: dict[str, Any], **kwargs: Any) -> str:
         try:
             bid = _resolve_bank_id(args, bank_id, bank_resolver)
             reflect_kwargs: dict[str, Any] = {
@@ -233,7 +233,7 @@ def register_tools(
                 "query": args["query"],
                 "budget": budget,
             }
-            response = resolved_client.reflect(**reflect_kwargs)
+            response = await resolved_client.areflect(**reflect_kwargs)
             return json.dumps(
                 {"result": response.text or "No relevant memories found."}
             )
@@ -284,29 +284,29 @@ def register(ctx: Any) -> None:
     resolved_client = _resolve_client(None, hindsight_api_url, api_key)
     created_banks: set[str] = set()
 
-    def _ensure_bank(bid: str) -> None:
+    async def _ensure_bank(bid: str) -> None:
         if bid in created_banks:
             return
         try:
-            resolved_client.create_bank(bank_id=bid, name=bid)
+            await resolved_client.acreate_bank(bank_id=bid, name=bid)
             created_banks.add(bid)
         except Exception:
             created_banks.add(bid)
 
-    def handle_retain(args: dict[str, Any], **kwargs: Any) -> str:
+    async def handle_retain(args: dict[str, Any], **kwargs: Any) -> str:
         try:
             bid = _resolve_bank_id(args, bank_id, None)
-            _ensure_bank(bid)
-            resolved_client.retain(bank_id=bid, content=args["content"])
+            await _ensure_bank(bid)
+            await resolved_client.aretain(bank_id=bid, content=args["content"])
             return json.dumps({"result": "Memory stored successfully."})
         except Exception as e:
             logger.error(f"Retain failed: {e}")
             return json.dumps({"error": str(e)})
 
-    def handle_recall(args: dict[str, Any], **kwargs: Any) -> str:
+    async def handle_recall(args: dict[str, Any], **kwargs: Any) -> str:
         try:
             bid = _resolve_bank_id(args, bank_id, None)
-            response = resolved_client.recall(
+            response = await resolved_client.arecall(
                 bank_id=bid, query=args["query"], budget=budget
             )
             if not response.results:
@@ -317,10 +317,10 @@ def register(ctx: Any) -> None:
             logger.error(f"Recall failed: {e}")
             return json.dumps({"error": str(e)})
 
-    def handle_reflect(args: dict[str, Any], **kwargs: Any) -> str:
+    async def handle_reflect(args: dict[str, Any], **kwargs: Any) -> str:
         try:
             bid = _resolve_bank_id(args, bank_id, None)
-            response = resolved_client.reflect(
+            response = await resolved_client.areflect(
                 bank_id=bid, query=args["query"], budget=budget
             )
             return json.dumps(
@@ -348,6 +348,72 @@ def register(ctx: Any) -> None:
         schema=REFLECT_SCHEMA,
         handler=handle_reflect,
     )
+
+    # ── Lifecycle hooks ──────────────────────────────────────────────────
+    # These require hermes-agent ≥ the version that invokes pre/post_llm_call.
+    # When running on an older hermes-agent the hooks are simply never called,
+    # so registering them is always safe.
+
+    recall_budget = os.environ.get("HINDSIGHT_RECALL_BUDGET", budget)
+    recall_max_tokens = int(os.environ.get("HINDSIGHT_RECALL_MAX_TOKENS", "4096"))
+    retain_enabled = os.environ.get("HINDSIGHT_AUTO_RETAIN", "true").lower() in {"1", "true", "yes", "on"}
+
+    async def _on_pre_llm_call(
+        *,
+        session_id: str = "",
+        user_message: str = "",
+        conversation_history: list | None = None,
+        is_first_turn: bool = False,
+        model: str = "",
+        **kwargs: Any,
+    ) -> dict[str, str] | None:
+        """Recall relevant memories and inject them as system prompt context."""
+        if not user_message or not bank_id:
+            return None
+        try:
+            await _ensure_bank(bank_id)
+            response = await resolved_client.arecall(
+                bank_id=bank_id,
+                query=user_message,
+                budget=recall_budget,
+                max_tokens=recall_max_tokens,
+            )
+            if not response.results:
+                return None
+            lines = [f"- {r.text}" for r in response.results]
+            context = (
+                "# Hindsight Memory (persistent cross-session context)\n"
+                "Use this to answer questions about the user and prior sessions. "
+                "Do not call tools to look up information that is already present here.\n\n"
+                + "\n".join(lines)
+            )
+            return {"context": context}
+        except Exception as exc:
+            logger.warning("Hindsight pre_llm_call recall failed: %s", exc)
+            return None
+
+    async def _on_post_llm_call(
+        *,
+        session_id: str = "",
+        user_message: str = "",
+        assistant_response: str = "",
+        model: str = "",
+        **kwargs: Any,
+    ) -> None:
+        """Retain the conversation turn so it can be recalled in future sessions."""
+        if not retain_enabled or not bank_id:
+            return
+        if not user_message or not assistant_response:
+            return
+        try:
+            await _ensure_bank(bank_id)
+            content = f"User: {user_message}\nAssistant: {assistant_response}"
+            await resolved_client.aretain(bank_id=bank_id, content=content)
+        except Exception as exc:
+            logger.warning("Hindsight post_llm_call retain failed: %s", exc)
+
+    ctx.register_hook("pre_llm_call", _on_pre_llm_call)
+    ctx.register_hook("post_llm_call", _on_post_llm_call)
 
 
 def memory_instructions(

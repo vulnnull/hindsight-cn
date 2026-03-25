@@ -4,13 +4,20 @@ Hindsight memory integration for [Hermes Agent](https://github.com/NousResearch/
 
 ## What it does
 
-This package registers three tools into Hermes via its plugin system:
+**Automatic memory on every turn** — no tool calls required:
+
+- **`pre_llm_call` hook** — Before each LLM call, recalls relevant memories and injects them into the system prompt. The model sees cross-session context automatically.
+- **`post_llm_call` hook** — After each turn, retains the user/assistant exchange so it can be recalled in future sessions.
+
+**Three explicit tools** for when the model wants direct control:
 
 - **`hindsight_retain`** — Stores information to long-term memory. Hermes calls this when the user shares facts, preferences, or anything worth remembering.
 - **`hindsight_recall`** — Searches long-term memory for relevant information. Returns a numbered list of matching memories.
 - **`hindsight_reflect`** — Synthesizes a thoughtful answer from stored memories. Use this when you want Hermes to reason over what it knows rather than return raw facts.
 
 These tools appear under the `[hindsight]` toolset in Hermes's `/tools` list.
+
+> **Note:** The lifecycle hooks require hermes-agent with [PR #2823](https://github.com/NousResearch/hermes-agent/pull/2823) or later. On older versions, only the tools are registered — hooks are silently skipped.
 
 ## Setup
 
@@ -230,7 +237,10 @@ This exposes the same retain/recall/reflect operations through Hermes's MCP inte
 | `api_key` | `HINDSIGHT_API_KEY` | — | API key for authentication |
 | `bank_id` | `HINDSIGHT_BANK_ID` | — | Memory bank ID |
 | `budget` | `HINDSIGHT_BUDGET` | `mid` | Recall budget (low/mid/high) |
-| `max_tokens` | — | `4096` | Max tokens for recall results |
+| — | `HINDSIGHT_AUTO_RETAIN` | `true` | Auto-retain conversation turns via `post_llm_call` hook |
+| — | `HINDSIGHT_RECALL_BUDGET` | same as `budget` | Budget for the `pre_llm_call` recall hook |
+| — | `HINDSIGHT_RECALL_MAX_TOKENS` | `4096` | Max tokens for the `pre_llm_call` recall hook |
+| `max_tokens` | — | `4096` | Max tokens for recall results (tools) |
 | `tags` | — | — | Tags applied when storing memories |
 | `recall_tags` | — | — | Tags to filter recall results |
 | `recall_tags_match` | — | `any` | Tag matching mode (any/all/any_strict/all_strict) |
