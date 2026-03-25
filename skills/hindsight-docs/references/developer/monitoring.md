@@ -79,7 +79,7 @@ The `source` label allows distinguishing between:
 | `hindsight.llm.tokens.output` | Counter | provider, model, scope, success, token_bucket | Output tokens from LLM calls |
 
 **Labels:**
-- `provider`: LLM provider (`openai`, `anthropic`, `gemini`, `groq`, `ollama`, `lmstudio`)
+- `provider`: LLM provider (`openai`, `anthropic`, `gemini`, `groq`, `ollama`, `lmstudio`, `bedrock`, `litellm`)
 - `model`: Model name (e.g., `gpt-4`, `claude-3-sonnet`)
 - `scope`: What the LLM call is for (`memory`, `reflect`, `consolidation`, `answer`)
 - `success`: Whether the call succeeded (`true`, `false`)

@@ -8,7 +8,8 @@ from .anthropic_llm import AnthropicLLM
 from .claude_code_llm import ClaudeCodeLLM
 from .codex_llm import CodexLLM
 from .gemini_llm import GeminiLLM
+from .litellm_llm import LiteLLMLLM
 from .mock_llm import MockLLM
 from .openai_compatible_llm import OpenAICompatibleLLM
 
-__all__ = ["AnthropicLLM", "ClaudeCodeLLM", "CodexLLM", "GeminiLLM", "MockLLM", "OpenAICompatibleLLM"]
+__all__ = ["AnthropicLLM", "ClaudeCodeLLM", "CodexLLM", "GeminiLLM", "LiteLLMLLM", "MockLLM", "OpenAICompatibleLLM"]

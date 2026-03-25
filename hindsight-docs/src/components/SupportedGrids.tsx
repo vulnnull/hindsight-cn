@@ -2,7 +2,7 @@ import React from 'react';
 import type {IconType} from 'react-icons';
 import {IconGrid} from './IconGrid';
 import {SiPython, SiGo, SiOpenai, SiAnthropic, SiGooglegemini, SiOllama} from 'react-icons/si';
-import {LuTerminal, LuPlug, LuZap, LuBrainCog, LuSparkles, LuGlobe} from 'react-icons/lu';
+import {LuTerminal, LuPlug, LuZap, LuBrainCog, LuSparkles, LuGlobe, LuLayers, LuCloud} from 'react-icons/lu';
 
 const OpenAICompatibleIcon: IconType = ({size = 28, ...props}) => (
   <span style={{position: 'relative', display: 'inline-flex'}}>
@@ -39,6 +39,8 @@ export function LLMProvidersGrid() {
       { label: 'LM Studio',     icon: LuBrainCog },
       { label: 'MiniMax',            icon: LuSparkles },
       { label: 'OpenAI Compatible', icon: OpenAICompatibleIcon },
+      { label: 'AWS Bedrock', icon: LuCloud },
+      { label: 'LiteLLM (100+)', icon: LuLayers },
     ]} />
   );
 }

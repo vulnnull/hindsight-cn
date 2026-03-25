@@ -43,6 +43,8 @@ MODEL_MATRIX = [
     ("claude-code", "claude-sonnet-4-20250514"),
     # OpenAI Codex (uses MCP with Codex-specific models)
     ("openai-codex", "gpt-5.2-codex"),
+    # Bedrock models (via LiteLLM)
+    ("bedrock", "us.amazon.nova-2-lite-v1:0"),
     # Mock provider (for testing)
     ("mock", "mock"),
 ]
@@ -77,6 +79,12 @@ def should_skip_provider(provider: str, model: str = "") -> tuple[bool, str]:
     # Skip Ollama gemma models (don't support tool calling)
     if provider == "ollama" and "gemma" in model.lower():
         return True, f"Ollama {model} does not support tool calling"
+
+    # Bedrock needs AWS credentials
+    if provider == "bedrock":
+        if not os.getenv("AWS_ACCESS_KEY_ID"):
+            return True, "No AWS credentials available (set AWS_ACCESS_KEY_ID)"
+        return False, ""
 
     # Other providers need an API key
     if provider not in ("ollama", "claude-code", "openai-codex", "mock"):
@@ -227,7 +235,7 @@ async def test_llm_provider_api_methods(provider: str, model: str):
 
 @pytest.mark.parametrize("provider,model", MODEL_MATRIX)
 @pytest.mark.asyncio
-@pytest.mark.timeout(300)
+@pytest.mark.timeout(600)  # 600s: some providers (e.g., bedrock via litellm) need extra time for fact extraction
 async def test_llm_provider_memory_operations(provider: str, model: str):
     """
     Test LLM provider with actual memory operations: fact extraction and reflect.
