@@ -20,7 +20,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from .embed_manager import EmbedManager
-from .profile_manager import ProfileManager, resolve_active_profile
+from .profile_manager import UI_PORT_OFFSET, ProfileManager, resolve_active_profile
 
 logger = logging.getLogger(__name__)
 console = Console(stderr=True)
@@ -321,6 +321,219 @@ class DaemonEmbedManager(EmbedManager):
             self._profile_manager.create_profile(profile, port, api_config)
         except Exception as e:
             logger.debug(f"Failed to register profile '{profile}' in metadata: {e}")
+
+    def _find_ui_command(self) -> list[str]:
+        """Find the command to run the control plane UI."""
+        # Check if we're in development mode (monorepo)
+        dev_cp_path = Path(__file__).parent.parent.parent / "hindsight-control-plane"
+        cli_js = dev_cp_path / "bin" / "cli.js"
+        if cli_js.exists():
+            return ["node", str(cli_js)]
+
+        # Use npx to run the published control plane package
+        from . import __version__
+
+        cp_version = os.getenv("HINDSIGHT_EMBED_CP_VERSION", __version__)
+        return ["npx", f"@vectorize-io/hindsight-control-plane@{cp_version}"]
+
+    def get_ui_url(self, profile: str, ui_port: int | None = None, hostname: str | None = None) -> str:
+        """Get the URL for the UI serving this profile."""
+        if ui_port is None:
+            paths = self._profile_manager.resolve_profile_paths(profile)
+            ui_port = paths.port + UI_PORT_OFFSET
+        host = hostname or "0.0.0.0"
+        return f"http://{host}:{ui_port}"
+
+    def is_ui_running(self, profile: str, ui_port: int | None = None) -> bool:
+        """Check if the UI is running and responsive."""
+        # Always health-check on 127.0.0.1 regardless of bind hostname
+        ui_url = self.get_ui_url(profile, ui_port, hostname="127.0.0.1")
+        try:
+            with httpx.Client(timeout=2) as client:
+                response = client.get(f"{ui_url}/api/health")
+                return response.status_code == 200
+        except Exception:
+            return False
+
+    def start_ui(self, profile: str, ui_port: int | None = None, hostname: str = "0.0.0.0") -> bool:
+        """Start the control plane UI in background.
+
+        Args:
+            profile: Profile name.
+            ui_port: Port for the UI. Defaults to daemon_port + 10000.
+            hostname: Hostname to bind to. Defaults to 0.0.0.0.
+
+        Returns:
+            True if UI started successfully.
+        """
+        paths = self._profile_manager.resolve_profile_paths(profile)
+        if ui_port is None:
+            ui_port = paths.port + UI_PORT_OFFSET
+
+        if self.is_ui_running(profile, ui_port):
+            logger.debug(f"UI already running for profile '{profile}' on port {ui_port}")
+            return True
+
+        profile_label = f"profile '{profile}'" if profile else "default profile"
+        api_url = self.get_url(profile)
+        ui_log = paths.ui_log
+
+        # Build environment
+        env = os.environ.copy()
+        env["PORT"] = str(ui_port)
+        env["HOSTNAME"] = hostname
+        env["HINDSIGHT_CP_DATAPLANE_API_URL"] = api_url
+
+        # Create log directory
+        ui_log.parent.mkdir(parents=True, exist_ok=True)
+
+        # Build command
+        cmd = self._find_ui_command() + [
+            "--port",
+            str(ui_port),
+            "--hostname",
+            hostname,
+            "--api-url",
+            api_url,
+        ]
+
+        try:
+            log_file = open(ui_log, "w")
+            subprocess.Popen(
+                cmd,
+                env=env,
+                start_new_session=True,
+                stdout=log_file,
+                stderr=log_file,
+            )
+
+            # Wait for UI to be ready
+            start_time = time.time()
+            title = f"[bold cyan]Starting UI[/bold cyan] [dim]({profile or 'default'} @ :{ui_port})[/dim]"
+            log_lines = [f"Starting UI for {profile_label}...", ""]
+
+            with Live(console=console, auto_refresh=False) as live:
+                content = Text("\n".join(log_lines), style="dim")
+                panel = Panel(content, title=title, border_style="cyan", padding=(1, 2))
+                live.update(panel)
+                live.refresh()
+
+                while time.time() - start_time < 30:
+                    if self.is_ui_running(profile, ui_port):
+                        log_lines.append(f"✓ UI started at http://127.0.0.1:{ui_port}")
+                        log_lines.append(f"Logs: {ui_log}")
+                        content = Text("\n".join(log_lines), style="dim")
+                        success_title = (
+                            f"[bold green]✓ UI Started[/bold green] [dim]({profile or 'default'} @ :{ui_port})[/dim]"
+                        )
+                        panel = Panel(content, title=success_title, border_style="green", padding=(1, 2))
+                        live.update(panel)
+                        live.refresh()
+                        console.print()
+                        return True
+
+                    elapsed = int(time.time() - start_time)
+                    status_msg = f"⏳ Waiting for UI... ({elapsed}s elapsed)"
+                    if log_lines and log_lines[-1].startswith("⏳"):
+                        log_lines[-1] = status_msg
+                    else:
+                        log_lines.append(status_msg)
+
+                    content = Text("\n".join(log_lines), style="dim")
+                    panel = Panel(content, title=title, border_style="cyan", padding=(1, 2))
+                    live.update(panel)
+                    live.refresh()
+                    time.sleep(0.5)
+
+            # Timeout
+            console.print(
+                Panel(
+                    Text(f"UI failed to start (timeout)\n\nSee full log: {ui_log}", style="dim"),
+                    title=f"[bold red]✗ UI Failed (Timeout)[/bold red] [dim](:{ui_port})[/dim]",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+            console.print()
+            return False
+
+        except FileNotFoundError:
+            error_msg = (
+                f"Command not found: {cmd[0]}\nFull command: {' '.join(cmd)}\n\nInstall Node.js and npx to run the UI."
+            )
+            console.print(
+                Panel(
+                    Text(error_msg, style="red"),
+                    title="[bold red]✗ Command Not Found[/bold red]",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+            console.print()
+            return False
+        except Exception as e:
+            error_msg = f"Failed to start UI: {e}\n\nCommand: {' '.join(cmd)}\nLog file: {ui_log}"
+            console.print(
+                Panel(
+                    Text(error_msg, style="red"),
+                    title="[bold red]✗ UI Startup Error[/bold red]",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+            console.print()
+            return False
+
+    def stop_ui(self, profile: str, ui_port: int | None = None) -> bool:
+        """Stop the UI for this profile.
+
+        Args:
+            profile: Profile name.
+            ui_port: Port the UI is running on. Defaults to daemon_port + 10000.
+
+        Returns:
+            True if stopped successfully.
+        """
+        paths = self._profile_manager.resolve_profile_paths(profile)
+        if ui_port is None:
+            ui_port = paths.port + UI_PORT_OFFSET
+
+        if not self.is_ui_running(profile, ui_port):
+            logger.debug(f"UI not running for profile '{profile}'")
+            return True
+
+        # Find PID by port
+        try:
+            result = subprocess.run(
+                ["lsof", "-ti", f":{ui_port}", "-sTCP:LISTEN"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                pid = int(result.stdout.strip().split()[0])
+                logger.debug(f"Found UI PID {pid} on port {ui_port}")
+                os.kill(pid, 15)
+
+                # Wait for process to exit
+                for _ in range(50):
+                    time.sleep(0.1)
+                    try:
+                        os.kill(pid, 0)
+                    except OSError:
+                        break
+            else:
+                logger.warning(f"Could not find PID for UI port {ui_port}")
+        except (subprocess.TimeoutExpired, ValueError, OSError, FileNotFoundError) as e:
+            logger.warning(f"Could not find/kill UI by port: {e}")
+
+        # Wait for health check to fail
+        for _ in range(30):
+            if not self.is_ui_running(profile, ui_port):
+                return True
+            time.sleep(0.1)
+
+        return not self.is_ui_running(profile, ui_port)
 
     def ensure_running(self, config: dict, profile: str) -> bool:
         """

@@ -683,6 +683,167 @@ def do_daemon(args, config: dict, logger):
         return 1
 
 
+def do_ui(args, config: dict, logger):
+    """Handle UI subcommands."""
+    from . import daemon_client
+    from .profile_manager import UI_PORT_OFFSET, ProfileManager
+
+    profile = args.profile
+    ui_port = getattr(args, "port", None)
+    hostname = getattr(args, "hostname", "0.0.0.0")
+
+    # Resolve default UI port
+    pm = ProfileManager()
+    paths = pm.resolve_profile_paths(profile or "")
+    default_ui_port = paths.port + UI_PORT_OFFSET
+
+    if args.ui_command == "start":
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+
+        console = Console()
+
+        effective_port = ui_port or default_ui_port
+
+        if daemon_client.is_ui_running(profile, effective_port):
+            title = (
+                f"[bold yellow]UI Already Running[/bold yellow] [dim]({profile or 'default'} @ :{effective_port})[/dim]"
+            )
+            console.print(
+                Panel(
+                    Text("UI is already running", style="yellow"),
+                    title=title,
+                    border_style="yellow",
+                )
+            )
+            return 0
+
+        # Ensure daemon is running first
+        if not daemon_client.is_daemon_running(profile):
+            console.print("[dim]Daemon not running, starting it first...[/dim]")
+            if not daemon_client.ensure_daemon_running(config, profile):
+                console.print(
+                    Panel(
+                        Text("Failed to start daemon (required for UI)", style="red"),
+                        title="[bold red]✗ Error[/bold red]",
+                        border_style="red",
+                    )
+                )
+                return 1
+
+        if daemon_client.start_ui(profile, ui_port, hostname):
+            return 0
+        else:
+            return 1
+
+    elif args.ui_command == "stop":
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+
+        console = Console()
+        effective_port = ui_port or default_ui_port
+
+        if not daemon_client.is_ui_running(profile, effective_port):
+            title = f"[bold]UI Status[/bold] [dim]({profile or 'default'})[/dim]"
+            console.print(
+                Panel(
+                    Text("UI is not running", style="dim"),
+                    title=title,
+                    border_style="dim",
+                )
+            )
+            return 0
+
+        if daemon_client.stop_ui(profile, ui_port):
+            title = f"[bold green]✓ UI Stopped[/bold green] [dim]({profile or 'default'})[/dim]"
+            console.print(
+                Panel(
+                    Text("UI stopped successfully", style="green"),
+                    title=title,
+                    border_style="green",
+                )
+            )
+            return 0
+        else:
+            console.print(
+                Panel(
+                    Text("Failed to stop UI", style="red"),
+                    title="[bold red]✗ Error[/bold red]",
+                    border_style="red",
+                )
+            )
+            return 1
+
+    elif args.ui_command == "status":
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+
+        console = Console()
+        effective_port = ui_port or default_ui_port
+
+        if daemon_client.is_ui_running(profile, effective_port):
+            status_text = Text()
+            status_text.append("UI is running\n\n", style="green bold")
+            status_text.append("  URL: ", style="dim")
+            status_text.append(f"http://127.0.0.1:{effective_port}\n", style="cyan")
+            status_text.append("  Logs: ", style="dim")
+            status_text.append(f"{paths.ui_log}", style="")
+
+            title = f"[bold green]✓ UI Running[/bold green] [dim]({profile or 'default'} @ :{effective_port})[/dim]"
+            console.print(
+                Panel(
+                    status_text,
+                    title=title,
+                    border_style="green",
+                    padding=(1, 2),
+                )
+            )
+            return 0
+        else:
+            title = f"[bold]UI Status[/bold] [dim]({profile or 'default'})[/dim]"
+            console.print(
+                Panel(
+                    Text("UI is not running", style="dim"),
+                    title=title,
+                    border_style="dim",
+                )
+            )
+            return 1
+
+    elif args.ui_command == "logs":
+        ui_log_path = paths.ui_log
+        if not ui_log_path.exists():
+            print("No UI logs found", file=sys.stderr)
+            print(f"  Expected at: {ui_log_path}")
+            return 1
+
+        if args.follow:
+            import subprocess
+
+            try:
+                subprocess.run(["tail", "-f", str(ui_log_path)])
+            except KeyboardInterrupt:
+                pass
+            return 0
+        else:
+            try:
+                with open(ui_log_path) as f:
+                    lines = f.readlines()
+                    for line in lines[-args.lines :]:
+                        print(line, end="")
+                return 0
+            except Exception as e:
+                print(f"Error reading logs: {e}", file=sys.stderr)
+                return 1
+
+    else:
+        print("Usage: hindsight-embed ui {start|stop|status|logs}", file=sys.stderr)
+        return 1
+
+
 def _do_configure_profile_with_env(profile_name: str, port: int | None, env_vars: list[str]) -> int:
     """Configure a named profile with environment variables (non-interactive).
 
@@ -1247,6 +1408,30 @@ def main():
             exit_code = do_daemon(args, config, logger)
             sys.exit(exit_code)
 
+        # Handle UI subcommands
+        if command == "ui":
+            parser = argparse.ArgumentParser(prog="hindsight-embed ui")
+            subparsers = parser.add_subparsers(dest="ui_command")
+            start_parser = subparsers.add_parser("start", help="Start the UI")
+            start_parser.add_argument("--port", type=int, help="Port for the UI (default: daemon_port + 10000)")
+            start_parser.add_argument(
+                "--hostname", "-H", default="0.0.0.0", help="Hostname to bind to (default: 0.0.0.0)"
+            )
+            stop_parser = subparsers.add_parser("stop", help="Stop the UI")
+            stop_parser.add_argument("--port", type=int, help="Port the UI is running on")
+            status_parser = subparsers.add_parser("status", help="Check UI status")
+            status_parser.add_argument("--port", type=int, help="Port to check")
+            logs_parser = subparsers.add_parser("logs", help="View UI logs")
+            logs_parser.add_argument("--follow", "-f", action="store_true")
+            logs_parser.add_argument("--lines", "-n", type=int, default=50)
+
+            args = parser.parse_args(remaining_args[1:])
+            args.profile = global_profile
+            logger = setup_logging(False)
+            config = get_config()
+            exit_code = do_ui(args, config, logger)
+            sys.exit(exit_code)
+
         # Handle --help / -h
         if command in ("--help", "-h"):
             print_help()
@@ -1304,6 +1489,12 @@ Daemon management:
     daemon stop            Stop the daemon
     daemon status          Check daemon status
     daemon logs [-f] [-n]  View daemon logs
+
+UI (control plane):
+    ui start [--port PORT] [--hostname HOST]  Start the web UI (default port: daemon_port + 10000)
+    ui stop [--port PORT]                     Stop the web UI
+    ui status [--port PORT]                   Check UI status
+    ui logs [-f] [-n]                         View UI logs
 
 CLI commands (forwarded to hindsight-cli):
     memory retain <bank> <content>   Store a memory

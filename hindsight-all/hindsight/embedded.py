@@ -34,7 +34,6 @@ Using context manager:
 """
 
 import logging
-import os
 import threading
 from typing import Optional
 
@@ -140,13 +139,17 @@ class HindsightEmbedded:
                 return
 
             if self._closed:
-                raise RuntimeError("Cannot use HindsightEmbedded after it has been closed")
+                raise RuntimeError(
+                    "Cannot use HindsightEmbedded after it has been closed"
+                )
 
             # Use embed manager interface for daemon management
             logger.info(f"Ensuring daemon is running for profile '{self.profile}'...")
             success = self._manager.ensure_running(self.config, self.profile)
             if not success:
-                raise RuntimeError(f"Failed to start daemon for profile '{self.profile}'")
+                raise RuntimeError(
+                    f"Failed to start daemon for profile '{self.profile}'"
+                )
 
             # Get daemon URL and create client
             daemon_url = self._manager.get_url(self.profile)
@@ -375,3 +378,45 @@ class HindsightEmbedded:
     def is_running(self) -> bool:
         """Check if the client is initialized."""
         return self._started and not self._closed and self._client is not None
+
+    def start_ui(self, ui_port: int | None = None, hostname: str = "0.0.0.0") -> bool:
+        """Start the control plane web UI.
+
+        The daemon is started automatically if not already running.
+
+        Args:
+            ui_port: Port for the UI. Defaults to daemon_port + 10000.
+            hostname: Hostname to bind to. Defaults to 0.0.0.0.
+
+        Returns:
+            True if UI started successfully.
+        """
+        self._ensure_started()
+        return self._manager.start_ui(self.profile, ui_port, hostname)
+
+    def stop_ui(self, ui_port: int | None = None) -> bool:
+        """Stop the control plane web UI.
+
+        Args:
+            ui_port: Port the UI is running on. Defaults to daemon_port + 10000.
+
+        Returns:
+            True if stopped successfully.
+        """
+        return self._manager.stop_ui(self.profile, ui_port)
+
+    def is_ui_running(self, ui_port: int | None = None) -> bool:
+        """Check if the control plane web UI is running.
+
+        Args:
+            ui_port: Port to check. Defaults to daemon_port + 10000.
+
+        Returns:
+            True if UI is running and responsive.
+        """
+        return self._manager.is_ui_running(self.profile, ui_port)
+
+    @property
+    def ui_url(self) -> str:
+        """Get the UI URL for this profile."""
+        return self._manager.get_ui_url(self.profile)

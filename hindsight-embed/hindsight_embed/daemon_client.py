@@ -104,6 +104,67 @@ def is_daemon_running(profile: str | None = None) -> bool:
     return _manager.is_running(profile)
 
 
+def start_ui(profile: str | None = None, ui_port: int | None = None, hostname: str = "0.0.0.0") -> bool:
+    """Start the control plane UI.
+
+    Args:
+        profile: Profile name (None = resolve from priority).
+        ui_port: Port for the UI. Defaults to daemon_port + 10000.
+        hostname: Hostname to bind to. Defaults to 0.0.0.0.
+
+    Returns:
+        True if UI started successfully.
+    """
+    if profile is None:
+        profile = resolve_active_profile()
+    return _manager.start_ui(profile, ui_port, hostname)
+
+
+def stop_ui(profile: str | None = None, ui_port: int | None = None) -> bool:
+    """Stop the control plane UI.
+
+    Args:
+        profile: Profile name (None = resolve from priority).
+        ui_port: Port the UI is running on. Defaults to daemon_port + 10000.
+
+    Returns:
+        True if UI stopped successfully.
+    """
+    if profile is None:
+        profile = resolve_active_profile()
+    return _manager.stop_ui(profile, ui_port)
+
+
+def is_ui_running(profile: str | None = None, ui_port: int | None = None) -> bool:
+    """Check if the UI is running.
+
+    Args:
+        profile: Profile name (None = resolve from priority).
+        ui_port: Port to check. Defaults to daemon_port + 10000.
+
+    Returns:
+        True if UI is running and responsive.
+    """
+    if profile is None:
+        profile = resolve_active_profile()
+    return _manager.is_ui_running(profile, ui_port)
+
+
+def get_ui_url(profile: str | None = None, ui_port: int | None = None) -> str:
+    """Get UI URL for a profile.
+
+    Args:
+        profile: Profile name (None = resolve from priority).
+        ui_port: Port for the UI. Defaults to daemon_port + 10000.
+
+    Returns:
+        URL for the UI.
+    """
+    if profile is None:
+        profile = resolve_active_profile()
+    return _manager.get_ui_url(profile, ui_port)
+
+
 def find_cli_binary() -> Path | None:
     """Find the hindsight CLI binary in known locations or PATH."""
     import shutil

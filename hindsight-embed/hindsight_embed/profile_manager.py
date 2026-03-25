@@ -28,6 +28,10 @@ PROFILE_PORT_BASE = 8889
 PROFILE_PORT_RANGE = 1000  # 8889-9888
 
 
+# UI port offset from daemon port (e.g., daemon 8888 -> UI 18888)
+UI_PORT_OFFSET = 10000
+
+
 @dataclass
 class ProfilePaths:
     """Paths and port for a profile."""
@@ -36,6 +40,11 @@ class ProfilePaths:
     lock: Path
     log: Path
     port: int
+    ui_log: Path = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.ui_log is None:
+            self.ui_log = self.log.parent / self.log.name.replace(".log", ".ui.log")
 
 
 @dataclass
