@@ -1,5 +1,4 @@
 version = 1
-revision = 1
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -1487,7 +1486,6 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
 ]
-provides-extras = ["test"]
 
 [[package]]
 name = "hindsight-all-slim"
@@ -1513,7 +1511,6 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
 ]
-provides-extras = ["test"]
 
 [[package]]
 name = "hindsight-api"
@@ -1702,7 +1699,6 @@ requires-dist = [
     { name = "winloop", marker = "sys_platform == 'win32'", specifier = ">=0.1.0" },
     { name = "wsproto", specifier = ">=1.0.0" },
 ]
-provides-extras = ["local-ml", "embedded-db", "all", "test"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1745,11 +1741,10 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
     { name = "python-dateutil", specifier = ">=2.8.2" },
-    { name = "requests", marker = "extra == 'test'", specifier = ">=2.28.0" },
+    { name = "requests", marker = "extra == 'test'", specifier = ">=2.33.0" },
     { name = "typing-extensions", specifier = ">=4.7.1" },
     { name = "urllib3", specifier = ">=2.1.0,<3.0.0" },
 ]
-provides-extras = ["test"]
 
 [[package]]
 name = "hindsight-dev"
@@ -1789,9 +1784,8 @@ requires-dist = [
     { name = "python-dotenv", marker = "extra == 'test'", specifier = ">=1.0.0" },
     { name = "python-fasthtml", specifier = ">=0.12.33" },
     { name = "rich", specifier = ">=13.0.0" },
-    { name = "streamlit", specifier = ">=1.51.0" },
+    { name = "streamlit", specifier = ">=1.54.0" },
 ]
-provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4420,7 +4414,7 @@ wheels = [
 
 [[package]]
 name = "requests"
-version = "2.32.5"
+version = "2.33.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -4428,9 +4422,9 @@ dependencies = [
     { name = "idna" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c9/74/b3ff8e6c8446842c3f5c837e9c3dfcfe2018ea6ecef224c710c85ef728f4/requests-2.32.5.tar.gz", hash = "sha256:dbba0bac56e100853db0ea71b82b4dfd5fe2bf6d3754a8893c3af500cec7d7cf", size = 134517 }
+sdist = { url = "https://files.pythonhosted.org/packages/34/64/8860370b167a9721e8956ae116825caff829224fbca0ca6e7bf8ddef8430/requests-2.33.0.tar.gz", hash = "sha256:c7ebc5e8b0f21837386ad0e1c8fe8b829fa5f544d8df3b2253bff14ef29d7652", size = 134232 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/db/4254e3eabe8020b458f1a747140d32277ec7a271daf1d235b70dc0b4e6e3/requests-2.32.5-py3-none-any.whl", hash = "sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6", size = 64738 },
+    { url = "https://files.pythonhosted.org/packages/56/5d/c814546c2333ceea4ba42262d8c4d55763003e767fa169adc693bd524478/requests-2.33.0-py3-none-any.whl", hash = "sha256:3324635456fa185245e24865e810cecec7b4caf933d7eb133dcde67d48cee69b", size = 65017 },
 ]
 
 [[package]]
@@ -5098,7 +5092,7 @@ wheels = [
 
 [[package]]
 name = "streamlit"
-version = "1.51.0"
+version = "1.55.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "altair" },
@@ -5120,9 +5114,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "watchdog", marker = "sys_platform != 'darwin'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/59/6d/327ddd5fc35fcf2aeecb4040668337f5565a1c6c95b1e892b8bfd4bb9031/streamlit-1.51.0.tar.gz", hash = "sha256:1e742a9c0b698f466c6f5bf58d333beda5a1fbe8de660743976791b5c1446ef6", size = 9742904 }
+sdist = { url = "https://files.pythonhosted.org/packages/92/8e/f2b8b4fa8ba65aae251170c54f8ce198fb588fc348301c2b624f8c63efac/streamlit-1.55.0.tar.gz", hash = "sha256:015e512bbd02d000f4047e51118dc086b70e7d9c46b4a11a33c2509731379626", size = 8612008 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/60/868371b6482ccd9ef423c6f62650066cf8271fdb2ee84f192695ad6b7a96/streamlit-1.51.0-py3-none-any.whl", hash = "sha256:4008b029f71401ce54946bb09a6a3e36f4f7652cbb48db701224557738cfda38", size = 10171702 },
+    { url = "https://files.pythonhosted.org/packages/dc/e6/412c1e1f200ca8c32ecf10201839183e261ad61ced3ede34a66f6d4be3cf/streamlit-1.55.0-py3-none-any.whl", hash = "sha256:1e4a16449c6131696180f4ddb40ea8c51834e89c2a43e1b0362bc9b1cfd9b415", size = 9075714 },
 ]
 
 [[package]]
