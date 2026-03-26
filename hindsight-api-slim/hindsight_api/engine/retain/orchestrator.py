@@ -127,9 +127,7 @@ async def _insert_facts_and_links(
     if unit_ids:
         # Process entities
         step_start = time.time()
-        user_entities_per_content = {
-            idx: content.entities for idx, content in enumerate(contents) if content.entities
-        }
+        user_entities_per_content = {idx: content.entities for idx, content in enumerate(contents) if content.entities}
         entity_links = await entity_processing.process_entities_batch(
             entity_resolver,
             conn,
@@ -217,9 +215,7 @@ async def _extract_and_embed(
     embeddings = await embedding_processing.generate_embeddings_batch(embeddings_model, augmented_texts)
     log_buffer.append(f"  Generate embeddings: {len(embeddings)} embeddings in {time.time() - step_start:.3f}s")
 
-    processed_facts = [
-        ProcessedFact.from_extracted_fact(ef, emb) for ef, emb in zip(extracted_facts, embeddings)
-    ]
+    processed_facts = [ProcessedFact.from_extracted_fact(ef, emb) for ef, emb in zip(extracted_facts, embeddings)]
 
     return extracted_facts, processed_facts, chunks, usage
 
@@ -268,23 +264,56 @@ async def retain_batch(
     # --- Delta retain: check if we can skip unchanged chunks ---
     if is_first_batch:
         delta_result = await _try_delta_retain(
-            pool, embeddings_model, llm_config, entity_resolver, format_date_fn,
-            bank_id, contents_dicts, contents, config, document_id, fact_type_override,
-            document_tags, agent_name, log_buffer, start_time, operation_id, schema, outbox_callback,
+            pool,
+            embeddings_model,
+            llm_config,
+            entity_resolver,
+            format_date_fn,
+            bank_id,
+            contents_dicts,
+            contents,
+            config,
+            document_id,
+            fact_type_override,
+            document_tags,
+            agent_name,
+            log_buffer,
+            start_time,
+            operation_id,
+            schema,
+            outbox_callback,
         )
         if delta_result is not None:
             return delta_result
 
     # --- Full retain path ---
     extracted_facts, processed_facts, chunks, usage = await _extract_and_embed(
-        contents, llm_config, agent_name, config, embeddings_model, format_date_fn,
-        fact_type_override, log_buffer, pool, operation_id, schema,
+        contents,
+        llm_config,
+        agent_name,
+        config,
+        embeddings_model,
+        format_date_fn,
+        fact_type_override,
+        log_buffer,
+        pool,
+        operation_id,
+        schema,
     )
 
     if not extracted_facts:
         await _handle_zero_facts_documents(
-            pool, bank_id, contents_dicts, contents, config, document_id,
-            is_first_batch, document_tags, chunks, log_buffer, start_time,
+            pool,
+            bank_id,
+            contents_dicts,
+            contents,
+            config,
+            document_id,
+            is_first_batch,
+            document_tags,
+            chunks,
+            log_buffer,
+            start_time,
         )
         return [[] for _ in contents], usage
 
@@ -336,8 +365,13 @@ async def retain_batch(
                                     contents_dicts, document_tags, doc_contents=doc_contents
                                 )
                                 await fact_storage.handle_document_tracking(
-                                    conn, bank_id, actual_doc_id, combined_content,
-                                    is_first_batch, retain_params, merged_tags,
+                                    conn,
+                                    bank_id,
+                                    actual_doc_id,
+                                    combined_content,
+                                    is_first_batch,
+                                    retain_params,
+                                    merged_tags,
                                 )
                                 document_ids_added.append(actual_doc_id)
 
@@ -382,8 +416,15 @@ async def retain_batch(
 
                 # Insert facts and create all links (shared pipeline)
                 result_unit_ids = await _insert_facts_and_links(
-                    conn, entity_resolver, bank_id, contents, extracted_facts,
-                    processed_facts, config, log_buffer, outbox_callback,
+                    conn,
+                    entity_resolver,
+                    bank_id,
+                    contents,
+                    extracted_facts,
+                    processed_facts,
+                    config,
+                    log_buffer,
+                    outbox_callback,
                 )
 
             await entity_resolver.flush_pending_stats()
@@ -406,9 +447,24 @@ async def retain_batch(
 
 
 async def _try_delta_retain(
-    pool, embeddings_model, llm_config, entity_resolver, format_date_fn,
-    bank_id, contents_dicts, contents, config, document_id, fact_type_override,
-    document_tags, agent_name, log_buffer, start_time, operation_id, schema, outbox_callback,
+    pool,
+    embeddings_model,
+    llm_config,
+    entity_resolver,
+    format_date_fn,
+    bank_id,
+    contents_dicts,
+    contents,
+    config,
+    document_id,
+    fact_type_override,
+    document_tags,
+    agent_name,
+    log_buffer,
+    start_time,
+    operation_id,
+    schema,
+    outbox_callback,
 ):
     """
     Attempt delta retain for a document upsert. Returns result tuple if delta
@@ -472,8 +528,15 @@ async def _try_delta_retain(
         # Nothing changed — just update document metadata/tags
         log_buffer.append("[delta] No chunk changes detected — updating document metadata only")
         return await _delta_metadata_only(
-            pool, bank_id, contents_dicts, contents, effective_doc_id,
-            document_tags, log_buffer, start_time, outbox_callback,
+            pool,
+            bank_id,
+            contents_dicts,
+            contents,
+            effective_doc_id,
+            document_tags,
+            log_buffer,
+            start_time,
+            outbox_callback,
         )
 
     # Build content items for only the changed/new chunks
@@ -481,14 +544,30 @@ async def _try_delta_retain(
 
     if not delta_contents:
         return await _delta_metadata_only(
-            pool, bank_id, contents_dicts, contents, effective_doc_id,
-            document_tags, log_buffer, start_time, outbox_callback,
+            pool,
+            bank_id,
+            contents_dicts,
+            contents,
+            effective_doc_id,
+            document_tags,
+            log_buffer,
+            start_time,
+            outbox_callback,
         )
 
     # Extract facts and generate embeddings (shared pipeline)
     extracted_facts, processed_facts, new_chunk_metadata, usage = await _extract_and_embed(
-        delta_contents, llm_config, agent_name, config, embeddings_model, format_date_fn,
-        fact_type_override, log_buffer, pool, operation_id, schema,
+        delta_contents,
+        llm_config,
+        agent_name,
+        config,
+        embeddings_model,
+        format_date_fn,
+        fact_type_override,
+        log_buffer,
+        pool,
+        operation_id,
+        schema,
     )
 
     # Database transaction
@@ -510,7 +589,12 @@ async def _try_delta_retain(
                 combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
                 retain_params, merged_tags = _build_retain_params(contents_dicts, document_tags)
                 await fact_storage.upsert_document_metadata(
-                    conn, bank_id, effective_doc_id, combined_content, retain_params, merged_tags,
+                    conn,
+                    bank_id,
+                    effective_doc_id,
+                    combined_content,
+                    retain_params,
+                    merged_tags,
                 )
                 log_buffer.append(f"  Document metadata update in {time.time() - step_start:.3f}s")
 
@@ -570,8 +654,15 @@ async def _try_delta_retain(
 
                 # Insert facts and create all links (shared pipeline)
                 result_unit_ids = await _insert_facts_and_links(
-                    conn, entity_resolver, bank_id, contents, extracted_facts,
-                    processed_facts, config, log_buffer, outbox_callback,
+                    conn,
+                    entity_resolver,
+                    bank_id,
+                    contents,
+                    extracted_facts,
+                    processed_facts,
+                    config,
+                    log_buffer,
+                    outbox_callback,
                 )
 
             await entity_resolver.flush_pending_stats()
@@ -591,8 +682,15 @@ async def _try_delta_retain(
 
 
 async def _delta_metadata_only(
-    pool, bank_id, contents_dicts, contents, document_id, document_tags,
-    log_buffer, start_time, outbox_callback,
+    pool,
+    bank_id,
+    contents_dicts,
+    contents,
+    document_id,
+    document_tags,
+    log_buffer,
+    start_time,
+    outbox_callback,
 ):
     """Handle the case where no chunks changed — just update document metadata and tags."""
     async with acquire_with_retry(pool) as conn:
@@ -600,7 +698,12 @@ async def _delta_metadata_only(
             combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
             retain_params, merged_tags = _build_retain_params(contents_dicts, document_tags)
             await fact_storage.upsert_document_metadata(
-                conn, bank_id, document_id, combined_content, retain_params, merged_tags,
+                conn,
+                bank_id,
+                document_id,
+                combined_content,
+                retain_params,
+                merged_tags,
             )
             await fact_storage.update_memory_units_tags(conn, bank_id, document_id, merged_tags)
             if outbox_callback:
@@ -645,8 +748,17 @@ def _build_contents(contents_dicts: list[RetainContentDict], document_tags: list
 
 
 async def _handle_zero_facts_documents(
-    pool, bank_id, contents_dicts, contents, config, document_id,
-    is_first_batch, document_tags, chunks, log_buffer, start_time,
+    pool,
+    bank_id,
+    contents_dicts,
+    contents,
+    config,
+    document_id,
+    is_first_batch,
+    document_tags,
+    chunks,
+    log_buffer,
+    start_time,
 ):
     """Handle document tracking when zero facts were extracted."""
     docs_tracked = 0
@@ -677,8 +789,13 @@ async def _handle_zero_facts_documents(
                             contents_dicts, document_tags, doc_contents=doc_contents
                         )
                         await fact_storage.handle_document_tracking(
-                            conn, bank_id, actual_doc_id, combined_content,
-                            is_first_batch, retain_params, merged_tags,
+                            conn,
+                            bank_id,
+                            actual_doc_id,
+                            combined_content,
+                            is_first_batch,
+                            retain_params,
+                            merged_tags,
                         )
                         docs_tracked += 1
 
