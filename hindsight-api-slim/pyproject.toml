@@ -57,6 +57,7 @@ dependencies = [
     "authlib>=1.6.9", # Account takeover/JWS header injection vulnerability fix
     "pyjwt>=2.12.0", # Accepts unknown crit header extensions fix
     "orjson>=3.11.6", # Unbounded recursion DoS fix
+    "python-multipart>=0.0.22", # Arbitrary file write via non-default configuration fix
     "tornado>=6.5.5", # DoS multipart/incomplete cookie validation fix
     "aiohttp>=3.13.3", # Multiple DoS vulnerabilities
     "claude-agent-sdk>=0.1.27",
