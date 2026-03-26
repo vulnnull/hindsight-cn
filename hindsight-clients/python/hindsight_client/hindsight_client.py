@@ -204,7 +204,7 @@ class Hindsight:
 
         request_obj = retain_request.RetainRequest(
             items=memory_items,
-            async_=retain_async,
+            var_async=retain_async,
             document_tags=document_tags,
         )
 
@@ -618,7 +618,7 @@ class Hindsight:
 
         request_obj = retain_request.RetainRequest(
             items=memory_items,
-            async_=retain_async,
+            var_async=retain_async,
             document_tags=document_tags,
         )
 
