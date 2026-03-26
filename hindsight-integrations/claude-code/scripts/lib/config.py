@@ -22,7 +22,6 @@ DEFAULTS = {
         "conflicting). Only use memories that are directly useful to continue "
         "this conversation; ignore the rest:"
     ),
-    "recallTopK": None,
     # Retain
     "autoRetain": True,
     "retainMode": "full-session",
