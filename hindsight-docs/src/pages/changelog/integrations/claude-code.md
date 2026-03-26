@@ -8,6 +8,12 @@ import PageHero from '@site/src/components/PageHero';
 
 [← Claude Code integration](/sdks/integrations/claude-code)
 
+## [0.3.0](https://github.com/vectorize-io/hindsight/tree/integrations/claude-code/v0.3.0)
+
+**Features**
+
+- Claude Code integration now retains tool calls as structured JSON for more accurate memory and retrieval. ([`8cb8b912`](https://github.com/vectorize-io/hindsight/commit/8cb8b912))
+
 ## [0.2.0](https://github.com/vectorize-io/hindsight/tree/integrations/claude-code/v0.2.0)
 
 **Features**
