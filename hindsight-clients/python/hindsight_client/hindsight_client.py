@@ -1218,16 +1218,33 @@ class Hindsight:
         self,
         bank_id: str,
         *,
+        # Reflect settings
         reflect_mission: str | None = None,
+        reflect_source_facts_max_tokens: int | None = None,
+        # Retain settings
         retain_mission: str | None = None,
         retain_extraction_mode: str | None = None,
         retain_custom_instructions: str | None = None,
         retain_chunk_size: int | None = None,
+        retain_default_strategy: str | None = None,
+        retain_strategies: dict[str, Any] | None = None,
+        # Entity settings
+        entity_labels: list[str] | None = None,
+        entities_allow_free_form: bool | None = None,
+        # Observation / consolidation settings
         enable_observations: bool | None = None,
         observations_mission: str | None = None,
+        consolidation_llm_batch_size: int | None = None,
+        consolidation_source_facts_max_tokens: int | None = None,
+        consolidation_source_facts_max_tokens_per_observation: int | None = None,
+        # Disposition settings
         disposition_skepticism: int | None = None,
         disposition_literalism: int | None = None,
         disposition_empathy: int | None = None,
+        # MCP settings
+        mcp_enabled_tools: list[str] | None = None,
+        # Gemini safety settings
+        llm_gemini_safety_settings: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """
         Update configuration overrides for a bank (sync wrapper — use ``await client.banks.update_bank_config(...)`` in async code).
@@ -1237,15 +1254,29 @@ class Hindsight:
         Args:
             bank_id: The memory bank ID
             reflect_mission: Identity and reasoning framing for reflect().
+            reflect_source_facts_max_tokens: Token budget for source facts in observation search
+                during reflect. -1 to disable (default: -1).
             retain_mission: Steers what gets extracted during retain().
             retain_extraction_mode: Fact extraction mode: 'concise', 'verbose', or 'custom'.
             retain_custom_instructions: Custom extraction prompt (only active when mode is 'custom').
             retain_chunk_size: Maximum token size for each content chunk during retain.
+            retain_default_strategy: Default retain strategy name.
+            retain_strategies: Named strategy definitions (dict of strategy name to config).
+            entity_labels: Controlled vocabulary for entity type classification.
+                When set, extracted entities are classified into these labels.
+            entities_allow_free_form: Whether to allow entity types outside entity_labels (default: True).
             enable_observations: Toggle automatic observation consolidation after retain().
             observations_mission: Controls what gets synthesised into observations.
+            consolidation_llm_batch_size: Number of LLM calls to batch during consolidation.
+            consolidation_source_facts_max_tokens: Max tokens for source facts across all observations
+                in a consolidation pass.
+            consolidation_source_facts_max_tokens_per_observation: Max tokens of source facts per
+                individual observation in the consolidation prompt.
             disposition_skepticism: How skeptical vs trusting (1=trusting, 5=skeptical).
             disposition_literalism: How literally to interpret information (1=flexible, 5=literal).
             disposition_empathy: How much to consider emotional context (1=detached, 5=empathetic).
+            mcp_enabled_tools: List of MCP tool names to enable for this bank.
+            llm_gemini_safety_settings: Gemini/VertexAI safety setting overrides (category → threshold).
 
         Returns:
             dict with ``bank_id``, ``config`` (fully resolved), and ``overrides`` (bank-level only)
@@ -1254,15 +1285,25 @@ class Hindsight:
             k: v
             for k, v in {
                 "reflect_mission": reflect_mission,
+                "reflect_source_facts_max_tokens": reflect_source_facts_max_tokens,
                 "retain_mission": retain_mission,
                 "retain_extraction_mode": retain_extraction_mode,
                 "retain_custom_instructions": retain_custom_instructions,
                 "retain_chunk_size": retain_chunk_size,
+                "retain_default_strategy": retain_default_strategy,
+                "retain_strategies": retain_strategies,
+                "entity_labels": entity_labels,
+                "entities_allow_free_form": entities_allow_free_form,
                 "enable_observations": enable_observations,
                 "observations_mission": observations_mission,
+                "consolidation_llm_batch_size": consolidation_llm_batch_size,
+                "consolidation_source_facts_max_tokens": consolidation_source_facts_max_tokens,
+                "consolidation_source_facts_max_tokens_per_observation": consolidation_source_facts_max_tokens_per_observation,
                 "disposition_skepticism": disposition_skepticism,
                 "disposition_literalism": disposition_literalism,
                 "disposition_empathy": disposition_empathy,
+                "mcp_enabled_tools": mcp_enabled_tools,
+                "llm_gemini_safety_settings": llm_gemini_safety_settings,
             }.items()
             if v is not None
         }
