@@ -2064,6 +2064,26 @@ def create_app(
     # This is required for mounted sub-applications where lifespan may not fire
     app.state.memory = memory
 
+    # ---------------------------------------------------------------------------
+    # Patch OpenAPI schema: align ValidationError with Pydantic v2 error format
+    # ---------------------------------------------------------------------------
+    # FastAPI auto-generates ValidationError with only loc/msg/type, but Pydantic
+    # v2 actually returns additional fields: input (the rejected value), ctx (extra
+    # context dict), and url (link to error docs). Without these in the spec,
+    # generated clients using strict JSON decoding break on real 422 responses.
+    _original_openapi = app.openapi
+
+    def _patched_openapi() -> dict[str, Any]:
+        schema = _original_openapi()
+        ve = schema.get("components", {}).get("schemas", {}).get("ValidationError")
+        if ve and "input" not in ve.get("properties", {}):
+            ve["properties"]["input"] = {"title": "Input"}
+            ve["properties"]["ctx"] = {"title": "Context", "type": "object"}
+            ve["properties"]["url"] = {"title": "URL", "type": "string"}
+        return schema
+
+    app.openapi = _patched_openapi  # type: ignore[assignment]
+
     # Add HTTP metrics middleware
     @app.middleware("http")
     async def http_metrics_middleware(request, call_next):
