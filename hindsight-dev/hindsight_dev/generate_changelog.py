@@ -38,6 +38,7 @@ VALID_INTEGRATIONS = [
     "langgraph",
     "nemoclaw",
     "strands",
+    "claude-code",
 ]
 
 
