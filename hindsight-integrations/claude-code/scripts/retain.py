@@ -127,7 +127,10 @@ def main():
 
     # Format transcript
     retain_roles = config.get("retainRoles", ["user", "assistant"])
-    transcript, message_count = prepare_retention_transcript(messages_to_retain, retain_roles, retain_full_window)
+    include_tool_calls = config.get("retainToolCalls", True)
+    transcript, message_count = prepare_retention_transcript(
+        messages_to_retain, retain_roles, retain_full_window, include_tool_calls=include_tool_calls
+    )
 
     if not transcript:
         debug_log(config, "Empty transcript after formatting, skipping retain")

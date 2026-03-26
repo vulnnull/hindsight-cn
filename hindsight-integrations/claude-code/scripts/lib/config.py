@@ -29,6 +29,7 @@ DEFAULTS = {
     "retainRoles": ["user", "assistant"],
     "retainEveryNTurns": 10,
     "retainOverlapTurns": 2,
+    "retainToolCalls": True,
     "retainContext": "claude-code",
     "retainTags": [],
     "retainMetadata": {},

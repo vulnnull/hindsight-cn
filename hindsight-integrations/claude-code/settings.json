@@ -17,6 +17,7 @@
   "retainRoles": ["user", "assistant"],
   "retainEveryNTurns": 10,
   "retainOverlapTurns": 2,
+  "retainToolCalls": true,
   "retainTags": ["{session_id}"],
   "retainMetadata": {},
   "retainContext": "claude-code",
