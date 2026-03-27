@@ -73,6 +73,9 @@ class HindsightEmbedded:
         database_url: Optional database URL override (default: profile-specific pg0)
         idle_timeout: Seconds before daemon auto-exits when idle (default: 300)
         log_level: Daemon log level (default: "info")
+        ui: Whether to start the control plane web UI alongside the daemon (default: False)
+        ui_port: Port for the UI. Defaults to daemon_port + 10000.
+        ui_hostname: Hostname to bind the UI to. Defaults to "0.0.0.0".
     """
 
     def __init__(
@@ -85,6 +88,9 @@ class HindsightEmbedded:
         database_url: Optional[str] = None,
         idle_timeout: int = 300,
         log_level: str = "info",
+        ui: bool = False,
+        ui_port: Optional[int] = None,
+        ui_hostname: str = "0.0.0.0",
     ):
         """
         Initialize the embedded client (daemon starts on first use).
@@ -98,6 +104,9 @@ class HindsightEmbedded:
             database_url: Optional database URL override
             idle_timeout: Seconds before daemon auto-exits when idle
             log_level: Daemon log level
+            ui: Whether to start the control plane web UI alongside the daemon
+            ui_port: Port for the UI (defaults to daemon_port + 10000)
+            ui_hostname: Hostname to bind the UI to (defaults to "0.0.0.0")
         """
         self.profile = profile
 
@@ -115,6 +124,10 @@ class HindsightEmbedded:
 
         if database_url:
             self.config["HINDSIGHT_EMBED_API_DATABASE_URL"] = database_url
+
+        self._ui = ui
+        self._ui_port = ui_port
+        self._ui_hostname = ui_hostname
 
         self._client: Optional[Hindsight] = None
         self._lock = threading.Lock()
@@ -157,6 +170,15 @@ class HindsightEmbedded:
             self._started = True
             logger.info(f"Connected to daemon at {daemon_url}")
 
+            # Start UI if requested
+            if self._ui:
+                logger.info(f"Starting UI for profile '{self.profile}'...")
+                ui_started = self._manager.start_ui(
+                    self.profile, self._ui_port, self._ui_hostname
+                )
+                if not ui_started:
+                    logger.warning(f"Failed to start UI for profile '{self.profile}'")
+
     def _cleanup(self, stop_daemon_on_close: bool = False):
         """
         Cleanup client resources (idempotent).
@@ -175,6 +197,11 @@ class HindsightEmbedded:
             if self._client is not None:
                 self._client.close()
                 self._client = None
+
+            # Stop UI if it was started
+            if self._ui and self._started:
+                logger.info(f"Stopping UI for profile '{self.profile}'...")
+                self._manager.stop_ui(self.profile, self._ui_port)
 
             # Optionally stop daemon (daemon has idle timeout, so not required)
             if stop_daemon_on_close and self._started:
@@ -378,43 +405,6 @@ class HindsightEmbedded:
     def is_running(self) -> bool:
         """Check if the client is initialized."""
         return self._started and not self._closed and self._client is not None
-
-    def start_ui(self, ui_port: int | None = None, hostname: str = "0.0.0.0") -> bool:
-        """Start the control plane web UI.
-
-        The daemon is started automatically if not already running.
-
-        Args:
-            ui_port: Port for the UI. Defaults to daemon_port + 10000.
-            hostname: Hostname to bind to. Defaults to 0.0.0.0.
-
-        Returns:
-            True if UI started successfully.
-        """
-        self._ensure_started()
-        return self._manager.start_ui(self.profile, ui_port, hostname)
-
-    def stop_ui(self, ui_port: int | None = None) -> bool:
-        """Stop the control plane web UI.
-
-        Args:
-            ui_port: Port the UI is running on. Defaults to daemon_port + 10000.
-
-        Returns:
-            True if stopped successfully.
-        """
-        return self._manager.stop_ui(self.profile, ui_port)
-
-    def is_ui_running(self, ui_port: int | None = None) -> bool:
-        """Check if the control plane web UI is running.
-
-        Args:
-            ui_port: Port to check. Defaults to daemon_port + 10000.
-
-        Returns:
-            True if UI is running and responsive.
-        """
-        return self._manager.is_ui_running(self.profile, ui_port)
 
     @property
     def ui_url(self) -> str:

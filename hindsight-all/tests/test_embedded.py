@@ -15,6 +15,8 @@ import os
 import uuid
 
 import pytest
+import urllib.request
+import json
 
 from hindsight import HindsightEmbedded
 
@@ -23,12 +25,20 @@ from hindsight import HindsightEmbedded
 def llm_config():
     """Get LLM configuration from environment (session-scoped)."""
     # Try both naming conventions
-    provider = os.getenv("HINDSIGHT_API_LLM_PROVIDER") or os.getenv("HINDSIGHT_LLM_PROVIDER", "groq")
-    api_key = os.getenv("HINDSIGHT_API_LLM_API_KEY") or os.getenv("HINDSIGHT_LLM_API_KEY", "")
-    model = os.getenv("HINDSIGHT_API_LLM_MODEL") or os.getenv("HINDSIGHT_LLM_MODEL", "openai/gpt-oss-120b")
+    provider = os.getenv("HINDSIGHT_API_LLM_PROVIDER") or os.getenv(
+        "HINDSIGHT_LLM_PROVIDER", "groq"
+    )
+    api_key = os.getenv("HINDSIGHT_API_LLM_API_KEY") or os.getenv(
+        "HINDSIGHT_LLM_API_KEY", ""
+    )
+    model = os.getenv("HINDSIGHT_API_LLM_MODEL") or os.getenv(
+        "HINDSIGHT_LLM_MODEL", "openai/gpt-oss-120b"
+    )
 
     if not api_key:
-        pytest.skip("LLM API key not configured. Set HINDSIGHT_API_LLM_API_KEY or HINDSIGHT_LLM_API_KEY.")
+        pytest.skip(
+            "LLM API key not configured. Set HINDSIGHT_API_LLM_API_KEY or HINDSIGHT_LLM_API_KEY."
+        )
 
     return {
         "llm_provider": provider,
@@ -78,7 +88,9 @@ def test_embedded_context_manager(llm_config):
 
         # Recall memory
         recall_results = client.recall(bank_id=bank_id, query="context")
-        assert isinstance(recall_results.results, list), "Recall should return results list"
+        assert isinstance(recall_results.results, list), (
+            "Recall should return results list"
+        )
 
     # Server should be stopped after context exit
     # Note: We can't check client.is_running here as client is out of scope
@@ -105,7 +117,9 @@ def test_embedded_complete_workflow(llm_config):
         # Step 1: Create a memory bank
         print(f"\n1. Creating memory bank: {bank_id}")
         bank_response = client.create_bank(
-            bank_id=bank_id, name="Test Assistant", mission="Help with programming tasks"
+            bank_id=bank_id,
+            name="Test Assistant",
+            mission="Help with programming tasks",
         )
         assert bank_response.bank_id == bank_id
 
@@ -126,7 +140,9 @@ def test_embedded_complete_workflow(llm_config):
             items=[
                 {"content": "User works with pandas and numpy."},
                 {"content": "User likes matplotlib for visualization."},
-                {"content": "User is interested in machine learning with scikit-learn."},
+                {
+                    "content": "User is interested in machine learning with scikit-learn."
+                },
             ],
         )
         assert batch_response.success
@@ -134,7 +150,9 @@ def test_embedded_complete_workflow(llm_config):
 
         # Step 4: Recall memories
         print("\n4. Recalling memories...")
-        recall_response = client.recall(bank_id=bank_id, query="What tools does the user prefer?", max_tokens=2000)
+        recall_response = client.recall(
+            bank_id=bank_id, query="What tools does the user prefer?", max_tokens=2000
+        )
         assert isinstance(recall_response.results, list)
         assert len(recall_response.results) > 0
         print(f"   Found {len(recall_response.results)} relevant memories")
@@ -152,7 +170,9 @@ def test_embedded_complete_workflow(llm_config):
 
         # Verify answer mentions relevant tools
         answer_lower = reflect_response.text.lower()
-        assert any(term in answer_lower for term in ["python", "pandas", "numpy", "data"])
+        assert any(
+            term in answer_lower for term in ["python", "pandas", "numpy", "data"]
+        )
 
         # Step 6: List memories
         print("\n6. Listing memories...")
@@ -215,7 +235,9 @@ def test_embedded_method_proxying(llm_config):
         assert bank.bank_id == bank_id
 
         # Test mission setting
-        mission_response = client.set_mission(bank_id=bank_id, mission="Test mission for proxying")
+        mission_response = client.set_mission(
+            bank_id=bank_id, mission="Test mission for proxying"
+        )
         assert mission_response.bank_id == bank_id
 
         # Test retain
@@ -264,7 +286,9 @@ def test_embedded_multiple_banks(llm_config):
 
         # Create second bank and store data
         client.create_bank(bank_id=bank2_id, name="Bank 2")
-        client.retain(bank_id=bank2_id, content="Bob uses JavaScript for web development")
+        client.retain(
+            bank_id=bank2_id, content="Bob uses JavaScript for web development"
+        )
 
         # Recall from both banks
         results1 = client.recall(bank_id=bank1_id, query="programming language")
@@ -275,9 +299,9 @@ def test_embedded_multiple_banks(llm_config):
 
         # Verify banks are isolated (each should only see their own content)
         # This is a basic check - content isolation is tested more thoroughly in other tests
-        assert results1.results[0].text != results2.results[0].text or len(results1.results) != len(
-            results2.results
-        )
+        assert results1.results[0].text != results2.results[0].text or len(
+            results1.results
+        ) != len(results2.results)
 
     finally:
         client.close()
@@ -296,10 +320,14 @@ def test_embedded_profile_isolation(llm_config):
 
     try:
         # Store data in profile1
-        client1.retain(bank_id=bank_id, content="User likes TypeScript for frontend development")
+        client1.retain(
+            bank_id=bank_id, content="User likes TypeScript for frontend development"
+        )
 
         # Store different data in profile2
-        client2.retain(bank_id=bank_id, content="User prefers Rust for systems programming")
+        client2.retain(
+            bank_id=bank_id, content="User prefers Rust for systems programming"
+        )
 
         # Each profile should only see its own data
         results1 = client1.recall(bank_id=bank_id, query="programming preference")
@@ -334,5 +362,42 @@ def test_embedded_error_after_close(llm_config):
     assert not client.is_running
 
     # Trying to use it after close should raise an error
-    with pytest.raises(RuntimeError, match="Cannot use HindsightEmbedded after it has been closed"):
+    with pytest.raises(
+        RuntimeError, match="Cannot use HindsightEmbedded after it has been closed"
+    ):
         client.retain(bank_id=bank_id, content="This should fail")
+
+
+def test_embedded_ui_flag(llm_config):
+    """
+    Test that ui=True starts the control plane UI alongside the daemon,
+    and that the UI's health endpoint reports a connected dataplane.
+    """
+    profile = f"test_ui_{uuid.uuid4().hex[:8]}"
+    bank_id = f"bank_{uuid.uuid4().hex[:8]}"
+
+    client = HindsightEmbedded(profile=profile, log_level="info", ui=True, **llm_config)
+
+    try:
+        # First use triggers daemon + UI startup
+        result = client.retain(bank_id=bank_id, content="UI integration test content")
+        assert result.success, "Retain should succeed"
+        assert client.is_running, "Daemon should be running"
+
+        # Verify UI is reachable and reports connected dataplane
+        ui_url = client.ui_url
+        assert ui_url, "ui_url should be set"
+
+        health_url = f"{ui_url}/api/health"
+        with urllib.request.urlopen(health_url, timeout=10) as resp:
+            health = json.loads(resp.read().decode())
+
+        assert health["status"] == "ok", (
+            f"UI health status should be 'ok', got: {health['status']}"
+        )
+        assert health["dataplane"]["status"] == "connected", (
+            f"Dataplane should be connected, got: {health['dataplane']}"
+        )
+
+    finally:
+        client.close()

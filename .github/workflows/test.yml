@@ -1822,6 +1822,28 @@ jobs:
       with:
         python-version-file: ".python-version"
 
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+
+    - name: Install SDK dependencies
+      run: npm ci --workspace=hindsight-clients/typescript
+
+    - name: Build SDK
+      run: npm run build --workspace=hindsight-clients/typescript
+
+    - name: Install Control Plane dependencies
+      run: |
+        npm install --workspace=hindsight-control-plane
+        rm -rf node_modules/lightningcss node_modules/@tailwindcss
+        npm install lightningcss @tailwindcss/postcss @tailwindcss/node
+
+    - name: Build Control Plane
+      run: npm run build --workspace=hindsight-control-plane
+
     - name: Build hindsight-all
       working-directory: ./hindsight-all
       run: uv build
