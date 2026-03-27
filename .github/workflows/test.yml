@@ -35,6 +35,7 @@ jobs:
       integrations-crewai: ${{ steps.filter.outputs.integrations-crewai }}
       integrations-litellm: ${{ steps.filter.outputs.integrations-litellm }}
       integrations-pydantic-ai: ${{ steps.filter.outputs.integrations-pydantic-ai }}
+      integrations-ag2: ${{ steps.filter.outputs.integrations-ag2 }}
       integrations-hermes: ${{ steps.filter.outputs.integrations-hermes }}
       dev: ${{ steps.filter.outputs.dev }}
       ci: ${{ steps.filter.outputs.ci }}
@@ -94,6 +95,8 @@ jobs:
             - 'hindsight-integrations/litellm/**'
           integrations-pydantic-ai:
             - 'hindsight-integrations/pydantic-ai/**'
+          integrations-ag2:
+            - 'hindsight-integrations/ag2/**'
           integrations-hermes:
             - 'hindsight-integrations/hermes/**'
           dev:
@@ -1486,6 +1489,40 @@ jobs:
       run: |
         echo "=== API Server Logs ==="
         cat /tmp/api-server.log || echo "No API server log found"
+
+  test-ag2-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-ag2 == 'true' ||
+      needs.detect-changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        prune-cache: false
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version-file: ".python-version"
+
+    - name: Build ag2 integration
+      working-directory: ./hindsight-integrations/ag2
+      run: uv build
+
+    - name: Install dependencies
+      working-directory: ./hindsight-integrations/ag2
+      run: uv sync --frozen
+
+    - name: Run tests
+      working-directory: ./hindsight-integrations/ag2
+      run: uv run pytest tests -v
 
   test-crewai-integration:
     needs: [detect-changes]

@@ -7,6 +7,7 @@ functions with ``Annotated`` type hints, compatible with AG2's
 """
 
 import logging
+from collections.abc import Callable
 from typing import Annotated, Any, Optional
 
 from hindsight_client import Hindsight
@@ -44,7 +45,7 @@ def create_hindsight_tools(
     include_retain: bool = True,
     include_recall: bool = True,
     include_reflect: bool = True,
-) -> list:
+) -> list[Callable]:
     """Create Hindsight memory tools for AG2 agents.
 
     Returns a list of plain Python functions compatible with AG2's
@@ -110,7 +111,7 @@ def create_hindsight_tools(
         else (config.max_tokens if config else 4096)
     )
 
-    tools: list = []
+    tools: list[Callable] = []
 
     if include_retain:
 
@@ -137,7 +138,7 @@ def create_hindsight_tools(
                 resolved_client.retain(**retain_kwargs)
                 return "Memory stored successfully."
             except Exception as e:
-                logger.error(f"Retain failed: {e}")
+                logger.error("Retain failed: %s", e)
                 raise HindsightError(f"Retain failed: {e}") from e
 
         tools.append(hindsight_retain)
@@ -177,7 +178,7 @@ def create_hindsight_tools(
                     lines.append(f"{i}. {result.text}")
                 return "\n".join(lines)
             except Exception as e:
-                logger.error(f"Recall failed: {e}")
+                logger.error("Recall failed: %s", e)
                 raise HindsightError(f"Recall failed: {e}") from e
 
         tools.append(hindsight_recall)
@@ -221,7 +222,7 @@ def create_hindsight_tools(
                 response = resolved_client.reflect(**reflect_kwargs)
                 return response.text or "No relevant memories found."
             except Exception as e:
-                logger.error(f"Reflect failed: {e}")
+                logger.error("Reflect failed: %s", e)
                 raise HindsightError(f"Reflect failed: {e}") from e
 
         tools.append(hindsight_reflect)
@@ -235,7 +236,7 @@ def register_hindsight_tools(
     *,
     bank_id: str,
     **kwargs,
-) -> list:
+) -> list[Callable]:
     """Convenience: create tools AND register them on AG2 agents.
 
     Creates Hindsight memory tools and registers them on the given AG2
