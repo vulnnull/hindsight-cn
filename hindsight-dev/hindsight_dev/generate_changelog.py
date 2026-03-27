@@ -32,6 +32,7 @@ VALID_INTEGRATIONS = [
     "litellm",
     "pydantic-ai",
     "crewai",
+    "ag2",
     "ai-sdk",
     "chat",
     "openclaw",
