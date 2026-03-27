@@ -495,16 +495,18 @@ async def create_temporal_links_batch_per_fact(
 
         if links:
             insert_start = time_mod.time()
+            # Add bank_id to each tuple for direct filtering (avoids expensive JOIN in stats)
+            links_with_bank = [(*link, bank_id) for link in links]
             # Batch inserts to avoid timeout on large batches
             BATCH_SIZE = 1000
-            for batch_start in range(0, len(links), BATCH_SIZE):
+            for batch_start in range(0, len(links_with_bank), BATCH_SIZE):
                 await conn.executemany(
                     f"""
-                    INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id, bank_id)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
                     """,
-                    links[batch_start : batch_start + BATCH_SIZE],
+                    links_with_bank[batch_start : batch_start + BATCH_SIZE],
                 )
             _log(log_buffer, f"      [7.4] Insert {len(links)} temporal links: {time_mod.time() - insert_start:.3f}s")
 
@@ -627,16 +629,18 @@ async def create_semantic_links_batch(
 
         if all_links:
             insert_start = time_mod.time()
+            # Add bank_id to each tuple for direct filtering (avoids expensive JOIN in stats)
+            all_links_with_bank = [(*link, bank_id) for link in all_links]
             # Batch inserts to avoid timeout on large batches
             BATCH_SIZE = 1000
-            for batch_start in range(0, len(all_links), BATCH_SIZE):
+            for batch_start in range(0, len(all_links_with_bank), BATCH_SIZE):
                 await conn.executemany(
                     f"""
-                    INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id, bank_id)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
                     """,
-                    all_links[batch_start : batch_start + BATCH_SIZE],
+                    all_links_with_bank[batch_start : batch_start + BATCH_SIZE],
                 )
             _log(
                 log_buffer, f"      [8.3] Insert {len(all_links)} semantic links: {time_mod.time() - insert_start:.3f}s"
@@ -652,7 +656,7 @@ async def create_semantic_links_batch(
         raise
 
 
-async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: int = 5000):
+async def insert_entity_links_batch(conn, links: list[EntityLink], bank_id: str, chunk_size: int = 5000):
     """
     Insert all entity links using COPY to temp table + chunked INSERT for reliability.
 
@@ -663,6 +667,7 @@ async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: i
     Args:
         conn: Database connection
         links: List of EntityLink objects
+        bank_id: Bank identifier (stored directly on memory_links for fast filtering)
         chunk_size: Number of rows per INSERT chunk (default 5000)
     """
     if not links:
@@ -681,7 +686,8 @@ async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: i
             to_unit_id uuid,
             link_type text,
             weight float,
-            entity_id uuid
+            entity_id uuid,
+            bank_id text
         ) ON COMMIT DROP
     """)
     logger.debug(f"      [9.1] Create temp table: {time_mod.time() - create_start:.3f}s")
@@ -693,7 +699,9 @@ async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: i
 
     # Convert EntityLink objects to tuples for COPY
     convert_start = time_mod.time()
-    records = [(link.from_unit_id, link.to_unit_id, link.link_type, link.weight, link.entity_id) for link in links]
+    records = [
+        (link.from_unit_id, link.to_unit_id, link.link_type, link.weight, link.entity_id, bank_id) for link in links
+    ]
     logger.debug(f"      [9.3] Convert {len(records)} records: {time_mod.time() - convert_start:.3f}s")
 
     # Bulk load using COPY (fastest method)
@@ -701,7 +709,7 @@ async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: i
     await conn.copy_records_to_table(
         "_temp_entity_links",
         records=records,
-        columns=["from_unit_id", "to_unit_id", "link_type", "weight", "entity_id"],
+        columns=["from_unit_id", "to_unit_id", "link_type", "weight", "entity_id", "bank_id"],
     )
     logger.debug(f"      [9.4] COPY {len(records)} records to temp table: {time_mod.time() - copy_start:.3f}s")
 
@@ -713,8 +721,8 @@ async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: i
         chunk_end = chunk_start + chunk_size
         await conn.execute(
             f"""
-            INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
-            SELECT from_unit_id, to_unit_id, link_type, weight, entity_id
+            INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id, bank_id)
+            SELECT from_unit_id, to_unit_id, link_type, weight, entity_id, bank_id
             FROM _temp_entity_links
             WHERE _row_num > $1 AND _row_num <= $2
             ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
@@ -729,6 +737,7 @@ async def insert_entity_links_batch(conn, links: list[EntityLink], chunk_size: i
 
 async def create_causal_links_batch(
     conn,
+    bank_id: str,
     unit_ids: list[str],
     causal_relations_per_fact: list[list[dict]],
 ) -> int:
@@ -795,15 +804,15 @@ async def create_causal_links_batch(
                 # Add the causal link
                 # link_type is the relation_type (e.g., "causes", "caused_by")
                 # weight is the strength of the relationship
-                links.append((from_unit_id, to_unit_id, relation_type, strength, None))
+                links.append((from_unit_id, to_unit_id, relation_type, strength, None, bank_id))
 
         if links:
             insert_start = time_mod.time()
             try:
                 await conn.executemany(
                     f"""
-                    INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO {fq_table("memory_links")} (from_unit_id, to_unit_id, link_type, weight, entity_id, bank_id)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
                     """,
                     links,

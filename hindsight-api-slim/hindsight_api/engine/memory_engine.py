@@ -5852,14 +5852,16 @@ class MemoryEngine(MemoryEngineInterface):
                 bank_id,
             )
 
-            # Single query for all link stats — avoids triple join on memory_links (can be 21M+ rows).
-            # link_counts and link_counts_by_fact_type are derived in Python from the breakdown.
+            # Link stats — filter on ml.bank_id (indexed) instead of joining through mu.bank_id.
+            # With the idx_memory_links_bank_link_type index this turns a full-table hash join
+            # into an indexed scan + PK lookups.  link_counts and link_counts_by_fact_type are
+            # derived in Python from the breakdown.
             link_breakdown_stats = await conn.fetch(
                 f"""
                 SELECT mu.fact_type, ml.link_type, COUNT(*) as count
                 FROM {fq_table("memory_links")} ml
                 JOIN {fq_table("memory_units")} mu ON ml.from_unit_id = mu.id
-                WHERE mu.bank_id = $1
+                WHERE ml.bank_id = $1
                 GROUP BY mu.fact_type, ml.link_type
                 """,
                 bank_id,

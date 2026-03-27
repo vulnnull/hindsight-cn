@@ -97,15 +97,16 @@ async def process_entities_batch(
     return entity_links
 
 
-async def insert_entity_links_batch(conn, entity_links: list[EntityLink]) -> None:
+async def insert_entity_links_batch(conn, entity_links: list[EntityLink], bank_id: str) -> None:
     """
     Insert entity links in batch.
 
     Args:
         conn: Database connection
         entity_links: List of EntityLink objects
+        bank_id: Bank identifier (stored directly on memory_links for fast filtering)
     """
     if not entity_links:
         return
 
-    await link_utils.insert_entity_links_batch(conn, entity_links)
+    await link_utils.insert_entity_links_batch(conn, entity_links, bank_id)

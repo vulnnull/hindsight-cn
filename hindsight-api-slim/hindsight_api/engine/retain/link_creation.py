@@ -56,7 +56,7 @@ async def create_semantic_links_batch(conn, bank_id: str, unit_ids: list[str], e
     return await link_utils.create_semantic_links_batch(conn, bank_id, unit_ids, embeddings, log_buffer=[])
 
 
-async def create_causal_links_batch(conn, unit_ids: list[str], facts: list[ProcessedFact]) -> int:
+async def create_causal_links_batch(conn, bank_id: str, unit_ids: list[str], facts: list[ProcessedFact]) -> int:
     """
     Create causal links between facts.
 
@@ -94,6 +94,6 @@ async def create_causal_links_batch(conn, unit_ids: list[str], facts: list[Proce
         else:
             causal_relations_per_fact.append([])
 
-    link_count = await link_utils.create_causal_links_batch(conn, unit_ids, causal_relations_per_fact)
+    link_count = await link_utils.create_causal_links_batch(conn, bank_id, unit_ids, causal_relations_per_fact)
 
     return link_count

@@ -156,14 +156,14 @@ async def _insert_facts_and_links(
         # Insert entity links
         step_start = time.time()
         if entity_links:
-            await entity_processing.insert_entity_links_batch(conn, entity_links)
+            await entity_processing.insert_entity_links_batch(conn, entity_links, bank_id)
         log_buffer.append(
             f"  Entity links: {len(entity_links) if entity_links else 0} links in {time.time() - step_start:.3f}s"
         )
 
         # Create causal links
         step_start = time.time()
-        causal_link_count = await link_creation.create_causal_links_batch(conn, unit_ids, processed_facts)
+        causal_link_count = await link_creation.create_causal_links_batch(conn, bank_id, unit_ids, processed_facts)
         log_buffer.append(f"  Causal links: {causal_link_count} links in {time.time() - step_start:.3f}s")
 
     # Map results back to original content items
