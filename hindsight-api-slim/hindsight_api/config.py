@@ -1409,6 +1409,9 @@ class HindsightConfig:
 
         root_logger.addHandler(handler)
 
+        # Silence noisy third-party loggers
+        logging.getLogger("google_genai.models").setLevel(logging.WARNING)
+
     def log_config(self) -> None:
         """Log the current configuration (without sensitive values)."""
         logger.info(f"Database: {self.database_url} (schema: {self.database_schema})")

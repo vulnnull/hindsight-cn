@@ -133,9 +133,13 @@ else
     exit 1
 fi
 
-# Commit version bump + changelog together
+# Regenerate docs skill so changelog/SDK pages stay in sync
+print_info "Regenerating docs skill..."
+./scripts/generate-docs-skill.sh
+
+# Commit version bump + changelog + regenerated skill together
 print_info "Committing changes..."
-git add "hindsight-integrations/$INTEGRATION/" "hindsight-docs/src/pages/changelog/integrations/$INTEGRATION.md"
+git add "hindsight-integrations/$INTEGRATION/" "hindsight-docs/src/pages/changelog/integrations/$INTEGRATION.md" "skills/"
 git commit --no-verify -m "release($INTEGRATION): v$VERSION"
 
 # Create annotated tag
