@@ -1681,17 +1681,15 @@ class MemoryEngine(MemoryEngineInterface):
             # Migrate all schemas from the tenant extension
             # The tenant extension is the single source of truth for which schemas exist
             logger.info("Running database migrations...")
+            config = get_config()
             tenants = await self._tenant_extension.list_tenants()
             if tenants:
                 logger.info(f"Running migrations on {len(tenants)} schema(s)...")
                 for tenant in tenants:
                     schema = tenant.schema
                     if schema:
-                        run_migrations(self.db_url, schema=schema)
+                        run_migrations(self.db_url, schema=schema, migration_database_url=config.migration_database_url)
                 logger.info("Schema migrations completed")
-
-                # Get config for vector extension setting
-                config = get_config()
 
                 # Ensure embedding column dimension matches the model's dimension
                 # This is done after migrations and after embeddings.initialize()

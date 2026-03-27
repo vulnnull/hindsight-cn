@@ -120,7 +120,9 @@ class DefaultExtensionContext(ExtensionContext):
         # CREATE INDEX CONCURRENTLY inside the migration waits for those transactions
         # forever — a deadlock.
         config = get_config()
-        await asyncio.to_thread(run_migrations, db_url, schema=schema)
+        await asyncio.to_thread(
+            run_migrations, db_url, schema=schema, migration_database_url=config.migration_database_url
+        )
 
         # Ensure embedding column dimension matches the model's dimension
         # This is needed because migrations create columns with default dimension

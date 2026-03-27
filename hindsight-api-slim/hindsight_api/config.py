@@ -118,6 +118,7 @@ def normalize_config_dict(config: dict[str, Any]) -> dict[str, Any]:
 
 # Environment variable names
 ENV_DATABASE_URL = "HINDSIGHT_API_DATABASE_URL"
+ENV_MIGRATION_DATABASE_URL = "HINDSIGHT_API_MIGRATION_DATABASE_URL"
 ENV_DATABASE_SCHEMA = "HINDSIGHT_API_DATABASE_SCHEMA"
 ENV_LLM_PROVIDER = "HINDSIGHT_API_LLM_PROVIDER"
 ENV_LLM_API_KEY = "HINDSIGHT_API_LLM_API_KEY"
@@ -616,6 +617,7 @@ class HindsightConfig:
 
     # Database
     database_url: str
+    migration_database_url: str | None
     database_schema: str
     vector_extension: str  # "pgvector" or "vchord"
     text_search_extension: str  # "native" or "vchord"
@@ -1009,6 +1011,7 @@ class HindsightConfig:
         config = cls(
             # Database
             database_url=os.getenv(ENV_DATABASE_URL, DEFAULT_DATABASE_URL),
+            migration_database_url=os.getenv(ENV_MIGRATION_DATABASE_URL) or None,
             database_schema=os.getenv(ENV_DATABASE_SCHEMA, DEFAULT_DATABASE_SCHEMA),
             vector_extension=os.getenv(ENV_VECTOR_EXTENSION, DEFAULT_VECTOR_EXTENSION).lower(),
             text_search_extension=os.getenv(ENV_TEXT_SEARCH_EXTENSION, DEFAULT_TEXT_SEARCH_EXTENSION).lower(),
@@ -1415,6 +1418,8 @@ class HindsightConfig:
     def log_config(self) -> None:
         """Log the current configuration (without sensitive values)."""
         logger.info(f"Database: {self.database_url} (schema: {self.database_schema})")
+        if self.migration_database_url:
+            logger.info(f"Migration database: {self.migration_database_url}")
         logger.info(f"LLM: provider={self.llm_provider}, model={self.llm_model}")
         if self.retain_llm_provider or self.retain_llm_model:
             retain_provider = self.retain_llm_provider or self.llm_provider

@@ -314,7 +314,7 @@ async def test_run_migration_without_schema_discovers_and_deduplicates_schemas(m
     async def fake_resolve_database_url(db_url: str) -> str:
         return f"resolved::{db_url}"
 
-    def fake_run_migrations(database_url: str, schema: str | None = None) -> None:
+    def fake_run_migrations(database_url: str, schema: str | None = None, **kwargs) -> None:
         calls["run_migrations"].append((database_url, schema))
 
     def fake_ensure_vector_extension(
@@ -376,7 +376,7 @@ async def test_run_migration_without_schema_runs_optional_post_migration_hooks(m
     async def fake_resolve_database_url(db_url: str) -> str:
         return f"resolved::{db_url}"
 
-    def fake_run_migrations(database_url: str, schema: str | None = None) -> None:
+    def fake_run_migrations(database_url: str, schema: str | None = None, **kwargs) -> None:
         calls["run_migrations"].append((database_url, schema))
 
     def fake_ensure_embedding_dimension(
@@ -453,7 +453,7 @@ async def test_run_migration_with_schema_only_runs_requested_schema(monkeypatch)
     async def fake_resolve_database_url(db_url: str) -> str:
         return f"resolved::{db_url}"
 
-    def fake_run_migrations(database_url: str, schema: str | None = None) -> None:
+    def fake_run_migrations(database_url: str, schema: str | None = None, **kwargs) -> None:
         calls["run_migrations"].append((database_url, schema))
 
     def fake_ensure_vector_extension(

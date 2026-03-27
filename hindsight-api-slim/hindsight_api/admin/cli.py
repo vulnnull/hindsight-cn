@@ -249,7 +249,7 @@ async def _run_migration(
         schemas = list(dict.fromkeys(schemas))
 
     for schema in schemas:
-        run_migrations(resolved_url, schema=schema)
+        run_migrations(resolved_url, schema=schema, migration_database_url=config.migration_database_url)
 
     if embedding_dimension is not None:
         for schema in schemas:
