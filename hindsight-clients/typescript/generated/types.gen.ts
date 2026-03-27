@@ -4868,3 +4868,121 @@ export type FileRetainResponses = {
 
 export type FileRetainResponse2 =
   FileRetainResponses[keyof FileRetainResponses];
+
+export type ListAuditLogsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: {
+    /**
+     * Action
+     *
+     * Filter by action type
+     */
+    action?: string | null;
+    /**
+     * Transport
+     *
+     * Filter by transport (http, mcp, system)
+     */
+    transport?: string | null;
+    /**
+     * Start Date
+     *
+     * Filter from this ISO datetime (inclusive)
+     */
+    start_date?: string | null;
+    /**
+     * End Date
+     *
+     * Filter until this ISO datetime (exclusive)
+     */
+    end_date?: string | null;
+    /**
+     * Limit
+     *
+     * Max items to return
+     */
+    limit?: number;
+    /**
+     * Offset
+     *
+     * Offset for pagination
+     */
+    offset?: number;
+  };
+  url: "/v1/default/banks/{bank_id}/audit-logs";
+};
+
+export type ListAuditLogsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListAuditLogsError = ListAuditLogsErrors[keyof ListAuditLogsErrors];
+
+export type ListAuditLogsResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
+
+export type AuditLogStatsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: {
+    /**
+     * Action
+     *
+     * Filter by action type
+     */
+    action?: string | null;
+    /**
+     * Period
+     *
+     * Time period: 1d, 7d, or 30d
+     */
+    period?: string;
+  };
+  url: "/v1/default/banks/{bank_id}/audit-logs/stats";
+};
+
+export type AuditLogStatsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type AuditLogStatsError = AuditLogStatsErrors[keyof AuditLogStatsErrors];
+
+export type AuditLogStatsResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};

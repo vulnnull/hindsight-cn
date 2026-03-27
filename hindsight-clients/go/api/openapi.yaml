@@ -2782,6 +2782,159 @@ paths:
       summary: Convert files to memories
       tags:
       - Files
+  /v1/default/banks/{bank_id}/audit-logs:
+    get:
+      description: "List audit log entries for a bank, ordered by most recent first."
+      operationId: list_audit_logs
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - description: Filter by action type
+        explode: true
+        in: query
+        name: action
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      - description: "Filter by transport (http, mcp, system)"
+        explode: true
+        in: query
+        name: transport
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      - description: Filter from this ISO datetime (inclusive)
+        explode: true
+        in: query
+        name: start_date
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      - description: Filter until this ISO datetime (exclusive)
+        explode: true
+        in: query
+        name: end_date
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      - description: Max items to return
+        explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 50
+          description: Max items to return
+          maximum: 500
+          minimum: 1
+          title: Limit
+          type: integer
+        style: form
+      - description: Offset for pagination
+        explode: true
+        in: query
+        name: offset
+        required: false
+        schema:
+          default: 0
+          description: Offset for pagination
+          minimum: 0
+          title: Offset
+          type: integer
+        style: form
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: List audit logs
+      tags:
+      - Audit
+  /v1/default/banks/{bank_id}/audit-logs/stats:
+    get:
+      description: Get audit log counts grouped by time bucket for charting.
+      operationId: audit_log_stats
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - description: Filter by action type
+        explode: true
+        in: query
+        name: action
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: form
+      - description: "Time period: 1d, 7d, or 30d"
+        explode: true
+        in: query
+        name: period
+        required: false
+        schema:
+          default: 7d
+          description: "Time period: 1d, 7d, or 30d"
+          title: Period
+          type: string
+        style: form
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Audit log statistics
+      tags:
+      - Audit
 components:
   schemas:
     AddBackgroundRequest:

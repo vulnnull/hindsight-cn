@@ -28,6 +28,7 @@ from ..metrics import get_metrics_collector
 from ..tracing import create_operation_span
 from ..utils import mask_network_location
 from ..worker.exceptions import RetryTaskAt
+from .audit import AuditLogger, audit_context
 from .db_budget import budgeted_operation
 from .operation_metadata import (
     BatchRetainChildMetadata,
@@ -476,6 +477,16 @@ class MemoryEngine(MemoryEngineInterface):
             schema_getter=get_current_schema,
         )
 
+        # Audit logger for feature usage tracking
+        config = get_config()
+        self._audit_logger = AuditLogger(
+            pool_getter=lambda: self._pool,
+            schema_getter=get_current_schema,
+            enabled=config.audit_log_enabled,
+            allowed_actions=config.audit_log_actions,
+            retention_days=config.audit_log_retention_days,
+        )
+
         # Backpressure mechanism: limit concurrent searches to prevent overwhelming the database
         # Configurable via HINDSIGHT_API_RECALL_MAX_CONCURRENT (default: 50)
         self._search_semaphore = asyncio.Semaphore(get_config().recall_max_concurrent)
@@ -497,6 +508,11 @@ class MemoryEngine(MemoryEngineInterface):
 
             tenant_extension = DefaultTenantExtension(config={})
         self._tenant_extension = tenant_extension
+
+    @property
+    def audit_logger(self) -> AuditLogger:
+        """The audit logger for feature usage tracking."""
+        return self._audit_logger
 
     @property
     def tenant_extension(self) -> "TenantExtension | None":
@@ -1030,72 +1046,78 @@ class MemoryEngine(MemoryEngineInterface):
                 # Continue with processing if we can't check status
 
         consolidation_result: dict | None = None
-        try:
-            if task_type == "batch_retain":
-                await self._handle_batch_retain(task_dict)
-            elif task_type == "file_convert_retain":
-                await self._handle_file_convert_retain(task_dict)
-            elif task_type == "consolidation":
-                consolidation_result = await self._handle_consolidation(task_dict)
-            elif task_type == "refresh_mental_model":
-                await self._handle_refresh_mental_model(task_dict)
-            elif task_type == "webhook_delivery":
-                await self._handle_webhook_delivery(task_dict)
-            else:
-                logger.error(f"Unknown task type: {task_type}")
-                # Don't retry unknown task types
-                if operation_id:
-                    await self._delete_operation_record(operation_id)
-                return
-
-            # Task succeeded - mark operation as completed
-            # file_convert_retain marks itself as completed in a transaction, skip double-marking
-            if operation_id and task_type not in ("file_convert_retain",):
-                if task_type == "consolidation":
-                    # Atomically mark completed AND queue webhook delivery in one transaction
-                    await self._mark_operation_completed_and_fire_webhook(
-                        operation_id=operation_id,
-                        bank_id=task_dict.get("bank_id", ""),
-                        status="completed",
-                        result=consolidation_result,
-                        schema=schema,
-                    )
+        bank_id = task_dict.get("bank_id")
+        async with audit_context(
+            self._audit_logger, task_type or "unknown", "system", bank_id, request=task_dict
+        ) as audit_entry:
+            try:
+                if task_type == "batch_retain":
+                    await self._handle_batch_retain(task_dict)
+                elif task_type == "file_convert_retain":
+                    await self._handle_file_convert_retain(task_dict)
+                elif task_type == "consolidation":
+                    consolidation_result = await self._handle_consolidation(task_dict)
+                elif task_type == "refresh_mental_model":
+                    await self._handle_refresh_mental_model(task_dict)
+                elif task_type == "webhook_delivery":
+                    await self._handle_webhook_delivery(task_dict)
                 else:
-                    await self._mark_operation_completed(operation_id)
+                    logger.error(f"Unknown task type: {task_type}")
+                    # Don't retry unknown task types
+                    if operation_id:
+                        await self._delete_operation_record(operation_id)
+                    return
 
-        except RetryTaskAt:
-            # Task-owned retry: let the poller handle scheduling
-            raise
-        except Exception as e:
-            logger.error(f"Task execution failed: {task_type}, error: {e}")
-            import traceback
+                # Task succeeded - mark operation as completed
+                # file_convert_retain marks itself as completed in a transaction, skip double-marking
+                if operation_id and task_type not in ("file_convert_retain",):
+                    if task_type == "consolidation":
+                        # Atomically mark completed AND queue webhook delivery in one transaction
+                        await self._mark_operation_completed_and_fire_webhook(
+                            operation_id=operation_id,
+                            bank_id=task_dict.get("bank_id", ""),
+                            status="completed",
+                            result=consolidation_result,
+                            schema=schema,
+                        )
+                    else:
+                        await self._mark_operation_completed(operation_id)
 
-            error_traceback = traceback.format_exc()
-            traceback.print_exc()
+                audit_entry.response = {"status": "completed", "operation_id": operation_id}
 
-            if task_type == "file_convert_retain":
-                # Non-retryable: mark as failed immediately.
-                # Conversion failures won't improve on retry (missing OCR, corrupted file, etc.)
-                logger.error(f"Not retrying task {task_type} (non-retryable), marking as failed")
-                if operation_id:
-                    await self._mark_operation_failed(operation_id, str(e), error_traceback)
-            else:
-                if task_type == "consolidation" and operation_id:
-                    # Fire failure webhook (non-transactional — operation not yet marked failed;
-                    # poller will mark it failed after this raise)
-                    await self._fire_consolidation_webhook(
-                        bank_id=task_dict.get("bank_id", ""),
-                        operation_id=operation_id,
-                        status="failed",
-                        result=None,
-                        error_message=str(e),
-                        schema=schema,
-                    )
-                # Retryable: use RetryTaskAt if under the retry limit, else re-raise (poller marks failed)
-                retry_count = task_dict.get("_retry_count", 0)
-                if retry_count < 3:
-                    raise RetryTaskAt(retry_at=datetime.now(UTC) + timedelta(seconds=60), message=str(e))
+            except RetryTaskAt:
+                # Task-owned retry: let the poller handle scheduling
                 raise
+            except Exception as e:
+                logger.error(f"Task execution failed: {task_type}, error: {e}")
+                import traceback
+
+                error_traceback = traceback.format_exc()
+                traceback.print_exc()
+
+                if task_type == "file_convert_retain":
+                    # Non-retryable: mark as failed immediately.
+                    # Conversion failures won't improve on retry (missing OCR, corrupted file, etc.)
+                    logger.error(f"Not retrying task {task_type} (non-retryable), marking as failed")
+                    if operation_id:
+                        await self._mark_operation_failed(operation_id, str(e), error_traceback)
+                else:
+                    if task_type == "consolidation" and operation_id:
+                        # Fire failure webhook (non-transactional — operation not yet marked failed;
+                        # poller will mark it failed after this raise)
+                        await self._fire_consolidation_webhook(
+                            bank_id=task_dict.get("bank_id", ""),
+                            operation_id=operation_id,
+                            status="failed",
+                            result=None,
+                            error_message=str(e),
+                            schema=schema,
+                        )
+                    # Retryable: use RetryTaskAt if under the retry limit, else re-raise (poller marks failed)
+                    retry_count = task_dict.get("_retry_count", 0)
+                    if retry_count < 3:
+                        raise RetryTaskAt(retry_at=datetime.now(UTC) + timedelta(seconds=60), message=str(e))
+                    raise
 
     async def _fire_consolidation_webhook(
         self,
@@ -1791,6 +1813,9 @@ class MemoryEngine(MemoryEngineInterface):
         self._task_backend.set_executor(self.execute_task)
         await self._task_backend.initialize()
 
+        # Start audit log retention sweep (if configured)
+        self._audit_logger.start_retention_sweep()
+
         self._initialized = True
         logger.info("Memory system initialized (pool and task backend started)")
 
@@ -1842,6 +1867,9 @@ class MemoryEngine(MemoryEngineInterface):
     async def close(self):
         """Close the connection pool and shutdown background workers."""
         logger.info("close() started")
+
+        # Stop audit log retention sweep
+        await self._audit_logger.stop_retention_sweep()
 
         # Shutdown task backend
         await self._task_backend.shutdown()

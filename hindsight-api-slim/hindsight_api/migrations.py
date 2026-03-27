@@ -157,7 +157,7 @@ def _run_migrations_internal(database_url: str, script_location: str, schema: st
     # calls from different threads corrupt each other's context.
     try:
         with _alembic_lock:
-            command.upgrade(alembic_cfg, "head")
+            command.upgrade(alembic_cfg, "heads")
     except ResolutionError as e:
         # This happens during rolling deployments when a newer version of the code
         # has already run migrations, and this older replica doesn't have the new

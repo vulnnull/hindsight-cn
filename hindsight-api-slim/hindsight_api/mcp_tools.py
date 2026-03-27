@@ -8,7 +8,7 @@ This module provides the core tool logic used by both:
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from fastmcp import FastMCP
@@ -18,6 +18,7 @@ from hindsight_api.config import (
     DEFAULT_MCP_RECALL_DESCRIPTION,
     DEFAULT_MCP_RETAIN_DESCRIPTION,
 )
+from hindsight_api.engine.audit import AuditEntry, AuditLogger
 from hindsight_api.engine.memory_engine import Budget
 from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES
 from hindsight_api.extensions import OperationValidationError
@@ -289,6 +290,7 @@ def register_mcp_tools(
         _register_clear_memories(mcp, memory, config)
 
     _apply_bank_tool_filtering(mcp, memory, config)
+    _apply_audit_logging(mcp, memory, config)
 
 
 def _apply_bank_tool_filtering(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfig) -> None:
@@ -359,6 +361,112 @@ def _apply_bank_tool_filtering(mcp: FastMCP, memory: MemoryEngine, config: MCPTo
             logger.warning(f"Could not apply bank tool filtering (v2): {e}")
     else:
         logger.warning("Could not apply bank tool filtering: unknown FastMCP version")
+
+
+_AUDITABLE_MCP_TOOLS: frozenset[str] = frozenset(
+    {
+        "retain",
+        "recall",
+        "reflect",
+        "create_bank",
+        "update_bank",
+        "delete_bank",
+        "clear_memories",
+        "create_mental_model",
+        "update_mental_model",
+        "delete_mental_model",
+        "refresh_mental_model",
+        "create_directive",
+        "delete_directive",
+        "delete_memory",
+        "delete_document",
+        "cancel_operation",
+    }
+)
+
+
+def _apply_audit_logging(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfig) -> None:
+    """Wrap auditable MCP tool run methods with audit logging."""
+    audit_logger: AuditLogger = memory.audit_logger
+
+    def _wrap_tool_run(tool_name: str, original_run):
+        """Create an audited wrapper for a tool's run method."""
+
+        async def _audited_run(arguments, _name=tool_name, _orig=original_run):
+            if not audit_logger.is_enabled(_name):
+                return await _orig(arguments)
+
+            bank_id = None
+            if isinstance(arguments, dict):
+                bank_id = arguments.get("bank_id") or (config.bank_id_resolver() if config.bank_id_resolver else None)
+            elif hasattr(arguments, "get"):
+                bank_id = arguments.get("bank_id")
+
+            entry = AuditEntry(
+                action=_name,
+                transport="mcp",
+                bank_id=bank_id,
+                started_at=datetime.now(timezone.utc),
+                request=dict(arguments) if isinstance(arguments, dict) else {"raw": str(arguments)},
+            )
+
+            try:
+                result = await _orig(arguments)
+                if isinstance(result, dict):
+                    entry.response = result
+                elif isinstance(result, list):
+                    entry.response = {"items": result}
+                elif isinstance(result, str):
+                    entry.response = {"text": result}
+                return result
+            finally:
+                entry.ended_at = datetime.now(timezone.utc)
+                audit_logger.log_fire_and_forget(entry)
+
+        return _audited_run
+
+    if hasattr(mcp, "_tool_manager"):
+        # FastMCP 2.x
+        try:
+            for name, tool in mcp._tool_manager._tools.items():
+                if name in _AUDITABLE_MCP_TOOLS:
+                    object.__setattr__(tool, "run", _wrap_tool_run(name, tool.run))
+        except (AttributeError, KeyError) as e:
+            logger.warning(f"Could not apply MCP audit logging (v2): {e}")
+    elif hasattr(mcp, "get_tool"):
+        # FastMCP 3.x: wrap call_tool
+        original_call_tool = getattr(mcp, "call_tool", None)
+        if original_call_tool:
+
+            async def _audited_call_tool(name, arguments=None, **kwargs):
+                if name not in _AUDITABLE_MCP_TOOLS or not audit_logger.is_enabled(name):
+                    return await original_call_tool(name, arguments, **kwargs)
+
+                bank_id = None
+                if isinstance(arguments, dict):
+                    bank_id = arguments.get("bank_id") or (
+                        config.bank_id_resolver() if config.bank_id_resolver else None
+                    )
+
+                entry = AuditEntry(
+                    action=name,
+                    transport="mcp",
+                    bank_id=bank_id,
+                    started_at=datetime.now(timezone.utc),
+                    request=dict(arguments) if isinstance(arguments, dict) else {},
+                )
+
+                try:
+                    result = await original_call_tool(name, arguments, **kwargs)
+                    entry.response = {"result": str(result)[:4096]}
+                    return result
+                finally:
+                    entry.ended_at = datetime.now(timezone.utc)
+                    audit_logger.log_fire_and_forget(entry)
+
+            object.__setattr__(mcp, "call_tool", _audited_call_tool)
+    else:
+        logger.warning("Could not apply MCP audit logging: unknown FastMCP version")
 
 
 def _register_retain(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfig) -> None:

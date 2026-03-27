@@ -11,6 +11,9 @@ import type {
   AddBankBackgroundData,
   AddBankBackgroundErrors,
   AddBankBackgroundResponses,
+  AuditLogStatsData,
+  AuditLogStatsErrors,
+  AuditLogStatsResponses,
   CancelOperationData,
   CancelOperationErrors,
   CancelOperationResponses,
@@ -96,6 +99,9 @@ import type {
   GetVersionResponses,
   HealthEndpointHealthGetData,
   HealthEndpointHealthGetResponses,
+  ListAuditLogsData,
+  ListAuditLogsErrors,
+  ListAuditLogsResponses,
   ListBanksData,
   ListBanksErrors,
   ListBanksResponses,
@@ -1226,3 +1232,31 @@ export const fileRetain = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * List audit logs
+ *
+ * List audit log entries for a bank, ordered by most recent first.
+ */
+export const listAuditLogs = <ThrowOnError extends boolean = false>(
+  options: Options<ListAuditLogsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    ListAuditLogsResponses,
+    ListAuditLogsErrors,
+    ThrowOnError
+  >({ url: "/v1/default/banks/{bank_id}/audit-logs", ...options });
+
+/**
+ * Audit log statistics
+ *
+ * Get audit log counts grouped by time bucket for charting.
+ */
+export const auditLogStats = <ThrowOnError extends boolean = false>(
+  options: Options<AuditLogStatsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    AuditLogStatsResponses,
+    AuditLogStatsErrors,
+    ThrowOnError
+  >({ url: "/v1/default/banks/{bank_id}/audit-logs/stats", ...options });

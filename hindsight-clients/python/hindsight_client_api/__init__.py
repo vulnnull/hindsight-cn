@@ -17,6 +17,7 @@
 __version__ = "0.0.7"
 
 # import apis into sdk package
+from hindsight_client_api.api.audit_api import AuditApi
 from hindsight_client_api.api.banks_api import BanksApi
 from hindsight_client_api.api.directives_api import DirectivesApi
 from hindsight_client_api.api.documents_api import DocumentsApi

@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 
+from hindsight_api.engine.audit import AuditEntry, AuditLogger
 from hindsight_api.extensions import AuthenticationError
 
 
@@ -1895,6 +1896,73 @@ class WebhookDeliveryListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+def _make_audited_http(audit_logger_getter: Callable[[], AuditLogger | None]):
+    """Create an audit decorator bound to an audit logger getter.
+
+    Returns a decorator factory that can be used as @audited("action_name").
+    """
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+    from functools import wraps
+    from typing import Callable as _Callable
+
+    def audited(action: str, *, request_param: str | None = "request"):
+        """Decorator that wraps an HTTP handler with audit logging.
+
+        Args:
+            action: The audit action name (e.g. "retain", "recall").
+            request_param: Name of the kwarg holding the Pydantic request model
+                           (None if handler has no request body). Also supports "body".
+        """
+
+        def decorator(func):
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                al = audit_logger_getter()
+                if al is None or not al.is_enabled(action):
+                    return await func(*args, **kwargs)
+
+                bank_id = kwargs.get("bank_id")
+                started_at = _dt.now(_tz.utc)
+
+                req_data = None
+                if request_param:
+                    req_obj = kwargs.get(request_param)
+                    if req_obj is not None and hasattr(req_obj, "model_dump"):
+                        req_data = req_obj.model_dump(mode="json")
+                    elif req_obj is not None and isinstance(req_obj, dict):
+                        req_data = req_obj
+
+                entry = AuditEntry(
+                    action=action,
+                    transport="http",
+                    bank_id=bank_id,
+                    started_at=started_at,
+                    request=req_data,
+                )
+
+                try:
+                    result = await func(*args, **kwargs)
+                    if hasattr(result, "model_dump"):
+                        entry.response = result.model_dump(mode="json")
+                    elif isinstance(result, dict):
+                        entry.response = result
+                    return result
+                finally:
+                    entry.ended_at = _dt.now(_tz.utc)
+                    al.log_fire_and_forget(entry)
+
+            # Preserve FastAPI's dependency injection signature
+            import inspect
+
+            wrapper.__signature__ = inspect.signature(func)  # type: ignore[attr-defined]
+            return wrapper
+
+        return decorator
+
+    return audited
+
+
 def create_app(
     memory: MemoryEngine,
     initialize_memory: bool = True,
@@ -2063,6 +2131,7 @@ def create_app(
     # IMPORTANT: Set memory on app.state immediately, don't wait for lifespan
     # This is required for mounted sub-applications where lifespan may not fire
     app.state.memory = memory
+    app.state.audit_logger = memory.audit_logger
 
     # ---------------------------------------------------------------------------
     # Patch OpenAPI schema: align ValidationError with Pydantic v2 error format
@@ -2128,6 +2197,9 @@ def create_app(
 
 def _register_routes(app: FastAPI):
     """Register all API routes on the given app instance."""
+
+    # Create audit decorator bound to this app's audit logger
+    audited = _make_audited_http(lambda: getattr(app.state, "audit_logger", None))
 
     def get_request_context(authorization: str | None = Header(default=None)) -> RequestContext:
         """
@@ -2384,6 +2456,7 @@ def _register_routes(app: FastAPI):
         operation_id="recall_memories",
         tags=["Memory"],
     )
+    @audited("recall")
     async def api_recall(
         bank_id: str, request: RecallRequest, request_context: RequestContext = Depends(get_request_context)
     ):
@@ -2570,6 +2643,7 @@ def _register_routes(app: FastAPI):
         operation_id="reflect",
         tags=["Memory"],
     )
+    @audited("reflect")
     async def api_reflect(
         bank_id: str, request: ReflectRequest, request_context: RequestContext = Depends(get_request_context)
     ):
@@ -2980,6 +3054,7 @@ def _register_routes(app: FastAPI):
         operation_id="create_mental_model",
         tags=["Mental Models"],
     )
+    @audited("create_mental_model", request_param="body")
     async def api_create_mental_model(
         bank_id: str,
         body: CreateMentalModelRequest,
@@ -3027,6 +3102,7 @@ def _register_routes(app: FastAPI):
         operation_id="refresh_mental_model",
         tags=["Mental Models"],
     )
+    @audited("refresh_mental_model", request_param=None)
     async def api_refresh_mental_model(
         bank_id: str,
         mental_model_id: str,
@@ -3065,6 +3141,7 @@ def _register_routes(app: FastAPI):
         operation_id="update_mental_model",
         tags=["Mental Models"],
     )
+    @audited("update_mental_model", request_param="body")
     async def api_update_mental_model(
         bank_id: str,
         mental_model_id: str,
@@ -3104,6 +3181,7 @@ def _register_routes(app: FastAPI):
         operation_id="delete_mental_model",
         tags=["Mental Models"],
     )
+    @audited("delete_mental_model", request_param=None)
     async def api_delete_mental_model(
         bank_id: str,
         mental_model_id: str,
@@ -3216,6 +3294,7 @@ def _register_routes(app: FastAPI):
         operation_id="create_directive",
         tags=["Directives"],
     )
+    @audited("create_directive", request_param="body")
     async def api_create_directive(
         bank_id: str,
         body: CreateDirectiveRequest,
@@ -3254,6 +3333,7 @@ def _register_routes(app: FastAPI):
         operation_id="update_directive",
         tags=["Directives"],
     )
+    @audited("update_directive", request_param="body")
     async def api_update_directive(
         bank_id: str,
         directive_id: str,
@@ -3293,6 +3373,7 @@ def _register_routes(app: FastAPI):
         operation_id="delete_directive",
         tags=["Directives"],
     )
+    @audited("delete_directive", request_param=None)
     async def api_delete_directive(
         bank_id: str,
         directive_id: str,
@@ -3505,6 +3586,7 @@ def _register_routes(app: FastAPI):
         operation_id="update_document",
         tags=["Documents"],
     )
+    @audited("update_document", request_param="body")
     async def api_update_document(
         bank_id: str,
         document_id: str,
@@ -3555,6 +3637,7 @@ def _register_routes(app: FastAPI):
         operation_id="delete_document",
         tags=["Documents"],
     )
+    @audited("delete_document", request_param=None)
     async def api_delete_document(
         bank_id: str, document_id: str, request_context: RequestContext = Depends(get_request_context)
     ):
@@ -3671,6 +3754,7 @@ def _register_routes(app: FastAPI):
         operation_id="cancel_operation",
         tags=["Operations"],
     )
+    @audited("cancel_operation", request_param=None)
     async def api_cancel_operation(
         bank_id: str, operation_id: str, request_context: RequestContext = Depends(get_request_context)
     ):
@@ -3705,6 +3789,7 @@ def _register_routes(app: FastAPI):
         operation_id="retry_operation",
         tags=["Operations"],
     )
+    @audited("retry_operation", request_param=None)
     async def api_retry_operation(
         bank_id: str, operation_id: str, request_context: RequestContext = Depends(get_request_context)
     ):
@@ -3851,6 +3936,7 @@ def _register_routes(app: FastAPI):
         operation_id="create_or_update_bank",
         tags=["Banks"],
     )
+    @audited("create_bank")
     async def api_create_or_update_bank(
         bank_id: str, request: CreateBankRequest, request_context: RequestContext = Depends(get_request_context)
     ):
@@ -3906,6 +3992,7 @@ def _register_routes(app: FastAPI):
         operation_id="update_bank",
         tags=["Banks"],
     )
+    @audited("update_bank")
     async def api_update_bank(
         bank_id: str, request: CreateBankRequest, request_context: RequestContext = Depends(get_request_context)
     ):
@@ -3962,6 +4049,7 @@ def _register_routes(app: FastAPI):
         operation_id="delete_bank",
         tags=["Banks"],
     )
+    @audited("delete_bank", request_param=None)
     async def api_delete_bank(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
         """Delete an entire memory bank and all its data."""
         try:
@@ -3992,6 +4080,7 @@ def _register_routes(app: FastAPI):
         operation_id="clear_observations",
         tags=["Banks"],
     )
+    @audited("clear_observations", request_param=None)
     async def api_clear_observations(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
         """Clear all observations for a bank."""
         try:
@@ -4024,6 +4113,7 @@ def _register_routes(app: FastAPI):
         operation_id="recover_consolidation",
         tags=["Banks"],
     )
+    @audited("recover_consolidation", request_param=None)
     async def api_recover_consolidation(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
         """Reset consolidation-failed memories for recovery."""
         try:
@@ -4050,6 +4140,7 @@ def _register_routes(app: FastAPI):
         operation_id="clear_memory_observations",
         tags=["Memory"],
     )
+    @audited("clear_memory_observations", request_param=None)
     async def api_clear_memory_observations(
         bank_id: str,
         memory_id: str,
@@ -4130,6 +4221,7 @@ def _register_routes(app: FastAPI):
         operation_id="update_bank_config",
         tags=["Banks"],
     )
+    @audited("update_bank_config")
     async def api_update_bank_config(
         bank_id: str, request: BankConfigUpdate, request_context: RequestContext = Depends(get_request_context)
     ):
@@ -4181,6 +4273,7 @@ def _register_routes(app: FastAPI):
         operation_id="reset_bank_config",
         tags=["Banks"],
     )
+    @audited("reset_bank_config", request_param=None)
     async def api_reset_bank_config(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
         """Reset bank configuration to defaults (remove all overrides)."""
         if not get_config().enable_bank_config_api:
@@ -4226,6 +4319,7 @@ def _register_routes(app: FastAPI):
         operation_id="trigger_consolidation",
         tags=["Banks"],
     )
+    @audited("consolidation", request_param=None)
     async def api_trigger_consolidation(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
         """Trigger consolidation for a bank (async)."""
         try:
@@ -4258,6 +4352,7 @@ def _register_routes(app: FastAPI):
         tags=["Webhooks"],
         status_code=201,
     )
+    @audited("create_webhook")
     async def api_create_webhook(
         bank_id: str,
         request: CreateWebhookRequest,
@@ -4374,6 +4469,7 @@ def _register_routes(app: FastAPI):
         operation_id="delete_webhook",
         tags=["Webhooks"],
     )
+    @audited("delete_webhook", request_param=None)
     async def api_delete_webhook(
         bank_id: str,
         webhook_id: str,
@@ -4410,6 +4506,7 @@ def _register_routes(app: FastAPI):
         operation_id="update_webhook",
         tags=["Webhooks"],
     )
+    @audited("update_webhook")
     async def api_update_webhook(
         bank_id: str,
         webhook_id: str,
@@ -4586,6 +4683,7 @@ def _register_routes(app: FastAPI):
         operation_id="retain_memories",
         tags=["Memory"],
     )
+    @audited("retain")
     async def api_retain(
         bank_id: str, request: RetainRequest, request_context: RequestContext = Depends(get_request_context)
     ):
@@ -4749,6 +4847,7 @@ def _register_routes(app: FastAPI):
         operation_id="file_retain",
         tags=["Files"],
     )
+    @audited("file_retain", request_param=None)
     async def api_file_retain(
         bank_id: str,
         files: list[UploadFile] = File(..., description="Files to upload and convert"),
@@ -4898,6 +4997,7 @@ def _register_routes(app: FastAPI):
         operation_id="clear_bank_memories",
         tags=["Memory"],
     )
+    @audited("clear_memories", request_param=None)
     async def api_clear_bank_memories(
         bank_id: str,
         type: str | None = Query(None, description="Optional fact type filter (world, experience, opinion)"),
@@ -4917,4 +5017,203 @@ def _register_routes(app: FastAPI):
 
             error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             logger.error(f"Error in /v1/default/banks/{bank_id}/memories: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ---- Audit Logs ----
+
+    @app.get(
+        "/v1/default/banks/{bank_id}/audit-logs",
+        summary="List audit logs",
+        description="List audit log entries for a bank, ordered by most recent first.",
+        operation_id="list_audit_logs",
+        tags=["Audit"],
+    )
+    async def api_list_audit_logs(
+        bank_id: str,
+        action: str | None = Query(None, description="Filter by action type"),
+        transport: str | None = Query(None, description="Filter by transport (http, mcp, system)"),
+        start_date: str | None = Query(None, description="Filter from this ISO datetime (inclusive)"),
+        end_date: str | None = Query(None, description="Filter until this ISO datetime (exclusive)"),
+        limit: int = Query(50, ge=1, le=500, description="Max items to return"),
+        offset: int = Query(0, ge=0, description="Offset for pagination"),
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """List audit log entries for a bank."""
+        try:
+            from hindsight_api.engine.memory_engine import fq_table
+
+            pool = await app.state.memory._get_pool()
+
+            # Ensure bank exists
+            await app.state.memory.get_bank_profile(bank_id, request_context=request_context)
+
+            from hindsight_api.engine.db_utils import acquire_with_retry
+
+            async with acquire_with_retry(pool) as conn:
+                where_clauses = ["bank_id = $1"]
+                params: list[Any] = [bank_id]
+                idx = 2
+
+                if action:
+                    where_clauses.append(f"action = ${idx}")
+                    params.append(action)
+                    idx += 1
+
+                if transport:
+                    where_clauses.append(f"transport = ${idx}")
+                    params.append(transport)
+                    idx += 1
+
+                if start_date:
+                    parsed_start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+                    where_clauses.append(f"started_at >= ${idx}")
+                    params.append(parsed_start)
+                    idx += 1
+
+                if end_date:
+                    parsed_end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                    where_clauses.append(f"started_at < ${idx}")
+                    params.append(parsed_end)
+                    idx += 1
+
+                where_sql = " AND ".join(where_clauses)
+                table = fq_table("audit_log")
+
+                # Get total count
+                count_row = await conn.fetchrow(
+                    f"SELECT COUNT(*) as total FROM {table} WHERE {where_sql}",
+                    *params,
+                )
+                total = count_row["total"] if count_row else 0
+
+                # Get paginated results
+                params.append(limit)
+                params.append(offset)
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, action, transport, bank_id, started_at, ended_at,
+                           request, response, metadata
+                    FROM {table}
+                    WHERE {where_sql}
+                    ORDER BY started_at DESC
+                    LIMIT ${idx} OFFSET ${idx + 1}
+                    """,
+                    *params,
+                )
+
+                items = []
+                for row in rows:
+                    items.append(
+                        {
+                            "id": str(row["id"]),
+                            "action": row["action"],
+                            "transport": row["transport"],
+                            "bank_id": row["bank_id"],
+                            "started_at": row["started_at"].isoformat() if row["started_at"] else None,
+                            "ended_at": row["ended_at"].isoformat() if row["ended_at"] else None,
+                            "request": json.loads(row["request"]) if row["request"] else None,
+                            "response": json.loads(row["response"]) if row["response"] else None,
+                            "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                        }
+                    )
+
+                return {
+                    "bank_id": bank_id,
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                    "items": items,
+                }
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            logger.error(f"Error listing audit logs: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get(
+        "/v1/default/banks/{bank_id}/audit-logs/stats",
+        summary="Audit log statistics",
+        description="Get audit log counts grouped by time bucket for charting.",
+        operation_id="audit_log_stats",
+        tags=["Audit"],
+    )
+    async def api_audit_log_stats(
+        bank_id: str,
+        action: str | None = Query(None, description="Filter by action type"),
+        period: str = Query("7d", description="Time period: 1d, 7d, or 30d"),
+        request_context: RequestContext = Depends(get_request_context),
+    ):
+        """Get audit log counts grouped by time bucket."""
+        try:
+            from hindsight_api.engine.db_utils import acquire_with_retry
+            from hindsight_api.engine.memory_engine import fq_table
+
+            pool = await app.state.memory._get_pool()
+            await app.state.memory.get_bank_profile(bank_id, request_context=request_context)
+
+            # Determine time range (always per-day buckets)
+            from datetime import timedelta as _td
+
+            now = datetime.now(timezone.utc)
+            trunc = "day"
+            if period == "1d":
+                start = now - _td(days=1)
+            elif period == "30d":
+                start = now - _td(days=30)
+            else:  # 7d default
+                start = now - _td(days=7)
+
+            table = fq_table("audit_log")
+
+            async with acquire_with_retry(pool) as conn:
+                where_clauses = ["bank_id = $1", "started_at >= $2"]
+                params: list[Any] = [bank_id, start]
+                idx = 3
+
+                if action:
+                    where_clauses.append(f"action = ${idx}")
+                    params.append(action)
+                    idx += 1
+
+                where_sql = " AND ".join(where_clauses)
+
+                rows = await conn.fetch(
+                    f"""
+                    SELECT date_trunc('{trunc}', started_at) AS bucket,
+                           action,
+                           COUNT(*) AS count
+                    FROM {table}
+                    WHERE {where_sql}
+                    GROUP BY bucket, action
+                    ORDER BY bucket ASC
+                    """,
+                    *params,
+                )
+
+                buckets: dict[str, dict[str, int]] = {}
+                for row in rows:
+                    bucket_key = row["bucket"].isoformat()
+                    if bucket_key not in buckets:
+                        buckets[bucket_key] = {}
+                    buckets[bucket_key][row["action"]] = row["count"]
+
+                return {
+                    "bank_id": bank_id,
+                    "period": period,
+                    "trunc": trunc,
+                    "start": start.isoformat(),
+                    "buckets": [{"time": k, "actions": v, "total": sum(v.values())} for k, v in buckets.items()],
+                }
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            logger.error(f"Error getting audit log stats: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=str(e))

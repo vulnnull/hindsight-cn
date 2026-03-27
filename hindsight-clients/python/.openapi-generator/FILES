@@ -1,5 +1,6 @@
 hindsight_client_api/__init__.py
 hindsight_client_api/api/__init__.py
+hindsight_client_api/api/audit_api.py
 hindsight_client_api/api/banks_api.py
 hindsight_client_api/api/directives_api.py
 hindsight_client_api/api/documents_api.py
