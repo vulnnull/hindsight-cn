@@ -513,6 +513,7 @@ def _get_package_name(integration: str) -> str:
         "litellm": "hindsight-litellm",
         "pydantic-ai": "hindsight-pydantic-ai",
         "crewai": "hindsight-crewai",
+        "ag2": "hindsight-ag2",
         "ai-sdk": "@vectorize-io/hindsight-ai-sdk",
         "chat": "@vectorize-io/hindsight-chat",
         "openclaw": "@vectorize-io/hindsight-openclaw",
