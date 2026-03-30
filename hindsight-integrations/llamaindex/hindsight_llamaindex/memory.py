@@ -7,6 +7,7 @@ Provides automatic memory for LlamaIndex agents:
 """
 
 import logging
+import re
 import time
 import uuid
 from typing import Any, Optional
@@ -22,6 +23,12 @@ DEFAULT_SYSTEM_PROMPT = (
     "Below are relevant memories from previous conversations:\n{memories}\n"
     "Use these memories to provide more personalized and contextual responses."
 )
+
+# Patterns for detecting ReAct-style reasoning traces in assistant messages
+_REACT_PATTERN = re.compile(
+    r"^(Thought|Action|Action Input|Observation)\s*:", re.MULTILINE
+)
+_ANSWER_PATTERN = re.compile(r"^Answer\s*:\s*", re.MULTILINE)
 
 
 class HindsightMemory(BaseMemory):
@@ -60,8 +67,9 @@ class HindsightMemory(BaseMemory):
             mission="Track user preferences",
         )
 
-        # Use with any LlamaIndex agent
-        agent = ReActAgent(tools=tools, llm=llm, memory=memory)
+        # Use with any LlamaIndex agent — pass memory to run(), not the constructor
+        agent = ReActAgent(tools=[], llm=llm)
+        response = await agent.run("Hello!", memory=memory)
     """
 
     bank_id: str = Field(description="Hindsight memory bank ID")
@@ -200,13 +208,41 @@ class HindsightMemory(BaseMemory):
         self._bank_initialized = True
 
     def _generate_document_id(self) -> str:
-        return f"{self._session_id}-{int(time.time() * 1000)}"
+        return f"{self._session_id}-{uuid.uuid4().hex[:12]}"
+
+    @staticmethod
+    def _extract_clean_content(content: str, role: MessageRole) -> str:
+        """Extract clean content from a message, stripping ReAct traces.
+
+        For assistant messages containing ReAct reasoning (Thought:/Action:/
+        Observation: prefixes), extracts only the final Answer: text.
+        Returns empty string if the message is purely reasoning with no answer.
+
+        User messages are returned as-is.
+        """
+        if role != MessageRole.ASSISTANT:
+            return content
+
+        # Check if this looks like ReAct reasoning
+        if not _REACT_PATTERN.search(content):
+            return content
+
+        # Extract the final Answer: block
+        answer_match = list(_ANSWER_PATTERN.finditer(content))
+        if answer_match:
+            # Use the last Answer: block (final answer after reasoning)
+            last_answer = answer_match[-1]
+            return content[last_answer.end():].strip()
+
+        # ReAct traces with no Answer: — skip retention
+        return ""
 
     def _retain_message(self, message: ChatMessage) -> None:
         """Retain a message to Hindsight (sync)."""
         if message.role not in (MessageRole.USER, MessageRole.ASSISTANT):
             return
         content = str(message.content) if message.content else ""
+        content = self._extract_clean_content(content, message.role)
         if not content.strip():
             return
         try:
@@ -229,6 +265,7 @@ class HindsightMemory(BaseMemory):
         if message.role not in (MessageRole.USER, MessageRole.ASSISTANT):
             return
         content = str(message.content) if message.content else ""
+        content = self._extract_clean_content(content, message.role)
         if not content.strip():
             return
         try:

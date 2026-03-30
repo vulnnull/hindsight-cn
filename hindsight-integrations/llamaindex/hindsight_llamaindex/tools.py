@@ -185,7 +185,7 @@ class HindsightToolSpec(BaseToolSpec):
 
     def _generate_document_id(self) -> str:
         """Generate a unique document_id for retain operations."""
-        return f"{self._session_id}-{int(time.time() * 1000)}"
+        return f"{self._session_id}-{uuid.uuid4().hex[:12]}"
 
     def _retain_kwargs(self, content: str) -> dict[str, Any]:
         kwargs: dict[str, Any] = {

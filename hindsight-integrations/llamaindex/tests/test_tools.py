@@ -207,10 +207,10 @@ class TestRetainTool:
         spec.retain_memory("content")
         call_kwargs = client.retain.call_args[1]
         doc_id = call_kwargs["document_id"]
-        # Auto-generated format: {session_id}-{timestamp_ms}
-        parts = doc_id.rsplit("-", 1)
-        assert len(parts) == 2
-        assert parts[1].isdigit()
+        # Auto-generated format: {session_id}-{uuid_hex_12}
+        assert "-" in doc_id
+        suffix = doc_id.rsplit("-", 1)[1]
+        assert len(suffix) == 12
 
     def test_retain_passes_context_label(self):
         client = _mock_client()

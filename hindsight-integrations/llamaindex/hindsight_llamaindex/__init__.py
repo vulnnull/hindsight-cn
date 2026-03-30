@@ -26,7 +26,7 @@ from .errors import HindsightError
 from .memory import HindsightMemory
 from .tools import HindsightToolSpec, create_hindsight_tools
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
     "configure",

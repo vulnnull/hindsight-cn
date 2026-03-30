@@ -37,8 +37,8 @@ async def main():
         mission="Track user preferences and project context",
     )
 
-    agent = ReActAgent(tools=[], llm=OpenAI(model="gpt-4o"), memory=memory)
-    response = await agent.run("Remember that I prefer dark mode")
+    agent = ReActAgent(tools=[], llm=OpenAI(model="gpt-4o"))
+    response = await agent.run("Remember that I prefer dark mode", memory=memory)
     print(response)
 
 asyncio.run(main())
@@ -48,8 +48,8 @@ asyncio.run(main())
 
 | Event | What Happens |
 |-------|-------------|
-| Agent receives input | `get(input)` recalls relevant memories from Hindsight, prepends as system message |
-| Agent produces output | `put(message)` retains the message to Hindsight for future recall |
+| Agent receives input | `aget(input)` recalls relevant memories from Hindsight, prepends as system message |
+| Agent produces output | `aput(message)` retains the message to Hindsight for future recall |
 | New session starts | Previous memories are available via recall; local chat buffer starts empty |
 
 ### `HindsightMemory.from_client()`
@@ -236,7 +236,10 @@ tools = create_hindsight_tools(
     include_reflect=True,   # agent can still explicitly reflect
 )
 
-agent = ReActAgent(tools=tools, llm=llm, memory=memory)
+agent = ReActAgent(tools=tools, llm=llm)
+
+# Pass memory to run()
+response = await agent.run("What should I prioritize?", memory=memory)
 ```
 
 ## Requirements

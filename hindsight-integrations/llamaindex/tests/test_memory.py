@@ -164,9 +164,10 @@ class TestPut:
 
         kwargs = client.retain.call_args[1]
         doc_id = kwargs["document_id"]
-        parts = doc_id.rsplit("-", 1)
-        assert len(parts) == 2
-        assert parts[1].isdigit()
+        # Auto-generated format: {session_id}-{uuid_hex_12}
+        assert "-" in doc_id
+        suffix = doc_id.rsplit("-", 1)[1]
+        assert len(suffix) == 12
 
 
 class TestGet:
@@ -293,6 +294,92 @@ class TestReset:
 
         memory.reset()
         assert len(memory.get_all()) == 0
+
+
+class TestReActStripping:
+    """Tests for stripping ReAct reasoning traces from assistant messages."""
+
+    def test_plain_assistant_message_retained(self):
+        client = _mock_client()
+        memory = HindsightMemory.from_client(client=client, bank_id="test")
+        msg = ChatMessage(role=MessageRole.ASSISTANT, content="You use VS Code.")
+        memory.put(msg)
+
+        client.retain.assert_called_once()
+        assert client.retain.call_args[1]["content"] == "You use VS Code."
+
+    def test_react_with_answer_retains_answer_only(self):
+        client = _mock_client()
+        memory = HindsightMemory.from_client(client=client, bank_id="test")
+        react_content = (
+            "Thought: I need to recall the user's IDE preference.\n"
+            "Action: recall_memory\n"
+            "Action Input: {\"query\": \"IDE preference\"}\n"
+            "Observation: User prefers VS Code with dark mode.\n"
+            "Thought: I now have the answer.\n"
+            "Answer: You use VS Code with dark mode."
+        )
+        msg = ChatMessage(role=MessageRole.ASSISTANT, content=react_content)
+        memory.put(msg)
+
+        client.retain.assert_called_once()
+        assert client.retain.call_args[1]["content"] == "You use VS Code with dark mode."
+
+    def test_react_without_answer_skips_retain(self):
+        client = _mock_client()
+        memory = HindsightMemory.from_client(client=client, bank_id="test")
+        react_content = (
+            "Thought: I need to use a tool to help me answer.\n"
+            "Action: retain_memory\n"
+            "Action Input: {\"content\": \"User likes Python\"}"
+        )
+        msg = ChatMessage(role=MessageRole.ASSISTANT, content=react_content)
+        memory.put(msg)
+
+        client.retain.assert_not_called()
+
+    def test_react_stripping_still_adds_to_local_history(self):
+        """Even when retain is skipped, the message is in local history."""
+        client = _mock_client()
+        memory = HindsightMemory.from_client(client=client, bank_id="test")
+        react_content = (
+            "Thought: I need a tool.\n"
+            "Action: some_tool\n"
+            "Action Input: {}"
+        )
+        msg = ChatMessage(role=MessageRole.ASSISTANT, content=react_content)
+        memory.put(msg)
+
+        # Not retained to Hindsight
+        client.retain.assert_not_called()
+        # But still in local history
+        assert len(memory.get_all()) == 1
+
+    def test_user_message_not_stripped(self):
+        """User messages with Thought:/Action: are retained as-is."""
+        client = _mock_client()
+        memory = HindsightMemory.from_client(client=client, bank_id="test")
+        content = "Thought: can you explain this Action: pattern?"
+        msg = ChatMessage(role=MessageRole.USER, content=content)
+        memory.put(msg)
+
+        client.retain.assert_called_once()
+        assert client.retain.call_args[1]["content"] == content
+
+    def test_react_multiple_answers_uses_last(self):
+        client = _mock_client()
+        memory = HindsightMemory.from_client(client=client, bank_id="test")
+        react_content = (
+            "Thought: Let me check.\n"
+            "Answer: Actually, let me reconsider.\n"
+            "Thought: After further review.\n"
+            "Answer: The final answer is 42."
+        )
+        msg = ChatMessage(role=MessageRole.ASSISTANT, content=react_content)
+        memory.put(msg)
+
+        client.retain.assert_called_once()
+        assert client.retain.call_args[1]["content"] == "The final answer is 42."
 
 
 class TestBankMission:
