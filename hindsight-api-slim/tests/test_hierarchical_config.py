@@ -88,8 +88,16 @@ async def test_hierarchical_fields_categorization():
     assert "entities_allow_free_form" in configurable
     assert "entity_labels" in configurable
 
+    # Verify other configurable fields
+    assert "retain_default_strategy" in configurable
+    assert "retain_strategies" in configurable
+    assert "max_observations_per_scope" in configurable
+    assert "reflect_source_facts_max_tokens" in configurable
+    assert "llm_gemini_safety_settings" in configurable
+    assert "mcp_enabled_tools" in configurable
+
     # Verify count is correct
-    assert len(configurable) == 20
+    assert len(configurable) == 21
 
     # Verify credential fields (NEVER exposed)
     assert "llm_api_key" in credentials

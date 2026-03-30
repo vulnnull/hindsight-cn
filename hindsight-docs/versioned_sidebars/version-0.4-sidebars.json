@@ -333,6 +333,22 @@
         },
         {
           "type": "doc",
+          "id": "sdks/integrations/llamaindex",
+          "label": "LlamaIndex",
+          "customProps": {
+            "icon": "/img/icons/llamaindex.png"
+          }
+        },
+        {
+          "type": "doc",
+          "id": "sdks/integrations/codex",
+          "label": "OpenAI Codex CLI",
+          "customProps": {
+            "icon": "/img/icons/openai.png"
+          }
+        },
+        {
+          "type": "doc",
           "id": "sdks/integrations/skills",
           "label": "Skills",
           "customProps": {

@@ -264,6 +264,12 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/llamaindex',
+          label: 'LlamaIndex',
+          customProps: { icon: '/img/icons/llamaindex.png' },
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/skills',
           label: 'Skills',
           customProps: { icon: '/img/icons/skills.png' },
