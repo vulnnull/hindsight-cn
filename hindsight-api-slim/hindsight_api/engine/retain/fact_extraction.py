@@ -616,7 +616,7 @@ VERBOSE_FACT_EXTRACTION_PROMPT = """Extract facts from text into structured form
 
 LANGUAGE: MANDATORY — Detect the language of the input text and produce ALL output in that EXACT same language. You are STRICTLY FORBIDDEN from translating or switching to any other language. Every single word of your output must be in the same language as the input. Do NOT output in a different language under any circumstance.
 
-══════════════════════════════════════════════════════════════════════════
+{retain_mission_section}══════════════════════════════════════════════════════════════════════════
 FACT FORMAT - ALL FIVE DIMENSIONS REQUIRED - MAXIMUM VERBOSITY
 ══════════════════════════════════════════════════════════════════════════
 
@@ -827,7 +827,9 @@ def _build_extraction_prompt_and_schema(config) -> tuple[str, type]:
                 custom_instructions=config.retain_custom_instructions,
             )
     elif extraction_mode == "verbose":
-        prompt = VERBOSE_FACT_EXTRACTION_PROMPT
+        prompt = VERBOSE_FACT_EXTRACTION_PROMPT.format(
+            retain_mission_section=retain_mission_section,
+        )
     elif extraction_mode == "verbatim":
         prompt = VERBATIM_FACT_EXTRACTION_PROMPT.format(
             retain_mission_section=retain_mission_section,

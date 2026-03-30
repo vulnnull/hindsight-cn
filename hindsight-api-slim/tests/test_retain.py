@@ -2612,11 +2612,11 @@ def test_retain_mission_injected_into_prompt():
     assert spec in prompt
     assert "FOCUS" in prompt
 
-    # retain_mission is present regardless of extraction mode (verbose has its own template, no spec injection)
+    # retain_mission is injected into verbose mode as well
     config.retain_extraction_mode = "verbose"
     prompt_verbose, _ = _build_extraction_prompt_and_schema(config)
-    # verbose uses its own template - spec not injected there
-    assert spec not in prompt_verbose
+    assert spec in prompt_verbose
+    assert "FOCUS" in prompt_verbose
 
 
 def test_retain_mission_absent_when_not_set():
