@@ -119,6 +119,39 @@ def _aggregate_source_fields(source_mems: list[dict[str, Any]], tags: list[str] 
     )
 
 
+async def _count_observations_for_scope(
+    conn: "Connection",
+    bank_id: str,
+    tags: list[str],
+) -> int:
+    """Count existing observations matching the given tag scope.
+
+    Returns the count of observations whose tags contain all specified tags.
+    Observations with no tags are not counted (the limit does not apply to them).
+    """
+    return await conn.fetchval(
+        f"SELECT COUNT(*) FROM {fq_table('memory_units')} "
+        f"WHERE bank_id = $1 AND fact_type = 'observation' AND tags @> $2::varchar[]",
+        bank_id,
+        tags,
+    )
+
+
+def _build_response_model(max_creates: int | None = None) -> type[_ConsolidationBatchResponse]:
+    """Build a response model, optionally constraining max creates via JSON schema."""
+    if max_creates is None or max_creates < 0:
+        return _ConsolidationBatchResponse
+
+    from pydantic import Field as PydanticField
+
+    clamped = max(max_creates, 0)
+
+    class _ConstrainedConsolidationBatchResponse(_ConsolidationBatchResponse):
+        creates: list[_CreateAction] = PydanticField(default=[], max_length=clamped)
+
+    return _ConstrainedConsolidationBatchResponse
+
+
 class ConsolidationPerfLog:
     """Performance logging for consolidation operations."""
 
@@ -698,24 +731,6 @@ async def _process_memory_batch(
         if recall_result.source_facts:
             union_source_facts.update(recall_result.source_facts)
 
-    # 3. Single LLM call
-    t0 = time.time()
-    llm_result = await _consolidate_batch_with_llm(
-        llm_config=llm_config,
-        memories=memories,
-        union_observations=union_observations,
-        union_source_facts=union_source_facts,
-        config=config,
-    )
-    if perf:
-        perf.record_timing("llm", time.time() - t0)
-        perf.record_llm_call(llm_result.obs_count, llm_result.prompt_chars)
-
-    # 4. Sequential execution of creates / updates / deletes
-    # Track which memory indices participated so we can build per-memory results for stats
-    per_memory_created: set[str] = set()
-    per_memory_updated: set[str] = set()
-
     # Determine effective tag scope for observations.
     # When obs_tags_override is set, use it; otherwise use the memory's own tags.
     if obs_tags_override is not None:
@@ -724,28 +739,52 @@ async def _process_memory_batch(
         # All memories in the batch share the same tag set (enforced by batching)
         fact_tags = memories[0].get("tags") or [] if memories else []
 
+    # 2b. Compute remaining observation slots for this scope (if limit configured)
+    max_obs = config.max_observations_per_scope if config is not None else -1
+    remaining_observation_slots: int | None = None
+    if max_obs > 0 and fact_tags:
+        current_count = await _count_observations_for_scope(conn, bank_id, fact_tags)
+        remaining_observation_slots = max(max_obs - current_count, 0)
+        if remaining_observation_slots == 0:
+            logger.info(
+                f"[CONSOLIDATION] bank={bank_id} scope={fact_tags} at observation limit "
+                f"({current_count}/{max_obs}), only updates/deletes allowed"
+            )
+
+    # 3. Single LLM call
+    t0 = time.time()
+    llm_result = await _consolidate_batch_with_llm(
+        llm_config=llm_config,
+        memories=memories,
+        union_observations=union_observations,
+        union_source_facts=union_source_facts,
+        config=config,
+        remaining_observation_slots=remaining_observation_slots,
+        max_observations_per_scope=max_obs,
+    )
+    if perf:
+        perf.record_timing("llm", time.time() - t0)
+        perf.record_llm_call(llm_result.obs_count, llm_result.prompt_chars)
+
+    # 4. Sequential execution of deletes / updates / creates
+    # Deletes run first to free observation slots before creates consume them.
+    # Track which memory indices participated so we can build per-memory results for stats
+    per_memory_created: set[str] = set()
+    per_memory_updated: set[str] = set()
+
     mem_by_id = {str(m["id"]): m for m in memories}
 
-    for create in llm_result.creates:
-        source_mems = [mem_by_id[fid] for fid in create.source_fact_ids if fid in mem_by_id]
-        if not source_mems:
+    # Execute deletes first to free observation slots before creates consume them
+    deleted_count = 0
+    for delete in llm_result.deletes:
+        # Security: the observation must be present in the unioned recall
+        if not any(str(obs.id) == delete.observation_id for obs in union_observations):
+            logger.debug(
+                f"Batch consolidation: rejected delete — observation {delete.observation_id} not in unioned recall"
+            )
             continue
-        agg = _aggregate_source_fields(source_mems, tags=fact_tags)
-        await _execute_create_action(
-            conn=conn,
-            memory_engine=memory_engine,
-            bank_id=bank_id,
-            source_memory_ids=[m["id"] for m in source_mems],
-            text=create.text,
-            source_fact_tags=agg.tags,
-            event_date=agg.event_date,
-            occurred_start=agg.occurred_start,
-            occurred_end=agg.occurred_end,
-            mentioned_at=agg.mentioned_at,
-            perf=perf,
-        )
-        for m in source_mems:
-            per_memory_created.add(str(m["id"]))
+        await _execute_delete_action(conn=conn, bank_id=bank_id, observation_id=delete.observation_id)
+        deleted_count += 1
 
     for update in llm_result.updates:
         source_mems = [mem_by_id[fid] for fid in update.source_fact_ids if fid in mem_by_id]
@@ -776,16 +815,26 @@ async def _process_memory_batch(
         for m in source_mems:
             per_memory_updated.add(str(m["id"]))
 
-    deleted_count = 0
-    for delete in llm_result.deletes:
-        # Security: the observation must be present in the unioned recall
-        if not any(str(obs.id) == delete.observation_id for obs in union_observations):
-            logger.debug(
-                f"Batch consolidation: rejected delete — observation {delete.observation_id} not in unioned recall"
-            )
+    for create in llm_result.creates:
+        source_mems = [mem_by_id[fid] for fid in create.source_fact_ids if fid in mem_by_id]
+        if not source_mems:
             continue
-        await _execute_delete_action(conn=conn, bank_id=bank_id, observation_id=delete.observation_id)
-        deleted_count += 1
+        agg = _aggregate_source_fields(source_mems, tags=fact_tags)
+        await _execute_create_action(
+            conn=conn,
+            memory_engine=memory_engine,
+            bank_id=bank_id,
+            source_memory_ids=[m["id"] for m in source_mems],
+            text=create.text,
+            source_fact_tags=agg.tags,
+            event_date=agg.event_date,
+            occurred_start=agg.occurred_start,
+            occurred_end=agg.occurred_end,
+            mentioned_at=agg.mentioned_at,
+            perf=perf,
+        )
+        for m in source_mems:
+            per_memory_created.add(str(m["id"]))
 
     # Build per-memory result dicts for the stats tracker in the outer loop
     results: list[dict[str, Any]] = []
@@ -1083,6 +1132,8 @@ async def _consolidate_batch_with_llm(
     union_observations: "list[MemoryFact]",
     union_source_facts: "dict[str, MemoryFact]",
     config: Any = None,
+    remaining_observation_slots: int | None = None,
+    max_observations_per_scope: int = -1,
 ) -> _BatchLLMResult:
     """Single LLM call for a batch of facts against a pooled set of observations."""
     if union_observations:
@@ -1106,12 +1157,30 @@ async def _consolidate_batch_with_llm(
 
     facts_lines = "\n".join(_fact_line(m) for m in memories)
 
+    # Build capacity note for the prompt when observation limit is configured
+    observation_capacity_note: str | None = None
+    if remaining_observation_slots is not None and max_observations_per_scope > 0:
+        if remaining_observation_slots == 0:
+            observation_capacity_note = (
+                f"OBSERVATION LIMIT REACHED ({max_observations_per_scope}/{max_observations_per_scope}). "
+                "Only UPDATE or DELETE existing observations. Do NOT create new ones — "
+                "merge new knowledge into existing observations via UPDATE."
+            )
+        elif remaining_observation_slots <= len(memories):
+            observation_capacity_note = (
+                f"This scope has {remaining_observation_slots} observation slot(s) remaining "
+                f"(out of {max_observations_per_scope}). Prefer UPDATE over CREATE when possible."
+            )
+
     observations_mission = config.observations_mission if config is not None else None
-    prompt_template = build_batch_consolidation_prompt(observations_mission)
+    prompt_template = build_batch_consolidation_prompt(observations_mission, observation_capacity_note)
     prompt = prompt_template.format(
         facts_text=facts_lines,
         observations_text=observations_text,
     )
+
+    # Use a constrained response model when observation limit is active
+    response_model = _build_response_model(max_creates=remaining_observation_slots)
 
     max_attempts = 3
     last_exc: Exception | None = None
@@ -1119,11 +1188,20 @@ async def _consolidate_batch_with_llm(
         try:
             response: _ConsolidationBatchResponse = await llm_config.call(
                 messages=[{"role": "user", "content": prompt}],
-                response_format=_ConsolidationBatchResponse,
+                response_format=response_model,
                 scope="consolidation",
             )
+            # Defensive truncation: some LLM providers may not enforce JSON schema max_length
+            creates = response.creates
+            if remaining_observation_slots is not None and remaining_observation_slots >= 0:
+                if len(creates) > remaining_observation_slots:
+                    logger.info(
+                        f"[CONSOLIDATION] Truncating {len(creates)} creates to {remaining_observation_slots} "
+                        f"(max_observations_per_scope={max_observations_per_scope})"
+                    )
+                    creates = creates[:remaining_observation_slots]
             return _BatchLLMResult(
-                creates=response.creates,
+                creates=creates,
                 updates=response.updates,
                 deletes=response.deletes,
                 obs_count=len(union_observations),

@@ -60,6 +60,7 @@ type ObservationsEdits = {
   consolidation_source_facts_max_tokens: number | null;
   consolidation_source_facts_max_tokens_per_observation: number | null;
   observations_mission: string | null;
+  max_observations_per_scope: number | null;
 };
 
 type LabelValue = { value: string; description: string };
@@ -179,6 +180,7 @@ function observationsSlice(config: Record<string, any>): ObservationsEdits {
     consolidation_source_facts_max_tokens_per_observation:
       config.consolidation_source_facts_max_tokens_per_observation ?? null,
     observations_mission: config.observations_mission ?? null,
+    max_observations_per_scope: config.max_observations_per_scope ?? null,
   };
 }
 
@@ -537,6 +539,23 @@ export function BankConfigView() {
                   consolidation_source_facts_max_tokens_per_observation: e.target.value
                     ? parseInt(e.target.value, 10)
                     : null,
+                }))
+              }
+              placeholder="Server default"
+            />
+          </FieldRow>
+          <FieldRow
+            label="Max Observations Per Scope"
+            description="Maximum number of observations allowed per tag scope. When the limit is reached, only updates and deletes are allowed. Observations with no tags are not subject to this limit. -1 = unlimited."
+          >
+            <Input
+              type="number"
+              min={-1}
+              value={observationsEdits.max_observations_per_scope ?? ""}
+              onChange={(e) =>
+                setObservationsEdits((prev) => ({
+                  ...prev,
+                  max_observations_per_scope: e.target.value ? parseInt(e.target.value, 10) : null,
                 }))
               }
               placeholder="Server default"

@@ -66,7 +66,10 @@ Rules:
 - Return {{"creates": [], "updates": [], "deletes": []}} if nothing durable is found."""
 
 
-def build_batch_consolidation_prompt(observations_mission: str | None = None) -> str:
+def build_batch_consolidation_prompt(
+    observations_mission: str | None = None,
+    observation_capacity_note: str | None = None,
+) -> str:
     """
     Build the consolidation prompt for batch mode (multiple facts per LLM call).
 
@@ -75,9 +78,13 @@ def build_batch_consolidation_prompt(observations_mission: str | None = None) ->
     """
     mission = observations_mission or _DEFAULT_MISSION
 
+    capacity_section = ""
+    if observation_capacity_note:
+        capacity_section = f"\n\n## CAPACITY CONSTRAINT\n{observation_capacity_note}"
+
     return (
         "You are a memory consolidation system. Synthesize facts into observations "
         "and merge with existing observations when appropriate.\n\n"
-        f"## MISSION\n{mission}\n\n"
+        f"## MISSION\n{mission}{capacity_section}\n\n"
         f"{_PROCESSING_RULES}" + _BATCH_DATA_SECTION + _BATCH_OUTPUT_FORMAT
     )
