@@ -17,6 +17,12 @@ from lib.content import (
 )
 
 
+def _write_jsonl(tmp_path, entries):
+    f = tmp_path / "transcript.jsonl"
+    f.write_text("\n".join(json.dumps(e) for e in entries))
+    return str(f)
+
+
 # ---------------------------------------------------------------------------
 # strip_memory_tags
 # ---------------------------------------------------------------------------
@@ -48,12 +54,6 @@ class TestStripMemoryTags:
 # ---------------------------------------------------------------------------
 # read_transcript — flat format
 # ---------------------------------------------------------------------------
-
-
-def _write_jsonl(tmp_path, entries):
-    f = tmp_path / "transcript.jsonl"
-    f.write_text("\n".join(json.dumps(e) for e in entries))
-    return str(f)
 
 
 class TestReadTranscriptFlat:
@@ -362,3 +362,358 @@ class TestPrepareRetentionTranscript:
         msgs = [{"role": "assistant", "content": "only assistant"}]
         result, _ = prepare_retention_transcript(msgs, retain_full_window=False)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# read_transcript — rich format (include_tool_calls=True)
+# ---------------------------------------------------------------------------
+
+
+class TestReadTranscriptRich:
+    def test_reads_messages_as_structured_blocks(self, tmp_path):
+        entries = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hello"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "hi there"}],
+                    "phase": "final_answer",
+                },
+            },
+        ]
+        path = _write_jsonl(tmp_path, entries)
+        msgs = read_transcript(path, include_tool_calls=True)
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "user"
+        assert msgs[0]["content"] == [{"type": "text", "text": "hello"}]
+        assert msgs[1]["role"] == "assistant"
+        assert msgs[1]["content"] == [{"type": "text", "text": "hi there"}]
+
+    def test_reads_function_call(self, tmp_path):
+        entries = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "list files"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "Read",
+                    "arguments": '{"file_path": "/tmp/foo.txt"}',
+                    "call_id": "call_1",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "file contents here",
+                },
+            },
+        ]
+        path = _write_jsonl(tmp_path, entries)
+        msgs = read_transcript(path, include_tool_calls=True)
+        assert len(msgs) == 2  # user + assistant
+        assistant = msgs[1]
+        assert assistant["role"] == "assistant"
+        assert len(assistant["content"]) == 2
+        assert assistant["content"][0]["type"] == "tool_use"
+        assert assistant["content"][0]["name"] == "Read"
+        assert assistant["content"][0]["input"] == {"file_path": "/tmp/foo.txt"}
+        assert assistant["content"][1]["type"] == "tool_result"
+        assert "file contents here" in assistant["content"][1]["content"]
+
+    def test_reads_local_shell_call(self, tmp_path):
+        entries = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "run ls"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "local_shell_call",
+                    "call_id": "call_1",
+                    "status": "completed",
+                    "action": {"type": "exec", "command": ["ls", "-la"]},
+                },
+            },
+        ]
+        path = _write_jsonl(tmp_path, entries)
+        msgs = read_transcript(path, include_tool_calls=True)
+        assistant = msgs[1]
+        assert assistant["content"][0]["type"] == "tool_use"
+        assert assistant["content"][0]["name"] == "shell"
+        assert assistant["content"][0]["input"]["command"] == ["ls", "-la"]
+
+    def test_reads_exec_command_end_event(self, tmp_path):
+        entries = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "check git status"}],
+                },
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "exec_command_end",
+                    "call_id": "call_1",
+                    "command": ["git", "status"],
+                    "aggregated_output": "On branch main\nnothing to commit",
+                    "exit_code": 0,
+                    "status": "completed",
+                },
+            },
+        ]
+        path = _write_jsonl(tmp_path, entries)
+        msgs = read_transcript(path, include_tool_calls=True)
+        assistant = msgs[1]
+        assert assistant["content"][0]["type"] == "tool_use"
+        assert assistant["content"][0]["name"] == "shell"
+        assert assistant["content"][0]["input"]["command"] == ["git", "status"]
+        assert assistant["content"][1]["type"] == "tool_result"
+        assert "On branch main" in assistant["content"][1]["content"]
+
+    def test_reads_exec_command_end_with_nonzero_exit(self, tmp_path):
+        entries = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "run bad cmd"}],
+                },
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "exec_command_end",
+                    "call_id": "call_1",
+                    "command": ["false"],
+                    "aggregated_output": "",
+                    "exit_code": 1,
+                    "status": "failed",
+                },
+            },
+        ]
+        path = _write_jsonl(tmp_path, entries)
+        msgs = read_transcript(path, include_tool_calls=True)
+        assistant = msgs[1]
+        result = assistant["content"][1]
+        assert "exit_code: 1" in result["content"]
+        assert "status: failed" in result["content"]
+
+    def test_reads_patch_apply_end_event(self, tmp_path):
+        entries = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "fix the bug"}],
+                },
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "patch_apply_end",
+                    "call_id": "call_1",
+                    "changes": [{"file": "main.py", "diff": "+fixed line"}],
+                    "status": "applied",
+                },
+            },
+        ]
+        path = _write_jsonl(tmp_path, entries)
+        msgs = read_transcript(path, include_tool_calls=True)
+        assistant = msgs[1]
+        assert assistant["content"][0]["type"] == "tool_use"
+        assert assistant["content"][0]["name"] == "patch"
+        assert assistant["content"][1]["content"] == "status: applied"
+
+    def test_reads_web_search_call(self, tmp_path):
+        entries = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "search for python docs"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "web_search_call",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "python documentation"},
+                },
+            },
+        ]
+        path = _write_jsonl(tmp_path, entries)
+        msgs = read_transcript(path, include_tool_calls=True)
+        assistant = msgs[1]
+        assert assistant["content"][0]["type"] == "tool_use"
+        assert assistant["content"][0]["name"] == "web_search"
+        assert assistant["content"][0]["input"]["query"] == "python documentation"
+
+    def test_skips_non_final_answer_in_rich_mode(self, tmp_path):
+        entries = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "thinking..."}],
+                    "phase": "reasoning",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "The answer"}],
+                    "phase": "final_answer",
+                },
+            },
+        ]
+        path = _write_jsonl(tmp_path, entries)
+        msgs = read_transcript(path, include_tool_calls=True)
+        assert len(msgs) == 1
+        assert msgs[0]["content"][0]["text"] == "The answer"
+
+    def test_flat_format_works_in_rich_mode(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ])
+        msgs = read_transcript(path, include_tool_calls=True)
+        assert len(msgs) == 2
+        assert msgs[0]["content"] == [{"type": "text", "text": "hello"}]
+        assert msgs[1]["content"] == [{"type": "text", "text": "hi"}]
+
+    def test_truncates_long_tool_output(self, tmp_path):
+        long_output = "x" * 3000
+        entries = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "do something"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "Read",
+                    "arguments": "{}",
+                    "call_id": "call_1",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": long_output,
+                },
+            },
+        ]
+        path = _write_jsonl(tmp_path, entries)
+        msgs = read_transcript(path, include_tool_calls=True)
+        result = msgs[1]["content"][1]
+        assert len(result["content"]) < 3000
+        assert "truncated" in result["content"]
+
+
+# ---------------------------------------------------------------------------
+# prepare_retention_transcript — JSON format (include_tool_calls=True)
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareRetentionTranscriptJson:
+    def test_json_format_basic(self):
+        msgs = [
+            {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "hi"}]},
+        ]
+        transcript, count = prepare_retention_transcript(
+            msgs, retain_full_window=True, include_tool_calls=True
+        )
+        assert count == 2
+        parsed = json.loads(transcript)
+        assert len(parsed) == 2
+        assert parsed[0]["role"] == "user"
+        assert parsed[1]["role"] == "assistant"
+
+    def test_json_format_with_tool_calls(self):
+        msgs = [
+            {"role": "user", "content": [{"type": "text", "text": "list files"}]},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "name": "shell", "input": {"command": ["ls"]}},
+                    {"type": "tool_result", "content": "file1.txt"},
+                    {"type": "text", "text": "Here are the files."},
+                ],
+            },
+        ]
+        transcript, count = prepare_retention_transcript(
+            msgs, retain_full_window=True, include_tool_calls=True
+        )
+        parsed = json.loads(transcript)
+        assistant = parsed[1]
+        assert any(b["type"] == "tool_use" for b in assistant["content"])
+        assert any(b["type"] == "tool_result" for b in assistant["content"])
+
+    def test_json_format_strips_memory_tags(self):
+        msgs = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "<hindsight_memories>secret</hindsight_memories> real question"},
+                ],
+            },
+        ]
+        transcript, _ = prepare_retention_transcript(
+            msgs, retain_full_window=True, include_tool_calls=True
+        )
+        assert "hindsight_memories" not in transcript
+        assert "secret" not in transcript
+        assert "real question" in transcript
+
+    def test_json_format_filters_roles(self):
+        msgs = [
+            {"role": "user", "content": [{"type": "text", "text": "user msg"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "assistant msg"}]},
+        ]
+        transcript, count = prepare_retention_transcript(
+            msgs, retain_roles=["user"], retain_full_window=True, include_tool_calls=True
+        )
+        parsed = json.loads(transcript)
+        assert count == 1
+        assert all(m["role"] == "user" for m in parsed)

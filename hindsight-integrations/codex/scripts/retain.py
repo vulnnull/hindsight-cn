@@ -56,7 +56,8 @@ def main():
     transcript_path = hook_input.get("transcript_path", "")
 
     # Read full transcript
-    all_messages = read_transcript(transcript_path)
+    include_tool_calls = config.get("retainToolCalls", True)
+    all_messages = read_transcript(transcript_path, include_tool_calls=include_tool_calls)
     if not all_messages:
         debug_log(config, "No messages in transcript, skipping retain")
         return
@@ -93,7 +94,7 @@ def main():
     # Format transcript
     retain_roles = config.get("retainRoles", ["user", "assistant"])
     transcript, message_count = prepare_retention_transcript(
-        messages_to_retain, retain_roles, retain_full_window
+        messages_to_retain, retain_roles, retain_full_window, include_tool_calls=include_tool_calls
     )
 
     if not transcript:
