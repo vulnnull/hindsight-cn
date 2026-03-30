@@ -245,6 +245,14 @@
         },
         {
           "type": "doc",
+          "id": "sdks/integrations/codex",
+          "label": "OpenAI Codex CLI",
+          "customProps": {
+            "icon": "/img/icons/terminal.svg"
+          }
+        },
+        {
+          "type": "doc",
           "id": "sdks/integrations/openclaw",
           "label": "OpenClaw",
           "customProps": {
@@ -337,14 +345,6 @@
           "label": "LlamaIndex",
           "customProps": {
             "icon": "/img/icons/llamaindex.png"
-          }
-        },
-        {
-          "type": "doc",
-          "id": "sdks/integrations/codex",
-          "label": "OpenAI Codex CLI",
-          "customProps": {
-            "icon": "/img/icons/openai.png"
           }
         },
         {

@@ -17,22 +17,22 @@ This plugin integrates [hindsight-embed](https://vectorize.io/hindsight/cli), a 
 Choose one provider and set its API key:
 
 ```bash
-# Option A: OpenAI (uses gpt-4o-mini for memory extraction)
+# Option A: OpenAI
 export OPENAI_API_KEY="sk-your-key"
 
-# Option B: Anthropic (uses claude-3-5-haiku for memory extraction)
+# Option B: Anthropic
 export ANTHROPIC_API_KEY="your-key"
 
-# Option C: Gemini (uses gemini-2.5-flash for memory extraction)
+# Option C: Gemini
 export GEMINI_API_KEY="your-key"
 
-# Option D: Groq (uses openai/gpt-oss-20b for memory extraction)
+# Option D: Groq
 export GROQ_API_KEY="your-key"
 
-# Option E: Claude Code (uses claude-sonnet-4-20250514, no API key needed)
+# Option E: Claude Code (no API key needed)
 export HINDSIGHT_API_LLM_PROVIDER=claude-code
 
-# Option F: OpenAI Codex (uses gpt-4o-mini, no API key needed)
+# Option F: OpenAI Codex (no API key needed)
 export HINDSIGHT_API_LLM_PROVIDER=openai-codex
 ```
 
@@ -102,6 +102,16 @@ Optional settings in `~/.openclaw/openclaw.json`:
 - `retainRoles` - Which message roles to retain (default: `["user", "assistant"]`). Options: `user`, `assistant`, `system`, `tool`
 - `recallBudget` - Recall effort: `"low"`, `"mid"`, or `"high"` (default: `"mid"`). Higher budgets use more retrieval strategies for better results.
 - `recallMaxTokens` - Max tokens for recall response (default: `1024`). Controls how much memory context is injected per turn.
+- `recallTopK` - Max number of memories to inject per turn (default: unlimited).
+- `recallTypes` - Memory types to recall (default: `["world", "experience"]`). Options: `world`, `experience`, `observation`.
+- `recallContextTurns` - Number of prior user turns to include in the recall query (default: `1`).
+- `recallMaxQueryChars` - Max characters for the composed recall query (default: `800`).
+- `recallPromptPreamble` - Custom preamble text placed above recalled memories. Overrides the built-in guidance text.
+- `recallInjectionPosition` - Where to inject recalled memories: `"prepend"` (default), `"append"`, or `"user"`. Use `"append"` to preserve prompt caching with large static system prompts. Use `"user"` to inject before the user message instead of in the system prompt.
+- `recallRoles` - Which message roles to include when composing the contextual recall query (default: `["user", "assistant"]`).
+- `retainEveryNTurns` - Retain every Nth turn (default: `1` = every turn). Values > 1 enable chunked retention.
+- `retainOverlapTurns` - Extra prior turns included when chunked retention fires (default: `0`).
+- `debug` - Enable debug logging (default: `false`).
 
 ### Memory Isolation
 
@@ -161,20 +171,21 @@ By default, the plugin retains `user` and `assistant` messages after each turn. 
 
 The plugin auto-detects your LLM provider from these environment variables:
 
-| Provider | Env Var | Default Model | Notes |
-|----------|---------|---------------|-------|
-| OpenAI | `OPENAI_API_KEY` | `gpt-4o-mini` | |
-| Anthropic | `ANTHROPIC_API_KEY` | `claude-3-5-haiku-20241022` | |
-| Gemini | `GEMINI_API_KEY` | `gemini-2.5-flash` | |
-| Groq | `GROQ_API_KEY` | `openai/gpt-oss-20b` | |
-| Claude Code | `HINDSIGHT_API_LLM_PROVIDER=claude-code` | `claude-sonnet-4-20250514` | No API key needed |
-| OpenAI Codex | `HINDSIGHT_API_LLM_PROVIDER=openai-codex` | `gpt-4o-mini` | No API key needed |
+| Provider | Env Var | Notes |
+|----------|---------|-------|
+| OpenAI | `OPENAI_API_KEY` | |
+| Anthropic | `ANTHROPIC_API_KEY` | |
+| Gemini | `GEMINI_API_KEY` | |
+| Groq | `GROQ_API_KEY` | |
+| Claude Code | `HINDSIGHT_API_LLM_PROVIDER=claude-code` | No API key needed |
+| OpenAI Codex | `HINDSIGHT_API_LLM_PROVIDER=openai-codex` | No API key needed |
+
+The model is selected automatically by the Hindsight API. To override, set `HINDSIGHT_API_LLM_MODEL`.
 
 **Override with explicit config:**
 
 ```bash
 export HINDSIGHT_API_LLM_PROVIDER=openai
-export HINDSIGHT_API_LLM_MODEL=gpt-4o-mini
 export HINDSIGHT_API_LLM_API_KEY=sk-your-key
 
 # Optional: custom base URL (OpenRouter, Azure, vLLM, etc.)

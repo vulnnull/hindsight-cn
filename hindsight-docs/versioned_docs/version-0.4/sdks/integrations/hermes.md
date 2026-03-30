@@ -4,216 +4,172 @@ sidebar_position: 10
 
 # Hermes Agent
 
-Hindsight memory integration for [Hermes Agent](https://github.com/NousResearch/hermes-agent). Gives your Hermes agent persistent long-term memory via retain, recall, and reflect tools.
+Persistent long-term memory for [Hermes Agent](https://github.com/NousResearch/hermes-agent) using [Hindsight](https://vectorize.io/hindsight). Automatically recalls relevant context before every LLM call and retains conversations for future sessions — plus explicit retain/recall/reflect tools.
 
-## What it does
-
-This package registers three tools into Hermes via its plugin system:
-
-- **`hindsight_retain`** — Stores information to long-term memory. Hermes calls this when the user shares facts, preferences, or anything worth remembering.
-- **`hindsight_recall`** — Searches long-term memory for relevant information. Returns a numbered list of matching memories.
-- **`hindsight_reflect`** — Synthesizes a thoughtful answer from stored memories. Use this when you want Hermes to reason over what it knows rather than return raw facts.
-
-These tools appear under the `[hindsight]` toolset in Hermes's `/tools` list.
-
-## Setup
-
-### 1. Install hindsight-hermes into the Hermes venv
-
-The package must be installed in the **same Python environment** that Hermes runs in, so the entry point is discoverable.
+## Quick Start
 
 ```bash
+# 1. Install the plugin into Hermes's Python environment
 uv pip install hindsight-hermes --python $HOME/.hermes/hermes-agent/venv/bin/python
+
+# 2. Configure (choose one)
+# Option A: Config file (recommended)
+mkdir -p ~/.hindsight
+cat > ~/.hindsight/hermes.json << 'EOF'
+{
+  "hindsightApiUrl": "http://localhost:9077",
+  "bankId": "hermes"
+}
+EOF
+
+# Option B: Environment variables
+export HINDSIGHT_API_URL=http://localhost:9077
+export HINDSIGHT_BANK_ID=hermes
+
+# 3. Start Hermes — the plugin activates automatically
+hermes
 ```
 
-### 2. Set environment variables
+## Features
 
-The plugin reads its configuration from environment variables. Set these before launching Hermes:
+- **Auto-recall** — on every turn, queries Hindsight for relevant memories and injects them into the system prompt (via `pre_llm_call` hook)
+- **Auto-retain** — after every response, retains the user/assistant exchange to Hindsight (via `post_llm_call` hook)
+- **Explicit tools** — `hindsight_retain`, `hindsight_recall`, `hindsight_reflect` for direct model control
+- **Config file** — `~/.hindsight/hermes.json` with the same field names as openclaw and claude-code integrations
+- **Zero config overhead** — env vars still work as overrides for CI/automation
 
-```bash
-# Required — tells the plugin where Hindsight is running
-export HINDSIGHT_API_URL=http://localhost:8888
+:::note
+The lifecycle hooks (`pre_llm_call`/`post_llm_call`) require hermes-agent with [PR #2823](https://github.com/NousResearch/hermes-agent/pull/2823) or later. On older versions, only the three tools are registered — hooks are silently skipped.
+:::
 
-# Required — the memory bank to read/write. Think of this as a "brain" for one user or agent.
-export HINDSIGHT_BANK_ID=my-agent
+## Architecture
 
-# Optional — only needed if using Hindsight Cloud (https://api.hindsight.vectorize.io)
-export HINDSIGHT_API_KEY=your-api-key
+The plugin registers via Hermes's `hermes_agent.plugins` entry point system:
 
-# Optional — recall budget: low (fast), mid (default), high (thorough)
-export HINDSIGHT_BUDGET=mid
+| Component | Purpose |
+|-----------|---------|
+| `pre_llm_call` hook | **Auto-recall** — query memories, inject as ephemeral system prompt context |
+| `post_llm_call` hook | **Auto-retain** — store user/assistant exchange to Hindsight |
+| `hindsight_retain` tool | Explicit memory storage (model-initiated) |
+| `hindsight_recall` tool | Explicit memory search (model-initiated) |
+| `hindsight_reflect` tool | LLM-synthesized answer from stored memories |
+
+## Connection Modes
+
+### 1. External API (recommended for production)
+
+Connect to a running Hindsight server (cloud or self-hosted). No local LLM needed — the server handles fact extraction.
+
+```json
+{
+  "hindsightApiUrl": "https://your-hindsight-server.com",
+  "hindsightApiToken": "your-token",
+  "bankId": "hermes"
+}
 ```
 
-If neither `HINDSIGHT_API_URL` nor `HINDSIGHT_API_KEY` is set, the plugin silently skips registration — Hermes starts normally without the Hindsight tools.
+### 2. Local Daemon
 
-### 3. Disable Hermes's built-in memory tool
+If you're running `hindsight-embed` locally, point to it:
 
-Hermes has its own `memory` tool that saves to local files (`~/.hermes/`). If both are active, the LLM tends to prefer the built-in one since it's familiar. Disable it so the LLM uses Hindsight instead:
+```json
+{
+  "hindsightApiUrl": "http://localhost:9077",
+  "bankId": "hermes"
+}
+```
+
+Follow the [Quick Start](/developer/api/quickstart) guide to get the Hindsight API running.
+
+## Configuration
+
+All settings are in `~/.hindsight/hermes.json`. Every setting can also be overridden via environment variables (env vars take priority).
+
+### Connection & Daemon
+
+| Setting | Default | Env Var | Description |
+|---------|---------|---------|-------------|
+| `hindsightApiUrl` | — | `HINDSIGHT_API_URL` | Hindsight API URL |
+| `hindsightApiToken` | `null` | `HINDSIGHT_API_TOKEN` / `HINDSIGHT_API_KEY` | Auth token for API |
+| `apiPort` | `9077` | `HINDSIGHT_API_PORT` | Port for local Hindsight daemon |
+| `daemonIdleTimeout` | `0` | `HINDSIGHT_DAEMON_IDLE_TIMEOUT` | Seconds before idle daemon shuts down (0 = never) |
+| `embedVersion` | `"latest"` | `HINDSIGHT_EMBED_VERSION` | `hindsight-embed` version for `uvx` |
+
+### LLM Provider (daemon mode only)
+
+| Setting | Default | Env Var | Description |
+|---------|---------|---------|-------------|
+| `llmProvider` | auto-detect | `HINDSIGHT_LLM_PROVIDER` | LLM provider: `openai`, `anthropic`, `gemini`, `groq`, `ollama` |
+| `llmModel` | provider default | `HINDSIGHT_LLM_MODEL` | Model override |
+
+### Memory Bank
+
+| Setting | Default | Env Var | Description |
+|---------|---------|---------|-------------|
+| `bankId` | — | `HINDSIGHT_BANK_ID` | Memory bank ID |
+| `bankMission` | `""` | `HINDSIGHT_BANK_MISSION` | Agent identity/purpose for the memory bank |
+| `retainMission` | `null` | — | Custom retain mission (what to extract from conversations) |
+| `bankIdPrefix` | `""` | — | Prefix for all bank IDs |
+
+### Auto-Recall
+
+| Setting | Default | Env Var | Description |
+|---------|---------|---------|-------------|
+| `autoRecall` | `true` | `HINDSIGHT_AUTO_RECALL` | Enable automatic memory recall via `pre_llm_call` hook |
+| `recallBudget` | `"mid"` | `HINDSIGHT_RECALL_BUDGET` | Recall effort: `low`, `mid`, `high` |
+| `recallMaxTokens` | `4096` | `HINDSIGHT_RECALL_MAX_TOKENS` | Max tokens in recall response |
+| `recallMaxQueryChars` | `800` | `HINDSIGHT_RECALL_MAX_QUERY_CHARS` | Max chars of user message used as query |
+| `recallPromptPreamble` | see below | — | Header text injected before recalled memories |
+
+Default preamble:
+> Relevant memories from past conversations (prioritize recent when conflicting). Only use memories that are directly useful to continue this conversation; ignore the rest:
+
+### Auto-Retain
+
+| Setting | Default | Env Var | Description |
+|---------|---------|---------|-------------|
+| `autoRetain` | `true` | `HINDSIGHT_AUTO_RETAIN` | Enable automatic retention via `post_llm_call` hook |
+| `retainEveryNTurns` | `1` | — | Retain every Nth turn |
+| `retainOverlapTurns` | `2` | — | Extra overlap turns for continuity |
+| `retainRoles` | `["user", "assistant"]` | — | Which message roles to retain |
+
+### Miscellaneous
+
+| Setting | Default | Env Var | Description |
+|---------|---------|---------|-------------|
+| `debug` | `false` | `HINDSIGHT_DEBUG` | Enable debug logging to stderr |
+
+## Hermes Gateway (Telegram, Discord, Slack)
+
+When using Hermes in gateway mode (multi-platform messaging), the plugin works across all platforms. Hermes creates a fresh `AIAgent` per message, and the plugin's `pre_llm_call` hook ensures relevant memories are recalled for each turn regardless of platform.
+
+## Disabling Hermes's Built-in Memory
+
+Hermes has a built-in `memory` tool that saves to local markdown files. If both are active, the LLM may prefer the built-in one. Disable it:
 
 ```bash
 hermes tools disable memory
 ```
 
-This persists across sessions. You can re-enable it later with `hermes tools enable memory`.
-
-### 4. Start Hindsight API
-
-Follow the [Quick Start](/developer/api/quickstart) guide to get the Hindsight API running, then come back here.
-
-### 5. Launch Hermes
-
-```bash
-hermes
-```
-
-Verify the plugin loaded by typing `/tools` — you should see:
-
-```
-[hindsight]
-  * hindsight_recall     - Search long-term memory for relevant information.
-  * hindsight_reflect    - Synthesize a thoughtful answer from long-term memories.
-  * hindsight_retain     - Store information to long-term memory for later retrieval.
-```
-
-### 6. Test it
-
-**Store a memory:**
-> Remember that my favourite colour is red
-
-You should see `⚡ hindsight` in the response, confirming it called `hindsight_retain`.
-
-**Recall a memory:**
-> What's my favourite colour?
-
-**Reflect on memories:**
-> Based on what you know about me, suggest a colour scheme for my IDE
-
-This calls `hindsight_reflect`, which synthesizes a response from all stored memories.
-
-**Verify via API:**
-
-```bash
-curl -s http://localhost:8888/v1/default/banks/my-agent/memories/recall \
-  -H "Content-Type: application/json" \
-  -d '{"query": "favourite colour", "budget": "low"}' | python3 -m json.tool
-```
+Re-enable later with `hermes tools enable memory`.
 
 ## Troubleshooting
 
-### Tools don't appear in `/tools`
-
-1. **Check the plugin is installed in the right venv.** Run this from the Hermes venv:
-   ```bash
-   python -c "from hindsight_hermes import register; print('OK')"
-   ```
-
-2. **Check the entry point is registered:**
-   ```bash
-   python -c "
-   import importlib.metadata
-   eps = importlib.metadata.entry_points(group='hermes_agent.plugins')
-   print(list(eps))
-   "
-   ```
-   You should see `EntryPoint(name='hindsight', value='hindsight_hermes', group='hermes_agent.plugins')`.
-
-3. **Check env vars are set.** The plugin skips registration silently if `HINDSIGHT_API_URL` and `HINDSIGHT_API_KEY` are both unset.
-
-### Hermes uses built-in memory instead of Hindsight
-
-Run `hermes tools disable memory` and restart. The built-in `memory` tool and Hindsight tools have overlapping purposes — the LLM will prefer whichever it's more familiar with, which is usually the built-in one.
-
-### Bank not found errors
-
-The plugin auto-creates banks on first use. If you see bank errors, check that the Hindsight API is running and `HINDSIGHT_API_URL` is correct.
-
-### Connection refused
-
-Make sure the Hindsight API is running and listening on the URL you configured. Test with:
+**Plugin not loading**: Verify the entry point is registered:
 ```bash
-curl http://localhost:8888/health
+python -c "
+import importlib.metadata
+eps = importlib.metadata.entry_points(group='hermes_agent.plugins')
+print(list(eps))
+"
+```
+You should see `EntryPoint(name='hindsight', value='hindsight_hermes', ...)`.
+
+**Tools don't appear in `/tools`**: Check that `hindsightApiUrl` (or `HINDSIGHT_API_URL`) is set. The plugin silently skips registration when unconfigured.
+
+**Connection refused**: Verify the Hindsight API is running:
+```bash
+curl http://localhost:9077/health
 ```
 
-## Manual registration (advanced)
-
-If you don't want to use the plugin system, you can register tools directly in a Hermes startup script or custom agent:
-
-```python
-from hindsight_hermes import register_tools
-
-register_tools(
-    bank_id="my-agent",
-    hindsight_api_url="http://localhost:8888",
-    budget="mid",
-    tags=["hermes"],           # applied to all retained memories
-    recall_tags=["hermes"],    # filter recall to only these tags
-)
-```
-
-This imports `tools.registry` from Hermes at call time and registers the three tools directly. This approach gives you more control over parameters but requires Hermes to be importable.
-
-## Memory instructions (system prompt injection)
-
-Pre-recall memories at startup and inject them into the system prompt, so the agent starts every conversation with relevant context:
-
-```python
-from hindsight_hermes import memory_instructions
-
-context = memory_instructions(
-    bank_id="my-agent",
-    hindsight_api_url="http://localhost:8888",
-    query="user preferences and important context",
-    budget="low",
-    max_results=5,
-)
-# Returns:
-# Relevant memories:
-# 1. User's favourite colour is red
-# 2. User prefers dark mode
-```
-
-This never raises — if the API is down or no memories exist, it returns an empty string.
-
-## Global configuration (advanced)
-
-Instead of passing parameters to every call, configure once:
-
-```python
-from hindsight_hermes import configure
-
-configure(
-    hindsight_api_url="http://localhost:8888",
-    api_key="your-key",
-    budget="mid",
-    tags=["hermes"],
-)
-```
-
-Subsequent calls to `register_tools()` or `memory_instructions()` will use these defaults if no explicit values are provided.
-
-## MCP alternative
-
-Hermes also supports MCP servers natively. You can use Hindsight's MCP server directly instead of this plugin — no `hindsight-hermes` package needed:
-
-```yaml
-# In your Hermes config
-mcp_servers:
-  - name: hindsight
-    url: http://localhost:8888/mcp
-```
-
-This exposes the same retain/recall/reflect operations through Hermes's MCP integration. The tradeoff is that MCP tools may have different naming and the LLM needs to discover them, whereas the plugin registers tools with Hermes-native schemas.
-
-## Configuration reference
-
-| Parameter | Env Var | Default | Description |
-|-----------|---------|---------|-------------|
-| `hindsight_api_url` | `HINDSIGHT_API_URL` | `https://api.hindsight.vectorize.io` | Hindsight API URL |
-| `api_key` | `HINDSIGHT_API_KEY` | — | API key for authentication |
-| `bank_id` | `HINDSIGHT_BANK_ID` | — | Memory bank ID |
-| `budget` | `HINDSIGHT_BUDGET` | `mid` | Recall budget (low/mid/high) |
-| `max_tokens` | — | `4096` | Max tokens for recall results |
-| `tags` | — | — | Tags applied when storing memories |
-| `recall_tags` | — | — | Tags to filter recall results |
-| `recall_tags_match` | — | `any` | Tag matching mode (any/all/any_strict/all_strict) |
-| `toolset` | — | `hindsight` | Hermes toolset group name |
+**Recall returning no memories**: Memories need at least one retain cycle. Try storing a fact first, then asking about it in a new session.
