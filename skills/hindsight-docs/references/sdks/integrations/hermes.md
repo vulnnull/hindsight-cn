@@ -1,5 +1,7 @@
 ---
 sidebar_position: 10
+title: "Hermes Agent Persistent Memory with Hindsight | Integration"
+description: "Add long-term memory to Hermes Agent with Hindsight. Automatically recalls context before every LLM call and retains conversations for future sessions."
 ---
 
 # Hermes Agent

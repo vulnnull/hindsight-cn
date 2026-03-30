@@ -1,5 +1,7 @@
 ---
 sidebar_position: 1
+title: "LiteLLM Persistent Memory with Hindsight | Integration Guide"
+description: "Add persistent memory to any LLM application via LiteLLM and Hindsight. Universal integration — works with any model or provider with just a few lines of code."
 ---
 
 # LiteLLM

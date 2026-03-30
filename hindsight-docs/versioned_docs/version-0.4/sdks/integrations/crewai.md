@@ -1,5 +1,7 @@
 ---
 sidebar_position: 5
+title: "CrewAI Persistent Memory with Hindsight | Integration Guide"
+description: "Add long-term memory to your CrewAI agent crews. Hindsight provides fact extraction, entity tracking, and temporal awareness — persisted automatically across all crew runs."
 ---
 
 # CrewAI

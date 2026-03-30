@@ -1,5 +1,7 @@
 ---
 sidebar_position: 8
+title: "LlamaIndex Persistent Memory with Hindsight | Integration"
+description: "Add long-term memory to LlamaIndex agents with Hindsight. Supports agent-driven tools (HindsightToolSpec) and automatic memory via the BaseMemory interface."
 ---
 
 # LlamaIndex

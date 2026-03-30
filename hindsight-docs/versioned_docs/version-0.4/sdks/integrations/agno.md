@@ -1,5 +1,7 @@
 ---
 sidebar_position: 9
+title: "Agno Agent Persistent Memory with Hindsight | Integration Guide"
+description: "Add persistent memory to Agno agents using Hindsight's retain, recall, and reflect tools. Plug into Agno's native Toolkit pattern for long-term memory across sessions."
 ---
 
 # Agno

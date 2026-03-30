@@ -1,5 +1,7 @@
 ---
 sidebar_position: 8
+title: "AG2 (AutoGen) Persistent Memory with Hindsight | Integration Guide"
+description: "Add long-term persistent memory to your AG2 (AutoGen) agents with Hindsight. Automatic fact extraction, entity tracking, and recall tools that persist across conversations."
 ---
 
 # AG2

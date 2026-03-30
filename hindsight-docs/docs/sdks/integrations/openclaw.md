@@ -1,5 +1,7 @@
 ---
 sidebar_position: 4
+title: "OpenClaw Persistent Memory with Hindsight | Plugin Integration"
+description: "Add persistent, automated memory to your OpenClaw agent with Hindsight. Local-first, open source — one plugin install replaces built-in memory with structured knowledge extraction and auto-recall."
 ---
 
 # OpenClaw

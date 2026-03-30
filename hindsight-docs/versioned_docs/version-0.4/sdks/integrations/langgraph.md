@@ -1,5 +1,7 @@
 ---
 sidebar_position: 7
+title: "LangGraph & LangChain Persistent Memory with Hindsight"
+description: "Add long-term memory to LangGraph and LangChain agents with Hindsight. Three integration patterns — tools, nodes, and BaseStore adapter — for persistent memory across agent runs."
 ---
 
 # LangGraph / LangChain

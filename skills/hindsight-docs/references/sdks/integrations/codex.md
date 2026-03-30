@@ -1,5 +1,7 @@
 ---
 sidebar_position: 6
+title: "Codex CLI Persistent Memory with Hindsight | Integration Guide"
+description: "Add persistent memory to OpenAI Codex CLI with Hindsight. Three Python hook scripts automatically recall context before each prompt and retain conversations — no workflow changes required."
 ---
 
 # Codex

@@ -1,5 +1,7 @@
 ---
 sidebar_position: 2
+title: "Hindsight Local MCP Server | Persistent Memory for Claude"
+description: "Run Hindsight as a local MCP server with embedded PostgreSQL — no external setup required. Ideal for Claude Code and Claude Desktop for long-term memory across conversations."
 ---
 
 # Local MCP Server

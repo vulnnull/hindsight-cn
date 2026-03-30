@@ -1,5 +1,7 @@
 ---
 sidebar_position: 13
+title: "Strands Agents Persistent Memory with Hindsight | Integration"
+description: "Add long-term memory to Strands Agents SDK agents with Hindsight. Retain, recall, and reflect tools using Strands' native @tool pattern for persistent memory across sessions."
 ---
 
 # Strands Agents

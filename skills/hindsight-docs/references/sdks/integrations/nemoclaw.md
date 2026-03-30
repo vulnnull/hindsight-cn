@@ -1,5 +1,7 @@
 ---
 sidebar_position: 5
+title: "NemoClaw Persistent Memory with Hindsight | Integration Guide"
+description: "Add persistent memory to NemoClaw sandboxed agents with Hindsight. One command adds automated memory extraction and auto-recall to any NemoClaw sandbox — no code changes required."
 ---
 
 # NemoClaw

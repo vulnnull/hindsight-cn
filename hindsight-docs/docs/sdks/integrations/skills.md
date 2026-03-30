@@ -1,5 +1,7 @@
 ---
 sidebar_position: 3
+title: "Hindsight Agent Memory Skill | AI Coding Assistant Integration"
+description: "Give AI coding assistants like Claude Code and Codex persistent memory across sessions with Hindsight's Agent Skill — a reusable prompt template for long-term context retention."
 ---
 
 # Skills

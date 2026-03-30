@@ -1,5 +1,7 @@
 ---
 sidebar_position: 6
+title: "Pydantic AI Persistent Memory with Hindsight | Integration"
+description: "Add long-term memory to Pydantic AI agents with Hindsight. Async-native retain, recall, and reflect tools — persistent memory across all agent runs with no thread-pool hacks."
 ---
 
 # Pydantic AI

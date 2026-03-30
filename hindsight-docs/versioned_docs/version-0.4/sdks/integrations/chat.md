@@ -1,5 +1,7 @@
 ---
 sidebar_position: 5
+title: "Vercel Chat SDK Persistent Memory with Hindsight | Integration"
+description: "Give your Vercel Chat SDK bot persistent, per-user memory across Slack, Discord, Teams, and more. Single handler wrapper, no custom plumbing required."
 ---
 
 # Vercel Chat SDK

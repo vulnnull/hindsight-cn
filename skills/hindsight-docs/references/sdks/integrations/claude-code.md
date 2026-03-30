@@ -1,5 +1,7 @@
 ---
 sidebar_position: 5
+title: "Claude Code Persistent Memory with Hindsight | Integration"
+description: "Add long-term memory to Claude Code with Hindsight. Automatically captures conversations and recalls relevant context across sessions using Claude Code's hook-based architecture."
 ---
 
 # Claude Code
