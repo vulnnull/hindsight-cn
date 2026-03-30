@@ -121,6 +121,16 @@
       "icon": "/img/icons/langgraph.png"
     },
     {
+      "id": "llamaindex",
+      "name": "LlamaIndex",
+      "description": "Add persistent memory to LlamaIndex agents via the native BaseToolSpec pattern. Retain, recall, and reflect as standard tools.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/llamaindex",
+      "icon": "/img/icons/llamaindex.png"
+    },
+    {
       "id": "nemoclaw",
       "name": "NemoClaw",
       "description": "Persistent memory for NemoClaw sandboxed agents. One-command setup — no code changes required.",
