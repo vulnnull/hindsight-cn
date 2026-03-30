@@ -8,6 +8,12 @@ import PageHero from '@site/src/components/PageHero';
 
 [← Codex CLI integration](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/codex)
 
+## [0.1.1](https://github.com/vectorize-io/hindsight/tree/integrations/codex/v0.1.1)
+
+**Features**
+
+- Added Hindsight memory integration for the OpenAI Codex CLI, enabling Codex to use and store memories in Hindsight. ([`0b17a67c`](https://github.com/vectorize-io/hindsight/commit/0b17a67c))
+
 ## [0.1.0](https://github.com/vectorize-io/hindsight/tree/integrations/codex/v0.1.0)
 
 **Features**
