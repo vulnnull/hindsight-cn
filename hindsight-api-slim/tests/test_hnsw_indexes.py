@@ -1,10 +1,10 @@
 """
-Tests for per-bank HNSW index lifecycle and UNION ALL retrieval.
+Tests for per-bank vector index lifecycle and UNION ALL retrieval.
 
 Covers:
-- _hnsw_index_name deterministic naming
-- Per-bank HNSW indexes created on bank creation (retain_async / ensure_bank_exists)
-- Per-bank HNSW indexes dropped on bank deletion
+- _bank_index_name deterministic naming
+- Per-bank vector indexes created on bank creation (retain_async / ensure_bank_exists)
+- Per-bank vector indexes dropped on bank deletion
 - retrieve_semantic_bm25_combined groups results correctly by fact_type and source
 """
 import uuid
@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from hindsight_api.engine.retain.bank_utils import _HNSW_FACT_TYPES, _hnsw_index_name
+from hindsight_api.engine.retain.bank_utils import _BANK_INDEX_FACT_TYPES, _bank_index_name
 
 
 # ---------------------------------------------------------------------------
@@ -20,36 +20,36 @@ from hindsight_api.engine.retain.bank_utils import _HNSW_FACT_TYPES, _hnsw_index
 # ---------------------------------------------------------------------------
 
 
-class TestHnswIndexName:
+class TestBankIndexName:
     def test_deterministic(self):
         uid = "550e8400-e29b-41d4-a716-446655440000"
-        assert _hnsw_index_name("world", uid) == _hnsw_index_name("world", uid)
+        assert _bank_index_name("world", uid) == _bank_index_name("world", uid)
 
     def test_strips_dashes(self):
         uid = "550e8400-e29b-41d4-a716-446655440000"
-        name = _hnsw_index_name("world", uid)
+        name = _bank_index_name("world", uid)
         # uid16 should be hex chars only
         assert "-" not in name
 
     def test_uses_first_16_hex_chars(self):
         uid = "550e8400-e29b-41d4-a716-446655440000"
         uid16 = uid.replace("-", "")[:16]  # "550e8400e29b41d4"
-        assert name_ends_with(name=_hnsw_index_name("world", uid), suffix=uid16)
+        assert name_ends_with(name=_bank_index_name("world", uid), suffix=uid16)
 
     def test_suffix_per_fact_type(self):
         uid = "550e8400-e29b-41d4-a716-446655440000"
-        names = {ft: _hnsw_index_name(ft, uid) for ft in _HNSW_FACT_TYPES}
+        names = {ft: _bank_index_name(ft, uid) for ft in _BANK_INDEX_FACT_TYPES}
         # All three names must be distinct
         assert len(set(names.values())) == 3
 
     def test_all_fact_types_covered(self):
-        assert set(_HNSW_FACT_TYPES) == {"world", "experience", "observation"}
+        assert set(_BANK_INDEX_FACT_TYPES) == {"world", "experience", "observation"}
 
     def test_fits_pg_identifier_limit(self):
         # PostgreSQL max identifier length is 63 chars
         uid = "f" * 32  # simulated UUID without dashes
-        for ft in _HNSW_FACT_TYPES:
-            assert len(_hnsw_index_name(ft, uid)) <= 63
+        for ft in _BANK_INDEX_FACT_TYPES:
+            assert len(_bank_index_name(ft, uid)) <= 63
 
 
 def name_ends_with(name: str, suffix: str) -> bool:
@@ -61,7 +61,7 @@ def name_ends_with(name: str, suffix: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-async def _get_bank_hnsw_indexes(pool, bank_id: str) -> list[str]:
+async def _get_bank_vector_indexes(pool, bank_id: str) -> list[str]:
     """Return index names for memory_units that match the per-bank pattern."""
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -79,8 +79,8 @@ async def _get_bank_hnsw_indexes(pool, bank_id: str) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_retain_creates_per_bank_hnsw_indexes(memory, request_context):
-    """retain_async on a new bank must create 3 per-(bank, fact_type) HNSW indexes."""
+async def test_retain_creates_per_bank_vector_indexes(memory, request_context):
+    """retain_async on a new bank must create 3 per-(bank, fact_type) vector indexes."""
     bank_id = f"test_hnsw_create_{uuid.uuid4().hex[:8]}"
     try:
         await memory.retain_async(
@@ -88,9 +88,9 @@ async def test_retain_creates_per_bank_hnsw_indexes(memory, request_context):
             content="Alice is a software engineer.",
             request_context=request_context,
         )
-        indexes = await _get_bank_hnsw_indexes(memory._pool, bank_id)
-        assert len(indexes) == 3, f"Expected 3 per-bank HNSW indexes, got: {indexes}"
-        for ft_short in _HNSW_FACT_TYPES.values():
+        indexes = await _get_bank_vector_indexes(memory._pool, bank_id)
+        assert len(indexes) == 3, f"Expected 3 per-bank vector indexes, got: {indexes}"
+        for ft_short in _BANK_INDEX_FACT_TYPES.values():
             assert any(ft_short in idx for idx in indexes), (
                 f"Missing index for fact_type short '{ft_short}' in {indexes}"
             )
@@ -99,8 +99,8 @@ async def test_retain_creates_per_bank_hnsw_indexes(memory, request_context):
 
 
 @pytest.mark.asyncio
-async def test_delete_bank_drops_hnsw_indexes(memory, request_context):
-    """delete_bank must drop all per-bank HNSW indexes."""
+async def test_delete_bank_drops_vector_indexes(memory, request_context):
+    """delete_bank must drop all per-bank vector indexes."""
     bank_id = f"test_hnsw_drop_{uuid.uuid4().hex[:8]}"
 
     await memory.retain_async(
@@ -109,12 +109,12 @@ async def test_delete_bank_drops_hnsw_indexes(memory, request_context):
         request_context=request_context,
     )
     # Verify indexes exist before deletion
-    indexes_before = await _get_bank_hnsw_indexes(memory._pool, bank_id)
+    indexes_before = await _get_bank_vector_indexes(memory._pool, bank_id)
     assert len(indexes_before) == 3
 
     await memory.delete_bank(bank_id, request_context=request_context)
 
-    indexes_after = await _get_bank_hnsw_indexes(memory._pool, bank_id)
+    indexes_after = await _get_bank_vector_indexes(memory._pool, bank_id)
     assert indexes_after == [], f"Indexes should be dropped after bank deletion, got: {indexes_after}"
 
 
@@ -133,7 +133,7 @@ async def test_retain_idempotent_bank_creation(memory, request_context):
             content="Carol joined the company in 2022.",
             request_context=request_context,
         )
-        indexes = await _get_bank_hnsw_indexes(memory._pool, bank_id)
+        indexes = await _get_bank_vector_indexes(memory._pool, bank_id)
         assert len(indexes) == 3
     finally:
         await memory.delete_bank(bank_id, request_context=request_context)

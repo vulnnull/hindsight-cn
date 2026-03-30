@@ -3896,11 +3896,11 @@ class MemoryEngine(MemoryEngineInterface):
                 except Exception as e:
                     raise Exception(f"Failed to delete agent data: {str(e)}")
 
-            # Drop per-bank HNSW indexes AFTER the transaction commits to avoid
+            # Drop per-bank vector indexes AFTER the transaction commits to avoid
             # AccessExclusiveLock deadlocks with concurrent bank deletions.
             # (DROP INDEX on memory_units conflicts with RowExclusiveLock from DELETE inside tx)
             if bank_internal_id:
-                await bank_utils.drop_bank_hnsw_indexes(conn, bank_internal_id)
+                await bank_utils.drop_bank_vector_indexes(conn, bank_internal_id)
 
         if invalidated_obs > 0:
             await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)

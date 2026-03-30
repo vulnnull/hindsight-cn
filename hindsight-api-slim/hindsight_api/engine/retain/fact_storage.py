@@ -10,7 +10,7 @@ import uuid
 
 from ...config import get_config
 from ..memory_engine import fq_table
-from .bank_utils import DEFAULT_DISPOSITION, create_bank_hnsw_indexes
+from .bank_utils import DEFAULT_DISPOSITION, create_bank_vector_indexes
 from .fact_extraction import _sanitize_text
 from .types import ProcessedFact
 
@@ -207,8 +207,8 @@ async def ensure_bank_exists(conn, bank_id: str) -> None:
         internal_id,
     )
     if inserted:
-        # Fresh insert — create per-bank HNSW indexes
-        await create_bank_hnsw_indexes(conn, bank_id, str(internal_id))
+        # Fresh insert — create per-bank vector indexes
+        await create_bank_vector_indexes(conn, bank_id, str(internal_id))
 
 
 async def handle_document_tracking(
