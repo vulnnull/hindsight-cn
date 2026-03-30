@@ -11,6 +11,12 @@ export interface MoltbotPluginAPI {
   registerService(config: ServiceConfig): void;
   // OpenClaw hook handler signature: (event, ctx?) where ctx contains channel/sender info
   on(event: string, handler: (event: any, ctx?: any) => void | Promise<void | PluginPromptHookResult>): void;
+  // OpenClaw framework logger — handles coloring/formatting consistently across plugins
+  logger: {
+    info(msg: string): void;
+    warn(msg: string): void;
+    error(msg: string): void;
+  };
   // Add more as needed
 }
 
@@ -75,6 +81,8 @@ export interface PluginConfig {
   recallPromptPreamble?: string; // Prompt preamble placed above recalled memories. Default: built-in guidance text.
   recallInjectionPosition?: 'prepend' | 'append' | 'user'; // Where to inject recalled memories. 'prepend' = start of system prompt (default), 'append' = end of system prompt (preserves prompt cache), 'user' = before user message.
   debug?: boolean; // Enable debug logging (default: false)
+  logLevel?: 'off' | 'error' | 'warning' | 'info' | 'debug'; // Console log verbosity (default: 'info').
+  logSummaryIntervalMs?: number; // Batch retain/recall log summaries over this interval in ms. 0 = log every event. Default: 300000 (5 min).
 }
 
 export interface ServiceConfig {

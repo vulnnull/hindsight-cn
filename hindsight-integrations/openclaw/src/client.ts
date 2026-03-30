@@ -10,6 +10,7 @@ import type {
   RecallRequest,
   RecallResponse,
 } from './types.js';
+import * as log from './logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -106,9 +107,9 @@ export class HindsightClient {
         const body = await res.text().catch(() => '');
         throw new Error(`HTTP ${res.status}: ${body}`);
       }
-      console.log(`[Hindsight] Bank mission set via HTTP`);
+      log.verbose('bank mission set via HTTP');
     } catch (error) {
-      console.warn(`[Hindsight] Could not set bank mission (bank may not exist yet): ${error}`);
+      log.warn(`could not set bank mission (bank may not exist yet): ${error}`);
     }
   }
 
@@ -117,10 +118,10 @@ export class HindsightClient {
     const args = [...baseArgs, '--profile', 'openclaw', 'bank', 'mission', this.bankId, sanitize(mission)];
     try {
       const { stdout } = await execFileAsync(cmd, args, { maxBuffer: MAX_BUFFER });
-      console.log(`[Hindsight] Bank mission set: ${stdout.trim()}`);
+      log.verbose(`bank mission set: ${stdout.trim()}`);
     } catch (error) {
       // Don't fail if mission set fails - bank might not exist yet, will be created on first retain
-      console.warn(`[Hindsight] Could not set bank mission (bank may not exist yet): ${error}`);
+      log.warn(`could not set bank mission (bank may not exist yet): ${error}`);
     }
   }
 
@@ -157,7 +158,7 @@ export class HindsightClient {
     }
 
     const data = await res.json();
-    console.log(`[Hindsight] Retained via HTTP (async): ${JSON.stringify(data).substring(0, 200)}`);
+    log.verbose(`retained via HTTP (async): ${JSON.stringify(data).substring(0, 200)}`);
 
     return {
       message: 'Memory queued for background processing',
@@ -183,7 +184,7 @@ export class HindsightClient {
       const args = [...baseArgs, '--profile', 'openclaw', 'memory', 'retain-files', this.bankId, tempFile, '--async'];
 
       const { stdout } = await execFileAsync(cmd, args, { maxBuffer: MAX_BUFFER });
-      console.log(`[Hindsight] Retained (async): ${stdout.trim()}`);
+      log.verbose(`retained (async): ${stdout.trim()}`);
 
       return {
         message: 'Memory queued for background processing',
@@ -211,7 +212,7 @@ export class HindsightClient {
     // Defense-in-depth: truncate query to stay under API's 500-token limit
     const MAX_QUERY_CHARS = 800;
     const query = request.query.length > MAX_QUERY_CHARS
-      ? (console.warn(`[Hindsight] Truncating recall query from ${request.query.length} to ${MAX_QUERY_CHARS} chars`),
+      ? (log.warn(`truncating recall query from ${request.query.length} to ${MAX_QUERY_CHARS} chars`),
          request.query.substring(0, MAX_QUERY_CHARS))
       : request.query;
     const body: Record<string, unknown> = {
