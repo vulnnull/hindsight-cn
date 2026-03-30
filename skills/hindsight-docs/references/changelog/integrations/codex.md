@@ -8,6 +8,12 @@ import PageHero from '@site/src/components/PageHero';
 
 [← Codex CLI integration](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/codex)
 
+## [0.2.0](https://github.com/vectorize-io/hindsight/tree/integrations/codex/v0.2.0)
+
+**Features**
+
+- Retain structured Codex tool calls from rollout files so they’re preserved in Hindsight memory. ([`3461398b`](https://github.com/vectorize-io/hindsight/commit/3461398b))
+
 ## [0.1.1](https://github.com/vectorize-io/hindsight/tree/integrations/codex/v0.1.1)
 
 **Features**
