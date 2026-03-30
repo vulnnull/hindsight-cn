@@ -704,7 +704,7 @@ class ZeroEntropyCrossEncoder(CrossEncoderModel):
             indices = [idx for idx, _ in indexed_texts]
 
             response = await self._async_client.post(
-                self.RERANK_URL,
+                self.rerank_url,
                 json={
                     "model": self.model,
                     "query": query,
