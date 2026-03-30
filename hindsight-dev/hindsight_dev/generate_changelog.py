@@ -40,6 +40,8 @@ VALID_INTEGRATIONS = [
     "nemoclaw",
     "strands",
     "claude-code",
+    "llamaindex",
+    "codex",
 ]
 
 
@@ -521,6 +523,8 @@ def _get_package_name(integration: str) -> str:
         "nemoclaw": "@vectorize-io/hindsight-nemoclaw",
         "strands": "hindsight-strands",
         "claude-code": "hindsight-memory",
+        "llamaindex": "hindsight-llamaindex",
+        "codex": "hindsight-codex",
     }
     return packages[integration]
 
@@ -545,6 +549,8 @@ def _integration_display_name(integration: str) -> str:
         "nemoclaw": "NemoClaw",
         "strands": "Strands",
         "claude-code": "Claude Code",
+        "llamaindex": "LlamaIndex",
+        "codex": "Codex",
     }
     return names.get(integration, integration)
 
