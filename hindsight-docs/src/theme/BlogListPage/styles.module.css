@@ -185,6 +185,8 @@
   font-weight: 500;
   color: var(--ifm-color-primary);
   text-decoration: none !important;
+  background: none;
+  cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 

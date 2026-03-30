@@ -116,7 +116,7 @@ const config: Config = {
           showReadingTime: true,
           blogTitle: 'Hindsight Blog',
           blogDescription: 'Updates, insights, and deep dives into agent memory',
-          postsPerPage: 10,
+          postsPerPage: 'ALL',
           blogSidebarCount: 0,
         },
         theme: {

@@ -1,6 +1,7 @@
 import React from 'react';
 import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
+import {useLocation, useHistory} from '@docusaurus/router';
 import type {Props} from '@theme/BlogListPage';
 import type {PropBlogPostContent} from '@docusaurus/plugin-content-blog';
 import PageHero from '@site/src/components/PageHero';
@@ -8,6 +9,7 @@ import styles from './styles.module.css';
 
 const CLOUD_TAG = 'hindsight-cloud';
 const CLOUD_PREVIEW_COUNT = 3;
+const HINDSIGHT_PAGE_SIZE = 9;
 
 function formatDate(dateString: string): string {
   const date = new Date(dateString);
@@ -59,7 +61,11 @@ function SectionHeader({title, subtitle, viewAllHref}: {title: string; subtitle?
 }
 
 export default function BlogListPage({items, metadata}: Props): React.ReactElement {
-  const {blogTitle, blogDescription, totalPages, page, nextPage, previousPage} = metadata;
+  const {blogTitle, blogDescription} = metadata;
+  const location = useLocation();
+  const history = useHistory();
+
+  const currentPage = Math.max(1, parseInt(new URLSearchParams(location.search).get('page') ?? '1', 10));
 
   const cloudPosts = items.filter(({content}) =>
     (content.metadata.tags ?? []).some((t) => t.label === CLOUD_TAG),
@@ -68,12 +74,29 @@ export default function BlogListPage({items, metadata}: Props): React.ReactEleme
     !(content.metadata.tags ?? []).some((t) => t.label === CLOUD_TAG),
   );
 
+  const totalHindsightPages = Math.max(1, Math.ceil(hindsightPosts.length / HINDSIGHT_PAGE_SIZE));
+  const hindsightPagePosts = hindsightPosts.slice(
+    (currentPage - 1) * HINDSIGHT_PAGE_SIZE,
+    currentPage * HINDSIGHT_PAGE_SIZE,
+  );
+
+  const goToPage = (page: number) => {
+    const params = new URLSearchParams(location.search);
+    if (page === 1) {
+      params.delete('page');
+    } else {
+      params.set('page', String(page));
+    }
+    const search = params.toString();
+    history.push({pathname: location.pathname, search: search ? `?${search}` : ''});
+  };
+
   return (
     <Layout title={blogTitle} description={blogDescription}>
       <main className={styles.blogPage}>
         <PageHero title={blogTitle} subtitle={blogDescription} />
 
-        {cloudPosts.length > 0 && (
+        {currentPage === 1 && cloudPosts.length > 0 && (
           <section className={styles.section}>
             <SectionHeader
               title="Hindsight Cloud"
@@ -88,34 +111,34 @@ export default function BlogListPage({items, metadata}: Props): React.ReactEleme
           </section>
         )}
 
-        {hindsightPosts.length > 0 && (
+        {hindsightPagePosts.length > 0 && (
           <section className={styles.section}>
             <SectionHeader
               title="Hindsight"
               subtitle="Releases, guides, and deep dives into agent memory"
             />
             <div className={styles.grid}>
-              {hindsightPosts.map(({content: BlogPostContent}) => (
+              {hindsightPagePosts.map(({content: BlogPostContent}) => (
                 <BlogCard key={BlogPostContent.metadata.permalink} content={BlogPostContent} />
               ))}
             </div>
           </section>
         )}
 
-        {totalPages > 1 && (
+        {totalHindsightPages > 1 && (
           <nav className={styles.pagination}>
-            {previousPage && (
-              <Link to={previousPage} className={styles.paginationButton}>
+            {currentPage > 1 && (
+              <button onClick={() => goToPage(currentPage - 1)} className={styles.paginationButton}>
                 ← Previous
-              </Link>
+              </button>
             )}
             <span className={styles.paginationInfo}>
-              Page {page} of {totalPages}
+              Page {currentPage} of {totalHindsightPages}
             </span>
-            {nextPage && (
-              <Link to={nextPage} className={styles.paginationButton}>
+            {currentPage < totalHindsightPages && (
+              <button onClick={() => goToPage(currentPage + 1)} className={styles.paginationButton}>
                 Next →
-              </Link>
+              </button>
             )}
           </nav>
         )}
