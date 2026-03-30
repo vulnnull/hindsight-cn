@@ -13,6 +13,7 @@ import logging
 import os
 import warnings
 from abc import ABC, abstractmethod
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 import httpx
 
@@ -426,9 +427,19 @@ class OpenAIEmbeddings(Embeddings):
         logger.info(f"Embeddings: initializing OpenAI provider with model {self.model}{base_url_msg}")
 
         # Build client kwargs, only including base_url if set (for Azure or custom endpoints)
+        # Parse query parameters from base_url (e.g. ?api-version=xxx for Azure OpenAI)
+        # and pass them as default_query so they're included in every request.
         client_kwargs = {"api_key": self.api_key, "max_retries": self.max_retries}
         if self.base_url:
-            client_kwargs["base_url"] = self.base_url
+            parsed = urlparse(self.base_url)
+            if parsed.query:
+                clean_url = urlunparse(parsed._replace(query=""))
+                client_kwargs["base_url"] = clean_url
+                default_query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+                client_kwargs["default_query"] = default_query
+                self.base_url = clean_url
+            else:
+                client_kwargs["base_url"] = self.base_url
         self._client = OpenAI(**client_kwargs)
 
         # Try to get dimension from known models, otherwise do a test embedding
