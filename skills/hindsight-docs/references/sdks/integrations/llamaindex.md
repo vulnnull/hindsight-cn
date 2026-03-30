@@ -37,7 +37,7 @@ async def main():
         mission="Track user preferences and project context",
     )
 
-    agent = ReActAgent(tools=tools, llm=OpenAI(model="gpt-4o"), memory=memory)
+    agent = ReActAgent(tools=[], llm=OpenAI(model="gpt-4o"), memory=memory)
     response = await agent.run("Remember that I prefer dark mode")
     print(response)
 

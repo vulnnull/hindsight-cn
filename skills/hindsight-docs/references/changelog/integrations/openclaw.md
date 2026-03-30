@@ -8,6 +8,12 @@ import PageHero from '@site/src/components/PageHero';
 
 [← OpenClaw integration](../../sdks/integrations/openclaw.md)
 
+## [0.5.1](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.5.1)
+
+**Bug Fixes**
+
+- Fixed JSON manifest formatting issues in the OpenClaw plugin to prevent manifest parsing/loading problems. ([`704e41fa`](https://github.com/vectorize-io/hindsight/commit/704e41fa))
+
 ## [0.5.0](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.5.0)
 
 **Breaking Changes**
