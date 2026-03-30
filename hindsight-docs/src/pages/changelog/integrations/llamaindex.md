@@ -10,6 +10,12 @@ For the source code, see [`hindsight-integrations/llamaindex`](https://github.co
 
 ← [Back to main changelog](/changelog)
 
+## [0.1.3](https://github.com/vectorize-io/hindsight/tree/integrations/llamaindex/v0.1.3)
+
+**Bug Fixes**
+
+- Fixed LlamaIndex integration issues with document IDs, the memory API, and ReAct trace handling to improve reliability and correctness. ([`d93dfea8`](https://github.com/vectorize-io/hindsight/commit/d93dfea8))
+
 ## [0.1.2](https://github.com/vectorize-io/hindsight/tree/integrations/llamaindex/v0.1.2)
 
 **Features**
