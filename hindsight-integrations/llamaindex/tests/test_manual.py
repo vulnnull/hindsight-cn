@@ -8,7 +8,7 @@ import uuid
 
 import pytest
 from hindsight_client import Hindsight
-from llama_index.tools.hindsight import HindsightToolSpec, create_hindsight_tools
+from hindsight_llamaindex import HindsightToolSpec, create_hindsight_tools
 
 HINDSIGHT_URL = "http://localhost:8888"
 

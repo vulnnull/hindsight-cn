@@ -2,7 +2,7 @@
 title: "Teaching the Llama to Remember"
 description: LlamaIndex agents reset memory every session. Learn how to add persistent cross-session memory using hindsight-llamaindex in 3 steps. Full code examples included.
 authors: [DK09876]
-date: 2026-03-26T12:00
+date: 2026-03-30T12:00
 tags: [llamaindex, integrations, agents, memory, python]
 image: /img/blog/llamaindex-agent-memory.png
 hide_table_of_contents: true
@@ -14,11 +14,11 @@ You've built a LlamaIndex agent that answers questions brilliantly. Then the ses
 
 That's the core limitation of LlamaIndex's built-in memory: it's session-scoped. `ChatMemoryBuffer` holds your conversation history while the agent is running, but the moment you restart, that context is gone. For agents that serve repeat users or run multi-session workflows, this isn't a minor inconvenience. It's a fundamental capability gap.
 
-`hindsight-llamaindex` solves this. It implements LlamaIndex's native `BaseToolSpec` to give agents persistent, searchable memory that survives across sessions, so your agent remembers what it learned, regardless of when the session started.
+`hindsight-llamaindex` solves this. It provides two complementary patterns: a `BaseToolSpec` that gives agents explicit retain/recall/reflect tools, and a `BaseMemory` implementation that automatically stores and recalls memories on every turn. Your agent remembers what it learned, regardless of when the session started.
 
 **What you'll learn:**
 - Why LlamaIndex agent memory resets and what persistent memory actually means
-- How `hindsight-llamaindex` integrates with any LlamaIndex agent via the native tool system
+- How `hindsight-llamaindex` integrates with any LlamaIndex agent via both the tool system and the memory interface
 - How to set up cross-session memory in three steps with full code examples
 - When to use persistent memory and when to skip it
 
@@ -34,7 +34,7 @@ That's a real improvement. But even the newer system has hard limits: retrieval 
 
 "Persistent" memory, in the fullest sense, means a system that extracts facts from conversations, builds a knowledge graph over time, and retrieves relevant context using multiple strategies in parallel -- not just the most recent embedding match. It should work regardless of which agent framework you're running.
 
-`hindsight-llamaindex` provides this via three native LlamaIndex tools: `retain_memory` (store facts), `recall_memory` (search memory), and `reflect_on_memory` (synthesize a reasoned answer from everything stored).
+`hindsight-llamaindex` provides this via two patterns. The **tools pattern** (`HindsightToolSpec`) exposes three native LlamaIndex tools: `retain_memory` (store facts), `recall_memory` (search memory), and `reflect_on_memory` (synthesize a reasoned answer from everything stored). The **memory pattern** (`HindsightMemory`) implements LlamaIndex's `BaseMemory` interface to automatically store messages and recall relevant context on every turn -- no explicit tool calls needed.
 
 ## The Problem with LlamaIndex's Built-In Memory
 
@@ -59,16 +59,17 @@ That's what Hindsight does. And `hindsight-llamaindex` wires it into LlamaIndex'
 
 ```
 LlamaIndex Agent (ReAct, FunctionCalling, etc.)
-  └─ HindsightToolSpec (extends BaseToolSpec)
-       ├─ retain_memory()     → Hindsight retain
-       │                        (fact extraction, entity resolution, knowledge graph)
-       ├─ recall_memory()     → Hindsight recall
-       │                        (semantic + BM25 + graph + temporal retrieval)
-       └─ reflect_on_memory() → Hindsight reflect
-                                (synthesize a reasoned answer from all memories)
+  ├─ HindsightToolSpec (extends BaseToolSpec) — agent-driven
+  │    ├─ retain_memory()     → Hindsight retain
+  │    ├─ recall_memory()     → Hindsight recall
+  │    └─ reflect_on_memory() → Hindsight reflect
+  │
+  └─ HindsightMemory (extends BaseMemory) — automatic
+       ├─ put()  → auto-retains user/assistant messages
+       └─ get()  → auto-recalls relevant memories as context
 ```
 
-`HindsightToolSpec` extends LlamaIndex's [`BaseToolSpec`](https://docs.llamaindex.ai/en/stable/api_reference/tools/). Call `to_tool_list()` and you get standard `FunctionTool` instances. No monkey-patching, no custom wrappers. Any LlamaIndex agent that accepts tools can use it.
+`HindsightToolSpec` extends LlamaIndex's [`BaseToolSpec`](https://docs.llamaindex.ai/en/stable/api_reference/tools/). Call `to_tool_list()` and you get standard `FunctionTool` instances. `HindsightMemory` extends `BaseMemory` for transparent, automatic memory. No monkey-patching, no custom wrappers. Any LlamaIndex agent that accepts tools or a memory parameter can use it.
 
 Under the hood, Hindsight extracts structured facts, identifies entities, builds a knowledge graph, and runs four parallel retrieval strategies with cross-encoder reranking.
 
@@ -92,9 +93,9 @@ pip install hindsight-llamaindex
 
 Pulls in `llama-index-core` and `hindsight-client`.
 
-## Step 3: Create the Bank and Agent
+## Step 3: Create the Agent
 
-Banks must exist before use. Since LlamaIndex agents are async, wrap everything in `asyncio.run()` for scripts (or use top-level `await` in notebooks):
+Pass a `mission` to auto-create the bank on first use. Since LlamaIndex agents are async, wrap everything in `asyncio.run()` for scripts (or use top-level `await` in notebooks):
 
 ```python
 import asyncio
@@ -105,35 +106,16 @@ from llama_index.core.agent import ReActAgent
 
 async def main():
     client = Hindsight(base_url="http://localhost:8888")
-    await client.acreate_bank("user-123", name="User 123 Memory")
 
     spec = HindsightToolSpec(
         client=client,
         bank_id="user-123",
-        tags=["source:chat"],
-        budget="mid",
+        mission="Track user preferences",
     )
     tools = spec.to_tool_list()
 
-    agent = ReActAgent(
-        tools=tools,
-        llm=OpenAI(model="gpt-4o-mini"),
-        system_prompt=(
-            "You are a helpful assistant with long-term memory. "
-            "Use retain_memory to store important facts. "
-            "Use recall_memory to search memory before answering."
-        ),
-    )
-
-    # Session 1
-    await agent.run(
-        "I'm a data scientist. I use Python, SQL, and VS Code with dark mode."
-    )
-
-    # Session 2 (new agent instance, same bank_id)
-    agent = ReActAgent(tools=tools, llm=OpenAI(model="gpt-4o-mini"))
-    response = await agent.run("What IDE do I use?")
-    # → "You use VS Code with dark mode."
+    agent = ReActAgent(tools=tools, llm=OpenAI(model="gpt-4o"))
+    response = await agent.run("Remember that I prefer dark mode")
     print(response)
 
 asyncio.run(main())
@@ -151,40 +133,84 @@ from hindsight_llamaindex import create_hindsight_tools
 tools = create_hindsight_tools(
     client=client,
     bank_id="user-123",
-    include_reflect=False,  # only retain + recall
+    mission="Track user preferences",
 )
 ```
 
 The factory wraps `HindsightToolSpec` and returns a filtered list. Use `include_retain`, `include_recall`, and `include_reflect` to control which tools are exposed.
 
-## Selective Tools and Per-User Memory Banks
+## Automatic Memory (BaseMemory)
 
-LlamaIndex's `BaseToolSpec` natively supports selective export:
+If you want memory to happen transparently -- no tool calls, no agent prompting -- use `HindsightMemory`. It implements LlamaIndex's `BaseMemory` interface: messages are retained on `put()`, relevant memories are recalled on `get()`.
 
 ```python
-spec = HindsightToolSpec(client=client, bank_id="user-123")
+import asyncio
+from hindsight_client import Hindsight
+from hindsight_llamaindex import HindsightMemory
+from llama_index.core.agent import ReActAgent
+from llama_index.llms.openai import OpenAI
 
-# Read-only: only recall and reflect
+async def main():
+    client = Hindsight(base_url="http://localhost:8888")
+
+    memory = HindsightMemory.from_client(
+        client=client,
+        bank_id="user-123",
+        mission="Track user preferences and project context",
+    )
+
+    agent = ReActAgent(tools=tools, llm=OpenAI(model="gpt-4o"), memory=memory)
+    response = await agent.run("Remember that I prefer dark mode")
+    print(response)
+
+asyncio.run(main())
+```
+
+Every user message and assistant response is automatically retained. On the next turn, relevant memories are recalled and injected as a system message. No system prompt engineering needed -- the agent gets context from previous sessions without being told to use tools.
+
+You can also combine both patterns: use `HindsightMemory` for automatic context enrichment, and expose only `reflect_on_memory` as an explicit tool for when the agent needs to synthesize a reasoned answer.
+
+## Selecting Tools
+
+You can control which tools are exposed:
+
+```python
+# Via to_tool_list()
 tools = spec.to_tool_list(spec_functions=["recall_memory", "reflect_on_memory"])
+
+# Via factory flags
+tools = create_hindsight_tools(
+    client=client,
+    bank_id="user-123",
+    include_retain=True,
+    include_recall=True,
+    include_reflect=False,
+)
 ```
 
 This is useful when different agents need different permissions. A research agent gets all three tools. A reporting agent gets read-only access.
 
-For multi-user applications, parameterize `bank_id` for per-user isolation:
+## Combining Tools + Memory
+
+Use both patterns together for maximum flexibility:
 
 ```python
-def create_agent_for_user(user_id: str) -> ReActAgent:
-    spec = HindsightToolSpec(
-        client=client,
-        bank_id=f"user-{user_id}",
-    )
-    return ReActAgent(
-        tools=spec.to_tool_list(),
-        llm=OpenAI(model="gpt-4o-mini"),
-    )
-```
+from hindsight_llamaindex import create_hindsight_tools, HindsightMemory
 
-Each bank is fully isolated. No cross-user data leakage.
+# Automatic memory for context enrichment
+memory = HindsightMemory.from_client(client=client, bank_id="user-123")
+
+# Explicit tools for agent-driven reflect
+tools = create_hindsight_tools(
+    client=client,
+    bank_id="user-123",
+    include_retain=False,   # memory handles retain automatically
+    include_recall=False,   # memory handles recall automatically
+    include_reflect=True,   # agent can still explicitly reflect
+)
+
+agent = ReActAgent(tools=tools, llm=llm, memory=memory)
+```
 
 ## Global Configuration
 
@@ -195,12 +221,14 @@ from hindsight_llamaindex import configure
 
 configure(
     hindsight_api_url="http://localhost:8888",
-    api_key="YOUR_API_KEY",  # or HINDSIGHT_API_KEY env var
+    api_key="your-api-key",  # or set HINDSIGHT_API_KEY env var
     budget="mid",
     tags=["source:llamaindex"],
+    context="my-app",
+    mission="Track user preferences",
 )
 
-# Now you can skip client= and url= arguments
+# Now create tools without passing client/url
 tools = create_hindsight_tools(bank_id="user-123")
 ```
 
@@ -220,7 +248,7 @@ In each case, the value is the same: the agent's context grows over time rather 
 
 ## Common Pitfalls
 
-**Bank must exist first.** Call `client.create_bank(bank_id, name=...)` before the agent starts. If the bank doesn't exist, retain/recall will fail with a 404-style error.
+**Bank auto-creation with mission.** Pass `mission=` to `HindsightToolSpec` or `HindsightMemory` and the bank is created automatically on first use. If you prefer explicit control, call `client.create_bank(bank_id, name=...)` before the agent starts.
 
 **Async processing delay.** After `retain_memory`, Hindsight processes content asynchronously. Extracting facts, entities, and embeddings takes 1-3 seconds. If you retain and immediately recall in the same session, the new memories may not be searchable yet.
 
@@ -259,7 +287,7 @@ Persistent memory isn't always the right tool.
 Hindsight processes retained content asynchronously. After calling `retain_memory`, wait 1-3 seconds before calling `recall_memory`. In production, architect your workflow so retain and recall happen in separate sessions rather than back-to-back in the same one.
 
 **What happens if I call `recall_memory` before the bank exists?**
-The call will fail. Always call `client.create_bank(bank_id)` before initializing `HindsightToolSpec`. If you're not sure whether the bank exists, wrap the create call in a try/except and handle the conflict error.
+The call will fail. The easiest fix is to pass `mission=` when creating `HindsightToolSpec` or `HindsightMemory` -- the bank is auto-created on first use. Alternatively, call `client.create_bank(bank_id)` before initializing the spec.
 
 **My agent isn't calling `retain_memory` automatically. Why?**
 The agent decides when to call tools based on its system prompt. If your system prompt doesn't instruct the agent to store important facts, it won't do so reliably. Include explicit instruction: `"Use retain_memory to store any facts, preferences, or context the user shares."` Then test with a few turns to confirm the behavior.

@@ -92,13 +92,13 @@
     },
     {
       "id": "codex",
-      "name": "OpenAI Codex CLI",
-      "description": "Automatic long-term memory for OpenAI Codex CLI via Hindsight hooks. Captures every conversation, recalls relevant context on every prompt.",
+      "name": "Codex",
+      "description": "Automatic long-term memory for Codex CLI via Hindsight hooks. Captures every conversation, recalls relevant context on every prompt.",
       "type": "official",
       "by": "hindsight",
       "category": "tool",
       "link": "/sdks/integrations/codex",
-      "icon": "/img/icons/terminal.svg"
+      "icon": "/img/icons/openai.png"
     },
     {
       "id": "openclaw",
@@ -133,7 +133,7 @@
     {
       "id": "llamaindex",
       "name": "LlamaIndex",
-      "description": "Add persistent memory to LlamaIndex agents via the native BaseToolSpec pattern. Retain, recall, and reflect as standard tools.",
+      "description": "Add persistent memory to LlamaIndex agents. Supports agent-driven tools (BaseToolSpec) and automatic memory (BaseMemory).",
       "type": "official",
       "by": "hindsight",
       "category": "framework",

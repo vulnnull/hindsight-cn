@@ -1,23 +1,24 @@
-# llama-index-tools-hindsight
+# hindsight-llamaindex
 
-LlamaIndex tools integration for [Hindsight](https://github.com/vectorize-io/hindsight) — persistent long-term memory for AI agents.
+LlamaIndex integration for [Hindsight](https://github.com/vectorize-io/hindsight) — persistent long-term memory for AI agents.
 
-Provides Hindsight memory as a native LlamaIndex `BaseToolSpec`, giving agents retain/recall/reflect capabilities through LlamaIndex's standard tool interface.
+Provides two complementary patterns:
 
-For automatic memory (auto-recall on input, auto-retain on output), see [`llama-index-memory-hindsight`](../llamaindex-memory/).
+- **Tools** (`HindsightToolSpec`) — Agent-driven memory via LlamaIndex's `BaseToolSpec`. The agent decides when to retain/recall/reflect.
+- **Memory** (`HindsightMemory`) — Automatic memory via LlamaIndex's `BaseMemory` interface. Messages are stored on every turn and recalled as context.
 
 ## Installation
 
 ```bash
-pip install llama-index-tools-hindsight
+pip install hindsight-llamaindex
 ```
 
-## Quick Start
+## Quick Start: Agent Tools
 
 ```python
 import asyncio
 from hindsight_client import Hindsight
-from llama_index.tools.hindsight import HindsightToolSpec
+from hindsight_llamaindex import HindsightToolSpec
 from llama_index.llms.openai import OpenAI
 from llama_index.core.agent import ReActAgent
 
@@ -38,22 +39,26 @@ async def main():
 asyncio.run(main())
 ```
 
-### Factory Function
+## Quick Start: Automatic Memory
 
 ```python
-from llama_index.tools.hindsight import create_hindsight_tools
+from hindsight_client import Hindsight
+from hindsight_llamaindex import HindsightMemory
 
-tools = create_hindsight_tools(
+client = Hindsight(base_url="http://localhost:8888")
+memory = HindsightMemory.from_client(
     client=client,
     bank_id="user-123",
-    include_reflect=False,  # only retain + recall
+    mission="Track user preferences",
 )
+
+agent = ReActAgent(tools=tools, llm=llm, memory=memory)
 ```
 
 ## Configuration
 
 ```python
-from llama_index.tools.hindsight import configure
+from hindsight_llamaindex import configure
 
 configure(
     hindsight_api_url="http://localhost:8888",

@@ -51,7 +51,7 @@ class HindsightMemory(BaseMemory):
     Example::
 
         from hindsight_client import Hindsight
-        from llama_index.memory.hindsight import HindsightMemory
+        from hindsight_llamaindex import HindsightMemory
 
         client = Hindsight(base_url="http://localhost:8888")
         memory = HindsightMemory.from_client(

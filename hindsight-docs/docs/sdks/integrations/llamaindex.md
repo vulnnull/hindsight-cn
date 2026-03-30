@@ -4,24 +4,15 @@ sidebar_position: 8
 
 # LlamaIndex
 
-Persistent long-term memory for [LlamaIndex](https://docs.llamaindex.ai/) agents via Hindsight. Two packages are available:
+Persistent long-term memory for [LlamaIndex](https://docs.llamaindex.ai/) agents via Hindsight. The `hindsight-llamaindex` package provides two complementary patterns:
 
-- **`llama-index-tools-hindsight`** — Agent-driven memory tools (retain/recall/reflect)
-- **`llama-index-memory-hindsight`** — Automatic memory via LlamaIndex's `BaseMemory` interface
-
-Both follow the LlamaIndex namespace package convention (`from llama_index.tools.hindsight import ...`).
+- **`HindsightToolSpec`** — Agent-driven memory tools (retain/recall/reflect)
+- **`HindsightMemory`** — Automatic memory via LlamaIndex's `BaseMemory` interface
 
 ## Installation
 
 ```bash
-# Tools only (agent-driven)
-pip install llama-index-tools-hindsight
-
-# Memory only (automatic)
-pip install llama-index-memory-hindsight
-
-# Both
-pip install llama-index-tools-hindsight llama-index-memory-hindsight
+pip install hindsight-llamaindex
 ```
 
 ---
@@ -33,7 +24,7 @@ The simplest way to add Hindsight memory to a LlamaIndex agent. Messages are aut
 ```python
 import asyncio
 from hindsight_client import Hindsight
-from llama_index.memory.hindsight import HindsightMemory
+from hindsight_llamaindex import HindsightMemory
 from llama_index.core.agent import ReActAgent
 from llama_index.llms.openai import OpenAI
 
@@ -90,7 +81,7 @@ For explicit control, expose retain/recall/reflect as tools the agent can choose
 ```python
 import asyncio
 from hindsight_client import Hindsight
-from llama_index.tools.hindsight import HindsightToolSpec
+from hindsight_llamaindex import HindsightToolSpec
 from llama_index.llms.openai import OpenAI
 from llama_index.core.agent import ReActAgent
 
@@ -114,7 +105,7 @@ asyncio.run(main())
 ### Quick Start: Factory Function
 
 ```python
-from llama_index.tools.hindsight import create_hindsight_tools
+from hindsight_llamaindex import create_hindsight_tools
 
 tools = create_hindsight_tools(
     client=client,
@@ -144,7 +135,7 @@ tools = create_hindsight_tools(
 Set defaults via `configure()`, override per-call:
 
 ```python
-from llama_index.tools.hindsight import configure
+from hindsight_llamaindex import configure
 
 configure(
     hindsight_api_url="http://localhost:8888",
@@ -224,15 +215,14 @@ spec = HindsightToolSpec(
 
 ### Error Handling
 
-Both packages handle errors gracefully — operations are logged and return friendly messages instead of raising exceptions. Agents continue functioning even if memory is unavailable.
+Both patterns handle errors gracefully — operations are logged and return friendly messages instead of raising exceptions. Agents continue functioning even if memory is unavailable.
 
 ### Combining Tools + Memory
 
-Use both packages together for maximum flexibility:
+Use both patterns together for maximum flexibility:
 
 ```python
-from llama_index.tools.hindsight import create_hindsight_tools
-from llama_index.memory.hindsight import HindsightMemory
+from hindsight_llamaindex import create_hindsight_tools, HindsightMemory
 
 # Automatic memory for context enrichment
 memory = HindsightMemory.from_client(client=client, bank_id="user-123")

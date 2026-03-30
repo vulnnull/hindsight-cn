@@ -2,11 +2,11 @@
 sidebar_position: 6
 ---
 
-# OpenAI Codex CLI
+# Codex
 
 [View Changelog →](/changelog/integrations/codex)
 
-Persistent memory for [OpenAI Codex CLI](https://github.com/openai/codex) using [Hindsight](https://vectorize.io/hindsight). Three Python hook scripts automatically recall relevant context before each prompt and retain conversations after each turn — no changes to your Codex workflow required.
+Persistent memory for [Codex CLI](https://github.com/openai/codex) using [Hindsight](https://vectorize.io/hindsight). Three Python hook scripts automatically recall relevant context before each prompt and retain conversations after each turn — no changes to your Codex workflow required.
 
 ## Quick Start
 

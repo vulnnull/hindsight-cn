@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from llama_index.core.llms import ChatMessage, MessageRole
-from llama_index.memory.hindsight import HindsightMemory
+from hindsight_llamaindex import HindsightMemory
 
 
 def _mock_client():
@@ -57,7 +57,7 @@ class TestHindsightMemoryCreation:
         assert memory.tags == ["source:chat"]
 
     def test_from_url(self):
-        with patch("llama_index.memory.hindsight.base.Hindsight") as mock_cls:
+        with patch("hindsight_llamaindex.memory.Hindsight") as mock_cls:
             mock_cls.return_value = _mock_client()
             memory = HindsightMemory.from_url(
                 hindsight_api_url="http://localhost:8888",

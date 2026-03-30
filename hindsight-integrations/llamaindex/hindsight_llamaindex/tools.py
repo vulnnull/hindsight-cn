@@ -51,7 +51,7 @@ class HindsightToolSpec(BaseToolSpec):
     Example::
 
         from hindsight_client import Hindsight
-        from llama_index.tools.hindsight import HindsightToolSpec
+        from hindsight_llamaindex import HindsightToolSpec
 
         client = Hindsight(base_url="http://localhost:8888")
         spec = HindsightToolSpec(client=client, bank_id="user-123")
