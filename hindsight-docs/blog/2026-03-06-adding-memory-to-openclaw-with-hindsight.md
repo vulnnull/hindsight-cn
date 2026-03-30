@@ -1,15 +1,17 @@
 ---
-title: "The Memory Upgrade Every OpenClaw User Needs"
+title: "How to Add Persistent Memory to OpenClaw with Hindsight"
 authors: [benfrank241]
 date: 2026-03-06T12:00
-tags: [openclaw]
+tags: [openclaw, memory, agents, persistent-memory, knowledge-graph]
 image: /img/blog/adding-memory-to-openclaw-with-hindsight.png
 hide_table_of_contents: true
 ---
 
-## TL;DR
+OpenClaw's built-in memory depends on the agent deciding what to save — and models don't do this consistently. [Hindsight](https://github.com/vectorize-io/hindsight) replaces it with automated extraction and auto-recall: every conversation is captured, facts and entities are extracted in the background, and relevant context is injected before every response automatically. One plugin install, three commands, no Docker.
 
 <!-- truncate -->
+
+## TL;DR
 
 - OpenClaw's built-in memory is file-based -- markdown files on disk with SQLite vector search. It works, but the agent has to decide what to remember. Hindsight automates the entire pipeline.
 - Hindsight is open source and runs locally by default. Your conversations, extracted knowledge, and memory store never leave your machine unless you choose otherwise.
