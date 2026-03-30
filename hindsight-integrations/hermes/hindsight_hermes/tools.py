@@ -349,16 +349,31 @@ def register(ctx: Any) -> None:
     )
 
     # ── Lifecycle hooks ──────────────────────────────────────────────────
-    # These require hermes-agent ≥ the version that invokes pre/post_llm_call.
-    # When running on an older hermes-agent the hooks are simply never called,
-    # so registering them is always safe.
+    # These require hermes-agent ≥ 0.5.0 which invokes pre/post_llm_call.
+    # On older hermes-agent the hooks are simply never called, so
+    # registering them is always safe.
+    #
+    # IMPORTANT: hermes-agent calls hooks synchronously via invoke_hook(),
+    # so these must be sync functions.  We use the sync client methods
+    # (recall / retain / create_bank) rather than the async variants.
 
     recall_budget = cfg.get("recallBudget", budget)
     recall_max_tokens = cfg.get("recallMaxTokens", 4096)
     retain_enabled = cfg.get("autoRetain", True)
     recall_preamble = cfg.get("recallPromptPreamble", "")
 
-    async def _on_pre_llm_call(
+    created_banks_sync: set[str] = set()
+
+    def _ensure_bank_sync(bid: str) -> None:
+        if bid in created_banks_sync:
+            return
+        try:
+            resolved_client.create_bank(bank_id=bid, name=bid)
+            created_banks_sync.add(bid)
+        except Exception:
+            created_banks_sync.add(bid)
+
+    def _on_pre_llm_call(
         *,
         session_id: str = "",
         user_message: str = "",
@@ -371,8 +386,8 @@ def register(ctx: Any) -> None:
         if not user_message or not bank_id:
             return None
         try:
-            await _ensure_bank(bank_id)
-            response = await resolved_client.arecall(
+            _ensure_bank_sync(bank_id)
+            response = resolved_client.recall(
                 bank_id=bank_id,
                 query=user_message,
                 budget=recall_budget,
@@ -392,7 +407,7 @@ def register(ctx: Any) -> None:
             logger.warning("Hindsight pre_llm_call recall failed: %s", exc)
             return None
 
-    async def _on_post_llm_call(
+    def _on_post_llm_call(
         *,
         session_id: str = "",
         user_message: str = "",
@@ -406,9 +421,9 @@ def register(ctx: Any) -> None:
         if not user_message or not assistant_response:
             return
         try:
-            await _ensure_bank(bank_id)
+            _ensure_bank_sync(bank_id)
             content = f"User: {user_message}\nAssistant: {assistant_response}"
-            await resolved_client.aretain(bank_id=bank_id, content=content)
+            resolved_client.retain(bank_id=bank_id, content=content)
         except Exception as exc:
             logger.warning("Hindsight post_llm_call retain failed: %s", exc)
 

@@ -51,6 +51,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["hindsight_hermes"]
 
+[tool.uv.sources]
+# hermes-agent 0.5.0 is not on PyPI yet; pin to the release tag
+hermes-agent = { git = "https://github.com/NousResearch/hermes-agent.git", tag = "v2026.3.28" }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
@@ -59,4 +63,5 @@ asyncio_mode = "auto"
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23.0",
+    "hermes-agent>=0.5.0 ; python_version >= '3.11'",
 ]

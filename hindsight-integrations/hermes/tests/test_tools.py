@@ -1,5 +1,6 @@
 """Tests for hindsight_hermes.tools module."""
 
+import asyncio
 import json
 import sys
 from types import SimpleNamespace
@@ -243,7 +244,11 @@ class TestRegisterPlugin:
 
 
 class TestLifecycleHooks:
-    """Tests for pre_llm_call and post_llm_call hook callbacks."""
+    """Tests for pre_llm_call and post_llm_call hook callbacks.
+
+    Hooks are synchronous functions (hermes-agent 0.5.0 calls them via
+    invoke_hook which is sync), so these tests call them directly without await.
+    """
 
     def _get_hook(self, ctx_mock, hook_name: str):
         """Extract the registered hook callback by name from the mock ctx."""
@@ -264,11 +269,10 @@ class TestLifecycleHooks:
 
     # -- pre_llm_call --
 
-    @pytest.mark.asyncio
-    async def test_pre_llm_call_returns_context(self, monkeypatch, mock_client):
+    def test_pre_llm_call_returns_context(self, monkeypatch, mock_client):
         ctx = self._register_with_hooks(monkeypatch, mock_client)
         hook = self._get_hook(ctx, "pre_llm_call")
-        result = await hook(
+        result = hook(
             session_id="s1",
             user_message="what color do I like?",
             conversation_history=[],
@@ -279,72 +283,65 @@ class TestLifecycleHooks:
         assert "context" in result
         assert "Memory 1" in result["context"]
         assert "Memory 2" in result["context"]
-        mock_client.arecall.assert_called_once()
+        mock_client.recall.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_pre_llm_call_returns_none_on_no_results(self, monkeypatch, mock_client):
-        mock_client.arecall.return_value = SimpleNamespace(results=[])
+    def test_pre_llm_call_returns_none_on_no_results(self, monkeypatch, mock_client):
+        mock_client.recall.return_value = SimpleNamespace(results=[])
         ctx = self._register_with_hooks(monkeypatch, mock_client)
         hook = self._get_hook(ctx, "pre_llm_call")
-        result = await hook(user_message="hello")
+        result = hook(user_message="hello")
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_pre_llm_call_returns_none_on_empty_message(self, monkeypatch, mock_client):
+    def test_pre_llm_call_returns_none_on_empty_message(self, monkeypatch, mock_client):
         ctx = self._register_with_hooks(monkeypatch, mock_client)
         hook = self._get_hook(ctx, "pre_llm_call")
-        result = await hook(user_message="")
+        result = hook(user_message="")
         assert result is None
-        mock_client.arecall.assert_not_called()
+        mock_client.recall.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_pre_llm_call_returns_none_on_error(self, monkeypatch, mock_client):
-        mock_client.arecall.side_effect = RuntimeError("connection failed")
+    def test_pre_llm_call_returns_none_on_error(self, monkeypatch, mock_client):
+        mock_client.recall.side_effect = RuntimeError("connection failed")
         ctx = self._register_with_hooks(monkeypatch, mock_client)
         hook = self._get_hook(ctx, "pre_llm_call")
-        result = await hook(user_message="hello")
+        result = hook(user_message="hello")
         assert result is None
 
     # -- post_llm_call --
 
-    @pytest.mark.asyncio
-    async def test_post_llm_call_retains_turn(self, monkeypatch, mock_client):
+    def test_post_llm_call_retains_turn(self, monkeypatch, mock_client):
         ctx = self._register_with_hooks(monkeypatch, mock_client)
         hook = self._get_hook(ctx, "post_llm_call")
-        await hook(
+        hook(
             session_id="s1",
             user_message="remember I like green",
             assistant_response="Got it, you like green!",
             model="test",
         )
-        mock_client.aretain.assert_called_once()
-        content = mock_client.aretain.call_args.kwargs["content"]
+        mock_client.retain.assert_called_once()
+        content = mock_client.retain.call_args.kwargs["content"]
         assert "remember I like green" in content
         assert "Got it, you like green!" in content
 
-    @pytest.mark.asyncio
-    async def test_post_llm_call_skips_empty_messages(self, monkeypatch, mock_client):
+    def test_post_llm_call_skips_empty_messages(self, monkeypatch, mock_client):
         ctx = self._register_with_hooks(monkeypatch, mock_client)
         hook = self._get_hook(ctx, "post_llm_call")
-        await hook(user_message="", assistant_response="hello")
-        mock_client.aretain.assert_not_called()
+        hook(user_message="", assistant_response="hello")
+        mock_client.retain.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_post_llm_call_skips_when_disabled(self, monkeypatch, mock_client):
+    def test_post_llm_call_skips_when_disabled(self, monkeypatch, mock_client):
         ctx = self._register_with_hooks(
             monkeypatch, mock_client, HINDSIGHT_AUTO_RETAIN="false"
         )
         hook = self._get_hook(ctx, "post_llm_call")
-        await hook(user_message="hi", assistant_response="hello")
-        mock_client.aretain.assert_not_called()
+        hook(user_message="hi", assistant_response="hello")
+        mock_client.retain.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_post_llm_call_does_not_raise_on_error(self, monkeypatch, mock_client):
-        mock_client.aretain.side_effect = RuntimeError("boom")
+    def test_post_llm_call_does_not_raise_on_error(self, monkeypatch, mock_client):
+        mock_client.retain.side_effect = RuntimeError("boom")
         ctx = self._register_with_hooks(monkeypatch, mock_client)
         hook = self._get_hook(ctx, "post_llm_call")
         # Should not raise
-        await hook(user_message="hi", assistant_response="hello")
+        hook(user_message="hi", assistant_response="hello")
 
 
 # --- memory_instructions tests ---
@@ -379,3 +376,103 @@ class TestMemoryInstructions:
     def test_custom_prefix(self, mock_client):
         result = memory_instructions(bank_id="b", client=mock_client, prefix="Context:\n")
         assert result.startswith("Context:")
+
+
+# --- Integration tests with real hermes-agent plugin system ---
+
+
+class TestHermesPluginIntegration:
+    """Tests that verify hooks work correctly when invoked through
+    hermes-agent's real PluginManager.invoke_hook (sync dispatch)."""
+
+    def _setup_plugin_manager(self, monkeypatch, mock_client):
+        """Register our plugin via the real PluginContext and return the PluginManager."""
+        from hermes_cli.plugins import PluginManager, PluginManifest, PluginContext
+
+        monkeypatch.setenv("HINDSIGHT_API_URL", "http://localhost:8888")
+        monkeypatch.setenv("HINDSIGHT_BANK_ID", "test-bank")
+
+        manager = PluginManager()
+        manifest = PluginManifest(name="hindsight", source="test")
+        ctx = PluginContext(manifest, manager)
+
+        with (
+            patch("hindsight_hermes.tools._resolve_client", return_value=mock_client),
+            patch.dict(sys.modules, {"tools": MagicMock(), "tools.registry": MagicMock()}),
+        ):
+            register(ctx)
+
+        return manager
+
+    def test_invoke_pre_llm_call_returns_context_dict(self, monkeypatch, mock_client):
+        """invoke_hook('pre_llm_call') should return a list with a context dict."""
+        manager = self._setup_plugin_manager(monkeypatch, mock_client)
+
+        results = manager.invoke_hook(
+            "pre_llm_call",
+            session_id="s1",
+            user_message="what is my favorite color?",
+            conversation_history=[],
+            is_first_turn=True,
+            model="test",
+        )
+
+        assert len(results) == 1
+        assert isinstance(results[0], dict)
+        assert "context" in results[0]
+        assert "Memory 1" in results[0]["context"]
+        mock_client.recall.assert_called_once()
+
+    def test_invoke_post_llm_call_retains(self, monkeypatch, mock_client):
+        """invoke_hook('post_llm_call') should call retain synchronously."""
+        manager = self._setup_plugin_manager(monkeypatch, mock_client)
+
+        results = manager.invoke_hook(
+            "post_llm_call",
+            session_id="s1",
+            user_message="remember I like blue",
+            assistant_response="Noted, you like blue!",
+            model="test",
+        )
+
+        # post_llm_call returns None, so results should be empty
+        assert results == []
+        mock_client.retain.assert_called_once()
+        content = mock_client.retain.call_args.kwargs["content"]
+        assert "remember I like blue" in content
+
+    def test_invoke_pre_llm_call_no_results(self, monkeypatch, mock_client):
+        """invoke_hook returns empty list when recall finds nothing."""
+        mock_client.recall.return_value = SimpleNamespace(results=[])
+        manager = self._setup_plugin_manager(monkeypatch, mock_client)
+
+        results = manager.invoke_hook(
+            "pre_llm_call",
+            session_id="s1",
+            user_message="hello",
+            conversation_history=[],
+            is_first_turn=True,
+            model="test",
+        )
+
+        assert results == []
+
+    def test_hooks_are_not_coroutines(self, monkeypatch, mock_client):
+        """Hooks must be plain functions, not async — verify invoke_hook
+        doesn't return coroutine objects."""
+        manager = self._setup_plugin_manager(monkeypatch, mock_client)
+
+        results = manager.invoke_hook(
+            "pre_llm_call",
+            session_id="s1",
+            user_message="test",
+            conversation_history=[],
+            is_first_turn=True,
+            model="test",
+        )
+
+        for r in results:
+            assert not asyncio.iscoroutine(r), (
+                "Hook returned a coroutine — hermes invoke_hook is sync and "
+                "will not await it"
+            )
