@@ -2868,7 +2868,8 @@ paths:
         "200":
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/AuditLogListResponse'
           description: Successful Response
         "422":
           content:
@@ -2924,7 +2925,8 @@ paths:
         "200":
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/AuditLogStatsResponse'
           description: Successful Response
         "422":
           content:
@@ -2972,6 +2974,185 @@ components:
       - operation_id
       - status
       title: AsyncOperationSubmitResponse
+    AuditLogEntry:
+      description: A single audit log entry.
+      example:
+        duration_ms: 5
+        request:
+          key: ""
+        metadata:
+          key: ""
+        bank_id: bank_id
+        response:
+          key: ""
+        action: action
+        started_at: started_at
+        id: id
+        transport: transport
+        ended_at: ended_at
+      properties:
+        id:
+          title: Id
+          type: string
+        action:
+          title: Action
+          type: string
+        transport:
+          title: Transport
+          type: string
+        bank_id:
+          nullable: true
+          type: string
+        started_at:
+          nullable: true
+          type: string
+        ended_at:
+          nullable: true
+          type: string
+        duration_ms:
+          nullable: true
+          type: integer
+        request:
+          additionalProperties: {}
+          nullable: true
+        response:
+          additionalProperties: {}
+          nullable: true
+        metadata:
+          additionalProperties: {}
+          title: Metadata
+      required:
+      - action
+      - bank_id
+      - ended_at
+      - id
+      - metadata
+      - request
+      - response
+      - started_at
+      - transport
+      title: AuditLogEntry
+    AuditLogListResponse:
+      description: Response model for list audit logs endpoint.
+      example:
+        total: 0
+        offset: 1
+        bank_id: bank_id
+        limit: 6
+        items:
+        - duration_ms: 5
+          request:
+            key: ""
+          metadata:
+            key: ""
+          bank_id: bank_id
+          response:
+            key: ""
+          action: action
+          started_at: started_at
+          id: id
+          transport: transport
+          ended_at: ended_at
+        - duration_ms: 5
+          request:
+            key: ""
+          metadata:
+            key: ""
+          bank_id: bank_id
+          response:
+            key: ""
+          action: action
+          started_at: started_at
+          id: id
+          transport: transport
+          ended_at: ended_at
+      properties:
+        bank_id:
+          title: Bank Id
+          type: string
+        total:
+          title: Total
+          type: integer
+        limit:
+          title: Limit
+          type: integer
+        offset:
+          title: Offset
+          type: integer
+        items:
+          items:
+            $ref: '#/components/schemas/AuditLogEntry'
+          type: array
+      required:
+      - bank_id
+      - items
+      - limit
+      - offset
+      - total
+      title: AuditLogListResponse
+    AuditLogStatsBucket:
+      description: A single time bucket in audit log stats.
+      example:
+        total: 6
+        time: time
+        actions:
+          key: 0
+      properties:
+        time:
+          title: Time
+          type: string
+        actions:
+          additionalProperties:
+            type: integer
+          title: Actions
+        total:
+          title: Total
+          type: integer
+      required:
+      - actions
+      - time
+      - total
+      title: AuditLogStatsBucket
+    AuditLogStatsResponse:
+      description: Response model for audit log stats endpoint.
+      example:
+        period: period
+        trunc: trunc
+        bank_id: bank_id
+        buckets:
+        - total: 6
+          time: time
+          actions:
+            key: 0
+        - total: 6
+          time: time
+          actions:
+            key: 0
+        start: start
+      properties:
+        bank_id:
+          title: Bank Id
+          type: string
+        period:
+          title: Period
+          type: string
+        trunc:
+          title: Trunc
+          type: string
+        start:
+          title: Start
+          type: string
+        buckets:
+          items:
+            $ref: '#/components/schemas/AuditLogStatsBucket'
+          type: array
+      required:
+      - bank_id
+      - buckets
+      - period
+      - start
+      - trunc
+      title: AuditLogStatsResponse
     BackgroundResponse:
       description: "Response model for background update. Deprecated: use MissionResponse\
         \ instead."

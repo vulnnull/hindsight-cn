@@ -18,6 +18,10 @@ hindsight_client_api/exceptions.py
 hindsight_client_api/models/__init__.py
 hindsight_client_api/models/add_background_request.py
 hindsight_client_api/models/async_operation_submit_response.py
+hindsight_client_api/models/audit_log_entry.py
+hindsight_client_api/models/audit_log_list_response.py
+hindsight_client_api/models/audit_log_stats_bucket.py
+hindsight_client_api/models/audit_log_stats_response.py
 hindsight_client_api/models/background_response.py
 hindsight_client_api/models/bank_config_response.py
 hindsight_client_api/models/bank_config_update.py

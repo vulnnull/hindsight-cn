@@ -41,6 +41,140 @@ export type AsyncOperationSubmitResponse = {
 };
 
 /**
+ * AuditLogEntry
+ *
+ * A single audit log entry.
+ */
+export type AuditLogEntry = {
+  /**
+   * Id
+   */
+  id: string;
+  /**
+   * Action
+   */
+  action: string;
+  /**
+   * Transport
+   */
+  transport: string;
+  /**
+   * Bank Id
+   */
+  bank_id: string | null;
+  /**
+   * Started At
+   */
+  started_at: string | null;
+  /**
+   * Ended At
+   */
+  ended_at: string | null;
+  /**
+   * Duration Ms
+   *
+   * Server-computed duration in milliseconds (started_at → ended_at). Null if not yet completed.
+   */
+  duration_ms?: number | null;
+  /**
+   * Request
+   */
+  request: {
+    [key: string]: unknown;
+  } | null;
+  /**
+   * Response
+   */
+  response: {
+    [key: string]: unknown;
+  } | null;
+  /**
+   * Metadata
+   */
+  metadata: {
+    [key: string]: unknown;
+  };
+};
+
+/**
+ * AuditLogListResponse
+ *
+ * Response model for list audit logs endpoint.
+ */
+export type AuditLogListResponse = {
+  /**
+   * Bank Id
+   */
+  bank_id: string;
+  /**
+   * Total
+   */
+  total: number;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Items
+   */
+  items: Array<AuditLogEntry>;
+};
+
+/**
+ * AuditLogStatsBucket
+ *
+ * A single time bucket in audit log stats.
+ */
+export type AuditLogStatsBucket = {
+  /**
+   * Time
+   */
+  time: string;
+  /**
+   * Actions
+   */
+  actions: {
+    [key: string]: number;
+  };
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
+ * AuditLogStatsResponse
+ *
+ * Response model for audit log stats endpoint.
+ */
+export type AuditLogStatsResponse = {
+  /**
+   * Bank Id
+   */
+  bank_id: string;
+  /**
+   * Period
+   */
+  period: string;
+  /**
+   * Trunc
+   */
+  trunc: string;
+  /**
+   * Start
+   */
+  start: string;
+  /**
+   * Buckets
+   */
+  buckets: Array<AuditLogStatsBucket>;
+};
+
+/**
  * BackgroundResponse
  *
  * Response model for background update. Deprecated: use MissionResponse instead.
@@ -4937,8 +5071,11 @@ export type ListAuditLogsResponses = {
   /**
    * Successful Response
    */
-  200: unknown;
+  200: AuditLogListResponse;
 };
+
+export type ListAuditLogsResponse =
+  ListAuditLogsResponses[keyof ListAuditLogsResponses];
 
 export type AuditLogStatsData = {
   body?: never;
@@ -4984,5 +5121,8 @@ export type AuditLogStatsResponses = {
   /**
    * Successful Response
    */
-  200: unknown;
+  200: AuditLogStatsResponse;
 };
+
+export type AuditLogStatsResponse2 =
+  AuditLogStatsResponses[keyof AuditLogStatsResponses];

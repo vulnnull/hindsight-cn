@@ -947,6 +947,7 @@ Configuration for MCP server endpoints.
 |----------|-------------|---------|
 | `HINDSIGHT_API_MCP_ENABLED` | Enable MCP server at `/mcp/{bank_id}/` | `true` |
 | `HINDSIGHT_API_MCP_ENABLED_TOOLS` | Comma-separated allowlist of MCP tools to expose globally (empty = all tools) | - |
+| `HINDSIGHT_API_MCP_STATELESS` | Use stateless HTTP transport (POST-only). When `false`, enables stateful mode with GET/SSE support for server-initiated messages | `false` |
 | `HINDSIGHT_API_MCP_AUTH_TOKEN` | Bearer token for MCP authentication (optional) | - |
 | `HINDSIGHT_API_MCP_LOCAL_BANK_ID` | Memory bank ID for local MCP | `mcp` |
 | `HINDSIGHT_API_MCP_INSTRUCTIONS` | Additional instructions appended to retain/recall tool descriptions | - |

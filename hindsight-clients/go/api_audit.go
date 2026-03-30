@@ -49,7 +49,7 @@ func (r ApiAuditLogStatsRequest) Authorization(authorization string) ApiAuditLog
 	return r
 }
 
-func (r ApiAuditLogStatsRequest) Execute() (interface{}, *http.Response, error) {
+func (r ApiAuditLogStatsRequest) Execute() (*AuditLogStatsResponse, *http.Response, error) {
 	return r.ApiService.AuditLogStatsExecute(r)
 }
 
@@ -71,13 +71,13 @@ func (a *AuditAPIService) AuditLogStats(ctx context.Context, bankId string) ApiA
 }
 
 // Execute executes the request
-//  @return interface{}
-func (a *AuditAPIService) AuditLogStatsExecute(r ApiAuditLogStatsRequest) (interface{}, *http.Response, error) {
+//  @return AuditLogStatsResponse
+func (a *AuditAPIService) AuditLogStatsExecute(r ApiAuditLogStatsRequest) (*AuditLogStatsResponse, *http.Response, error) {
 	var (
 		localVarHTTPMethod   = http.MethodGet
 		localVarPostBody     interface{}
 		formFiles            []formFile
-		localVarReturnValue  interface{}
+		localVarReturnValue  *AuditLogStatsResponse
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "AuditAPIService.AuditLogStats")
@@ -222,7 +222,7 @@ func (r ApiListAuditLogsRequest) Authorization(authorization string) ApiListAudi
 	return r
 }
 
-func (r ApiListAuditLogsRequest) Execute() (interface{}, *http.Response, error) {
+func (r ApiListAuditLogsRequest) Execute() (*AuditLogListResponse, *http.Response, error) {
 	return r.ApiService.ListAuditLogsExecute(r)
 }
 
@@ -244,13 +244,13 @@ func (a *AuditAPIService) ListAuditLogs(ctx context.Context, bankId string) ApiL
 }
 
 // Execute executes the request
-//  @return interface{}
-func (a *AuditAPIService) ListAuditLogsExecute(r ApiListAuditLogsRequest) (interface{}, *http.Response, error) {
+//  @return AuditLogListResponse
+func (a *AuditAPIService) ListAuditLogsExecute(r ApiListAuditLogsRequest) (*AuditLogListResponse, *http.Response, error) {
 	var (
 		localVarHTTPMethod   = http.MethodGet
 		localVarPostBody     interface{}
 		formFiles            []formFile
-		localVarReturnValue  interface{}
+		localVarReturnValue  *AuditLogListResponse
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "AuditAPIService.ListAuditLogs")

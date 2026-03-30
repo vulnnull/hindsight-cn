@@ -17,8 +17,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
 from pydantic import Field, StrictStr
-from typing import Any, Optional
+from typing import Optional
 from typing_extensions import Annotated
+from hindsight_client_api.models.audit_log_list_response import AuditLogListResponse
+from hindsight_client_api.models.audit_log_stats_response import AuditLogStatsResponse
 
 from hindsight_client_api.api_client import ApiClient, RequestSerialized
 from hindsight_client_api.api_response import ApiResponse
@@ -57,7 +59,7 @@ class AuditApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> object:
+    ) -> AuditLogStatsResponse:
         """Audit log statistics
 
         Get audit log counts grouped by time bucket for charting.
@@ -104,7 +106,7 @@ class AuditApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
+            '200': "AuditLogStatsResponse",
             '422': "HTTPValidationError",
         }
         response_data = await self.api_client.call_api(
@@ -137,7 +139,7 @@ class AuditApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[object]:
+    ) -> ApiResponse[AuditLogStatsResponse]:
         """Audit log statistics
 
         Get audit log counts grouped by time bucket for charting.
@@ -184,7 +186,7 @@ class AuditApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
+            '200': "AuditLogStatsResponse",
             '422': "HTTPValidationError",
         }
         response_data = await self.api_client.call_api(
@@ -264,7 +266,7 @@ class AuditApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
+            '200': "AuditLogStatsResponse",
             '422': "HTTPValidationError",
         }
         response_data = await self.api_client.call_api(
@@ -373,7 +375,7 @@ class AuditApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> object:
+    ) -> AuditLogListResponse:
         """List audit logs
 
         List audit log entries for a bank, ordered by most recent first.
@@ -432,7 +434,7 @@ class AuditApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
+            '200': "AuditLogListResponse",
             '422': "HTTPValidationError",
         }
         response_data = await self.api_client.call_api(
@@ -469,7 +471,7 @@ class AuditApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[object]:
+    ) -> ApiResponse[AuditLogListResponse]:
         """List audit logs
 
         List audit log entries for a bank, ordered by most recent first.
@@ -528,7 +530,7 @@ class AuditApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
+            '200': "AuditLogListResponse",
             '422': "HTTPValidationError",
         }
         response_data = await self.api_client.call_api(
@@ -624,7 +626,7 @@ class AuditApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
+            '200': "AuditLogListResponse",
             '422': "HTTPValidationError",
         }
         response_data = await self.api_client.call_api(

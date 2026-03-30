@@ -4215,7 +4215,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogListResponse"
+                }
               }
             }
           },
@@ -4302,7 +4304,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogStatsResponse"
+                }
               }
             }
           },
@@ -4369,6 +4373,211 @@
           "operation_id": "550e8400-e29b-41d4-a716-446655440000",
           "status": "queued"
         }
+      },
+      "AuditLogEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "transport": {
+            "type": "string",
+            "title": "Transport"
+          },
+          "bank_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms",
+            "description": "Server-computed duration in milliseconds (started_at \u2192 ended_at). Null if not yet completed."
+          },
+          "request": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "action",
+          "transport",
+          "bank_id",
+          "started_at",
+          "ended_at",
+          "request",
+          "response",
+          "metadata"
+        ],
+        "title": "AuditLogEntry",
+        "description": "A single audit log entry."
+      },
+      "AuditLogListResponse": {
+        "properties": {
+          "bank_id": {
+            "type": "string",
+            "title": "Bank Id"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditLogEntry"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bank_id",
+          "total",
+          "limit",
+          "offset",
+          "items"
+        ],
+        "title": "AuditLogListResponse",
+        "description": "Response model for list audit logs endpoint."
+      },
+      "AuditLogStatsBucket": {
+        "properties": {
+          "time": {
+            "type": "string",
+            "title": "Time"
+          },
+          "actions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Actions"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "actions",
+          "total"
+        ],
+        "title": "AuditLogStatsBucket",
+        "description": "A single time bucket in audit log stats."
+      },
+      "AuditLogStatsResponse": {
+        "properties": {
+          "bank_id": {
+            "type": "string",
+            "title": "Bank Id"
+          },
+          "period": {
+            "type": "string",
+            "title": "Period"
+          },
+          "trunc": {
+            "type": "string",
+            "title": "Trunc"
+          },
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/AuditLogStatsBucket"
+            },
+            "type": "array",
+            "title": "Buckets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bank_id",
+          "period",
+          "trunc",
+          "start",
+          "buckets"
+        ],
+        "title": "AuditLogStatsResponse",
+        "description": "Response model for audit log stats endpoint."
       },
       "BackgroundResponse": {
         "properties": {

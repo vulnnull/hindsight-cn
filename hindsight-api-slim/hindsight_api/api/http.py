@@ -5021,12 +5021,55 @@ def _register_routes(app: FastAPI):
 
     # ---- Audit Logs ----
 
+    class AuditLogEntry(BaseModel):
+        """A single audit log entry."""
+
+        id: str
+        action: str
+        transport: str
+        bank_id: str | None
+        started_at: str | None
+        ended_at: str | None
+        duration_ms: int | None = Field(
+            default=None,
+            description="Server-computed duration in milliseconds (started_at → ended_at). Null if not yet completed.",
+        )
+        request: dict[str, Any] | None
+        response: dict[str, Any] | None
+        metadata: dict[str, Any]
+
+    class AuditLogListResponse(BaseModel):
+        """Response model for list audit logs endpoint."""
+
+        bank_id: str
+        total: int
+        limit: int
+        offset: int
+        items: list[AuditLogEntry]
+
+    class AuditLogStatsBucket(BaseModel):
+        """A single time bucket in audit log stats."""
+
+        time: str
+        actions: dict[str, int]
+        total: int
+
+    class AuditLogStatsResponse(BaseModel):
+        """Response model for audit log stats endpoint."""
+
+        bank_id: str
+        period: str
+        trunc: str
+        start: str
+        buckets: list[AuditLogStatsBucket]
+
     @app.get(
         "/v1/default/banks/{bank_id}/audit-logs",
         summary="List audit logs",
         description="List audit log entries for a bank, ordered by most recent first.",
         operation_id="list_audit_logs",
         tags=["Audit"],
+        response_model=AuditLogListResponse,
     )
     async def api_list_audit_logs(
         bank_id: str,
@@ -5103,6 +5146,10 @@ def _register_routes(app: FastAPI):
 
                 items = []
                 for row in rows:
+                    duration_ms = None
+                    if row["started_at"] and row["ended_at"]:
+                        duration_ms = int((row["ended_at"] - row["started_at"]).total_seconds() * 1000)
+
                     items.append(
                         {
                             "id": str(row["id"]),
@@ -5111,6 +5158,7 @@ def _register_routes(app: FastAPI):
                             "bank_id": row["bank_id"],
                             "started_at": row["started_at"].isoformat() if row["started_at"] else None,
                             "ended_at": row["ended_at"].isoformat() if row["ended_at"] else None,
+                            "duration_ms": duration_ms,
                             "request": json.loads(row["request"]) if row["request"] else None,
                             "response": json.loads(row["response"]) if row["response"] else None,
                             "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
@@ -5140,6 +5188,7 @@ def _register_routes(app: FastAPI):
         description="Get audit log counts grouped by time bucket for charting.",
         operation_id="audit_log_stats",
         tags=["Audit"],
+        response_model=AuditLogStatsResponse,
     )
     async def api_audit_log_stats(
         bank_id: str,

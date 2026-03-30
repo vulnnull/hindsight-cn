@@ -43,6 +43,10 @@ from hindsight_client_api.exceptions import ApiException
 # import models into sdk package
 from hindsight_client_api.models.add_background_request import AddBackgroundRequest
 from hindsight_client_api.models.async_operation_submit_response import AsyncOperationSubmitResponse
+from hindsight_client_api.models.audit_log_entry import AuditLogEntry
+from hindsight_client_api.models.audit_log_list_response import AuditLogListResponse
+from hindsight_client_api.models.audit_log_stats_bucket import AuditLogStatsBucket
+from hindsight_client_api.models.audit_log_stats_response import AuditLogStatsResponse
 from hindsight_client_api.models.background_response import BackgroundResponse
 from hindsight_client_api.models.bank_config_response import BankConfigResponse
 from hindsight_client_api.models.bank_config_update import BankConfigUpdate
