@@ -24,6 +24,42 @@ from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES
 from hindsight_api.extensions import OperationValidationError
 from hindsight_api.models import RequestContext
 
+# All tools available in the system (explicit list — no wildcards).
+# Defined here (shared module) to avoid circular imports with api/mcp.py.
+_ALL_TOOLS: frozenset[str] = frozenset(
+    {
+        "retain",
+        "recall",
+        "reflect",
+        "list_banks",
+        "create_bank",
+        "list_mental_models",
+        "get_mental_model",
+        "create_mental_model",
+        "update_mental_model",
+        "delete_mental_model",
+        "refresh_mental_model",
+        "list_directives",
+        "create_directive",
+        "delete_directive",
+        "list_memories",
+        "get_memory",
+        "delete_memory",
+        "list_documents",
+        "get_document",
+        "delete_document",
+        "list_operations",
+        "get_operation",
+        "cancel_operation",
+        "list_tags",
+        "get_bank",
+        "get_bank_stats",
+        "update_bank",
+        "delete_bank",
+        "clear_memories",
+    }
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -305,11 +341,29 @@ def _apply_bank_tool_filtering(mcp: FastMCP, memory: MemoryEngine, config: MCPTo
         if not bank_id:
             return None
         request_context = _get_request_context(config)
+
+        # Layer 1: bank config filter (existing)
         bank_cfg = await memory._config_resolver.get_bank_config(bank_id, request_context)
-        enabled: list[str] | None = bank_cfg.get("mcp_enabled_tools")
-        if enabled is None:
-            return None
-        return set(enabled)
+        bank_tools: list[str] | None = bank_cfg.get("mcp_enabled_tools")
+        enabled: set[str] | None = set(bank_tools) if bank_tools is not None else None
+
+        # Layer 2: operation validator filter
+        validator = memory._operation_validator
+        if validator is not None:
+            candidate = frozenset(enabled) if enabled is not None else _ALL_TOOLS
+            try:
+                filtered = await validator.filter_mcp_tools(bank_id, request_context, candidate)
+            except Exception:
+                logger.warning("filter_mcp_tools raised, returning unfiltered tools", exc_info=True)
+                return enabled
+            if filtered != candidate:
+                # Validator can only narrow, never expand beyond the bank config ceiling.
+                if bank_tools is not None:
+                    enabled = set(filtered) & set(bank_tools)
+                else:
+                    enabled = set(filtered)
+
+        return enabled
 
     if hasattr(mcp, "list_tools"):
         # FastMCP 3.x: wrap list_tools() and get_tool() on the instance

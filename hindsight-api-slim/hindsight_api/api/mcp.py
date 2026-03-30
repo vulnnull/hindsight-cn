@@ -12,43 +12,8 @@ from hindsight_api.config import _get_raw_config
 from hindsight_api.engine.memory_engine import _current_schema
 from hindsight_api.extensions import MCPExtension, load_extension
 from hindsight_api.extensions.tenant import AuthenticationError
-from hindsight_api.mcp_tools import MCPToolsConfig, register_mcp_tools
+from hindsight_api.mcp_tools import _ALL_TOOLS, MCPToolsConfig, register_mcp_tools
 from hindsight_api.models import RequestContext
-
-# All tools available in the system (explicit list — no wildcards)
-_ALL_TOOLS: frozenset[str] = frozenset(
-    {
-        "retain",
-        "recall",
-        "reflect",
-        "list_banks",
-        "create_bank",
-        "list_mental_models",
-        "get_mental_model",
-        "create_mental_model",
-        "update_mental_model",
-        "delete_mental_model",
-        "refresh_mental_model",
-        "list_directives",
-        "create_directive",
-        "delete_directive",
-        "list_memories",
-        "get_memory",
-        "delete_memory",
-        "list_documents",
-        "get_document",
-        "delete_document",
-        "list_operations",
-        "get_operation",
-        "cancel_operation",
-        "list_tags",
-        "get_bank",
-        "get_bank_stats",
-        "update_bank",
-        "delete_bank",
-        "clear_memories",
-    }
-)
 
 # Configure logging from HINDSIGHT_API_LOG_LEVEL environment variable
 _log_level_str = os.environ.get("HINDSIGHT_API_LOG_LEVEL", "info").lower()

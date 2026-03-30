@@ -722,3 +722,28 @@ class OperationValidatorExtension(Extension, ABC):
             BankListResult with the filtered list of banks.
         """
         return BankListResult(banks=ctx.banks)
+
+    async def filter_mcp_tools(
+        self,
+        bank_id: str,
+        request_context: "RequestContext",
+        tools: frozenset[str],
+    ) -> frozenset[str]:
+        """
+        Filter MCP tools visible to this user on this bank.
+
+        Called during tools/list after bank-level mcp_enabled_tools filtering.
+        The input set is already narrowed by bank config — this method can only
+        remove tools, never add ones the bank config excluded.
+
+        Default: return all tools unchanged (no per-user filtering).
+
+        Args:
+            bank_id: Target bank ID (from URL path or header).
+            request_context: Authenticated context with tenant_id set.
+            tools: Tools remaining after bank config filtering.
+
+        Returns:
+            Subset of tools this user should see.
+        """
+        return tools
