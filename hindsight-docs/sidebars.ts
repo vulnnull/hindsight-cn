@@ -192,6 +192,12 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/codex',
+          label: 'OpenAI Codex CLI',
+          customProps: { icon: '/img/icons/terminal.svg' },
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/openclaw',
           label: 'OpenClaw',
           customProps: { icon: '/img/icons/openclaw.png' },
