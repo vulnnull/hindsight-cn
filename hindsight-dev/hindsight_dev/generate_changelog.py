@@ -42,6 +42,7 @@ VALID_INTEGRATIONS = [
     "claude-code",
     "llamaindex",
     "codex",
+    "hermes",
 ]
 
 
@@ -525,6 +526,7 @@ def _get_package_name(integration: str) -> str:
         "claude-code": "hindsight-memory",
         "llamaindex": "hindsight-llamaindex",
         "codex": "hindsight-codex",
+        "hermes": "hindsight-hermes",
     }
     return packages[integration]
 
@@ -551,6 +553,7 @@ def _integration_display_name(integration: str) -> str:
         "claude-code": "Claude Code",
         "llamaindex": "LlamaIndex",
         "codex": "Codex",
+        "hermes": "Hermes",
     }
     return names.get(integration, integration)
 
