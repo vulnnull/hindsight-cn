@@ -1003,7 +1003,7 @@ function TimelineView({
     });
 
     return Object.entries(groups)
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([, a], [, b]) => a.date.getTime() - b.date.getTime())
       .map(([key, { items, date }]) => ({
         key,
         label: getGroupLabel(key, date),
