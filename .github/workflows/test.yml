@@ -3,14 +3,21 @@ name: CI
 on:
   pull_request:
     branches: [ main ]
+  pull_request_target:
+    branches: [ main ]
+    types: [ labeled ]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   detect-changes:
+    # Skip the redundant pull_request_target 'labeled' event when it's not the safe-to-test label
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      github.event.label.name == 'safe-to-test'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
@@ -43,6 +50,9 @@ jobs:
       ci: ${{ steps.filter.outputs.ci }}
     steps:
     - uses: actions/checkout@v6
+      with:
+        # For pull_request_target, checkout the PR head (not the base branch)
+        ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
     - uses: dorny/paths-filter@v3
       id: filter
@@ -113,9 +123,10 @@ jobs:
   build-api-python-versions:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -123,6 +134,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -141,13 +154,16 @@ jobs:
   build-typescript-client:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.clients-ts == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Set up Node.js
       uses: actions/setup-node@v6
@@ -165,13 +181,16 @@ jobs:
   build-openclaw-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-openclaw == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Set up Node.js
       uses: actions/setup-node@v6
@@ -193,13 +212,16 @@ jobs:
   test-claude-code-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-claude-code == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Set up Python
       uses: actions/setup-python@v6
@@ -216,13 +238,16 @@ jobs:
   test-codex-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-codex == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Set up Python
       uses: actions/setup-python@v6
@@ -239,13 +264,16 @@ jobs:
   build-ai-sdk-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-ai-sdk == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Set up Node.js
       uses: actions/setup-node@v6
@@ -267,13 +295,16 @@ jobs:
   test-ai-sdk-integration-deno:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-ai-sdk == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Set up Deno
       uses: denoland/setup-deno@v2
@@ -296,13 +327,16 @@ jobs:
   build-chat-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-chat == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Set up Node.js
       uses: actions/setup-node@v6
@@ -324,14 +358,17 @@ jobs:
   build-control-plane:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.control-plane == 'true' ||
       needs.detect-changes.outputs.clients-ts == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Set up Node.js
       uses: actions/setup-node@v6
@@ -382,13 +419,16 @@ jobs:
   build-docs:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.docs == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Set up Node.js
       uses: actions/setup-node@v6
@@ -406,6 +446,7 @@ jobs:
   test-rust-cli:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.cli == 'true' ||
@@ -420,6 +461,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -532,13 +575,16 @@ jobs:
   lint-helm-chart:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.helm == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install Helm
       uses: azure/setup-helm@v4
@@ -551,6 +597,7 @@ jobs:
   build-docker-images:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.docker == 'true' ||
@@ -588,6 +635,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
@@ -641,6 +690,7 @@ jobs:
   test-api:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.ci == 'true'
@@ -661,6 +711,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -714,6 +766,7 @@ jobs:
   test-python-client:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.clients-python == 'true' ||
@@ -729,6 +782,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -822,6 +877,7 @@ jobs:
   test-typescript-client:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.clients-ts == 'true' ||
@@ -837,6 +893,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -935,6 +993,7 @@ jobs:
   test-typescript-client-deno:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.clients-ts == 'true' ||
@@ -949,6 +1008,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -1054,13 +1115,16 @@ jobs:
   build-rust-cli-arm64:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.cli == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-24.04-arm
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
@@ -1083,6 +1147,7 @@ jobs:
   test-rust-client:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.clients-rust == 'true' ||
@@ -1098,6 +1163,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -1195,6 +1262,7 @@ jobs:
   test-go-client:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.clients-go == 'true' ||
@@ -1210,6 +1278,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -1305,6 +1375,7 @@ jobs:
   test-openclaw-integration:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.integrations-openclaw == 'true' ||
@@ -1321,6 +1392,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -1419,6 +1492,7 @@ jobs:
   test-integration:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.integration-tests == 'true' ||
@@ -1433,6 +1507,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -1522,13 +1598,16 @@ jobs:
   test-ag2-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-ag2 == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -1556,13 +1635,16 @@ jobs:
   test-crewai-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-crewai == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -1590,13 +1672,16 @@ jobs:
   test-litellm-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-litellm == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -1624,13 +1709,16 @@ jobs:
   test-pydantic-ai-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-pydantic-ai == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -1658,13 +1746,16 @@ jobs:
   test-hermes-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-hermes == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -1692,13 +1783,16 @@ jobs:
   test-llamaindex-integration:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.integrations-llamaindex == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -1726,6 +1820,7 @@ jobs:
   test-pip-slim:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.ci == 'true'
@@ -1740,6 +1835,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -1791,6 +1888,7 @@ jobs:
   test-embed:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.embed == 'true' ||
@@ -1804,6 +1902,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -1850,6 +1950,7 @@ jobs:
   test-hindsight-all:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.hindsight-all == 'true' ||
@@ -1867,6 +1968,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -1931,6 +2034,7 @@ jobs:
   test-doc-examples:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.clients-ts == 'true' ||
@@ -1954,6 +2058,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Setup GCP credentials
       run: |
@@ -2080,6 +2186,7 @@ jobs:
   test-upgrade:
     needs: [detect-changes]
     if: >-
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test') ||
       github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.dev == 'true' ||
@@ -2094,6 +2201,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
         fetch-depth: 0  # Full history needed for git clone of tags
 
     - name: Setup GCP credentials
@@ -2161,9 +2269,12 @@ jobs:
         done
 
   verify-generated-files:
+    if: github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -2236,13 +2347,15 @@ jobs:
   check-openapi-compatibility:
     needs: [detect-changes]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request_target' &&
+      (github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.core == 'true' ||
-      needs.detect-changes.outputs.ci == 'true'
+      needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
       with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
         fetch-depth: 0  # Fetch full git history to access base branch
 
     - name: Install uv
