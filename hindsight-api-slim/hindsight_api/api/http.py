@@ -2153,6 +2153,77 @@ def create_app(
 
     app.openapi = _patched_openapi  # type: ignore[assignment]
 
+    # Add unknown parameters detection middleware
+    @app.middleware("http")
+    async def unknown_params_middleware(request, call_next):
+        """Detect unknown query params and body fields, log warning and set response header."""
+        import inspect
+
+        from starlette.routing import Match
+
+        ignored_params: list[str] = []
+
+        # --- Query parameters ---
+        if request.query_params:
+            for route in app.routes:
+                match, _ = route.matches(request.scope)
+                if match == Match.FULL:
+                    endpoint = getattr(route, "endpoint", None)
+                    if endpoint:
+                        sig = inspect.signature(endpoint)
+                        declared = set(sig.parameters.keys())
+                        path_params = set(getattr(route, "param_convertors", {}).keys()) | set(
+                            request.path_params.keys()
+                        )
+                        known_query = declared - path_params
+                        for name in request.query_params:
+                            if name not in known_query and name not in path_params:
+                                ignored_params.append(name)
+                    break
+
+        # --- Body fields ---
+        body_ignored: list[str] = []
+        content_type = request.headers.get("content-type", "")
+        if request.method in ("POST", "PUT", "PATCH") and "application/json" in content_type:
+            try:
+                body_bytes = await request.body()
+                if body_bytes:
+                    body_json = json.loads(body_bytes)
+                    if isinstance(body_json, dict):
+                        for route in app.routes:
+                            match, _ = route.matches(request.scope)
+                            if match == Match.FULL:
+                                endpoint = getattr(route, "endpoint", None)
+                                if endpoint:
+                                    sig = inspect.signature(endpoint)
+                                    for param in sig.parameters.values():
+                                        ann = param.annotation
+                                        if isinstance(ann, type) and issubclass(ann, BaseModel):
+                                            known_fields = set(ann.model_fields.keys())
+                                            for key in body_json:
+                                                if key not in known_fields:
+                                                    body_ignored.append(key)
+                                            break
+                                break
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+
+        all_ignored = ignored_params + body_ignored
+
+        response = await call_next(request)
+
+        if all_ignored:
+            ignored_str = ", ".join(all_ignored)
+            logger.warning(
+                "Unknown parameters ignored: [%s] for %s %s",
+                ignored_str,
+                request.method,
+                request.url.path,
+            )
+            response.headers["X-Ignored-Params"] = ignored_str
+
+        return response
+
     # Add HTTP metrics middleware
     @app.middleware("http")
     async def http_metrics_middleware(request, call_next):
