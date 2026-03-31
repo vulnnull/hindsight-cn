@@ -425,3 +425,23 @@ describe('truncateRecallQuery', () => {
     expect(truncated.length).toBeLessThanOrEqual(180);
   });
 });
+
+// ---------------------------------------------------------------------------
+// waitForReady — CLI mode no-op (initPromise is null before service.start())
+// ---------------------------------------------------------------------------
+
+describe('waitForReady (CLI mode)', () => {
+  it('returns without error when initPromise is null (service.start not called)', async () => {
+    // The module sets up global.__hindsightClient on import.
+    // In test context, service.start() is never called so initPromise remains null.
+    const hindsight = (global as any).__hindsightClient;
+    expect(hindsight).toBeDefined();
+    // Should resolve without throwing
+    await expect(hindsight.waitForReady()).resolves.toBeUndefined();
+  });
+
+  it('getClient returns null when service.start not called', () => {
+    const hindsight = (global as any).__hindsightClient;
+    expect(hindsight.getClient()).toBeNull();
+  });
+});

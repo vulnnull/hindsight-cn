@@ -134,7 +134,7 @@ if (typeof global !== 'undefined') {
       // If initPromise is null, it means service.start() hasn't been called yet
       // (CLI mode, not gateway mode). Hooks should gracefully no-op.
       if (!initPromise) {
-        debug('[Hindsight] waitForReady called but initPromise is null (gateway not started)');
+        log.warn('waitForReady called before service.start() — hooks will no-op (expected in CLI mode)');
         return;
       }
       try {
