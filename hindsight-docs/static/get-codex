@@ -210,13 +210,43 @@ chmod +x "${SCRIPTS_DIR}/retain.py"
 
 print_success "Scripts installed to ${SCRIPTS_DIR}"
 
-# Step 4: Download default settings (don't overwrite existing)
+# Step 4: Download default settings (don't overwrite existing, but update version)
 SETTINGS_DST="${INSTALL_DIR}/settings.json"
 if [ ! -f "${SETTINGS_DST}" ]; then
     download_file "${GITHUB_RAW}/settings.json" "${SETTINGS_DST}"
     print_success "Default settings written to ${SETTINGS_DST}"
 else
-    print_info "Keeping existing settings at ${SETTINGS_DST}"
+    # Merge version and any new keys from upstream into existing settings
+    SETTINGS_TMP="${INSTALL_DIR}/settings.json.new"
+    download_file "${GITHUB_RAW}/settings.json" "${SETTINGS_TMP}"
+    if command -v python3 &> /dev/null; then
+        python3 -c "
+import json, sys
+with open('${SETTINGS_DST}') as f:
+    existing = json.load(f)
+with open('${SETTINGS_TMP}') as f:
+    upstream = json.load(f)
+# Add new keys from upstream (don't overwrite user customizations)
+for key, value in upstream.items():
+    if key not in existing:
+        existing[key] = value
+# Always update version
+existing['version'] = upstream.get('version', existing.get('version', ''))
+with open('${SETTINGS_DST}', 'w') as f:
+    json.dump(existing, f, indent=2)
+    f.write('\n')
+" 2>/dev/null && {
+            rm -f "${SETTINGS_TMP}"
+            NEW_VER=$(python3 -c "import json; print(json.load(open('${SETTINGS_DST}'))['version'])" 2>/dev/null)
+            print_success "Settings updated (v${NEW_VER}), user customizations preserved"
+        } || {
+            rm -f "${SETTINGS_TMP}"
+            print_info "Keeping existing settings at ${SETTINGS_DST}"
+        }
+    else
+        rm -f "${SETTINGS_TMP}"
+        print_info "Keeping existing settings at ${SETTINGS_DST}"
+    fi
 fi
 
 # Step 5: Configure connection
