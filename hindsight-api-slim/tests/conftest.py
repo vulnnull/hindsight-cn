@@ -126,7 +126,7 @@ def llm_config():
     Provide LLM configuration for tests.
     This can be used by tests that need to call LLM directly without memory system.
     """
-    return LLMConfig.for_memory()
+    return LLMConfig.from_env()
 
 
 @pytest.fixture(scope="session")

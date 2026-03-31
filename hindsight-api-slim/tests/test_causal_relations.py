@@ -36,7 +36,7 @@ class TestCausalRelationsValidation:
         """
 
         context = "Personal life update"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         event_date = datetime(2024, 3, 15)
 
         facts, _, usage = await extract_facts_from_text(
@@ -81,7 +81,7 @@ class TestCausalRelationsValidation:
         """
 
         context = "Project update"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         event_date = datetime(2024, 6, 1)
 
         facts, _, _ = await extract_facts_from_text(
@@ -118,7 +118,7 @@ class TestCausalRelationsValidation:
         """
 
         context = "Personal achievement story"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         event_date = datetime(2024, 7, 15)
 
         facts, _, _ = await extract_facts_from_text(
@@ -168,7 +168,7 @@ class TestCausalRelationsValidation:
         """
 
         context = "Business impact analysis"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         event_date = datetime(2024, 4, 1)
 
         facts, _, usage = await extract_facts_from_text(
@@ -205,7 +205,7 @@ class TestCausalRelationsValidation:
         """
 
         context = "Career progression"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         event_date = datetime(2024, 5, 1)
 
         facts, _, _ = await extract_facts_from_text(

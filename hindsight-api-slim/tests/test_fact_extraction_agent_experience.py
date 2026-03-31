@@ -23,7 +23,7 @@ I changed the return type of the `process_request` function from `dict` to `Resp
 After that, I updated the three callers in `api/handlers.py` to destructure the new model fields.
 The type checker was happy after the change but I noticed one test was still using the old dict keys.
 """
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2025, 3, 28),
@@ -50,7 +50,7 @@ The tests were failing with a ConnectionRefusedError on the Redis integration su
 I traced it to the connection pool not being initialized before the first test ran.
 I added a setup fixture that ensures the pool is warmed up, and all 47 tests pass now.
 """
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2025, 3, 28),
@@ -78,7 +78,7 @@ I proposed splitting it into two modules: token_validation.py and session_manage
 The user approved my approach and I started with the token validation logic.
 I discovered that the existing tests were mocking the wrong interface, so I had to rewrite them first.
 """
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2025, 3, 28),
@@ -106,7 +106,7 @@ I migrated our codebase from the old TypeVar approach to the new syntax.
 The migration touched 23 files but was mostly mechanical.
 PEP 695 defines the new type statement that makes generics more readable.
 """
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         facts, _, _ = await extract_facts_from_text(
             text=text,
             event_date=datetime(2025, 3, 28),

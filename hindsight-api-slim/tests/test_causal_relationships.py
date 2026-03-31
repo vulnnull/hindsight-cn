@@ -35,7 +35,7 @@ After searching for weeks, I finally found a cheaper apartment in Brooklyn.
 """
 
         context = "Personal story about housing change"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text, event_date=datetime(2024, 3, 15), context=context, llm_config=llm_config, agent_name="TestUser",
@@ -105,7 +105,7 @@ The renovation took three months and cost $15,000.
 """
 
         context = "Home repair story"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text, event_date=datetime(2024, 6, 1), context=context, llm_config=llm_config, agent_name="TestUser",
@@ -136,7 +136,7 @@ Machine learning fascinated me so much that I changed my career to data science.
 """
 
         context = "Career change story"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text, event_date=datetime(2024, 1, 1), context=context, llm_config=llm_config, agent_name="TestUser",
@@ -164,7 +164,7 @@ The new role enabled me to lead a team of engineers.
 """
 
         context = "Work promotion story"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text, event_date=datetime(2024, 2, 15), context=context, llm_config=llm_config, agent_name="TestUser",
@@ -192,7 +192,7 @@ Reduced spending somewhat affected local businesses.
 """
 
         context = "Economic impact story"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text, event_date=datetime(2024, 4, 1), context=context, llm_config=llm_config, agent_name="TestUser",

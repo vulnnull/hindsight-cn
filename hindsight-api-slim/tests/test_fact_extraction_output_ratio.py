@@ -38,7 +38,7 @@ I ran into my neighbor Sarah who mentioned she's planning a trip to Italy next m
 """
 
         context = "Personal diary entry"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -83,7 +83,7 @@ User: Perfect, I'll make a reservation for Saturday at 7pm.
 """
 
         context = "Restaurant recommendation conversation"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -140,7 +140,7 @@ I edited about 20 photos from my recent trip to the mountains.
 """
 
         context = "Personal blog post"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -205,7 +205,7 @@ I edited about 20 photos from my recent trip to the mountains.
         text = "\n".join([f"{turn['speaker']}: {turn['text']}" for turn in session])
 
         context = f"Conversation between {data['conversation']['speaker_a']} and {data['conversation']['speaker_b']}"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -267,7 +267,7 @@ I'm planning to visit Japan next year.
 """
 
         context = "Personal info"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,

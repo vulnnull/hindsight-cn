@@ -2256,7 +2256,7 @@ If the text contains both Italian and English content, extract ONLY the Italian 
         Il sistema di autenticazione è stato migrato a OAuth 2.0.
         """
 
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -2491,7 +2491,7 @@ async def test_verbatim_extraction_mode():
             "She holds a CKA certification and has 5 years of Kubernetes experience."
         )
 
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         contents = [RetainContent(content=text, event_date=datetime(2024, 3, 10, tzinfo=timezone.utc), context="onboarding notes")]
         facts, chunks, _ = await extract_facts_from_contents(
             contents=contents,

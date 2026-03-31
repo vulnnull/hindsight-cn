@@ -42,7 +42,7 @@ Marcus felt anxious about the upcoming interview.
 """
 
         context = "Personal journal entry"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -75,7 +75,7 @@ The music was so loud I could barely hear myself think.
 """
 
         context = "Personal experience"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -109,7 +109,7 @@ Maybe we should reconsider the timeline.
 """
 
         context = "Team discussion"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -143,7 +143,7 @@ I'm unable to attend the conference due to scheduling conflicts.
 """
 
         context = "Personal profile discussion"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -176,7 +176,7 @@ Unlike last year, we're ahead of schedule.
 """
 
         context = "Project review"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -210,7 +210,7 @@ She's enthusiastic about the opportunity.
 """
 
         context = "Team meeting"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -244,7 +244,7 @@ I'm planning to switch careers because I'm not fulfilled in my current role.
 """
 
         context = "Personal goals discussion"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -282,7 +282,7 @@ Family is the most important thing to her.
 """
 
         context = "Personal values discussion"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -315,7 +315,7 @@ I prefer presenting in person rather than virtually because I can read the room 
 """
 
         context = "Personal reflection"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         event_date = datetime(2024, 11, 13)
 
@@ -373,7 +373,7 @@ I'm planning to visit Tokyo next month.
 """
 
         context = "Personal conversation"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         event_date = datetime(2024, 11, 13)
 
@@ -421,7 +421,7 @@ with a concert surrounded by music, joy and the warm summer breeze.
 """
 
         context = "Conversation between Melanie and Caroline"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
         event_date = datetime(2023, 8, 14, 14, 24)
 
         last_error = None
@@ -496,7 +496,7 @@ It was a beautiful day and I plan to make this a regular habit.
 """
 
         context = "Personal diary"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         event_date = datetime(2024, 11, 13)
 
@@ -547,7 +547,7 @@ It was a beautiful day and I plan to make this a regular habit.
         """Test that relative dates are converted to absolute dates."""
 
         reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=UTC)
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         text = """
         Yesterday I went hiking in Yosemite.
@@ -582,7 +582,7 @@ It was a beautiful day and I plan to make this a regular habit.
         """Test that facts without temporal info are still extracted."""
 
         reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=UTC)
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         text = "Alice works at Google. She loves Python programming."
 
@@ -607,7 +607,7 @@ It was a beautiful day and I plan to make this a regular habit.
         """Test that absolute dates in text are preserved."""
 
         reference_date = datetime(2024, 3, 20, 14, 0, 0, tzinfo=UTC)
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         text = """
         On March 15, 2024, Alice joined Google.
@@ -662,7 +662,7 @@ great time! Every time I see it, I can't help but smile.
 """
 
         context = "Conversation between Deborah and Jolene"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         event_date = datetime(2023, 2, 23)
 
@@ -715,7 +715,7 @@ I've learned so much from it.
 """
 
         context = "Personal update"
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -785,7 +785,7 @@ Jamie: Congratulations! I'd love to read it.
 
         context = "Podcast episode between you (Marcus) and Jamie discussing AI research"
 
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=transcript,
@@ -831,7 +831,7 @@ We presented our findings to the team yesterday.
 
         context = "Personal work log"
 
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=text,
@@ -867,7 +867,7 @@ Jamie: [teasing] We'll see who's right, my Niners pick is solid.
         context = "podcast episode on match prediction of week 10 - Marcus (you) and Jamie - 14 nov"
         agent_name = "Marcus"
 
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         facts, _, _ = await extract_facts_from_text(
             text=transcript,
@@ -929,7 +929,7 @@ so the algorithm learns to box out. See you next week!
 
         context = "Podcast episode between you (Marcus) and Jamie about AI"
 
-        llm_config = LLMConfig.for_memory()
+        llm_config = LLMConfig.from_env()
 
         max_retries = 3
         last_error = None
