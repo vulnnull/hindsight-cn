@@ -3681,7 +3681,7 @@ components:
           title: Max Tokens
           type: integer
         trigger:
-          $ref: '#/components/schemas/MentalModelTrigger'
+          $ref: '#/components/schemas/MentalModelTrigger-Input'
       required:
       - name
       - source_query
@@ -4426,12 +4426,22 @@ components:
           id: id
           trigger:
             refresh_after_consolidation: false
+            tag_groups:
+            - match: any_strict
+              tags:
+              - tags
+              - tags
+            - match: any_strict
+              tags:
+              - tags
+              - tags
             fact_types:
             - world
             - world
             exclude_mental_model_ids:
             - exclude_mental_model_ids
             - exclude_mental_model_ids
+            tags_match: any
             exclude_mental_models: false
           last_refreshed_at: last_refreshed_at
           content: content
@@ -4448,12 +4458,22 @@ components:
           id: id
           trigger:
             refresh_after_consolidation: false
+            tag_groups:
+            - match: any_strict
+              tags:
+              - tags
+              - tags
+            - match: any_strict
+              tags:
+              - tags
+              - tags
             fact_types:
             - world
             - world
             exclude_mental_model_ids:
             - exclude_mental_model_ids
             - exclude_mental_model_ids
+            tags_match: any
             exclude_mental_models: false
           last_refreshed_at: last_refreshed_at
           content: content
@@ -4481,12 +4501,22 @@ components:
         id: id
         trigger:
           refresh_after_consolidation: false
+          tag_groups:
+          - match: any_strict
+            tags:
+            - tags
+            - tags
+          - match: any_strict
+            tags:
+            - tags
+            - tags
           fact_types:
           - world
           - world
           exclude_mental_model_ids:
           - exclude_mental_model_ids
           - exclude_mental_model_ids
+          tags_match: any
           exclude_mental_models: false
         last_refreshed_at: last_refreshed_at
         content: content
@@ -4521,7 +4551,7 @@ components:
           title: Max Tokens
           type: integer
         trigger:
-          $ref: '#/components/schemas/MentalModelTrigger'
+          $ref: '#/components/schemas/MentalModelTrigger-Output'
         last_refreshed_at:
           nullable: true
           type: string
@@ -4538,16 +4568,69 @@ components:
       - name
       - source_query
       title: MentalModelResponse
-    MentalModelTrigger:
+    MentalModelTrigger-Input:
+      description: Trigger settings for a mental model.
+      properties:
+        refresh_after_consolidation:
+          default: false
+          description: "If true, refresh this mental model after observations consolidation\
+            \ (real-time mode)"
+          title: Refresh After Consolidation
+          type: boolean
+        fact_types:
+          items:
+            enum:
+            - world
+            - experience
+            - observation
+            type: string
+          nullable: true
+          type: array
+        exclude_mental_models:
+          default: false
+          description: "If true, exclude all mental models from the reflect loop (skip\
+            \ search_mental_models tool)."
+          title: Exclude Mental Models
+          type: boolean
+        exclude_mental_model_ids:
+          items:
+            type: string
+          nullable: true
+          type: array
+        tags_match:
+          enum:
+          - any
+          - all
+          - any_strict
+          - all_strict
+          nullable: true
+          type: string
+        tag_groups:
+          items:
+            $ref: '#/components/schemas/MentalModelTrigger_Input_tag_groups_inner'
+          nullable: true
+          type: array
+      title: MentalModelTrigger
+    MentalModelTrigger-Output:
       description: Trigger settings for a mental model.
       example:
         refresh_after_consolidation: false
+        tag_groups:
+        - match: any_strict
+          tags:
+          - tags
+          - tags
+        - match: any_strict
+          tags:
+          - tags
+          - tags
         fact_types:
         - world
         - world
         exclude_mental_model_ids:
         - exclude_mental_model_ids
         - exclude_mental_model_ids
+        tags_match: any
         exclude_mental_models: false
       properties:
         refresh_after_consolidation:
@@ -4574,6 +4657,19 @@ components:
         exclude_mental_model_ids:
           items:
             type: string
+          nullable: true
+          type: array
+        tags_match:
+          enum:
+          - any
+          - all
+          - any_strict
+          - all_strict
+          nullable: true
+          type: string
+        tag_groups:
+          items:
+            $ref: '#/components/schemas/MentalModelTrigger_Output_tag_groups_inner'
           nullable: true
           type: array
       title: MentalModelTrigger
@@ -4759,7 +4855,7 @@ components:
           type: string
         tag_groups:
           items:
-            $ref: '#/components/schemas/RecallRequest_tag_groups_inner'
+            $ref: '#/components/schemas/MentalModelTrigger_Input_tag_groups_inner'
           nullable: true
           type: array
       required:
@@ -5081,7 +5177,7 @@ components:
           type: string
         tag_groups:
           items:
-            $ref: '#/components/schemas/RecallRequest_tag_groups_inner'
+            $ref: '#/components/schemas/MentalModelTrigger_Input_tag_groups_inner'
           nullable: true
           type: array
         fact_types:
@@ -5318,18 +5414,33 @@ components:
           title: Max Tokens Per Observation
           type: integer
       title: SourceFactsIncludeOptions
-    TagGroupAnd:
+    TagGroupAnd-Input:
       description: "Compound AND group: all child filters must match."
       properties:
         and:
           items:
-            $ref: '#/components/schemas/RecallRequest_tag_groups_inner'
+            $ref: '#/components/schemas/MentalModelTrigger_Input_tag_groups_inner'
+          type: array
+      required:
+      - and
+      title: TagGroupAnd
+    TagGroupAnd-Output:
+      description: "Compound AND group: all child filters must match."
+      properties:
+        and:
+          items:
+            $ref: '#/components/schemas/MentalModelTrigger_Output_tag_groups_inner'
           type: array
       required:
       - and
       title: TagGroupAnd
     TagGroupLeaf:
       description: "A leaf tag filter: matches memories by tag list and match mode."
+      example:
+        match: any_strict
+        tags:
+        - tags
+        - tags
       properties:
         tags:
           items:
@@ -5347,7 +5458,7 @@ components:
       required:
       - tags
       title: TagGroupLeaf
-    TagGroupNot:
+    TagGroupNot-Input:
       description: "Compound NOT group: child filter must NOT match."
       properties:
         not:
@@ -5355,12 +5466,30 @@ components:
       required:
       - not
       title: TagGroupNot
-    TagGroupOr:
+    TagGroupNot-Output:
+      description: "Compound NOT group: child filter must NOT match."
+      properties:
+        not:
+          $ref: '#/components/schemas/Not_1'
+      required:
+      - not
+      title: TagGroupNot
+    TagGroupOr-Input:
       description: "Compound OR group: at least one child filter must match."
       properties:
         or:
           items:
-            $ref: '#/components/schemas/RecallRequest_tag_groups_inner'
+            $ref: '#/components/schemas/MentalModelTrigger_Input_tag_groups_inner'
+          type: array
+      required:
+      - or
+      title: TagGroupOr
+    TagGroupOr-Output:
+      description: "Compound OR group: at least one child filter must match."
+      properties:
+        or:
+          items:
+            $ref: '#/components/schemas/MentalModelTrigger_Output_tag_groups_inner'
           type: array
       required:
       - or
@@ -5511,7 +5640,7 @@ components:
           nullable: true
           type: array
         trigger:
-          $ref: '#/components/schemas/MentalModelTrigger'
+          $ref: '#/components/schemas/MentalModelTrigger-Input'
       title: UpdateMentalModelRequest
     UpdateWebhookRequest:
       description: Request model for updating a webhook. Only provided fields are
@@ -5870,18 +5999,31 @@ components:
         \ which combinations to use."
       nullable: true
       title: ObservationScopes
-    RecallRequest_tag_groups_inner:
+    MentalModelTrigger_Input_tag_groups_inner:
       anyOf:
       - $ref: '#/components/schemas/TagGroupLeaf'
-      - $ref: '#/components/schemas/TagGroupAnd'
-      - $ref: '#/components/schemas/TagGroupOr'
-      - $ref: '#/components/schemas/TagGroupNot'
+      - $ref: '#/components/schemas/TagGroupAnd-Input'
+      - $ref: '#/components/schemas/TagGroupOr-Input'
+      - $ref: '#/components/schemas/TagGroupNot-Input'
+    MentalModelTrigger_Output_tag_groups_inner:
+      anyOf:
+      - $ref: '#/components/schemas/TagGroupLeaf'
+      - $ref: '#/components/schemas/TagGroupAnd-Output'
+      - $ref: '#/components/schemas/TagGroupOr-Output'
+      - $ref: '#/components/schemas/TagGroupNot-Output'
     Not:
       anyOf:
       - $ref: '#/components/schemas/TagGroupLeaf'
-      - $ref: '#/components/schemas/TagGroupAnd'
-      - $ref: '#/components/schemas/TagGroupOr'
-      - $ref: '#/components/schemas/TagGroupNot'
+      - $ref: '#/components/schemas/TagGroupAnd-Input'
+      - $ref: '#/components/schemas/TagGroupOr-Input'
+      - $ref: '#/components/schemas/TagGroupNot-Input'
+      title: Not
+    Not_1:
+      anyOf:
+      - $ref: '#/components/schemas/TagGroupLeaf'
+      - $ref: '#/components/schemas/TagGroupAnd-Output'
+      - $ref: '#/components/schemas/TagGroupOr-Output'
+      - $ref: '#/components/schemas/TagGroupNot-Output'
       title: Not
     ValidationError_loc_inner:
       anyOf:

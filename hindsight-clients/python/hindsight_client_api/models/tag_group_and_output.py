@@ -22,12 +22,12 @@ from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class TagGroupNot(BaseModel):
+class TagGroupAndOutput(BaseModel):
     """
-    Compound NOT group: child filter must NOT match.
+    Compound AND group: all child filters must match.
     """ # noqa: E501
-    var_not: ModelNot = Field(alias="not")
-    __properties: ClassVar[List[str]] = ["not"]
+    var_and: List[MentalModelTriggerOutputTagGroupsInner] = Field(alias="and")
+    __properties: ClassVar[List[str]] = ["and"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -47,7 +47,7 @@ class TagGroupNot(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of TagGroupNot from a JSON string"""
+        """Create an instance of TagGroupAndOutput from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -68,14 +68,18 @@ class TagGroupNot(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of var_not
-        if self.var_not:
-            _dict['not'] = self.var_not.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of each item in var_and (list)
+        _items = []
+        if self.var_and:
+            for _item_var_and in self.var_and:
+                if _item_var_and:
+                    _items.append(_item_var_and.to_dict())
+            _dict['and'] = _items
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of TagGroupNot from a dict"""
+        """Create an instance of TagGroupAndOutput from a dict"""
         if obj is None:
             return None
 
@@ -83,11 +87,11 @@ class TagGroupNot(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "not": ModelNot.from_dict(obj["not"]) if obj.get("not") is not None else None
+            "and": [MentalModelTriggerOutputTagGroupsInner.from_dict(_item) for _item in obj["and"]] if obj.get("and") is not None else None
         })
         return _obj
 
-from hindsight_client_api.models.model_not import ModelNot
+from hindsight_client_api.models.mental_model_trigger_output_tag_groups_inner import MentalModelTriggerOutputTagGroupsInner
 # TODO: Rewrite to not use raise_errors
-TagGroupNot.model_rebuild(raise_errors=False)
+TagGroupAndOutput.model_rebuild(raise_errors=False)
 

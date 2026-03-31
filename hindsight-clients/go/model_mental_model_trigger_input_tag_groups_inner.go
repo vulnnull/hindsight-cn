@@ -16,8 +16,8 @@ import (
 )
 
 
-// Not struct for Not
-type Not struct {
+// MentalModelTriggerInputTagGroupsInner struct for MentalModelTriggerInputTagGroupsInner
+type MentalModelTriggerInputTagGroupsInner struct {
 	TagGroupAndInput *TagGroupAndInput
 	TagGroupLeaf *TagGroupLeaf
 	TagGroupNotInput *TagGroupNotInput
@@ -25,7 +25,7 @@ type Not struct {
 }
 
 // Unmarshal JSON data into any of the pointers in the struct
-func (dst *Not) UnmarshalJSON(data []byte) error {
+func (dst *MentalModelTriggerInputTagGroupsInner) UnmarshalJSON(data []byte) error {
 	var err error
 	// try to unmarshal JSON data into TagGroupAndInput
 	err = json.Unmarshal(data, &dst.TagGroupAndInput);
@@ -79,11 +79,11 @@ func (dst *Not) UnmarshalJSON(data []byte) error {
 		dst.TagGroupOrInput = nil
 	}
 
-	return fmt.Errorf("data failed to match schemas in anyOf(Not)")
+	return fmt.Errorf("data failed to match schemas in anyOf(MentalModelTriggerInputTagGroupsInner)")
 }
 
 // Marshal data from the first non-nil pointers in the struct to JSON
-func (src *Not) MarshalJSON() ([]byte, error) {
+func (src *MentalModelTriggerInputTagGroupsInner) MarshalJSON() ([]byte, error) {
 	if src.TagGroupAndInput != nil {
 		return json.Marshal(&src.TagGroupAndInput)
 	}
@@ -104,38 +104,38 @@ func (src *Not) MarshalJSON() ([]byte, error) {
 }
 
 
-type NullableNot struct {
-	value *Not
+type NullableMentalModelTriggerInputTagGroupsInner struct {
+	value *MentalModelTriggerInputTagGroupsInner
 	isSet bool
 }
 
-func (v NullableNot) Get() *Not {
+func (v NullableMentalModelTriggerInputTagGroupsInner) Get() *MentalModelTriggerInputTagGroupsInner {
 	return v.value
 }
 
-func (v *NullableNot) Set(val *Not) {
+func (v *NullableMentalModelTriggerInputTagGroupsInner) Set(val *MentalModelTriggerInputTagGroupsInner) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableNot) IsSet() bool {
+func (v NullableMentalModelTriggerInputTagGroupsInner) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableNot) Unset() {
+func (v *NullableMentalModelTriggerInputTagGroupsInner) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableNot(val *Not) *NullableNot {
-	return &NullableNot{value: val, isSet: true}
+func NewNullableMentalModelTriggerInputTagGroupsInner(val *MentalModelTriggerInputTagGroupsInner) *NullableMentalModelTriggerInputTagGroupsInner {
+	return &NullableMentalModelTriggerInputTagGroupsInner{value: val, isSet: true}
 }
 
-func (v NullableNot) MarshalJSON() ([]byte, error) {
+func (v NullableMentalModelTriggerInputTagGroupsInner) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableNot) UnmarshalJSON(src []byte) error {
+func (v *NullableMentalModelTriggerInputTagGroupsInner) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

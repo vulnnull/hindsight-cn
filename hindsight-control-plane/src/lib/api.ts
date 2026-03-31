@@ -73,6 +73,14 @@ export interface AuditStatsResponse {
   buckets: AuditStatsBucket[];
 }
 
+export type TagsMatch = "any" | "all" | "any_strict" | "all_strict";
+
+export type TagGroup =
+  | { tags: string[]; match?: TagsMatch }
+  | { and: TagGroup[] }
+  | { or: TagGroup[] }
+  | { not: TagGroup };
+
 export interface MentalModel {
   id: string;
   bank_id: string;
@@ -86,6 +94,8 @@ export interface MentalModel {
     fact_types?: Array<"world" | "experience" | "observation">;
     exclude_mental_models?: boolean;
     exclude_mental_model_ids?: string[];
+    tags_match?: TagsMatch;
+    tag_groups?: TagGroup[];
   };
   last_refreshed_at: string;
   created_at: string;
@@ -804,6 +814,8 @@ export class ControlPlaneClient {
           fact_types?: Array<"world" | "experience" | "observation">;
           exclude_mental_models?: boolean;
           exclude_mental_model_ids?: string[];
+          tags_match?: TagsMatch;
+          tag_groups?: TagGroup[];
         };
         last_refreshed_at: string;
         created_at: string;
@@ -832,6 +844,8 @@ export class ControlPlaneClient {
         fact_types?: Array<"world" | "experience" | "observation">;
         exclude_mental_models?: boolean;
         exclude_mental_model_ids?: string[];
+        tags_match?: TagsMatch;
+        tag_groups?: TagGroup[];
       };
     }
   ) {
@@ -866,6 +880,8 @@ export class ControlPlaneClient {
         fact_types?: Array<"world" | "experience" | "observation">;
         exclude_mental_models?: boolean;
         exclude_mental_model_ids?: string[];
+        tags_match?: TagsMatch;
+        tag_groups?: TagGroup[];
       };
     }
   ) {
@@ -882,6 +898,8 @@ export class ControlPlaneClient {
         fact_types?: Array<"world" | "experience" | "observation">;
         exclude_mental_models?: boolean;
         exclude_mental_model_ids?: string[];
+        tags_match?: TagsMatch;
+        tag_groups?: TagGroup[];
       };
       last_refreshed_at: string;
       created_at: string;

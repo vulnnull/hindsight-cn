@@ -5470,7 +5470,7 @@
             "default": 2048
           },
           "trigger": {
-            "$ref": "#/components/schemas/MentalModelTrigger",
+            "$ref": "#/components/schemas/MentalModelTrigger-Input",
             "description": "Trigger settings",
             "default": {}
           }
@@ -6728,7 +6728,7 @@
             "default": 2048
           },
           "trigger": {
-            "$ref": "#/components/schemas/MentalModelTrigger",
+            "$ref": "#/components/schemas/MentalModelTrigger-Output",
             "default": {}
           },
           "last_refreshed_at": {
@@ -6778,7 +6778,7 @@
         "title": "MentalModelResponse",
         "description": "Response model for a mental model (stored reflect response)."
       },
-      "MentalModelTrigger": {
+      "MentalModelTrigger-Input": {
         "properties": {
           "refresh_after_consolidation": {
             "type": "boolean",
@@ -6826,6 +6826,152 @@
             ],
             "title": "Exclude Mental Model Ids",
             "description": "Exclude specific mental models by ID from the reflect loop."
+          },
+          "tags_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "any",
+                  "all",
+                  "any_strict",
+                  "all_strict"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags Match",
+            "description": "Override how the model's tags filter memories during refresh. If not set, defaults to 'all_strict' when the model has tags (security isolation) or 'any' when the model has no tags. Set to 'any' to include untagged memories alongside tagged ones during refresh."
+          },
+          "tag_groups": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TagGroupLeaf"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TagGroupAnd-Input"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TagGroupOr-Input"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TagGroupNot-Input"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Groups",
+            "description": "Compound boolean tag expressions to use during refresh instead of the model's own tags. When set, these tag groups are passed to reflect and the model's flat tags are NOT used for filtering. Supports nested and/or/not expressions for complex tag-based scoping."
+          }
+        },
+        "type": "object",
+        "title": "MentalModelTrigger",
+        "description": "Trigger settings for a mental model."
+      },
+      "MentalModelTrigger-Output": {
+        "properties": {
+          "refresh_after_consolidation": {
+            "type": "boolean",
+            "title": "Refresh After Consolidation",
+            "description": "If true, refresh this mental model after observations consolidation (real-time mode)",
+            "default": false
+          },
+          "fact_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "world",
+                    "experience",
+                    "observation"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fact Types",
+            "description": "Filter which fact types are retrieved during reflect. None means all types (world, experience, observation)."
+          },
+          "exclude_mental_models": {
+            "type": "boolean",
+            "title": "Exclude Mental Models",
+            "description": "If true, exclude all mental models from the reflect loop (skip search_mental_models tool).",
+            "default": false
+          },
+          "exclude_mental_model_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude Mental Model Ids",
+            "description": "Exclude specific mental models by ID from the reflect loop."
+          },
+          "tags_match": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "any",
+                  "all",
+                  "any_strict",
+                  "all_strict"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags Match",
+            "description": "Override how the model's tags filter memories during refresh. If not set, defaults to 'all_strict' when the model has tags (security isolation) or 'any' when the model has no tags. Set to 'any' to include untagged memories alongside tagged ones during refresh."
+          },
+          "tag_groups": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TagGroupLeaf"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TagGroupAnd-Output"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TagGroupOr-Output"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TagGroupNot-Output"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Groups",
+            "description": "Compound boolean tag expressions to use during refresh instead of the model's own tags. When set, these tag groups are passed to reflect and the model's flat tags are NOT used for filtering. Supports nested and/or/not expressions for complex tag-based scoping."
           }
         },
         "type": "object",
@@ -7151,13 +7297,13 @@
                       "$ref": "#/components/schemas/TagGroupLeaf"
                     },
                     {
-                      "$ref": "#/components/schemas/TagGroupAnd"
+                      "$ref": "#/components/schemas/TagGroupAnd-Input"
                     },
                     {
-                      "$ref": "#/components/schemas/TagGroupOr"
+                      "$ref": "#/components/schemas/TagGroupOr-Input"
                     },
                     {
-                      "$ref": "#/components/schemas/TagGroupNot"
+                      "$ref": "#/components/schemas/TagGroupNot-Input"
                     }
                   ]
                 },
@@ -7808,13 +7954,13 @@
                       "$ref": "#/components/schemas/TagGroupLeaf"
                     },
                     {
-                      "$ref": "#/components/schemas/TagGroupAnd"
+                      "$ref": "#/components/schemas/TagGroupAnd-Input"
                     },
                     {
-                      "$ref": "#/components/schemas/TagGroupOr"
+                      "$ref": "#/components/schemas/TagGroupOr-Input"
                     },
                     {
-                      "$ref": "#/components/schemas/TagGroupNot"
+                      "$ref": "#/components/schemas/TagGroupNot-Input"
                     }
                   ]
                 },
@@ -8274,7 +8420,7 @@
         "title": "SourceFactsIncludeOptions",
         "description": "Options for including source facts for observation-type results."
       },
-      "TagGroupAnd": {
+      "TagGroupAnd-Input": {
         "properties": {
           "and": {
             "items": {
@@ -8283,13 +8429,43 @@
                   "$ref": "#/components/schemas/TagGroupLeaf"
                 },
                 {
-                  "$ref": "#/components/schemas/TagGroupAnd"
+                  "$ref": "#/components/schemas/TagGroupAnd-Input"
                 },
                 {
-                  "$ref": "#/components/schemas/TagGroupOr"
+                  "$ref": "#/components/schemas/TagGroupOr-Input"
                 },
                 {
-                  "$ref": "#/components/schemas/TagGroupNot"
+                  "$ref": "#/components/schemas/TagGroupNot-Input"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "And"
+          }
+        },
+        "type": "object",
+        "required": [
+          "and"
+        ],
+        "title": "TagGroupAnd",
+        "description": "Compound AND group: all child filters must match."
+      },
+      "TagGroupAnd-Output": {
+        "properties": {
+          "and": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TagGroupLeaf"
+                },
+                {
+                  "$ref": "#/components/schemas/TagGroupAnd-Output"
+                },
+                {
+                  "$ref": "#/components/schemas/TagGroupOr-Output"
+                },
+                {
+                  "$ref": "#/components/schemas/TagGroupNot-Output"
                 }
               ]
             },
@@ -8332,7 +8508,7 @@
         "title": "TagGroupLeaf",
         "description": "A leaf tag filter: matches memories by tag list and match mode."
       },
-      "TagGroupNot": {
+      "TagGroupNot-Input": {
         "properties": {
           "not": {
             "anyOf": [
@@ -8340,13 +8516,13 @@
                 "$ref": "#/components/schemas/TagGroupLeaf"
               },
               {
-                "$ref": "#/components/schemas/TagGroupAnd"
+                "$ref": "#/components/schemas/TagGroupAnd-Input"
               },
               {
-                "$ref": "#/components/schemas/TagGroupOr"
+                "$ref": "#/components/schemas/TagGroupOr-Input"
               },
               {
-                "$ref": "#/components/schemas/TagGroupNot"
+                "$ref": "#/components/schemas/TagGroupNot-Input"
               }
             ],
             "title": "Not"
@@ -8359,7 +8535,34 @@
         "title": "TagGroupNot",
         "description": "Compound NOT group: child filter must NOT match."
       },
-      "TagGroupOr": {
+      "TagGroupNot-Output": {
+        "properties": {
+          "not": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagGroupLeaf"
+              },
+              {
+                "$ref": "#/components/schemas/TagGroupAnd-Output"
+              },
+              {
+                "$ref": "#/components/schemas/TagGroupOr-Output"
+              },
+              {
+                "$ref": "#/components/schemas/TagGroupNot-Output"
+              }
+            ],
+            "title": "Not"
+          }
+        },
+        "type": "object",
+        "required": [
+          "not"
+        ],
+        "title": "TagGroupNot",
+        "description": "Compound NOT group: child filter must NOT match."
+      },
+      "TagGroupOr-Input": {
         "properties": {
           "or": {
             "items": {
@@ -8368,13 +8571,43 @@
                   "$ref": "#/components/schemas/TagGroupLeaf"
                 },
                 {
-                  "$ref": "#/components/schemas/TagGroupAnd"
+                  "$ref": "#/components/schemas/TagGroupAnd-Input"
                 },
                 {
-                  "$ref": "#/components/schemas/TagGroupOr"
+                  "$ref": "#/components/schemas/TagGroupOr-Input"
                 },
                 {
-                  "$ref": "#/components/schemas/TagGroupNot"
+                  "$ref": "#/components/schemas/TagGroupNot-Input"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Or"
+          }
+        },
+        "type": "object",
+        "required": [
+          "or"
+        ],
+        "title": "TagGroupOr",
+        "description": "Compound OR group: at least one child filter must match."
+      },
+      "TagGroupOr-Output": {
+        "properties": {
+          "or": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TagGroupLeaf"
+                },
+                {
+                  "$ref": "#/components/schemas/TagGroupAnd-Output"
+                },
+                {
+                  "$ref": "#/components/schemas/TagGroupOr-Output"
+                },
+                {
+                  "$ref": "#/components/schemas/TagGroupNot-Output"
                 }
               ]
             },
@@ -8634,7 +8867,7 @@
           "trigger": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/MentalModelTrigger"
+                "$ref": "#/components/schemas/MentalModelTrigger-Input"
               },
               {
                 "type": "null"

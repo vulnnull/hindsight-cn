@@ -23,7 +23,7 @@ type UpdateMentalModelRequest struct {
 	SourceQuery NullableString `json:"source_query,omitempty"`
 	MaxTokens NullableInt32 `json:"max_tokens,omitempty"`
 	Tags []string `json:"tags,omitempty"`
-	Trigger NullableMentalModelTrigger `json:"trigger,omitempty"`
+	Trigger NullableMentalModelTriggerInput `json:"trigger,omitempty"`
 }
 
 // NewUpdateMentalModelRequest instantiates a new UpdateMentalModelRequest object
@@ -203,9 +203,9 @@ func (o *UpdateMentalModelRequest) SetTags(v []string) {
 }
 
 // GetTrigger returns the Trigger field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *UpdateMentalModelRequest) GetTrigger() MentalModelTrigger {
+func (o *UpdateMentalModelRequest) GetTrigger() MentalModelTriggerInput {
 	if o == nil || IsNil(o.Trigger.Get()) {
-		var ret MentalModelTrigger
+		var ret MentalModelTriggerInput
 		return ret
 	}
 	return *o.Trigger.Get()
@@ -214,7 +214,7 @@ func (o *UpdateMentalModelRequest) GetTrigger() MentalModelTrigger {
 // GetTriggerOk returns a tuple with the Trigger field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *UpdateMentalModelRequest) GetTriggerOk() (*MentalModelTrigger, bool) {
+func (o *UpdateMentalModelRequest) GetTriggerOk() (*MentalModelTriggerInput, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -230,8 +230,8 @@ func (o *UpdateMentalModelRequest) HasTrigger() bool {
 	return false
 }
 
-// SetTrigger gets a reference to the given NullableMentalModelTrigger and assigns it to the Trigger field.
-func (o *UpdateMentalModelRequest) SetTrigger(v MentalModelTrigger) {
+// SetTrigger gets a reference to the given NullableMentalModelTriggerInput and assigns it to the Trigger field.
+func (o *UpdateMentalModelRequest) SetTrigger(v MentalModelTriggerInput) {
 	o.Trigger.Set(&v)
 }
 // SetTriggerNil sets the value for Trigger to be an explicit nil

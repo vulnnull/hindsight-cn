@@ -17,24 +17,17 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
-from typing_extensions import Annotated
-from hindsight_client_api.models.mental_model_trigger_input import MentalModelTriggerInput
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class CreateMentalModelRequest(BaseModel):
+class TagGroupNotOutput(BaseModel):
     """
-    Request model for creating a mental model.
+    Compound NOT group: child filter must NOT match.
     """ # noqa: E501
-    id: Optional[StrictStr] = None
-    name: StrictStr = Field(description="Human-readable name for the mental model")
-    source_query: StrictStr = Field(description="The query to run to generate content")
-    tags: Optional[List[StrictStr]] = Field(default=None, description="Tags for scoped visibility")
-    max_tokens: Optional[Annotated[int, Field(le=8192, strict=True, ge=256)]] = Field(default=2048, description="Maximum tokens for generated content")
-    trigger: Optional[MentalModelTriggerInput] = Field(default=None, description="Trigger settings")
-    __properties: ClassVar[List[str]] = ["id", "name", "source_query", "tags", "max_tokens", "trigger"]
+    var_not: Not1 = Field(alias="not")
+    __properties: ClassVar[List[str]] = ["not"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -54,7 +47,7 @@ class CreateMentalModelRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of CreateMentalModelRequest from a JSON string"""
+        """Create an instance of TagGroupNotOutput from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -75,19 +68,14 @@ class CreateMentalModelRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of trigger
-        if self.trigger:
-            _dict['trigger'] = self.trigger.to_dict()
-        # set to None if id (nullable) is None
-        # and model_fields_set contains the field
-        if self.id is None and "id" in self.model_fields_set:
-            _dict['id'] = None
-
+        # override the default output from pydantic by calling `to_dict()` of var_not
+        if self.var_not:
+            _dict['not'] = self.var_not.to_dict()
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of CreateMentalModelRequest from a dict"""
+        """Create an instance of TagGroupNotOutput from a dict"""
         if obj is None:
             return None
 
@@ -95,13 +83,11 @@ class CreateMentalModelRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "id": obj.get("id"),
-            "name": obj.get("name"),
-            "source_query": obj.get("source_query"),
-            "tags": obj.get("tags"),
-            "max_tokens": obj.get("max_tokens") if obj.get("max_tokens") is not None else 2048,
-            "trigger": MentalModelTriggerInput.from_dict(obj["trigger"]) if obj.get("trigger") is not None else None
+            "not": Not1.from_dict(obj["not"]) if obj.get("not") is not None else None
         })
         return _obj
 
+from hindsight_client_api.models.not1 import Not1
+# TODO: Rewrite to not use raise_errors
+TagGroupNotOutput.model_rebuild(raise_errors=False)
 

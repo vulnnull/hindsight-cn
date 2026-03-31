@@ -16,36 +16,36 @@ import (
 	"fmt"
 )
 
-// checks if the TagGroupNot type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &TagGroupNot{}
+// checks if the TagGroupNotInput type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &TagGroupNotInput{}
 
-// TagGroupNot Compound NOT group: child filter must NOT match.
-type TagGroupNot struct {
+// TagGroupNotInput Compound NOT group: child filter must NOT match.
+type TagGroupNotInput struct {
 	Not Not `json:"not"`
 }
 
-type _TagGroupNot TagGroupNot
+type _TagGroupNotInput TagGroupNotInput
 
-// NewTagGroupNot instantiates a new TagGroupNot object
+// NewTagGroupNotInput instantiates a new TagGroupNotInput object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewTagGroupNot(not Not) *TagGroupNot {
-	this := TagGroupNot{}
+func NewTagGroupNotInput(not Not) *TagGroupNotInput {
+	this := TagGroupNotInput{}
 	this.Not = not
 	return &this
 }
 
-// NewTagGroupNotWithDefaults instantiates a new TagGroupNot object
+// NewTagGroupNotInputWithDefaults instantiates a new TagGroupNotInput object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewTagGroupNotWithDefaults() *TagGroupNot {
-	this := TagGroupNot{}
+func NewTagGroupNotInputWithDefaults() *TagGroupNotInput {
+	this := TagGroupNotInput{}
 	return &this
 }
 
 // GetNot returns the Not field value
-func (o *TagGroupNot) GetNot() Not {
+func (o *TagGroupNotInput) GetNot() Not {
 	if o == nil {
 		var ret Not
 		return ret
@@ -56,7 +56,7 @@ func (o *TagGroupNot) GetNot() Not {
 
 // GetNotOk returns a tuple with the Not field value
 // and a boolean to check if the value has been set.
-func (o *TagGroupNot) GetNotOk() (*Not, bool) {
+func (o *TagGroupNotInput) GetNotOk() (*Not, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -64,11 +64,11 @@ func (o *TagGroupNot) GetNotOk() (*Not, bool) {
 }
 
 // SetNot sets field value
-func (o *TagGroupNot) SetNot(v Not) {
+func (o *TagGroupNotInput) SetNot(v Not) {
 	o.Not = v
 }
 
-func (o TagGroupNot) MarshalJSON() ([]byte, error) {
+func (o TagGroupNotInput) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -76,13 +76,13 @@ func (o TagGroupNot) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o TagGroupNot) ToMap() (map[string]interface{}, error) {
+func (o TagGroupNotInput) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["not"] = o.Not
 	return toSerialize, nil
 }
 
-func (o *TagGroupNot) UnmarshalJSON(data []byte) (err error) {
+func (o *TagGroupNotInput) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -104,53 +104,53 @@ func (o *TagGroupNot) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varTagGroupNot := _TagGroupNot{}
+	varTagGroupNotInput := _TagGroupNotInput{}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varTagGroupNot)
+	err = decoder.Decode(&varTagGroupNotInput)
 
 	if err != nil {
 		return err
 	}
 
-	*o = TagGroupNot(varTagGroupNot)
+	*o = TagGroupNotInput(varTagGroupNotInput)
 
 	return err
 }
 
-type NullableTagGroupNot struct {
-	value *TagGroupNot
+type NullableTagGroupNotInput struct {
+	value *TagGroupNotInput
 	isSet bool
 }
 
-func (v NullableTagGroupNot) Get() *TagGroupNot {
+func (v NullableTagGroupNotInput) Get() *TagGroupNotInput {
 	return v.value
 }
 
-func (v *NullableTagGroupNot) Set(val *TagGroupNot) {
+func (v *NullableTagGroupNotInput) Set(val *TagGroupNotInput) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableTagGroupNot) IsSet() bool {
+func (v NullableTagGroupNotInput) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableTagGroupNot) Unset() {
+func (v *NullableTagGroupNotInput) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableTagGroupNot(val *TagGroupNot) *NullableTagGroupNot {
-	return &NullableTagGroupNot{value: val, isSet: true}
+func NewNullableTagGroupNotInput(val *TagGroupNotInput) *NullableTagGroupNotInput {
+	return &NullableTagGroupNotInput{value: val, isSet: true}
 }
 
-func (v NullableTagGroupNot) MarshalJSON() ([]byte, error) {
+func (v NullableTagGroupNotInput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableTagGroupNot) UnmarshalJSON(src []byte) error {
+func (v *NullableTagGroupNotInput) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

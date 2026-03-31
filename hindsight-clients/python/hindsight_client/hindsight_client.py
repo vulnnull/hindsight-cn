@@ -960,11 +960,11 @@ class Hindsight:
         Returns:
             CreateMentalModelResponse with operation_id
         """
-        from hindsight_client_api.models import create_mental_model_request, mental_model_trigger
+        from hindsight_client_api.models import create_mental_model_request, mental_model_trigger_input
 
         trigger_obj = None
         if trigger:
-            trigger_obj = mental_model_trigger.MentalModelTrigger(**trigger)
+            trigger_obj = mental_model_trigger_input.MentalModelTriggerInput(**trigger)
 
         request_obj = create_mental_model_request.CreateMentalModelRequest(
             id=id,
@@ -1041,11 +1041,11 @@ class Hindsight:
         Returns:
             MentalModelResponse
         """
-        from hindsight_client_api.models import mental_model_trigger, update_mental_model_request
+        from hindsight_client_api.models import mental_model_trigger_input, update_mental_model_request
 
         trigger_obj = None
         if trigger:
-            trigger_obj = mental_model_trigger.MentalModelTrigger(**trigger)
+            trigger_obj = mental_model_trigger_input.MentalModelTriggerInput(**trigger)
 
         request_obj = update_mental_model_request.UpdateMentalModelRequest(
             name=name,

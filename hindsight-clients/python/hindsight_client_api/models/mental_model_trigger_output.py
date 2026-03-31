@@ -17,29 +17,34 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from hindsight_client_api.models.budget import Budget
-from hindsight_client_api.models.include_options import IncludeOptions
-from hindsight_client_api.models.mental_model_trigger_input_tag_groups_inner import MentalModelTriggerInputTagGroupsInner
+from hindsight_client_api.models.mental_model_trigger_output_tag_groups_inner import MentalModelTriggerOutputTagGroupsInner
 from typing import Optional, Set
 from typing_extensions import Self
 
-class RecallRequest(BaseModel):
+class MentalModelTriggerOutput(BaseModel):
     """
-    Request model for recall endpoint.
+    Trigger settings for a mental model.
     """ # noqa: E501
-    query: StrictStr
-    types: Optional[List[StrictStr]] = None
-    budget: Optional[Budget] = None
-    max_tokens: Optional[StrictInt] = 4096
-    trace: Optional[StrictBool] = False
-    query_timestamp: Optional[StrictStr] = None
-    include: Optional[IncludeOptions] = Field(default=None, description="Options for including additional data (entities are included by default)")
-    tags: Optional[List[StrictStr]] = None
-    tags_match: Optional[StrictStr] = Field(default='any', description="How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).")
-    tag_groups: Optional[List[MentalModelTriggerInputTagGroupsInner]] = None
-    __properties: ClassVar[List[str]] = ["query", "types", "budget", "max_tokens", "trace", "query_timestamp", "include", "tags", "tags_match", "tag_groups"]
+    refresh_after_consolidation: Optional[StrictBool] = Field(default=False, description="If true, refresh this mental model after observations consolidation (real-time mode)")
+    fact_types: Optional[List[StrictStr]] = None
+    exclude_mental_models: Optional[StrictBool] = Field(default=False, description="If true, exclude all mental models from the reflect loop (skip search_mental_models tool).")
+    exclude_mental_model_ids: Optional[List[StrictStr]] = None
+    tags_match: Optional[StrictStr] = None
+    tag_groups: Optional[List[MentalModelTriggerOutputTagGroupsInner]] = None
+    __properties: ClassVar[List[str]] = ["refresh_after_consolidation", "fact_types", "exclude_mental_models", "exclude_mental_model_ids", "tags_match", "tag_groups"]
+
+    @field_validator('fact_types')
+    def fact_types_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        for i in value:
+            if i not in set(['world', 'experience', 'observation']):
+                raise ValueError("each list item must be one of ('world', 'experience', 'observation')")
+        return value
 
     @field_validator('tags_match')
     def tags_match_validate_enum(cls, value):
@@ -69,7 +74,7 @@ class RecallRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of RecallRequest from a JSON string"""
+        """Create an instance of MentalModelTriggerOutput from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -90,9 +95,6 @@ class RecallRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of include
-        if self.include:
-            _dict['include'] = self.include.to_dict()
         # override the default output from pydantic by calling `to_dict()` of each item in tag_groups (list)
         _items = []
         if self.tag_groups:
@@ -100,20 +102,20 @@ class RecallRequest(BaseModel):
                 if _item_tag_groups:
                     _items.append(_item_tag_groups.to_dict())
             _dict['tag_groups'] = _items
-        # set to None if types (nullable) is None
+        # set to None if fact_types (nullable) is None
         # and model_fields_set contains the field
-        if self.types is None and "types" in self.model_fields_set:
-            _dict['types'] = None
+        if self.fact_types is None and "fact_types" in self.model_fields_set:
+            _dict['fact_types'] = None
 
-        # set to None if query_timestamp (nullable) is None
+        # set to None if exclude_mental_model_ids (nullable) is None
         # and model_fields_set contains the field
-        if self.query_timestamp is None and "query_timestamp" in self.model_fields_set:
-            _dict['query_timestamp'] = None
+        if self.exclude_mental_model_ids is None and "exclude_mental_model_ids" in self.model_fields_set:
+            _dict['exclude_mental_model_ids'] = None
 
-        # set to None if tags (nullable) is None
+        # set to None if tags_match (nullable) is None
         # and model_fields_set contains the field
-        if self.tags is None and "tags" in self.model_fields_set:
-            _dict['tags'] = None
+        if self.tags_match is None and "tags_match" in self.model_fields_set:
+            _dict['tags_match'] = None
 
         # set to None if tag_groups (nullable) is None
         # and model_fields_set contains the field
@@ -124,7 +126,7 @@ class RecallRequest(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of RecallRequest from a dict"""
+        """Create an instance of MentalModelTriggerOutput from a dict"""
         if obj is None:
             return None
 
@@ -132,16 +134,12 @@ class RecallRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "query": obj.get("query"),
-            "types": obj.get("types"),
-            "budget": obj.get("budget"),
-            "max_tokens": obj.get("max_tokens") if obj.get("max_tokens") is not None else 4096,
-            "trace": obj.get("trace") if obj.get("trace") is not None else False,
-            "query_timestamp": obj.get("query_timestamp"),
-            "include": IncludeOptions.from_dict(obj["include"]) if obj.get("include") is not None else None,
-            "tags": obj.get("tags"),
-            "tags_match": obj.get("tags_match") if obj.get("tags_match") is not None else 'any',
-            "tag_groups": [MentalModelTriggerInputTagGroupsInner.from_dict(_item) for _item in obj["tag_groups"]] if obj.get("tag_groups") is not None else None
+            "refresh_after_consolidation": obj.get("refresh_after_consolidation") if obj.get("refresh_after_consolidation") is not None else False,
+            "fact_types": obj.get("fact_types"),
+            "exclude_mental_models": obj.get("exclude_mental_models") if obj.get("exclude_mental_models") is not None else False,
+            "exclude_mental_model_ids": obj.get("exclude_mental_model_ids"),
+            "tags_match": obj.get("tags_match"),
+            "tag_groups": [MentalModelTriggerOutputTagGroupsInner.from_dict(_item) for _item in obj["tag_groups"]] if obj.get("tag_groups") is not None else None
         })
         return _obj
 

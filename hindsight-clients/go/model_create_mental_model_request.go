@@ -31,7 +31,7 @@ type CreateMentalModelRequest struct {
 	// Maximum tokens for generated content
 	MaxTokens *int32 `json:"max_tokens,omitempty"`
 	// Trigger settings
-	Trigger *MentalModelTrigger `json:"trigger,omitempty"`
+	Trigger *MentalModelTriggerInput `json:"trigger,omitempty"`
 }
 
 type _CreateMentalModelRequest CreateMentalModelRequest
@@ -214,9 +214,9 @@ func (o *CreateMentalModelRequest) SetMaxTokens(v int32) {
 }
 
 // GetTrigger returns the Trigger field value if set, zero value otherwise.
-func (o *CreateMentalModelRequest) GetTrigger() MentalModelTrigger {
+func (o *CreateMentalModelRequest) GetTrigger() MentalModelTriggerInput {
 	if o == nil || IsNil(o.Trigger) {
-		var ret MentalModelTrigger
+		var ret MentalModelTriggerInput
 		return ret
 	}
 	return *o.Trigger
@@ -224,7 +224,7 @@ func (o *CreateMentalModelRequest) GetTrigger() MentalModelTrigger {
 
 // GetTriggerOk returns a tuple with the Trigger field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *CreateMentalModelRequest) GetTriggerOk() (*MentalModelTrigger, bool) {
+func (o *CreateMentalModelRequest) GetTriggerOk() (*MentalModelTriggerInput, bool) {
 	if o == nil || IsNil(o.Trigger) {
 		return nil, false
 	}
@@ -240,8 +240,8 @@ func (o *CreateMentalModelRequest) HasTrigger() bool {
 	return false
 }
 
-// SetTrigger gets a reference to the given MentalModelTrigger and assigns it to the Trigger field.
-func (o *CreateMentalModelRequest) SetTrigger(v MentalModelTrigger) {
+// SetTrigger gets a reference to the given MentalModelTriggerInput and assigns it to the Trigger field.
+func (o *CreateMentalModelRequest) SetTrigger(v MentalModelTriggerInput) {
 	o.Trigger = &v
 }
 

@@ -24,26 +24,26 @@ from typing import Union, Any, List, Set, TYPE_CHECKING, Optional, Dict
 from typing_extensions import Literal, Self
 from pydantic import Field
 
-RECALLREQUESTTAGGROUPSINNER_ANY_OF_SCHEMAS = ["TagGroupAnd", "TagGroupLeaf", "TagGroupNot", "TagGroupOr"]
+MENTALMODELTRIGGEROUTPUTTAGGROUPSINNER_ANY_OF_SCHEMAS = ["TagGroupAndOutput", "TagGroupLeaf", "TagGroupNotOutput", "TagGroupOrOutput"]
 
-class RecallRequestTagGroupsInner(BaseModel):
+class MentalModelTriggerOutputTagGroupsInner(BaseModel):
     """
-    RecallRequestTagGroupsInner
+    MentalModelTriggerOutputTagGroupsInner
     """
 
     # data type: TagGroupLeaf
     anyof_schema_1_validator: Optional[TagGroupLeaf] = None
-    # data type: TagGroupAnd
-    anyof_schema_2_validator: Optional[TagGroupAnd] = None
-    # data type: TagGroupOr
-    anyof_schema_3_validator: Optional[TagGroupOr] = None
-    # data type: TagGroupNot
-    anyof_schema_4_validator: Optional[TagGroupNot] = None
+    # data type: TagGroupAndOutput
+    anyof_schema_2_validator: Optional[TagGroupAndOutput] = None
+    # data type: TagGroupOrOutput
+    anyof_schema_3_validator: Optional[TagGroupOrOutput] = None
+    # data type: TagGroupNotOutput
+    anyof_schema_4_validator: Optional[TagGroupNotOutput] = None
     if TYPE_CHECKING:
-        actual_instance: Optional[Union[TagGroupAnd, TagGroupLeaf, TagGroupNot, TagGroupOr]] = None
+        actual_instance: Optional[Union[TagGroupAndOutput, TagGroupLeaf, TagGroupNotOutput, TagGroupOrOutput]] = None
     else:
         actual_instance: Any = None
-    any_of_schemas: Set[str] = { "TagGroupAnd", "TagGroupLeaf", "TagGroupNot", "TagGroupOr" }
+    any_of_schemas: Set[str] = { "TagGroupAndOutput", "TagGroupLeaf", "TagGroupNotOutput", "TagGroupOrOutput" }
 
     model_config = {
         "validate_assignment": True,
@@ -62,7 +62,7 @@ class RecallRequestTagGroupsInner(BaseModel):
 
     @field_validator('actual_instance')
     def actual_instance_must_validate_anyof(cls, v):
-        instance = RecallRequestTagGroupsInner.model_construct()
+        instance = MentalModelTriggerOutputTagGroupsInner.model_construct()
         error_messages = []
         # validate data type: TagGroupLeaf
         if not isinstance(v, TagGroupLeaf):
@@ -70,27 +70,27 @@ class RecallRequestTagGroupsInner(BaseModel):
         else:
             return v
 
-        # validate data type: TagGroupAnd
-        if not isinstance(v, TagGroupAnd):
-            error_messages.append(f"Error! Input type `{type(v)}` is not `TagGroupAnd`")
+        # validate data type: TagGroupAndOutput
+        if not isinstance(v, TagGroupAndOutput):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `TagGroupAndOutput`")
         else:
             return v
 
-        # validate data type: TagGroupOr
-        if not isinstance(v, TagGroupOr):
-            error_messages.append(f"Error! Input type `{type(v)}` is not `TagGroupOr`")
+        # validate data type: TagGroupOrOutput
+        if not isinstance(v, TagGroupOrOutput):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `TagGroupOrOutput`")
         else:
             return v
 
-        # validate data type: TagGroupNot
-        if not isinstance(v, TagGroupNot):
-            error_messages.append(f"Error! Input type `{type(v)}` is not `TagGroupNot`")
+        # validate data type: TagGroupNotOutput
+        if not isinstance(v, TagGroupNotOutput):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `TagGroupNotOutput`")
         else:
             return v
 
         if error_messages:
             # no match
-            raise ValueError("No match found when setting the actual_instance in RecallRequestTagGroupsInner with anyOf schemas: TagGroupAnd, TagGroupLeaf, TagGroupNot, TagGroupOr. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting the actual_instance in MentalModelTriggerOutputTagGroupsInner with anyOf schemas: TagGroupAndOutput, TagGroupLeaf, TagGroupNotOutput, TagGroupOrOutput. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -109,28 +109,28 @@ class RecallRequestTagGroupsInner(BaseModel):
             return instance
         except (ValidationError, ValueError) as e:
              error_messages.append(str(e))
-        # anyof_schema_2_validator: Optional[TagGroupAnd] = None
+        # anyof_schema_2_validator: Optional[TagGroupAndOutput] = None
         try:
-            instance.actual_instance = TagGroupAnd.from_json(json_str)
+            instance.actual_instance = TagGroupAndOutput.from_json(json_str)
             return instance
         except (ValidationError, ValueError) as e:
              error_messages.append(str(e))
-        # anyof_schema_3_validator: Optional[TagGroupOr] = None
+        # anyof_schema_3_validator: Optional[TagGroupOrOutput] = None
         try:
-            instance.actual_instance = TagGroupOr.from_json(json_str)
+            instance.actual_instance = TagGroupOrOutput.from_json(json_str)
             return instance
         except (ValidationError, ValueError) as e:
              error_messages.append(str(e))
-        # anyof_schema_4_validator: Optional[TagGroupNot] = None
+        # anyof_schema_4_validator: Optional[TagGroupNotOutput] = None
         try:
-            instance.actual_instance = TagGroupNot.from_json(json_str)
+            instance.actual_instance = TagGroupNotOutput.from_json(json_str)
             return instance
         except (ValidationError, ValueError) as e:
              error_messages.append(str(e))
 
         if error_messages:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into RecallRequestTagGroupsInner with anyOf schemas: TagGroupAnd, TagGroupLeaf, TagGroupNot, TagGroupOr. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into MentalModelTriggerOutputTagGroupsInner with anyOf schemas: TagGroupAndOutput, TagGroupLeaf, TagGroupNotOutput, TagGroupOrOutput. Details: " + ", ".join(error_messages))
         else:
             return instance
 
@@ -144,7 +144,7 @@ class RecallRequestTagGroupsInner(BaseModel):
         else:
             return json.dumps(self.actual_instance)
 
-    def to_dict(self) -> Optional[Union[Dict[str, Any], TagGroupAnd, TagGroupLeaf, TagGroupNot, TagGroupOr]]:
+    def to_dict(self) -> Optional[Union[Dict[str, Any], TagGroupAndOutput, TagGroupLeaf, TagGroupNotOutput, TagGroupOrOutput]]:
         """Returns the dict representation of the actual instance"""
         if self.actual_instance is None:
             return None
@@ -158,9 +158,9 @@ class RecallRequestTagGroupsInner(BaseModel):
         """Returns the string representation of the actual instance"""
         return pprint.pformat(self.model_dump())
 
-from hindsight_client_api.models.tag_group_and import TagGroupAnd
-from hindsight_client_api.models.tag_group_not import TagGroupNot
-from hindsight_client_api.models.tag_group_or import TagGroupOr
+from hindsight_client_api.models.tag_group_and_output import TagGroupAndOutput
+from hindsight_client_api.models.tag_group_not_output import TagGroupNotOutput
+from hindsight_client_api.models.tag_group_or_output import TagGroupOrOutput
 # TODO: Rewrite to not use raise_errors
-RecallRequestTagGroupsInner.model_rebuild(raise_errors=False)
+MentalModelTriggerOutputTagGroupsInner.model_rebuild(raise_errors=False)
 

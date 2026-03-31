@@ -16,6 +16,7 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -224,6 +225,42 @@ def _get_tiktoken_encoding():
     if _TIKTOKEN_ENCODING is None:
         _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
     return _TIKTOKEN_ENCODING
+
+
+@dataclass(frozen=True)
+class RefreshTagFiltering:
+    """Resolved tag filtering parameters for mental model refresh."""
+
+    tags: list[str] | None
+    tags_match: TagsMatch
+    tag_groups: list[TagGroup] | None
+
+
+def _resolve_refresh_tag_filtering(
+    model_tags: list[str] | None,
+    trigger_data: dict[str, Any],
+) -> RefreshTagFiltering:
+    """Resolve tag filtering parameters for mental model refresh.
+
+    Takes raw trigger dict from DB (JSONB with no fixed schema guarantee)
+    and resolves the tag filtering to use during reflect.
+
+    Priority:
+    - If trigger has tag_groups, use those (overrides flat tags entirely)
+    - If trigger has tags_match, use model's tags with that match mode
+    - Otherwise default to all_strict when tags present (security isolation)
+    """
+    trigger_tag_groups = trigger_data.get("tag_groups")
+    if trigger_tag_groups is not None:
+        from pydantic import TypeAdapter
+
+        adapter = TypeAdapter(TagGroup)
+        parsed = [adapter.validate_python(tg) for tg in trigger_tag_groups]
+        return RefreshTagFiltering(tags=None, tags_match="any", tag_groups=parsed)
+
+    trigger_tags_match = trigger_data.get("tags_match")
+    tags_match: TagsMatch = trigger_tags_match if trigger_tags_match else ("all_strict" if model_tags else "any")
+    return RefreshTagFiltering(tags=model_tags, tags_match=tags_match, tag_groups=None)
 
 
 class MemoryEngine(MemoryEngineInterface):
@@ -908,17 +945,13 @@ class MemoryEngine(MemoryEngineInterface):
 
         source_query = mental_model["source_query"]
 
-        # SECURITY: If the mental model has tags, pass them to reflect with "all_strict" matching
-        # to ensure it can only access other mental models/memories with the SAME tags.
-        # This prevents cross-tenant/cross-user information leakage by excluding untagged content.
-        tags = mental_model.get("tags")
-        tags_match = "all_strict" if tags else "any"
-
         # Read reflect options from trigger (if stored)
         trigger_data = mental_model.get("trigger") or {}
         fact_types = trigger_data.get("fact_types")
         exclude_mental_models = trigger_data.get("exclude_mental_models", False)
         stored_exclude_ids: list[str] = trigger_data.get("exclude_mental_model_ids") or []
+
+        tag_filtering = _resolve_refresh_tag_filtering(mental_model.get("tags"), trigger_data)
 
         # Run reflect to generate new content, excluding the mental model being refreshed
         # Always add self to excluded IDs to prevent circular reference
@@ -926,8 +959,9 @@ class MemoryEngine(MemoryEngineInterface):
             bank_id=bank_id,
             query=source_query,
             request_context=internal_context,
-            tags=tags,
-            tags_match=tags_match,
+            tags=tag_filtering.tags,
+            tags_match=tag_filtering.tags_match,
+            tag_groups=tag_filtering.tag_groups,
             fact_types=fact_types,
             exclude_mental_models=exclude_mental_models,
             exclude_mental_model_ids=list({*stored_exclude_ids, mental_model_id}),
@@ -6581,17 +6615,13 @@ class MemoryEngine(MemoryEngineInterface):
 
         # Create parent span for mental model refresh operation
         with create_operation_span("mental_model_refresh", bank_id):
-            # SECURITY: If the mental model has tags, pass them to reflect with "all_strict" matching
-            # to ensure it can only access other mental models/memories with the SAME tags.
-            # This prevents cross-tenant/cross-user information leakage by excluding untagged content.
-            tags = mental_model.get("tags")
-            tags_match = "all_strict" if tags else "any"
-
             # Read reflect options from trigger (if stored)
             trigger_data = mental_model.get("trigger") or {}
             fact_types = trigger_data.get("fact_types")
             exclude_mental_models = trigger_data.get("exclude_mental_models", False)
             stored_exclude_ids: list[str] = trigger_data.get("exclude_mental_model_ids") or []
+
+            tag_filtering = _resolve_refresh_tag_filtering(mental_model.get("tags"), trigger_data)
 
             # Run reflect with the source query, excluding the mental model being refreshed
             # Skip creating a nested "hindsight.reflect" span since we already have "hindsight.mental_model_refresh"
@@ -6599,8 +6629,9 @@ class MemoryEngine(MemoryEngineInterface):
                 bank_id=bank_id,
                 query=mental_model["source_query"],
                 request_context=request_context,
-                tags=tags,
-                tags_match=tags_match,
+                tags=tag_filtering.tags,
+                tags_match=tag_filtering.tags_match,
+                tag_groups=tag_filtering.tag_groups,
                 fact_types=fact_types,
                 exclude_mental_models=exclude_mental_models,
                 exclude_mental_model_ids=list({*stored_exclude_ids, mental_model_id}),

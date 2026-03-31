@@ -16,38 +16,38 @@ import (
 	"fmt"
 )
 
-// checks if the TagGroupOr type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &TagGroupOr{}
+// checks if the TagGroupOrOutput type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &TagGroupOrOutput{}
 
-// TagGroupOr Compound OR group: at least one child filter must match.
-type TagGroupOr struct {
-	Or []RecallRequestTagGroupsInner `json:"or"`
+// TagGroupOrOutput Compound OR group: at least one child filter must match.
+type TagGroupOrOutput struct {
+	Or []MentalModelTriggerOutputTagGroupsInner `json:"or"`
 }
 
-type _TagGroupOr TagGroupOr
+type _TagGroupOrOutput TagGroupOrOutput
 
-// NewTagGroupOr instantiates a new TagGroupOr object
+// NewTagGroupOrOutput instantiates a new TagGroupOrOutput object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewTagGroupOr(or []RecallRequestTagGroupsInner) *TagGroupOr {
-	this := TagGroupOr{}
+func NewTagGroupOrOutput(or []MentalModelTriggerOutputTagGroupsInner) *TagGroupOrOutput {
+	this := TagGroupOrOutput{}
 	this.Or = or
 	return &this
 }
 
-// NewTagGroupOrWithDefaults instantiates a new TagGroupOr object
+// NewTagGroupOrOutputWithDefaults instantiates a new TagGroupOrOutput object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewTagGroupOrWithDefaults() *TagGroupOr {
-	this := TagGroupOr{}
+func NewTagGroupOrOutputWithDefaults() *TagGroupOrOutput {
+	this := TagGroupOrOutput{}
 	return &this
 }
 
 // GetOr returns the Or field value
-func (o *TagGroupOr) GetOr() []RecallRequestTagGroupsInner {
+func (o *TagGroupOrOutput) GetOr() []MentalModelTriggerOutputTagGroupsInner {
 	if o == nil {
-		var ret []RecallRequestTagGroupsInner
+		var ret []MentalModelTriggerOutputTagGroupsInner
 		return ret
 	}
 
@@ -56,7 +56,7 @@ func (o *TagGroupOr) GetOr() []RecallRequestTagGroupsInner {
 
 // GetOrOk returns a tuple with the Or field value
 // and a boolean to check if the value has been set.
-func (o *TagGroupOr) GetOrOk() ([]RecallRequestTagGroupsInner, bool) {
+func (o *TagGroupOrOutput) GetOrOk() ([]MentalModelTriggerOutputTagGroupsInner, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -64,11 +64,11 @@ func (o *TagGroupOr) GetOrOk() ([]RecallRequestTagGroupsInner, bool) {
 }
 
 // SetOr sets field value
-func (o *TagGroupOr) SetOr(v []RecallRequestTagGroupsInner) {
+func (o *TagGroupOrOutput) SetOr(v []MentalModelTriggerOutputTagGroupsInner) {
 	o.Or = v
 }
 
-func (o TagGroupOr) MarshalJSON() ([]byte, error) {
+func (o TagGroupOrOutput) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -76,13 +76,13 @@ func (o TagGroupOr) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o TagGroupOr) ToMap() (map[string]interface{}, error) {
+func (o TagGroupOrOutput) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["or"] = o.Or
 	return toSerialize, nil
 }
 
-func (o *TagGroupOr) UnmarshalJSON(data []byte) (err error) {
+func (o *TagGroupOrOutput) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -104,53 +104,53 @@ func (o *TagGroupOr) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varTagGroupOr := _TagGroupOr{}
+	varTagGroupOrOutput := _TagGroupOrOutput{}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varTagGroupOr)
+	err = decoder.Decode(&varTagGroupOrOutput)
 
 	if err != nil {
 		return err
 	}
 
-	*o = TagGroupOr(varTagGroupOr)
+	*o = TagGroupOrOutput(varTagGroupOrOutput)
 
 	return err
 }
 
-type NullableTagGroupOr struct {
-	value *TagGroupOr
+type NullableTagGroupOrOutput struct {
+	value *TagGroupOrOutput
 	isSet bool
 }
 
-func (v NullableTagGroupOr) Get() *TagGroupOr {
+func (v NullableTagGroupOrOutput) Get() *TagGroupOrOutput {
 	return v.value
 }
 
-func (v *NullableTagGroupOr) Set(val *TagGroupOr) {
+func (v *NullableTagGroupOrOutput) Set(val *TagGroupOrOutput) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableTagGroupOr) IsSet() bool {
+func (v NullableTagGroupOrOutput) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableTagGroupOr) Unset() {
+func (v *NullableTagGroupOrOutput) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableTagGroupOr(val *TagGroupOr) *NullableTagGroupOr {
-	return &NullableTagGroupOr{value: val, isSet: true}
+func NewNullableTagGroupOrOutput(val *TagGroupOrOutput) *NullableTagGroupOrOutput {
+	return &NullableTagGroupOrOutput{value: val, isSet: true}
 }
 
-func (v NullableTagGroupOr) MarshalJSON() ([]byte, error) {
+func (v NullableTagGroupOrOutput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableTagGroupOr) UnmarshalJSON(src []byte) error {
+func (v *NullableTagGroupOrOutput) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

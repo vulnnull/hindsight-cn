@@ -29,7 +29,7 @@ type MentalModelResponse struct {
 	Content string `json:"content"`
 	Tags []string `json:"tags,omitempty"`
 	MaxTokens *int32 `json:"max_tokens,omitempty"`
-	Trigger *MentalModelTrigger `json:"trigger,omitempty"`
+	Trigger *MentalModelTriggerOutput `json:"trigger,omitempty"`
 	LastRefreshedAt NullableString `json:"last_refreshed_at,omitempty"`
 	CreatedAt NullableString `json:"created_at,omitempty"`
 	ReflectResponse map[string]interface{} `json:"reflect_response,omitempty"`
@@ -248,9 +248,9 @@ func (o *MentalModelResponse) SetMaxTokens(v int32) {
 }
 
 // GetTrigger returns the Trigger field value if set, zero value otherwise.
-func (o *MentalModelResponse) GetTrigger() MentalModelTrigger {
+func (o *MentalModelResponse) GetTrigger() MentalModelTriggerOutput {
 	if o == nil || IsNil(o.Trigger) {
-		var ret MentalModelTrigger
+		var ret MentalModelTriggerOutput
 		return ret
 	}
 	return *o.Trigger
@@ -258,7 +258,7 @@ func (o *MentalModelResponse) GetTrigger() MentalModelTrigger {
 
 // GetTriggerOk returns a tuple with the Trigger field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *MentalModelResponse) GetTriggerOk() (*MentalModelTrigger, bool) {
+func (o *MentalModelResponse) GetTriggerOk() (*MentalModelTriggerOutput, bool) {
 	if o == nil || IsNil(o.Trigger) {
 		return nil, false
 	}
@@ -274,8 +274,8 @@ func (o *MentalModelResponse) HasTrigger() bool {
 	return false
 }
 
-// SetTrigger gets a reference to the given MentalModelTrigger and assigns it to the Trigger field.
-func (o *MentalModelResponse) SetTrigger(v MentalModelTrigger) {
+// SetTrigger gets a reference to the given MentalModelTriggerOutput and assigns it to the Trigger field.
+func (o *MentalModelResponse) SetTrigger(v MentalModelTriggerOutput) {
 	o.Trigger = &v
 }
 

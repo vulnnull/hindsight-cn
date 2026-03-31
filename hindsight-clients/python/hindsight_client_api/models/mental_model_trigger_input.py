@@ -19,10 +19,11 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
+from hindsight_client_api.models.mental_model_trigger_input_tag_groups_inner import MentalModelTriggerInputTagGroupsInner
 from typing import Optional, Set
 from typing_extensions import Self
 
-class MentalModelTrigger(BaseModel):
+class MentalModelTriggerInput(BaseModel):
     """
     Trigger settings for a mental model.
     """ # noqa: E501
@@ -30,7 +31,9 @@ class MentalModelTrigger(BaseModel):
     fact_types: Optional[List[StrictStr]] = None
     exclude_mental_models: Optional[StrictBool] = Field(default=False, description="If true, exclude all mental models from the reflect loop (skip search_mental_models tool).")
     exclude_mental_model_ids: Optional[List[StrictStr]] = None
-    __properties: ClassVar[List[str]] = ["refresh_after_consolidation", "fact_types", "exclude_mental_models", "exclude_mental_model_ids"]
+    tags_match: Optional[StrictStr] = None
+    tag_groups: Optional[List[MentalModelTriggerInputTagGroupsInner]] = None
+    __properties: ClassVar[List[str]] = ["refresh_after_consolidation", "fact_types", "exclude_mental_models", "exclude_mental_model_ids", "tags_match", "tag_groups"]
 
     @field_validator('fact_types')
     def fact_types_validate_enum(cls, value):
@@ -41,6 +44,16 @@ class MentalModelTrigger(BaseModel):
         for i in value:
             if i not in set(['world', 'experience', 'observation']):
                 raise ValueError("each list item must be one of ('world', 'experience', 'observation')")
+        return value
+
+    @field_validator('tags_match')
+    def tags_match_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        if value not in set(['any', 'all', 'any_strict', 'all_strict']):
+            raise ValueError("must be one of enum values ('any', 'all', 'any_strict', 'all_strict')")
         return value
 
     model_config = ConfigDict(
@@ -61,7 +74,7 @@ class MentalModelTrigger(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of MentalModelTrigger from a JSON string"""
+        """Create an instance of MentalModelTriggerInput from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -82,6 +95,13 @@ class MentalModelTrigger(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in tag_groups (list)
+        _items = []
+        if self.tag_groups:
+            for _item_tag_groups in self.tag_groups:
+                if _item_tag_groups:
+                    _items.append(_item_tag_groups.to_dict())
+            _dict['tag_groups'] = _items
         # set to None if fact_types (nullable) is None
         # and model_fields_set contains the field
         if self.fact_types is None and "fact_types" in self.model_fields_set:
@@ -92,11 +112,21 @@ class MentalModelTrigger(BaseModel):
         if self.exclude_mental_model_ids is None and "exclude_mental_model_ids" in self.model_fields_set:
             _dict['exclude_mental_model_ids'] = None
 
+        # set to None if tags_match (nullable) is None
+        # and model_fields_set contains the field
+        if self.tags_match is None and "tags_match" in self.model_fields_set:
+            _dict['tags_match'] = None
+
+        # set to None if tag_groups (nullable) is None
+        # and model_fields_set contains the field
+        if self.tag_groups is None and "tag_groups" in self.model_fields_set:
+            _dict['tag_groups'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of MentalModelTrigger from a dict"""
+        """Create an instance of MentalModelTriggerInput from a dict"""
         if obj is None:
             return None
 
@@ -107,7 +137,9 @@ class MentalModelTrigger(BaseModel):
             "refresh_after_consolidation": obj.get("refresh_after_consolidation") if obj.get("refresh_after_consolidation") is not None else False,
             "fact_types": obj.get("fact_types"),
             "exclude_mental_models": obj.get("exclude_mental_models") if obj.get("exclude_mental_models") is not None else False,
-            "exclude_mental_model_ids": obj.get("exclude_mental_model_ids")
+            "exclude_mental_model_ids": obj.get("exclude_mental_model_ids"),
+            "tags_match": obj.get("tags_match"),
+            "tag_groups": [MentalModelTriggerInputTagGroupsInner.from_dict(_item) for _item in obj["tag_groups"]] if obj.get("tag_groups") is not None else None
         })
         return _obj
 

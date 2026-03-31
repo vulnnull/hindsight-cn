@@ -32,7 +32,7 @@ type ReflectRequest struct {
 	Tags []string `json:"tags,omitempty"`
 	// How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).
 	TagsMatch *string `json:"tags_match,omitempty"`
-	TagGroups []RecallRequestTagGroupsInner `json:"tag_groups,omitempty"`
+	TagGroups []MentalModelTriggerInputTagGroupsInner `json:"tag_groups,omitempty"`
 	FactTypes []string `json:"fact_types,omitempty"`
 	// If true, exclude all mental models from the reflect loop (skip search_mental_models tool).
 	ExcludeMentalModels *bool `json:"exclude_mental_models,omitempty"`
@@ -332,9 +332,9 @@ func (o *ReflectRequest) SetTagsMatch(v string) {
 }
 
 // GetTagGroups returns the TagGroups field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *ReflectRequest) GetTagGroups() []RecallRequestTagGroupsInner {
+func (o *ReflectRequest) GetTagGroups() []MentalModelTriggerInputTagGroupsInner {
 	if o == nil {
-		var ret []RecallRequestTagGroupsInner
+		var ret []MentalModelTriggerInputTagGroupsInner
 		return ret
 	}
 	return o.TagGroups
@@ -343,7 +343,7 @@ func (o *ReflectRequest) GetTagGroups() []RecallRequestTagGroupsInner {
 // GetTagGroupsOk returns a tuple with the TagGroups field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *ReflectRequest) GetTagGroupsOk() ([]RecallRequestTagGroupsInner, bool) {
+func (o *ReflectRequest) GetTagGroupsOk() ([]MentalModelTriggerInputTagGroupsInner, bool) {
 	if o == nil || IsNil(o.TagGroups) {
 		return nil, false
 	}
@@ -359,8 +359,8 @@ func (o *ReflectRequest) HasTagGroups() bool {
 	return false
 }
 
-// SetTagGroups gets a reference to the given []RecallRequestTagGroupsInner and assigns it to the TagGroups field.
-func (o *ReflectRequest) SetTagGroups(v []RecallRequestTagGroupsInner) {
+// SetTagGroups gets a reference to the given []MentalModelTriggerInputTagGroupsInner and assigns it to the TagGroups field.
+func (o *ReflectRequest) SetTagGroups(v []MentalModelTriggerInputTagGroupsInner) {
 	o.TagGroups = v
 }
 

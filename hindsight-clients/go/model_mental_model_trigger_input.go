@@ -14,25 +14,27 @@ import (
 	"encoding/json"
 )
 
-// checks if the MentalModelTrigger type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &MentalModelTrigger{}
+// checks if the MentalModelTriggerInput type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &MentalModelTriggerInput{}
 
-// MentalModelTrigger Trigger settings for a mental model.
-type MentalModelTrigger struct {
+// MentalModelTriggerInput Trigger settings for a mental model.
+type MentalModelTriggerInput struct {
 	// If true, refresh this mental model after observations consolidation (real-time mode)
 	RefreshAfterConsolidation *bool `json:"refresh_after_consolidation,omitempty"`
 	FactTypes []string `json:"fact_types,omitempty"`
 	// If true, exclude all mental models from the reflect loop (skip search_mental_models tool).
 	ExcludeMentalModels *bool `json:"exclude_mental_models,omitempty"`
 	ExcludeMentalModelIds []string `json:"exclude_mental_model_ids,omitempty"`
+	TagsMatch NullableString `json:"tags_match,omitempty"`
+	TagGroups []MentalModelTriggerInputTagGroupsInner `json:"tag_groups,omitempty"`
 }
 
-// NewMentalModelTrigger instantiates a new MentalModelTrigger object
+// NewMentalModelTriggerInput instantiates a new MentalModelTriggerInput object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewMentalModelTrigger() *MentalModelTrigger {
-	this := MentalModelTrigger{}
+func NewMentalModelTriggerInput() *MentalModelTriggerInput {
+	this := MentalModelTriggerInput{}
 	var refreshAfterConsolidation bool = false
 	this.RefreshAfterConsolidation = &refreshAfterConsolidation
 	var excludeMentalModels bool = false
@@ -40,11 +42,11 @@ func NewMentalModelTrigger() *MentalModelTrigger {
 	return &this
 }
 
-// NewMentalModelTriggerWithDefaults instantiates a new MentalModelTrigger object
+// NewMentalModelTriggerInputWithDefaults instantiates a new MentalModelTriggerInput object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewMentalModelTriggerWithDefaults() *MentalModelTrigger {
-	this := MentalModelTrigger{}
+func NewMentalModelTriggerInputWithDefaults() *MentalModelTriggerInput {
+	this := MentalModelTriggerInput{}
 	var refreshAfterConsolidation bool = false
 	this.RefreshAfterConsolidation = &refreshAfterConsolidation
 	var excludeMentalModels bool = false
@@ -53,7 +55,7 @@ func NewMentalModelTriggerWithDefaults() *MentalModelTrigger {
 }
 
 // GetRefreshAfterConsolidation returns the RefreshAfterConsolidation field value if set, zero value otherwise.
-func (o *MentalModelTrigger) GetRefreshAfterConsolidation() bool {
+func (o *MentalModelTriggerInput) GetRefreshAfterConsolidation() bool {
 	if o == nil || IsNil(o.RefreshAfterConsolidation) {
 		var ret bool
 		return ret
@@ -63,7 +65,7 @@ func (o *MentalModelTrigger) GetRefreshAfterConsolidation() bool {
 
 // GetRefreshAfterConsolidationOk returns a tuple with the RefreshAfterConsolidation field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *MentalModelTrigger) GetRefreshAfterConsolidationOk() (*bool, bool) {
+func (o *MentalModelTriggerInput) GetRefreshAfterConsolidationOk() (*bool, bool) {
 	if o == nil || IsNil(o.RefreshAfterConsolidation) {
 		return nil, false
 	}
@@ -71,7 +73,7 @@ func (o *MentalModelTrigger) GetRefreshAfterConsolidationOk() (*bool, bool) {
 }
 
 // HasRefreshAfterConsolidation returns a boolean if a field has been set.
-func (o *MentalModelTrigger) HasRefreshAfterConsolidation() bool {
+func (o *MentalModelTriggerInput) HasRefreshAfterConsolidation() bool {
 	if o != nil && !IsNil(o.RefreshAfterConsolidation) {
 		return true
 	}
@@ -80,12 +82,12 @@ func (o *MentalModelTrigger) HasRefreshAfterConsolidation() bool {
 }
 
 // SetRefreshAfterConsolidation gets a reference to the given bool and assigns it to the RefreshAfterConsolidation field.
-func (o *MentalModelTrigger) SetRefreshAfterConsolidation(v bool) {
+func (o *MentalModelTriggerInput) SetRefreshAfterConsolidation(v bool) {
 	o.RefreshAfterConsolidation = &v
 }
 
 // GetFactTypes returns the FactTypes field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *MentalModelTrigger) GetFactTypes() []string {
+func (o *MentalModelTriggerInput) GetFactTypes() []string {
 	if o == nil {
 		var ret []string
 		return ret
@@ -96,7 +98,7 @@ func (o *MentalModelTrigger) GetFactTypes() []string {
 // GetFactTypesOk returns a tuple with the FactTypes field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *MentalModelTrigger) GetFactTypesOk() ([]string, bool) {
+func (o *MentalModelTriggerInput) GetFactTypesOk() ([]string, bool) {
 	if o == nil || IsNil(o.FactTypes) {
 		return nil, false
 	}
@@ -104,7 +106,7 @@ func (o *MentalModelTrigger) GetFactTypesOk() ([]string, bool) {
 }
 
 // HasFactTypes returns a boolean if a field has been set.
-func (o *MentalModelTrigger) HasFactTypes() bool {
+func (o *MentalModelTriggerInput) HasFactTypes() bool {
 	if o != nil && !IsNil(o.FactTypes) {
 		return true
 	}
@@ -113,12 +115,12 @@ func (o *MentalModelTrigger) HasFactTypes() bool {
 }
 
 // SetFactTypes gets a reference to the given []string and assigns it to the FactTypes field.
-func (o *MentalModelTrigger) SetFactTypes(v []string) {
+func (o *MentalModelTriggerInput) SetFactTypes(v []string) {
 	o.FactTypes = v
 }
 
 // GetExcludeMentalModels returns the ExcludeMentalModels field value if set, zero value otherwise.
-func (o *MentalModelTrigger) GetExcludeMentalModels() bool {
+func (o *MentalModelTriggerInput) GetExcludeMentalModels() bool {
 	if o == nil || IsNil(o.ExcludeMentalModels) {
 		var ret bool
 		return ret
@@ -128,7 +130,7 @@ func (o *MentalModelTrigger) GetExcludeMentalModels() bool {
 
 // GetExcludeMentalModelsOk returns a tuple with the ExcludeMentalModels field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *MentalModelTrigger) GetExcludeMentalModelsOk() (*bool, bool) {
+func (o *MentalModelTriggerInput) GetExcludeMentalModelsOk() (*bool, bool) {
 	if o == nil || IsNil(o.ExcludeMentalModels) {
 		return nil, false
 	}
@@ -136,7 +138,7 @@ func (o *MentalModelTrigger) GetExcludeMentalModelsOk() (*bool, bool) {
 }
 
 // HasExcludeMentalModels returns a boolean if a field has been set.
-func (o *MentalModelTrigger) HasExcludeMentalModels() bool {
+func (o *MentalModelTriggerInput) HasExcludeMentalModels() bool {
 	if o != nil && !IsNil(o.ExcludeMentalModels) {
 		return true
 	}
@@ -145,12 +147,12 @@ func (o *MentalModelTrigger) HasExcludeMentalModels() bool {
 }
 
 // SetExcludeMentalModels gets a reference to the given bool and assigns it to the ExcludeMentalModels field.
-func (o *MentalModelTrigger) SetExcludeMentalModels(v bool) {
+func (o *MentalModelTriggerInput) SetExcludeMentalModels(v bool) {
 	o.ExcludeMentalModels = &v
 }
 
 // GetExcludeMentalModelIds returns the ExcludeMentalModelIds field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *MentalModelTrigger) GetExcludeMentalModelIds() []string {
+func (o *MentalModelTriggerInput) GetExcludeMentalModelIds() []string {
 	if o == nil {
 		var ret []string
 		return ret
@@ -161,7 +163,7 @@ func (o *MentalModelTrigger) GetExcludeMentalModelIds() []string {
 // GetExcludeMentalModelIdsOk returns a tuple with the ExcludeMentalModelIds field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *MentalModelTrigger) GetExcludeMentalModelIdsOk() ([]string, bool) {
+func (o *MentalModelTriggerInput) GetExcludeMentalModelIdsOk() ([]string, bool) {
 	if o == nil || IsNil(o.ExcludeMentalModelIds) {
 		return nil, false
 	}
@@ -169,7 +171,7 @@ func (o *MentalModelTrigger) GetExcludeMentalModelIdsOk() ([]string, bool) {
 }
 
 // HasExcludeMentalModelIds returns a boolean if a field has been set.
-func (o *MentalModelTrigger) HasExcludeMentalModelIds() bool {
+func (o *MentalModelTriggerInput) HasExcludeMentalModelIds() bool {
 	if o != nil && !IsNil(o.ExcludeMentalModelIds) {
 		return true
 	}
@@ -178,11 +180,86 @@ func (o *MentalModelTrigger) HasExcludeMentalModelIds() bool {
 }
 
 // SetExcludeMentalModelIds gets a reference to the given []string and assigns it to the ExcludeMentalModelIds field.
-func (o *MentalModelTrigger) SetExcludeMentalModelIds(v []string) {
+func (o *MentalModelTriggerInput) SetExcludeMentalModelIds(v []string) {
 	o.ExcludeMentalModelIds = v
 }
 
-func (o MentalModelTrigger) MarshalJSON() ([]byte, error) {
+// GetTagsMatch returns the TagsMatch field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *MentalModelTriggerInput) GetTagsMatch() string {
+	if o == nil || IsNil(o.TagsMatch.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.TagsMatch.Get()
+}
+
+// GetTagsMatchOk returns a tuple with the TagsMatch field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *MentalModelTriggerInput) GetTagsMatchOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.TagsMatch.Get(), o.TagsMatch.IsSet()
+}
+
+// HasTagsMatch returns a boolean if a field has been set.
+func (o *MentalModelTriggerInput) HasTagsMatch() bool {
+	if o != nil && o.TagsMatch.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetTagsMatch gets a reference to the given NullableString and assigns it to the TagsMatch field.
+func (o *MentalModelTriggerInput) SetTagsMatch(v string) {
+	o.TagsMatch.Set(&v)
+}
+// SetTagsMatchNil sets the value for TagsMatch to be an explicit nil
+func (o *MentalModelTriggerInput) SetTagsMatchNil() {
+	o.TagsMatch.Set(nil)
+}
+
+// UnsetTagsMatch ensures that no value is present for TagsMatch, not even an explicit nil
+func (o *MentalModelTriggerInput) UnsetTagsMatch() {
+	o.TagsMatch.Unset()
+}
+
+// GetTagGroups returns the TagGroups field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *MentalModelTriggerInput) GetTagGroups() []MentalModelTriggerInputTagGroupsInner {
+	if o == nil {
+		var ret []MentalModelTriggerInputTagGroupsInner
+		return ret
+	}
+	return o.TagGroups
+}
+
+// GetTagGroupsOk returns a tuple with the TagGroups field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *MentalModelTriggerInput) GetTagGroupsOk() ([]MentalModelTriggerInputTagGroupsInner, bool) {
+	if o == nil || IsNil(o.TagGroups) {
+		return nil, false
+	}
+	return o.TagGroups, true
+}
+
+// HasTagGroups returns a boolean if a field has been set.
+func (o *MentalModelTriggerInput) HasTagGroups() bool {
+	if o != nil && !IsNil(o.TagGroups) {
+		return true
+	}
+
+	return false
+}
+
+// SetTagGroups gets a reference to the given []MentalModelTriggerInputTagGroupsInner and assigns it to the TagGroups field.
+func (o *MentalModelTriggerInput) SetTagGroups(v []MentalModelTriggerInputTagGroupsInner) {
+	o.TagGroups = v
+}
+
+func (o MentalModelTriggerInput) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -190,7 +267,7 @@ func (o MentalModelTrigger) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o MentalModelTrigger) ToMap() (map[string]interface{}, error) {
+func (o MentalModelTriggerInput) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	if !IsNil(o.RefreshAfterConsolidation) {
 		toSerialize["refresh_after_consolidation"] = o.RefreshAfterConsolidation
@@ -204,41 +281,47 @@ func (o MentalModelTrigger) ToMap() (map[string]interface{}, error) {
 	if o.ExcludeMentalModelIds != nil {
 		toSerialize["exclude_mental_model_ids"] = o.ExcludeMentalModelIds
 	}
+	if o.TagsMatch.IsSet() {
+		toSerialize["tags_match"] = o.TagsMatch.Get()
+	}
+	if o.TagGroups != nil {
+		toSerialize["tag_groups"] = o.TagGroups
+	}
 	return toSerialize, nil
 }
 
-type NullableMentalModelTrigger struct {
-	value *MentalModelTrigger
+type NullableMentalModelTriggerInput struct {
+	value *MentalModelTriggerInput
 	isSet bool
 }
 
-func (v NullableMentalModelTrigger) Get() *MentalModelTrigger {
+func (v NullableMentalModelTriggerInput) Get() *MentalModelTriggerInput {
 	return v.value
 }
 
-func (v *NullableMentalModelTrigger) Set(val *MentalModelTrigger) {
+func (v *NullableMentalModelTriggerInput) Set(val *MentalModelTriggerInput) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableMentalModelTrigger) IsSet() bool {
+func (v NullableMentalModelTriggerInput) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableMentalModelTrigger) Unset() {
+func (v *NullableMentalModelTriggerInput) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableMentalModelTrigger(val *MentalModelTrigger) *NullableMentalModelTrigger {
-	return &NullableMentalModelTrigger{value: val, isSet: true}
+func NewNullableMentalModelTriggerInput(val *MentalModelTriggerInput) *NullableMentalModelTriggerInput {
+	return &NullableMentalModelTriggerInput{value: val, isSet: true}
 }
 
-func (v NullableMentalModelTrigger) MarshalJSON() ([]byte, error) {
+func (v NullableMentalModelTriggerInput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableMentalModelTrigger) UnmarshalJSON(src []byte) error {
+func (v *NullableMentalModelTriggerInput) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

@@ -32,7 +32,7 @@ type RecallRequest struct {
 	Tags []string `json:"tags,omitempty"`
 	// How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged).
 	TagsMatch *string `json:"tags_match,omitempty"`
-	TagGroups []RecallRequestTagGroupsInner `json:"tag_groups,omitempty"`
+	TagGroups []MentalModelTriggerInputTagGroupsInner `json:"tag_groups,omitempty"`
 }
 
 type _RecallRequest RecallRequest
@@ -360,9 +360,9 @@ func (o *RecallRequest) SetTagsMatch(v string) {
 }
 
 // GetTagGroups returns the TagGroups field value if set, zero value otherwise (both if not set or set to explicit null).
-func (o *RecallRequest) GetTagGroups() []RecallRequestTagGroupsInner {
+func (o *RecallRequest) GetTagGroups() []MentalModelTriggerInputTagGroupsInner {
 	if o == nil {
-		var ret []RecallRequestTagGroupsInner
+		var ret []MentalModelTriggerInputTagGroupsInner
 		return ret
 	}
 	return o.TagGroups
@@ -371,7 +371,7 @@ func (o *RecallRequest) GetTagGroups() []RecallRequestTagGroupsInner {
 // GetTagGroupsOk returns a tuple with the TagGroups field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
-func (o *RecallRequest) GetTagGroupsOk() ([]RecallRequestTagGroupsInner, bool) {
+func (o *RecallRequest) GetTagGroupsOk() ([]MentalModelTriggerInputTagGroupsInner, bool) {
 	if o == nil || IsNil(o.TagGroups) {
 		return nil, false
 	}
@@ -387,8 +387,8 @@ func (o *RecallRequest) HasTagGroups() bool {
 	return false
 }
 
-// SetTagGroups gets a reference to the given []RecallRequestTagGroupsInner and assigns it to the TagGroups field.
-func (o *RecallRequest) SetTagGroups(v []RecallRequestTagGroupsInner) {
+// SetTagGroups gets a reference to the given []MentalModelTriggerInputTagGroupsInner and assigns it to the TagGroups field.
+func (o *RecallRequest) SetTagGroups(v []MentalModelTriggerInputTagGroupsInner) {
 	o.TagGroups = v
 }
 

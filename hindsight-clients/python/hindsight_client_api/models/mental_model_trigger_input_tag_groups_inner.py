@@ -24,11 +24,11 @@ from typing import Union, Any, List, Set, TYPE_CHECKING, Optional, Dict
 from typing_extensions import Literal, Self
 from pydantic import Field
 
-MODELNOT_ANY_OF_SCHEMAS = ["TagGroupAndInput", "TagGroupLeaf", "TagGroupNotInput", "TagGroupOrInput"]
+MENTALMODELTRIGGERINPUTTAGGROUPSINNER_ANY_OF_SCHEMAS = ["TagGroupAndInput", "TagGroupLeaf", "TagGroupNotInput", "TagGroupOrInput"]
 
-class ModelNot(BaseModel):
+class MentalModelTriggerInputTagGroupsInner(BaseModel):
     """
-    ModelNot
+    MentalModelTriggerInputTagGroupsInner
     """
 
     # data type: TagGroupLeaf
@@ -62,7 +62,7 @@ class ModelNot(BaseModel):
 
     @field_validator('actual_instance')
     def actual_instance_must_validate_anyof(cls, v):
-        instance = ModelNot.model_construct()
+        instance = MentalModelTriggerInputTagGroupsInner.model_construct()
         error_messages = []
         # validate data type: TagGroupLeaf
         if not isinstance(v, TagGroupLeaf):
@@ -90,7 +90,7 @@ class ModelNot(BaseModel):
 
         if error_messages:
             # no match
-            raise ValueError("No match found when setting the actual_instance in ModelNot with anyOf schemas: TagGroupAndInput, TagGroupLeaf, TagGroupNotInput, TagGroupOrInput. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting the actual_instance in MentalModelTriggerInputTagGroupsInner with anyOf schemas: TagGroupAndInput, TagGroupLeaf, TagGroupNotInput, TagGroupOrInput. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -130,7 +130,7 @@ class ModelNot(BaseModel):
 
         if error_messages:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into ModelNot with anyOf schemas: TagGroupAndInput, TagGroupLeaf, TagGroupNotInput, TagGroupOrInput. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into MentalModelTriggerInputTagGroupsInner with anyOf schemas: TagGroupAndInput, TagGroupLeaf, TagGroupNotInput, TagGroupOrInput. Details: " + ", ".join(error_messages))
         else:
             return instance
 
@@ -162,5 +162,5 @@ from hindsight_client_api.models.tag_group_and_input import TagGroupAndInput
 from hindsight_client_api.models.tag_group_not_input import TagGroupNotInput
 from hindsight_client_api.models.tag_group_or_input import TagGroupOrInput
 # TODO: Rewrite to not use raise_errors
-ModelNot.model_rebuild(raise_errors=False)
+MentalModelTriggerInputTagGroupsInner.model_rebuild(raise_errors=False)
 

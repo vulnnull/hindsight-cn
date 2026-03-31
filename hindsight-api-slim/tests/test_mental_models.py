@@ -1022,3 +1022,310 @@ class TestMentalModelRefreshTagSecurity:
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
+
+
+class TestMentalModelTriggerTagsConfig:
+    """Test trigger-level tags_match and tag_groups configuration for mental model refresh."""
+
+    async def test_trigger_tags_match_any_includes_untagged_content(
+        self, memory: MemoryEngine, request_context
+    ):
+        """Test that setting trigger.tags_match='any' allows a tagged model to see untagged memories.
+
+        This is the fix for #786: by default, tagged models use all_strict which excludes
+        untagged content. Setting tags_match='any' in the trigger overrides this.
+        """
+        bank_id = f"test-trigger-tags-match-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id, request_context=request_context)
+
+        # Add memories: some tagged, some untagged
+        await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[
+                {"content": "Alice is a frontend engineer who specializes in React and TypeScript.", "tags": ["living"]},
+                {"content": "The company headquarters is located in San Francisco, California.", "tags": []},
+                {"content": "Annual revenue reached 50 million dollars last year.", "tags": []},
+            ],
+            request_context=request_context,
+        )
+        await memory.wait_for_background_tasks()
+
+        # Create a mental model with tags but trigger.tags_match='any' to include untagged content
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Living Summary",
+            source_query="What do we know about the company and people?",
+            content="Initial content",
+            tags=["living"],
+            trigger={"tags_match": "any"},
+            request_context=request_context,
+        )
+
+        # Refresh — should see BOTH tagged and untagged content
+        refreshed = await memory.refresh_mental_model(
+            bank_id=bank_id,
+            mental_model_id=mm["id"],
+            request_context=request_context,
+        )
+
+        refreshed_content = refreshed["content"].lower()
+
+        # Should include tagged content
+        assert "alice" in refreshed_content or "react" in refreshed_content or "frontend" in refreshed_content, (
+            f"Refreshed model should include tagged memories. Content: {refreshed['content']}"
+        )
+
+        # Should ALSO include untagged content (the fix for #786)
+        assert "san francisco" in refreshed_content or "50 million" in refreshed_content or "headquarters" in refreshed_content or "revenue" in refreshed_content, (
+            f"With tags_match='any', refreshed model should include untagged memories. Content: {refreshed['content']}"
+        )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_trigger_tags_match_default_preserves_strict_isolation(
+        self, memory: MemoryEngine, request_context
+    ):
+        """Test that without trigger.tags_match, tagged models still use all_strict (backward compat)."""
+        bank_id = f"test-trigger-default-strict-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id, request_context=request_context)
+
+        # Add tagged and untagged memories
+        await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[
+                {"content": "Alice is a frontend engineer specializing in React.", "tags": ["user:alice"]},
+                {"content": "Bob is a backend engineer specializing in Python.", "tags": ["user:bob"]},
+                {"content": "The company has 200 employees worldwide.", "tags": []},
+            ],
+            request_context=request_context,
+        )
+        await memory.wait_for_background_tasks()
+
+        # Create a tagged mental model WITHOUT trigger.tags_match (should default to all_strict)
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Alice's Summary",
+            source_query="What are all the facts about work and people?",
+            content="Initial content",
+            tags=["user:alice"],
+            request_context=request_context,
+        )
+
+        refreshed = await memory.refresh_mental_model(
+            bank_id=bank_id,
+            mental_model_id=mm["id"],
+            request_context=request_context,
+        )
+
+        refreshed_content = refreshed["content"].lower()
+
+        import re
+
+        def contains_word(text: str, word: str) -> bool:
+            return bool(re.search(rf"\b{re.escape(word)}\b", text, re.IGNORECASE))
+
+        # MUST NOT include Bob's content (security boundary preserved)
+        assert not contains_word(refreshed_content, "bob") and not contains_word(refreshed_content, "python"), (
+            f"Default behavior should still enforce all_strict isolation. Content: {refreshed['content']}"
+        )
+
+        # MUST NOT include untagged content (strict excludes untagged)
+        assert "200 employees" not in refreshed_content, (
+            f"Default behavior should exclude untagged content. Content: {refreshed['content']}"
+        )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_trigger_tag_groups_override_flat_tags(
+        self, memory: MemoryEngine, request_context
+    ):
+        """Test that trigger.tag_groups overrides the model's flat tags for refresh filtering.
+
+        When tag_groups is set, the model's own tags are NOT used for filtering during refresh,
+        giving the user full control over the search scope.
+        """
+        bank_id = f"test-trigger-tag-groups-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id, request_context=request_context)
+
+        # Add memories with different tags
+        await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[
+                {"content": "Alice is a frontend engineer who works on the React dashboard.", "tags": ["user:alice"]},
+                {"content": "Bob is a backend engineer who maintains the Python API.", "tags": ["user:bob"]},
+                {"content": "The shared codebase uses TypeScript for all frontend code.", "tags": ["shared"]},
+            ],
+            request_context=request_context,
+        )
+        await memory.wait_for_background_tasks()
+
+        # Create a mental model tagged user:alice, but with tag_groups that include both alice AND shared
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="Alice's Full View",
+            source_query="What do we know about people and technology?",
+            content="Initial content",
+            tags=["user:alice"],
+            trigger={
+                "tag_groups": [
+                    {
+                        "or": [
+                            {"tags": ["user:alice"], "match": "all_strict"},
+                            {"tags": ["shared"], "match": "all_strict"},
+                        ]
+                    }
+                ]
+            },
+            request_context=request_context,
+        )
+
+        refreshed = await memory.refresh_mental_model(
+            bank_id=bank_id,
+            mental_model_id=mm["id"],
+            request_context=request_context,
+        )
+
+        refreshed_content = refreshed["content"].lower()
+
+        # Should include alice's content
+        assert "alice" in refreshed_content or "react" in refreshed_content or "dashboard" in refreshed_content, (
+            f"Should include user:alice memories via tag_groups. Content: {refreshed['content']}"
+        )
+
+        # Should include shared content (via tag_groups OR expression)
+        assert "typescript" in refreshed_content or "shared" in refreshed_content or "frontend code" in refreshed_content, (
+            f"Should include shared memories via tag_groups. Content: {refreshed['content']}"
+        )
+
+        import re
+
+        def contains_word(text: str, word: str) -> bool:
+            return bool(re.search(rf"\b{re.escape(word)}\b", text, re.IGNORECASE))
+
+        # MUST NOT include Bob's content (not in tag_groups)
+        assert not contains_word(refreshed_content, "bob"), (
+            f"Should NOT include user:bob memories (not in tag_groups). Content: {refreshed['content']}"
+        )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_trigger_tags_match_with_no_model_tags(
+        self, memory: MemoryEngine, request_context
+    ):
+        """Test that trigger.tags_match on an untagged model still works correctly."""
+        bank_id = f"test-trigger-untagged-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id, request_context=request_context)
+
+        await memory.retain_batch_async(
+            bank_id=bank_id,
+            contents=[
+                {"content": "Alice works on React and TypeScript daily.", "tags": ["team"]},
+                {"content": "The office is in downtown Seattle near Pike Place.", "tags": []},
+            ],
+            request_context=request_context,
+        )
+        await memory.wait_for_background_tasks()
+
+        # Untagged model with no trigger.tags_match — defaults to "any" (no tags to trigger strict)
+        mm = await memory.create_mental_model(
+            bank_id=bank_id,
+            name="General Summary",
+            source_query="What do we know about the team and office?",
+            content="Initial content",
+            request_context=request_context,
+        )
+
+        refreshed = await memory.refresh_mental_model(
+            bank_id=bank_id,
+            mental_model_id=mm["id"],
+            request_context=request_context,
+        )
+
+        refreshed_content = refreshed["content"].lower()
+
+        # Should include both tagged and untagged content (default "any" for untagged models)
+        has_tagged = "alice" in refreshed_content or "react" in refreshed_content
+        has_untagged = "seattle" in refreshed_content or "pike place" in refreshed_content or "downtown" in refreshed_content
+        assert has_tagged or has_untagged, (
+            f"Untagged model should see all content with default 'any' matching. Content: {refreshed['content']}"
+        )
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+
+class TestMentalModelTriggerSchema:
+    """Unit tests for MentalModelTrigger schema validation (no DB needed)."""
+
+    def test_trigger_accepts_tags_match(self):
+        from hindsight_api.api.http import MentalModelTrigger
+
+        t = MentalModelTrigger(tags_match="any")
+        assert t.tags_match == "any"
+
+    def test_trigger_accepts_all_tags_match_modes(self):
+        from hindsight_api.api.http import MentalModelTrigger
+
+        for mode in ("any", "all", "any_strict", "all_strict"):
+            t = MentalModelTrigger(tags_match=mode)
+            assert t.tags_match == mode
+
+    def test_trigger_tags_match_defaults_to_none(self):
+        from hindsight_api.api.http import MentalModelTrigger
+
+        t = MentalModelTrigger()
+        assert t.tags_match is None
+
+    def test_trigger_accepts_tag_groups_leaf(self):
+        from hindsight_api.api.http import MentalModelTrigger
+
+        t = MentalModelTrigger(tag_groups=[{"tags": ["user:alice"], "match": "all_strict"}])
+        assert len(t.tag_groups) == 1
+        assert t.tag_groups[0].tags == ["user:alice"]
+
+    def test_trigger_accepts_tag_groups_compound(self):
+        from hindsight_api.api.http import MentalModelTrigger
+
+        t = MentalModelTrigger(
+            tag_groups=[
+                {
+                    "or": [
+                        {"tags": ["user:alice"], "match": "all_strict"},
+                        {"tags": ["shared"], "match": "any_strict"},
+                    ]
+                }
+            ]
+        )
+        assert len(t.tag_groups) == 1
+        from hindsight_api.engine.search.tags import TagGroupOr
+
+        assert isinstance(t.tag_groups[0], TagGroupOr)
+        assert len(t.tag_groups[0].filters) == 2
+
+    def test_trigger_tag_groups_defaults_to_none(self):
+        from hindsight_api.api.http import MentalModelTrigger
+
+        t = MentalModelTrigger()
+        assert t.tag_groups is None
+
+    def test_trigger_roundtrip_via_model_dump(self):
+        """Test that tag_groups survive model_dump -> model_validate (simulates DB storage)."""
+        from hindsight_api.api.http import MentalModelTrigger
+
+        t = MentalModelTrigger(
+            tags_match="any",
+            tag_groups=[{"tags": ["a", "b"], "match": "all_strict"}],
+            fact_types=["world"],
+        )
+        d = t.model_dump()
+        t2 = MentalModelTrigger.model_validate(d)
+        assert t2.tags_match == "any"
+        assert len(t2.tag_groups) == 1
+        assert t2.tag_groups[0].tags == ["a", "b"]
+        assert t2.fact_types == ["world"]
+
+    def test_trigger_tag_groups_rejects_invalid(self):
+        from hindsight_api.api.http import MentalModelTrigger
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            MentalModelTrigger(tag_groups=[{"invalid_key": "bad"}])

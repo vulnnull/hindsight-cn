@@ -729,7 +729,7 @@ export type CreateMentalModelRequest = {
   /**
    * Trigger settings
    */
-  trigger?: MentalModelTrigger;
+  trigger?: MentalModelTriggerInput;
 };
 
 /**
@@ -1450,7 +1450,7 @@ export type MentalModelResponse = {
    * Max Tokens
    */
   max_tokens?: number;
-  trigger?: MentalModelTrigger;
+  trigger?: MentalModelTriggerOutput;
   /**
    * Last Refreshed At
    */
@@ -1474,7 +1474,7 @@ export type MentalModelResponse = {
  *
  * Trigger settings for a mental model.
  */
-export type MentalModelTrigger = {
+export type MentalModelTriggerInput = {
   /**
    * Refresh After Consolidation
    *
@@ -1499,6 +1499,66 @@ export type MentalModelTrigger = {
    * Exclude specific mental models by ID from the reflect loop.
    */
   exclude_mental_model_ids?: Array<string> | null;
+  /**
+   * Tags Match
+   *
+   * Override how the model's tags filter memories during refresh. If not set, defaults to 'all_strict' when the model has tags (security isolation) or 'any' when the model has no tags. Set to 'any' to include untagged memories alongside tagged ones during refresh.
+   */
+  tags_match?: "any" | "all" | "any_strict" | "all_strict" | null;
+  /**
+   * Tag Groups
+   *
+   * Compound boolean tag expressions to use during refresh instead of the model's own tags. When set, these tag groups are passed to reflect and the model's flat tags are NOT used for filtering. Supports nested and/or/not expressions for complex tag-based scoping.
+   */
+  tag_groups?: Array<
+    TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput
+  > | null;
+};
+
+/**
+ * MentalModelTrigger
+ *
+ * Trigger settings for a mental model.
+ */
+export type MentalModelTriggerOutput = {
+  /**
+   * Refresh After Consolidation
+   *
+   * If true, refresh this mental model after observations consolidation (real-time mode)
+   */
+  refresh_after_consolidation?: boolean;
+  /**
+   * Fact Types
+   *
+   * Filter which fact types are retrieved during reflect. None means all types (world, experience, observation).
+   */
+  fact_types?: Array<"world" | "experience" | "observation"> | null;
+  /**
+   * Exclude Mental Models
+   *
+   * If true, exclude all mental models from the reflect loop (skip search_mental_models tool).
+   */
+  exclude_mental_models?: boolean;
+  /**
+   * Exclude Mental Model Ids
+   *
+   * Exclude specific mental models by ID from the reflect loop.
+   */
+  exclude_mental_model_ids?: Array<string> | null;
+  /**
+   * Tags Match
+   *
+   * Override how the model's tags filter memories during refresh. If not set, defaults to 'all_strict' when the model has tags (security isolation) or 'any' when the model has no tags. Set to 'any' to include untagged memories alongside tagged ones during refresh.
+   */
+  tags_match?: "any" | "all" | "any_strict" | "all_strict" | null;
+  /**
+   * Tag Groups
+   *
+   * Compound boolean tag expressions to use during refresh instead of the model's own tags. When set, these tag groups are passed to reflect and the model's flat tags are NOT used for filtering. Supports nested and/or/not expressions for complex tag-based scoping.
+   */
+  tag_groups?: Array<
+    TagGroupLeaf | TagGroupAndOutput | TagGroupOrOutput | TagGroupNotOutput
+  > | null;
 };
 
 /**
@@ -1668,7 +1728,7 @@ export type RecallRequest = {
    * Compound tag filter using boolean groups. Groups in the list are AND-ed. Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}.
    */
   tag_groups?: Array<
-    TagGroupLeaf | TagGroupAnd | TagGroupOr | TagGroupNot
+    TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput
   > | null;
 };
 
@@ -1991,7 +2051,7 @@ export type ReflectRequest = {
    * Compound tag filter using boolean groups. Groups in the list are AND-ed. Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}.
    */
   tag_groups?: Array<
-    TagGroupLeaf | TagGroupAnd | TagGroupOr | TagGroupNot
+    TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput
   > | null;
   /**
    * Fact Types
@@ -2222,11 +2282,27 @@ export type SourceFactsIncludeOptions = {
  *
  * Compound AND group: all child filters must match.
  */
-export type TagGroupAnd = {
+export type TagGroupAndInput = {
   /**
    * And
    */
-  and: Array<TagGroupLeaf | TagGroupAnd | TagGroupOr | TagGroupNot>;
+  and: Array<
+    TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput
+  >;
+};
+
+/**
+ * TagGroupAnd
+ *
+ * Compound AND group: all child filters must match.
+ */
+export type TagGroupAndOutput = {
+  /**
+   * And
+   */
+  and: Array<
+    TagGroupLeaf | TagGroupAndOutput | TagGroupOrOutput | TagGroupNotOutput
+  >;
 };
 
 /**
@@ -2250,11 +2326,23 @@ export type TagGroupLeaf = {
  *
  * Compound NOT group: child filter must NOT match.
  */
-export type TagGroupNot = {
+export type TagGroupNotInput = {
   /**
    * Not
    */
-  not: TagGroupLeaf | TagGroupAnd | TagGroupOr | TagGroupNot;
+  not: TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput;
+};
+
+/**
+ * TagGroupNot
+ *
+ * Compound NOT group: child filter must NOT match.
+ */
+export type TagGroupNotOutput = {
+  /**
+   * Not
+   */
+  not: TagGroupLeaf | TagGroupAndOutput | TagGroupOrOutput | TagGroupNotOutput;
 };
 
 /**
@@ -2262,11 +2350,27 @@ export type TagGroupNot = {
  *
  * Compound OR group: at least one child filter must match.
  */
-export type TagGroupOr = {
+export type TagGroupOrInput = {
   /**
    * Or
    */
-  or: Array<TagGroupLeaf | TagGroupAnd | TagGroupOr | TagGroupNot>;
+  or: Array<
+    TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput
+  >;
+};
+
+/**
+ * TagGroupOr
+ *
+ * Compound OR group: at least one child filter must match.
+ */
+export type TagGroupOrOutput = {
+  /**
+   * Or
+   */
+  or: Array<
+    TagGroupLeaf | TagGroupAndOutput | TagGroupOrOutput | TagGroupNotOutput
+  >;
 };
 
 /**
@@ -2438,7 +2542,7 @@ export type UpdateMentalModelRequest = {
   /**
    * Trigger settings
    */
-  trigger?: MentalModelTrigger | null;
+  trigger?: MentalModelTriggerInput | null;
 };
 
 /**

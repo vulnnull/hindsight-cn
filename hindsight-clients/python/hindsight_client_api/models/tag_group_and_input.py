@@ -22,12 +22,12 @@ from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class TagGroupOr(BaseModel):
+class TagGroupAndInput(BaseModel):
     """
-    Compound OR group: at least one child filter must match.
+    Compound AND group: all child filters must match.
     """ # noqa: E501
-    var_or: List[RecallRequestTagGroupsInner] = Field(alias="or")
-    __properties: ClassVar[List[str]] = ["or"]
+    var_and: List[MentalModelTriggerInputTagGroupsInner] = Field(alias="and")
+    __properties: ClassVar[List[str]] = ["and"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -47,7 +47,7 @@ class TagGroupOr(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of TagGroupOr from a JSON string"""
+        """Create an instance of TagGroupAndInput from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -68,18 +68,18 @@ class TagGroupOr(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in var_or (list)
+        # override the default output from pydantic by calling `to_dict()` of each item in var_and (list)
         _items = []
-        if self.var_or:
-            for _item_var_or in self.var_or:
-                if _item_var_or:
-                    _items.append(_item_var_or.to_dict())
-            _dict['or'] = _items
+        if self.var_and:
+            for _item_var_and in self.var_and:
+                if _item_var_and:
+                    _items.append(_item_var_and.to_dict())
+            _dict['and'] = _items
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of TagGroupOr from a dict"""
+        """Create an instance of TagGroupAndInput from a dict"""
         if obj is None:
             return None
 
@@ -87,11 +87,11 @@ class TagGroupOr(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "or": [RecallRequestTagGroupsInner.from_dict(_item) for _item in obj["or"]] if obj.get("or") is not None else None
+            "and": [MentalModelTriggerInputTagGroupsInner.from_dict(_item) for _item in obj["and"]] if obj.get("and") is not None else None
         })
         return _obj
 
-from hindsight_client_api.models.recall_request_tag_groups_inner import RecallRequestTagGroupsInner
+from hindsight_client_api.models.mental_model_trigger_input_tag_groups_inner import MentalModelTriggerInputTagGroupsInner
 # TODO: Rewrite to not use raise_errors
-TagGroupOr.model_rebuild(raise_errors=False)
+TagGroupAndInput.model_rebuild(raise_errors=False)
 

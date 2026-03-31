@@ -20,7 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
-from hindsight_client_api.models.mental_model_trigger import MentalModelTrigger
+from hindsight_client_api.models.mental_model_trigger_input import MentalModelTriggerInput
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -32,7 +32,7 @@ class UpdateMentalModelRequest(BaseModel):
     source_query: Optional[StrictStr] = None
     max_tokens: Optional[Annotated[int, Field(le=8192, strict=True, ge=256)]] = None
     tags: Optional[List[StrictStr]] = None
-    trigger: Optional[MentalModelTrigger] = None
+    trigger: Optional[MentalModelTriggerInput] = None
     __properties: ClassVar[List[str]] = ["name", "source_query", "max_tokens", "tags", "trigger"]
 
     model_config = ConfigDict(
@@ -118,7 +118,7 @@ class UpdateMentalModelRequest(BaseModel):
             "source_query": obj.get("source_query"),
             "max_tokens": obj.get("max_tokens"),
             "tags": obj.get("tags"),
-            "trigger": MentalModelTrigger.from_dict(obj["trigger"]) if obj.get("trigger") is not None else None
+            "trigger": MentalModelTriggerInput.from_dict(obj["trigger"]) if obj.get("trigger") is not None else None
         })
         return _obj
 

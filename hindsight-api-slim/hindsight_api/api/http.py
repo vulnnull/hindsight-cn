@@ -1502,6 +1502,23 @@ class MentalModelTrigger(BaseModel):
         default=None,
         description="Exclude specific mental models by ID from the reflect loop.",
     )
+    tags_match: TagsMatch | None = Field(
+        default=None,
+        description=(
+            "Override how the model's tags filter memories during refresh. "
+            "If not set, defaults to 'all_strict' when the model has tags (security isolation) "
+            "or 'any' when the model has no tags. "
+            "Set to 'any' to include untagged memories alongside tagged ones during refresh."
+        ),
+    )
+    tag_groups: list[TagGroup] | None = Field(
+        default=None,
+        description=(
+            "Compound boolean tag expressions to use during refresh instead of the model's own tags. "
+            "When set, these tag groups are passed to reflect and the model's flat tags are NOT used for filtering. "
+            "Supports nested and/or/not expressions for complex tag-based scoping."
+        ),
+    )
 
     @field_validator("fact_types")
     @classmethod

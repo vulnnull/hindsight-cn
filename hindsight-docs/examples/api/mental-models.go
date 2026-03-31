@@ -81,7 +81,7 @@ func main() {
 		CreateMentalModelRequest(hindsight.CreateMentalModelRequest{
 			Name:        "Project Status",
 			SourceQuery: "What is the current project status?",
-			Trigger: &hindsight.MentalModelTrigger{
+			Trigger: &hindsight.MentalModelTriggerInput{
 				RefreshAfterConsolidation: &refreshTrue,
 			},
 		}).Execute()
@@ -132,7 +132,7 @@ func main() {
 	updated, _, _ := client.MentalModelsAPI.UpdateMentalModel(ctx, mmBankID, mentalModelID).
 		UpdateMentalModelRequest(hindsight.UpdateMentalModelRequest{
 			Name: *hindsight.NewNullableString(&newName),
-			Trigger: *hindsight.NewNullableMentalModelTrigger(&hindsight.MentalModelTrigger{
+			Trigger: *hindsight.NewNullableMentalModelTriggerInput(&hindsight.MentalModelTriggerInput{
 				RefreshAfterConsolidation: &refreshAfter,
 			}),
 		}).Execute()

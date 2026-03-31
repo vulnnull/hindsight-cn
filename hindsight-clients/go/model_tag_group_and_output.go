@@ -16,38 +16,38 @@ import (
 	"fmt"
 )
 
-// checks if the TagGroupAnd type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &TagGroupAnd{}
+// checks if the TagGroupAndOutput type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &TagGroupAndOutput{}
 
-// TagGroupAnd Compound AND group: all child filters must match.
-type TagGroupAnd struct {
-	And []RecallRequestTagGroupsInner `json:"and"`
+// TagGroupAndOutput Compound AND group: all child filters must match.
+type TagGroupAndOutput struct {
+	And []MentalModelTriggerOutputTagGroupsInner `json:"and"`
 }
 
-type _TagGroupAnd TagGroupAnd
+type _TagGroupAndOutput TagGroupAndOutput
 
-// NewTagGroupAnd instantiates a new TagGroupAnd object
+// NewTagGroupAndOutput instantiates a new TagGroupAndOutput object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewTagGroupAnd(and []RecallRequestTagGroupsInner) *TagGroupAnd {
-	this := TagGroupAnd{}
+func NewTagGroupAndOutput(and []MentalModelTriggerOutputTagGroupsInner) *TagGroupAndOutput {
+	this := TagGroupAndOutput{}
 	this.And = and
 	return &this
 }
 
-// NewTagGroupAndWithDefaults instantiates a new TagGroupAnd object
+// NewTagGroupAndOutputWithDefaults instantiates a new TagGroupAndOutput object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewTagGroupAndWithDefaults() *TagGroupAnd {
-	this := TagGroupAnd{}
+func NewTagGroupAndOutputWithDefaults() *TagGroupAndOutput {
+	this := TagGroupAndOutput{}
 	return &this
 }
 
 // GetAnd returns the And field value
-func (o *TagGroupAnd) GetAnd() []RecallRequestTagGroupsInner {
+func (o *TagGroupAndOutput) GetAnd() []MentalModelTriggerOutputTagGroupsInner {
 	if o == nil {
-		var ret []RecallRequestTagGroupsInner
+		var ret []MentalModelTriggerOutputTagGroupsInner
 		return ret
 	}
 
@@ -56,7 +56,7 @@ func (o *TagGroupAnd) GetAnd() []RecallRequestTagGroupsInner {
 
 // GetAndOk returns a tuple with the And field value
 // and a boolean to check if the value has been set.
-func (o *TagGroupAnd) GetAndOk() ([]RecallRequestTagGroupsInner, bool) {
+func (o *TagGroupAndOutput) GetAndOk() ([]MentalModelTriggerOutputTagGroupsInner, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -64,11 +64,11 @@ func (o *TagGroupAnd) GetAndOk() ([]RecallRequestTagGroupsInner, bool) {
 }
 
 // SetAnd sets field value
-func (o *TagGroupAnd) SetAnd(v []RecallRequestTagGroupsInner) {
+func (o *TagGroupAndOutput) SetAnd(v []MentalModelTriggerOutputTagGroupsInner) {
 	o.And = v
 }
 
-func (o TagGroupAnd) MarshalJSON() ([]byte, error) {
+func (o TagGroupAndOutput) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -76,13 +76,13 @@ func (o TagGroupAnd) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o TagGroupAnd) ToMap() (map[string]interface{}, error) {
+func (o TagGroupAndOutput) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["and"] = o.And
 	return toSerialize, nil
 }
 
-func (o *TagGroupAnd) UnmarshalJSON(data []byte) (err error) {
+func (o *TagGroupAndOutput) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -104,53 +104,53 @@ func (o *TagGroupAnd) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varTagGroupAnd := _TagGroupAnd{}
+	varTagGroupAndOutput := _TagGroupAndOutput{}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varTagGroupAnd)
+	err = decoder.Decode(&varTagGroupAndOutput)
 
 	if err != nil {
 		return err
 	}
 
-	*o = TagGroupAnd(varTagGroupAnd)
+	*o = TagGroupAndOutput(varTagGroupAndOutput)
 
 	return err
 }
 
-type NullableTagGroupAnd struct {
-	value *TagGroupAnd
+type NullableTagGroupAndOutput struct {
+	value *TagGroupAndOutput
 	isSet bool
 }
 
-func (v NullableTagGroupAnd) Get() *TagGroupAnd {
+func (v NullableTagGroupAndOutput) Get() *TagGroupAndOutput {
 	return v.value
 }
 
-func (v *NullableTagGroupAnd) Set(val *TagGroupAnd) {
+func (v *NullableTagGroupAndOutput) Set(val *TagGroupAndOutput) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableTagGroupAnd) IsSet() bool {
+func (v NullableTagGroupAndOutput) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableTagGroupAnd) Unset() {
+func (v *NullableTagGroupAndOutput) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableTagGroupAnd(val *TagGroupAnd) *NullableTagGroupAnd {
-	return &NullableTagGroupAnd{value: val, isSet: true}
+func NewNullableTagGroupAndOutput(val *TagGroupAndOutput) *NullableTagGroupAndOutput {
+	return &NullableTagGroupAndOutput{value: val, isSet: true}
 }
 
-func (v NullableTagGroupAnd) MarshalJSON() ([]byte, error) {
+func (v NullableTagGroupAndOutput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableTagGroupAnd) UnmarshalJSON(src []byte) error {
+func (v *NullableTagGroupAndOutput) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

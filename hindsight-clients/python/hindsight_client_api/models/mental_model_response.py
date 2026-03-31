@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from hindsight_client_api.models.mental_model_trigger import MentalModelTrigger
+from hindsight_client_api.models.mental_model_trigger_output import MentalModelTriggerOutput
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -34,7 +34,7 @@ class MentalModelResponse(BaseModel):
     content: StrictStr = Field(description="The mental model content as well-formatted markdown (auto-generated from reflect endpoint)")
     tags: Optional[List[StrictStr]] = None
     max_tokens: Optional[StrictInt] = 2048
-    trigger: Optional[MentalModelTrigger] = None
+    trigger: Optional[MentalModelTriggerOutput] = None
     last_refreshed_at: Optional[StrictStr] = None
     created_at: Optional[StrictStr] = None
     reflect_response: Optional[Dict[str, Any]] = None
@@ -116,7 +116,7 @@ class MentalModelResponse(BaseModel):
             "content": obj.get("content"),
             "tags": obj.get("tags"),
             "max_tokens": obj.get("max_tokens") if obj.get("max_tokens") is not None else 2048,
-            "trigger": MentalModelTrigger.from_dict(obj["trigger"]) if obj.get("trigger") is not None else None,
+            "trigger": MentalModelTriggerOutput.from_dict(obj["trigger"]) if obj.get("trigger") is not None else None,
             "last_refreshed_at": obj.get("last_refreshed_at"),
             "created_at": obj.get("created_at"),
             "reflect_response": obj.get("reflect_response")

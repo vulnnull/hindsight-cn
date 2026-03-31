@@ -3,12 +3,20 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { client } from "@/lib/api";
+import { client, type TagGroup, type TagsMatch } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { FactType, FactTypeCheckboxGroup } from "@/components/fact-type-filter";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -91,6 +99,8 @@ interface MentalModel {
     fact_types?: Array<"world" | "experience" | "observation">;
     exclude_mental_models?: boolean;
     exclude_mental_model_ids?: string[];
+    tags_match?: TagsMatch;
+    tag_groups?: TagGroup[];
   };
   last_refreshed_at: string;
   created_at: string;
@@ -601,6 +611,8 @@ function CreateMentalModelDialog({
     factTypes: [] as Array<"world" | "experience" | "observation">,
     excludeMentalModels: false,
     excludeMentalModelIds: "",
+    tagsMatch: "" as string,
+    tagGroups: "",
   });
 
   const handleCreate = async () => {
@@ -621,6 +633,16 @@ function CreateMentalModelDialog({
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
 
+      let tagGroups: TagGroup[] | undefined;
+      if (form.tagGroups.trim()) {
+        try {
+          tagGroups = JSON.parse(form.tagGroups.trim());
+        } catch {
+          toast.error("Invalid JSON in Tag Groups field");
+          return;
+        }
+      }
+
       await client.createMentalModel(currentBank, {
         id: form.id.trim() || undefined,
         name: form.name.trim(),
@@ -632,6 +654,8 @@ function CreateMentalModelDialog({
           fact_types: form.factTypes.length > 0 ? form.factTypes : undefined,
           exclude_mental_models: form.excludeMentalModels || undefined,
           exclude_mental_model_ids: excludeIds.length > 0 ? excludeIds : undefined,
+          tags_match: (form.tagsMatch as TagsMatch) || undefined,
+          tag_groups: tagGroups,
         },
       });
 
@@ -645,6 +669,8 @@ function CreateMentalModelDialog({
         factTypes: [],
         excludeMentalModels: false,
         excludeMentalModelIds: "",
+        tagsMatch: "",
+        tagGroups: "",
       });
       onCreated();
     } catch (error) {
@@ -669,6 +695,8 @@ function CreateMentalModelDialog({
             factTypes: [],
             excludeMentalModels: false,
             excludeMentalModelIds: "",
+            tagsMatch: "",
+            tagGroups: "",
           });
           onClose();
         }
@@ -786,6 +814,45 @@ function CreateMentalModelDialog({
                 placeholder="e.g., model-a, model-b (comma-separated)"
               />
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Tags Match</label>
+              <Select
+                value={form.tagsMatch}
+                onValueChange={(v) => setForm({ ...form, tagsMatch: v === "default" ? "" : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Default (all_strict when tags set)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Default (all_strict when tags set)</SelectItem>
+                  <SelectItem value="any">any — OR matching, includes untagged</SelectItem>
+                  <SelectItem value="all">all — AND matching, includes untagged</SelectItem>
+                  <SelectItem value="any_strict">
+                    any_strict — OR matching, excludes untagged
+                  </SelectItem>
+                  <SelectItem value="all_strict">
+                    all_strict — AND matching, excludes untagged
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Controls how the model&apos;s tags filter memories during refresh.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Tag Groups (JSON)</label>
+              <Textarea
+                value={form.tagGroups}
+                onChange={(e) => setForm({ ...form, tagGroups: e.target.value })}
+                placeholder='e.g., [{"or": [{"tags": ["user:alice"], "match": "all_strict"}, {"tags": ["shared"]}]}]'
+                rows={3}
+                className="font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">
+                Compound boolean tag expressions for refresh filtering. Overrides flat tags when
+                set.
+              </p>
+            </div>
           </TabsContent>
         </Tabs>
 
@@ -837,6 +904,10 @@ function UpdateMentalModelDialog({
         | undefined) || [],
     excludeMentalModels: mentalModel.trigger?.exclude_mental_models || false,
     excludeMentalModelIds: (mentalModel.trigger?.exclude_mental_model_ids || []).join(", "),
+    tagsMatch: (mentalModel.trigger?.tags_match as string) || "",
+    tagGroups: mentalModel.trigger?.tag_groups
+      ? JSON.stringify(mentalModel.trigger.tag_groups, null, 2)
+      : "",
   });
 
   // Reset form when mental model changes or dialog opens
@@ -854,6 +925,10 @@ function UpdateMentalModelDialog({
             | undefined) || [],
         excludeMentalModels: mentalModel.trigger?.exclude_mental_models || false,
         excludeMentalModelIds: (mentalModel.trigger?.exclude_mental_model_ids || []).join(", "),
+        tagsMatch: (mentalModel.trigger?.tags_match as string) || "",
+        tagGroups: mentalModel.trigger?.tag_groups
+          ? JSON.stringify(mentalModel.trigger.tag_groups, null, 2)
+          : "",
       });
     }
   }, [open, mentalModel]);
@@ -875,6 +950,16 @@ function UpdateMentalModelDialog({
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
 
+      let tagGroups: TagGroup[] | undefined;
+      if (form.tagGroups.trim()) {
+        try {
+          tagGroups = JSON.parse(form.tagGroups.trim());
+        } catch {
+          toast.error("Invalid JSON in Tag Groups field");
+          return;
+        }
+      }
+
       const updated = await client.updateMentalModel(currentBank, mentalModel.id, {
         name: form.name.trim(),
         source_query: form.sourceQuery.trim(),
@@ -885,6 +970,8 @@ function UpdateMentalModelDialog({
           fact_types: form.factTypes.length > 0 ? form.factTypes : undefined,
           exclude_mental_models: form.excludeMentalModels || undefined,
           exclude_mental_model_ids: excludeIds.length > 0 ? excludeIds : undefined,
+          tags_match: (form.tagsMatch as TagsMatch) || undefined,
+          tag_groups: tagGroups,
         },
       });
 
@@ -1005,6 +1092,45 @@ function UpdateMentalModelDialog({
                 onChange={(e) => setForm({ ...form, excludeMentalModelIds: e.target.value })}
                 placeholder="e.g., model-a, model-b (comma-separated)"
               />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Tags Match</label>
+              <Select
+                value={form.tagsMatch || "default"}
+                onValueChange={(v) => setForm({ ...form, tagsMatch: v === "default" ? "" : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Default (all_strict when tags set)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Default (all_strict when tags set)</SelectItem>
+                  <SelectItem value="any">any — OR matching, includes untagged</SelectItem>
+                  <SelectItem value="all">all — AND matching, includes untagged</SelectItem>
+                  <SelectItem value="any_strict">
+                    any_strict — OR matching, excludes untagged
+                  </SelectItem>
+                  <SelectItem value="all_strict">
+                    all_strict — AND matching, excludes untagged
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Controls how the model&apos;s tags filter memories during refresh.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Tag Groups (JSON)</label>
+              <Textarea
+                value={form.tagGroups}
+                onChange={(e) => setForm({ ...form, tagGroups: e.target.value })}
+                placeholder='e.g., [{"or": [{"tags": ["user:alice"], "match": "all_strict"}, {"tags": ["shared"]}]}]'
+                rows={3}
+                className="font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">
+                Compound boolean tag expressions for refresh filtering. Overrides flat tags when
+                set.
+              </p>
             </div>
           </TabsContent>
         </Tabs>
