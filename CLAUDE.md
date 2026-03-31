@@ -11,9 +11,15 @@ Hindsight is an agent memory system that provides long-term memory for AI agents
 
 ## Development Commands
 
+### Local Development (API + UI)
+```bash
+# Start both API server and control plane UI
+./scripts/dev/start.sh
+```
+
 ### API Server (Python/FastAPI)
 ```bash
-# Start API server (loads .env automatically)
+# Start API server only (loads .env automatically)
 ./scripts/dev/start-api.sh
 
 # Run all tests (parallelized with pytest-xdist)
@@ -73,17 +79,16 @@ cd hindsight-control-plane && npm run dev
 
 ### Monorepo Structure
 - **hindsight-api-slim/**: Core FastAPI server with memory engine (Python, uv)
-- **hindsight/**: Embedded Python bundle (hindsight-all package)
 - **hindsight-control-plane/**: Admin UI (Next.js, npm)
 - **hindsight-cli/**: CLI tool (Rust, cargo, uses progenitor for API client)
 - **hindsight-clients/**: Generated SDK clients (Python, TypeScript, Rust)
 - **hindsight-docs/**: Docusaurus documentation site
-- **hindsight-integrations/**: Framework integrations (LiteLLM, OpenAI)
+- **hindsight-integrations/**: Framework integrations (LiteLLM, CrewAI, LangGraph, Pydantic AI, AG2, Claude Code, etc.)
 - **hindsight-dev/**: Development tools and benchmarks
 
 ### Core Engine (hindsight-api-slim/hindsight_api/engine/)
-- `memory_engine.py`: Main orchestrator (~170KB) for retain/recall/reflect operations
-- `llm_wrapper.py`: LLM abstraction supporting OpenAI, Anthropic, Gemini, Groq, MiniMax, Ollama, LM Studio
+- `memory_engine.py`: Main orchestrator for retain/recall/reflect operations
+- `llm_wrapper.py`: LLM abstraction supporting OpenAI, Anthropic, Gemini, VertexAI, Groq, MiniMax, Ollama, LM Studio, LiteLLM, Claude Code
 - `embeddings.py`: Embedding generation (local sentence-transformers or TEI)
 - `cross_encoder.py`: Reranking (local or TEI)
 - `entity_resolver.py`: Entity extraction and normalization
@@ -102,7 +107,7 @@ cd hindsight-control-plane && npm run dev
 - `reranking.py`: Cross-encoder reranking
 
 ### API Layer (hindsight-api-slim/hindsight_api/api/)
-- `http.py`: FastAPI HTTP routers (~80KB) for all REST endpoints
+- `http.py`: FastAPI HTTP routers for all REST endpoints
 - `mcp.py`: Model Context Protocol server implementation
 
 Main operations:
@@ -174,6 +179,8 @@ Key tables: `banks`, `memory_units`, `documents`, `entities`, `entity_links`
 
 **After completing any implementation work, run `/code-review`** to verify your changes against project standards (missing tests, dead code, type safety, etc.). Fix any "must fix" issues before considering the task done.
 
+**MANDATORY: Run `/code-review` before pushing code or creating a pull request.** Do not push or create a PR until all "must fix" issues are resolved.
+
 ### Memory Banks
 - Each bank is an isolated memory store (like a "brain" for one user/agent)
 - Banks have dispositions (skepticism, literalism, empathy traits 1-5) affecting reflect
@@ -204,6 +211,17 @@ When adding or modifying parameters in the dataplane API (hindsight-api), you mu
    - Update the client type definition in `lib/api.ts`
    - Update any UI components that need to use the new parameter
 
+### Adding New Integrations
+
+Every new integration in `hindsight-integrations/` must satisfy all of the following before it can be merged:
+
+1. **Tests are required** — tests must simulate or exercise the external system (mock the framework's interfaces and verify the integration actually calls Hindsight correctly). Pure unit tests of helper functions are not sufficient.
+2. **CI job** — add a test job in `.github/workflows/test.yml` following the existing pattern (e.g., `test-crewai-integration`). The job must build, install deps, and run `uv run pytest tests -v`. Also add the integration to `detect-changes` outputs so it only runs when its files change.
+3. **Release process** — add the integration name to the `VALID_INTEGRATIONS` array in `scripts/release-integration.sh` so it can be released via the standard release workflow.
+4. **Follow project code standards** — Python style, type safety, no raw dicts for structured data, no multi-item tuple returns (see `.claude/skills/code-review/SKILL.md`).
+
+If any of these are missing, the integration is incomplete and must not be pushed or merged.
+
 ### Adding New API Configuration Flags
 
 Configuration follows a hierarchical system: **Global (env vars) → Tenant (via extension) → Bank (database)**.
@@ -216,17 +234,17 @@ Fields must be categorized as either **hierarchical** (can be overridden per-ten
    - Add `ENV_*` constant for the environment variable name (e.g., `ENV_MY_SETTING = "HINDSIGHT_API_MY_SETTING"`)
    - Add `DEFAULT_*` constant for the default value
    - Add field to `HindsightConfig` dataclass with type annotation
-   - **Mark as hierarchical or static** by adding to `_HIERARCHICAL_FIELDS` set (hierarchical) or leaving it out (static)
+   - **Mark as configurable** by adding to `_CONFIGURABLE_FIELDS` set if the field should be overridable per-tenant/bank via API
    - Add initialization in `from_env()` method
 
    ```python
-   # Hierarchical field (can be overridden per-bank)
-   _HIERARCHICAL_FIELDS = {
+   # Configurable field (can be overridden per-tenant/bank via API)
+   _CONFIGURABLE_FIELDS = {
        ...,
-       "my_setting",  # Add here for hierarchical
+       "my_setting",  # Add here for configurable
    }
 
-   # Static field - just don't add to _HIERARCHICAL_FIELDS
+   # Static field - just don't add to _CONFIGURABLE_FIELDS
    ```
 
 2. **main.py** (`hindsight-api-slim/hindsight_api/main.py`):

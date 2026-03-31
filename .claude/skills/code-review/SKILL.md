@@ -18,15 +18,17 @@ Read and internalize these standards before writing code. The review steps below
 - Pydantic models for request/response
 - Ruff for linting (line-length 120)
 - No Python files at project root - maintain clean directory structure
-- **Never use multi-item tuple return values** - prefer dataclass or Pydantic model for structured returns
+- **Never use multi-item tuple return values** — not even for internal/private functions. Always use a dataclass or Pydantic model. No exceptions, no "it's just two values" shortcuts. If a function returns more than one value, define a named type for it.
 
 ### Type Safety with Pydantic Models
-**NEVER use raw `dict` types for structured data.** Always use Pydantic models:
+**NEVER use raw `dict` types for structured data** — this applies to all code, including internal helpers and private functions. If the dict has known keys, it must be a dataclass or Pydantic model:
 - Use Pydantic `BaseModel` for all data structures passed between functions
+- Use `@dataclass` for lightweight internal data containers when Pydantic validation isn't needed
 - Add `@field_validator` for type coercion (e.g., ensuring datetimes are timezone-aware)
 - Avoid `dict.get()` patterns - use typed model attributes instead
 - Parse external data (JSON, API responses) into Pydantic models at the boundary
 - This catches type errors at parse time, not deep in business logic
+- The only acceptable `dict` usage is for truly dynamic/unknown keys (e.g., arbitrary metadata, JSON blobs with no fixed schema)
 
 ```python
 # BAD - error-prone dict access
@@ -118,8 +120,8 @@ For each changed TypeScript file, check for:
 ### 5. Check type safety (Python)
 
 For each changed Python file, check for violations:
-- **No raw `dict` for structured data** — should use Pydantic models
-- **No multi-item tuple returns** — should use dataclass or Pydantic model
+- **No raw `dict` for structured data** — must use Pydantic model or dataclass, even for internal/private functions (only exception: truly dynamic/unknown keys)
+- **No multi-item tuple returns** — must use dataclass or Pydantic model, even for internal/private functions (no exceptions)
 - **Missing type hints** on function parameters and return types
 - **Missing `@field_validator`** for datetime fields that should be timezone-aware
 
@@ -147,7 +149,15 @@ For each non-trivial change:
 - **Changed approach** — does the comment include what was done before and why it changed?
 - **Stale comments** — do existing comments near the changed code still accurately describe the behavior?
 
-### 9. Review against other coding standards
+### 9. Check integration completeness
+
+If any files in `hindsight-integrations/` were added or changed, verify:
+- **Tests exist** — the integration must have tests that simulate/exercise the external framework (not just pure unit tests of helpers). Check for a `tests/` directory with meaningful test files.
+- **CI job exists** — check `.github/workflows/test.yml` for a corresponding `test-<name>-integration` job. If missing, flag it.
+- **Release process** — check that the integration name is in the `VALID_INTEGRATIONS` array in `scripts/release-integration.sh`. If missing, flag it.
+- **Code standards** — the integration code must follow all Python style rules (type hints, no raw dicts, no tuple returns, etc.).
+
+### 10. Review against other coding standards
 
 Check the diff for violations of the standards listed above:
 - Python files at project root (not allowed)
@@ -159,7 +169,7 @@ Check the diff for violations of the standards listed above:
 - Premature abstractions or speculative helpers
 - Backwards-compatibility hacks (unused vars, re-exports, "removed" comments)
 
-### 10. Report findings
+### 11. Report findings
 
 Present a clear summary organized by severity:
 
@@ -167,8 +177,10 @@ Present a clear summary organized by severity:
 - Unrelated commits on the branch
 - Lint failures
 - Missing type hints on public functions
-- Raw dict usage for structured data
+- Raw dict usage for structured data (including internal code)
+- Multi-item tuple returns (including internal code)
 - Missing tests for new endpoints
+- New integration missing tests, CI job, or release-integration.sh entry
 
 **Should fix** — issues that hurt code quality:
 - Dead code / unused imports missed by linter
