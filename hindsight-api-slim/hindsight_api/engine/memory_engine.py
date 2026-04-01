@@ -4340,13 +4340,16 @@ class MemoryEngine(MemoryEngineInterface):
 
             # Get entity information — only for visible units
             if unit_ids:
-                unit_entities = await conn.fetch(f"""
+                unit_entities = await conn.fetch(
+                    f"""
                     SELECT ue.unit_id, e.canonical_name
                     FROM {fq_table("unit_entities")} ue
                     JOIN {fq_table("entities")} e ON ue.entity_id = e.id
                     WHERE ue.unit_id = ANY($1::uuid[])
                     ORDER BY ue.unit_id
-                """, unit_ids)
+                """,
+                    unit_ids,
+                )
             else:
                 unit_entities = []
 
