@@ -277,6 +277,7 @@ ENV_RETAIN_BATCH_TOKENS = "HINDSIGHT_API_RETAIN_BATCH_TOKENS"
 ENV_RETAIN_ENTITY_LOOKUP = "HINDSIGHT_API_RETAIN_ENTITY_LOOKUP"
 ENV_RETAIN_BATCH_ENABLED = "HINDSIGHT_API_RETAIN_BATCH_ENABLED"
 ENV_RETAIN_BATCH_POLL_INTERVAL_SECONDS = "HINDSIGHT_API_RETAIN_BATCH_POLL_INTERVAL_SECONDS"
+ENV_RETAIN_CHUNK_BATCH_SIZE = "HINDSIGHT_API_RETAIN_CHUNK_BATCH_SIZE"
 
 # File storage configuration
 ENV_FILE_STORAGE_TYPE = "HINDSIGHT_API_FILE_STORAGE_TYPE"
@@ -340,6 +341,7 @@ ENV_WORKER_MAX_RETRIES = "HINDSIGHT_API_WORKER_MAX_RETRIES"
 ENV_WORKER_HTTP_PORT = "HINDSIGHT_API_WORKER_HTTP_PORT"
 ENV_WORKER_MAX_SLOTS = "HINDSIGHT_API_WORKER_MAX_SLOTS"
 ENV_WORKER_CONSOLIDATION_MAX_SLOTS = "HINDSIGHT_API_WORKER_CONSOLIDATION_MAX_SLOTS"
+ENV_RETAIN_MAX_CONCURRENT = "HINDSIGHT_API_RETAIN_MAX_CONCURRENT"
 
 # Reflect agent settings
 ENV_REFLECT_MAX_ITERATIONS = "HINDSIGHT_API_REFLECT_MAX_ITERATIONS"
@@ -466,6 +468,9 @@ DEFAULT_RETAIN_MISSION = None  # Declarative spec of what to retain (injected in
 DEFAULT_RETAIN_CUSTOM_INSTRUCTIONS = None  # Custom extraction guidelines (only used when mode="custom")
 DEFAULT_RETAIN_DEFAULT_STRATEGY = None  # Default strategy name (None = no strategy override)
 DEFAULT_RETAIN_STRATEGIES: dict | None = None  # Named retain strategies (dict of name → config overrides)
+DEFAULT_RETAIN_CHUNK_BATCH_SIZE = (
+    100  # Max chunks per streaming batch. Each chunk produces ~17 facts, so 100 chunks = ~1700 facts/batch.
+)
 DEFAULT_RETAIN_BATCH_TOKENS = 10_000  # ~40KB of text  # Max chars per sub-batch for async retain auto-splitting
 DEFAULT_RETAIN_ENTITY_LOOKUP = "trigram"  # "full" or "trigram"
 DEFAULT_RETAIN_BATCH_ENABLED = False  # Use LLM Batch API for fact extraction (only when async=True)
@@ -513,6 +518,7 @@ DEFAULT_WORKER_MAX_RETRIES = 3  # Max retries before marking task failed
 DEFAULT_WORKER_HTTP_PORT = 8889  # HTTP port for worker metrics/health
 DEFAULT_WORKER_MAX_SLOTS = 10  # Total concurrent tasks per worker
 DEFAULT_WORKER_CONSOLIDATION_MAX_SLOTS = 2  # Max concurrent consolidation tasks per worker
+DEFAULT_RETAIN_MAX_CONCURRENT = 4  # Max concurrent retain DB phases (HNSW reads + writes). Limits I/O contention.
 
 # Reflect agent settings
 DEFAULT_REFLECT_MAX_ITERATIONS = 10  # Max tool call iterations before forcing response
@@ -759,6 +765,7 @@ class HindsightConfig:
     retain_batch_enabled: bool
     retain_batch_poll_interval_seconds: int
     retain_entity_lookup: str  # "full" or "trigram"
+    retain_chunk_batch_size: int  # Max chunks per streaming batch (0 = disabled)
 
     # File storage (static - server-level only)
     file_storage_type: str  # "native" (PostgreSQL) or "s3" (S3-compatible)
@@ -830,6 +837,7 @@ class HindsightConfig:
     worker_http_port: int
     worker_max_slots: int
     worker_consolidation_max_slots: int
+    retain_max_concurrent: int
 
     # Reflect agent settings
     reflect_max_iterations: int
@@ -896,6 +904,7 @@ class HindsightConfig:
         "retain_custom_instructions",
         "retain_default_strategy",
         "retain_strategies",
+        "retain_chunk_batch_size",
         # Entity labels (controlled vocabulary for entity classification)
         "entity_labels",
         "entities_allow_free_form",
@@ -1249,6 +1258,7 @@ class HindsightConfig:
             retain_batch_poll_interval_seconds=int(
                 os.getenv(ENV_RETAIN_BATCH_POLL_INTERVAL_SECONDS, str(DEFAULT_RETAIN_BATCH_POLL_INTERVAL_SECONDS))
             ),
+            retain_chunk_batch_size=int(os.getenv(ENV_RETAIN_CHUNK_BATCH_SIZE, str(DEFAULT_RETAIN_CHUNK_BATCH_SIZE))),
             # File storage
             file_storage_type=os.getenv(ENV_FILE_STORAGE_TYPE, DEFAULT_FILE_STORAGE_TYPE),
             file_storage_s3_bucket=os.getenv(ENV_FILE_STORAGE_S3_BUCKET) or None,
@@ -1330,6 +1340,7 @@ class HindsightConfig:
             worker_consolidation_max_slots=int(
                 os.getenv(ENV_WORKER_CONSOLIDATION_MAX_SLOTS, str(DEFAULT_WORKER_CONSOLIDATION_MAX_SLOTS))
             ),
+            retain_max_concurrent=int(os.getenv(ENV_RETAIN_MAX_CONCURRENT, str(DEFAULT_RETAIN_MAX_CONCURRENT))),
             # Reflect agent settings
             reflect_max_iterations=int(os.getenv(ENV_REFLECT_MAX_ITERATIONS, str(DEFAULT_REFLECT_MAX_ITERATIONS))),
             reflect_max_context_tokens=int(
