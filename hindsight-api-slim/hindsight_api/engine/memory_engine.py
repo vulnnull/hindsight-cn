@@ -4338,8 +4338,9 @@ class MemoryEngine(MemoryEngineInterface):
                 link for link in links if link["from_unit_id"] in unit_id_set and link["to_unit_id"] in unit_id_set
             ]
 
-            # Get entity information — only for visible units
-            if unit_ids:
+            # Get entity information — for visible units AND their source memories
+            # (observations inherit entities from source memories)
+            if all_relevant_ids:
                 unit_entities = await conn.fetch(
                     f"""
                     SELECT ue.unit_id, e.canonical_name
@@ -4348,7 +4349,7 @@ class MemoryEngine(MemoryEngineInterface):
                     WHERE ue.unit_id = ANY($1::uuid[])
                     ORDER BY ue.unit_id
                 """,
-                    unit_ids,
+                    all_relevant_ids,
                 )
             else:
                 unit_entities = []

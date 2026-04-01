@@ -1,7 +1,7 @@
 """Fix per-bank vector indexes to match configured extension
 
 Revision ID: a4b5c6d7e8f9
-Revises: c2d3e4f5g6h7, c5d6e7f8a9b0
+Revises: 2eee35aa3cfc
 Create Date: 2026-04-01
 
 Migration d5e6f7a8b9c0 hardcoded HNSW when creating per-bank partial vector
