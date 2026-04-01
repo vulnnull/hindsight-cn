@@ -4262,23 +4262,27 @@ class MemoryEngine(MemoryEngineInterface):
                     source_memory_ids.extend(unit["source_memory_ids"])
             source_memory_ids = list(set(source_memory_ids))  # Deduplicate
 
-            # Fetch links involving both visible units AND source memories
+            # Fetch links where BOTH endpoints are in the visible set (or source memories)
+            # Cap at 10k edges — the UI can't usefully render more, and uncapped queries
+            # on highly-connected graphs (e.g. 1000 nodes with 500k+ edges) are too slow.
+            max_edges = 10000
             all_relevant_ids = unit_ids + source_memory_ids
             if all_relevant_ids:
                 links = await conn.fetch(
                     f"""
-                    SELECT DISTINCT ON (LEAST(ml.from_unit_id, ml.to_unit_id), GREATEST(ml.from_unit_id, ml.to_unit_id), ml.link_type, COALESCE(ml.entity_id, '00000000-0000-0000-0000-000000000000'::uuid))
-                        ml.from_unit_id,
-                        ml.to_unit_id,
-                        ml.link_type,
-                        ml.weight,
-                        e.canonical_name as entity_name
+                    SELECT ml.from_unit_id,
+                           ml.to_unit_id,
+                           ml.link_type,
+                           ml.weight,
+                           e.canonical_name as entity_name
                     FROM {fq_table("memory_links")} ml
                     LEFT JOIN {fq_table("entities")} e ON ml.entity_id = e.id
-                    WHERE ml.from_unit_id = ANY($1::uuid[]) OR ml.to_unit_id = ANY($1::uuid[])
-                    ORDER BY LEAST(ml.from_unit_id, ml.to_unit_id), GREATEST(ml.from_unit_id, ml.to_unit_id), ml.link_type, COALESCE(ml.entity_id, '00000000-0000-0000-0000-000000000000'::uuid), ml.weight DESC
+                    WHERE ml.from_unit_id = ANY($1::uuid[]) AND ml.to_unit_id = ANY($1::uuid[])
+                    ORDER BY ml.weight DESC NULLS LAST
+                    LIMIT $2
                 """,
                     all_relevant_ids,
+                    max_edges,
                 )
             else:
                 links = []
@@ -4339,13 +4343,17 @@ class MemoryEngine(MemoryEngineInterface):
                 link for link in links if link["from_unit_id"] in unit_id_set and link["to_unit_id"] in unit_id_set
             ]
 
-            # Get entity information
-            unit_entities = await conn.fetch(f"""
-                SELECT ue.unit_id, e.canonical_name
-                FROM {fq_table("unit_entities")} ue
-                JOIN {fq_table("entities")} e ON ue.entity_id = e.id
-                ORDER BY ue.unit_id
-            """)
+            # Get entity information — only for visible units
+            if unit_ids:
+                unit_entities = await conn.fetch(f"""
+                    SELECT ue.unit_id, e.canonical_name
+                    FROM {fq_table("unit_entities")} ue
+                    JOIN {fq_table("entities")} e ON ue.entity_id = e.id
+                    WHERE ue.unit_id = ANY($1::uuid[])
+                    ORDER BY ue.unit_id
+                """, unit_ids)
+            else:
+                unit_entities = []
 
         # Build entity mapping
         entity_map = {}
