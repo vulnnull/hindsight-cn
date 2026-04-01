@@ -29,7 +29,7 @@ from ..db_utils import acquire_with_retry
 from ..memory_engine import fq_table
 from .graph_retrieval import GraphRetriever
 from .tags import TagGroup, TagsMatch, filter_results_by_tag_groups, filter_results_by_tags
-from .types import MPFPTimings, RetrievalResult
+from .types import GraphRetrievalTimings, RetrievalResult
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ class LinkExpansionRetriever(GraphRetriever):
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
         tag_groups: list[TagGroup] | None = None,
-    ) -> tuple[list[RetrievalResult], MPFPTimings | None]:
+    ) -> tuple[list[RetrievalResult], GraphRetrievalTimings | None]:
         """
         Retrieve facts by expanding links from seeds.
 
@@ -136,7 +136,7 @@ class LinkExpansionRetriever(GraphRetriever):
             Tuple of (results, timings)
         """
         start_time = time.time()
-        timings = MPFPTimings(fact_type=fact_type)
+        timings = GraphRetrievalTimings(fact_type=fact_type)
 
         async with acquire_with_retry(pool) as conn:
             # Find seeds if not provided

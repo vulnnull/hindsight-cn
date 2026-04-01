@@ -2832,7 +2832,7 @@ class MemoryEngine(MemoryEngineInterface):
                 "temporal": 0.0,
                 "temporal_extraction": 0.0,
             }
-            all_mpfp_timings = []
+            all_graph_timings = []
 
             detected_temporal_constraint = None
             max_conn_wait = multi_result.max_conn_wait
@@ -2894,25 +2894,25 @@ class MemoryEngine(MemoryEngineInterface):
             )
 
             # Log graph retriever timing breakdown if available
-            if all_mpfp_timings:
+            if all_graph_timings:
                 retriever_name = get_default_graph_retriever().name.upper()
-                mpfp_total = all_mpfp_timings[0]  # Take first fact type's timing as representative
-                mpfp_parts = [
-                    f"db_queries={mpfp_total.db_queries}",
-                    f"edge_load={mpfp_total.edge_load_time:.3f}s",
-                    f"edges={mpfp_total.edge_count}",
-                    f"patterns={mpfp_total.pattern_count}",
+                graph_total = all_graph_timings[0]  # Take first fact type's timing as representative
+                graph_parts = [
+                    f"db_queries={graph_total.db_queries}",
+                    f"edge_load={graph_total.edge_load_time:.3f}s",
+                    f"edges={graph_total.edge_count}",
+                    f"patterns={graph_total.pattern_count}",
                 ]
-                if mpfp_total.seeds_time > 0.01:
-                    mpfp_parts.append(f"seeds={mpfp_total.seeds_time:.3f}s")
-                if mpfp_total.fusion > 0.001:
-                    mpfp_parts.append(f"fusion={mpfp_total.fusion:.3f}s")
-                if mpfp_total.fetch > 0.001:
-                    mpfp_parts.append(f"fetch={mpfp_total.fetch:.3f}s")
-                log_buffer.append(f"      [{retriever_name}] {', '.join(mpfp_parts)}")
+                if graph_total.seeds_time > 0.01:
+                    graph_parts.append(f"seeds={graph_total.seeds_time:.3f}s")
+                if graph_total.fusion > 0.001:
+                    graph_parts.append(f"fusion={graph_total.fusion:.3f}s")
+                if graph_total.fetch > 0.001:
+                    graph_parts.append(f"fetch={graph_total.fetch:.3f}s")
+                log_buffer.append(f"      [{retriever_name}] {', '.join(graph_parts)}")
                 # Log detailed hop timing for debugging slow queries
-                if mpfp_total.hop_details:
-                    for hd in mpfp_total.hop_details:
+                if graph_total.hop_details:
+                    for hd in graph_total.hop_details:
                         log_buffer.append(
                             f"        hop{hd['hop']}: exec={hd.get('exec_time', 0) * 1000:.0f}ms, "
                             f"uncached={hd.get('uncached_after_filter', 0)}, "
