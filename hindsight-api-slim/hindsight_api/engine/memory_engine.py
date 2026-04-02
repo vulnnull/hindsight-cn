@@ -3625,7 +3625,10 @@ class MemoryEngine(MemoryEngineInterface):
                 }
 
         if invalidated_obs > 0:
-            await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+            try:
+                await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+            except Exception as e:
+                logger.warning(f"Failed to submit consolidation after document deletion for bank {bank_id}: {e}")
 
         return result
 
@@ -3759,7 +3762,10 @@ class MemoryEngine(MemoryEngineInterface):
                             )
 
         if invalidated_obs > 0:
-            await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+            try:
+                await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+            except Exception as e:
+                logger.warning(f"Failed to submit consolidation after document update for bank {bank_id}: {e}")
 
         return True
 
@@ -3821,7 +3827,14 @@ class MemoryEngine(MemoryEngineInterface):
                 }
 
         if bank_id_for_consolidation:
-            await self.submit_async_consolidation(bank_id=bank_id_for_consolidation, request_context=request_context)
+            try:
+                await self.submit_async_consolidation(
+                    bank_id=bank_id_for_consolidation, request_context=request_context
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to submit consolidation after memory deletion for bank {bank_id_for_consolidation}: {e}"
+                )
 
         return result
 
@@ -3830,6 +3843,7 @@ class MemoryEngine(MemoryEngineInterface):
         bank_id: str,
         fact_type: str | None = None,
         *,
+        delete_bank_profile: bool = True,
         request_context: "RequestContext",
     ) -> dict[str, int]:
         """
@@ -3916,19 +3930,20 @@ class MemoryEngine(MemoryEngineInterface):
                         # Delete entities (cascades to unit_entities, entity_cooccurrences, memory_links with entity_id)
                         await conn.execute(f"DELETE FROM {fq_table('entities')} WHERE bank_id = $1", bank_id)
 
-                        # Delete the bank profile and retrieve internal_id for HNSW index cleanup
-                        internal_id = await conn.fetchval(
-                            f"DELETE FROM {fq_table('banks')} WHERE bank_id = $1 RETURNING internal_id", bank_id
-                        )
-                        if internal_id:
-                            bank_internal_id = str(internal_id)
-
                         result = {
                             "memory_units_deleted": units_count,
                             "entities_deleted": entities_count,
                             "documents_deleted": documents_count,
-                            "bank_deleted": True,
                         }
+
+                        if delete_bank_profile:
+                            # Delete the bank profile and retrieve internal_id for HNSW index cleanup
+                            internal_id = await conn.fetchval(
+                                f"DELETE FROM {fq_table('banks')} WHERE bank_id = $1 RETURNING internal_id", bank_id
+                            )
+                            if internal_id:
+                                bank_internal_id = str(internal_id)
+                            result["bank_deleted"] = True
 
                 except Exception as e:
                     raise Exception(f"Failed to delete agent data: {str(e)}")
@@ -3940,7 +3955,10 @@ class MemoryEngine(MemoryEngineInterface):
                 await bank_utils.drop_bank_vector_indexes(conn, bank_internal_id)
 
         if invalidated_obs > 0:
-            await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+            try:
+                await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+            except Exception as e:
+                logger.warning(f"Failed to submit consolidation after bank deletion for bank {bank_id}: {e}")
 
         return result
 
@@ -4331,7 +4349,10 @@ class MemoryEngine(MemoryEngineInterface):
             ]
 
             # Get entity information — only for visible units
-            if unit_ids:
+            # Fetch entities for visible units AND their source memories
+            # (so observations can inherit entities from source memories)
+            entity_lookup_ids = unit_ids + source_memory_ids
+            if entity_lookup_ids:
                 unit_entities = await conn.fetch(
                     f"""
                     SELECT ue.unit_id, e.canonical_name
@@ -4340,7 +4361,7 @@ class MemoryEngine(MemoryEngineInterface):
                     WHERE ue.unit_id = ANY($1::uuid[])
                     ORDER BY ue.unit_id
                 """,
-                    unit_ids,
+                    entity_lookup_ids,
                 )
             else:
                 unit_entities = []
@@ -6340,6 +6361,7 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         tags: list[str] | None = None,
         tags_match: str = "any",
+        detail: str = "full",
         limit: int = 100,
         offset: int = 0,
         request_context: "RequestContext",
@@ -6350,6 +6372,7 @@ class MemoryEngine(MemoryEngineInterface):
             bank_id: Bank identifier
             tags: Optional tags to filter by
             tags_match: How to match tags - 'any', 'all', or 'exact'
+            detail: Detail level - 'metadata', 'content', or 'full'
             limit: Maximum number of results
             offset: Offset for pagination
             request_context: Request context for authentication
@@ -6391,13 +6414,14 @@ class MemoryEngine(MemoryEngineInterface):
                 *params,
             )
 
-            return [self._row_to_mental_model(row) for row in rows]
+            return [self._row_to_mental_model(row, detail=detail) for row in rows]
 
     async def get_mental_model(
         self,
         bank_id: str,
         mental_model_id: str,
         *,
+        detail: str = "full",
         request_context: "RequestContext",
     ) -> dict[str, Any] | None:
         """Get a single pinned mental model by ID.
@@ -6405,6 +6429,7 @@ class MemoryEngine(MemoryEngineInterface):
         Args:
             bank_id: Bank identifier
             mental_model_id: Pinned mental model UUID
+            detail: Detail level - 'metadata', 'content', or 'full'
             request_context: Request context for authentication
 
         Returns:
@@ -6438,7 +6463,7 @@ class MemoryEngine(MemoryEngineInterface):
                 mental_model_id,
             )
 
-            result = self._row_to_mental_model(row) if row else None
+            result = self._row_to_mental_model(row, detail=detail) if row else None
 
         # Post-operation hook (usage recording)
         if result and self._operation_validator:
@@ -6836,34 +6861,45 @@ class MemoryEngine(MemoryEngineInterface):
 
         return result == "DELETE 1"
 
-    def _row_to_mental_model(self, row) -> dict[str, Any]:
-        """Convert a database row to a mental model dict."""
-        reflect_response = row.get("reflect_response")
-        # Parse JSON string to dict if needed (asyncpg may return JSONB as string)
-        if isinstance(reflect_response, str):
-            try:
-                reflect_response = json.loads(reflect_response)
-            except json.JSONDecodeError:
-                reflect_response = None
+    def _row_to_mental_model(self, row, *, detail: str = "full") -> dict[str, Any]:
+        """Convert a database row to a mental model dict.
+
+        Args:
+            row: Database row
+            detail: Detail level - 'metadata', 'content', or 'full'
+        """
+        result: dict[str, Any] = {
+            "id": str(row["id"]),
+            "bank_id": row["bank_id"],
+            "name": row["name"],
+            "tags": row["tags"] or [],
+            "last_refreshed_at": row["last_refreshed_at"].isoformat() if row["last_refreshed_at"] else None,
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        if detail == "metadata":
+            return result
+
         trigger = row.get("trigger")
         if isinstance(trigger, str):
             try:
                 trigger = json.loads(trigger)
             except json.JSONDecodeError:
                 trigger = None
-        return {
-            "id": str(row["id"]),
-            "bank_id": row["bank_id"],
-            "name": row["name"],
-            "source_query": row["source_query"],
-            "content": row["content"],
-            "tags": row["tags"] or [],
-            "max_tokens": row.get("max_tokens"),
-            "trigger": trigger,
-            "last_refreshed_at": row["last_refreshed_at"].isoformat() if row["last_refreshed_at"] else None,
-            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-            "reflect_response": reflect_response,
-        }
+        result["source_query"] = row["source_query"]
+        result["content"] = row["content"]
+        result["max_tokens"] = row.get("max_tokens")
+        result["trigger"] = trigger
+
+        if detail == "full":
+            reflect_response = row.get("reflect_response")
+            if isinstance(reflect_response, str):
+                try:
+                    reflect_response = json.loads(reflect_response)
+                except json.JSONDecodeError:
+                    reflect_response = None
+            result["reflect_response"] = reflect_response
+
+        return result
 
     # =========================================================================
     # Directives - Hard rules injected into prompts

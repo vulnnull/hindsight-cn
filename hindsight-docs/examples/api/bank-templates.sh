@@ -41,7 +41,7 @@ curl -X POST "$HINDSIGHT_URL/v1/default/banks/my-bank/import" \
 # [docs:import-dry-run]
 curl -X POST "$HINDSIGHT_URL/v1/default/banks/my-bank/import?dry_run=true" \
   -H "Content-Type: application/json" \
-  -d @template.json
+  -d '{"version": "1", "bank": {"retain_mission": "Dry run test."}}'
 # [/docs:import-dry-run]
 
 # [docs:export-template]
