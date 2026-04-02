@@ -123,6 +123,12 @@ const sidebars: SidebarsConfig = {
           customProps: { icon: 'lu-webhook' },
         },
         {
+          type: 'doc',
+          id: 'developer/api/bank-templates',
+          label: 'Bank Templates',
+          customProps: { icon: 'lu-file-json' },
+        },
+        {
           type: 'link',
           href: '/api-reference',
           label: 'API Reference',
@@ -342,6 +348,12 @@ const sidebars: SidebarsConfig = {
       label: 'Resources',
       collapsible: false,
       items: [
+        {
+          type: 'link',
+          href: '/templates',
+          label: 'Bank Templates Hub',
+          customProps: { icon: 'lu-layout-template', iconAfter: 'lu-arrow-up-right' },
+        },
         {
           type: 'link',
           href: '/best-practices',
