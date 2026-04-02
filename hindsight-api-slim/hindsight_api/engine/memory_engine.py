@@ -270,7 +270,7 @@ class MemoryEngine(MemoryEngineInterface):
     This class provides:
     - Embedding generation for semantic search
     - Entity, temporal, and semantic link creation
-    - Think operations for formulating answers with opinions
+    - Think operations for formulating answers with observations
     - bank profile and disposition management
     """
 
@@ -2003,7 +2003,6 @@ class MemoryEngine(MemoryEngineInterface):
         event_date: datetime | None = None,
         document_id: str | None = None,
         fact_type_override: str | None = None,
-        confidence_score: float | None = None,
         *,
         request_context: "RequestContext",
     ) -> list[str]:
@@ -2019,7 +2018,6 @@ class MemoryEngine(MemoryEngineInterface):
             event_date: When the event occurred (defaults to now)
             document_id: Optional document ID for tracking (always upserts if document already exists)
             fact_type_override: Override fact type ('world', 'experience')
-            confidence_score: Confidence score (0.0 to 1.0)
             request_context: Request context for authentication.
 
         Returns:
@@ -2038,7 +2036,6 @@ class MemoryEngine(MemoryEngineInterface):
             contents=[content_dict],
             request_context=request_context,
             fact_type_override=fact_type_override,
-            confidence_score=confidence_score,
         )
 
         # Return the first (and only) list of unit IDs
@@ -2052,7 +2049,6 @@ class MemoryEngine(MemoryEngineInterface):
         request_context: "RequestContext",
         document_id: str | None = None,
         fact_type_override: str | None = None,
-        confidence_score: float | None = None,
         document_tags: list[str] | None = None,
         return_usage: bool = False,
         operation_id: str | None = None,
@@ -2078,7 +2074,6 @@ class MemoryEngine(MemoryEngineInterface):
             document_id: **DEPRECATED** - Use "document_id" key in each content dict instead.
                         Applies the same document_id to ALL content items that don't specify their own.
             fact_type_override: Override fact type for all facts ('world', 'experience')
-            confidence_score: Confidence score (0.0 to 1.0)
             return_usage: If True, returns tuple of (unit_ids, TokenUsage). Default False for backward compatibility.
 
         Returns:
@@ -2128,7 +2123,6 @@ class MemoryEngine(MemoryEngineInterface):
                 request_context=request_context,
                 document_id=document_id,
                 fact_type_override=fact_type_override,
-                confidence_score=confidence_score,
             )
             result = await self._validate_operation(self._operation_validator.validate_retain(ctx))
             if result and result.contents is not None:
@@ -2254,7 +2248,6 @@ class MemoryEngine(MemoryEngineInterface):
                 request_context=request_context,
                 document_id=document_id,
                 fact_type_override=fact_type_override,
-                confidence_score=confidence_score,
                 unit_ids=result,
                 success=True,
                 error=None,
@@ -2373,7 +2366,7 @@ class MemoryEngine(MemoryEngineInterface):
         Args:
             bank_id: bank ID to recall for
             query: Recall query
-            fact_type: Required filter for fact type ('world', 'experience', or 'opinion')
+            fact_type: Required filter for fact type ('world' or 'experience')
             budget: Budget level for graph traversal (low=100, mid=300, high=600 units)
             max_tokens: Maximum tokens to return (counts only 'text' field, default 4096)
             enable_trace: If True, returns detailed trace object
@@ -2467,8 +2460,10 @@ class MemoryEngine(MemoryEngineInterface):
         if fact_type is None:
             fact_type = list(VALID_RECALL_FACT_TYPES)
 
-        # Filter out 'opinion' early (deprecated, silently ignore)
+        # Filter out 'opinion' (removed fact type, silently ignore for backwards compat)
         fact_type = [ft for ft in fact_type if ft != "opinion"]
+        if not fact_type:
+            return RecallResultModel(results=[], entities={}, chunks={})
 
         # Validate fact types
         invalid_types = set(fact_type) - VALID_RECALL_FACT_TYPES
@@ -2477,9 +2472,6 @@ class MemoryEngine(MemoryEngineInterface):
                 f"Invalid fact type(s): {', '.join(sorted(invalid_types))}. "
                 f"Must be one of: {', '.join(sorted(VALID_RECALL_FACT_TYPES))}"
             )
-        if not fact_type:
-            # All requested types were opinions - return empty result
-            return RecallResultModel(results=[], entities={}, chunks={})
 
         # Validate operation if validator is configured
         if self._operation_validator:
@@ -3854,7 +3846,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         Args:
             bank_id: bank ID to delete
-            fact_type: Optional fact type filter (world, experience, opinion). If provided, only deletes memories of that type.
+            fact_type: Optional fact type filter (world, experience). If provided, only deletes memories of that type.
             request_context: Request context for authentication.
 
         Returns:
@@ -4173,7 +4165,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         Args:
             bank_id: Filter by bank ID
-            fact_type: Filter by fact type (world, experience, opinion)
+            fact_type: Filter by fact type (world, experience)
             limit: Maximum number of items to return (default: 1000)
             q: Full-text search query (searches text and context fields)
             tags: Filter by tags
@@ -4552,7 +4544,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         Args:
             bank_id: Filter by bank ID
-            fact_type: Filter by fact type (world, experience, opinion)
+            fact_type: Filter by fact type (world, experience)
             search_query: Full-text search query (searches text and context fields)
             limit: Maximum number of results to return
             offset: Offset for pagination
