@@ -258,6 +258,12 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'sdks/integrations/paperclip',
+          label: 'Paperclip',
+          customProps: { icon: '/img/icons/nodejs.png' },
+        },
+        {
+          type: 'doc',
           id: 'sdks/integrations/strands',
           label: 'Strands Agents',
           customProps: { icon: '/img/icons/strands.png' },
