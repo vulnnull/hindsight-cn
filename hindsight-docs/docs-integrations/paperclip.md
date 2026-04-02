@@ -1,5 +1,7 @@
 ---
 sidebar_position: 11
+title: "Paperclip Persistent Memory with Hindsight | Integration Guide"
+description: "Add long-term memory to Paperclip agents with Hindsight. Retain, recall, and reflect memories across sessions using the Paperclip integration."
 ---
 
 # Paperclip
