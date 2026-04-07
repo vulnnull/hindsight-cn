@@ -1661,7 +1661,9 @@ class BankTemplateConfig(BaseModel):
     disposition_skepticism: int | None = Field(default=None, ge=1, le=5, description="Skepticism trait (1-5)")
     disposition_literalism: int | None = Field(default=None, ge=1, le=5, description="Literalism trait (1-5)")
     disposition_empathy: int | None = Field(default=None, ge=1, le=5, description="Empathy trait (1-5)")
-    entity_labels: list[str] | None = Field(default=None, description="Controlled vocabulary for entity labels")
+    entity_labels: list[dict[str, Any]] | None = Field(
+        default=None, description="Controlled vocabulary for entity labels"
+    )
     entities_allow_free_form: bool | None = Field(
         default=None, description="Allow entities outside the label vocabulary"
     )
