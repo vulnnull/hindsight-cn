@@ -1100,6 +1100,7 @@ Hindsight provides OpenTelemetry-based observability for LLM calls, conforming t
 | `HINDSIGHT_API_OTEL_EXPORTER_OTLP_HEADERS` | Headers for OTLP exporter (format: "key1=value1,key2=value2") | - |
 | `HINDSIGHT_API_OTEL_SERVICE_NAME` | Service name for traces | `hindsight-api` |
 | `HINDSIGHT_API_OTEL_DEPLOYMENT_ENVIRONMENT` | Deployment environment name (e.g., development, staging, production) | `development` |
+| `HINDSIGHT_API_METRICS_INCLUDE_BANK_ID` | Include `bank_id` in OTel metric attributes. Enable only for deployments with few banks — high cardinality causes unbounded memory growth. | `false` |
 
 **Features:**
 - Full prompts and completions recorded as events
