@@ -370,6 +370,7 @@ export HINDSIGHT_API_RETAIN_LLM_MAX_BACKOFF=120.0    # Cap at 2min instead of 1m
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MODEL` | LiteLLM SDK embedding model (use provider prefix, e.g., `cohere/embed-english-v3.0`) | `cohere/embed-english-v3.0` |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_BASE` | Custom base URL for LiteLLM SDK embeddings (optional) | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_OUTPUT_DIMENSIONS` | Optional output embedding dimensions (provider-dependent, e.g., `768` for Gemini embedding models) | - |
+| `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_ENCODING_FORMAT` | Encoding format for embedding responses. Set to empty string to omit the parameter (needed for Voyage AI, Gemini). | `float` |
 | `HINDSIGHT_API_EMBEDDINGS_GEMINI_API_KEY` | Gemini API key for embeddings (falls back to `HINDSIGHT_API_LLM_API_KEY`) | - |
 | `HINDSIGHT_API_EMBEDDINGS_GEMINI_MODEL` | Gemini embedding model | `gemini-embedding-001` |
 | `HINDSIGHT_API_EMBEDDINGS_GEMINI_OUTPUT_DIMENSIONALITY` | Output embedding dimensions (Gemini supports configurable dimensionality) | `768` |

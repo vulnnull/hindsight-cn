@@ -211,6 +211,7 @@ ENV_EMBEDDINGS_LITELLM_SDK_API_KEY = "HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_K
 ENV_EMBEDDINGS_LITELLM_SDK_MODEL = "HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MODEL"
 ENV_EMBEDDINGS_LITELLM_SDK_API_BASE = "HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_BASE"
 ENV_EMBEDDINGS_LITELLM_SDK_OUTPUT_DIMENSIONS = "HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_OUTPUT_DIMENSIONS"
+ENV_EMBEDDINGS_LITELLM_SDK_ENCODING_FORMAT = "HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_ENCODING_FORMAT"
 ENV_RERANKER_LITELLM_SDK_API_KEY = "HINDSIGHT_API_RERANKER_LITELLM_SDK_API_KEY"
 ENV_RERANKER_LITELLM_SDK_MODEL = "HINDSIGHT_API_RERANKER_LITELLM_SDK_MODEL"
 ENV_RERANKER_LITELLM_SDK_API_BASE = "HINDSIGHT_API_RERANKER_LITELLM_SDK_API_BASE"
@@ -460,6 +461,7 @@ DEFAULT_RERANKER_LITELLM_MAX_TOKENS_PER_DOC: int | None = None
 
 # LiteLLM SDK defaults
 DEFAULT_EMBEDDINGS_LITELLM_SDK_MODEL = "cohere/embed-english-v3.0"
+DEFAULT_EMBEDDINGS_LITELLM_SDK_ENCODING_FORMAT = "float"
 DEFAULT_RERANKER_LITELLM_SDK_MODEL = "cohere/rerank-english-v3.0"
 
 DEFAULT_HOST = "0.0.0.0"
@@ -729,6 +731,7 @@ class HindsightConfig:
     embeddings_litellm_sdk_model: str
     embeddings_litellm_sdk_api_base: str | None
     embeddings_litellm_sdk_output_dimensions: int | None
+    embeddings_litellm_sdk_encoding_format: str | None
     # Gemini/Vertex AI embeddings
     embeddings_gemini_api_key: str | None
     embeddings_gemini_model: str
@@ -1200,6 +1203,9 @@ class HindsightConfig:
             embeddings_litellm_sdk_output_dimensions=int(v)
             if (v := os.getenv(ENV_EMBEDDINGS_LITELLM_SDK_OUTPUT_DIMENSIONS))
             else None,
+            embeddings_litellm_sdk_encoding_format=os.getenv(
+                ENV_EMBEDDINGS_LITELLM_SDK_ENCODING_FORMAT, DEFAULT_EMBEDDINGS_LITELLM_SDK_ENCODING_FORMAT
+            ),
             # Gemini/Vertex AI embeddings (with fallback to LLM keys)
             embeddings_gemini_api_key=os.getenv(ENV_EMBEDDINGS_GEMINI_API_KEY) or os.getenv(ENV_LLM_API_KEY),
             embeddings_gemini_model=os.getenv(ENV_EMBEDDINGS_GEMINI_MODEL, DEFAULT_EMBEDDINGS_GEMINI_MODEL),
