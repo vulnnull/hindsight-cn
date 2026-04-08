@@ -87,7 +87,7 @@ embedded-db = [
     "pg0-embedded>=0.11.0",
 ]
 all = [
-    "hindsight-api-slim[local-ml,local-llm,embedded-db]",
+    "hindsight-api-slim[local-ml,embedded-db]",
 ]
 test = [
     "pytest>=7.0.0",

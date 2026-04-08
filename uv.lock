@@ -1480,6 +1480,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+local-llm = [
+    { name = "hindsight-api-slim", extra = ["local-llm"] },
+]
 test = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1488,12 +1491,13 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "hindsight-api-slim", extras = ["all"], editable = "hindsight-api-slim" },
+    { name = "hindsight-api-slim", extras = ["local-llm"], marker = "extra == 'local-llm'", editable = "hindsight-api-slim" },
     { name = "hindsight-client", editable = "hindsight-clients/python" },
     { name = "hindsight-embed", editable = "hindsight-embed" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
 ]
-provides-extras = ["test"]
+provides-extras = ["local-llm", "test"]
 
 [[package]]
 name = "hindsight-all-slim"
@@ -1595,8 +1599,6 @@ dependencies = [
 all = [
     { name = "einops" },
     { name = "flashrank" },
-    { name = "huggingface-hub" },
-    { name = "llama-cpp-python", extra = ["server"] },
     { name = "mlx" },
     { name = "mlx-lm" },
     { name = "pg0-embedded" },
@@ -1668,7 +1670,7 @@ requires-dist = [
     { name = "google-auth", specifier = ">=2.0.0" },
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "greenlet", specifier = ">=3.2.4" },
-    { name = "hindsight-api-slim", extras = ["local-ml", "local-llm", "embedded-db"], marker = "extra == 'all'" },
+    { name = "hindsight-api-slim", extras = ["local-ml", "embedded-db"], marker = "extra == 'all'" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "huggingface-hub", marker = "extra == 'local-llm'", specifier = ">=0.20.0" },
     { name = "langchain-core", specifier = ">=1.2.22" },

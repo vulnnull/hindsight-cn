@@ -20,6 +20,9 @@ hindsight-client = { workspace = true }
 hindsight-embed = { workspace = true }
 
 [project.optional-dependencies]
+local-llm = [
+    "hindsight-api-slim[local-llm]>=0.4.17",
+]
 test = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
