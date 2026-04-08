@@ -1,0 +1,2 @@
+# greenlet 3.4.0 lacks arm64 wheels for manylinux_2_41 — remove this cap once 3.4.1+ ships with them
+greenlet<3.4.0
