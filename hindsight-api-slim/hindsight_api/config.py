@@ -194,6 +194,13 @@ ENV_RERANKER_COHERE_API_KEY = "HINDSIGHT_API_RERANKER_COHERE_API_KEY"
 ENV_RERANKER_COHERE_MODEL = "HINDSIGHT_API_RERANKER_COHERE_MODEL"
 ENV_RERANKER_COHERE_BASE_URL = "HINDSIGHT_API_RERANKER_COHERE_BASE_URL"
 
+# OpenRouter configuration (embeddings and reranker)
+ENV_OPENROUTER_API_KEY = "HINDSIGHT_API_OPENROUTER_API_KEY"
+ENV_EMBEDDINGS_OPENROUTER_API_KEY = "HINDSIGHT_API_EMBEDDINGS_OPENROUTER_API_KEY"
+ENV_EMBEDDINGS_OPENROUTER_MODEL = "HINDSIGHT_API_EMBEDDINGS_OPENROUTER_MODEL"
+ENV_RERANKER_OPENROUTER_API_KEY = "HINDSIGHT_API_RERANKER_OPENROUTER_API_KEY"
+ENV_RERANKER_OPENROUTER_MODEL = "HINDSIGHT_API_RERANKER_OPENROUTER_MODEL"
+
 # Deprecated: Legacy shared Cohere API key (for backward compatibility)
 ENV_COHERE_API_KEY = "HINDSIGHT_API_COHERE_API_KEY"
 
@@ -399,6 +406,7 @@ PROVIDER_DEFAULT_MODELS = {
     "litellm": "gpt-4o-mini",
     "bedrock": "us.amazon.nova-2-lite-v1:0",
     "volcano": "doubao-pro-32k",
+    "openrouter": "qwen/qwen3.5-9b",
 }
 DEFAULT_LLM_MODEL = "gpt-4o-mini"  # Fallback if provider not in table
 DEFAULT_LLM_MAX_CONCURRENT = 32
@@ -442,6 +450,10 @@ DEFAULT_RERANKER_FLASHRANK_CACHE_DIR = None  # Use default cache directory
 
 DEFAULT_EMBEDDINGS_COHERE_MODEL = "embed-english-v3.0"
 DEFAULT_RERANKER_COHERE_MODEL = "rerank-english-v3.0"
+
+# OpenRouter defaults
+DEFAULT_EMBEDDINGS_OPENROUTER_MODEL = "perplexity/pplx-embed-v1-0.6b"
+DEFAULT_RERANKER_OPENROUTER_MODEL = "cohere/rerank-v3.5"
 
 DEFAULT_RERANKER_ZEROENTROPY_MODEL = "zerank-2"
 
@@ -724,6 +736,8 @@ class HindsightConfig:
     embeddings_cohere_api_key: str | None
     embeddings_cohere_model: str
     embeddings_cohere_base_url: str | None
+    embeddings_openrouter_api_key: str | None
+    embeddings_openrouter_model: str
     embeddings_litellm_api_base: str
     embeddings_litellm_api_key: str | None
     embeddings_litellm_model: str
@@ -756,6 +770,8 @@ class HindsightConfig:
     reranker_cohere_api_key: str | None
     reranker_cohere_model: str
     reranker_cohere_base_url: str | None
+    reranker_openrouter_api_key: str | None
+    reranker_openrouter_model: str
     reranker_litellm_api_base: str
     reranker_litellm_api_key: str | None
     reranker_litellm_model: str
@@ -1189,6 +1205,11 @@ class HindsightConfig:
             embeddings_cohere_api_key=os.getenv(ENV_EMBEDDINGS_COHERE_API_KEY) or os.getenv(ENV_COHERE_API_KEY),
             embeddings_cohere_model=os.getenv(ENV_EMBEDDINGS_COHERE_MODEL, DEFAULT_EMBEDDINGS_COHERE_MODEL),
             embeddings_cohere_base_url=os.getenv(ENV_EMBEDDINGS_COHERE_BASE_URL) or None,
+            # OpenRouter embeddings (with fallback to shared OpenRouter key, then LLM key)
+            embeddings_openrouter_api_key=os.getenv(ENV_EMBEDDINGS_OPENROUTER_API_KEY)
+            or os.getenv(ENV_OPENROUTER_API_KEY)
+            or os.getenv(ENV_LLM_API_KEY),
+            embeddings_openrouter_model=os.getenv(ENV_EMBEDDINGS_OPENROUTER_MODEL, DEFAULT_EMBEDDINGS_OPENROUTER_MODEL),
             # LiteLLM embeddings (with backward-compatible fallback to shared config)
             embeddings_litellm_api_base=os.getenv(ENV_EMBEDDINGS_LITELLM_API_BASE)
             or os.getenv(ENV_LITELLM_API_BASE, DEFAULT_LITELLM_API_BASE),
@@ -1253,6 +1274,11 @@ class HindsightConfig:
             reranker_cohere_api_key=os.getenv(ENV_RERANKER_COHERE_API_KEY) or os.getenv(ENV_COHERE_API_KEY),
             reranker_cohere_model=os.getenv(ENV_RERANKER_COHERE_MODEL, DEFAULT_RERANKER_COHERE_MODEL),
             reranker_cohere_base_url=os.getenv(ENV_RERANKER_COHERE_BASE_URL) or None,
+            # OpenRouter reranker (with fallback to shared OpenRouter key, then LLM key)
+            reranker_openrouter_api_key=os.getenv(ENV_RERANKER_OPENROUTER_API_KEY)
+            or os.getenv(ENV_OPENROUTER_API_KEY)
+            or os.getenv(ENV_LLM_API_KEY),
+            reranker_openrouter_model=os.getenv(ENV_RERANKER_OPENROUTER_MODEL, DEFAULT_RERANKER_OPENROUTER_MODEL),
             # LiteLLM reranker (with backward-compatible fallback to shared config)
             reranker_litellm_api_base=os.getenv(ENV_RERANKER_LITELLM_API_BASE)
             or os.getenv(ENV_LITELLM_API_BASE, DEFAULT_LITELLM_API_BASE),
