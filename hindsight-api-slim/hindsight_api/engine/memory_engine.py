@@ -1923,6 +1923,18 @@ class MemoryEngine(MemoryEngineInterface):
 
         self._initialized = False
 
+        # Clean up LLM providers (e.g. stop llamacpp subprocess)
+        for llm_config in (
+            self._llm_config,
+            self._retain_llm_config,
+            self._reflect_llm_config,
+            self._consolidation_llm_config,
+        ):
+            try:
+                await llm_config.cleanup()
+            except Exception as e:
+                logger.warning(f"Error cleaning up LLM provider: {e}")
+
         # Stop pg0 if we started it
         if self._pg0 is not None:
             logger.info("Stopping pg0...")

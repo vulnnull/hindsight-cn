@@ -78,11 +78,16 @@ local-ml = [
     "mlx-lm>=0.31.1",
     "safetensors>=0.6.2",
 ]
+local-llm = [
+    # Built-in llama.cpp inference for fully offline operation
+    "llama-cpp-python[server]>=0.3.0",
+    "huggingface-hub>=0.20.0",
+]
 embedded-db = [
     "pg0-embedded>=0.11.0",
 ]
 all = [
-    "hindsight-api-slim[local-ml,embedded-db]",
+    "hindsight-api-slim[local-ml,local-llm,embedded-db]",
 ]
 test = [
     "pytest>=7.0.0",
