@@ -4784,6 +4784,12 @@ components:
         strategy:
           nullable: true
           type: string
+        update_mode:
+          enum:
+          - replace
+          - append
+          nullable: true
+          type: string
       required:
       - content
       title: MemoryItem

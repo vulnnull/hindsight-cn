@@ -2146,6 +2146,11 @@ class MemoryEngine(MemoryEngineInterface):
                 f"Each content item in a batch must have a unique document_id to avoid race conditions."
             )
 
+        # Validate update_mode=append requires document_id
+        for item in contents:
+            if item.get("update_mode") == "append" and not item.get("document_id"):
+                raise ValueError("update_mode='append' requires a document_id")
+
         # Auto-chunk large batches by token count to avoid timeouts and memory issues
         # Calculate total token count
         total_tokens = sum(count_tokens(item.get("content", "")) for item in contents)
