@@ -2510,6 +2510,40 @@ jobs:
         cd hindsight-dev
         uv run check-openapi-compatibility /tmp/old-openapi.json ../hindsight-docs/static/openapi.json
 
+  check-cli-coverage:
+    needs: [detect-changes]
+    if: >-
+      github.event_name != 'pull_request_review' &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.cli == 'true' ||
+      needs.detect-changes.outputs.dev == 'true' ||
+      needs.detect-changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version-file: ".python-version"
+
+    - name: Install hindsight-dev dependencies
+      run: |
+        cd hindsight-dev && uv sync --frozen --index-strategy unsafe-best-match
+
+    - name: Check CLI covers every OpenAPI operation
+      run: |
+        cd hindsight-dev
+        uv run cli-coverage-check
+
   # Report CI status back to the PR for pull_request_review events.
   # GitHub does not automatically link pull_request_review check runs to the PR,
   # so we create a commit status on the PR head SHA and post a comment.
@@ -2553,6 +2587,7 @@ jobs:
       - test-upgrade
       - verify-generated-files
       - check-openapi-compatibility
+      - check-cli-coverage
     runs-on: ubuntu-latest
     permissions:
       statuses: write
