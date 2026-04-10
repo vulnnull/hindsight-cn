@@ -44,7 +44,8 @@
     "prepublishOnly": "npm run clean && npm run build"
   },
   "dependencies": {
-    "node-fetch": "^3.3.2"
+    "@vectorize-io/hindsight-client": "file:../../hindsight-clients/typescript",
+    "@vectorize-io/hindsight-all": "file:../../hindsight-all-npm"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

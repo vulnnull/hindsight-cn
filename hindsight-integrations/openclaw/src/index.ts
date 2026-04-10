@@ -1,6 +1,6 @@
 import type { MoltbotPluginAPI, PluginConfig, PluginHookAgentContext, MemoryResult, RetainRequest } from './types.js';
-import { HindsightEmbedManager } from './embed-manager.js';
-import { HindsightClient, type HindsightClientOptions } from './client.js';
+import { HindsightServer, type Logger } from '@vectorize-io/hindsight-all';
+import { HindsightClient, type HindsightClientOptions } from '@vectorize-io/hindsight-client';
 import { RetainQueue } from './retain-queue.js';
 import { compileSessionPatterns, matchesSessionPattern } from './session-patterns.js';
 import { createHash } from 'crypto';
@@ -11,6 +11,16 @@ import { configureLogger, setApiLogger, stopLogger } from './logger.js';
 import { mkdirSync } from 'fs';
 import { homedir } from 'os';
 
+// Logger adapter that routes the embed wrapper's output through openclaw's
+// batched structured logger so messages share the same prefix and respect
+// the configured log level.
+const embedLogger: Logger = {
+  debug: (msg) => log.verbose(msg),
+  info: (msg) => log.info(msg),
+  warn: (msg) => log.warn(msg),
+  error: (msg) => log.error(msg),
+};
+
 // Debug logging: silent by default, enable with debug: true or logLevel: 'debug'
 let debugEnabled = false;
 const debug = (...args: unknown[]) => {
@@ -18,7 +28,7 @@ const debug = (...args: unknown[]) => {
 };
 
 // Module-level state
-let embedManager: HindsightEmbedManager | null = null;
+let hindsightServer: HindsightServer | null = null;
 let client: HindsightClient | null = null;
 let clientOptions: HindsightClientOptions | null = null;
 let initPromise: Promise<void> | null = null;
@@ -28,15 +38,93 @@ let usingExternalApi = false; // Track if using external API (skip daemon manage
 // Store the current plugin config for bank ID derivation
 let currentPluginConfig: PluginConfig | null = null;
 
-// Track which banks have had their mission set (to avoid re-setting on every request)
+// Track which banks have had their mission set (to avoid re-setting on every request).
+// Under the old bespoke client we also cached a client instance per bank because the
+// client carried a mutable bankId. HindsightClient takes bankId as a parameter on every
+// call, so no per-bank caching is needed anymore — one module-level client is enough.
 const banksWithMissionSet = new Set<string>();
-// Use dedicated client instances per bank to avoid cross-session bankId mutation races.
-const clientsByBankId = new Map<string, HindsightClient>();
-const MAX_TRACKED_BANK_CLIENTS = 10_000;
 
 // In-flight recall deduplication: concurrent recalls for the same bank reuse one promise
 import type { RecallResponse } from './types.js';
 const inflightRecalls = new Map<string, Promise<RecallResponse>>();
+
+// Lightweight bank-scoped facade over HindsightClient. Created per-request via
+// getClientForContext() so hook bodies can keep their bankId-implicit style
+// without going back to a stateful setBankId pattern. Also bridges the
+// small shape differences (e.g. RetainRequest.metadata is Record<string, unknown>
+// at build time; HindsightClient wants Record<string, string>).
+export interface BankScopedClient {
+  readonly bankId: string;
+  retain(req: RetainRequest): Promise<void>;
+  recall(
+    req: {
+      query: string;
+      maxTokens?: number;
+      budget?: 'low' | 'mid' | 'high';
+      types?: Array<'world' | 'experience' | 'observation'>;
+    },
+    timeoutMs?: number,
+  ): Promise<RecallResponse>;
+  setMission(mission: string): Promise<void>;
+}
+
+function scopeClient(c: HindsightClient, bankId: string): BankScopedClient {
+  return {
+    bankId,
+    async retain(req) {
+      await c.retain(bankId, req.content, {
+        documentId: req.documentId,
+        metadata: toStringMetadata(req.metadata),
+        tags: req.tags,
+        async: true,
+      });
+    },
+    async recall(req, timeoutMs) {
+      const call = c.recall(bankId, req.query, {
+        maxTokens: req.maxTokens,
+        budget: req.budget,
+        types: req.types,
+      });
+      if (!timeoutMs) return call;
+      // The generated client doesn't accept a per-call AbortSignal, so we race
+      // against a TimeoutError here. The before_prompt_build caller already
+      // special-cases `DOMException { name: 'TimeoutError' }` from the old
+      // bespoke client, so we preserve that contract.
+      return Promise.race([
+        call,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new DOMException(`Recall timed out after ${timeoutMs}ms`, 'TimeoutError')),
+            timeoutMs,
+          ),
+        ),
+      ]);
+    },
+    async setMission(mission) {
+      // createBank upserts the reflect mission. openclaw's old setBankMission
+      // went through a dedicated PUT endpoint; this call lands on the same
+      // server-side handler via the non-deprecated path.
+      await c.createBank(bankId, { reflectMission: mission });
+    },
+  };
+}
+
+/**
+ * The generated client's metadata type is `Record<string, string>`; the
+ * openclaw builder uses `Record<string, unknown>` because some fields come
+ * from optional plugin context. Drop undefined/null, stringify the rest.
+ */
+function toStringMetadata(
+  input: Record<string, unknown> | undefined,
+): Record<string, string> | undefined {
+  if (!input) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (v === undefined || v === null) continue;
+    out[k] = typeof v === 'string' ? v : String(v);
+  }
+  return out;
+}
 const turnCountBySession = new Map<string, number>();
 const MAX_TRACKED_SESSIONS = 10_000;
 const DEFAULT_RECALL_TIMEOUT_MS = 10_000;
@@ -75,7 +163,7 @@ async function flushRetainQueue(): Promise<void> {
   let failed = 0;
 
   try {
-    if (!clientOptions) return; // no client config — can't flush
+    if (!client) return; // no client yet — can't flush
 
     // Cleanup expired items first
     retainQueue.cleanup();
@@ -84,17 +172,11 @@ async function flushRetainQueue(): Promise<void> {
     const flushedIds: string[] = [];
     for (const item of items) {
       try {
-        let bankClient = clientsByBankId.get(item.bankId);
-        if (!bankClient) {
-          bankClient = new HindsightClient(clientOptions);
-          bankClient.setBankId(item.bankId);
-          clientsByBankId.set(item.bankId, bankClient);
-        }
-
-        await bankClient.retain({
-          content: item.content,
-          document_id: item.documentId,
-          metadata: item.metadata,
+        await client.retain(item.bankId, item.content, {
+          documentId: item.documentId,
+          metadata: toStringMetadata(item.metadata),
+          tags: item.tags,
+          async: true,
         });
 
         flushedIds.push(item.id);
@@ -171,14 +253,17 @@ async function lazyReinit(configOverride?: PluginConfig): Promise<void> {
 
     const llmConfig = detectLLMConfig(config);
     clientOptions = buildClientOptions(llmConfig, config, externalApi);
-    clientsByBankId.clear();
     banksWithMissionSet.clear();
     client = new HindsightClient(clientOptions);
-    const defaultBankId = deriveBankId(undefined, config);
-    client.setBankId(defaultBankId);
 
     if (config.bankMission && usesStaticBank(config)) {
-      await client.setBankMission(config.bankMission);
+      const bankId = getStaticBankId(config);
+      try {
+        await scopeClient(client, bankId).setMission(config.bankMission);
+        banksWithMissionSet.add(bankId);
+      } catch (err) {
+        log.warn(`could not set bank mission for ${bankId}: ${err instanceof Error ? err.message : err}`);
+      }
     }
 
     usingExternalApi = true;
@@ -222,38 +307,20 @@ if (typeof global !== 'undefined') {
       }
     },
     /**
-     * Get a client configured for a specific agent context.
-     * Derives the bank ID from the context for per-channel isolation.
-     * Also ensures the bank mission is set on first use.
+     * Get a bank-scoped client handle for a specific agent context.
+     * Derives the bank ID from the context for per-channel isolation and
+     * ensures the bank mission is set on first use.
      */
-    getClientForContext: async (ctx: PluginHookAgentContext | undefined) => {
-      if (!client) {return null;}
+    getClientForContext: async (ctx: PluginHookAgentContext | undefined): Promise<BankScopedClient | null> => {
+      if (!client) return null;
       const config = currentPluginConfig || {};
-      if (usesStaticBank(config)) {
-        return client;
-      }
-      const bankId = deriveBankId(ctx, config);
-      let bankClient = clientsByBankId.get(bankId);
-      if (!bankClient) {
-        if (!clientOptions) {
-          return null;
-        }
-        bankClient = new HindsightClient(clientOptions);
-        bankClient.setBankId(bankId);
-        clientsByBankId.set(bankId, bankClient);
-        if (clientsByBankId.size > MAX_TRACKED_BANK_CLIENTS) {
-          const oldestKey = clientsByBankId.keys().next().value;
-          if (oldestKey) {
-            clientsByBankId.delete(oldestKey);
-            banksWithMissionSet.delete(oldestKey);
-          }
-        }
-      }
+      const bankId = usesStaticBank(config) ? getStaticBankId(config) : deriveBankId(ctx, config);
+      const scoped = scopeClient(client, bankId);
 
-      // Set bank mission on first use of this bank (if configured)
-      if (config.bankMission && !usesStaticBank(config) && !banksWithMissionSet.has(bankId)) {
+      // Set bank mission on first use of this bank (if configured).
+      if (config.bankMission && !banksWithMissionSet.has(bankId)) {
         try {
-          await bankClient.setBankMission(config.bankMission);
+          await scoped.setMission(config.bankMission);
           banksWithMissionSet.add(bankId);
           debug(`[Hindsight] Set mission for new bank: ${bankId}`);
         } catch (error) {
@@ -262,7 +329,7 @@ if (typeof global !== 'undefined') {
         }
       }
 
-      return bankClient;
+      return scoped;
     },
     getPluginConfig: () => currentPluginConfig,
   };
@@ -745,19 +812,21 @@ export function detectExternalApi(pluginConfig?: PluginConfig): {
 }
 
 /**
- * Build HindsightClientOptions from LLM config, plugin config, and external API settings.
+ * Build HindsightClientOptions for the generated hindsight-client. In
+ * external-API mode we use the configured URL/token; in local daemon mode
+ * the caller overrides with the daemon's base URL after start().
+ * The llmConfig parameter is currently only consumed by the daemon manager
+ * (via env vars); it's kept on the client builder signature so callers
+ * don't need to branch and so future features can forward it.
  */
 export function buildClientOptions(
-  llmConfig: { provider?: string; apiKey?: string; model?: string },
-  pluginCfg: PluginConfig,
+  _llmConfig: { provider?: string; apiKey?: string; model?: string },
+  _pluginCfg: PluginConfig,
   externalApi: { apiUrl: string | null; apiToken: string | null },
 ): HindsightClientOptions {
   return {
-    llmModel: llmConfig.model,
-    embedVersion: pluginCfg.embedVersion,
-    embedPackagePath: pluginCfg.embedPackagePath,
-    apiUrl: externalApi.apiUrl ?? undefined,
-    apiToken: externalApi.apiToken ?? undefined,
+    baseUrl: externalApi.apiUrl ?? '',
+    apiKey: externalApi.apiToken ?? undefined,
   };
 }
 
@@ -964,23 +1033,25 @@ export default function (api: MoltbotPluginAPI) {
               debug('[Hindsight] External API mode - skipping local daemon...');
               await checkExternalApiHealth(externalApi.apiUrl, externalApi.apiToken);
 
-              // Initialize client with direct HTTP mode
-              debug('[Hindsight] Creating HindsightClient (HTTP mode)...');
+              // Initialize client for external API
+              debug('[Hindsight] Creating HindsightClient (external API)...');
               clientOptions = buildClientOptions(llmConfig, pluginConfig, externalApi);
-              clientsByBankId.clear();
               banksWithMissionSet.clear();
               client = new HindsightClient(clientOptions);
 
-              // Set default bank (will be overridden per-request when dynamic bank IDs are enabled)
               const defaultBankId = deriveBankId(undefined, pluginConfig);
               debug(`[Hindsight] Default bank: ${defaultBankId}`);
-              client.setBankId(defaultBankId);
 
               // Note: Bank mission will be set per-bank when dynamic bank IDs are enabled
-              // For now, set it on the default bank
+              // For now, set it on the static default bank only.
               if (pluginConfig.bankMission && usesStaticBank(pluginConfig)) {
                 debug(`[Hindsight] Setting bank mission...`);
-                await client.setBankMission(pluginConfig.bankMission);
+                try {
+                  await scopeClient(client, defaultBankId).setMission(pluginConfig.bankMission);
+                  banksWithMissionSet.add(defaultBankId);
+                } catch (err) {
+                  log.warn(`could not set bank mission for ${defaultBankId}: ${err instanceof Error ? err.message : err}`);
+                }
               }
 
               if (!isInitialized) {
@@ -993,39 +1064,45 @@ export default function (api: MoltbotPluginAPI) {
               debug('[Hindsight] ✓ Ready (external API mode)');
             } else {
               // Local daemon mode - start hindsight-embed daemon
-              debug('[Hindsight] Creating HindsightEmbedManager...');
-              embedManager = new HindsightEmbedManager(
-                apiPort,
-                llmConfig.provider || "",
-                llmConfig.apiKey || "",
-                llmConfig.model,
-                llmConfig.baseUrl,
-                pluginConfig.daemonIdleTimeout,
-                pluginConfig.embedVersion,
-                pluginConfig.embedPackagePath
-              );
+              debug('[Hindsight] Creating HindsightServer...');
+              hindsightServer = new HindsightServer({
+                profile: 'openclaw',
+                port: apiPort,
+                embedVersion: pluginConfig.embedVersion,
+                embedPackagePath: pluginConfig.embedPackagePath,
+                env: {
+                  HINDSIGHT_API_LLM_PROVIDER: llmConfig.provider || '',
+                  HINDSIGHT_API_LLM_API_KEY: llmConfig.apiKey || '',
+                  HINDSIGHT_API_LLM_MODEL: llmConfig.model,
+                  HINDSIGHT_API_LLM_BASE_URL: llmConfig.baseUrl,
+                  HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: String(pluginConfig.daemonIdleTimeout ?? 0),
+                },
+                logger: embedLogger,
+              });
 
               // Start the embedded server
               debug('[Hindsight] Starting embedded server...');
-              await embedManager.start();
+              await hindsightServer.start();
 
-              // Initialize client (local daemon mode — no apiUrl)
-              debug('[Hindsight] Creating HindsightClient (subprocess mode)...');
-              clientOptions = buildClientOptions(llmConfig, pluginConfig, { apiUrl: null, apiToken: null });
-              clientsByBankId.clear();
+              // Initialize client pointed at the local daemon URL
+              debug('[Hindsight] Creating HindsightClient (local daemon)...');
+              clientOptions = { baseUrl: hindsightServer.getBaseUrl() };
               banksWithMissionSet.clear();
               client = new HindsightClient(clientOptions);
 
-              // Set default bank (will be overridden per-request when dynamic bank IDs are enabled)
               const defaultBankId = deriveBankId(undefined, pluginConfig);
               debug(`[Hindsight] Default bank: ${defaultBankId}`);
-              client.setBankId(defaultBankId);
 
               // Note: Bank mission will be set per-bank when dynamic bank IDs are enabled
-              // For now, set it on the default bank
+              // For now, set it on the static default bank only.
               if (pluginConfig.bankMission && usesStaticBank(pluginConfig)) {
                 debug(`[Hindsight] Setting bank mission...`);
-                await client.setBankMission(pluginConfig.bankMission);
+                try {
+                  await scopeClient(client, defaultBankId).setMission(pluginConfig.bankMission);
+                  banksWithMissionSet.add(defaultBankId);
+                } catch (err) {
+                  log.warn(`could not set bank mission for ${defaultBankId}: ${err instanceof Error ? err.message : err}`);
+                }
               }
 
               if (!isInitialized) {
@@ -1064,15 +1141,14 @@ export default function (api: MoltbotPluginAPI) {
               // Reset state for reinitialization attempt
               client = null;
               clientOptions = null;
-              clientsByBankId.clear();
               banksWithMissionSet.clear();
               isInitialized = false;
             }
           }
         } else {
           // Local daemon mode: check daemon health (handles SIGUSR1 restart case)
-          if (embedManager && isInitialized) {
-            const healthy = await embedManager.checkHealth();
+          if (hindsightServer && isInitialized) {
+            const healthy = await hindsightServer.checkHealth();
             if (healthy) {
               debug('[Hindsight] Daemon is healthy');
               return;
@@ -1080,10 +1156,9 @@ export default function (api: MoltbotPluginAPI) {
 
             debug('[Hindsight] Daemon is not responding - reinitializing...');
             // Reset state for reinitialization
-            embedManager = null;
+            hindsightServer = null;
             client = null;
             clientOptions = null;
-            clientsByBankId.clear();
             banksWithMissionSet.clear();
             isInitialized = false;
           }
@@ -1109,42 +1184,52 @@ export default function (api: MoltbotPluginAPI) {
             await checkExternalApiHealth(externalApi.apiUrl, externalApi.apiToken);
 
             clientOptions = buildClientOptions(llmConfig, reinitPluginConfig, externalApi);
-            clientsByBankId.clear();
             banksWithMissionSet.clear();
             client = new HindsightClient(clientOptions);
             const defaultBankId = deriveBankId(undefined, reinitPluginConfig);
-            client.setBankId(defaultBankId);
 
             if (reinitPluginConfig.bankMission && usesStaticBank(reinitPluginConfig)) {
-              await client.setBankMission(reinitPluginConfig.bankMission);
+              try {
+                await scopeClient(client, defaultBankId).setMission(reinitPluginConfig.bankMission);
+                banksWithMissionSet.add(defaultBankId);
+              } catch (err) {
+                log.warn(`could not set bank mission for ${defaultBankId}: ${err instanceof Error ? err.message : err}`);
+              }
             }
 
             isInitialized = true;
             debug('[Hindsight] Reinitialization complete (external API mode)');
           } else {
             // Local daemon mode
-            embedManager = new HindsightEmbedManager(
-              apiPort,
-              llmConfig.provider || "",
-              llmConfig.apiKey || "",
-              llmConfig.model,
-              llmConfig.baseUrl,
-              reinitPluginConfig.daemonIdleTimeout,
-              reinitPluginConfig.embedVersion,
-              reinitPluginConfig.embedPackagePath
-            );
+            hindsightServer = new HindsightServer({
+              profile: 'openclaw',
+              port: apiPort,
+              embedVersion: reinitPluginConfig.embedVersion,
+              embedPackagePath: reinitPluginConfig.embedPackagePath,
+              env: {
+                HINDSIGHT_API_LLM_PROVIDER: llmConfig.provider || '',
+                HINDSIGHT_API_LLM_API_KEY: llmConfig.apiKey || '',
+                HINDSIGHT_API_LLM_MODEL: llmConfig.model,
+                HINDSIGHT_API_LLM_BASE_URL: llmConfig.baseUrl,
+                HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: String(reinitPluginConfig.daemonIdleTimeout ?? 0),
+              },
+              logger: embedLogger,
+            });
 
-            await embedManager.start();
+            await hindsightServer.start();
 
-            clientOptions = buildClientOptions(llmConfig, reinitPluginConfig, { apiUrl: null, apiToken: null });
-            clientsByBankId.clear();
+            clientOptions = { baseUrl: hindsightServer.getBaseUrl() };
             banksWithMissionSet.clear();
             client = new HindsightClient(clientOptions);
             const defaultBankId = deriveBankId(undefined, reinitPluginConfig);
-            client.setBankId(defaultBankId);
 
             if (reinitPluginConfig.bankMission && usesStaticBank(reinitPluginConfig)) {
-              await client.setBankMission(reinitPluginConfig.bankMission);
+              try {
+                await scopeClient(client, defaultBankId).setMission(reinitPluginConfig.bankMission);
+                banksWithMissionSet.add(defaultBankId);
+              } catch (err) {
+                log.warn(`could not set bank mission for ${defaultBankId}: ${err instanceof Error ? err.message : err}`);
+              }
             }
 
             isInitialized = true;
@@ -1158,9 +1243,9 @@ export default function (api: MoltbotPluginAPI) {
           debug('[Hindsight] Service stopping...');
 
           // Only stop daemon if in local mode
-          if (!usingExternalApi && embedManager) {
-            await embedManager.stop();
-            embedManager = null;
+          if (!usingExternalApi && hindsightServer) {
+            await hindsightServer.stop();
+            hindsightServer = null;
           }
 
           // Close retain queue
@@ -1179,7 +1264,6 @@ export default function (api: MoltbotPluginAPI) {
 
           client = null;
           clientOptions = null;
-          clientsByBankId.clear();
           banksWithMissionSet.clear();
           isInitialized = false;
 
@@ -1314,7 +1398,7 @@ export default function (api: MoltbotPluginAPI) {
           recallPromise = existing;
         } else {
           const recallTimeoutMs = pluginConfig.recallTimeoutMs ?? DEFAULT_RECALL_TIMEOUT_MS;
-          recallPromise = client.recall({ query: prompt, max_tokens: pluginConfig.recallMaxTokens || 1024, budget: pluginConfig.recallBudget, types: pluginConfig.recallTypes }, recallTimeoutMs);
+          recallPromise = client.recall({ query: prompt, maxTokens: pluginConfig.recallMaxTokens || 1024, budget: pluginConfig.recallBudget, types: pluginConfig.recallTypes }, recallTimeoutMs);
           inflightRecalls.set(recallKey, recallPromise);
           void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
         }
@@ -1495,12 +1579,12 @@ ${memoriesFormatted}
         );
 
         // Retain to Hindsight
-        debug(`[Hindsight] Retaining to bank ${bankId}, document: ${retainRequest.document_id}, chars: ${transcript.length}\n---\n${transcript.substring(0, 500)}${transcript.length > 500 ? '\n...(truncated)' : ''}\n---`);
+        debug(`[Hindsight] Retaining to bank ${bankId}, document: ${retainRequest.documentId}, chars: ${transcript.length}\n---\n${transcript.substring(0, 500)}${transcript.length > 500 ? '\n...(truncated)' : ''}\n---`);
 
         try {
           await client.retain(retainRequest);
           log.trackRetain(bankId, messageCount);
-          debug(`[Hindsight] Retained ${messageCount} messages to bank ${bankId} for session ${retainRequest.document_id}`);
+          debug(`[Hindsight] Retained ${messageCount} messages to bank ${bankId} for session ${retainRequest.documentId}`);
 
           // After a successful retain, try flushing any queued items
           if (retainQueue && retainQueue.size() > 0) {
@@ -1586,7 +1670,7 @@ export function buildRetainRequest(
 
   return {
     content: transcript,
-    document_id: documentId,
+    documentId: documentId,
     metadata: {
       retained_at: new Date(now).toISOString(),
       message_count: String(messageCount),

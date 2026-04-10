@@ -100,35 +100,35 @@ export interface ServiceConfig {
   stop(): Promise<void>;
 }
 
+// -----------------------------------------------------------------------------
 // Hindsight API types
+// -----------------------------------------------------------------------------
 
+// MemoryResult / RecallResponse / ReflectResponse come from the generated
+// hindsight-client SDK. We alias MemoryResult → RecallResult so existing code
+// paths (formatMemories, etc.) keep the old name.
+export type { RecallResult as MemoryResult, RecallResponse, ReflectResponse } from '@vectorize-io/hindsight-client';
+
+/**
+ * Internal retain payload shape built by `buildRetainRequest`. Not a
+ * re-export from the generated client — the generated client's retain()
+ * takes bankId + content + options as positional args, whereas we build up a
+ * single object inside the plugin and translate it at the call site. Keeping
+ * this type local means tests can assert the shape without pulling in
+ * generated types.
+ */
 export interface RetainRequest {
   content: string;
-  document_id?: string;
+  documentId?: string;
   metadata?: Record<string, unknown>;
   tags?: string[];
 }
 
-export interface RetainResponse {
-  message: string;
-  document_id: string;
-  memory_unit_ids: string[];
-}
-
-export interface RecallRequest {
-  query: string;
-  max_tokens?: number;
-  budget?: 'low' | 'mid' | 'high';
-  types?: Array<'world' | 'experience' | 'observation'>;
-}
-
-export interface RecallResponse {
-  results: MemoryResult[];
-  entities: Record<string, unknown> | null;
-  trace: unknown | null;
-  chunks: unknown | null;
-}
-
+/**
+ * Stats returned by `GET /v1/default/banks/{bank_id}/stats`. The generated
+ * high-level client does not expose this endpoint yet; backfill calls it
+ * directly via `fetch`.
+ */
 export interface BankStats {
   bank_id: string;
   total_nodes: number;
@@ -143,30 +143,4 @@ export interface BankStats {
   links_by_link_type?: Record<string, number>;
   links_by_fact_type?: Record<string, number>;
   links_breakdown?: Record<string, unknown>;
-}
-
-export interface MemoryResult {
-  id: string;
-  text: string;
-  type: string;
-  entities: string[];
-  context: string;
-  occurred_start: string | null;
-  occurred_end: string | null;
-  mentioned_at: string | null;
-  document_id: string | null;
-  metadata: Record<string, unknown> | null;
-  chunk_id: string | null;
-  tags: string[];
-}
-
-export interface CreateBankRequest {
-  name: string;
-  background_context?: string;
-}
-
-export interface CreateBankResponse {
-  bank_id: string;
-  name: string;
-  created_at: string;
 }
