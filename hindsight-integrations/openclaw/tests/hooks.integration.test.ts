@@ -148,18 +148,15 @@ beforeAll(async () => {
   // Reset module registry so we get a fresh module with clean state.
   vi.resetModules();
 
-  // Provide LLM config — used by plugin init even in HTTP mode.
-  process.env.HINDSIGHT_API_LLM_PROVIDER = 'openai';
-  process.env.HINDSIGHT_API_LLM_API_KEY = 'test-key-hooks';
-  // Point the plugin at the running test API.
-  process.env.HINDSIGHT_EMBED_API_URL = HINDSIGHT_API_URL;
-
   const mod = await import('../src/index.js');
   const { HindsightClient } = await import('@vectorize-io/hindsight-client');
   const pluginFn = mod.default;
   const getClient = mod.getClient;
 
+  // Plugin runs in external API mode (talks to the running test API), so no LLM
+  // credentials are needed in the plugin config — the daemon handles them.
   const handle = createMockApi({
+    hindsightApiUrl: HINDSIGHT_API_URL,
     dynamicBankId: true,
     excludeProviders: ['slack'],
     retainEveryNTurns: 1, // retain every turn so individual tests aren't affected by chunking
@@ -188,9 +185,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   vi.restoreAllMocks();
-  delete process.env.HINDSIGHT_API_LLM_PROVIDER;
-  delete process.env.HINDSIGHT_API_LLM_API_KEY;
-  delete process.env.HINDSIGHT_EMBED_API_URL;
   if (stopServicesFn) await stopServicesFn().catch(() => {});
 }, 15_000);
 

@@ -173,12 +173,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 function inferApiSettings(pluginConfig: PluginConfig, explicitApiUrl?: string, explicitApiToken?: string): { apiUrl: string; apiToken?: string } {
   const apiUrl = explicitApiUrl
-    || process.env.HINDSIGHT_EMBED_API_URL
     || pluginConfig.hindsightApiUrl
     || `http://127.0.0.1:${pluginConfig.apiPort || 9077}`;
-  const apiToken = explicitApiToken
-    || process.env.HINDSIGHT_EMBED_API_TOKEN
-    || pluginConfig.hindsightApiToken;
+  const apiToken = explicitApiToken || pluginConfig.hindsightApiToken;
   return { apiUrl, apiToken: apiToken || undefined };
 }
 

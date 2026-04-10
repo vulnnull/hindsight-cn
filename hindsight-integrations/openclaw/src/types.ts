@@ -55,14 +55,15 @@ export interface PluginConfig {
   daemonIdleTimeout?: number; // Seconds before daemon shuts down (0 = never)
   embedVersion?: string; // hindsight-embed version (default: "latest")
   embedPackagePath?: string; // Local path to hindsight package (e.g. '/path/to/hindsight')
-  llmProvider?: string; // LLM provider override (e.g. 'openai', 'anthropic', 'gemini', 'groq', 'ollama')
-  llmModel?: string; // LLM model override (e.g. 'gpt-4o-mini', 'claude-3-5-haiku-20241022')
-  llmApiKeyEnv?: string; // Env var name holding the API key (e.g. 'MY_CUSTOM_KEY')
+  llmProvider?: string; // LLM provider (e.g. 'openai', 'anthropic', 'gemini', 'groq', 'ollama', 'openai-codex', 'claude-code')
+  llmModel?: string; // LLM model (e.g. 'gpt-4o-mini', 'claude-3-5-haiku-20241022')
+  llmApiKey?: string; // LLM provider API key. Configure via SecretRef: openclaw config set ... --ref-source env --ref-id OPENAI_API_KEY
+  llmBaseUrl?: string; // Optional base URL override for OpenAI-compatible providers (e.g. OpenRouter)
   apiPort?: number; // Port for openclaw profile daemon (default: 9077)
   hindsightApiUrl?: string; // External Hindsight API URL (skips local daemon when set)
-  hindsightApiToken?: string; // API token for external Hindsight API authentication
+  hindsightApiToken?: string; // API token for external Hindsight API. Configure via SecretRef.
   dynamicBankId?: boolean; // Enable per-channel memory banks (default: true)
-  bankId?: string; // Static bank ID used when dynamicBankId is false. Can also be set via HINDSIGHT_BANK_ID.
+  bankId?: string; // Static bank ID used when dynamicBankId is false.
   bankIdPrefix?: string; // Prefix for bank IDs (e.g. 'prod' -> 'prod-slack-C123')
   retainTags?: string[]; // Tags applied to all retained documents (e.g. ['source_system:openclaw', 'agent:agentname'])
   retainSource?: string; // Source written into retained document metadata (default: 'openclaw')

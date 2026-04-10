@@ -245,12 +245,6 @@ async function lazyReinit(configOverride?: PluginConfig): Promise<void> {
   try {
     await checkExternalApiHealth(externalApi.apiUrl, externalApi.apiToken);
 
-    // Health check passed — set up env vars and create client
-    process.env.HINDSIGHT_EMBED_API_URL = externalApi.apiUrl;
-    if (externalApi.apiToken) {
-      process.env.HINDSIGHT_EMBED_API_TOKEN = externalApi.apiToken;
-    }
-
     const llmConfig = detectLLMConfig(config);
     clientOptions = buildClientOptions(llmConfig, config, externalApi);
     banksWithMissionSet.clear();
@@ -667,16 +661,8 @@ export function formatMemories(results: MemoryResult[]): string {
 }
 
 
-// Provider detection from standard env vars
-const PROVIDER_DETECTION = [
-  { name: 'openai', keyEnv: 'OPENAI_API_KEY' },
-  { name: 'anthropic', keyEnv: 'ANTHROPIC_API_KEY' },
-  { name: 'gemini', keyEnv: 'GEMINI_API_KEY' },
-  { name: 'groq', keyEnv: 'GROQ_API_KEY' },
-  { name: 'ollama', keyEnv: '' },
-  { name: 'openai-codex', keyEnv: '' },
-  { name: 'claude-code', keyEnv: '' },
-];
+// Providers that authenticate via OAuth or run locally — no API key needed.
+const NO_KEY_REQUIRED_PROVIDERS = new Set(['ollama', 'openai-codex', 'claude-code']);
 
 export function detectLLMConfig(pluginConfig?: PluginConfig): {
   provider?: string;
@@ -685,88 +671,7 @@ export function detectLLMConfig(pluginConfig?: PluginConfig): {
   baseUrl?: string;
   source: string;
 } {
-  // Override values from HINDSIGHT_API_LLM_* env vars (highest priority)
-  const overrideProvider = process.env.HINDSIGHT_API_LLM_PROVIDER;
-  const overrideModel = process.env.HINDSIGHT_API_LLM_MODEL;
-  const overrideKey = process.env.HINDSIGHT_API_LLM_API_KEY;
-  const overrideBaseUrl = process.env.HINDSIGHT_API_LLM_BASE_URL;
-
-  // Priority 1: If provider is explicitly set via env var, use that
-  if (overrideProvider) {
-    // Providers that don't require an API key (use OAuth or local models)
-    const noKeyRequired = ['ollama', 'openai-codex', 'claude-code'];
-    if (!overrideKey && !noKeyRequired.includes(overrideProvider)) {
-      throw new Error(
-        `HINDSIGHT_API_LLM_PROVIDER is set to "${overrideProvider}" but HINDSIGHT_API_LLM_API_KEY is not set.\n` +
-        `Please set: export HINDSIGHT_API_LLM_API_KEY=your-api-key`
-      );
-    }
-
-    return {
-      provider: overrideProvider,
-      apiKey: overrideKey || '',
-      model: overrideModel,
-      baseUrl: overrideBaseUrl,
-      source: 'HINDSIGHT_API_LLM_PROVIDER override',
-    };
-  }
-
-  // Priority 2: Plugin config llmProvider/llmModel
-  if (pluginConfig?.llmProvider) {
-    const providerInfo = PROVIDER_DETECTION.find(p => p.name === pluginConfig.llmProvider);
-
-    // Resolve API key: llmApiKeyEnv > provider's standard keyEnv
-    let apiKey = '';
-    if (pluginConfig.llmApiKeyEnv) {
-      apiKey = process.env[pluginConfig.llmApiKeyEnv] || '';
-    } else if (providerInfo?.keyEnv) {
-      apiKey = process.env[providerInfo.keyEnv] || '';
-    }
-
-    // Providers that don't require an API key (use OAuth or local models)
-    const noKeyRequired = ['ollama', 'openai-codex', 'claude-code'];
-    if (!apiKey && !noKeyRequired.includes(pluginConfig.llmProvider)) {
-      const keySource = pluginConfig.llmApiKeyEnv || providerInfo?.keyEnv || 'unknown';
-      throw new Error(
-        `Plugin config llmProvider is set to "${pluginConfig.llmProvider}" but no API key found.\n` +
-        `Expected env var: ${keySource}\n` +
-        `Set the env var or use llmApiKeyEnv in plugin config to specify a custom env var name.`
-      );
-    }
-
-    return {
-      provider: pluginConfig.llmProvider,
-      apiKey,
-      model: pluginConfig.llmModel || overrideModel,
-      baseUrl: overrideBaseUrl,
-      source: 'plugin config',
-    };
-  }
-
-  // Priority 3: Auto-detect from standard provider env vars
-  for (const providerInfo of PROVIDER_DETECTION) {
-    const apiKey = providerInfo.keyEnv ? process.env[providerInfo.keyEnv] : '';
-
-    // Skip providers that don't use API keys in auto-detection (must be explicitly requested)
-    const noKeyRequired = ['ollama', 'openai-codex', 'claude-code'];
-    if (noKeyRequired.includes(providerInfo.name)) {
-      continue;
-    }
-
-    if (apiKey) {
-      return {
-        provider: providerInfo.name,
-        apiKey,
-        model: overrideModel,
-        baseUrl: overrideBaseUrl,
-        source: `auto-detected from ${providerInfo.keyEnv}`,
-      };
-    }
-  }
-
-  // No configuration found - show helpful error
-
-  // Allow empty LLM config if using external Hindsight API (server handles LLM)
+  // External API mode: the daemon handles LLM credentials, plugin doesn't need them.
   const externalApiCheck = detectExternalApi(pluginConfig);
   if (externalApiCheck.apiUrl) {
     return {
@@ -778,37 +683,51 @@ export function detectLLMConfig(pluginConfig?: PluginConfig): {
     };
   }
 
-  throw new Error(
-    `No LLM configuration found for Hindsight memory plugin.\n\n` +
-    `Option 1: Set a standard provider API key (auto-detect):\n` +
-    `  export OPENAI_API_KEY=sk-your-key\n` +
-    `  export ANTHROPIC_API_KEY=your-key\n` +
-    `  export GEMINI_API_KEY=your-key\n` +
-    `  export GROQ_API_KEY=your-key\n\n` +
-    `Option 2: Use Codex or Claude Code (no API key needed):\n` +
-    `  export HINDSIGHT_API_LLM_PROVIDER=openai-codex    # Requires 'codex auth login'\n` +
-    `  export HINDSIGHT_API_LLM_PROVIDER=claude-code     # Requires Claude Code CLI\n\n` +
-    `Option 3: Set llmProvider in openclaw.json plugin config:\n` +
-    `  "llmProvider": "openai"\n\n` +
-    `Option 4: Override with Hindsight-specific env vars:\n` +
-    `  export HINDSIGHT_API_LLM_PROVIDER=openai\n` +
-    `  export HINDSIGHT_API_LLM_API_KEY=sk-your-key\n` +
-    `  export HINDSIGHT_API_LLM_BASE_URL=https://openrouter.ai/api/v1  # Optional\n\n` +
-    `The model will be selected automatically by Hindsight. To override: export HINDSIGHT_API_LLM_MODEL=your-model`
-  );
+  const provider = pluginConfig?.llmProvider;
+  if (!provider) {
+    throw new Error(
+      `No LLM provider configured for the Hindsight memory plugin.\n\n` +
+      `Set the provider via 'openclaw config set':\n` +
+      `  openclaw config set plugins.entries.hindsight-openclaw.config.llmProvider openai\n\n` +
+      `For providers that need an API key, configure it as a SecretRef so the value\n` +
+      `is read from an env var (or file/exec source) at runtime instead of stored in plain text:\n` +
+      `  openclaw config set plugins.entries.hindsight-openclaw.config.llmApiKey \\\n` +
+      `      --ref-source env --ref-provider default --ref-id OPENAI_API_KEY\n\n` +
+      `Providers that don't need an API key: ${[...NO_KEY_REQUIRED_PROVIDERS].join(', ')}.\n` +
+      `Or point the plugin at an external Hindsight API by setting hindsightApiUrl instead.`
+    );
+  }
+
+  const apiKey = pluginConfig?.llmApiKey ?? '';
+  if (!apiKey && !NO_KEY_REQUIRED_PROVIDERS.has(provider)) {
+    throw new Error(
+      `llmProvider is set to "${provider}" but llmApiKey is empty.\n\n` +
+      `Configure it via 'openclaw config set' as a SecretRef:\n` +
+      `  openclaw config set plugins.entries.hindsight-openclaw.config.llmApiKey \\\n` +
+      `      --ref-source env --ref-provider default --ref-id OPENAI_API_KEY`
+    );
+  }
+
+  return {
+    provider,
+    apiKey,
+    model: pluginConfig?.llmModel,
+    baseUrl: pluginConfig?.llmBaseUrl,
+    source: 'plugin config',
+  };
 }
 
 /**
- * Detect external Hindsight API configuration.
- * Priority: env vars > plugin config
+ * Detect external Hindsight API configuration from plugin config.
  */
 export function detectExternalApi(pluginConfig?: PluginConfig): {
   apiUrl: string | null;
   apiToken: string | null;
 } {
-  const apiUrl = process.env.HINDSIGHT_EMBED_API_URL || pluginConfig?.hindsightApiUrl || null;
-  const apiToken = process.env.HINDSIGHT_EMBED_API_TOKEN || pluginConfig?.hindsightApiToken || null;
-  return { apiUrl, apiToken };
+  return {
+    apiUrl: pluginConfig?.hindsightApiUrl ?? null,
+    apiToken: pluginConfig?.hindsightApiToken ?? null,
+  };
 }
 
 /**
@@ -867,9 +786,6 @@ async function checkExternalApiHealth(apiUrl: string, apiToken?: string | null):
 function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
   const config = api.config.plugins?.entries?.['hindsight-openclaw']?.config || {};
   const defaultMission = 'You are an AI assistant helping users across multiple communication channels (Telegram, Slack, Discord, etc.). Remember user preferences, instructions, and important context from conversations to provide personalized assistance.';
-  const envBankId = typeof process.env.HINDSIGHT_BANK_ID === 'string' && process.env.HINDSIGHT_BANK_ID.trim().length > 0
-    ? process.env.HINDSIGHT_BANK_ID.trim()
-    : undefined;
 
   return {
     bankMission: config.bankMission || defaultMission,
@@ -879,13 +795,14 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     embedPackagePath: config.embedPackagePath,
     llmProvider: config.llmProvider,
     llmModel: config.llmModel,
-    llmApiKeyEnv: config.llmApiKeyEnv,
+    llmApiKey: config.llmApiKey,
+    llmBaseUrl: config.llmBaseUrl,
     hindsightApiUrl: config.hindsightApiUrl,
     hindsightApiToken: config.hindsightApiToken,
     apiPort: config.apiPort || 9077,
     // Dynamic bank ID options (default: enabled)
     dynamicBankId: config.dynamicBankId !== false,
-    bankId: envBankId || (typeof config.bankId === 'string' && config.bankId.trim().length > 0 ? config.bankId.trim() : undefined),
+    bankId: typeof config.bankId === 'string' && config.bankId.trim().length > 0 ? config.bankId.trim() : undefined,
     bankIdPrefix: config.bankIdPrefix,
     retainTags: Array.isArray(config.retainTags) ? config.retainTags.filter((tag): tag is string => typeof tag === 'string') : undefined,
     retainSource: typeof config.retainSource === 'string' && config.retainSource.trim().length > 0 ? config.retainSource.trim() : undefined,
@@ -1013,10 +930,7 @@ export default function (api: MoltbotPluginAPI) {
             log.warn(`could not initialize retain queue: ${error}`);
           }
 
-          // Set env vars so CLI commands (uvx hindsight-embed) use external API
-          process.env.HINDSIGHT_EMBED_API_URL = externalApi.apiUrl;
           if (externalApi.apiToken) {
-            process.env.HINDSIGHT_EMBED_API_TOKEN = externalApi.apiToken;
             debug('[Hindsight] API token configured');
           }
         } else {
@@ -1176,10 +1090,6 @@ export default function (api: MoltbotPluginAPI) {
           if (externalApi.apiUrl) {
             // External API mode
             usingExternalApi = true;
-            process.env.HINDSIGHT_EMBED_API_URL = externalApi.apiUrl;
-            if (externalApi.apiToken) {
-              process.env.HINDSIGHT_EMBED_API_TOKEN = externalApi.apiToken;
-            }
 
             await checkExternalApiHealth(externalApi.apiUrl, externalApi.apiToken);
 
