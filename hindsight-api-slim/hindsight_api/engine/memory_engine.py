@@ -1140,6 +1140,26 @@ class MemoryEngine(MemoryEngineInterface):
                     logger.error(f"Not retrying task {task_type} (non-retryable), marking as failed")
                     if operation_id:
                         await self._mark_operation_failed(operation_id, str(e), error_traceback)
+                elif isinstance(e, asyncpg.exceptions.IntegrityConstraintViolationError):
+                    # Non-retryable: deterministic Postgres integrity violations
+                    # (UniqueViolationError, ForeignKeyViolationError, CheckViolationError,
+                    # NotNullViolationError, ExclusionViolationError) will never succeed on
+                    # retry — the offending row state is already committed. Retrying just
+                    # burns worker capacity. See vectorize-io/hindsight#980.
+                    logger.error(
+                        f"Not retrying task {task_type} (integrity violation, deterministic): {type(e).__name__}"
+                    )
+                    if task_type == "consolidation" and operation_id:
+                        await self._fire_consolidation_webhook(
+                            bank_id=task_dict.get("bank_id", ""),
+                            operation_id=operation_id,
+                            status="failed",
+                            result=None,
+                            error_message=str(e),
+                            schema=schema,
+                        )
+                    if operation_id:
+                        await self._mark_operation_failed(operation_id, str(e), error_traceback)
                 else:
                     if task_type == "consolidation" and operation_id:
                         # Fire failure webhook (non-transactional — operation not yet marked failed;
