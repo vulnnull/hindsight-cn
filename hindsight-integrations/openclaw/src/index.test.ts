@@ -395,6 +395,110 @@ describe('prepareRetentionTranscript', () => {
     expect(result?.transcript).toContain('Dark mode is a display setting.');
   });
 
+  it('emits Anthropic-shaped typed blocks by default (retainToolCalls=true)', () => {
+    const messages = [
+      { role: 'user', content: 'Hello there' },
+      { role: 'assistant', content: 'Hi back' },
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.transcript);
+    expect(parsed).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'Hello there' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Hi back' }] },
+    ]);
+    expect(result!.transcript).not.toContain('[role:');
+  });
+
+  it('flattens content to a string when retainToolCalls is false', () => {
+    const config: PluginConfig = { ...baseConfig, retainToolCalls: false };
+    const messages = [
+      { role: 'user', content: 'Hello there' },
+      { role: 'assistant', content: 'Hi back' },
+    ];
+    const result = prepareRetentionTranscript(messages, config);
+    expect(JSON.parse(result!.transcript)).toEqual([
+      { role: 'user', content: 'Hello there' },
+      { role: 'assistant', content: 'Hi back' },
+    ]);
+  });
+
+  it('retains assistant tool_use blocks and folds toolResult into a user tool_result block', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'What is the weather?' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'deliberation — should be stripped' },
+          { type: 'text', text: 'Let me check.' },
+          { type: 'toolCall', id: 'call_abc', name: 'get_weather', arguments: { city: 'SF' } },
+        ],
+      },
+      { role: 'toolResult', toolCallId: 'call_abc', toolName: 'get_weather', content: [{ type: 'text', text: 'sunny, 62F' }] },
+      { role: 'assistant', content: [{ type: 'text', text: "It's sunny, 62F." }] },
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.transcript);
+    expect(parsed).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'What is the weather?' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Let me check.' },
+          { type: 'tool_use', name: 'get_weather', input: { city: 'SF' }, id: 'call_abc' },
+        ],
+      },
+      { role: 'user', content: [{ type: 'tool_result', content: 'sunny, 62F', tool_use_id: 'call_abc' }] },
+      { role: 'assistant', content: [{ type: 'text', text: "It's sunny, 62F." }] },
+    ]);
+  });
+
+  it('filters operational MCP tool calls to avoid feedback loops', () => {
+    const messages = [
+      { role: 'user', content: 'recall stuff' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id: 'c1', name: 'mcp__hindsight__recall', arguments: { query: 'x' } },
+          { type: 'toolCall', id: 'c2', name: 'mcp__other__send_message', arguments: { text: 'hi' } },
+          { type: 'text', text: 'Done.' },
+        ],
+      },
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    const parsed = JSON.parse(result!.transcript);
+    const assistantBlocks = parsed[1].content;
+    expect(assistantBlocks.some((b: any) => b.type === 'tool_use' && b.name === 'mcp__hindsight__recall')).toBe(false);
+    expect(assistantBlocks.some((b: any) => b.type === 'tool_use' && b.name === 'mcp__other__send_message')).toBe(true);
+  });
+
+  it('truncates tool_result content at 2000 chars', () => {
+    const big = 'x'.repeat(3000);
+    const messages = [
+      { role: 'user', content: 'run tool' },
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'noop', arguments: {} }] },
+      { role: 'toolResult', toolCallId: 'c1', content: [{ type: 'text', text: big }] },
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    const parsed = JSON.parse(result!.transcript);
+    const toolResult = parsed.find((m: any) => m.content.some((b: any) => b.type === 'tool_result')).content[0];
+    expect(toolResult.content.endsWith('... (truncated)')).toBe(true);
+    expect(toolResult.content.length).toBe(2000 + '... (truncated)'.length);
+  });
+
+  it('emits legacy text markers when retainFormat is "text"', () => {
+    const config: PluginConfig = { ...baseConfig, retainFormat: 'text' };
+    const messages = [
+      { role: 'user', content: 'Hello there' },
+      { role: 'assistant', content: 'Hi back' },
+    ];
+    const result = prepareRetentionTranscript(messages, config);
+    expect(result).not.toBeNull();
+    expect(result!.transcript).toContain('[role: user]\nHello there\n[user:end]');
+    expect(result!.transcript).toContain('[role: assistant]\nHi back\n[assistant:end]');
+  });
+
   it('reports accurate messageCount excluding empty messages', () => {
     const messages = [
       { role: 'user', content: 'Real message' },
