@@ -1103,8 +1103,12 @@ Configuration for background task processing. By default, the API processes task
 | `HINDSIGHT_API_WORKER_POLL_INTERVAL_MS` | Database polling interval in milliseconds | `500` |
 | `HINDSIGHT_API_WORKER_MAX_RETRIES` | Max retries before marking task failed | `3` |
 | `HINDSIGHT_API_WORKER_HTTP_PORT` | HTTP port for worker metrics/health (worker CLI only) | `8889` |
-| `HINDSIGHT_API_WORKER_MAX_SLOTS` | Maximum concurrent tasks per worker | `10` |
-| `HINDSIGHT_API_WORKER_CONSOLIDATION_MAX_SLOTS` | Maximum concurrent consolidation tasks per worker | `2` |
+| `HINDSIGHT_API_WORKER_MAX_SLOTS` | Maximum concurrent tasks per worker (total across all operation types) | `10` |
+| `HINDSIGHT_API_WORKER_CONSOLIDATION_MAX_SLOTS` | Slots reserved for consolidation tasks within `WORKER_MAX_SLOTS` | `2` |
+
+:::note Slot reservation
+`WORKER_CONSOLIDATION_MAX_SLOTS` is a **reservation within** `WORKER_MAX_SLOTS`, not an additive pool. With the defaults (`MAX_SLOTS=10`, `CONSOLIDATION_MAX_SLOTS=2`), retain and other non-consolidation tasks may use at most `10 - 2 = 8` concurrent slots, leaving 2 always available for consolidation. This prevents consolidation from being starved when retain throughput continuously saturates the queue. Set `CONSOLIDATION_MAX_SLOTS=0` to give all slots to non-consolidation work.
+:::
 
 ### Performance Optimization
 

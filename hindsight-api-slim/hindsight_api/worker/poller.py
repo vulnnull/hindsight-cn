@@ -116,17 +116,25 @@ class WorkerPoller:
         """
         Calculate available slots for claiming tasks.
 
+        Consolidation has a reserved pool of ``consolidation_max_slots`` within
+        ``max_slots``. Non-consolidation tasks may use at most
+        ``max_slots - consolidation_max_slots`` slots, leaving the remainder
+        always available for consolidation. This prevents consolidation from
+        being starved when retain throughput continuously saturates the queue.
+
         Returns:
-            (total_available, consolidation_available) tuple
+            (non_consolidation_available, consolidation_available) tuple
         """
         async with self._in_flight_lock:
             total_in_flight = self._in_flight_count
             consolidation_in_flight = self._in_flight_by_type.get("consolidation", 0)
 
-        total_available = max(0, self._max_slots - total_in_flight)
+        non_consolidation_in_flight = max(0, total_in_flight - consolidation_in_flight)
+        non_consolidation_max = max(0, self._max_slots - self._consolidation_max_slots)
+        non_consolidation_available = max(0, non_consolidation_max - non_consolidation_in_flight)
         consolidation_available = max(0, self._consolidation_max_slots - consolidation_in_flight)
 
-        return total_available, consolidation_available
+        return non_consolidation_available, consolidation_available
 
     async def wait_for_active_tasks(self, timeout: float = 10.0) -> bool:
         """
@@ -164,40 +172,40 @@ class WorkerPoller:
         Returns:
             List of ClaimedTask objects containing operation_id, task_dict, and schema
         """
-        # Calculate available slots
-        total_available, consolidation_available = await self._get_available_slots()
+        # Calculate available slots (independent pools after reservation)
+        non_consolidation_available, consolidation_available = await self._get_available_slots()
 
-        if total_available <= 0:
+        if non_consolidation_available <= 0 and consolidation_available <= 0:
             return []
 
         schemas = await self._get_schemas()
         all_tasks: list[ClaimedTask] = []
-        remaining_total = total_available
+        remaining_non_consolidation = non_consolidation_available
         remaining_consolidation = consolidation_available
 
         for schema in schemas:
-            if remaining_total <= 0:
+            if remaining_non_consolidation <= 0 and remaining_consolidation <= 0:
                 break
 
-            tasks = await self._claim_batch_for_schema(schema, remaining_total, remaining_consolidation)
+            tasks = await self._claim_batch_for_schema(schema, remaining_non_consolidation, remaining_consolidation)
 
-            # Update remaining slots based on what was claimed
             for task in tasks:
                 op_type = task.task_dict.get("operation_type", "unknown")
                 if op_type == "consolidation":
                     remaining_consolidation -= 1
+                else:
+                    remaining_non_consolidation -= 1
 
             all_tasks.extend(tasks)
-            remaining_total -= len(tasks)
 
         return all_tasks
 
     async def _claim_batch_for_schema(
-        self, schema: str | None, limit: int, consolidation_limit: int
+        self, schema: str | None, non_consolidation_limit: int, consolidation_limit: int
     ) -> list[ClaimedTask]:
         """Claim tasks from a specific schema respecting slot limits."""
         try:
-            return await self._claim_batch_for_schema_inner(schema, limit, consolidation_limit)
+            return await self._claim_batch_for_schema_inner(schema, non_consolidation_limit, consolidation_limit)
         except Exception as e:
             # Format schema for logging: custom schemas in quotes, None as-is
             schema_display = f'"{schema}"' if schema else str(schema)
@@ -205,37 +213,38 @@ class WorkerPoller:
             return []
 
     async def _claim_batch_for_schema_inner(
-        self, schema: str | None, limit: int, consolidation_limit: int
+        self, schema: str | None, non_consolidation_limit: int, consolidation_limit: int
     ) -> list[ClaimedTask]:
-        """Inner implementation for claiming tasks from a specific schema with slot limits."""
+        """Inner implementation for claiming tasks from a specific schema with slot limits.
+
+        Non-consolidation and consolidation pools are independent: each is bounded by
+        its own limit and they do not borrow from each other.
+        """
         table = fq_table("async_operations", schema)
 
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                # Strategy: Claim non-consolidation tasks first, then consolidation up to limit
+                # 1. Claim non-consolidation tasks
+                non_consolidation_rows = []
+                if non_consolidation_limit > 0:
+                    non_consolidation_rows = await conn.fetch(
+                        f"""
+                        SELECT operation_id, task_payload, retry_count
+                        FROM {table}
+                        WHERE status = 'pending'
+                          AND task_payload IS NOT NULL
+                          AND operation_type != 'consolidation'
+                          AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+                        ORDER BY created_at
+                        LIMIT $1
+                        FOR UPDATE SKIP LOCKED
+                        """,
+                        non_consolidation_limit,
+                    )
 
-                # 1. Claim non-consolidation tasks (up to limit)
-                non_consolidation_rows = await conn.fetch(
-                    f"""
-                    SELECT operation_id, task_payload, retry_count
-                    FROM {table}
-                    WHERE status = 'pending'
-                      AND task_payload IS NOT NULL
-                      AND operation_type != 'consolidation'
-                      AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-                    ORDER BY created_at
-                    LIMIT $1
-                    FOR UPDATE SKIP LOCKED
-                    """,
-                    limit,
-                )
-
-                claimed_count = len(non_consolidation_rows)
-                remaining_limit = limit - claimed_count
-
-                # 2. Claim consolidation tasks (up to consolidation_limit and remaining_limit)
+                # 2. Claim consolidation tasks from their reserved pool
                 consolidation_rows = []
-                if consolidation_limit > 0 and remaining_limit > 0:
+                if consolidation_limit > 0:
                     consolidation_rows = await conn.fetch(
                         f"""
                         SELECT operation_id, task_payload, retry_count
@@ -254,16 +263,17 @@ class WorkerPoller:
                         LIMIT $1
                         FOR UPDATE SKIP LOCKED
                         """,
-                        min(consolidation_limit, remaining_limit),
+                        consolidation_limit,
                     )
 
-                all_rows = non_consolidation_rows + consolidation_rows
+                tagged_rows = [(row, False) for row in non_consolidation_rows] + [
+                    (row, True) for row in consolidation_rows
+                ]
 
-                if not all_rows:
+                if not tagged_rows:
                     return []
 
-                # Claim the tasks by updating status and worker_id
-                operation_ids = [row["operation_id"] for row in all_rows]
+                operation_ids = [row["operation_id"] for row, _ in tagged_rows]
                 await conn.execute(
                     f"""
                     UPDATE {table}
@@ -274,12 +284,16 @@ class WorkerPoller:
                     operation_ids,
                 )
 
-                # Parse and return task payloads with schema context
                 result = []
-                for row in all_rows:
+                for row, is_consolidation in tagged_rows:
                     task_dict = json.loads(row["task_payload"])
                     task_dict["_retry_count"] = row["retry_count"]
                     task_dict["_operation_id"] = str(row["operation_id"])
+                    # The DB row knows the operation_type, but the JSON payload may not
+                    # carry it. Inject it so in-flight tracking and slot accounting
+                    # (which key off task_dict["operation_type"]) work correctly.
+                    if is_consolidation:
+                        task_dict["operation_type"] = "consolidation"
                     result.append(
                         ClaimedTask(
                             operation_id=str(row["operation_id"]),
@@ -721,8 +735,10 @@ class WorkerPoller:
                 active_tasks = dict(self._active_tasks)
 
             consolidation_count = in_flight_by_type.get("consolidation", 0)
-            available_slots = self._max_slots - in_flight
-            available_consolidation_slots = self._consolidation_max_slots - consolidation_count
+            non_consolidation_in_flight = max(0, in_flight - consolidation_count)
+            non_consolidation_max = max(0, self._max_slots - self._consolidation_max_slots)
+            available_slots = max(0, non_consolidation_max - non_consolidation_in_flight)
+            available_consolidation_slots = max(0, self._consolidation_max_slots - consolidation_count)
 
             # Build local processing breakdown
             task_groups: dict[tuple[str, str], int] = {}
