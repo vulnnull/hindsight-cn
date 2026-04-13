@@ -196,15 +196,28 @@ class OpenAICompatibleLLM(LLMInterface):
     def _max_tokens_param_name(self) -> str:
         """Return the correct parameter name for limiting response tokens.
 
-        Native OpenAI and Groq accept 'max_completion_tokens'. Mistral and other
-        OpenAI-compatible endpoints that haven't adopted the newer parameter name
-        require 'max_tokens'. Using a custom base_url with the openai provider
-        signals a third-party compatible API, so fall back to 'max_tokens'.
+        Native OpenAI, Azure OpenAI, Groq, and llamacpp accept 'max_completion_tokens'.
+        Mistral and other OpenAI-compatible endpoints that haven't adopted the newer
+        parameter name require 'max_tokens', so when the openai provider is configured
+        with a non-Azure custom base_url we fall back to the widely-supported
+        'max_tokens'.
+
+        Reasoning models (GPT-5, o1, o3) only accept 'max_completion_tokens' and reject
+        'max_tokens' outright, so they always use the new parameter name regardless of
+        base_url.
         """
+        # Reasoning models (GPT-5, o1, o3, ...) only accept max_completion_tokens.
+        # Azure OpenAI + GPT-5 is the canonical example: issue #978.
+        if self._supports_reasoning_model():
+            return "max_completion_tokens"
         # Native OpenAI (no custom base URL), Groq, and llamacpp use max_completion_tokens
         if self.provider in ("groq", "llamacpp"):
             return "max_completion_tokens"
         if self.provider == "openai" and not self.base_url:
+            return "max_completion_tokens"
+        # Azure OpenAI is fully OpenAI-API-compatible — detect it by hostname so users
+        # can keep provider=openai + an Azure base_url (the documented setup).
+        if self.provider == "openai" and self.base_url and ".openai.azure.com" in self.base_url:
             return "max_completion_tokens"
         # openai with custom base_url, ollama, lmstudio, minimax, volcano —
         # use the widely-supported max_tokens
