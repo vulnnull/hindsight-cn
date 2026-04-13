@@ -17,11 +17,11 @@ openclaw gateway
 
 `hindsight-openclaw-setup` walks you through picking one of three modes:
 
-- **Cloud** — managed Hindsight. Pick an API token env var, done.
+- **Cloud** — managed Hindsight. Paste your cloud API token, done.
 - **External API** — your own running Hindsight deployment. Prompts for the URL and optional token.
-- **Embedded daemon** — spawns a local `hindsight-embed` daemon on this machine. Prompts for the LLM provider (OpenAI / Anthropic / Gemini / Groq / Claude Code / Codex / Ollama) and the env var that holds the API key.
+- **Embedded daemon** — spawns a local `hindsight-embed` daemon on this machine. Prompts for the LLM provider (OpenAI / Anthropic / Gemini / Groq / Claude Code / Codex / Ollama) and its API key.
 
-Credentials are always written as `SecretRef` objects that reference an environment variable — the key itself never ends up in plaintext on disk. `--ref-source file` and `--ref-source exec` are also supported by OpenClaw for mounted-secret and Vault-style setups; once you want to use them, set them via `openclaw config set` (see below).
+The interactive wizard stores credentials **inline** in `openclaw.json` for simplicity — the value is masked as you paste it. For CI / production you can store credentials as a `SecretRef` (resolved from an env var, file, or exec source at startup) by using the non-interactive flags with `--token-env` / `--api-key-env`, or by switching an existing field afterwards with `openclaw config set ... --ref-source env --ref-id …`.
 
 ### Manual configuration (without the wizard)
 

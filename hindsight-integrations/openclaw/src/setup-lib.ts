@@ -107,49 +107,83 @@ export function defaultApiKeyEnvVar(provider: string): string {
   return `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`;
 }
 
+/**
+ * Cloud mode credential: either a direct token value (stored inline as a
+ * plaintext string in openclaw.json) or an env var name (stored as a
+ * SecretRef that OpenClaw resolves from `process.env` at startup).
+ *
+ * Interactive wizard defaults to the direct-value form — simpler UX for
+ * users pasting a freshly-issued cloud token. CI / production flows should
+ * prefer `tokenEnvVar` via `openclaw config set ... --ref-source env` or
+ * `--token-env` to keep secrets off disk.
+ */
 export interface CloudSetupInput {
   apiUrl?: string;
-  tokenEnvVar: string;
+  token?: string;
+  tokenEnvVar?: string;
 }
 
 export interface ApiSetupInput {
   apiUrl: string;
+  token?: string;
   tokenEnvVar?: string;
 }
 
 export interface EmbeddedSetupInput {
   llmProvider: string;
+  apiKey?: string;
   apiKeyEnvVar?: string;
   llmModel?: string;
 }
 
+function pickCredential(
+  token: string | undefined,
+  tokenEnvVar: string | undefined,
+): string | SecretRef | undefined {
+  const hasToken = token && token.trim().length > 0;
+  const hasEnvVar = tokenEnvVar && tokenEnvVar.trim().length > 0;
+  if (hasToken && hasEnvVar) {
+    throw new Error('provide either a direct value or an env var name — not both');
+  }
+  if (hasToken) return token!.trim();
+  if (hasEnvVar) return envSecretRef(tokenEnvVar!.trim());
+  return undefined;
+}
+
 /**
  * Apply the Cloud mode to a plugin config in place: sets `hindsightApiUrl` and
- * a `hindsightApiToken` SecretRef, strips any leftover local-LLM fields so we
- * don't carry stale credentials across mode switches.
+ * `hindsightApiToken` (either as a plaintext string or as a SecretRef —
+ * whichever the caller provided), strips any leftover local-LLM fields so
+ * mode switches don't carry stale state.
  */
 export function applyCloudMode(
   pluginConfig: Record<string, unknown>,
   input: CloudSetupInput,
 ): void {
+  const token = pickCredential(input.token, input.tokenEnvVar);
+  if (token === undefined) {
+    throw new Error('Cloud mode requires either `token` or `tokenEnvVar`');
+  }
   clearLocalLlmFields(pluginConfig);
   pluginConfig.hindsightApiUrl = (input.apiUrl ?? HINDSIGHT_CLOUD_URL).trim();
-  pluginConfig.hindsightApiToken = envSecretRef(input.tokenEnvVar.trim());
+  pluginConfig.hindsightApiToken = token;
 }
 
 /**
  * Apply the external-API mode to a plugin config in place: sets a required
- * `hindsightApiUrl`, optional `hindsightApiToken` SecretRef, and strips any
- * leftover local-LLM fields so mode switches don't carry stale state.
+ * `hindsightApiUrl`, optional `hindsightApiToken` (plaintext or SecretRef),
+ * and strips any leftover local-LLM fields so mode switches don't carry
+ * stale state.
  */
 export function applyApiMode(
   pluginConfig: Record<string, unknown>,
   input: ApiSetupInput,
 ): void {
+  const token = pickCredential(input.token, input.tokenEnvVar);
   clearLocalLlmFields(pluginConfig);
   pluginConfig.hindsightApiUrl = input.apiUrl.trim();
-  if (input.tokenEnvVar && input.tokenEnvVar.trim().length > 0) {
-    pluginConfig.hindsightApiToken = envSecretRef(input.tokenEnvVar.trim());
+  if (token !== undefined) {
+    pluginConfig.hindsightApiToken = token;
   } else {
     delete pluginConfig.hindsightApiToken;
   }
@@ -157,22 +191,24 @@ export function applyApiMode(
 
 /**
  * Apply the embedded-daemon mode to a plugin config in place: sets
- * `llmProvider`, optional `llmApiKey` SecretRef, optional `llmModel`, and
- * strips any external-API settings so mode switches don't carry stale state.
+ * `llmProvider`, optional `llmApiKey` (plaintext or SecretRef), optional
+ * `llmModel`, and strips any external-API settings so mode switches don't
+ * carry stale state.
  */
 export function applyEmbeddedMode(
   pluginConfig: Record<string, unknown>,
   input: EmbeddedSetupInput,
 ): void {
+  const key = pickCredential(input.apiKey, input.apiKeyEnvVar);
   clearCloudFields(pluginConfig);
   pluginConfig.llmProvider = input.llmProvider;
   if (NO_KEY_PROVIDERS.has(input.llmProvider)) {
     delete pluginConfig.llmApiKey;
   } else {
-    if (!input.apiKeyEnvVar) {
-      throw new Error(`llmProvider "${input.llmProvider}" requires an apiKeyEnvVar`);
+    if (key === undefined) {
+      throw new Error(`llmProvider "${input.llmProvider}" requires either \`apiKey\` or \`apiKeyEnvVar\``);
     }
-    pluginConfig.llmApiKey = envSecretRef(input.apiKeyEnvVar.trim());
+    pluginConfig.llmApiKey = key;
   }
   if (input.llmModel && input.llmModel.trim().length > 0) {
     pluginConfig.llmModel = input.llmModel.trim();
@@ -181,17 +217,29 @@ export function applyEmbeddedMode(
   }
 }
 
+function credentialSuffix(token: string | undefined, tokenEnvVar: string | undefined): string {
+  if (tokenEnvVar && tokenEnvVar.trim().length > 0) {
+    return ` (token from \${${tokenEnvVar.trim()}})`;
+  }
+  if (token && token.trim().length > 0) {
+    return ' (token stored inline)';
+  }
+  return ' (no auth)';
+}
+
 export function summarizeCloud(input: CloudSetupInput): string {
   const url = (input.apiUrl ?? HINDSIGHT_CLOUD_URL).trim();
-  return `Cloud → ${url} (token from \${${input.tokenEnvVar.trim()}})`;
+  return `Cloud → ${url}${credentialSuffix(input.token, input.tokenEnvVar)}`;
 }
 
 export function summarizeApi(input: ApiSetupInput): string {
-  const suffix = input.tokenEnvVar ? ' (authenticated)' : ' (no auth)';
-  return `External API → ${input.apiUrl.trim()}${suffix}`;
+  return `External API → ${input.apiUrl.trim()}${credentialSuffix(input.token, input.tokenEnvVar)}`;
 }
 
 export function summarizeEmbedded(input: EmbeddedSetupInput): string {
-  const keyHint = NO_KEY_PROVIDERS.has(input.llmProvider) ? '' : ' (key via SecretRef)';
+  if (NO_KEY_PROVIDERS.has(input.llmProvider)) {
+    return `Embedded daemon → ${input.llmProvider}`;
+  }
+  const keyHint = input.apiKeyEnvVar ? ` (key from \${${input.apiKeyEnvVar.trim()}})` : ' (key stored inline)';
   return `Embedded daemon → ${input.llmProvider}${keyHint}`;
 }

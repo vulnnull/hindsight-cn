@@ -77,6 +77,36 @@ describe('ensurePluginConfig', () => {
   });
 });
 
+describe('applyCloudMode — direct token value', () => {
+  it('stores the token inline when a literal value is provided', () => {
+    const pc: Record<string, unknown> = {
+      llmProvider: 'openai',
+      llmApiKey: { source: 'env', provider: 'default', id: 'OPENAI_API_KEY' },
+    };
+    applyCloudMode(pc, { token: 'hsk_literal_value' });
+    expect(pc.hindsightApiUrl).toBe(HINDSIGHT_CLOUD_URL);
+    expect(pc.hindsightApiToken).toBe('hsk_literal_value');
+    expect(pc.llmProvider).toBeUndefined();
+    expect(pc.llmApiKey).toBeUndefined();
+  });
+
+  it('trims whitespace around an inline token', () => {
+    const pc: Record<string, unknown> = {};
+    applyCloudMode(pc, { token: '  hsk_padded  ' });
+    expect(pc.hindsightApiToken).toBe('hsk_padded');
+  });
+
+  it('throws when neither token nor tokenEnvVar is provided', () => {
+    const pc: Record<string, unknown> = {};
+    expect(() => applyCloudMode(pc, {})).toThrow(/requires either/);
+  });
+
+  it('throws when both token and tokenEnvVar are provided', () => {
+    const pc: Record<string, unknown> = {};
+    expect(() => applyCloudMode(pc, { token: 'x', tokenEnvVar: 'Y' })).toThrow(/either a direct value or an env var name/);
+  });
+});
+
 describe('applyCloudMode', () => {
   it('writes the default URL and a SecretRef, stripping local LLM state', () => {
     const pc: Record<string, unknown> = {
@@ -109,6 +139,22 @@ describe('applyCloudMode', () => {
   });
 });
 
+describe('applyApiMode — direct token value', () => {
+  it('stores the token inline when a literal value is provided', () => {
+    const pc: Record<string, unknown> = {};
+    applyApiMode(pc, { apiUrl: 'https://mcp.example.com', token: 'api_literal' });
+    expect(pc.hindsightApiUrl).toBe('https://mcp.example.com');
+    expect(pc.hindsightApiToken).toBe('api_literal');
+  });
+
+  it('throws when both token and tokenEnvVar are provided', () => {
+    const pc: Record<string, unknown> = {};
+    expect(() =>
+      applyApiMode(pc, { apiUrl: 'https://mcp.example.com', token: 'x', tokenEnvVar: 'Y' }),
+    ).toThrow(/either a direct value or an env var name/);
+  });
+});
+
 describe('applyApiMode', () => {
   it('writes the URL without a token when none is provided', () => {
     const pc: Record<string, unknown> = {
@@ -138,6 +184,22 @@ describe('applyApiMode', () => {
   });
 });
 
+describe('applyEmbeddedMode — direct API key value', () => {
+  it('stores the API key inline when a literal value is provided', () => {
+    const pc: Record<string, unknown> = {};
+    applyEmbeddedMode(pc, { llmProvider: 'openai', apiKey: 'sk-literal' });
+    expect(pc.llmProvider).toBe('openai');
+    expect(pc.llmApiKey).toBe('sk-literal');
+  });
+
+  it('throws when both apiKey and apiKeyEnvVar are provided', () => {
+    const pc: Record<string, unknown> = {};
+    expect(() =>
+      applyEmbeddedMode(pc, { llmProvider: 'openai', apiKey: 'sk-x', apiKeyEnvVar: 'OPENAI_API_KEY' }),
+    ).toThrow(/either a direct value or an env var name/);
+  });
+});
+
 describe('applyEmbeddedMode', () => {
   it('writes llmProvider + SecretRef for providers that require a key', () => {
     const pc: Record<string, unknown> = {
@@ -162,9 +224,11 @@ describe('applyEmbeddedMode', () => {
     expect(pc.llmApiKey).toBeUndefined();
   });
 
-  it('throws when a key-requiring provider is given without an env var name', () => {
+  it('throws when a key-requiring provider is given without a key', () => {
     const pc: Record<string, unknown> = {};
-    expect(() => applyEmbeddedMode(pc, { llmProvider: 'openai' })).toThrow(/requires an apiKeyEnvVar/);
+    expect(() => applyEmbeddedMode(pc, { llmProvider: 'openai' })).toThrow(
+      /requires either `apiKey` or `apiKeyEnvVar`/,
+    );
   });
 
   it('persists llmModel when provided and clears it when absent', () => {
@@ -183,13 +247,19 @@ describe('summarize*', () => {
       'Cloud → https://api.hindsight.vectorize.io (token from ${HINDSIGHT_CLOUD_TOKEN})',
     );
     expect(summarizeApi({ apiUrl: 'https://api.example.com', tokenEnvVar: 'T' })).toBe(
-      'External API → https://api.example.com (authenticated)',
+      'External API → https://api.example.com (token from ${T})',
+    );
+    expect(summarizeApi({ apiUrl: 'https://api.example.com', token: 'literal' })).toBe(
+      'External API → https://api.example.com (token stored inline)',
     );
     expect(summarizeApi({ apiUrl: 'https://api.example.com' })).toBe(
       'External API → https://api.example.com (no auth)',
     );
     expect(summarizeEmbedded({ llmProvider: 'openai', apiKeyEnvVar: 'X' })).toBe(
-      'Embedded daemon → openai (key via SecretRef)',
+      'Embedded daemon → openai (key from ${X})',
+    );
+    expect(summarizeEmbedded({ llmProvider: 'openai', apiKey: 'sk-test' })).toBe(
+      'Embedded daemon → openai (key stored inline)',
     );
     expect(summarizeEmbedded({ llmProvider: 'claude-code' })).toBe(
       'Embedded daemon → claude-code',

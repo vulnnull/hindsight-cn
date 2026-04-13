@@ -32,24 +32,32 @@ npx --package @vectorize-io/hindsight-openclaw hindsight-openclaw-setup
 
 The wizard walks you through picking one of three install modes:
 
-- **Cloud** — managed Hindsight at `https://api.hindsight.vectorize.io`. Prompts for the env var that holds your cloud API token. No local setup needed.
-- **External API** — your own running Hindsight deployment. Prompts for the URL and, optionally, the env var that holds an auth token.
-- **Embedded daemon** — spawns a local `hindsight-embed` daemon on this machine. Prompts for the LLM provider (OpenAI / Anthropic / Gemini / Groq / Claude Code / OpenAI Codex / Ollama) and the env var that holds the API key.
+- **Cloud** — managed Hindsight at `https://api.hindsight.vectorize.io`. Paste your cloud API token when prompted (masked input). No local setup needed.
+- **External API** — your own running Hindsight deployment. Prompts for the URL and, optionally, the token value (masked).
+- **Embedded daemon** — spawns a local `hindsight-embed` daemon on this machine. Prompts for the LLM provider (OpenAI / Anthropic / Gemini / Groq / Claude Code / OpenAI Codex / Ollama) and the API key (masked).
 
-Credentials are always written as [`SecretRef`](#llm-configuration) objects that reference an environment variable — the key itself never ends up in plaintext on disk.
+The interactive wizard stores credentials **inline** in `openclaw.json` for simplicity. For CI / production you can store credentials as a [`SecretRef`](#llm-configuration) (resolved from an env var, file, or exec source at startup, never saved on disk) by either passing `--token-env` / `--api-key-env` to the non-interactive wizard or switching an existing field afterwards via `openclaw config set ... --ref-source env|file|exec`.
 
-For CI and scripted setups the wizard also runs non-interactively:
+For CI and scripted setups the wizard also runs non-interactively — either with an inline value or with an env var reference:
 
 ```bash
-# Cloud
+# Cloud — inline token (simplest)
+npx --package @vectorize-io/hindsight-openclaw hindsight-openclaw-setup \
+    --mode cloud --token hsk_your_cloud_token
+
+# Cloud — SecretRef (read from env at gateway startup)
 npx --package @vectorize-io/hindsight-openclaw hindsight-openclaw-setup \
     --mode cloud --token-env HINDSIGHT_CLOUD_TOKEN
 
-# External API
+# External API (no auth)
 npx --package @vectorize-io/hindsight-openclaw hindsight-openclaw-setup \
     --mode api --api-url https://mcp.hindsight.example.com --no-token
 
-# Embedded daemon with OpenAI
+# Embedded daemon with OpenAI — inline API key
+npx --package @vectorize-io/hindsight-openclaw hindsight-openclaw-setup \
+    --mode embedded --provider openai --api-key sk-...
+
+# Embedded daemon with OpenAI — SecretRef
 npx --package @vectorize-io/hindsight-openclaw hindsight-openclaw-setup \
     --mode embedded --provider openai --api-key-env OPENAI_API_KEY
 

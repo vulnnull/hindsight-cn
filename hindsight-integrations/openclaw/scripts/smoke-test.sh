@@ -119,6 +119,29 @@ get_config_value() {
   openclaw config get "$1" 2>/dev/null | tail -1
 }
 
+# Read a value directly from the raw openclaw.json. `openclaw config get`
+# redacts sensitive fields (renders them as "__OPENCLAW_REDACTED__"), so we
+# can't use it to assert the actual token/key value stored inline. This
+# helper bypasses the redaction for smoke-test assertions.
+get_raw_config_value() {
+  python3 -c "
+import json, sys
+path = sys.argv[1]
+dotted = sys.argv[2]
+with open(path) as f:
+    node = json.load(f)
+for part in dotted.split('.'):
+    if isinstance(node, dict) and part in node:
+        node = node[part]
+    else:
+        sys.exit(0)
+if isinstance(node, (dict, list)):
+    print(json.dumps(node))
+else:
+    print(node)
+" "$CONFIG_PATH" "$1"
+}
+
 main() {
   require openclaw
   require node
@@ -195,22 +218,38 @@ main() {
   # -------------------------------------------------------------------------
   # Phase 2 — non-interactive setup for each mode
   # -------------------------------------------------------------------------
-  run_setup_mode "cloud (default URL)" \
+  run_setup_mode "cloud (default URL, SecretRef)" \
     --mode cloud --token-env HINDSIGHT_CLOUD_TOKEN
   [[ "$(get_config_value plugins.entries.hindsight-openclaw.config.hindsightApiUrl)" == "https://api.hindsight.vectorize.io" ]] \
     || fail "cloud mode: hindsightApiUrl not set to the default URL"
+
+  run_setup_mode "cloud (inline --token)" \
+    --mode cloud --token hsk_smoke_test_inline_value
+  # Read the raw file — `openclaw config get` redacts sensitive fields.
+  [[ "$(get_raw_config_value plugins.entries.hindsight-openclaw.config.hindsightApiToken)" == "hsk_smoke_test_inline_value" ]] \
+    || fail "cloud mode: --token did not roundtrip as inline string"
 
   run_setup_mode "external API (no auth)" \
     --mode api --api-url "$HINDSIGHT_API_URL" --no-token
   [[ "$(get_config_value plugins.entries.hindsight-openclaw.config.hindsightApiUrl)" == "$HINDSIGHT_API_URL" ]] \
     || fail "api mode: hindsightApiUrl did not roundtrip"
 
-  run_setup_mode "embedded (openai with model override)" \
+  run_setup_mode "external API (inline --token)" \
+    --mode api --api-url "$HINDSIGHT_API_URL" --token api_smoke_test_inline
+  [[ "$(get_raw_config_value plugins.entries.hindsight-openclaw.config.hindsightApiToken)" == "api_smoke_test_inline" ]] \
+    || fail "api mode: --token did not roundtrip as inline string"
+
+  run_setup_mode "embedded (openai --api-key-env + model override)" \
     --mode embedded --provider openai --api-key-env OPENAI_API_KEY --model gpt-4o-mini
   [[ "$(get_config_value plugins.entries.hindsight-openclaw.config.llmProvider)" == "openai" ]] \
     || fail "embedded mode: llmProvider not set to openai"
   [[ "$(get_config_value plugins.entries.hindsight-openclaw.config.llmModel)" == "gpt-4o-mini" ]] \
     || fail "embedded mode: llmModel not set to gpt-4o-mini"
+
+  run_setup_mode "embedded (openai --api-key inline)" \
+    --mode embedded --provider openai --api-key sk-smoke-test-inline
+  [[ "$(get_raw_config_value plugins.entries.hindsight-openclaw.config.llmApiKey)" == "sk-smoke-test-inline" ]] \
+    || fail "embedded mode: --api-key did not roundtrip as inline string"
 
   run_setup_mode "embedded (claude-code, no key)" \
     --mode embedded --provider claude-code
@@ -220,13 +259,19 @@ main() {
   # -------------------------------------------------------------------------
   log "verifying setup wizard rejects bad args…"
   if node "$EXT_DIR/dist/setup.js" --config-path "$CONFIG_PATH" --mode cloud 2>/dev/null; then
-    fail "cloud mode without --token-env should have failed"
+    fail "cloud mode without --token or --token-env should have failed"
+  fi
+  if node "$EXT_DIR/dist/setup.js" --config-path "$CONFIG_PATH" --mode cloud --token hsk_x --token-env T 2>/dev/null; then
+    fail "cloud mode with both --token and --token-env should have failed"
   fi
   if node "$EXT_DIR/dist/setup.js" --config-path "$CONFIG_PATH" --mode api --api-url "$HINDSIGHT_API_URL" --token-env TOK --no-token 2>/dev/null; then
     fail "--token-env + --no-token together should have failed"
   fi
   if node "$EXT_DIR/dist/setup.js" --config-path "$CONFIG_PATH" --mode embedded --provider openai 2>/dev/null; then
-    fail "openai without --api-key-env should have failed"
+    fail "openai without --api-key or --api-key-env should have failed"
+  fi
+  if node "$EXT_DIR/dist/setup.js" --config-path "$CONFIG_PATH" --mode embedded --provider openai --api-key sk-x --api-key-env OPENAI_API_KEY 2>/dev/null; then
+    fail "embedded with both --api-key and --api-key-env should have failed"
   fi
   log "✓ bad args rejected"
 

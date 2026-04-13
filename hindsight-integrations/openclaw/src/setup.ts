@@ -49,9 +49,11 @@ export interface ParsedCliArgs {
   configPath?: string;
   mode?: SetupMode;
   apiUrl?: string;
+  token?: string;
   tokenEnv?: string;
   noToken: boolean;
   provider?: string;
+  apiKey?: string;
   apiKeyEnv?: string;
   model?: string;
   positional?: string;
@@ -72,24 +74,29 @@ function usage(): string {
     '  --config-path <path>    Path to openclaw.json (default: ~/.openclaw/openclaw.json)',
     '  --mode <mode>           cloud | api | embedded (enables non-interactive mode)',
     '',
-    'Cloud mode:',
+    'Cloud mode (must pass exactly one of --token or --token-env):',
     `  --api-url <url>         Override the Hindsight Cloud URL (default: ${HINDSIGHT_CLOUD_URL})`,
-    '  --token-env <VAR>       Env var holding the cloud API token (required)',
+    '  --token <value>         Store the token inline in openclaw.json (simple)',
+    '  --token-env <VAR>       Reference an env var instead — resolved at startup',
+    '                          via SecretRef (keeps the secret off disk)',
     '',
-    'External API mode:',
+    'External API mode (token is optional; pass at most one of --token / --token-env / --no-token):',
     '  --api-url <url>         Hindsight API URL (required)',
-    '  --token-env <VAR>       Env var holding the API token (optional)',
+    '  --token <value>         Inline token value in openclaw.json',
+    '  --token-env <VAR>       Env var holding the token (SecretRef)',
     '  --no-token              Explicitly disable token auth',
     '',
-    'Embedded mode:',
+    'Embedded mode (for providers that need a key, pass exactly one of --api-key or --api-key-env):',
     `  --provider <id>         LLM provider: ${['openai', 'anthropic', 'gemini', 'groq', ...NO_KEY_PROVIDERS].join(' | ')}`,
-    '  --api-key-env <VAR>     Env var holding the LLM API key (required unless provider needs no key)',
+    '  --api-key <value>       Store the LLM API key inline in openclaw.json',
+    '  --api-key-env <VAR>     Env var holding the LLM API key (SecretRef)',
     '  --model <id>            Optional model override (otherwise uses the provider default)',
     '',
     '  -h, --help              Show this help',
     '',
     'Examples:',
     '  hindsight-openclaw-setup',
+    '  hindsight-openclaw-setup --mode cloud --token hsk_...',
     '  hindsight-openclaw-setup --mode cloud --token-env HINDSIGHT_CLOUD_TOKEN',
     '  hindsight-openclaw-setup --mode api --api-url https://mcp.hindsight.example.com --no-token',
     '  hindsight-openclaw-setup --mode embedded --provider openai --api-key-env OPENAI_API_KEY',
@@ -129,6 +136,9 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
       case '--api-url':
         args.apiUrl = next();
         break;
+      case '--token':
+        args.token = next();
+        break;
       case '--token-env':
         args.tokenEnv = next();
         break;
@@ -137,6 +147,9 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
         break;
       case '--provider':
         args.provider = next();
+        break;
+      case '--api-key':
+        args.apiKey = next();
         break;
       case '--api-key-env':
         args.apiKeyEnv = next();
@@ -163,14 +176,18 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
 // ---------------------------------------------------------------------------
 
 function buildCloudInput(args: ParsedCliArgs): CloudSetupInput {
-  if (!args.tokenEnv) {
-    throw new Error('--mode cloud requires --token-env <VAR>');
+  if (!args.token && !args.tokenEnv) {
+    throw new Error('--mode cloud requires --token <value> or --token-env <VAR>');
   }
-  if (!isValidEnvVarName(args.tokenEnv)) {
+  if (args.token && args.tokenEnv) {
+    throw new Error('--token and --token-env are mutually exclusive — pick one');
+  }
+  if (args.tokenEnv && !isValidEnvVarName(args.tokenEnv)) {
     throw new Error(`--token-env must be an UPPER_SNAKE_CASE env var name, got: ${args.tokenEnv}`);
   }
   return {
     apiUrl: args.apiUrl,
+    token: args.token,
     tokenEnvVar: args.tokenEnv,
   };
 }
@@ -179,14 +196,17 @@ function buildApiInput(args: ParsedCliArgs): ApiSetupInput {
   if (!args.apiUrl) {
     throw new Error('--mode api requires --api-url <url>');
   }
-  if (args.tokenEnv && args.noToken) {
-    throw new Error('--token-env and --no-token cannot both be set');
+  const credFlagCount =
+    (args.token ? 1 : 0) + (args.tokenEnv ? 1 : 0) + (args.noToken ? 1 : 0);
+  if (credFlagCount > 1) {
+    throw new Error('--token, --token-env, and --no-token are mutually exclusive — pick at most one');
   }
   if (args.tokenEnv && !isValidEnvVarName(args.tokenEnv)) {
     throw new Error(`--token-env must be an UPPER_SNAKE_CASE env var name, got: ${args.tokenEnv}`);
   }
   return {
     apiUrl: args.apiUrl,
+    token: args.token,
     tokenEnvVar: args.tokenEnv,
   };
 }
@@ -195,19 +215,23 @@ function buildEmbeddedInput(args: ParsedCliArgs): EmbeddedSetupInput {
   if (!args.provider) {
     throw new Error('--mode embedded requires --provider <id>');
   }
+  if (args.apiKey && args.apiKeyEnv) {
+    throw new Error('--api-key and --api-key-env are mutually exclusive — pick one');
+  }
   const needsKey = !NO_KEY_PROVIDERS.has(args.provider);
   if (needsKey) {
-    if (!args.apiKeyEnv) {
+    if (!args.apiKey && !args.apiKeyEnv) {
       throw new Error(
-        `--provider ${args.provider} requires --api-key-env <VAR> (providers that need no key: ${[...NO_KEY_PROVIDERS].join(', ')})`,
+        `--provider ${args.provider} requires --api-key <value> or --api-key-env <VAR> (providers that need no key: ${[...NO_KEY_PROVIDERS].join(', ')})`,
       );
     }
-    if (!isValidEnvVarName(args.apiKeyEnv)) {
+    if (args.apiKeyEnv && !isValidEnvVarName(args.apiKeyEnv)) {
       throw new Error(`--api-key-env must be an UPPER_SNAKE_CASE env var name, got: ${args.apiKeyEnv}`);
     }
   }
   return {
     llmProvider: args.provider,
+    apiKey: args.apiKey,
     apiKeyEnvVar: args.apiKeyEnv,
     llmModel: args.model,
   };
@@ -280,15 +304,13 @@ async function promptCloud(pluginConfig: Record<string, unknown>): Promise<strin
     apiUrl = custom;
   }
 
-  const tokenEnvVar = await p.text({
-    message: 'Environment variable holding your Hindsight Cloud API token',
-    placeholder: 'HINDSIGHT_CLOUD_TOKEN',
-    initialValue: 'HINDSIGHT_CLOUD_TOKEN',
-    validate: validateEnvVar,
+  const token = await p.password({
+    message: 'Hindsight Cloud API token (paste the value, it will be masked)',
+    validate: validateRequired('Token is required'),
   });
-  assertNotCancelled(tokenEnvVar);
+  assertNotCancelled(token);
 
-  const input = { apiUrl, tokenEnvVar };
+  const input = { apiUrl, token };
   applyCloudMode(pluginConfig, input);
   return summarizeCloud(input);
 }
@@ -307,19 +329,17 @@ async function promptApi(pluginConfig: Record<string, unknown>): Promise<string>
   });
   assertNotCancelled(needsToken);
 
-  let tokenEnvVar: string | undefined;
+  let token: string | undefined;
   if (needsToken) {
-    const value = await p.text({
-      message: 'Environment variable holding the API token',
-      placeholder: 'HINDSIGHT_API_TOKEN',
-      initialValue: 'HINDSIGHT_API_TOKEN',
-      validate: validateEnvVar,
+    const value = await p.password({
+      message: 'API token (paste the value, it will be masked)',
+      validate: validateRequired('Token is required'),
     });
     assertNotCancelled(value);
-    tokenEnvVar = value;
+    token = value;
   }
 
-  const input = { apiUrl, tokenEnvVar };
+  const input = { apiUrl, token };
   applyApiMode(pluginConfig, input);
   return summarizeApi(input);
 }
@@ -348,17 +368,14 @@ async function promptEmbedded(pluginConfig: Record<string, unknown>): Promise<st
   assertNotCancelled(provider);
   const llmProvider = provider as string;
 
-  let apiKeyEnvVar: string | undefined;
+  let apiKey: string | undefined;
   if (!NO_KEY_PROVIDERS.has(llmProvider)) {
-    const defaultEnvId = defaultApiKeyEnvVar(llmProvider);
-    const envId = await p.text({
-      message: `Environment variable holding your ${llmProvider} API key`,
-      placeholder: defaultEnvId,
-      initialValue: defaultEnvId,
-      validate: validateEnvVar,
+    const value = await p.password({
+      message: `${llmProvider} API key (paste the value, it will be masked)`,
+      validate: validateRequired('API key is required'),
     });
-    assertNotCancelled(envId);
-    apiKeyEnvVar = envId;
+    assertNotCancelled(value);
+    apiKey = value;
   }
 
   const overrideModel = await p.confirm({
@@ -378,7 +395,7 @@ async function promptEmbedded(pluginConfig: Record<string, unknown>): Promise<st
     llmModel = value;
   }
 
-  const input = { llmProvider, apiKeyEnvVar, llmModel };
+  const input = { llmProvider, apiKey, llmModel };
   applyEmbeddedMode(pluginConfig, input);
   return summarizeEmbedded(input);
 }
@@ -423,9 +440,13 @@ async function runInteractive(configPath: string): Promise<{ summary: string; co
       summary,
       '',
       'Next steps:',
-      '  1. Ensure any referenced env vars are exported in the shell that runs the gateway.',
-      '  2. Restart the gateway:  openclaw gateway restart',
-      '  3. Verify config:        openclaw config validate',
+      '  1. Restart the gateway:  openclaw gateway restart',
+      '  2. Verify config:        openclaw config validate',
+      '',
+      'Secrets were stored inline in openclaw.json. To reference an env var',
+      'instead (recommended for CI/production), use:',
+      '  openclaw config set plugins.entries.hindsight-openclaw.config.hindsightApiToken \\',
+      '      --ref-source env --ref-id HINDSIGHT_CLOUD_TOKEN',
     ].join('\n'),
     'Hindsight Memory configured',
   );

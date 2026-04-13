@@ -21,7 +21,15 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['/tmp/b.json']).positional).toBe('/tmp/b.json');
   });
 
-  it('parses cloud-mode flags', () => {
+  it('parses cloud-mode flags (direct token value)', () => {
+    const args = parseCliArgs([
+      '--mode', 'cloud',
+      '--token', 'hsk_literal',
+    ]);
+    expect(args).toMatchObject({ mode: 'cloud', token: 'hsk_literal' });
+  });
+
+  it('parses cloud-mode flags (token env var)', () => {
     const args = parseCliArgs([
       '--mode', 'cloud',
       '--api-url', 'https://cloud.example.com',
@@ -31,6 +39,19 @@ describe('parseCliArgs', () => {
       mode: 'cloud',
       apiUrl: 'https://cloud.example.com',
       tokenEnv: 'HINDSIGHT_CLOUD_TOKEN',
+    });
+  });
+
+  it('parses embedded-mode direct apiKey flag', () => {
+    const args = parseCliArgs([
+      '--mode', 'embedded',
+      '--provider', 'openai',
+      '--api-key', 'sk-literal',
+    ]);
+    expect(args).toMatchObject({
+      mode: 'embedded',
+      provider: 'openai',
+      apiKey: 'sk-literal',
     });
   });
 
@@ -125,9 +146,27 @@ describe('runNonInteractive', () => {
     expect((pc.hindsightApiToken as { id: string }).id).toBe('MY_TOKEN');
   });
 
-  it('rejects cloud mode without --token-env', async () => {
+  it('writes a cloud-mode config with an inline token (--token)', async () => {
+    const args = parseCliArgs(['--mode', 'cloud', '--token', 'hsk_direct_value']);
+    await runNonInteractive(args, configPath);
+    const cfg = await readBack();
+    const pc = cfg.plugins?.entries?.[PLUGIN_ID]?.config ?? {};
+    expect(pc.hindsightApiUrl).toBe('https://api.hindsight.vectorize.io');
+    expect(pc.hindsightApiToken).toBe('hsk_direct_value');
+  });
+
+  it('rejects cloud mode without --token or --token-env', async () => {
     const args = parseCliArgs(['--mode', 'cloud']);
-    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/--token-env/);
+    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/--token .*--token-env/);
+  });
+
+  it('rejects cloud mode with both --token and --token-env', async () => {
+    const args = parseCliArgs([
+      '--mode', 'cloud',
+      '--token', 'hsk_x',
+      '--token-env', 'HINDSIGHT_CLOUD_TOKEN',
+    ]);
+    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/mutually exclusive/);
   });
 
   it('rejects cloud mode with a bad token env var name', async () => {
@@ -172,7 +211,7 @@ describe('runNonInteractive', () => {
       '--token-env', 'FOO',
       '--no-token',
     ]);
-    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/cannot both be set/);
+    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/mutually exclusive/);
   });
 
   it('writes an embedded-mode config for openai', async () => {
@@ -205,9 +244,29 @@ describe('runNonInteractive', () => {
     await expect(runNonInteractive(args, configPath)).rejects.toThrow(/--provider/);
   });
 
-  it('rejects embedded mode with a key-requiring provider but no --api-key-env', async () => {
+  it('rejects embedded mode with a key-requiring provider but no --api-key or --api-key-env', async () => {
     const args = parseCliArgs(['--mode', 'embedded', '--provider', 'openai']);
-    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/--api-key-env/);
+    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/--api-key .*--api-key-env/);
+  });
+
+  it('rejects embedded mode with both --api-key and --api-key-env', async () => {
+    const args = parseCliArgs([
+      '--mode', 'embedded', '--provider', 'openai',
+      '--api-key', 'sk-x', '--api-key-env', 'OPENAI_API_KEY',
+    ]);
+    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/mutually exclusive/);
+  });
+
+  it('writes an embedded-mode config with an inline API key (--api-key)', async () => {
+    const args = parseCliArgs([
+      '--mode', 'embedded', '--provider', 'openai', '--api-key', 'sk-inline',
+    ]);
+    await runNonInteractive(args, configPath);
+    const cfg = await readBack();
+    const pc = cfg.plugins?.entries?.[PLUGIN_ID]?.config ?? {};
+    expect(pc.llmProvider).toBe('openai');
+    expect(pc.llmApiKey).toBe('sk-inline');
+    expect(typeof pc.llmApiKey).toBe('string');
   });
 
   it('clears stale fields when switching between modes', async () => {

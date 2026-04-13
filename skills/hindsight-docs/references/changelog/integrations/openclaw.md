@@ -8,6 +8,13 @@ import PageHero from '@site/src/components/PageHero';
 
 ← OpenClaw integration
 
+## 0.6.1 (Unreleased)
+
+**Improvements**
+
+- `hindsight-openclaw-setup` interactive wizard now asks for the API token/API key **value** instead of the env var name holding it. Pasted values are masked and stored inline in `openclaw.json` — no more two-step "pick an env var name, then export it" flow that confused first-time users. For CI / production, the SecretRef path is still available via the non-interactive flags (`--token-env`, `--api-key-env`) or after-the-fact with `openclaw config set ... --ref-source env --ref-id …`.
+- Added non-interactive CLI flags for direct-value credentials: `--token` (cloud / external API modes) and `--api-key` (embedded mode). `--token` and `--token-env` are mutually exclusive within a mode; same for `--api-key` / `--api-key-env`.
+
 ## [0.6.0](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.6.0)
 
 **Breaking Changes**
