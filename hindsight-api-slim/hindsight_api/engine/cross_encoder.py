@@ -1207,14 +1207,31 @@ class JinaMLXCrossEncoder(CrossEncoderModel):
         if self._reranker is not None:
             return
 
+        # Pre-warm transformers.AutoTokenizer to fully populate the transformers
+        # namespace before mlx_lm imports it. transformers 5.x uses _LazyModule,
+        # which has an unguarded window where `from transformers import AutoTokenizer`
+        # raises ImportError if another thread is concurrently initializing the
+        # namespace (e.g. embeddings init in an executor thread).
+        # See: https://github.com/vectorize-io/hindsight/issues/994
+        import transformers
+
+        _ = transformers.AutoTokenizer
+
         try:
             import mlx.core  # noqa: F401
             import mlx_lm  # noqa: F401
-        except ImportError:
+        except ImportError as exc:
+            # Only swallow "package not installed" errors. Anything else (e.g. a
+            # transitive import failure inside mlx_lm) must surface verbatim so
+            # the real cause is debuggable instead of being masked by a generic
+            # "install mlx" message.
+            msg = str(exc)
+            if "mlx" not in msg and "mlx_lm" not in msg:
+                raise
             raise ImportError(
                 "mlx and mlx-lm are required for JinaMLXCrossEncoder. "
                 "Install with: pip install mlx>=0.31.0 mlx-lm>=0.31.1 safetensors>=0.6.2"
-            )
+            ) from exc
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self._load_model)
