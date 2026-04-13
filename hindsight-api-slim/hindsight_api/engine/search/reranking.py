@@ -60,6 +60,32 @@ def apply_combined_scoring(
     if now.tzinfo is None:
         now = now.replace(tzinfo=UTC)
 
+    # When the configured cross-encoder is a passthrough (e.g.
+    # RRFPassthroughCrossEncoder used by slim deployments), every
+    # cross_encoder_score_normalized is identical and provides no relevance
+    # signal. In that case the multiplicative recency / temporal / proof_count
+    # boosts below become the *only* ranking signal — making the final order a
+    # pure recency sort regardless of how relevant a candidate actually is.
+    #
+    # Detect that case and seed cross_encoder_score_normalized from the RRF
+    # rank instead, so the boosts modulate a meaningful base score rather than
+    # replacing it. This is a no-op for real cross-encoders, which produce
+    # diverse scores.
+    if scored_results:
+        ce_scores = {sr.cross_encoder_score_normalized for sr in scored_results}
+        if len(ce_scores) <= 1:
+            n = len(scored_results)
+            sorted_by_rrf = sorted(
+                scored_results,
+                key=lambda s: getattr(getattr(s, "candidate", None), "rrf_score", 0.0),
+                reverse=True,
+            )
+            denom = max(1, n - 1)
+            for new_rank, sr in enumerate(sorted_by_rrf):
+                # Map rank → [0.1, 1.0] so the recency boost can still nudge
+                # ordering between adjacent candidates without overpowering RRF.
+                sr.cross_encoder_score_normalized = 1.0 - (0.9 * new_rank / denom)
+
     for sr in scored_results:
         # Recency: linear decay over 365 days → [0.1, 1.0]; neutral 0.5 if no date.
         sr.recency = 0.5
