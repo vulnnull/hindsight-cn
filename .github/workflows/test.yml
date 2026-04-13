@@ -274,6 +274,61 @@ jobs:
       working-directory: ./hindsight-integrations/openclaw
       run: npm test
 
+  smoke-openclaw-install:
+    needs: [detect-changes, build-openclaw-integration]
+    if: >-
+      github.event_name != 'pull_request_review' &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-openclaw == 'true' ||
+      needs.detect-changes.outputs.clients-ts == 'true' ||
+      needs.detect-changes.outputs.all-npm == 'true' ||
+      needs.detect-changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+
+    # Install the openclaw CLI globally. The smoke test exercises the real
+    # `openclaw plugins install` / `openclaw config set` / `openclaw plugins
+    # doctor` commands — not the in-repo integration tests — so a real CLI
+    # must be on PATH.
+    - name: Install openclaw CLI
+      run: npm install -g openclaw
+
+    - name: Verify openclaw CLI
+      run: openclaw --version
+
+    # openclaw depends on the workspace packages via published version
+    # ranges (^0.1.0 / ^0.5.0), not file: paths, so the smoke test's
+    # `openclaw plugins install <tarball>` resolves them straight from the
+    # npm registry. These builds are just for `npm pack` / local unit
+    # tests, not for resolving the plugin's runtime deps.
+    - name: Install root workspace dependencies
+      run: npm ci
+
+    - name: Build hindsight-client (openclaw dep)
+      run: npm run build --workspace=hindsight-clients/typescript
+
+    - name: Build hindsight-all-npm (openclaw dep)
+      run: npm run build --workspace=hindsight-all-npm
+
+    - name: Install openclaw dependencies
+      working-directory: ./hindsight-integrations/openclaw
+      run: npm ci
+
+    - name: Run openclaw install smoke test
+      working-directory: ./hindsight-integrations/openclaw
+      run: ./scripts/smoke-test.sh
+
   test-claude-code-integration:
     needs: [detect-changes]
     if: >-
@@ -2588,6 +2643,7 @@ jobs:
       - build-api-python-versions
       - build-typescript-client
       - build-openclaw-integration
+      - smoke-openclaw-install
       - test-claude-code-integration
       - test-codex-integration
       - build-ai-sdk-integration
