@@ -7,6 +7,7 @@ consolidating daemon lifecycle, profile management, and database URL resolution.
 
 import logging
 import os
+import platform
 import re
 import subprocess
 import time
@@ -236,6 +237,15 @@ class DaemonEmbedManager(EmbedManager):
             if value:
                 env[env_key] = str(value)
 
+        # Propagate any other HINDSIGHT_* keys from the merged profile/explicit
+        # config into the daemon env. Without this, arbitrary settings in the
+        # profile's .env file (e.g. HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU,
+        # HINDSIGHT_API_EMBEDDINGS_PROVIDER) are silently dropped because the
+        # whitelist above only covers LLM/log/idle_timeout keys.
+        for key, value in config.items():
+            if key.startswith("HINDSIGHT_") and value is not None:
+                env[key] = str(value)
+
         # Use profile-specific database (check config for override)
         db_override = config.get("HINDSIGHT_EMBED_API_DATABASE_URL") or env.get("HINDSIGHT_EMBED_API_DATABASE_URL")
         if db_override:
@@ -251,6 +261,15 @@ class DaemonEmbedManager(EmbedManager):
             env["HINDSIGHT_API_LOG_LEVEL"] = "info"
         if "HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT" not in env:
             env["HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT"] = str(DEFAULT_DAEMON_IDLE_TIMEOUT)
+
+        # On macOS, force CPU for local embeddings/reranker to avoid MPS/XPC
+        # hangs during sentence-transformers init in daemon mode (issue #962).
+        # Users can opt back into MPS by explicitly setting these to "0".
+        if platform.system() == "Darwin":
+            if "HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU" not in env:
+                env["HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"] = "1"
+            if "HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU" not in env:
+                env["HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU"] = "1"
 
         # Get idle timeout from env
         idle_timeout = int(env.get("HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT", str(DEFAULT_DAEMON_IDLE_TIMEOUT)))
