@@ -232,6 +232,25 @@ describe('compacting hook', () => {
         expect(opts.documentId).toMatch(/^sess-1-\d+$/);
     });
 
+    it('resets lastRetainedTurn so idle-retain resumes after compaction', async () => {
+        const client = makeClient();
+        client.recall.mockResolvedValue({ results: [] });
+        const messages = [
+            { info: { role: 'user' }, parts: [{ type: 'text', text: 'Hello' }] },
+            { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Hi' }] },
+        ];
+        const state = makeState();
+        // Simulate prior retain at turn 10
+        state.lastRetainedTurn.set('sess-1', 10);
+        const output = { context: [] as string[] };
+        const hooks = createHooks(client, 'bank', makeConfig(), state, makeOpencodeClient(messages));
+
+        await hooks['experimental.session.compacting']({ sessionID: 'sess-1' }, output);
+
+        // After compaction, lastRetainedTurn should be cleared so idle-retain works again
+        expect(state.lastRetainedTurn.has('sess-1')).toBe(false);
+    });
+
     it('does not throw on error', async () => {
         const client = makeClient();
         client.recall.mockRejectedValue(new Error('Failed'));

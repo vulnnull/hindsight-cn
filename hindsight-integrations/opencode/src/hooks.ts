@@ -260,6 +260,9 @@ export function createHooks(
             if (messages.length && config.autoRetain) {
                 try {
                     await retainSession(input.sessionID, messages);
+                    // Reset turn tracking — after compaction the message list shrinks,
+                    // so the old lastRetainedTurn value would block future idle retains.
+                    state.lastRetainedTurn.delete(input.sessionID);
                     debugLog(config, 'Pre-compaction retain completed');
                 } catch (e) {
                     debugLog(config, 'Pre-compaction retain failed:', e);
