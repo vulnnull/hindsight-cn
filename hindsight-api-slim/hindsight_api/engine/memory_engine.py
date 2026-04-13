@@ -29,6 +29,7 @@ from ..metrics import get_metrics_collector
 from ..tracing import create_operation_span
 from ..utils import mask_network_location
 from ..worker.exceptions import RetryTaskAt
+from ..worker.stage import set_stage
 from .audit import AuditLogger, audit_context
 from .db_budget import budgeted_operation
 from .operation_metadata import (
@@ -1090,6 +1091,9 @@ class MemoryEngine(MemoryEngineInterface):
             self._audit_logger, task_type or "unknown", "system", bank_id, request=task_dict
         ) as audit_entry:
             try:
+                # Stage breadcrumb for the worker poller's WORKER_TASK log line.
+                # No-op outside a worker context.
+                set_stage(f"task.{task_type}")
                 if task_type == "batch_retain":
                     await self._handle_batch_retain(task_dict)
                 elif task_type == "file_convert_retain":
@@ -2763,8 +2767,11 @@ class MemoryEngine(MemoryEngineInterface):
         pool = await self._get_pool()
         recall_start = time.time()
 
-        # Buffer logs for clean output in concurrent scenarios
-        recall_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
+        # Buffer logs for clean output in concurrent scenarios.
+        # Include a uuid suffix so two recalls on the same bank within the
+        # same millisecond don't collide on the budgeted_operation key
+        # (`recall-{recall_id}`), which would raise "Operation ... already exists".
+        recall_id = f"{bank_id[:8]}-{int(time.time() * 1000) % 100000}-{uuid.uuid4().hex[:6]}"
         log_buffer = []
         tags_info = f", tags={tags}, tags_match={tags_match}" if tags else ""
         log_buffer.append(
@@ -3107,8 +3114,13 @@ class MemoryEngine(MemoryEngineInterface):
 
             # Step 4.5: Combine cross-encoder score with retrieval signals via multiplicative boosts.
             # See apply_combined_scoring for the full rationale and formula.
+            # is_passthrough_reranker tells the scoring code to seed CE scores
+            # from RRF rank — only meaningful when the configured reranker is
+            # the slim/passthrough one that returns a constant score per pair.
             if scored_results:
-                apply_combined_scoring(scored_results, now=utcnow())
+                ce = reranker_instance.cross_encoder
+                is_passthrough = ce is not None and ce.provider_name == "rrf"
+                apply_combined_scoring(scored_results, now=utcnow(), is_passthrough_reranker=is_passthrough)
                 scored_results.sort(key=lambda x: x.weight, reverse=True)
                 log_buffer.append("  [4.6] Combined scoring: ce * recency_boost(0.2) * temporal_boost(0.2)")
 
