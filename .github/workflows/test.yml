@@ -47,6 +47,7 @@ jobs:
       integrations-llamaindex: ${{ steps.filter.outputs.integrations-llamaindex }}
       integrations-paperclip: ${{ steps.filter.outputs.integrations-paperclip }}
       integrations-opencode: ${{ steps.filter.outputs.integrations-opencode }}
+      integrations-cloudflare-oauth-proxy: ${{ steps.filter.outputs.integrations-cloudflare-oauth-proxy }}
       dev: ${{ steps.filter.outputs.dev }}
       ci: ${{ steps.filter.outputs.ci }}
       # Secrets are available for internal PRs, pull_request_review, and workflow_dispatch.
@@ -125,6 +126,8 @@ jobs:
             - 'hindsight-integrations/paperclip/**'
           integrations-opencode:
             - 'hindsight-integrations/opencode/**'
+          integrations-cloudflare-oauth-proxy:
+            - 'hindsight-integrations/cloudflare-oauth-proxy/**'
           dev:
             - 'hindsight-dev/**'
           ci:
@@ -416,6 +419,37 @@ jobs:
     - name: Build
       working-directory: ./hindsight-integrations/opencode
       run: npm run build
+
+  test-cloudflare-oauth-proxy-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name != 'pull_request_review' &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-cloudflare-oauth-proxy == 'true' ||
+      needs.detect-changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      working-directory: ./hindsight-integrations/cloudflare-oauth-proxy
+      run: npm ci
+
+    - name: Typecheck
+      working-directory: ./hindsight-integrations/cloudflare-oauth-proxy
+      run: npm run typecheck
+
+    - name: Run tests
+      working-directory: ./hindsight-integrations/cloudflare-oauth-proxy
+      run: npm test
 
   build-chat-integration:
     needs: [detect-changes]
@@ -2559,6 +2593,7 @@ jobs:
       - build-ai-sdk-integration
       - test-ai-sdk-integration-deno
       - test-opencode-integration
+      - test-cloudflare-oauth-proxy-integration
       - build-chat-integration
       - test-paperclip-integration
       - build-control-plane
