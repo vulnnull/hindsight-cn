@@ -8,6 +8,12 @@ import PageHero from '@site/src/components/PageHero';
 
 [← OpenClaw integration](/sdks/integrations/openclaw)
 
+## [0.6.1](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.6.1)
+
+**Bug Fixes**
+
+- Openclaw setup wizard now prompts for the actual token value instead of an environment variable name. ([`9679d813`](https://github.com/vectorize-io/hindsight/commit/9679d813))
+
 ## 0.6.1 (Unreleased)
 
 **Improvements**
