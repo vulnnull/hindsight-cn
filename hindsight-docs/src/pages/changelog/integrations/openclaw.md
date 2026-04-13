@@ -8,6 +8,17 @@ import PageHero from '@site/src/components/PageHero';
 
 [← OpenClaw integration](/sdks/integrations/openclaw)
 
+## [0.6.2](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.6.2)
+
+**Features**
+
+- OpenClaw conversations are now stored in an Anthropic-style JSON format, preserving tool_use/tool_result blocks for more faithful replay and analysis. ([`adc85129`](https://github.com/vectorize-io/hindsight/commit/adc85129))
+
+**Bug Fixes**
+
+- Improved session consistency and reduced noise by stabilizing session identity and skipping non-user operational turns. ([`2ff805d6`](https://github.com/vectorize-io/hindsight/commit/2ff805d6))
+- Fixed intermittent missing behavior by ensuring agent hooks are registered on every plugin invocation. ([`1be5ff33`](https://github.com/vectorize-io/hindsight/commit/1be5ff33))
+
 ## [0.6.1](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.6.1)
 
 **Bug Fixes**
