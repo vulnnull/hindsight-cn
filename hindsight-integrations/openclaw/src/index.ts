@@ -8,8 +8,20 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import * as log from './logger.js';
 import { configureLogger, setApiLogger, stopLogger } from './logger.js';
-import { mkdirSync } from 'fs';
+import { mkdirSync, readFileSync } from 'fs';
 import { homedir } from 'os';
+
+function loadPackageVersion(): string {
+  try {
+    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string };
+    return pkg.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+const USER_AGENT = `hindsight-openclaw/${loadPackageVersion()}`;
 
 // Logger adapter that routes the embed wrapper's output through openclaw's
 // batched structured logger so messages share the same prefix and respect
@@ -991,7 +1003,7 @@ async function checkExternalApiHealth(apiUrl: string, apiToken?: string | null):
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       debug(`[Hindsight] Checking external API health at ${healthUrl}... (attempt ${attempt}/${maxRetries})`);
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = { 'User-Agent': USER_AGENT };
       if (apiToken) {
         headers['Authorization'] = `Bearer ${apiToken}`;
       }
