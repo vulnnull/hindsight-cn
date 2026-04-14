@@ -468,6 +468,68 @@ export type BankTemplateConfig = {
    * Allow entities outside the label vocabulary
    */
   entities_allow_free_form?: boolean | null;
+  /**
+   * Retain Default Strategy
+   *
+   * Name of the default retain strategy (key into retain_strategies map)
+   */
+  retain_default_strategy?: string | null;
+  /**
+   * Retain Strategies
+   *
+   * Map of retain strategy name to per-strategy config dict
+   */
+  retain_strategies?: {
+    [key: string]: unknown;
+  } | null;
+  /**
+   * Retain Chunk Batch Size
+   *
+   * Max chunks per streaming batch (0 disables batching)
+   */
+  retain_chunk_batch_size?: number | null;
+  /**
+   * Mcp Enabled Tools
+   *
+   * MCP tool allowlist for this bank (None = all tools)
+   */
+  mcp_enabled_tools?: Array<string> | null;
+  /**
+   * Consolidation Llm Batch Size
+   *
+   * LLM batch size for observation consolidation
+   */
+  consolidation_llm_batch_size?: number | null;
+  /**
+   * Consolidation Source Facts Max Tokens
+   *
+   * Max tokens of source facts per consolidation batch
+   */
+  consolidation_source_facts_max_tokens?: number | null;
+  /**
+   * Consolidation Source Facts Max Tokens Per Observation
+   *
+   * Max tokens of source facts per observation
+   */
+  consolidation_source_facts_max_tokens_per_observation?: number | null;
+  /**
+   * Max Observations Per Scope
+   *
+   * Max observations to retain per consolidation scope
+   */
+  max_observations_per_scope?: number | null;
+  /**
+   * Reflect Source Facts Max Tokens
+   *
+   * Max tokens of source facts per reflect call
+   */
+  reflect_source_facts_max_tokens?: number | null;
+  /**
+   * Llm Gemini Safety Settings
+   *
+   * Per-bank Gemini/VertexAI safety filter settings
+   */
+  llm_gemini_safety_settings?: Array<unknown> | null;
 };
 
 /**

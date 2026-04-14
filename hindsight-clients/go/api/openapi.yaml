@@ -3576,6 +3576,39 @@ components:
         entities_allow_free_form:
           nullable: true
           type: boolean
+        retain_default_strategy:
+          nullable: true
+          type: string
+        retain_strategies:
+          additionalProperties: {}
+          nullable: true
+        retain_chunk_batch_size:
+          nullable: true
+          type: integer
+        mcp_enabled_tools:
+          items:
+            type: string
+          nullable: true
+          type: array
+        consolidation_llm_batch_size:
+          nullable: true
+          type: integer
+        consolidation_source_facts_max_tokens:
+          nullable: true
+          type: integer
+        consolidation_source_facts_max_tokens_per_observation:
+          nullable: true
+          type: integer
+        max_observations_per_scope:
+          nullable: true
+          type: integer
+        reflect_source_facts_max_tokens:
+          nullable: true
+          type: integer
+        llm_gemini_safety_settings:
+          items: {}
+          nullable: true
+          type: array
       title: BankTemplateConfig
     BankTemplateDirective:
       description: |-

@@ -5298,6 +5298,131 @@
             ],
             "title": "Entities Allow Free Form",
             "description": "Allow entities outside the label vocabulary"
+          },
+          "retain_default_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Default Strategy",
+            "description": "Name of the default retain strategy (key into retain_strategies map)"
+          },
+          "retain_strategies": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Strategies",
+            "description": "Map of retain strategy name to per-strategy config dict"
+          },
+          "retain_chunk_batch_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Chunk Batch Size",
+            "description": "Max chunks per streaming batch (0 disables batching)"
+          },
+          "mcp_enabled_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mcp Enabled Tools",
+            "description": "MCP tool allowlist for this bank (None = all tools)"
+          },
+          "consolidation_llm_batch_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consolidation Llm Batch Size",
+            "description": "LLM batch size for observation consolidation"
+          },
+          "consolidation_source_facts_max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consolidation Source Facts Max Tokens",
+            "description": "Max tokens of source facts per consolidation batch"
+          },
+          "consolidation_source_facts_max_tokens_per_observation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consolidation Source Facts Max Tokens Per Observation",
+            "description": "Max tokens of source facts per observation"
+          },
+          "max_observations_per_scope": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Observations Per Scope",
+            "description": "Max observations to retain per consolidation scope"
+          },
+          "reflect_source_facts_max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflect Source Facts Max Tokens",
+            "description": "Max tokens of source facts per reflect call"
+          },
+          "llm_gemini_safety_settings": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Gemini Safety Settings",
+            "description": "Per-bank Gemini/VertexAI safety filter settings"
           }
         },
         "type": "object",
