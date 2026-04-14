@@ -4853,6 +4853,7 @@ components:
           id: id
           trigger:
             refresh_after_consolidation: false
+            recall_chunks_max_tokens: 1
             tag_groups:
             - match: any_strict
               tags:
@@ -4868,8 +4869,10 @@ components:
             exclude_mental_model_ids:
             - exclude_mental_model_ids
             - exclude_mental_model_ids
+            include_chunks: true
             tags_match: any
             exclude_mental_models: false
+            recall_max_tokens: 6
           last_refreshed_at: last_refreshed_at
           content: content
           tags:
@@ -4885,6 +4888,7 @@ components:
           id: id
           trigger:
             refresh_after_consolidation: false
+            recall_chunks_max_tokens: 1
             tag_groups:
             - match: any_strict
               tags:
@@ -4900,8 +4904,10 @@ components:
             exclude_mental_model_ids:
             - exclude_mental_model_ids
             - exclude_mental_model_ids
+            include_chunks: true
             tags_match: any
             exclude_mental_models: false
+            recall_max_tokens: 6
           last_refreshed_at: last_refreshed_at
           content: content
           tags:
@@ -4928,6 +4934,7 @@ components:
         id: id
         trigger:
           refresh_after_consolidation: false
+          recall_chunks_max_tokens: 1
           tag_groups:
           - match: any_strict
             tags:
@@ -4943,8 +4950,10 @@ components:
           exclude_mental_model_ids:
           - exclude_mental_model_ids
           - exclude_mental_model_ids
+          include_chunks: true
           tags_match: any
           exclude_mental_models: false
+          recall_max_tokens: 6
         last_refreshed_at: last_refreshed_at
         content: content
         tags:
@@ -5032,11 +5041,21 @@ components:
             $ref: '#/components/schemas/MentalModelTrigger_Input_tag_groups_inner'
           nullable: true
           type: array
+        include_chunks:
+          nullable: true
+          type: boolean
+        recall_max_tokens:
+          nullable: true
+          type: integer
+        recall_chunks_max_tokens:
+          nullable: true
+          type: integer
       title: MentalModelTrigger
     MentalModelTrigger-Output:
       description: Trigger settings for a mental model.
       example:
         refresh_after_consolidation: false
+        recall_chunks_max_tokens: 1
         tag_groups:
         - match: any_strict
           tags:
@@ -5052,8 +5071,10 @@ components:
         exclude_mental_model_ids:
         - exclude_mental_model_ids
         - exclude_mental_model_ids
+        include_chunks: true
         tags_match: any
         exclude_mental_models: false
+        recall_max_tokens: 6
       properties:
         refresh_after_consolidation:
           default: false
@@ -5094,6 +5115,15 @@ components:
             $ref: '#/components/schemas/MentalModelTrigger_Output_tag_groups_inner'
           nullable: true
           type: array
+        include_chunks:
+          nullable: true
+          type: boolean
+        recall_max_tokens:
+          nullable: true
+          type: integer
+        recall_chunks_max_tokens:
+          nullable: true
+          type: integer
       title: MentalModelTrigger
     OperationResponse:
       description: Response model for a single async operation.

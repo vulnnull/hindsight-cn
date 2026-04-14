@@ -1526,6 +1526,27 @@ class MentalModelTrigger(BaseModel):
             "Supports nested and/or/not expressions for complex tag-based scoping."
         ),
     )
+    include_chunks: bool | None = Field(
+        default=None,
+        description=(
+            "Override whether the internal recall used during refresh returns raw chunk text. "
+            "None means use the bank/global config default (recall_include_chunks)."
+        ),
+    )
+    recall_max_tokens: int | None = Field(
+        default=None,
+        description=(
+            "Override the token budget for facts returned by the internal recall during refresh. "
+            "None means use the bank/global config default (recall_max_tokens)."
+        ),
+    )
+    recall_chunks_max_tokens: int | None = Field(
+        default=None,
+        description=(
+            "Override the token budget for raw chunks returned by the internal recall during refresh. "
+            "None means use the bank/global config default (recall_chunks_max_tokens)."
+        ),
+    )
 
     @field_validator("fact_types")
     @classmethod

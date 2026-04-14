@@ -1838,6 +1838,24 @@ export type MentalModelTriggerInput = {
   tag_groups?: Array<
     TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput
   > | null;
+  /**
+   * Include Chunks
+   *
+   * Override whether the internal recall used during refresh returns raw chunk text. None means use the bank/global config default (recall_include_chunks).
+   */
+  include_chunks?: boolean | null;
+  /**
+   * Recall Max Tokens
+   *
+   * Override the token budget for facts returned by the internal recall during refresh. None means use the bank/global config default (recall_max_tokens).
+   */
+  recall_max_tokens?: number | null;
+  /**
+   * Recall Chunks Max Tokens
+   *
+   * Override the token budget for raw chunks returned by the internal recall during refresh. None means use the bank/global config default (recall_chunks_max_tokens).
+   */
+  recall_chunks_max_tokens?: number | null;
 };
 
 /**
@@ -1884,6 +1902,24 @@ export type MentalModelTriggerOutput = {
   tag_groups?: Array<
     TagGroupLeaf | TagGroupAndOutput | TagGroupOrOutput | TagGroupNotOutput
   > | null;
+  /**
+   * Include Chunks
+   *
+   * Override whether the internal recall used during refresh returns raw chunk text. None means use the bank/global config default (recall_include_chunks).
+   */
+  include_chunks?: boolean | null;
+  /**
+   * Recall Max Tokens
+   *
+   * Override the token budget for facts returned by the internal recall during refresh. None means use the bank/global config default (recall_max_tokens).
+   */
+  recall_max_tokens?: number | null;
+  /**
+   * Recall Chunks Max Tokens
+   *
+   * Override the token budget for raw chunks returned by the internal recall during refresh. None means use the bank/global config default (recall_chunks_max_tokens).
+   */
+  recall_chunks_max_tokens?: number | null;
 };
 
 /**

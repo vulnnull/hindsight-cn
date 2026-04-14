@@ -7639,6 +7639,42 @@
             ],
             "title": "Tag Groups",
             "description": "Compound boolean tag expressions to use during refresh instead of the model's own tags. When set, these tag groups are passed to reflect and the model's flat tags are NOT used for filtering. Supports nested and/or/not expressions for complex tag-based scoping."
+          },
+          "include_chunks": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Chunks",
+            "description": "Override whether the internal recall used during refresh returns raw chunk text. None means use the bank/global config default (recall_include_chunks)."
+          },
+          "recall_max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall Max Tokens",
+            "description": "Override the token budget for facts returned by the internal recall during refresh. None means use the bank/global config default (recall_max_tokens)."
+          },
+          "recall_chunks_max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall Chunks Max Tokens",
+            "description": "Override the token budget for raw chunks returned by the internal recall during refresh. None means use the bank/global config default (recall_chunks_max_tokens)."
           }
         },
         "type": "object",
@@ -7739,6 +7775,42 @@
             ],
             "title": "Tag Groups",
             "description": "Compound boolean tag expressions to use during refresh instead of the model's own tags. When set, these tag groups are passed to reflect and the model's flat tags are NOT used for filtering. Supports nested and/or/not expressions for complex tag-based scoping."
+          },
+          "include_chunks": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Chunks",
+            "description": "Override whether the internal recall used during refresh returns raw chunk text. None means use the bank/global config default (recall_include_chunks)."
+          },
+          "recall_max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall Max Tokens",
+            "description": "Override the token budget for facts returned by the internal recall during refresh. None means use the bank/global config default (recall_max_tokens)."
+          },
+          "recall_chunks_max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall Chunks Max Tokens",
+            "description": "Override the token budget for raw chunks returned by the internal recall during refresh. None means use the bank/global config default (recall_chunks_max_tokens)."
           }
         },
         "type": "object",

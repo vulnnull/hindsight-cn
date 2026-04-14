@@ -1048,6 +1048,16 @@ export HINDSIGHT_API_OBSERVATIONS_MISSION="Observations are recurring patterns i
 | `HINDSIGHT_API_REFLECT_MISSION` | Global reflect mission (identity and reasoning framing). Overridden per bank via config API. | - |
 | `HINDSIGHT_API_REFLECT_SOURCE_FACTS_MAX_TOKENS` | Token budget for source facts in `search_observations` during reflect. `-1` disables source facts (default), `0` enables with no limit, `>0` enables with a token budget. Hierarchical — can be overridden per bank via config API. | `-1` |
 
+#### Internal recall (used by mental model refresh)
+
+These knobs control the recall tool that runs inside `reflect_async` (e.g. when refreshing a mental model). They are hierarchical — overridable per bank via the config API, and individually overridable per mental model via the `trigger.include_chunks`, `trigger.recall_max_tokens`, and `trigger.recall_chunks_max_tokens` fields.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_RECALL_INCLUDE_CHUNKS` | Whether the internal recall returns raw chunk text alongside facts. Set `false` to skip chunks and save prompt budget. | `true` |
+| `HINDSIGHT_API_RECALL_MAX_TOKENS` | Token budget for facts returned by the internal recall. | `2048` |
+| `HINDSIGHT_API_RECALL_CHUNKS_MAX_TOKENS` | Token budget for raw chunks returned by the internal recall. | `1000` |
+
 #### Disposition
 
 Disposition traits control how the bank reasons during reflect operations. Each trait is on a scale of 1–5. These are hierarchical — they can be overridden per bank via the [config API](./configuration.md#hierarchical-configuration).
