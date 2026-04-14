@@ -2114,6 +2114,10 @@ class OperationStatusResponse(BaseModel):
     child_operations: list[ChildOperationStatus] | None = Field(
         default=None, description="Child operations for batch operations (if applicable)"
     )
+    task_payload: dict[str, Any] | None = Field(
+        default=None,
+        description="Raw task payload (params the operation was submitted with). Only populated when include_payload=true.",
+    )
 
 
 class AsyncOperationSubmitResponse(BaseModel):
@@ -4198,7 +4202,13 @@ def _register_routes(app: FastAPI):
         tags=["Operations"],
     )
     async def api_get_operation_status(
-        bank_id: str, operation_id: str, request_context: RequestContext = Depends(get_request_context)
+        bank_id: str,
+        operation_id: str,
+        include_payload: bool = Query(
+            default=False,
+            description="Include the raw task payload (submission params) in the response. May be large.",
+        ),
+        request_context: RequestContext = Depends(get_request_context),
     ):
         """Get the status of an async operation."""
         try:
@@ -4208,7 +4218,9 @@ def _register_routes(app: FastAPI):
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Invalid operation_id format: {operation_id}")
 
-            result = await app.state.memory.get_operation_status(bank_id, operation_id, request_context=request_context)
+            result = await app.state.memory.get_operation_status(
+                bank_id, operation_id, request_context=request_context, include_payload=include_payload
+            )
             return OperationStatusResponse(**result)
         except OperationValidationError as e:
             raise HTTPException(status_code=e.status_code, detail=e.reason)

@@ -710,7 +710,12 @@ export class ControlPlaneClient {
   /**
    * Get operation status
    */
-  async getOperationStatus(bankId: string, operationId: string) {
+  async getOperationStatus(
+    bankId: string,
+    operationId: string,
+    opts?: { includePayload?: boolean }
+  ) {
+    const qs = opts?.includePayload ? "?include_payload=true" : "";
     return this.fetchApi<{
       operation_id: string;
       status: "pending" | "completed" | "failed" | "not_found";
@@ -719,7 +724,22 @@ export class ControlPlaneClient {
       updated_at: string | null;
       completed_at: string | null;
       error_message: string | null;
-    }>(`/api/banks/${bankId}/operations/${operationId}`);
+      result_metadata?: {
+        items_count?: number;
+        total_tokens?: number;
+        num_sub_batches?: number;
+        is_parent?: boolean;
+        [key: string]: any;
+      } | null;
+      child_operations?: Array<{
+        operation_id: string;
+        status: string;
+        sub_batch_index: number | null;
+        items_count: number | null;
+        error_message: string | null;
+      }> | null;
+      task_payload?: Record<string, unknown> | null;
+    }>(`/api/banks/${bankId}/operations/${operationId}${qs}`);
   }
 
   /**

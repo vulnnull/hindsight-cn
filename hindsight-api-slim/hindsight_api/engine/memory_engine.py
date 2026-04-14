@@ -7433,6 +7433,7 @@ class MemoryEngine(MemoryEngineInterface):
         operation_id: str,
         *,
         request_context: "RequestContext",
+        include_payload: bool = False,
     ) -> dict[str, Any]:
         """Get the status of a specific async operation.
 
@@ -7455,9 +7456,10 @@ class MemoryEngine(MemoryEngineInterface):
         op_uuid = uuid.UUID(operation_id)
 
         async with acquire_with_retry(pool) as conn:
+            payload_column = ", task_payload" if include_payload else ""
             row = await conn.fetchrow(
                 f"""
-                SELECT operation_id, operation_type, created_at, updated_at, completed_at, status, error_message, result_metadata
+                SELECT operation_id, operation_type, created_at, updated_at, completed_at, status, error_message, result_metadata{payload_column}
                 FROM {fq_table("async_operations")}
                 WHERE operation_id = $1 AND bank_id = $2
                 """,
@@ -7469,6 +7471,7 @@ class MemoryEngine(MemoryEngineInterface):
                 # Check if this is a parent operation
                 result_metadata = json.loads(row["result_metadata"]) if row["result_metadata"] else {}
                 is_parent = result_metadata.get("is_parent", False)
+                task_payload = json.loads(row["task_payload"]) if include_payload and row["task_payload"] else None
 
                 # Use status from database (parent status is updated when all children complete/fail)
                 db_status = row["status"]
@@ -7545,6 +7548,7 @@ class MemoryEngine(MemoryEngineInterface):
                         "error_message": row["error_message"],
                         "result_metadata": result_metadata,
                         "child_operations": child_statuses,
+                        "task_payload": task_payload,
                     }
                 else:
                     # Regular operation (not a parent)
@@ -7557,6 +7561,7 @@ class MemoryEngine(MemoryEngineInterface):
                         "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
                         "error_message": row["error_message"],
                         "result_metadata": result_metadata,
+                        "task_payload": task_payload,
                     }
             else:
                 # Operation not found

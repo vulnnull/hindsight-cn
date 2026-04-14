@@ -489,8 +489,8 @@ async def retain_batch(
             return result_unit_ids, total_usage
 
     # Resolve effective document_id early so both delta and streaming paths
-    # can find existing chunks from a prior attempt. On retry, the generated
-    # document_id is recovered from operation result_metadata.
+    # can find existing chunks from a prior attempt. On retry, a generated
+    # document_id is recovered from operation result_metadata.document_ids[0].
     effective_doc_id = document_id
     if not effective_doc_id:
         doc_ids = {item.get("document_id") for item in contents_dicts if item.get("document_id")}
@@ -509,26 +509,41 @@ async def retain_batch(
                         if isinstance(row["result_metadata"], dict)
                         else json.loads(row["result_metadata"])
                     )
-                    effective_doc_id = meta.get("generated_document_id")
+                    recovered = meta.get("document_ids") or []
+                    if recovered:
+                        effective_doc_id = recovered[0]
         except Exception:
             pass
     if not effective_doc_id:
         effective_doc_id = str(uuid.uuid4())
-        # Persist so retries reuse the same document_id
-        if operation_id:
-            try:
-                async with acquire_with_retry(pool) as conn:
-                    await conn.execute(
-                        f"""
-                        UPDATE {fq_table("async_operations")}
-                        SET result_metadata = result_metadata || $1::jsonb, updated_at = now()
-                        WHERE operation_id = $2
-                        """,
-                        json.dumps({"generated_document_id": effective_doc_id}),
-                        uuid.UUID(operation_id),
-                    )
-            except Exception:
-                logger.warning("Failed to persist generated document_id", exc_info=True)
+
+    # Record effective_doc_id on the operation (idempotent set-append). Captures
+    # both user-provided and generated ids so the operation shows every document
+    # it touched, and lets retries reuse the same generated id.
+    if operation_id:
+        try:
+            async with acquire_with_retry(pool) as conn:
+                await conn.execute(
+                    f"""
+                    UPDATE {fq_table("async_operations")}
+                    SET result_metadata = jsonb_set(
+                        COALESCE(result_metadata, '{{}}'::jsonb),
+                        '{{document_ids}}',
+                        CASE
+                            WHEN COALESCE(result_metadata->'document_ids', '[]'::jsonb) @> $1::jsonb
+                                THEN result_metadata->'document_ids'
+                            ELSE COALESCE(result_metadata->'document_ids', '[]'::jsonb) || $1::jsonb
+                        END,
+                        true
+                    ),
+                    updated_at = now()
+                    WHERE operation_id = $2
+                    """,
+                    json.dumps([effective_doc_id]),
+                    uuid.UUID(operation_id),
+                )
+        except Exception:
+            logger.warning("Failed to persist document_id", exc_info=True)
 
     # --- Append mode: prepend existing document content to new content ---
     # When update_mode="append", fetch the existing document text and prepend it

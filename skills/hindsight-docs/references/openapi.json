@@ -2535,6 +2535,18 @@
             }
           },
           {
+            "name": "include_payload",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include the raw task payload (submission params) in the response. May be large.",
+              "default": false,
+              "title": "Include Payload"
+            },
+            "description": "Include the raw task payload (submission params) in the response. May be large."
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
@@ -7895,6 +7907,19 @@
             ],
             "title": "Child Operations",
             "description": "Child operations for batch operations (if applicable)"
+          },
+          "task_payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Payload",
+            "description": "Raw task payload (params the operation was submitted with). Only populated when include_payload=true."
           }
         },
         "type": "object",

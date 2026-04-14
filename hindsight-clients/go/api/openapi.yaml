@@ -1781,6 +1781,19 @@ paths:
           title: Operation Id
           type: string
         style: simple
+      - description: Include the raw task payload (submission params) in the response.
+          May be large.
+        explode: true
+        in: query
+        name: include_payload
+        required: false
+        schema:
+          default: false
+          description: Include the raw task payload (submission params) in the response.
+            May be large.
+          title: Include Payload
+          type: boolean
+        style: form
       - explode: false
         in: header
         name: authorization
@@ -5164,6 +5177,9 @@ components:
             $ref: '#/components/schemas/ChildOperationStatus'
           nullable: true
           type: array
+        task_payload:
+          additionalProperties: {}
+          nullable: true
       required:
       - operation_id
       - status

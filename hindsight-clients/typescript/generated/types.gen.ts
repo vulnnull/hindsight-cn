@@ -1970,6 +1970,14 @@ export type OperationStatusResponse = {
    * Child operations for batch operations (if applicable)
    */
   child_operations?: Array<ChildOperationStatus> | null;
+  /**
+   * Task Payload
+   *
+   * Raw task payload (params the operation was submitted with). Only populated when include_payload=true.
+   */
+  task_payload?: {
+    [key: string]: unknown;
+  } | null;
 };
 
 /**
@@ -4571,7 +4579,14 @@ export type GetOperationStatusData = {
      */
     operation_id: string;
   };
-  query?: never;
+  query?: {
+    /**
+     * Include Payload
+     *
+     * Include the raw task payload (submission params) in the response. May be large.
+     */
+    include_payload?: boolean;
+  };
   url: "/v1/default/banks/{bank_id}/operations/{operation_id}";
 };
 
