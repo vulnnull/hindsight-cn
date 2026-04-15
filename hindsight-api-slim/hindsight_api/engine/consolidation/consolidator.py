@@ -1131,11 +1131,13 @@ async def _consolidate_batch_with_llm(
     memories: list[dict[str, Any]],
     union_observations: "list[MemoryFact]",
     union_source_facts: "dict[str, MemoryFact]",
-    config: Any = None,
+    config: Any,
     remaining_observation_slots: int | None = None,
     max_observations_per_scope: int = -1,
 ) -> _BatchLLMResult:
     """Single LLM call for a batch of facts against a pooled set of observations."""
+    if config is None:
+        raise ValueError("config is required for _consolidate_batch_with_llm")
     if union_observations:
         obs_list = _build_observations_for_llm(union_observations, union_source_facts)
         observations_text = json.dumps(obs_list, indent=2)
@@ -1172,8 +1174,7 @@ async def _consolidate_batch_with_llm(
                 f"(out of {max_observations_per_scope}). Prefer UPDATE over CREATE when possible."
             )
 
-    observations_mission = config.observations_mission if config is not None else None
-    prompt_template = build_batch_consolidation_prompt(observations_mission, observation_capacity_note)
+    prompt_template = build_batch_consolidation_prompt(config.observations_mission, observation_capacity_note)
     prompt = prompt_template.format(
         facts_text=facts_lines,
         observations_text=observations_text,
@@ -1182,8 +1183,8 @@ async def _consolidate_batch_with_llm(
     # Use a constrained response model when observation limit is active
     response_model = _build_response_model(max_creates=remaining_observation_slots)
 
-    max_attempts = getattr(config, "consolidation_max_attempts", None) or 3
-    inner_max_retries = getattr(config, "consolidation_llm_max_retries", None)
+    max_attempts = config.consolidation_max_attempts
+    inner_max_retries = config.consolidation_llm_max_retries
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
