@@ -413,6 +413,35 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Get entity co-occurrence graph
+   */
+  async getEntityGraph(params: { bank_id: string; limit?: number; min_count?: number }) {
+    const queryParams = new URLSearchParams();
+    queryParams.append("bank_id", params.bank_id);
+    if (params.limit) queryParams.append("limit", params.limit.toString());
+    if (params.min_count !== undefined)
+      queryParams.append("min_count", params.min_count.toString());
+    return this.fetchApi<{
+      nodes: Array<{ data: { id: string; label: string; mentionCount: number; color: string } }>;
+      edges: Array<{
+        data: {
+          id: string;
+          source: string;
+          target: string;
+          linkType: string;
+          weight: number;
+          color: string;
+          lineStyle: string;
+          lastCooccurred: string | null;
+        };
+      }>;
+      total_entities: number;
+      total_edges: number;
+      limit: number;
+    }>(`/api/entities/graph?${queryParams}`);
+  }
+
+  /**
    * Get entity details
    */
   async getEntity(entityId: string, bankId: string) {
