@@ -45,6 +45,7 @@ VALID_INTEGRATIONS = [
     "autogen",
     "paperclip",
     "opencode",
+    "cloudflare-oauth-proxy",
 ]
 
 
@@ -531,6 +532,7 @@ def _get_package_name(integration: str) -> str:
         "autogen": "hindsight-autogen",
         "paperclip": "@vectorize-io/hindsight-paperclip",
         "opencode": "@vectorize-io/opencode-hindsight",
+        "cloudflare-oauth-proxy": "hindsight-cloudflare-oauth-proxy",
     }
     return packages[integration]
 
