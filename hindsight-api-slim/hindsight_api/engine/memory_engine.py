@@ -7042,7 +7042,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             # Run reflect with the source query, excluding the mental model being refreshed
             # Skip creating a nested "hindsight.reflect" span since we already have "hindsight.mental_model_refresh"
-            reflect_result = await self.reflect_async(
+            reflect_kwargs: dict[str, Any] = dict(
                 bank_id=bank_id,
                 query=mental_model["source_query"],
                 request_context=request_context,
@@ -7057,6 +7057,12 @@ class MemoryEngine(MemoryEngineInterface):
                 recall_chunks_max_tokens_override=recall_chunks_max_tokens_override,
                 _skip_span=True,
             )
+            # Forward the per-model max_tokens so the final synthesis is capped at the
+            # user-configured limit rather than the reflect_async default.
+            stored_max_tokens = mental_model.get("max_tokens")
+            if stored_max_tokens is not None:
+                reflect_kwargs["max_tokens"] = stored_max_tokens
+            reflect_result = await self.reflect_async(**reflect_kwargs)
 
             # Build reflect_response payload to store
             # based_on contains MemoryFact objects for most types, but plain dicts for directives
