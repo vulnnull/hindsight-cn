@@ -1182,15 +1182,19 @@ async def _consolidate_batch_with_llm(
     # Use a constrained response model when observation limit is active
     response_model = _build_response_model(max_creates=remaining_observation_slots)
 
-    max_attempts = 3
+    max_attempts = getattr(config, "consolidation_max_attempts", None) or 3
+    inner_max_retries = getattr(config, "consolidation_llm_max_retries", None)
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            response: _ConsolidationBatchResponse = await llm_config.call(
-                messages=[{"role": "user", "content": prompt}],
-                response_format=response_model,
-                scope="consolidation",
-            )
+            call_kwargs: dict[str, Any] = {
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": response_model,
+                "scope": "consolidation",
+            }
+            if inner_max_retries is not None:
+                call_kwargs["max_retries"] = inner_max_retries
+            response: _ConsolidationBatchResponse = await llm_config.call(**call_kwargs)
             # Defensive truncation: some LLM providers may not enforce JSON schema max_length
             creates = response.creates
             if remaining_observation_slots is not None and remaining_observation_slots >= 0:
