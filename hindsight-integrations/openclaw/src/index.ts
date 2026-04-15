@@ -453,6 +453,20 @@ export function stripInlineRetainTags(content: string): string {
 }
 
 /**
+ * Strip OpenClaw's inline timestamp prefix (e.g. "[Wed 2026-04-15 10:44 GMT+2] ")
+ * from the start of user-facing text. We lift this into a structured `timestamp`
+ * field on the retained message instead, so facts aren't polluted by a weekday
+ * prefix that varies per message.
+ */
+const INLINE_TIMESTAMP_PREFIX_RE =
+  /^\s*\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}(?::\d{2})?\s+(?:GMT|UTC)(?:[+\-]\d{1,2}(?::\d{2})?)?\]\s*/;
+
+export function stripInlineTimestampPrefix(content: string): string {
+  if (!content) return content;
+  return content.replace(INLINE_TIMESTAMP_PREFIX_RE, "");
+}
+
+/**
  * Extract sender_id from OpenClaw's injected inbound metadata blocks.
  * Checks both "Conversation info (untrusted metadata)" and "Sender (untrusted metadata)" blocks.
  * Returns the first sender_id / id string found, or undefined if none.
@@ -2249,8 +2263,12 @@ export function buildRetainRequest(
   const turnIndex = options?.turnIndex ?? nextDocumentSequence(resolvedCtx);
   const retentionScope = options?.retentionScope || "turn";
   const documentBase = getSessionDocumentBase(resolvedCtx);
+  const documentScope = pluginConfig.retainDocumentScope ?? "session";
   const documentKind = retentionScope === "window" ? "window" : "turn";
-  const documentId = `${documentBase}:${documentKind}:${String(turnIndex).padStart(6, "0")}`;
+  const documentId =
+    documentScope === "session"
+      ? documentBase
+      : `${documentBase}:${documentKind}:${String(turnIndex).padStart(6, "0")}`;
   const provider = effectiveCtx?.messageProvider || parsedSession.provider;
   const channelId = sanitizeChannelId(effectiveCtx?.channelId, provider) || parsedSession.channel;
   const channelType = effectiveCtx?.messageProvider;
@@ -2329,7 +2347,7 @@ export function prepareRetentionTranscript(
     return null; // No messages to retain
   }
 
-  const normalized: Array<{ role: string; content: string }> = [];
+  const normalized: Array<{ role: string; content: string; timestamp?: string }> = [];
   for (const msg of filteredMessages) {
     const role = msg.role || "unknown";
     let content = "";
@@ -2346,9 +2364,11 @@ export function prepareRetentionTranscript(
     content = stripMemoryTags(content);
     content = stripInlineRetainTags(content);
     content = stripMetadataEnvelopes(content);
+    content = stripInlineTimestampPrefix(content);
 
     if (content.trim()) {
-      normalized.push({ role, content });
+      const timestamp = normalizeMessageTimestamp(msg);
+      normalized.push(timestamp ? { role, content, timestamp } : { role, content });
     }
   }
 
@@ -2388,9 +2408,9 @@ const TOOL_RESULT_MAX_CHARS = 2000;
 function buildAnthropicStructuredMessages(
   messages: any[],
   pluginConfig: PluginConfig
-): Array<{ role: string; content: any[] }> {
+): Array<{ role: string; content: any[]; timestamp?: string }> {
   const allowedRoles = new Set(pluginConfig.retainRoles || ["user", "assistant"]);
-  const out: Array<{ role: string; content: any[] }> = [];
+  const out: Array<{ role: string; content: any[]; timestamp?: string }> = [];
 
   for (const msg of messages) {
     const rawRole = msg?.role;
@@ -2417,16 +2437,32 @@ function buildAnthropicStructuredMessages(
 
     const blocks = extractStructuredBlocks(msg.content, rawRole);
     if (blocks.length > 0) {
-      out.push({ role: rawRole, content: blocks });
+      const timestamp = normalizeMessageTimestamp(msg);
+      out.push(
+        timestamp
+          ? { role: rawRole, content: blocks, timestamp }
+          : { role: rawRole, content: blocks }
+      );
     }
   }
 
   return out;
 }
 
+function normalizeMessageTimestamp(msg: any): string | undefined {
+  const raw = msg?.timestamp;
+  if (raw === undefined || raw === null) return undefined;
+  const date =
+    typeof raw === "number" ? new Date(raw) : typeof raw === "string" ? new Date(raw) : undefined;
+  if (!date || Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
+}
+
 function extractStructuredBlocks(content: any, role: string): any[] {
   if (typeof content === "string") {
-    const cleaned = stripMetadataEnvelopes(stripInlineRetainTags(stripMemoryTags(content))).trim();
+    const cleaned = stripInlineTimestampPrefix(
+      stripMetadataEnvelopes(stripInlineRetainTags(stripMemoryTags(content)))
+    ).trim();
     return cleaned ? [{ type: "text", text: cleaned }] : [];
   }
   if (!Array.isArray(content)) return [];
@@ -2437,8 +2473,8 @@ function extractStructuredBlocks(content: any, role: string): any[] {
     const blockType = block.type;
 
     if (blockType === "text") {
-      const cleaned = stripMetadataEnvelopes(
-        stripInlineRetainTags(stripMemoryTags(block.text ?? ""))
+      const cleaned = stripInlineTimestampPrefix(
+        stripMetadataEnvelopes(stripInlineRetainTags(stripMemoryTags(block.text ?? "")))
       ).trim();
       if (cleaned) blocks.push({ type: "text", text: cleaned });
     } else if (blockType === "toolCall" && role === "assistant") {

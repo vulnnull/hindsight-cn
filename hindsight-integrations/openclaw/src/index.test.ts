@@ -19,6 +19,7 @@ import {
   normalizeRetainTags,
   extractInlineRetainTags,
   stripInlineRetainTags,
+  stripInlineTimestampPrefix,
 } from "./index.js";
 import type { PluginConfig, MemoryResult } from "./types.js";
 
@@ -342,7 +343,7 @@ describe("buildRetainRequest", () => {
 
     expect(request).toEqual({
       content: "hello world",
-      documentId: "openclaw:agent:main:main:turn:000001",
+      documentId: "openclaw:agent:main:main",
       metadata: {
         retained_at: expect.any(String),
         message_count: "2",
@@ -361,6 +362,28 @@ describe("buildRetainRequest", () => {
     });
   });
 
+  it("uses per-turn document ids when retainDocumentScope is 'turn'", () => {
+    const request = buildRetainRequest(
+      "hello world",
+      2,
+      {
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        messageProvider: "discord",
+        channelId: "channel:123",
+        senderId: "user:456",
+      },
+      {
+        retainSource: "openclaw",
+        retainDocumentScope: "turn",
+      },
+      1700000000000,
+      { turnIndex: 7 }
+    );
+
+    expect(request.documentId).toBe("openclaw:agent:main:main:turn:000007");
+  });
+
   it("uses window ids and metadata for chunked retention", () => {
     const request = buildRetainRequest(
       "hello world",
@@ -373,6 +396,7 @@ describe("buildRetainRequest", () => {
       },
       {
         retainSource: "openclaw",
+        retainDocumentScope: "turn",
       },
       1700000000000,
       {
@@ -444,6 +468,19 @@ describe("buildRetainRequest", () => {
   });
 });
 
+describe("stripInlineTimestampPrefix", () => {
+  it("strips weekday/date/time/GMT offset prefixes", () => {
+    expect(stripInlineTimestampPrefix("[Wed 2026-04-15 10:44 GMT+2] hello")).toBe("hello");
+    expect(stripInlineTimestampPrefix("[Mon 2026-01-05 9:07 GMT-5] x")).toBe("x");
+    expect(stripInlineTimestampPrefix("[Sun 2025-12-07 23:59:30 UTC] y")).toBe("y");
+  });
+
+  it("leaves unrelated content untouched", () => {
+    expect(stripInlineTimestampPrefix("just text")).toBe("just text");
+    expect(stripInlineTimestampPrefix("[Random] not a timestamp")).toBe("[Random] not a timestamp");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // prepareRetentionTranscript
 // ---------------------------------------------------------------------------
@@ -453,6 +490,53 @@ describe("prepareRetentionTranscript", () => {
     dynamicBankId: true,
     retainRoles: ["user", "assistant"],
   };
+
+  it("lifts message timestamps into a structured field and strips inline prefix (json+toolcalls)", () => {
+    const messages = [
+      {
+        role: "user",
+        timestamp: 1776246240000,
+        content: [{ type: "text", text: "[Wed 2026-04-15 10:44 GMT+2] just pick some news" }],
+      },
+      {
+        role: "assistant",
+        timestamp: 1776246243000,
+        content: [{ type: "text", text: "Got it." }],
+      },
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.transcript);
+    expect(parsed).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "just pick some news" }],
+        timestamp: "2026-04-15T09:44:00.000Z",
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Got it." }],
+        timestamp: "2026-04-15T09:44:03.000Z",
+      },
+    ]);
+  });
+
+  it("lifts message timestamps into a structured field (json without toolcalls)", () => {
+    const config: PluginConfig = { ...baseConfig, retainToolCalls: false };
+    const messages = [
+      {
+        role: "user",
+        timestamp: 1776246240000,
+        content: "[Wed 2026-04-15 10:44 GMT+2] hi there",
+      },
+    ];
+    const result = prepareRetentionTranscript(messages, config);
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.transcript);
+    expect(parsed).toEqual([
+      { role: "user", content: "hi there", timestamp: "2026-04-15T09:44:00.000Z" },
+    ]);
+  });
 
   it("returns null if no user message found (turn boundary)", () => {
     const messages = [
