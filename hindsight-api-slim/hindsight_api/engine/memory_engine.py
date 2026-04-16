@@ -899,7 +899,8 @@ class MemoryEngine(MemoryEngineInterface):
                     )
 
         # For SyncTaskBackend: executes the retain task inline.
-        # For BrokerTaskBackend: idempotent UPDATE (payload already set above).
+        # For BrokerTaskBackend: no-op (submit_task's UPDATE skips rows whose
+        # task_payload is already set, which it is after the INSERT above).
         await self._task_backend.submit_task(full_retain_payload)
 
         logger.info(
@@ -8166,8 +8167,9 @@ class MemoryEngine(MemoryEngineInterface):
             )
 
         # For SyncTaskBackend: executes the task immediately.
-        # For BrokerTaskBackend: does an idempotent UPDATE (payload already set above),
-        # kept for symmetry and to support any future notification mechanisms.
+        # For BrokerTaskBackend: no-op (submit_task's UPDATE skips rows whose
+        # task_payload is already set, which it is after the INSERT above). The call
+        # is kept for symmetry and to support any future notification mechanisms.
         await self._task_backend.submit_task(full_payload)
 
         logger.info(f"{operation_type} task queued for bank_id={bank_id}, operation_id={operation_id}")
