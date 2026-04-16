@@ -4670,6 +4670,7 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         fact_type: str | None = None,
         search_query: str | None = None,
+        consolidation_state: str | None = None,
         limit: int = 100,
         offset: int = 0,
         request_context: "RequestContext",
@@ -4681,6 +4682,11 @@ class MemoryEngine(MemoryEngineInterface):
             bank_id: Filter by bank ID
             fact_type: Filter by fact type (world, experience)
             search_query: Full-text search query (searches text and context fields)
+            consolidation_state: Optional filter on consolidation state. One of
+                'failed' (consolidation permanently failed and awaiting recovery),
+                'pending' (not yet consolidated, no failure), or
+                'done' (successfully consolidated). Only applies to source memory
+                types (world/experience).
             limit: Maximum number of results to return
             offset: Offset for pagination
             request_context: Request context for authentication.
@@ -4717,6 +4723,24 @@ class MemoryEngine(MemoryEngineInterface):
                 query_conditions.append(f"(text ILIKE ${param_count} OR context ILIKE ${param_count})")
                 query_params.append(f"%{search_query}%")
 
+            if consolidation_state:
+                state = consolidation_state.lower()
+                if state == "failed":
+                    query_conditions.append(
+                        "consolidation_failed_at IS NOT NULL AND fact_type IN ('experience', 'world')"
+                    )
+                elif state == "pending":
+                    query_conditions.append(
+                        "consolidated_at IS NULL AND consolidation_failed_at IS NULL "
+                        "AND fact_type IN ('experience', 'world')"
+                    )
+                elif state == "done":
+                    query_conditions.append("consolidated_at IS NOT NULL AND fact_type IN ('experience', 'world')")
+                else:
+                    raise ValueError(
+                        f"Invalid consolidation_state '{consolidation_state}': expected 'failed', 'pending', or 'done'."
+                    )
+
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
 
             # Get total count
@@ -4739,7 +4763,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             units = await conn.fetch(
                 f"""
-                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end, chunk_id, proof_count, tags
+                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end, chunk_id, proof_count, tags, consolidated_at, consolidation_failed_at
                 FROM {fq_table("memory_units")}
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, created_at DESC
@@ -4793,6 +4817,10 @@ class MemoryEngine(MemoryEngineInterface):
                         "chunk_id": row["chunk_id"] if row["chunk_id"] else None,
                         "proof_count": row["proof_count"] if row["proof_count"] is not None else 1,
                         "tags": list(row["tags"]) if row["tags"] else [],
+                        "consolidated_at": row["consolidated_at"].isoformat() if row["consolidated_at"] else None,
+                        "consolidation_failed_at": (
+                            row["consolidation_failed_at"].isoformat() if row["consolidation_failed_at"] else None
+                        ),
                     }
                 )
 
@@ -6286,7 +6314,8 @@ class MemoryEngine(MemoryEngineInterface):
                 f"""
                 SELECT
                     MAX(consolidated_at) as last_consolidated_at,
-                    COUNT(*) FILTER (WHERE consolidated_at IS NULL AND fact_type IN ('experience', 'world')) as pending
+                    COUNT(*) FILTER (WHERE consolidated_at IS NULL AND fact_type IN ('experience', 'world')) as pending,
+                    COUNT(*) FILTER (WHERE consolidation_failed_at IS NOT NULL AND fact_type IN ('experience', 'world')) as failed
                 FROM {fq_table("memory_units")}
                 WHERE bank_id = $1
                 """,
@@ -6310,6 +6339,7 @@ class MemoryEngine(MemoryEngineInterface):
                 "total_documents": doc_count_row["count"] if doc_count_row else 0,
                 "last_consolidated_at": last_consolidated_at.isoformat() if last_consolidated_at else None,
                 "pending_consolidation": consolidation_row["pending"] if consolidation_row else 0,
+                "failed_consolidation": consolidation_row["failed"] if consolidation_row else 0,
                 "total_observations": node_counts.get("observation", 0),
             }
 
