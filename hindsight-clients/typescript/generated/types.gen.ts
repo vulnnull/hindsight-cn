@@ -544,6 +544,60 @@ export type BankTemplateConfig = {
    * Per-bank Gemini/VertexAI safety filter settings
    */
   llm_gemini_safety_settings?: Array<unknown> | null;
+  /**
+   * Recall Budget Function
+   *
+   * Recall budget mapping function: 'fixed' or 'adaptive'
+   */
+  recall_budget_function?: string | null;
+  /**
+   * Recall Budget Fixed Low
+   *
+   * Fixed thinking_budget for budget=low (function='fixed')
+   */
+  recall_budget_fixed_low?: number | null;
+  /**
+   * Recall Budget Fixed Mid
+   *
+   * Fixed thinking_budget for budget=mid (function='fixed')
+   */
+  recall_budget_fixed_mid?: number | null;
+  /**
+   * Recall Budget Fixed High
+   *
+   * Fixed thinking_budget for budget=high (function='fixed')
+   */
+  recall_budget_fixed_high?: number | null;
+  /**
+   * Recall Budget Adaptive Low
+   *
+   * Ratio of max_tokens for budget=low (function='adaptive')
+   */
+  recall_budget_adaptive_low?: number | null;
+  /**
+   * Recall Budget Adaptive Mid
+   *
+   * Ratio of max_tokens for budget=mid (function='adaptive')
+   */
+  recall_budget_adaptive_mid?: number | null;
+  /**
+   * Recall Budget Adaptive High
+   *
+   * Ratio of max_tokens for budget=high (function='adaptive')
+   */
+  recall_budget_adaptive_high?: number | null;
+  /**
+   * Recall Budget Min
+   *
+   * Floor for the adaptive function (after clamping)
+   */
+  recall_budget_min?: number | null;
+  /**
+   * Recall Budget Max
+   *
+   * Ceiling for the adaptive function (after clamping)
+   */
+  recall_budget_max?: number | null;
 };
 
 /**

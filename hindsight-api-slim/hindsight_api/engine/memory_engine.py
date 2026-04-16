@@ -212,6 +212,39 @@ class Budget(str, Enum):
     HIGH = "high"
 
 
+def _resolve_thinking_budget(config_dict: dict, budget: "Budget | None", max_tokens: int) -> int:
+    """
+    Map a Budget enum level to the integer thinking_budget passed to retrieval.
+
+    Reads the bank-resolved config to decide between two functions:
+    - "fixed": returns recall_budget_fixed_<level> directly (legacy default).
+    - "adaptive": returns round(max_tokens * recall_budget_adaptive_<level>),
+                  clamped to [recall_budget_min, recall_budget_max].
+
+    A None budget falls back to MID (preserves legacy default).
+    """
+    effective_budget = budget if budget is not None else Budget.MID
+    function = config_dict.get("recall_budget_function", "fixed")
+
+    if function == "adaptive":
+        ratios = {
+            Budget.LOW: config_dict.get("recall_budget_adaptive_low", 0.025),
+            Budget.MID: config_dict.get("recall_budget_adaptive_mid", 0.075),
+            Budget.HIGH: config_dict.get("recall_budget_adaptive_high", 0.25),
+        }
+        raw = round(max_tokens * float(ratios[effective_budget]))
+        floor = int(config_dict.get("recall_budget_min", 20))
+        ceiling = int(config_dict.get("recall_budget_max", 2000))
+        return max(floor, min(ceiling, raw))
+
+    fixed = {
+        Budget.LOW: config_dict.get("recall_budget_fixed_low", 100),
+        Budget.MID: config_dict.get("recall_budget_fixed_mid", 300),
+        Budget.HIGH: config_dict.get("recall_budget_fixed_high", 1000),
+    }
+    return int(fixed[effective_budget])
+
+
 def utcnow():
     """Get current UTC time with timezone info."""
     return datetime.now(UTC)
@@ -2604,10 +2637,11 @@ class MemoryEngine(MemoryEngineInterface):
                 if result.tag_groups is not None:
                     tag_groups = result.tag_groups
 
-        # Map budget enum to thinking_budget number (default to MID if None)
-        budget_mapping = {Budget.LOW: 100, Budget.MID: 300, Budget.HIGH: 1000}
-        effective_budget = budget if budget is not None else Budget.MID
-        thinking_budget = budget_mapping[effective_budget]
+        # Map budget enum to thinking_budget number using bank-resolved config.
+        # Function "fixed" preserves legacy {LOW: 100, MID: 300, HIGH: 1000}; function "adaptive"
+        # derives from max_tokens and clamps to [recall_budget_min, recall_budget_max].
+        budget_config_dict = await self._config_resolver.get_bank_config(bank_id, request_context)
+        thinking_budget = _resolve_thinking_budget(budget_config_dict, budget, max_tokens)
 
         # Log recall start with tags if present (skip if quiet mode for internal operations)
         if not _quiet:

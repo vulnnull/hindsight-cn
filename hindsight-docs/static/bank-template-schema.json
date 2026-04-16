@@ -303,6 +303,123 @@
           "default": null,
           "description": "Per-bank Gemini/VertexAI safety filter settings",
           "title": "Llm Gemini Safety Settings"
+        },
+        "recall_budget_function": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Recall budget mapping function: 'fixed' or 'adaptive'",
+          "title": "Recall Budget Function"
+        },
+        "recall_budget_fixed_low": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fixed thinking_budget for budget=low (function='fixed')",
+          "title": "Recall Budget Fixed Low"
+        },
+        "recall_budget_fixed_mid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fixed thinking_budget for budget=mid (function='fixed')",
+          "title": "Recall Budget Fixed Mid"
+        },
+        "recall_budget_fixed_high": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fixed thinking_budget for budget=high (function='fixed')",
+          "title": "Recall Budget Fixed High"
+        },
+        "recall_budget_adaptive_low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ratio of max_tokens for budget=low (function='adaptive')",
+          "title": "Recall Budget Adaptive Low"
+        },
+        "recall_budget_adaptive_mid": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ratio of max_tokens for budget=mid (function='adaptive')",
+          "title": "Recall Budget Adaptive Mid"
+        },
+        "recall_budget_adaptive_high": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ratio of max_tokens for budget=high (function='adaptive')",
+          "title": "Recall Budget Adaptive High"
+        },
+        "recall_budget_min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Floor for the adaptive function (after clamping)",
+          "title": "Recall Budget Min"
+        },
+        "recall_budget_max": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ceiling for the adaptive function (after clamping)",
+          "title": "Recall Budget Max"
         }
       },
       "title": "BankTemplateConfig",

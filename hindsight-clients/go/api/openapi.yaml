@@ -3750,6 +3750,33 @@ components:
           items: {}
           nullable: true
           type: array
+        recall_budget_function:
+          nullable: true
+          type: string
+        recall_budget_fixed_low:
+          nullable: true
+          type: integer
+        recall_budget_fixed_mid:
+          nullable: true
+          type: integer
+        recall_budget_fixed_high:
+          nullable: true
+          type: integer
+        recall_budget_adaptive_low:
+          nullable: true
+          type: number
+        recall_budget_adaptive_mid:
+          nullable: true
+          type: number
+        recall_budget_adaptive_high:
+          nullable: true
+          type: number
+        recall_budget_min:
+          nullable: true
+          type: integer
+        recall_budget_max:
+          nullable: true
+          type: integer
       title: BankTemplateConfig
     BankTemplateDirective:
       description: |-

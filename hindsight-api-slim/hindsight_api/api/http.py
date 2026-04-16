@@ -1800,6 +1800,31 @@ class BankTemplateConfig(BaseModel):
     llm_gemini_safety_settings: list | None = Field(
         default=None, description="Per-bank Gemini/VertexAI safety filter settings"
     )
+    recall_budget_function: str | None = Field(
+        default=None, description="Recall budget mapping function: 'fixed' or 'adaptive'"
+    )
+    recall_budget_fixed_low: int | None = Field(
+        default=None, description="Fixed thinking_budget for budget=low (function='fixed')"
+    )
+    recall_budget_fixed_mid: int | None = Field(
+        default=None, description="Fixed thinking_budget for budget=mid (function='fixed')"
+    )
+    recall_budget_fixed_high: int | None = Field(
+        default=None, description="Fixed thinking_budget for budget=high (function='fixed')"
+    )
+    recall_budget_adaptive_low: float | None = Field(
+        default=None, description="Ratio of max_tokens for budget=low (function='adaptive')"
+    )
+    recall_budget_adaptive_mid: float | None = Field(
+        default=None, description="Ratio of max_tokens for budget=mid (function='adaptive')"
+    )
+    recall_budget_adaptive_high: float | None = Field(
+        default=None, description="Ratio of max_tokens for budget=high (function='adaptive')"
+    )
+    recall_budget_min: int | None = Field(default=None, description="Floor for the adaptive function (after clamping)")
+    recall_budget_max: int | None = Field(
+        default=None, description="Ceiling for the adaptive function (after clamping)"
+    )
 
     def get_config_updates(self) -> dict[str, Any]:
         """Return only the fields that were explicitly set (non-None)."""
