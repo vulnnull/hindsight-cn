@@ -1011,7 +1011,14 @@ class WorkerPoller:
             min_size = pool.get_min_size() if hasattr(pool, "get_min_size") else None
             max_size = pool.get_max_size() if hasattr(pool, "get_max_size") else None
             queue = getattr(pool, "_queue", None)
-            waiters = queue.qsize() if queue is not None and hasattr(queue, "qsize") else None
+            # asyncpg's _queue is a LifoQueue pre-filled to max_size with
+            # PoolConnectionHolder objects. qsize() therefore counts *available
+            # holders*, not callers waiting on the pool — the previous "waiters"
+            # label here was the opposite of what it suggested. The actual count
+            # of awaiters is len(_queue._getters), nonzero only when qsize()==0.
+            free_holders = queue.qsize() if queue is not None and hasattr(queue, "qsize") else None
+            getters = getattr(queue, "_getters", None) if queue is not None else None
+            pending_acquires = len(getters) if getters is not None else None
 
             parts = [f"size={size}"]
             if min_size is not None and max_size is not None:
@@ -1019,8 +1026,10 @@ class WorkerPoller:
             if free is not None:
                 parts.append(f"idle={free}")
                 parts.append(f"in_use={size - free}")
-            if waiters is not None:
-                parts.append(f"waiters={waiters}")
+            if free_holders is not None:
+                parts.append(f"free_holders={free_holders}")
+            if pending_acquires is not None:
+                parts.append(f"pending_acquires={pending_acquires}")
             return " ".join(parts)
         except Exception as e:
             logger.debug(f"Pool stats unavailable: {e}")

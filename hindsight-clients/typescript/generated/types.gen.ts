@@ -1969,6 +1969,12 @@ export type MentalModelResponse = {
  */
 export type MentalModelTriggerInput = {
   /**
+   * Mode
+   *
+   * Refresh mode. 'full' (default) regenerates the mental model content from scratch on each refresh. 'delta' performs surgical edits against the existing content: unchanged sections are preserved byte-for-byte, stale content is removed, new content is added. If the mental model has no existing content, or if the source_query has changed since the last refresh, delta mode falls back to a full regeneration automatically.
+   */
+  mode?: "full" | "delta";
+  /**
    * Refresh After Consolidation
    *
    * If true, refresh this mental model after observations consolidation (real-time mode)
@@ -2032,6 +2038,12 @@ export type MentalModelTriggerInput = {
  * Trigger settings for a mental model.
  */
 export type MentalModelTriggerOutput = {
+  /**
+   * Mode
+   *
+   * Refresh mode. 'full' (default) regenerates the mental model content from scratch on each refresh. 'delta' performs surgical edits against the existing content: unchanged sections are preserved byte-for-byte, stale content is removed, new content is added. If the mental model has no existing content, or if the source_query has changed since the last refresh, delta mode falls back to a full regeneration automatically.
+   */
+  mode?: "full" | "delta";
   /**
    * Refresh After Consolidation
    *
