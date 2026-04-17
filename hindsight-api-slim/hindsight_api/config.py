@@ -335,6 +335,7 @@ ENV_FILE_DELETE_AFTER_RETAIN = "HINDSIGHT_API_FILE_DELETE_AFTER_RETAIN"
 # Observations settings (consolidated knowledge from facts)
 ENV_ENABLE_OBSERVATIONS = "HINDSIGHT_API_ENABLE_OBSERVATIONS"
 ENV_CONSOLIDATION_BATCH_SIZE = "HINDSIGHT_API_CONSOLIDATION_BATCH_SIZE"
+ENV_CONSOLIDATION_MAX_MEMORIES_PER_ROUND = "HINDSIGHT_API_CONSOLIDATION_MAX_MEMORIES_PER_ROUND"
 ENV_CONSOLIDATION_LLM_BATCH_SIZE = "HINDSIGHT_API_CONSOLIDATION_LLM_BATCH_SIZE"
 ENV_CONSOLIDATION_MAX_TOKENS = "HINDSIGHT_API_CONSOLIDATION_MAX_TOKENS"
 ENV_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS = "HINDSIGHT_API_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS"
@@ -571,6 +572,9 @@ DEFAULT_ENABLE_OBSERVATION_HISTORY = True  # Observation history tracking enable
 DEFAULT_ENABLE_MENTAL_MODEL_HISTORY = True  # Mental model history tracking enabled by default
 DEFAULT_CONSOLIDATION_MAX_ATTEMPTS = 3  # Outer retry attempts for consolidation LLM batch calls
 DEFAULT_CONSOLIDATION_BATCH_SIZE = 50  # Memories to load per batch (internal memory optimization)
+DEFAULT_CONSOLIDATION_MAX_MEMORIES_PER_ROUND = (
+    100  # Max memories per consolidation round (0 = unlimited). Limits how long one bank holds a worker slot.
+)
 DEFAULT_CONSOLIDATION_LLM_BATCH_SIZE = 8  # Facts per LLM call (1 = no batching; >1 = batch mode)
 DEFAULT_CONSOLIDATION_MAX_TOKENS = 512  # Max tokens for recall when finding related observations
 DEFAULT_CONSOLIDATION_SOURCE_FACTS_MAX_TOKENS = (
@@ -973,6 +977,7 @@ class HindsightConfig:
     enable_observation_history: bool
     enable_mental_model_history: bool
     consolidation_batch_size: int
+    consolidation_max_memories_per_round: int
     consolidation_llm_batch_size: int
     consolidation_max_tokens: int
     consolidation_source_facts_max_tokens: int
@@ -1117,6 +1122,7 @@ class HindsightConfig:
         # Consolidation settings
         "enable_observations",
         "consolidation_llm_batch_size",
+        "consolidation_max_memories_per_round",
         "consolidation_source_facts_max_tokens",
         "consolidation_source_facts_max_tokens_per_observation",
         "observations_mission",
@@ -1577,6 +1583,12 @@ class HindsightConfig:
             == "true",
             consolidation_batch_size=int(
                 os.getenv(ENV_CONSOLIDATION_BATCH_SIZE, str(DEFAULT_CONSOLIDATION_BATCH_SIZE))
+            ),
+            consolidation_max_memories_per_round=int(
+                os.getenv(
+                    ENV_CONSOLIDATION_MAX_MEMORIES_PER_ROUND,
+                    str(DEFAULT_CONSOLIDATION_MAX_MEMORIES_PER_ROUND),
+                )
             ),
             consolidation_llm_batch_size=int(
                 os.getenv(ENV_CONSOLIDATION_LLM_BATCH_SIZE, str(DEFAULT_CONSOLIDATION_LLM_BATCH_SIZE))
