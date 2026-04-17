@@ -46,6 +46,7 @@ VALID_INTEGRATIONS = [
     "paperclip",
     "opencode",
     "cloudflare-oauth-proxy",
+    "openai-agents",
 ]
 
 
