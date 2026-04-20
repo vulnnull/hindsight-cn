@@ -2220,6 +2220,11 @@ class TestClaimBatchRotation:
             return out
 
         poller._claim_batch_for_schema = fake_claim  # type: ignore[method-assign]
+
+        async def fake_scan(scan_schemas):
+            return {s for s in scan_schemas if pending_per_schema.get(s, 0) > 0}
+
+        poller._scan_active_schemas = fake_scan  # type: ignore[method-assign]
         return poller, serviced
 
     @pytest.mark.asyncio
@@ -2296,6 +2301,85 @@ class TestClaimBatchRotation:
         await poller.claim_batch()
         # Pass 1: 1 from "b" (only one with work). Pass 2: 2 more from "b".
         assert serviced == ["b", "b", "b"]
+
+    @pytest.mark.asyncio
+    async def test_scan_finds_schemas_with_pending_work(self, pool, clean_operations):
+        """_scan_active_schemas identifies schemas with pending rows
+        and ignores empty schemas. Uses real DB, no mocks.
+        """
+        from hindsight_api.worker import WorkerPoller
+
+        bank_id = f"test-scan-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
+
+        poller = WorkerPoller(
+            pool=pool,
+            worker_id="test-scan",
+            executor=lambda x: None,
+        )
+
+        # No pending rows → scan returns empty
+        result = await poller._scan_active_schemas([None])
+        assert None not in result, "Scan found work in schema with no pending rows"
+
+        # Insert a pending row
+        op_id = uuid.uuid4()
+        await pool.execute(
+            """INSERT INTO async_operations
+               (operation_id, bank_id, operation_type, status, task_payload)
+               VALUES ($1, $2, 'test', 'pending', $3::jsonb)""",
+            op_id,
+            bank_id,
+            json.dumps({"type": "test", "bank_id": bank_id}),
+        )
+
+        try:
+            # Now scan should find work
+            result = await poller._scan_active_schemas([None])
+            assert None in result, "Scan missed schema with pending work"
+        finally:
+            await pool.execute("DELETE FROM async_operations WHERE operation_id = $1", op_id)
+
+    @pytest.mark.asyncio
+    async def test_claim_batch_only_queries_active_schemas(self, pool, clean_operations):
+        """claim_batch uses _scan_active_schemas to pre-filter, then
+        only calls _claim_batch_for_schema on schemas the scan found.
+        Verifies the scan→claim pipeline end-to-end with real DB rows.
+        """
+        from hindsight_api.worker import WorkerPoller
+
+        bank_id = f"test-pipeline-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
+
+        await pool.execute(
+            """INSERT INTO async_operations
+               (operation_id, bank_id, operation_type, status, task_payload)
+               VALUES ($1, $2, 'test', 'pending', $3::jsonb)""",
+            uuid.uuid4(),
+            bank_id,
+            json.dumps({"type": "test", "bank_id": bank_id}),
+        )
+
+        schemas_claimed: list[str | None] = []
+        poller = WorkerPoller(
+            pool=pool,
+            worker_id="test-pipeline",
+            executor=lambda x: None,
+        )
+        original_claim = poller._claim_batch_for_schema
+
+        async def tracking_claim(schema, nc_limit, cons_limit):
+            schemas_claimed.append(schema)
+            return await original_claim(schema, nc_limit, cons_limit)
+
+        poller._claim_batch_for_schema = tracking_claim  # type: ignore[method-assign]
+
+        claimed = await poller.claim_batch()
+
+        assert len(claimed) == 1, f"Expected 1 claimed task, got {len(claimed)}"
+        assert len(schemas_claimed) <= 3, (
+            f"Claim called on {len(schemas_claimed)} schemas — should only visit schemas the scan identified as active"
+        )
 
 
 class TestDecommissionAllWorkers:
