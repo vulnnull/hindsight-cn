@@ -709,6 +709,82 @@ class TestWorkerPoller:
         assert abs((row["next_retry_at"] - defer_until).total_seconds()) < 1
 
     @pytest.mark.asyncio
+    async def test_memory_engine_execute_task_passes_through_defer_operation(self, memory):
+        """Regression test: MemoryEngine.execute_task must pass DeferOperation
+        through to the worker poller unchanged (same as RetryTaskAt).
+
+        Prior to this fix, the generic ``except Exception`` in execute_task
+        converted any exception — including DeferOperation — into a
+        ``RetryTaskAt(60s)``, which bumps retry_count and writes an
+        error_message. That silently broke the "defer is not a failure"
+        semantics added in #1105: a task scheduled hours out (e.g. by a
+        backpressure-aware extension waiting for a quota window to open)
+        would instead come back in 60 seconds with retry_count bumped.
+
+        Verify by injecting a validator that raises DeferOperation during
+        validate_retain and confirming the outer exception type that
+        escapes execute_task is DeferOperation, not RetryTaskAt.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        from hindsight_api.extensions import (
+            DeferOperation,
+            OperationValidatorExtension,
+            RecallContext,
+            ReflectContext,
+            RetainContext,
+            ValidationResult,
+        )
+        from hindsight_api.worker.exceptions import DeferOperation as DeferOpFromExceptions
+        from hindsight_api.worker.exceptions import RetryTaskAt
+
+        defer_until = datetime.now(timezone.utc) + timedelta(hours=6)
+
+        class QuotaDeferringValidator(OperationValidatorExtension):
+            def __init__(self):
+                super().__init__({})
+
+            async def validate_retain(self, ctx: RetainContext) -> ValidationResult:
+                raise DeferOperation(exec_date=defer_until, reason="quota_window_closed")
+
+            async def validate_recall(self, ctx: RecallContext) -> ValidationResult:
+                return ValidationResult.accept()
+
+            async def validate_reflect(self, ctx: ReflectContext) -> ValidationResult:
+                return ValidationResult.accept()
+
+        # Attach the validator to the MemoryEngine so it's invoked from
+        # inside retain_batch_async → _validate_operation.
+        memory._operation_validator = QuotaDeferringValidator()
+
+        # Set up a bank the task handler can address.
+        bank_id = f"test-defer-passthrough-{uuid.uuid4().hex[:8]}"
+        async with memory._pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO banks (bank_id) VALUES ($1) ON CONFLICT DO NOTHING",
+                bank_id,
+            )
+
+        task_dict = {
+            "type": "batch_retain",
+            "bank_id": bank_id,
+            "contents": [{"content": "x"}],
+            "operation_id": str(uuid.uuid4()),
+            "_tenant_id": "default",
+        }
+
+        # Contract: DeferOperation must escape execute_task intact.
+        # Must NOT be converted to RetryTaskAt. Must NOT be swallowed.
+        with pytest.raises(DeferOpFromExceptions) as exc_info:
+            await memory.execute_task(task_dict)
+
+        assert exc_info.value.reason == "quota_window_closed"
+        assert abs((exc_info.value.exec_date - defer_until).total_seconds()) < 1
+
+        # Defensive: confirm it wasn't a RetryTaskAt masquerading as Defer.
+        assert not isinstance(exc_info.value, RetryTaskAt)
+
+    @pytest.mark.asyncio
     async def test_claim_batch_skips_consolidation_when_same_bank_processing(self, pool, clean_operations):
         """Test that pending consolidation is skipped if same bank has one processing."""
         from hindsight_api.worker import WorkerPoller
