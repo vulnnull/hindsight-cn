@@ -14,7 +14,7 @@ on:
           - small
           - medium
           - large
-        default: small
+        default: large
       suite:
         description: "Suite to run (blank = all)"
         type: choice
@@ -80,7 +80,7 @@ jobs:
           SUITE_ARG="--suite ${{ inputs.suite }}"
         fi
         ./scripts/benchmarks/run-perf-test.sh \
-          --scale ${{ inputs.scale || 'small' }} \
+          --scale ${{ inputs.scale || 'large' }} \
           $SUITE_ARG \
           --output perf-results.json
 
