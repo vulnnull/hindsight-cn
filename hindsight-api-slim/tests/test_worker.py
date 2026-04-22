@@ -68,6 +68,37 @@ async def clean_operations(pool):
     )
 
 
+def test_all_operation_types_have_slot_reservation_config():
+    """Every operation_type used in memory_engine must be listed in
+    WORKER_SLOT_RESERVATION_TYPES so it can be reserved via env var.
+
+    If this test fails, a new operation_type was added to memory_engine.py
+    without a corresponding entry in config.WORKER_SLOT_RESERVATION_TYPES.
+    Add the new type there (single line) and it will automatically get an
+    env var, config field, and validation.
+    """
+    import ast
+    import pathlib
+
+    from hindsight_api.config import WORKER_SLOT_RESERVATION_TYPES
+
+    # Parse memory_engine.py and extract all operation_type="..." string values
+    engine_path = pathlib.Path(__file__).parent.parent / "hindsight_api" / "engine" / "memory_engine.py"
+    tree = ast.parse(engine_path.read_text())
+
+    operation_types_in_code: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == "operation_type" and isinstance(node.value, ast.Constant):
+            operation_types_in_code.add(node.value.value)
+
+    missing = operation_types_in_code - set(WORKER_SLOT_RESERVATION_TYPES.keys())
+    assert not missing, (
+        f"Operation types {missing} are used in memory_engine.py but missing from "
+        f"config.WORKER_SLOT_RESERVATION_TYPES. Add them there so they can be "
+        f"reserved via env var."
+    )
+
+
 class TestBrokerTaskBackend:
     """Tests for BrokerTaskBackend task storage."""
 
@@ -266,7 +297,7 @@ class TestWorkerPoller:
             worker_id="test-worker-1",
             executor=lambda x: None,
             max_slots=3,  # Limit to 3 concurrent tasks
-            consolidation_max_slots=0,  # No reservation; all 3 slots available for non-consolidation
+            slot_reservations={},  # No reservations; all 3 slots available as shared pool
         )
 
         claimed = await poller.claim_batch()
@@ -1576,7 +1607,7 @@ async def test_worker_fire_and_forget_nonblocking(pool, clean_operations):
         executor=blocking_executor,
         poll_interval_ms=50,  # Fast polling
         max_slots=10,
-        consolidation_max_slots=2,
+        slot_reservations={"consolidation": 2},
     )
 
     bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
@@ -1682,7 +1713,7 @@ async def test_worker_slot_limits_enforced(pool, clean_operations):
         executor=controlled_executor,
         poll_interval_ms=50,
         max_slots=3,  # Only allow 3 concurrent tasks
-        consolidation_max_slots=0,  # No consolidation reservation; all 3 slots available for retain
+        slot_reservations={},  # No reservations; all 3 slots available as shared pool
     )
 
     # Submit 10 tasks
@@ -1750,10 +1781,10 @@ async def test_worker_slot_limits_enforced(pool, clean_operations):
 async def test_consolidation_slots_reserved_when_retain_saturates(pool, clean_operations):
     """Regression: consolidation must not be starved when retain saturates the queue.
 
-    With ``max_slots=5`` and ``consolidation_max_slots=2``, retain tasks may use at
-    most 3 concurrent slots, leaving 2 slots reserved for consolidation. Without
-    the reservation (issue #1006), a continuous stream of retain tasks would fill
-    every slot and consolidation would never run.
+    With ``max_slots=5`` and ``slot_reservations={"consolidation": 2}``, retain tasks
+    may use at most 3 concurrent slots (the shared pool), leaving 2 slots reserved for
+    consolidation. Without the reservation (issue #1006), a continuous stream of retain
+    tasks would fill every slot and consolidation would never run.
     """
     from hindsight_api.worker.poller import WorkerPoller
 
@@ -1773,14 +1804,14 @@ async def test_consolidation_slots_reserved_when_retain_saturates(pool, clean_op
         executor=blocking_executor,
         poll_interval_ms=50,
         max_slots=5,
-        consolidation_max_slots=2,
+        slot_reservations={"consolidation": 2},
     )
 
     bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
     await _ensure_bank(pool, bank_id)
 
     # Submit 10 retain tasks first — these should be claimed up to the
-    # non-consolidation cap (max_slots - consolidation_max_slots = 3).
+    # shared pool cap (max_slots - sum(reservations) = 3).
     for _ in range(10):
         op_id = uuid.uuid4()
         payload = json.dumps(
@@ -1823,7 +1854,7 @@ async def test_consolidation_slots_reserved_when_retain_saturates(pool, clean_op
         consolidation_started = [op for op, t in started.items() if t == "consolidation"]
 
         assert len(retain_started) == 3, (
-            f"Retain should be capped at max_slots - consolidation_max_slots = 3, got {len(retain_started)}"
+            f"Retain should be capped at shared pool size (max_slots - sum(reservations)) = 3, got {len(retain_started)}"
         )
         assert len(consolidation_started) == 1, (
             f"Consolidation should claim its reserved slot even while retain saturates, "
@@ -1835,6 +1866,183 @@ async def test_consolidation_slots_reserved_when_retain_saturates(pool, clean_op
         # otherwise the consolidation pool accounting drifts on subsequent claims.
         async with poller._in_flight_lock:
             assert poller._in_flight_by_type.get("consolidation", 0) == 1
+
+    finally:
+        for event in finish_events.values():
+            event.set()
+        await poller.shutdown_graceful(timeout=2.0)
+        try:
+            await asyncio.wait_for(poll_task, timeout=1.0)
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_per_operation_slot_reservations(pool, clean_operations):
+    """Test that per-operation slot reservations guarantee capacity for each type.
+
+    With ``max_slots=8`` and ``slot_reservations={"consolidation": 2, "retain": 3}``,
+    retain gets 3 reserved, consolidation gets 2 reserved, and there are 3 shared slots.
+    When retain saturates the queue, it should claim 3 (reserved) + 3 (shared) = 6 max,
+    but consolidation's 2 reserved slots must remain available.
+    """
+    from hindsight_api.worker.poller import WorkerPoller
+
+    started: dict[str, str] = {}  # op_id -> op_type
+    finish_events: dict[str, asyncio.Event] = {}
+
+    async def blocking_executor(task_dict: dict):
+        op_id = task_dict["operation_id"]
+        started[op_id] = task_dict.get("operation_type", "unknown")
+        event = asyncio.Event()
+        finish_events[op_id] = event
+        await event.wait()
+
+    poller = WorkerPoller(
+        pool=pool,
+        worker_id="test-worker-per-op-slots",
+        executor=blocking_executor,
+        poll_interval_ms=50,
+        max_slots=8,
+        slot_reservations={"consolidation": 2, "retain": 3},
+    )
+
+    bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(pool, bank_id)
+
+    # Submit 10 retain tasks — should fill 3 reserved + 3 shared = 6
+    for _ in range(10):
+        op_id = uuid.uuid4()
+        payload = json.dumps(
+            {"type": "test", "operation_type": "retain", "operation_id": str(op_id), "bank_id": bank_id}
+        )
+        await pool.execute(
+            """
+            INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+            VALUES ($1, $2, 'retain', 'pending', $3::jsonb)
+            """,
+            op_id,
+            bank_id,
+            payload,
+        )
+
+    # Submit 2 consolidation tasks (different banks for bank-serialization)
+    consolidation_bank_1 = f"test-worker-{uuid.uuid4().hex[:8]}"
+    consolidation_bank_2 = f"test-worker-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(pool, consolidation_bank_1)
+    await _ensure_bank(pool, consolidation_bank_2)
+
+    for c_bank in [consolidation_bank_1, consolidation_bank_2]:
+        c_op_id = uuid.uuid4()
+        c_payload = json.dumps({"type": "test", "operation_id": str(c_op_id), "bank_id": c_bank})
+        await pool.execute(
+            """
+            INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+            VALUES ($1, $2, 'consolidation', 'pending', $3::jsonb)
+            """,
+            c_op_id,
+            c_bank,
+            c_payload,
+        )
+
+    poll_task = asyncio.create_task(poller.run())
+
+    try:
+        # Wait for the worker to fill its slots: 6 retain + 2 consolidation = 8 active
+        for _ in range(200):
+            if len(started) >= 8:
+                break
+            await asyncio.sleep(0.01)
+
+        retain_started = [op for op, t in started.items() if t == "retain"]
+        consolidation_started = [op for op, t in started.items() if t == "consolidation"]
+
+        assert len(retain_started) == 6, (
+            f"Retain should use 3 reserved + 3 shared = 6 slots, got {len(retain_started)}"
+        )
+        assert len(consolidation_started) == 2, (
+            f"Consolidation should use its 2 reserved slots, got {len(consolidation_started)}"
+        )
+
+        # Verify in-flight tracking
+        async with poller._in_flight_lock:
+            assert poller._in_flight_by_type.get("retain", 0) == 6
+            assert poller._in_flight_by_type.get("consolidation", 0) == 2
+
+    finally:
+        for event in finish_events.values():
+            event.set()
+        await poller.shutdown_graceful(timeout=2.0)
+        try:
+            await asyncio.wait_for(poll_task, timeout=1.0)
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_shared_pool_usable_by_reserved_types(pool, clean_operations):
+    """Test that operation types with reservations can also use shared pool slots.
+
+    With ``max_slots=5`` and ``slot_reservations={"retain": 2}``, shared pool = 3.
+    If 5 retain tasks are submitted, retain should use 2 reserved + 3 shared = 5.
+    """
+    from hindsight_api.worker.poller import WorkerPoller
+
+    started: dict[str, str] = {}
+    finish_events: dict[str, asyncio.Event] = {}
+
+    async def blocking_executor(task_dict: dict):
+        op_id = task_dict["operation_id"]
+        started[op_id] = task_dict.get("operation_type", "unknown")
+        event = asyncio.Event()
+        finish_events[op_id] = event
+        await event.wait()
+
+    poller = WorkerPoller(
+        pool=pool,
+        worker_id="test-worker-shared-overflow",
+        executor=blocking_executor,
+        poll_interval_ms=50,
+        max_slots=5,
+        slot_reservations={"retain": 2},
+    )
+
+    bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+    await _ensure_bank(pool, bank_id)
+
+    # Submit 10 retain tasks
+    for _ in range(10):
+        op_id = uuid.uuid4()
+        payload = json.dumps(
+            {"type": "test", "operation_type": "retain", "operation_id": str(op_id), "bank_id": bank_id}
+        )
+        await pool.execute(
+            """
+            INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+            VALUES ($1, $2, 'retain', 'pending', $3::jsonb)
+            """,
+            op_id,
+            bank_id,
+            payload,
+        )
+
+    poll_task = asyncio.create_task(poller.run())
+
+    try:
+        # Wait for the worker to fill all 5 slots with retain
+        for _ in range(200):
+            if len(started) >= 5:
+                break
+            await asyncio.sleep(0.01)
+
+        retain_started = [op for op, t in started.items() if t == "retain"]
+        assert len(retain_started) == 5, (
+            f"Retain should use 2 reserved + 3 shared = 5 slots, got {len(retain_started)}"
+        )
+
+        # Should not exceed max_slots
+        await asyncio.sleep(0.1)
+        assert len(started) == 5, f"Should not exceed max_slots=5, got {len(started)}"
 
     finally:
         for event in finish_events.values():
@@ -2192,20 +2400,20 @@ class TestClaimBatchRotation:
             executor=lambda x: None,
             tenant_extension=StaticTenantExtension(),
             max_slots=max_slots,
-            # No consolidation reservation — all slots available for non-consolidation
-            # test tasks. Keeps the fair-rotation behavior easy to assert.
-            consolidation_max_slots=0,
+            # No per-type reservations — all slots available as shared pool.
+            # Keeps the fair-rotation behavior easy to assert.
+            slot_reservations={},
         )
 
         serviced: list[str] = []
 
-        async def fake_claim(schema, non_consolidation_limit, consolidation_limit):
-            # Tests only exercise non-consolidation ("test") tasks, so we only
-            # consult the non-consolidation limit.
+        async def fake_claim(schema, reserved_limits, shared_limit):
+            # Tests only exercise non-reserved ("test") tasks, so we only
+            # consult the shared_limit.
             remaining = pending_per_schema.get(schema, 0)
-            if remaining <= 0 or non_consolidation_limit <= 0:
+            if remaining <= 0 or shared_limit <= 0:
                 return []
-            take = min(remaining, non_consolidation_limit)
+            take = min(remaining, shared_limit)
             pending_per_schema[schema] = remaining - take
             out = []
             for _ in range(take):

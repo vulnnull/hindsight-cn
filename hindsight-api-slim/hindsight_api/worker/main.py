@@ -164,7 +164,11 @@ def main():
     print(f"  Poll interval: {args.poll_interval}ms")
     print(f"  Max retries: {args.max_retries}")
     print(f"  Max slots: {config.worker_max_slots}")
-    print(f"  Consolidation max slots: {config.worker_consolidation_max_slots}")
+    reservations = config.worker_slot_reservations
+    reservations_str = ", ".join(f"{k}={v}" for k, v in reservations.items()) if reservations else "none"
+    shared_pool = max(0, config.worker_max_slots - sum(reservations.values()))
+    print(f"  Slot reservations: {reservations_str}")
+    print(f"  Shared pool: {shared_pool}")
     print(f"  HTTP server: {args.http_host}:{args.http_port}")
     print()
 
@@ -222,7 +226,7 @@ def main():
             schema=schema,
             tenant_extension=tenant_extension,
             max_slots=config.worker_max_slots,
-            consolidation_max_slots=config.worker_consolidation_max_slots,
+            slot_reservations=config.worker_slot_reservations,
         )
 
         # Create the HTTP app for metrics/health

@@ -729,7 +729,7 @@ async def cmd_generate(bank_id: str, scale: str, workers: int = 16, with_observa
         executor=engine.execute_task,
         poll_interval_ms=200,
         max_slots=workers,
-        consolidation_max_slots=0,
+        slot_reservations={},
     )
     poller_task = asyncio.create_task(poller.run())
     console.print("  Worker     : started\n")
