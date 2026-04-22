@@ -2267,6 +2267,11 @@ class MemoryEngine(MemoryEngineInterface):
         # Calculate total token count
         total_tokens = sum(count_tokens(item.get("content", "")) for item in contents)
         total_usage = TokenUsage()
+        # Aggregate "content tokens that actually went through extraction after
+        # chunk-level dedup" across sub-batches. ``None`` in any sub-batch
+        # means that sub-batch bypassed dedup, so the aggregate is None
+        # (see RetainResult.processed_content_tokens).
+        total_processed_content_tokens: int | None = 0
 
         # Get batch size threshold from config
         config = get_config()
@@ -2318,7 +2323,7 @@ class MemoryEngine(MemoryEngineInterface):
                     f"Processing sub-batch {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_tokens:,} tokens"
                 )
 
-                sub_results, sub_usage = await self._retain_batch_async_internal(
+                sub_results, sub_usage, sub_processed = await self._retain_batch_async_internal(
                     bank_id=bank_id,
                     contents=sub_batch,
                     request_context=request_context,
@@ -2334,6 +2339,10 @@ class MemoryEngine(MemoryEngineInterface):
                 )
                 all_results.extend(sub_results)
                 total_usage = total_usage + sub_usage
+                if total_processed_content_tokens is None or sub_processed is None:
+                    total_processed_content_tokens = None
+                else:
+                    total_processed_content_tokens = total_processed_content_tokens + sub_processed
 
             total_time = time.time() - start_time
             logger.info(
@@ -2342,7 +2351,7 @@ class MemoryEngine(MemoryEngineInterface):
             result = all_results
         else:
             # Small batch - use internal method directly
-            result, total_usage = await self._retain_batch_async_internal(
+            result, total_usage, total_processed_content_tokens = await self._retain_batch_async_internal(
                 bank_id=bank_id,
                 contents=contents,
                 request_context=request_context,
@@ -2371,6 +2380,7 @@ class MemoryEngine(MemoryEngineInterface):
                 llm_input_tokens=total_usage.input_tokens,
                 llm_output_tokens=total_usage.output_tokens,
                 llm_total_tokens=total_usage.total_tokens,
+                processed_content_tokens=total_processed_content_tokens,
             )
             try:
                 await self._operation_validator.on_retain_complete(result_ctx)
@@ -2403,7 +2413,7 @@ class MemoryEngine(MemoryEngineInterface):
         operation_id: str | None = None,
         outbox_callback: "Callable[[asyncpg.Connection], Awaitable[None]] | None" = None,
         strategy: str | None = None,
-    ) -> tuple[list[list[str]], "TokenUsage"]:
+    ) -> tuple[list[list[str]], "TokenUsage", int | None]:
         """
         Internal method for batch processing without chunking logic.
 
@@ -2422,7 +2432,9 @@ class MemoryEngine(MemoryEngineInterface):
             document_tags: Tags applied to all items in this batch
 
         Returns:
-            Tuple of (unit ID lists, token usage for fact extraction)
+            Tuple of (unit ID lists, LLM token usage, processed_content_tokens).
+            See ``RetainResult.processed_content_tokens`` for the semantics of
+            the third element.
         """
         # Use the new modular orchestrator
         from .retain import orchestrator
