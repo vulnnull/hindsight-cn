@@ -1,14 +1,14 @@
 ---
-title: "The 10k Star Story: How Hindsight Became Production Standard"
-description: "How Hindsight went from zero to 10,000 GitHub stars in 4.5 months. Why agent memory matters, what the community is building, and why they chose open-source."
-slug: "hindsight-10k-stars"
-date: "2026-04-21"
+title: "Hindsight Reaches 10,000 Stars: The Community's Choice for Agent Memory"
+description: "How Hindsight became the community's choice for agent memory in 4.5 months. 10,000 stars, 1,000+ Cloud sign-ups, and a thriving ecosystem of real-world use cases."
+slug: "2026/04/22/hindsight-10k-stars"
+date: 2026-04-22T12:00
 image: "/img/blog/hindsight-10k-stars.png"
 ---
 
-![The 10k Star Story](/img/blog/hindsight-10k-stars.png)
+![Hindsight Reaches 10,000 Stars](/img/blog/hindsight-10k-stars.png)
 
-# The 10k Star Story: How Hindsight Became Production Standard
+# Hindsight Reaches 10,000 Stars: The Community's Choice for Agent Memory
 
 Ten thousand stars on GitHub isn't just a number. It's a signal that thousands of AI engineers looked at Hindsight agent memory, tested it, stress-tested it, filed bugs, opened discussions, and decided: "This is the agent memory system I'm building with."
 
