@@ -737,6 +737,7 @@ class MemoryEngine(MemoryEngineInterface):
             user_initiated=True,
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
+            retry_count=task_dict.get("_retry_count", 0),
         )
         await self.retain_batch_async(
             bank_id=bank_id,
@@ -843,6 +844,7 @@ class MemoryEngine(MemoryEngineInterface):
                     user_initiated=True,
                     tenant_id=task_dict.get("_tenant_id"),
                     api_key_id=task_dict.get("_api_key_id"),
+                    retry_count=task_dict.get("_retry_count", 0),
                 )
                 await self._operation_validator.on_file_convert_complete(
                     FileConvertResult(
@@ -987,6 +989,7 @@ class MemoryEngine(MemoryEngineInterface):
             internal=True,
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
+            retry_count=task_dict.get("_retry_count", 0),
         )
         result = await run_consolidation_job(
             memory_engine=self,
@@ -1033,6 +1036,7 @@ class MemoryEngine(MemoryEngineInterface):
             internal=True,
             tenant_id=task_dict.get("_tenant_id"),
             api_key_id=task_dict.get("_api_key_id"),
+            retry_count=task_dict.get("_retry_count", 0),
         )
 
         refreshed = await self.refresh_mental_model(
@@ -8038,7 +8042,8 @@ class MemoryEngine(MemoryEngineInterface):
             # Get operations with pagination (include result_metadata to check for parent operations)
             operations = await conn.fetch(
                 f"""
-                SELECT operation_id, operation_type, created_at, status, error_message, result_metadata
+                SELECT operation_id, operation_type, created_at, status, error_message,
+                       result_metadata, retry_count, next_retry_at
                 FROM {fq_table("async_operations")}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
@@ -8059,6 +8064,7 @@ class MemoryEngine(MemoryEngineInterface):
 
                 result_metadata = json.loads(row["result_metadata"]) if row["result_metadata"] else {}
 
+                next_retry_at = row["next_retry_at"]
                 operation_list.append(
                     {
                         "id": str(row["operation_id"]),
@@ -8068,6 +8074,8 @@ class MemoryEngine(MemoryEngineInterface):
                         "created_at": row["created_at"].isoformat(),
                         "status": api_status,
                         "error_message": row["error_message"],
+                        "retry_count": row["retry_count"] or 0,
+                        "next_retry_at": next_retry_at.isoformat() if next_retry_at else None,
                     }
                 )
 
@@ -8108,7 +8116,7 @@ class MemoryEngine(MemoryEngineInterface):
             payload_column = ", task_payload" if include_payload else ""
             row = await conn.fetchrow(
                 f"""
-                SELECT operation_id, operation_type, created_at, updated_at, completed_at, status, error_message, result_metadata{payload_column}
+                SELECT operation_id, operation_type, created_at, updated_at, completed_at, status, error_message, result_metadata, retry_count, next_retry_at{payload_column}
                 FROM {fq_table("async_operations")}
                 WHERE operation_id = $1 AND bank_id = $2
                 """,
@@ -8195,6 +8203,8 @@ class MemoryEngine(MemoryEngineInterface):
                         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                         "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
                         "error_message": row["error_message"],
+                        "retry_count": row["retry_count"] or 0,
+                        "next_retry_at": row["next_retry_at"].isoformat() if row["next_retry_at"] else None,
                         "result_metadata": result_metadata,
                         "child_operations": child_statuses,
                         "task_payload": task_payload,
@@ -8209,6 +8219,8 @@ class MemoryEngine(MemoryEngineInterface):
                         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                         "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
                         "error_message": row["error_message"],
+                        "retry_count": row["retry_count"] or 0,
+                        "next_retry_at": row["next_retry_at"].isoformat() if row["next_retry_at"] else None,
                         "result_metadata": result_metadata,
                         "task_payload": task_payload,
                     }
