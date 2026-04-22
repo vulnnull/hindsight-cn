@@ -209,7 +209,6 @@ async def _populate_bank(engine: Any, bank_id: str, size: int) -> None:
         executor=engine.execute_task,
         poll_interval_ms=200,
         max_slots=8,
-        consolidation_max_slots=0,
     )
     poller_task = asyncio.create_task(poller.run())
 

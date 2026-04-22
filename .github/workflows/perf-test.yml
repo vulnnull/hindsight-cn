@@ -71,7 +71,7 @@ jobs:
 
     - name: Install hindsight-dev dependencies
       run: |
-        cd hindsight-dev && uv sync --frozen --index-strategy unsafe-best-match
+        cd hindsight-dev && uv sync --frozen --all-extras --index-strategy unsafe-best-match
 
     - name: Run perf tests
       run: |
