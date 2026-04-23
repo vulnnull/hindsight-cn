@@ -8002,6 +8002,7 @@ class MemoryEngine(MemoryEngineInterface):
         task_type: str | None = None,
         limit: int = 20,
         offset: int = 0,
+        exclude_parents: bool = False,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
         """List async operations for a bank with optional filtering and pagination.
@@ -8012,6 +8013,7 @@ class MemoryEngine(MemoryEngineInterface):
             task_type: Optional operation type filter (retain, consolidation, etc.)
             limit: Maximum number of operations to return (default 20)
             offset: Number of operations to skip (default 0)
+            exclude_parents: If True, exclude parent batch operations (is_parent=True in result_metadata)
             request_context: Request context for authentication
 
         Returns:
@@ -8037,6 +8039,9 @@ class MemoryEngine(MemoryEngineInterface):
             if task_type:
                 where_conditions.append(f"operation_type = ${len(params) + 1}")
                 params.append(task_type)
+
+            if exclude_parents:
+                where_conditions.append("NOT (result_metadata::jsonb @> '{\"is_parent\": true}'::jsonb)")
 
             where_clause = " AND ".join(where_conditions)
 

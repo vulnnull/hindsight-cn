@@ -296,6 +296,7 @@ type ApiListOperationsRequest struct {
 	type_ *string
 	limit *int32
 	offset *int32
+	excludeParents *bool
 	authorization *string
 }
 
@@ -320,6 +321,12 @@ func (r ApiListOperationsRequest) Limit(limit int32) ApiListOperationsRequest {
 // Number of operations to skip
 func (r ApiListOperationsRequest) Offset(offset int32) ApiListOperationsRequest {
 	r.offset = &offset
+	return r
+}
+
+// Exclude parent batch operations from results
+func (r ApiListOperationsRequest) ExcludeParents(excludeParents bool) ApiListOperationsRequest {
+	r.excludeParents = &excludeParents
 	return r
 }
 
@@ -388,6 +395,12 @@ func (a *OperationsAPIService) ListOperationsExecute(r ApiListOperationsRequest)
 	} else {
 		var defaultValue int32 = 0
 		r.offset = &defaultValue
+	}
+	if r.excludeParents != nil {
+		parameterAddToHeaderOrQuery(localVarQueryParams, "exclude_parents", r.excludeParents, "form", "")
+	} else {
+		var defaultValue bool = false
+		r.excludeParents = &defaultValue
 	}
 	// to determine the Content-Type header
 	localVarHTTPContentTypes := []string{}

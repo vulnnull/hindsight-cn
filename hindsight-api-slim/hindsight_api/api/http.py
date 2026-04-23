@@ -4397,12 +4397,19 @@ def _register_routes(app: FastAPI):
         ),
         limit: int = Query(default=20, ge=1, le=100, description="Maximum number of operations to return"),
         offset: int = Query(default=0, ge=0, description="Number of operations to skip"),
+        exclude_parents: bool = Query(default=False, description="Exclude parent batch operations from results"),
         request_context: RequestContext = Depends(get_request_context),
     ):
         """List async operations for a memory bank with optional filtering and pagination."""
         try:
             result = await app.state.memory.list_operations(
-                bank_id, status=status, task_type=type, limit=limit, offset=offset, request_context=request_context
+                bank_id,
+                status=status,
+                task_type=type,
+                limit=limit,
+                offset=offset,
+                exclude_parents=exclude_parents,
+                request_context=request_context,
             )
             return OperationsListResponse(
                 bank_id=bank_id,

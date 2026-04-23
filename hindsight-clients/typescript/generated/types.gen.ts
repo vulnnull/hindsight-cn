@@ -4839,6 +4839,12 @@ export type ListOperationsData = {
      * Number of operations to skip
      */
     offset?: number;
+    /**
+     * Exclude Parents
+     *
+     * Exclude parent batch operations from results
+     */
+    exclude_parents?: boolean;
   };
   url: "/v1/default/banks/{bank_id}/operations";
 };

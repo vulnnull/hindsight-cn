@@ -2635,6 +2635,18 @@
             "description": "Number of operations to skip"
           },
           {
+            "name": "exclude_parents",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Exclude parent batch operations from results",
+              "default": false,
+              "title": "Exclude Parents"
+            },
+            "description": "Exclude parent batch operations from results"
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
