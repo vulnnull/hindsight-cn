@@ -1761,7 +1761,8 @@ paths:
           title: Bank Id
           type: string
         style: simple
-      - description: "Filter by status: pending, completed, or failed"
+      - description: "Filter by status: pending, processing, completed, failed, or\
+          \ cancelled"
         explode: true
         in: query
         name: status
@@ -3632,8 +3633,8 @@ components:
         operations_by_status:
           additionalProperties:
             type: integer
-          description: "Async operations grouped by status (pending, in_progress,\
-            \ completed, failed, cancelled)."
+          description: "Async operations grouped by status (pending, processing, completed,\
+            \ failed, cancelled)."
           title: Operations By Status
         last_consolidated_at:
           nullable: true
@@ -5497,8 +5498,10 @@ components:
         status:
           enum:
           - pending
+          - processing
           - completed
           - failed
+          - cancelled
           - not_found
           title: Status
           type: string

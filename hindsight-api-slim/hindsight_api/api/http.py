@@ -1472,7 +1472,7 @@ class BankStatsResponse(BaseModel):
     failed_operations: int
     operations_by_status: dict[str, int] = Field(
         default_factory=dict,
-        description="Async operations grouped by status (pending, in_progress, completed, failed, cancelled).",
+        description="Async operations grouped by status (pending, processing, completed, failed, cancelled).",
     )
     # Consolidation stats
     last_consolidated_at: str | None = Field(default=None, description="When consolidation last ran (ISO format)")
@@ -2249,7 +2249,7 @@ class OperationStatusResponse(BaseModel):
     )
 
     operation_id: str
-    status: Literal["pending", "completed", "failed", "not_found"]
+    status: Literal["pending", "processing", "completed", "failed", "cancelled", "not_found"]
     operation_type: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -4388,7 +4388,9 @@ def _register_routes(app: FastAPI):
     )
     async def api_list_operations(
         bank_id: str,
-        status: str | None = Query(default=None, description="Filter by status: pending, completed, or failed"),
+        status: str | None = Query(
+            default=None, description="Filter by status: pending, processing, completed, failed, or cancelled"
+        ),
         type: str | None = Query(
             default=None,
             description="Filter by operation type: retain, consolidation, refresh_mental_model, file_convert_retain, webhook_delivery",

@@ -299,7 +299,7 @@ type ApiListOperationsRequest struct {
 	authorization *string
 }
 
-// Filter by status: pending, completed, or failed
+// Filter by status: pending, processing, completed, failed, or cancelled
 func (r ApiListOperationsRequest) Status(status string) ApiListOperationsRequest {
 	r.status = &status
 	return r
