@@ -24,9 +24,13 @@ on:
           - recall
         default: ""
       locomo_max_conversations:
-        description: "LoComo max conversations (0 = skip)"
+        description: "LoComo max conversations (0 = skip, blank = all)"
         type: number
-        default: 5
+        default: 0
+      locomo_skip:
+        description: "Skip LoComo job"
+        type: boolean
+        default: false
       ref:
         description: "Git ref to test (branch, tag, or SHA). Defaults to main."
         type: string
@@ -97,7 +101,7 @@ jobs:
         retention-days: 90
 
   locomo:
-    if: inputs.locomo_max_conversations != 0
+    if: inputs.locomo_skip != true
     runs-on: ubuntu-latest
     env:
       HINDSIGHT_API_LLM_PROVIDER: vertexai
@@ -106,7 +110,7 @@ jobs:
       HINDSIGHT_API_JUDGE_LLM_PROVIDER: vertexai
       HINDSIGHT_API_JUDGE_LLM_MODEL: google/gemini-2.5-flash-lite
       HINDSIGHT_API_ANSWER_LLM_PROVIDER: vertexai
-      HINDSIGHT_API_ANSWER_LLM_MODEL: google/gemini-2.5-flash-lite
+      HINDSIGHT_API_ANSWER_LLM_MODEL: google/gemini-3.1-pro-preview
     steps:
     - uses: actions/checkout@v6
       with:
@@ -153,8 +157,13 @@ jobs:
 
     - name: Run LoComo benchmark
       run: |
+        MAX_CONV_ARG=""
+        if [ "${{ inputs.locomo_max_conversations }}" != "0" ] && [ -n "${{ inputs.locomo_max_conversations }}" ]; then
+          MAX_CONV_ARG="--max-conversations ${{ inputs.locomo_max_conversations }}"
+        fi
         uv run python hindsight-dev/benchmarks/locomo/locomo_benchmark.py \
-          --max-conversations ${{ inputs.locomo_max_conversations || 5 }}
+          --wait-consolidation \
+          $MAX_CONV_ARG
 
     - name: Upload LoComo results
       if: always()
