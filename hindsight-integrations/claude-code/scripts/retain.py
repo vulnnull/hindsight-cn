@@ -32,7 +32,7 @@ from lib.content import (
     slice_last_turns_by_user_boundary,
 )
 from lib.daemon import get_api_url
-from lib.state import increment_turn_count
+from lib.state import increment_turn_count, track_retention
 
 
 def read_transcript(transcript_path: str) -> list:
@@ -150,12 +150,25 @@ def run_retain(hook_input: dict, force: bool = False) -> None:
     bank_id = derive_bank_id(hook_input, config)
     ensure_bank_mission(client, bank_id, config, debug_fn=_dbg)
 
-    # Document ID: use session_id so the same session always upserts the same document.
-    # In chunked mode, append timestamp to create distinct documents per chunk.
+    # Document ID strategy:
+    # - Chunked mode: each chunk gets a timestamped document_id.
+    # - Full-session mode: uses session_id as base, but tracks message count
+    #   to detect compaction.  When Claude Code compacts the conversation the
+    #   transcript shrinks — if we kept the same document_id we'd overwrite the
+    #   pre-compaction document with a shorter one, losing context.  Instead we
+    #   increment a chunk counter so the old document is preserved.
     if retain_mode == "chunked" and retain_every_n > 1:
         document_id = f"{session_id}-{int(time.time() * 1000)}"
     else:
-        document_id = session_id
+        chunk_index, compacted = track_retention(session_id, len(all_messages))
+        if compacted:
+            debug_log(
+                config,
+                f"Compaction detected for session {session_id}: transcript shrank, "
+                f"advancing to chunk {chunk_index} to preserve prior document",
+            )
+        # chunk 0 → plain session_id (backwards compatible with existing docs)
+        document_id = session_id if chunk_index == 0 else f"{session_id}-c{chunk_index}"
 
     # Resolve template variables in tags and metadata.
     # Supported variables: {session_id}, {bank_id}, {timestamp}, {user_id}
