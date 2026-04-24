@@ -516,6 +516,7 @@ class CohereEmbeddings(Embeddings):
         api_key: str,
         model: str = DEFAULT_EMBEDDINGS_COHERE_MODEL,
         base_url: str | None = None,
+        output_dimensions: int | None = None,
         batch_size: int = 96,
         timeout: float = 60.0,
         input_type: str = "search_document",
@@ -527,6 +528,7 @@ class CohereEmbeddings(Embeddings):
             api_key: Cohere API key
             model: Cohere embedding model name (default: embed-english-v3.0)
             base_url: Custom base URL for Cohere-compatible API (e.g., Azure-hosted endpoint)
+            output_dimensions: Optional output embedding dimensions (for Matryoshka-capable models)
             batch_size: Maximum batch size for embedding requests (default: 96, Cohere's limit)
             timeout: Request timeout in seconds (default: 60.0)
             input_type: Input type for embeddings (default: search_document).
@@ -535,6 +537,7 @@ class CohereEmbeddings(Embeddings):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url
+        self.output_dimensions = output_dimensions
         self.batch_size = batch_size
         self.timeout = timeout
         self.input_type = input_type
@@ -570,8 +573,10 @@ class CohereEmbeddings(Embeddings):
             client_kwargs["base_url"] = self.base_url
         self._client = cohere.Client(**client_kwargs)
 
-        # Try to get dimension from known models, otherwise do a test embedding
-        if self.model in self.MODEL_DIMENSIONS:
+        # If output_dimensions is explicitly set, use that as the dimension
+        if self.output_dimensions is not None:
+            self._dimension = self.output_dimensions
+        elif self.model in self.MODEL_DIMENSIONS:
             self._dimension = self.MODEL_DIMENSIONS[self.model]
         else:
             # Do a test embedding to detect dimension
@@ -607,13 +612,23 @@ class CohereEmbeddings(Embeddings):
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
 
-            response = self._client.embed(
-                texts=batch,
-                model=self.model,
-                input_type=self.input_type,
-            )
-
-            all_embeddings.extend(response.embeddings)
+            if self.output_dimensions is not None:
+                # Use v2 API which supports output_dimension
+                response = self._client.v2.embed(
+                    texts=batch,
+                    model=self.model,
+                    input_type=self.input_type,
+                    output_dimension=self.output_dimensions,
+                    embedding_types=["float"],
+                )
+                all_embeddings.extend(response.embeddings.float_)
+            else:
+                response = self._client.embed(
+                    texts=batch,
+                    model=self.model,
+                    input_type=self.input_type,
+                )
+                all_embeddings.extend(response.embeddings)
 
         return all_embeddings
 
@@ -1127,6 +1142,7 @@ def create_embeddings_from_env() -> Embeddings:
             api_key=api_key,
             model=config.embeddings_cohere_model,
             base_url=config.embeddings_cohere_base_url,
+            output_dimensions=config.embeddings_cohere_output_dimensions,
         )
     elif provider == "litellm":
         return LiteLLMEmbeddings(

@@ -191,6 +191,7 @@ ENV_EMBEDDINGS_VERTEXAI_SERVICE_ACCOUNT_KEY = "HINDSIGHT_API_EMBEDDINGS_VERTEXAI
 ENV_EMBEDDINGS_COHERE_API_KEY = "HINDSIGHT_API_EMBEDDINGS_COHERE_API_KEY"
 ENV_EMBEDDINGS_COHERE_MODEL = "HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL"
 ENV_EMBEDDINGS_COHERE_BASE_URL = "HINDSIGHT_API_EMBEDDINGS_COHERE_BASE_URL"
+ENV_EMBEDDINGS_COHERE_OUTPUT_DIMENSIONS = "HINDSIGHT_API_EMBEDDINGS_COHERE_OUTPUT_DIMENSIONS"
 ENV_RERANKER_COHERE_API_KEY = "HINDSIGHT_API_RERANKER_COHERE_API_KEY"
 ENV_RERANKER_COHERE_MODEL = "HINDSIGHT_API_RERANKER_COHERE_MODEL"
 ENV_RERANKER_COHERE_BASE_URL = "HINDSIGHT_API_RERANKER_COHERE_BASE_URL"
@@ -891,6 +892,7 @@ class HindsightConfig:
     embeddings_cohere_api_key: str | None
     embeddings_cohere_model: str
     embeddings_cohere_base_url: str | None
+    embeddings_cohere_output_dimensions: int | None
     embeddings_openrouter_api_key: str | None
     embeddings_openrouter_model: str
     embeddings_litellm_api_base: str
@@ -1433,6 +1435,9 @@ class HindsightConfig:
             embeddings_cohere_api_key=os.getenv(ENV_EMBEDDINGS_COHERE_API_KEY) or os.getenv(ENV_COHERE_API_KEY),
             embeddings_cohere_model=os.getenv(ENV_EMBEDDINGS_COHERE_MODEL, DEFAULT_EMBEDDINGS_COHERE_MODEL),
             embeddings_cohere_base_url=os.getenv(ENV_EMBEDDINGS_COHERE_BASE_URL) or None,
+            embeddings_cohere_output_dimensions=int(v)
+            if (v := os.getenv(ENV_EMBEDDINGS_COHERE_OUTPUT_DIMENSIONS))
+            else None,
             # OpenRouter embeddings (with fallback to shared OpenRouter key, then LLM key)
             embeddings_openrouter_api_key=os.getenv(ENV_EMBEDDINGS_OPENROUTER_API_KEY)
             or os.getenv(ENV_OPENROUTER_API_KEY)
