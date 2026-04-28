@@ -162,7 +162,7 @@ To switch between backends:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-codex`, `claude-code`, `anthropic`, `gemini`, `groq`, `minimax`, `ollama`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `volcano`, `openrouter`, `none` | `openai` |
+| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-codex`, `claude-code`, `anthropic`, `gemini`, `groq`, `minimax`, `deepseek`, `ollama`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `volcano`, `openrouter`, `none` | `openai` |
 | `HINDSIGHT_API_LLM_API_KEY` | API key for LLM provider | - |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | `gpt-5-mini` |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default |
@@ -254,6 +254,18 @@ export HINDSIGHT_API_LLM_MODEL=doubao-pro-32k
 export HINDSIGHT_API_LLM_PROVIDER=openrouter
 export HINDSIGHT_API_LLM_API_KEY=your-openrouter-api-key
 export HINDSIGHT_API_LLM_MODEL=qwen/qwen3.5-9b
+
+# DeepSeek (OpenAI-compatible, https://api.deepseek.com)
+export HINDSIGHT_API_LLM_PROVIDER=deepseek
+export HINDSIGHT_API_LLM_API_KEY=sk-xxxxxxxxxxxx
+export HINDSIGHT_API_LLM_MODEL=deepseek-v4-flash
+# Notes:
+# - `deepseek-v4-flash` defaults to thinking mode at the API level (treated as
+#   `deepseek-reasoner`). Hindsight handles this transparently; the reflect
+#   agent will not crash with "deepseek-reasoner does not support this
+#   tool_choice".
+# - Use `deepseek-v4-pro` for the higher-quality reasoning route.
+# - Use `deepseek-chat` for the non-thinking alias (faster, cheaper).
 
 # AWS Bedrock (native support - no API key needed, uses AWS credentials)
 export HINDSIGHT_API_LLM_PROVIDER=bedrock

@@ -56,8 +56,7 @@ def _resolve_client(
 
     if url is None:
         raise HindsightPipecatError(
-            "No Hindsight API URL configured. "
-            "Pass client= or hindsight_api_url=, or call configure() first."
+            "No Hindsight API URL configured. Pass client= or hindsight_api_url=, or call configure() first."
         )
 
     kwargs: dict[str, Any] = {"base_url": url, "timeout": 30.0}
@@ -120,12 +119,8 @@ class HindsightMemoryService(FrameProcessor):
         self._bank_id = bank_id
         self._client = _resolve_client(client, hindsight_api_url, api_key)
         config = get_config()
-        self._recall_budget = recall_budget or (
-            config.recall_budget if config else "mid"
-        )
-        self._recall_max_tokens = recall_max_tokens or (
-            config.recall_max_tokens if config else 4096
-        )
+        self._recall_budget = recall_budget or (config.recall_budget if config else "mid")
+        self._recall_max_tokens = recall_max_tokens or (config.recall_max_tokens if config else 4096)
         self._enable_recall = enable_recall
         self._enable_retain = enable_retain
         self._memory_prefix = memory_prefix
@@ -169,9 +164,7 @@ class HindsightMemoryService(FrameProcessor):
                     return content
                 # Multimodal content is a list of parts; extract text parts.
                 if isinstance(content, list):
-                    texts = [
-                        p.get("text", "") for p in content if p.get("type") == "text"
-                    ]
+                    texts = [p.get("text", "") for p in content if p.get("type") == "text"]
                     return " ".join(texts) if texts else None
         return None
 
@@ -239,9 +232,7 @@ class HindsightMemoryService(FrameProcessor):
                 lines.append(f"{i}. {result.text}")
             return "\n".join(lines)
         except Exception as e:
-            logger.warning(
-                f"Hindsight recall failed (continuing without memories): {e}"
-            )
+            logger.warning(f"Hindsight recall failed (continuing without memories): {e}")
             return None
 
     async def _retain(self, content: str) -> None:

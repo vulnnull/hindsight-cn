@@ -448,6 +448,7 @@ PROVIDER_DEFAULT_MODELS = {
     "gemini": "gemini-2.5-flash",
     "groq": "openai/gpt-oss-120b",
     "minimax": "MiniMax-M2.7",
+    "deepseek": "deepseek-v4-flash",
     "ollama": "gemma3:12b",
     "llamacpp": "gemma-4-e2b-it",
     "lmstudio": "local-model",

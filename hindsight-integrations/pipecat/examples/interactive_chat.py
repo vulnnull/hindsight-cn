@@ -37,7 +37,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from hindsight_pipecat import HindsightMemoryService
 from hindsight_pipecat.memory import _MEMORY_MARKER
 
-
 BLUE = "\033[94m"
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
@@ -53,6 +52,7 @@ def banner(label: str, color: str = CYAN) -> None:
 def _make_frame(messages: list[dict]) -> MagicMock:
     """Build a mock OpenAILLMContextFrame (Pipecat's text context carrier)."""
     from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
+
     frame = MagicMock(spec=OpenAILLMContextFrame)
     ctx = MagicMock()
     ctx.messages = messages
@@ -111,7 +111,10 @@ async def main() -> None:
     parser.add_argument("--bank", default=f"demo-{os.environ.get('USER', 'anon')}")
     parser.add_argument("--hindsight-url", default=os.environ.get("HINDSIGHT_API_URL", "http://localhost:8888"))
     parser.add_argument("--hindsight-api-key", default=os.environ.get("HINDSIGHT_API_KEY"))
-    parser.add_argument("--system-prompt", default="You are a friendly voice assistant with long-term memory. Use memories naturally; don't dump them verbatim. Keep responses concise.")
+    parser.add_argument(
+        "--system-prompt",
+        default="You are a friendly voice assistant with long-term memory. Use memories naturally; don't dump them verbatim. Keep responses concise.",
+    )
     args = parser.parse_args()
 
     service = HindsightMemoryService(
