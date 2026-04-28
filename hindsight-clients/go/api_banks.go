@@ -799,7 +799,7 @@ func (r ApiGetBankProfileRequest) Execute() (*BankProfileResponse, *http.Respons
 /*
 GetBankProfile Get memory bank profile
 
-Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
+Get disposition traits and mission for a memory bank. Returns 404 if the bank does not exist.
 
  @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
  @param bankId

@@ -1797,7 +1797,7 @@ class BanksApi:
     ) -> BankProfileResponse:
         """(Deprecated) Get memory bank profile
 
-        Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
+        Get disposition traits and mission for a memory bank. Returns 404 if the bank does not exist.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1870,7 +1870,7 @@ class BanksApi:
     ) -> ApiResponse[BankProfileResponse]:
         """(Deprecated) Get memory bank profile
 
-        Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
+        Get disposition traits and mission for a memory bank. Returns 404 if the bank does not exist.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1943,7 +1943,7 @@ class BanksApi:
     ) -> RESTResponseType:
         """(Deprecated) Get memory bank profile
 
-        Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
+        Get disposition traits and mission for a memory bank. Returns 404 if the bank does not exist.
 
         :param bank_id: (required)
         :type bank_id: str
