@@ -243,11 +243,14 @@ async function ensurePlugin(): Promise<void> {
   const installed = isPluginInstalled();
   const currentVersion = installed ? getInstalledPluginVersion() : null;
   const needsInstall = !installed;
-  const needsUpgrade = installed && currentVersion && !versionGte(currentVersion, MIN_PLUGIN_VERSION);
+  const needsUpgrade =
+    installed && currentVersion && !versionGte(currentVersion, MIN_PLUGIN_VERSION);
 
   if (needsInstall || needsUpgrade) {
     if (needsUpgrade) {
-      p.log.warn(`Hindsight plugin v${currentVersion} is outdated (need >=${MIN_PLUGIN_VERSION}). Upgrading...`);
+      p.log.warn(
+        `Hindsight plugin v${currentVersion} is outdated (need >=${MIN_PLUGIN_VERSION}). Upgrading...`
+      );
     } else {
       p.log.warn("Hindsight plugin not found. Installing...");
     }
