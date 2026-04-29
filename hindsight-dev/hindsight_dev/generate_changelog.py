@@ -633,6 +633,7 @@ def _get_package_name(integration: str) -> str:
         "cloudflare-oauth-proxy": "hindsight-cloudflare-oauth-proxy",
         "openai-agents": "hindsight-openai-agents",
         "pipecat": "hindsight-pipecat",
+        "agentcore": "hindsight-agentcore",
     }
     return packages[integration]
 
@@ -663,6 +664,7 @@ def _integration_display_name(integration: str) -> str:
         "paperclip": "Paperclip",
         "opencode": "OpenCode",
         "pipecat": "Pipecat",
+        "agentcore": "Bedrock AgentCore",
     }
     return names.get(integration, integration)
 
