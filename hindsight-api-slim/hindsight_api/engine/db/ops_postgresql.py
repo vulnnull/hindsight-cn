@@ -299,44 +299,39 @@ class PostgreSQLOps(DataAccessOps):
         rows: list[ResultRow] = []
         for start in range(0, len(lateral_unit_ids), batch_size):
             end = min(start + batch_size, len(lateral_unit_ids))
-            # Each LATERAL arm fetches up to half_limit in each direction
-            # (backward + forward = 2×half_limit).  The outer ROW_NUMBER
-            # picks the half_limit closest overall per source unit, matching
-            # the original query behavior.
+            # Exact v0.5.6 query shape: src.unit_id::text AS from_id,
+            # combined.*, ABS(EXTRACT(...)), ROW_NUMBER PARTITION BY src.unit_id.
             batch_rows = await conn.fetch(
                 f"""
                 SELECT from_id, id, event_date, time_diff_hours FROM (
-                    SELECT sub.from_id, sub.id, sub.event_date, sub.time_diff_hours,
+                    SELECT src.unit_id::text AS from_id, combined.*,
                            ROW_NUMBER() OVER (
-                               PARTITION BY sub.from_id
-                               ORDER BY sub.time_diff_hours
+                               PARTITION BY src.unit_id
+                               ORDER BY combined.time_diff_hours
                            ) AS rn
-                    FROM unnest($1::uuid[], $2::timestamptz[], $3::text[]) AS inp(uid, edate, ftype)
+                    FROM unnest($1::uuid[], $2::timestamptz[], $3::text[])
+                         AS src(unit_id, event_date, fact_type)
                     CROSS JOIN LATERAL (
-                        (
-                            SELECT inp.uid AS from_id, mu.id, mu.event_date,
-                                   EXTRACT(EPOCH FROM (inp.edate - mu.event_date)) / 3600.0 AS time_diff_hours
-                            FROM {mu_table} mu
-                            WHERE mu.bank_id = $4
-                              AND mu.fact_type = inp.ftype
-                              AND mu.event_date <= inp.edate
-                              AND mu.id != inp.uid
-                            ORDER BY mu.event_date DESC
-                            LIMIT $5
-                        )
+                        (SELECT mu.id, mu.event_date,
+                                ABS(EXTRACT(EPOCH FROM mu.event_date - src.event_date)) / 3600.0 AS time_diff_hours
+                         FROM {mu_table} mu
+                         WHERE mu.bank_id = $4
+                           AND mu.fact_type = src.fact_type
+                           AND mu.event_date <= src.event_date
+                           AND mu.id != src.unit_id
+                         ORDER BY mu.event_date DESC
+                         LIMIT $5)
                         UNION ALL
-                        (
-                            SELECT inp.uid AS from_id, mu.id, mu.event_date,
-                                   EXTRACT(EPOCH FROM (mu.event_date - inp.edate)) / 3600.0 AS time_diff_hours
-                            FROM {mu_table} mu
-                            WHERE mu.bank_id = $4
-                              AND mu.fact_type = inp.ftype
-                              AND mu.event_date > inp.edate
-                              AND mu.id != inp.uid
-                            ORDER BY mu.event_date ASC
-                            LIMIT $5
-                        )
-                    ) sub
+                        (SELECT mu.id, mu.event_date,
+                                ABS(EXTRACT(EPOCH FROM mu.event_date - src.event_date)) / 3600.0 AS time_diff_hours
+                         FROM {mu_table} mu
+                         WHERE mu.bank_id = $4
+                           AND mu.fact_type = src.fact_type
+                           AND mu.event_date > src.event_date
+                           AND mu.id != src.unit_id
+                         ORDER BY mu.event_date ASC
+                         LIMIT $5)
+                    ) combined
                 ) ranked
                 WHERE rn <= $5
                 """,
@@ -388,56 +383,60 @@ class PostgreSQLOps(DataAccessOps):
         ml_table: str,
         mu_table: str,
     ) -> str:
-        # DISTINCT ON deduplicates by mu.id (keeping the best weight), but
-        # forces ORDER BY mu.id first.  Wrap in a subquery to re-sort by score
-        # so the LIMIT keeps the globally highest-scored rows (matching the
-        # original GROUP BY + MAX(weight) + ORDER BY score DESC behavior).
+        # Exact v0.5.6 query shape: GROUP BY + MAX(weight) for semantic,
+        # DISTINCT ON for causal.
         return f"""
-            sem_deduped AS (
-                SELECT DISTINCT ON (mu.id)
-                       mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
-                       mu.occurred_end, mu.mentioned_at,
-                       mu.fact_type, mu.document_id, mu.chunk_id, mu.tags, mu.proof_count,
-                       ml.weight::float AS score,
-                       'semantic'::text AS source
+            semantic_expanded AS (
+                SELECT
+                    id, text, context, event_date, occurred_start,
+                    occurred_end, mentioned_at,
+                    fact_type, document_id, chunk_id, tags, proof_count,
+                    MAX(weight) AS score,
+                    'semantic'::text AS source
                 FROM (
-                    SELECT ml.to_unit_id AS id, ml.weight
+                    SELECT
+                        mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
+                        mu.occurred_end, mu.mentioned_at,
+                        mu.fact_type, mu.document_id, mu.chunk_id, mu.tags, mu.proof_count,
+                        ml.weight
                     FROM {ml_table} ml
+                    JOIN {mu_table} mu ON mu.id = ml.to_unit_id
                     WHERE ml.from_unit_id = ANY($1::uuid[])
                       AND ml.link_type = 'semantic'
+                      AND mu.fact_type = $2
+                      AND mu.id != ALL($1::uuid[])
                     UNION ALL
-                    SELECT ml.from_unit_id AS id, ml.weight
+                    SELECT
+                        mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
+                        mu.occurred_end, mu.mentioned_at,
+                        mu.fact_type, mu.document_id, mu.chunk_id, mu.tags, mu.proof_count,
+                        ml.weight
                     FROM {ml_table} ml
+                    JOIN {mu_table} mu ON mu.id = ml.from_unit_id
                     WHERE ml.to_unit_id = ANY($1::uuid[])
                       AND ml.link_type = 'semantic'
-                ) ml
-                JOIN {mu_table} mu ON mu.id = ml.id
-                WHERE mu.fact_type = $2
-                  AND mu.id != ALL($1::uuid[])
-                ORDER BY mu.id, ml.weight DESC
-            ),
-            semantic_expanded AS (
-                SELECT * FROM sem_deduped
+                      AND mu.fact_type = $2
+                      AND mu.id != ALL($1::uuid[])
+                ) sem_raw
+                GROUP BY id, text, context, event_date, occurred_start,
+                         occurred_end, mentioned_at,
+                         fact_type, document_id, chunk_id, tags, proof_count
                 ORDER BY score DESC
                 LIMIT $3
             ),
-            causal_deduped AS (
+            causal_expanded AS (
                 SELECT DISTINCT ON (mu.id)
-                       mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
-                       mu.occurred_end, mu.mentioned_at,
-                       mu.fact_type, mu.document_id, mu.chunk_id, mu.tags, mu.proof_count,
-                       ml.weight::float AS score,
-                       'causal'::text AS source
+                    mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
+                    mu.occurred_end, mu.mentioned_at,
+                    mu.fact_type, mu.document_id, mu.chunk_id, mu.tags, mu.proof_count,
+                    ml.weight AS score,
+                    'causal'::text AS source
                 FROM {ml_table} ml
                 JOIN {mu_table} mu ON ml.to_unit_id = mu.id
                 WHERE ml.from_unit_id = ANY($1::uuid[])
                   AND ml.link_type IN ('causes', 'caused_by', 'enables', 'prevents')
                   AND mu.fact_type = $2
                 ORDER BY mu.id, ml.weight DESC
-            ),
-            causal_expanded AS (
-                SELECT * FROM causal_deduped
-                ORDER BY score DESC
                 LIMIT $3
             )"""
 
@@ -505,54 +504,48 @@ class PostgreSQLOps(DataAccessOps):
             budget,
         )
 
-        # Semantic + causal expansion (same pattern as build_semantic_causal_cte
-        # but hardcoded to fact_type='observation').
-        # Wrap DISTINCT ON in subqueries to re-sort by score before LIMIT.
+        # Exact v0.5.6 query shape: GROUP BY + MAX(weight) for semantic,
+        # DISTINCT ON for causal, hardcoded to fact_type='observation'.
         sem_causal_rows = await conn.fetch(
             f"""
-            WITH
-            sem_deduped AS (
-                SELECT DISTINCT ON (mu.id)
-                       mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
-                       mu.occurred_end, mu.mentioned_at,
-                       mu.fact_type, mu.document_id, mu.chunk_id, mu.tags, mu.proof_count,
-                       ml.weight::float AS score,
-                       'semantic'::text AS source
+            WITH semantic_expanded AS (
+                SELECT
+                    id, text, context, event_date, occurred_start,
+                    occurred_end, mentioned_at,
+                    fact_type, document_id, chunk_id, tags, proof_count,
+                    MAX(weight) AS score,
+                    'semantic'::text AS source
                 FROM (
-                    SELECT ml.to_unit_id AS id, ml.weight
-                    FROM {ml_table} ml
+                    SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
+                           mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id,
+                           mu.chunk_id, mu.tags, mu.proof_count, ml.weight
+                    FROM {ml_table} ml JOIN {mu_table} mu ON mu.id = ml.to_unit_id
                     WHERE ml.from_unit_id = ANY($1::uuid[])
-                      AND ml.link_type = 'semantic'
+                      AND ml.link_type = 'semantic' AND mu.fact_type = 'observation'
+                      AND mu.id != ALL($1::uuid[])
                     UNION ALL
-                    SELECT ml.from_unit_id AS id, ml.weight
-                    FROM {ml_table} ml
+                    SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
+                           mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id,
+                           mu.chunk_id, mu.tags, mu.proof_count, ml.weight
+                    FROM {ml_table} ml JOIN {mu_table} mu ON mu.id = ml.from_unit_id
                     WHERE ml.to_unit_id = ANY($1::uuid[])
-                      AND ml.link_type = 'semantic'
-                ) ml
-                JOIN {mu_table} mu ON mu.id = ml.id
-                WHERE mu.fact_type = 'observation'
-                  AND mu.id != ALL($1::uuid[])
-                ORDER BY mu.id, ml.weight DESC
+                      AND ml.link_type = 'semantic' AND mu.fact_type = 'observation'
+                      AND mu.id != ALL($1::uuid[])
+                ) sem_raw
+                GROUP BY id, text, context, event_date, occurred_start, occurred_end,
+                         mentioned_at, fact_type, document_id, chunk_id, tags, proof_count
+                ORDER BY score DESC LIMIT $2
             ),
-            semantic_expanded AS (
-                SELECT * FROM sem_deduped ORDER BY score DESC LIMIT $2
-            ),
-            causal_deduped AS (
+            causal_expanded AS (
                 SELECT DISTINCT ON (mu.id)
-                       mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
-                       mu.occurred_end, mu.mentioned_at,
-                       mu.fact_type, mu.document_id, mu.chunk_id, mu.tags, mu.proof_count,
-                       ml.weight::float AS score,
-                       'causal'::text AS source
-                FROM {ml_table} ml
-                JOIN {mu_table} mu ON ml.to_unit_id = mu.id
+                    mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
+                    mu.occurred_end, mu.mentioned_at, mu.fact_type, mu.document_id,
+                    mu.chunk_id, mu.tags, mu.proof_count, ml.weight AS score, 'causal'::text AS source
+                FROM {ml_table} ml JOIN {mu_table} mu ON ml.to_unit_id = mu.id
                 WHERE ml.from_unit_id = ANY($1::uuid[])
                   AND ml.link_type IN ('causes', 'caused_by', 'enables', 'prevents')
                   AND mu.fact_type = 'observation'
-                ORDER BY mu.id, ml.weight DESC
-            ),
-            causal_expanded AS (
-                SELECT * FROM causal_deduped ORDER BY score DESC LIMIT $2
+                ORDER BY mu.id, ml.weight DESC LIMIT $2
             )
             SELECT * FROM semantic_expanded
             UNION ALL
