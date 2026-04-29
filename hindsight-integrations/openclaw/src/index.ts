@@ -15,15 +15,15 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import * as log from "./logger.js";
 import { configureLogger, setApiLogger, stopLogger } from "./logger.js";
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
-import { extname } from "path";
+import { mkdirSync } from "fs";
+import { createRequire } from "module";
 import { homedir } from "os";
 import { createKnowledgeTools, TOOL_NAMES } from "@vectorize-io/hindsight-agent-sdk";
 
 function loadPackageVersion(): string {
   try {
-    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+    const require = createRequire(import.meta.url);
+    const pkg = require("../package.json") as { version?: string };
     return pkg.version ?? "0.0.0";
   } catch {
     return "0.0.0";
