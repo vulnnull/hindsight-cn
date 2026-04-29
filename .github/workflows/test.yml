@@ -51,6 +51,7 @@ jobs:
       integrations-lockfiles: ${{ steps.filter.outputs.integrations-lockfiles }}
       integrations-openai-agents: ${{ steps.filter.outputs.integrations-openai-agents }}
       integrations-pipecat: ${{ steps.filter.outputs.integrations-pipecat }}
+      integrations-agentcore: ${{ steps.filter.outputs.integrations-agentcore }}
       dev: ${{ steps.filter.outputs.dev }}
       ci: ${{ steps.filter.outputs.ci }}
       # Secrets are available for internal PRs, pull_request_review, and workflow_dispatch.
@@ -139,6 +140,8 @@ jobs:
             - 'hindsight-integrations/openai-agents/**'
           integrations-pipecat:
             - 'hindsight-integrations/pipecat/**'
+          integrations-agentcore:
+            - 'hindsight-integrations/agentcore/**'
           dev:
             - 'hindsight-dev/**'
           ci:
@@ -2246,6 +2249,43 @@ jobs:
       working-directory: ./hindsight-integrations/openai-agents
       run: uv run pytest tests -v
 
+  test-agentcore-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name != 'pull_request_review' &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-agentcore == 'true' ||
+      needs.detect-changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        prune-cache: false
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version-file: ".python-version"
+
+    - name: Build agentcore integration
+      working-directory: ./hindsight-integrations/agentcore
+      run: uv build
+
+    - name: Install dependencies
+      working-directory: ./hindsight-integrations/agentcore
+      run: uv sync --frozen
+
+    - name: Run tests
+      working-directory: ./hindsight-integrations/agentcore
+      run: uv run pytest tests -v
+
   test-pip-slim:
     needs: [detect-changes]
     if: >-
@@ -3092,6 +3132,7 @@ jobs:
       - test-litellm-integration
       - test-pydantic-ai-integration
       - test-llamaindex-integration
+      - test-agentcore-integration
       - test-pip-slim
       - test-embed
       - test-embed-windows

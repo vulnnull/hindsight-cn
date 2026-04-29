@@ -276,6 +276,12 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'link',
+          href: '/sdks/integrations/agentcore',
+          label: 'AgentCore Runtime',
+          customProps: { icon: '/img/icons/agentcore.png' },
+        },
+        {
+          type: 'link',
           href: '/sdks/integrations/ag2',
           label: 'AG2',
           customProps: { icon: '/img/icons/ag2.svg' },

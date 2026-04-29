@@ -231,6 +231,16 @@
       "icon": "/img/icons/pipecat.png"
     },
     {
+      "id": "agentcore",
+      "name": "Bedrock AgentCore",
+      "description": "Persistent memory for Amazon Bedrock AgentCore Runtime agents. Memory survives ephemeral Runtime sessions so agents remember users, decisions, and context across reprovisioning.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/agentcore",
+      "icon": "/img/icons/agentcore.png"
+    },
+    {
       "id": "hindclaw",
       "name": "HindClaw",
       "description": "Production memory infrastructure for AI agents — server-side access control via Hindsight extensions, Terraform provider for users/groups/banks/permissions, and an OpenClaw plugin with auto-managed embed.",
