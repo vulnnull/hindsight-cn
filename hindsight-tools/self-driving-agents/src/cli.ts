@@ -88,21 +88,16 @@ async function resolveAgentDir(
   const parts = input.split("/");
   let org: string, repo: string, subpath: string;
 
-  if (parts.length === 1) {
-    // Just a name → default repo
+  if (parts.length <= 2) {
+    // "name" or "name/subpath" → default repo
     org = "vectorize-io";
     repo = "self-driving-agents";
-    subpath = parts[0];
-  } else if (parts.length >= 3) {
+    subpath = input;
+  } else {
     // org/repo/path...
     org = parts[0];
     repo = parts[1];
     subpath = parts.slice(2).join("/");
-  } else {
-    throw new Error(
-      `Invalid agent reference: '${input}'\n` +
-        `  Use: <name>, <org>/<repo>/<path>, or a local path (./dir)`
-    );
   }
 
   spinner.start(`Fetching ${color.cyan(`${org}/${repo}/${subpath}`)} from GitHub...`);
