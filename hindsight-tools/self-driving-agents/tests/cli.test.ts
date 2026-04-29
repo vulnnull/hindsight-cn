@@ -159,6 +159,36 @@ describe("isLocalPath", () => {
   it("rejects GitHub-style references", () => {
     expect(isLocalPath("marketing")).toBe(false);
     expect(isLocalPath("org/repo/path")).toBe(false);
+    expect(isLocalPath("marketing/seo")).toBe(false);
+  });
+});
+
+describe("deriveDefaultName", () => {
+  // Mirrors the logic in resolveAgentDir:
+  // - GitHub refs: subpath with / → hyphens (marketing/seo → marketing-seo)
+  // - Local paths: basename of resolved dir
+
+  function deriveFromGitHub(input: string): string {
+    const parts = input.split("/");
+    const subpath = parts.length <= 2 ? input : parts.slice(2).join("/");
+    return subpath.replace(/\//g, "-");
+  }
+
+  it("single name stays as-is", () => {
+    expect(deriveFromGitHub("marketing")).toBe("marketing");
+  });
+
+  it("two segments become hyphenated", () => {
+    expect(deriveFromGitHub("marketing/seo")).toBe("marketing-seo");
+  });
+
+  it("three+ segments treat first two as org/repo", () => {
+    // marketing/seo/technical → org=marketing, repo=seo, path=technical
+    expect(deriveFromGitHub("marketing/seo/technical")).toBe("technical");
+  });
+
+  it("org/repo with deep path uses hyphenated path", () => {
+    expect(deriveFromGitHub("my-org/my-repo/agents/seo")).toBe("agents-seo");
   });
 });
 
