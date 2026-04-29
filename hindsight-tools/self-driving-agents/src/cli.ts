@@ -158,6 +158,29 @@ function enableKnowledgeTools(): void {
   writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
 }
 
+const MIN_PLUGIN_VERSION = "0.7.0";
+
+function getInstalledPluginVersion(): string | null {
+  try {
+    // Check the installed plugin's package.json
+    const extDir = join(homedir(), ".openclaw", "extensions", "hindsight-openclaw");
+    const pkgPath = join(extDir, "package.json");
+    if (!existsSync(pkgPath)) return null;
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+    return pkg.version || null;
+  } catch {
+    return null;
+  }
+}
+
+function versionGte(current: string, required: string): boolean {
+  const [aMaj, aMin, aPat] = current.split(".").map(Number);
+  const [bMaj, bMin, bPat] = required.split(".").map(Number);
+  if (aMaj !== bMaj) return aMaj > bMaj;
+  if (aMin !== bMin) return aMin > bMin;
+  return aPat >= bPat;
+}
+
 function isPluginInstalled(): boolean {
   const config = readOpenClawConfig();
   if (!config) return false;
@@ -217,8 +240,17 @@ function parseAgentsJson(raw: string): any[] {
 }
 
 async function ensurePlugin(): Promise<void> {
-  if (!isPluginInstalled()) {
-    p.log.warn("Hindsight plugin not found. Installing...");
+  const installed = isPluginInstalled();
+  const currentVersion = installed ? getInstalledPluginVersion() : null;
+  const needsInstall = !installed;
+  const needsUpgrade = installed && currentVersion && !versionGte(currentVersion, MIN_PLUGIN_VERSION);
+
+  if (needsInstall || needsUpgrade) {
+    if (needsUpgrade) {
+      p.log.warn(`Hindsight plugin v${currentVersion} is outdated (need >=${MIN_PLUGIN_VERSION}). Upgrading...`);
+    } else {
+      p.log.warn("Hindsight plugin not found. Installing...");
+    }
     try {
       execSync("openclaw plugins install @vectorize-io/hindsight-openclaw", { stdio: "inherit" });
     } catch {
