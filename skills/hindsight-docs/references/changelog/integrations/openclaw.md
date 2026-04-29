@@ -8,6 +8,10 @@ import PageHero from '@site/src/components/PageHero';
 
 ← OpenClaw integration
 
+## [0.7.2](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.7.2)
+
+*This release contains internal maintenance and infrastructure changes only.*
+
 ## [0.7.1](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.7.1)
 
 **Bug Fixes**
