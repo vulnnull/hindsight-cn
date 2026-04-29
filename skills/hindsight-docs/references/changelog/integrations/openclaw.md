@@ -8,6 +8,12 @@ import PageHero from '@site/src/components/PageHero';
 
 ← OpenClaw integration
 
+## [0.7.1](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.7.1)
+
+**Bug Fixes**
+
+- Fix OpenClaw integration upgrades by using the published agent-sdk dependency and updating the plugin configuration schema.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/c1924e9d" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>c1924e9d</a>
+
 ## [0.7.0](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.7.0)
 
 **Features**
