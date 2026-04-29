@@ -158,7 +158,7 @@ function enableKnowledgeTools(): void {
   writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
 }
 
-const MIN_PLUGIN_VERSION = "0.7.0";
+const MIN_PLUGIN_VERSION = "0.7.1";
 
 function getInstalledPluginVersion(): string | null {
   try {
@@ -184,10 +184,12 @@ function versionGte(current: string, required: string): boolean {
 function isPluginInstalled(): boolean {
   const config = readOpenClawConfig();
   if (!config) return false;
-  return (
+  const hasConfig =
     config.plugins?.entries?.["hindsight-openclaw"]?.enabled !== false &&
-    config.plugins?.entries?.["hindsight-openclaw"] !== undefined
-  );
+    config.plugins?.entries?.["hindsight-openclaw"] !== undefined;
+  // Also check the extension dir actually exists (may have been deleted during a failed upgrade)
+  const extDir = join(homedir(), ".openclaw", "extensions", "hindsight-openclaw");
+  return hasConfig && existsSync(extDir);
 }
 
 function isPluginConfigured(): boolean {
@@ -255,18 +257,29 @@ async function ensurePlugin(): Promise<void> {
       p.log.warn("Hindsight plugin not found. Installing...");
     }
     try {
-      if (needsUpgrade) {
-        // Remove old version first — openclaw doesn't support in-place upgrade
-        const extDir = join(homedir(), ".openclaw", "extensions", "hindsight-openclaw");
-        rmSync(extDir, { recursive: true, force: true });
+      // Remove old extension if present — openclaw doesn't support in-place upgrade
+      const extDir = join(homedir(), ".openclaw", "extensions", "hindsight-openclaw");
+      rmSync(extDir, { recursive: true, force: true });
+
+      // Temporarily clear plugins.slots.memory so openclaw doesn't reject
+      // the config while the extension is missing
+      const cfg = readOpenClawConfig();
+      if (cfg?.plugins?.slots?.memory === "hindsight-openclaw") {
+        delete cfg.plugins.slots.memory;
+        writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n");
       }
+
       execSync("openclaw plugins install @vectorize-io/hindsight-openclaw", { stdio: "inherit" });
+      const newVersion = getInstalledPluginVersion();
+      p.log.success(`Hindsight plugin v${newVersion} installed`);
     } catch {
       p.cancel(
         "Failed to install plugin. Run manually:\n  openclaw plugins install @vectorize-io/hindsight-openclaw"
       );
       process.exit(1);
     }
+  } else if (currentVersion) {
+    p.log.info(`Hindsight plugin v${currentVersion}`);
   }
 
   if (!isPluginConfigured()) {
@@ -450,19 +463,25 @@ async function main() {
 
     if (harness === "openclaw") {
       try {
-        const listOut = execSync("openclaw agents list --json 2>/dev/null", { encoding: "utf-8" });
+        const listOut = execSync("openclaw agents list --json", {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
         const agents = parseAgentsJson(listOut);
         if (!agents.some((a: any) => a.name === agentId || a.id === agentId)) {
           execSync(`openclaw agents add ${agentId} --workspace ${workspaceDir} --non-interactive`, {
-            stdio: "pipe",
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"],
           });
           p.log.success(`Agent '${agentId}' created`);
         } else {
           p.log.info(`Agent '${agentId}' already exists`);
         }
-      } catch {
+      } catch (err: any) {
+        const stderr = err?.stderr?.toString?.()?.trim() || "";
+        const msg = stderr || err?.message || String(err);
         p.log.warn(
-          `Create agent manually:\n  openclaw agents add ${agentId} --workspace ${workspaceDir} --non-interactive`
+          `Failed to manage agent: ${msg}\n  Create manually:\n  openclaw agents add ${agentId} --workspace ${workspaceDir} --non-interactive`
         );
       }
     }
