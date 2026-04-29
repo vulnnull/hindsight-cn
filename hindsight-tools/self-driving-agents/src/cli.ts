@@ -77,11 +77,11 @@ function isLocalPath(input: string): boolean {
 async function resolveAgentDir(
   input: string,
   spinner: ReturnType<typeof p.spinner>
-): Promise<{ dir: string; source: string; cleanup?: () => void }> {
+): Promise<{ dir: string; source: string; defaultName: string; cleanup?: () => void }> {
   if (isLocalPath(input)) {
     const dir = resolve(input.replace(/^~/, homedir()));
     if (!existsSync(dir)) throw new Error(`Directory not found: ${dir}`);
-    return { dir, source: dir };
+    return { dir, source: dir, defaultName: basename(dir) };
   }
 
   // Parse GitHub reference: "name" or "org/repo/path/to/agent"
@@ -127,9 +127,10 @@ async function resolveAgentDir(
   }
 
   const source = `github.com/${org}/${repo}/${subpath}`;
+  const defaultName = subpath.replace(/\//g, "-");
   spinner.stop(`Fetched ${color.cyan(source)}`);
 
-  return { dir, source, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
+  return { dir, source, defaultName, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
 }
 
 // ── Skill ───────────────────────────────────────────────
@@ -319,10 +320,10 @@ async function main() {
 
   // Step 0: Resolve agent directory (local or GitHub)
   const spin = p.spinner();
-  const { dir, source, cleanup } = await resolveAgentDir(dirArg, spin);
+  const { dir, source, defaultName, cleanup } = await resolveAgentDir(dirArg, spin);
 
   try {
-    const agentId = agentName || basename(dir);
+    const agentId = agentName || defaultName;
 
     // Step 1: Ensure plugin
     if (harness === "openclaw") {
