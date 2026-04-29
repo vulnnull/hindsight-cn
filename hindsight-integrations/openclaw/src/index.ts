@@ -1881,7 +1881,6 @@ export default function (api: MoltbotPluginAPI) {
         debug(
           `[Hindsight] before_agent_start - bank: ${bankId}, channel: ${resolvedCtx.messageProvider}/${resolvedCtx.channelId}`
         );
-
       } catch (error) {
         log.warn(`before_agent_start identity resolution error: ${error}`);
       }
@@ -2377,7 +2376,7 @@ ${memoriesFormatted}
             description: t.description,
             parameters: t.parameters,
             async execute(_id: string, params: Record<string, unknown>) {
-              return { ...await t.execute(params), details: {} };
+              return { ...(await t.execute(params)), details: {} };
             },
           }));
         };
