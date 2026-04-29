@@ -48,6 +48,7 @@ VALID_INTEGRATIONS = [
     "cloudflare-oauth-proxy",
     "openai-agents",
     "pipecat",
+    "agentcore",
 ]
 
 
