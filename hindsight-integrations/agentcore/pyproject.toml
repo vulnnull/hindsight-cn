@@ -1,6 +1,6 @@
 [project]
 name = "hindsight-agentcore"
-version = "0.1.0"
+version = "0.1.1"
 description = "Persistent memory for Amazon Bedrock AgentCore Runtime agents using Hindsight"
 readme = "README.md"
 requires-python = ">=3.10"
