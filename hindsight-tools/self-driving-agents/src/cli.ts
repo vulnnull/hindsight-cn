@@ -158,7 +158,7 @@ function enableKnowledgeTools(): void {
   writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
 }
 
-const MIN_PLUGIN_VERSION = "0.7.1";
+const MIN_PLUGIN_VERSION = "0.7.2";
 
 function getInstalledPluginVersion(): string | null {
   try {
