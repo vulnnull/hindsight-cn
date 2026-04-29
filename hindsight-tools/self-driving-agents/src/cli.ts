@@ -255,6 +255,11 @@ async function ensurePlugin(): Promise<void> {
       p.log.warn("Hindsight plugin not found. Installing...");
     }
     try {
+      if (needsUpgrade) {
+        // Remove old version first — openclaw doesn't support in-place upgrade
+        const extDir = join(homedir(), ".openclaw", "extensions", "hindsight-openclaw");
+        rmSync(extDir, { recursive: true, force: true });
+      }
       execSync("openclaw plugins install @vectorize-io/hindsight-openclaw", { stdio: "inherit" });
     } catch {
       p.cancel(
