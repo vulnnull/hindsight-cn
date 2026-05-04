@@ -26,40 +26,9 @@ from hindsight_api.engine.query_analyzer import DateparserQueryAnalyzer
 from hindsight_api.engine.task_backend import SyncTaskBackend
 
 
-class _TestEmbeddings:
-    provider_name = "test"
-    dimension = 384
-
-    async def initialize(self) -> None:
-        return None
-
-    def encode(self, texts: list[str]) -> list[list[float]]:
-        return [[0.0] * self.dimension for _ in texts]
-
-
-class _TestCrossEncoder:
-    provider_name = "test"
-
-    async def initialize(self) -> None:
-        return None
-
-    async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
-        return [1.0 for _ in pairs]
-
-
 @pytest.fixture(scope="function")
 def request_context():
     return RequestContext()
-
-
-@pytest.fixture(scope="function")
-def embeddings():
-    return _TestEmbeddings()
-
-
-@pytest.fixture(scope="function")
-def cross_encoder():
-    return _TestCrossEncoder()
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -175,13 +144,17 @@ async def test_async_batch_retain_tracks_all_document_ids_with_none_provider(non
         contents=contents,
         request_context=request_context,
     )
-    await asyncio.sleep(0.1)
 
-    status = await none_memory.get_operation_status(
-        bank_id=bank_id,
-        operation_id=result["operation_id"],
-        request_context=request_context,
-    )
+    # Poll until the async operation completes (avoid flaky sleep)
+    for _ in range(50):
+        status = await none_memory.get_operation_status(
+            bank_id=bank_id,
+            operation_id=result["operation_id"],
+            request_context=request_context,
+        )
+        if status["status"] in ("completed", "failed"):
+            break
+        await asyncio.sleep(0.1)
     assert status["status"] == "completed", status
 
     alpha = await none_memory.get_document("doc-alpha", bank_id, request_context=request_context)

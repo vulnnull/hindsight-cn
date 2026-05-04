@@ -1311,6 +1311,9 @@ async def _streaming_retain_batch(
                     )
                     committed_doc_ids = meta.get("facts_committed_document_ids") or []
                     document_ids = meta.get("document_ids") or []
+                    # Legacy path: operations created before per-document checkpoint
+                    # tracking only wrote facts_committed=true without document IDs.
+                    # Treat those as committed only for single-doc operations.
                     legacy_single_doc_checkpoint = (
                         meta.get("facts_committed")
                         and not committed_doc_ids
@@ -1379,6 +1382,9 @@ async def _streaming_retain_batch(
         if operation_id and all_unit_ids:
             try:
                 async with acquire_with_retry(pool) as conn:
+                    # Append effective_doc_id to the committed document set if not
+                    # already present, so multi-doc batches track each document
+                    # independently for crash recovery.
                     await conn.execute(
                         f"""
                         UPDATE {fq_table("async_operations")}
