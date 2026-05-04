@@ -311,7 +311,7 @@ export class ControlPlaneClient {
   async getMemoriesTimeseries(
     bankId: string,
     period: string,
-    timeField: "created_at" | "mentioned_at" | "occurred_start" = "created_at",
+    timeField: "created_at" | "mentioned_at" | "occurred_start" = "created_at"
   ) {
     return this.fetchApi<{
       bank_id: string;
@@ -327,8 +327,8 @@ export class ControlPlaneClient {
     }>(
       bankStatsApi(
         bankId,
-        `/memories-timeseries?period=${encodeURIComponent(period)}&time_field=${encodeURIComponent(timeField)}`,
-      ),
+        `/memories-timeseries?period=${encodeURIComponent(period)}&time_field=${encodeURIComponent(timeField)}`
+      )
     );
   }
 
