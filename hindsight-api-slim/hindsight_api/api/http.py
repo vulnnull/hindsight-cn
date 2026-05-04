@@ -5425,29 +5425,17 @@ def _register_routes(app: FastAPI):
     ):
         """Register a webhook for a bank."""
         try:
-            backend = await app.state.memory._get_backend()
-            from hindsight_api.engine.db_utils import acquire_with_retry
-            from hindsight_api.engine.memory_engine import fq_table
-            from hindsight_api.engine.retain import bank_utils
-
-            # Ensure the bank row exists before inserting into webhooks (FK constraint).
-            _, created = await bank_utils.get_or_create_bank_profile(backend, bank_id)
-            if created:
-                await app.state.memory._apply_default_bank_template(bank_id, request_context)
-
             webhook_id = uuid.uuid4()
-            async with acquire_with_retry(backend) as conn:
-                row = await backend.ops.create_webhook(
-                    conn,
-                    fq_table("webhooks"),
-                    webhook_id,
-                    bank_id,
-                    request.url,
-                    request.secret,
-                    request.event_types,
-                    request.enabled,
-                    request.http_config.model_dump_json(),
-                )
+            row = await app.state.memory.create_webhook(
+                bank_id,
+                webhook_id=webhook_id,
+                url=request.url,
+                secret=request.secret,
+                event_types=request.event_types,
+                enabled=request.enabled,
+                http_config_json=request.http_config.model_dump_json(),
+                request_context=request_context,
+            )
 
             event_types_val = row["event_types"] if row else []
             if isinstance(event_types_val, str):
@@ -5496,16 +5484,10 @@ def _register_routes(app: FastAPI):
     ):
         """List webhooks for a bank."""
         try:
-            backend = await app.state.memory._get_backend()
-            from hindsight_api.engine.db_utils import acquire_with_retry
-            from hindsight_api.engine.memory_engine import fq_table
-
-            async with acquire_with_retry(backend) as conn:
-                rows = await backend.ops.list_webhooks_for_bank(
-                    conn,
-                    fq_table("webhooks"),
-                    bank_id,
-                )
+            rows = await app.state.memory.list_webhooks(
+                bank_id,
+                request_context=request_context,
+            )
 
             def _parse_webhook_row(row):
                 event_types_val = row["event_types"]
@@ -5558,17 +5540,11 @@ def _register_routes(app: FastAPI):
     ):
         """Delete a webhook."""
         try:
-            backend = await app.state.memory._get_backend()
-            from hindsight_api.engine.db_utils import acquire_with_retry
-            from hindsight_api.engine.memory_engine import fq_table
-
-            async with acquire_with_retry(backend) as conn:
-                deleted = await backend.ops.delete_webhook(
-                    conn,
-                    fq_table("webhooks"),
-                    uuid.UUID(webhook_id),
-                    bank_id,
-                )
+            deleted = await app.state.memory.delete_webhook(
+                bank_id,
+                uuid.UUID(webhook_id),
+                request_context=request_context,
+            )
             if not deleted:
                 raise HTTPException(status_code=404, detail="Webhook not found")
             return DeleteResponse(success=True)
@@ -5598,10 +5574,6 @@ def _register_routes(app: FastAPI):
     ):
         """Update a webhook's fields (PATCH semantics — only sent fields are updated)."""
         try:
-            backend = await app.state.memory._get_backend()
-            from hindsight_api.engine.db_utils import acquire_with_retry
-            from hindsight_api.engine.memory_engine import fq_table
-
             set_clauses: list[str] = []
             params: list = [uuid.UUID(webhook_id), bank_id]
 
@@ -5625,15 +5597,13 @@ def _register_routes(app: FastAPI):
             if not set_clauses:
                 raise HTTPException(status_code=422, detail="No fields provided to update")
 
-            async with acquire_with_retry(backend) as conn:
-                row = await backend.ops.update_webhook(
-                    conn,
-                    fq_table("webhooks"),
-                    uuid.UUID(webhook_id),
-                    bank_id,
-                    set_clauses,
-                    params,
-                )
+            row = await app.state.memory.update_webhook(
+                bank_id,
+                uuid.UUID(webhook_id),
+                set_clauses=set_clauses,
+                params=params,
+                request_context=request_context,
+            )
             if not row:
                 raise HTTPException(status_code=404, detail="Webhook not found")
 
@@ -5687,28 +5657,16 @@ def _register_routes(app: FastAPI):
     ):
         """List deliveries for a specific webhook, newest first. Use next_cursor for pagination."""
         try:
-            backend = await app.state.memory._get_backend()
-            from hindsight_api.engine.db_utils import acquire_with_retry
-            from hindsight_api.engine.memory_engine import fq_table
-
-            async with acquire_with_retry(backend) as conn:
-                # Verify webhook belongs to this bank
-                webhook_row = await conn.fetchrow(
-                    f"SELECT id FROM {fq_table('webhooks')} WHERE id = $1 AND bank_id = $2",
+            try:
+                rows = await app.state.memory.list_webhook_deliveries(
+                    bank_id,
                     uuid.UUID(webhook_id),
-                    bank_id,
+                    limit=limit,
+                    cursor=cursor,
+                    request_context=request_context,
                 )
-                if not webhook_row:
-                    raise HTTPException(status_code=404, detail="Webhook not found")
-
-                rows = await backend.ops.list_webhook_deliveries(
-                    conn,
-                    fq_table("async_operations"),
-                    webhook_id,
-                    bank_id,
-                    limit,
-                    cursor,
-                )
+            except LookupError:
+                raise HTTPException(status_code=404, detail="Webhook not found")
 
             has_more = len(rows) > limit
             page = rows[:limit]

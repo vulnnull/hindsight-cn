@@ -8819,6 +8819,198 @@ class MemoryEngine(MemoryEngineInterface):
         # Return updated profile
         return await self.get_bank_profile(bank_id, request_context=request_context)
 
+    # =========================================================================
+    # Webhook configuration methods
+    #
+    # These wrap the raw backend.ops.* calls used to be invoked directly from
+    # the HTTP layer with ``fq_table("webhooks")``. Computing the fully-qualified
+    # table name from the HTTP layer evaluates ``fq_table`` before the schema
+    # contextvar is set, which means under deployments that resolve a
+    # per-request target schema (multi-target-schema routing) the webhook rows
+    # would land in the default schema while the rest of the bank's data lives
+    # in a per-target schema. The fire path uses the bank's resolved schema
+    # and would silently never see those webhook rows.
+    #
+    # Routing through engine methods that call ``_authenticate_tenant`` first
+    # ensures ``fq_table`` resolves to the same schema used by retain,
+    # consolidate, and every other bank-scoped operation.
+    # =========================================================================
+
+    async def create_webhook(
+        self,
+        bank_id: str,
+        *,
+        webhook_id: uuid.UUID,
+        url: str,
+        secret: str | None,
+        event_types: list[str],
+        enabled: bool,
+        http_config_json: str,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """Insert a webhook row in the bank's resolved schema.
+
+        Authenticates the tenant first so ``fq_table("webhooks")`` resolves to
+        the same schema as the rest of the bank's data.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="create_webhook", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+
+        backend = await self._get_backend()
+
+        # Ensure the bank row exists before inserting into webhooks (FK constraint).
+        _, created = await bank_utils.get_or_create_bank_profile(backend, bank_id)
+        if created:
+            await self._apply_default_bank_template(bank_id, request_context)
+
+        async with acquire_with_retry(backend) as conn:
+            row = await backend.ops.create_webhook(
+                conn,
+                fq_table("webhooks"),
+                webhook_id,
+                bank_id,
+                url,
+                secret,
+                event_types,
+                enabled,
+                http_config_json,
+            )
+        return dict(row) if row is not None else None
+
+    async def list_webhooks(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> list[dict[str, Any]]:
+        """List webhooks for a bank in the bank's resolved schema."""
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_webhooks", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            rows = await backend.ops.list_webhooks_for_bank(
+                conn,
+                fq_table("webhooks"),
+                bank_id,
+            )
+        return [dict(row) for row in rows]
+
+    async def update_webhook(
+        self,
+        bank_id: str,
+        webhook_id: uuid.UUID,
+        *,
+        set_clauses: list[str],
+        params: list[Any],
+        request_context: "RequestContext",
+    ) -> dict[str, Any] | None:
+        """Update a webhook row in the bank's resolved schema.
+
+        ``set_clauses`` and ``params`` are pre-built by the caller using PATCH
+        semantics (only sent fields are updated). The first two ``params`` are
+        ``webhook_id`` and ``bank_id``; subsequent params correspond to the
+        SET clauses.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="update_webhook", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            row = await backend.ops.update_webhook(
+                conn,
+                fq_table("webhooks"),
+                webhook_id,
+                bank_id,
+                set_clauses,
+                params,
+            )
+        return dict(row) if row is not None else None
+
+    async def delete_webhook(
+        self,
+        bank_id: str,
+        webhook_id: uuid.UUID,
+        *,
+        request_context: "RequestContext",
+    ) -> bool:
+        """Delete a webhook row from the bank's resolved schema.
+
+        Returns True if a row was deleted, False if no matching row was found.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="delete_webhook", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            return await backend.ops.delete_webhook(
+                conn,
+                fq_table("webhooks"),
+                webhook_id,
+                bank_id,
+            )
+
+    async def list_webhook_deliveries(
+        self,
+        bank_id: str,
+        webhook_id: uuid.UUID,
+        *,
+        limit: int,
+        cursor: str | None,
+        request_context: "RequestContext",
+    ) -> list[dict[str, Any]]:
+        """List webhook delivery rows from the bank's resolved schema.
+
+        First verifies the webhook belongs to this bank (in the same schema),
+        then reads the delivery rows from ``async_operations``. Returns up to
+        ``limit + 1`` rows so callers can determine whether more pages exist.
+
+        Raises:
+            LookupError: When the webhook does not exist in this bank.
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_webhook_deliveries", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            webhook_row = await conn.fetchrow(
+                f"SELECT id FROM {fq_table('webhooks')} WHERE id = $1 AND bank_id = $2",
+                webhook_id,
+                bank_id,
+            )
+            if not webhook_row:
+                raise LookupError("Webhook not found")
+
+            rows = await backend.ops.list_webhook_deliveries(
+                conn,
+                fq_table("async_operations"),
+                str(webhook_id),
+                bank_id,
+                limit,
+                cursor,
+            )
+        return [dict(row) for row in rows]
+
     async def _submit_async_operation(
         self,
         bank_id: str,
