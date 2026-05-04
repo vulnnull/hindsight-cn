@@ -47,6 +47,10 @@ import type {
   BankTemplateMentalModel,
   BankTemplateDirective,
   BankTemplateImportResponse,
+  TagGroupLeaf,
+  TagGroupAndInput,
+  TagGroupOrInput,
+  TagGroupNotInput,
 } from "../generated/types.gen";
 
 export const CLIENT_VERSION = "0.5.1";
@@ -162,50 +166,31 @@ export class HindsightClient {
       tags?: string[];
       /** How to handle existing documents: 'replace' (default) or 'append' */
       updateMode?: "replace" | "append";
+      /** Observation scoping strategy: 'per_tag', 'combined', 'all_combinations', or explicit scope groups */
+      observationScopes?: "per_tag" | "combined" | "all_combinations" | string[][];
+      /** Extraction strategy override */
+      strategy?: string;
       signal?: AbortSignal;
     }
   ): Promise<RetainResponse> {
-    const item: {
-      content: string;
-      timestamp?: string;
-      context?: string;
-      metadata?: Record<string, string>;
-      document_id?: string;
-      entities?: EntityInput[];
-      tags?: string[];
-      update_mode?: "replace" | "append";
-    } = { content };
-    if (options?.timestamp) {
-      item.timestamp =
-        options.timestamp instanceof Date ? options.timestamp.toISOString() : options.timestamp;
-    }
-    if (options?.context) {
-      item.context = options.context;
-    }
-    if (options?.metadata) {
-      item.metadata = options.metadata;
-    }
-    if (options?.documentId) {
-      item.document_id = options.documentId;
-    }
-    if (options?.entities) {
-      item.entities = options.entities;
-    }
-    if (options?.tags) {
-      item.tags = options.tags;
-    }
-    if (options?.updateMode) {
-      item.update_mode = options.updateMode;
-    }
-
-    const response = await sdk.retainMemories({
-      client: this.client,
-      path: { bank_id: bankId },
-      body: { items: [item], async: options?.async },
-      signal: options?.signal,
-    });
-
-    return this.validateResponse(response, "retain");
+    return this.retainBatch(
+      bankId,
+      [
+        {
+          content,
+          timestamp: options?.timestamp,
+          context: options?.context,
+          metadata: options?.metadata,
+          document_id: options?.documentId,
+          entities: options?.entities,
+          tags: options?.tags,
+          update_mode: options?.updateMode,
+          observation_scopes: options?.observationScopes,
+          strategy: options?.strategy,
+        },
+      ],
+      { async: options?.async, signal: options?.signal }
+    );
   }
 
   /**
@@ -321,6 +306,8 @@ export class HindsightClient {
       tags?: string[];
       /** How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged). Default: 'any' */
       tagsMatch?: "any" | "all" | "any_strict" | "all_strict";
+      /** Compound tag filter using boolean groups. Groups are AND-ed. Each group is a leaf {tags, match} or compound {and: [...]}, {or: [...]}, {not: ...}. Mutually exclusive with tags/tagsMatch. */
+      tagGroups?: Array<TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput>;
       signal?: AbortSignal;
     }
   ): Promise<RecallResponse> {
@@ -350,6 +337,7 @@ export class HindsightClient {
         },
         tags: options?.tags,
         tags_match: options?.tagsMatch,
+        tag_groups: options?.tagGroups,
       },
       signal: options?.signal,
     });
@@ -370,6 +358,16 @@ export class HindsightClient {
       tags?: string[];
       /** How to match tags: 'any' (OR, includes untagged), 'all' (AND, includes untagged), 'any_strict' (OR, excludes untagged), 'all_strict' (AND, excludes untagged). Default: 'any' */
       tagsMatch?: "any" | "all" | "any_strict" | "all_strict";
+      /** Compound tag filter using boolean groups. Groups are AND-ed. Mutually exclusive with tags/tagsMatch. */
+      tagGroups?: Array<TagGroupLeaf | TagGroupAndInput | TagGroupOrInput | TagGroupNotInput>;
+      /** Optional JSON Schema for structured output. When provided, the response includes a 'structured_output' field. */
+      responseSchema?: Record<string, unknown>;
+      /** Filter which fact types are retrieved: 'world', 'experience', 'observation'. None means all. */
+      factTypes?: Array<"world" | "experience" | "observation">;
+      /** If true, exclude all mental models from reflection. */
+      excludeMentalModels?: boolean;
+      /** Exclude specific mental models by ID from reflection. */
+      excludeMentalModelIds?: string[];
       signal?: AbortSignal;
     }
   ): Promise<ReflectResponse> {
@@ -382,6 +380,11 @@ export class HindsightClient {
         budget: options?.budget || "low",
         tags: options?.tags,
         tags_match: options?.tagsMatch,
+        tag_groups: options?.tagGroups,
+        response_schema: options?.responseSchema,
+        fact_types: options?.factTypes,
+        exclude_mental_models: options?.excludeMentalModels,
+        exclude_mental_model_ids: options?.excludeMentalModelIds,
       },
       signal: options?.signal,
     });
@@ -1025,6 +1028,10 @@ export type {
   BankTemplateMentalModel,
   BankTemplateDirective,
   BankTemplateImportResponse,
+  TagGroupLeaf,
+  TagGroupAndInput,
+  TagGroupOrInput,
+  TagGroupNotInput,
 };
 
 // Also export low-level SDK functions for advanced usage
