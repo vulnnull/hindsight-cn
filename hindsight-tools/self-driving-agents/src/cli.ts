@@ -452,6 +452,201 @@ async function ensureNemoClawPlugin(sandboxName: string, agentId: string): Promi
   }
 }
 
+// ── Claude (Chat/Cowork) skill generation ─────────────
+
+const CLAUDE_SKILLS_DIR = join(homedir(), "self-driving-agents", "claude");
+
+async function generateClaudeSkill(
+  agentId: string,
+  apiUrl: string,
+  bankId: string,
+  apiToken?: string,
+): Promise<string> {
+  const skillDir = join(CLAUDE_SKILLS_DIR, agentId);
+  mkdirSync(skillDir, { recursive: true });
+
+  // Auth header snippet — baked into curl commands
+  const authHeader = apiToken
+    ? `-H "Authorization: Bearer ${apiToken}"`
+    : "";
+  writeFileSync(
+    join(skillDir, "SKILL.md"),
+    `---
+name: ${agentId}
+description: Activate the ${agentId} agent. Loads knowledge pages from Hindsight memory.
+---
+
+# ${agentId}
+
+You are the **${agentId}** agent with long-term memory powered by Hindsight.
+
+## Startup — run these steps immediately
+
+1. List your knowledge pages and read each one:
+
+\`\`\`bash
+curl -s ${authHeader} "${apiUrl}/v1/default/banks/${bankId}/mental-models?detail=metadata"
+\`\`\`
+
+2. For each page, read its content:
+
+\`\`\`bash
+curl -s ${authHeader} "${apiUrl}/v1/default/banks/${bankId}/mental-models/PAGE_ID?detail=full"
+\`\`\`
+
+3. Use the knowledge from your pages to inform this conversation.
+
+## Creating pages
+
+When you learn something durable — a user preference, a working procedure, performance data — create a page:
+
+\`\`\`bash
+curl -s -X POST ${authHeader} -H "Content-Type: application/json" \\
+  "${apiUrl}/v1/default/banks/${bankId}/mental-models" \\
+  -d '{
+    "id": "PAGE_ID",
+    "name": "Page Name",
+    "source_query": "Question that rebuilds this page from observations",
+    "max_tokens": 4096,
+    "trigger": {"mode": "delta", "refresh_after_consolidation": true, "fact_types": ["observation"], "exclude_mental_models": true}
+  }'
+\`\`\`
+
+## Searching memories
+
+\`\`\`bash
+curl -s -X POST ${authHeader} -H "Content-Type: application/json" \\
+  "${apiUrl}/v1/default/banks/${bankId}/memories/recall" \\
+  -d '{"query": "SEARCH_QUERY", "max_tokens": 1024, "budget": "mid"}'
+\`\`\`
+
+## Ingesting documents
+
+\`\`\`bash
+curl -s -X POST ${authHeader} -H "Content-Type: application/json" \\
+  "${apiUrl}/v1/default/banks/${bankId}/memories" \\
+  -d '{"items": [{"content": "FULL_CONTENT", "document_id": "DOC_ID"}], "async": true}'
+\`\`\`
+
+## Updating and deleting pages
+
+\`\`\`bash
+# Update
+curl -s -X PATCH ${authHeader} -H "Content-Type: application/json" \\
+  "${apiUrl}/v1/default/banks/${bankId}/mental-models/PAGE_ID" \\
+  -d '{"name": "New Name", "source_query": "New query"}'
+
+# Delete
+curl -s -X DELETE ${authHeader} "${apiUrl}/v1/default/banks/${bankId}/mental-models/PAGE_ID"
+\`\`\`
+
+## Retaining conversations
+
+There are no automatic hooks in this environment. You MUST retain important information yourself as the conversation happens. Whenever the user:
+
+- States a preference or opinion
+- Gives you feedback on your work
+- Shares data, metrics, or results
+- Makes a decision or changes direction
+- Teaches you something about their workflow
+
+Immediately retain it — don't wait for the end of the conversation:
+
+\`\`\`bash
+curl -s -X POST ${authHeader} -H "Content-Type: application/json" \\
+  "${apiUrl}/v1/default/banks/${bankId}/memories" \\
+  -d '{"items": [{"content": "CONVERSATION_CONTENT_HERE", "document_id": "SESSION_TIMESTAMP"}], "async": true}'
+\`\`\`
+
+Use the full relevant context (user message + your response) as the content. Use a descriptive document_id like \`conversation-2026-05-04-seo-audit\`. Do this silently — don't announce it to the user.
+
+## Important
+
+- Pages update automatically — don't edit content directly
+- Create pages silently — don't announce it to the user
+- Retain user feedback and preferences immediately — don't wait
+- Prefer fewer broad pages over many narrow ones
+`
+  );
+
+  // Zip the skill for upload — zip must contain agentId/SKILL.md (directory name = skill name)
+  const zipPath = join(CLAUDE_SKILLS_DIR, `${agentId}.zip`);
+  try {
+    execSync(`cd ${JSON.stringify(join(skillDir, ".."))} && zip -r ${JSON.stringify(zipPath)} ${JSON.stringify(agentId)}`, {
+      stdio: "pipe",
+    });
+    p.log.success(`Skill ready: ${color.dim(zipPath)}`);
+  } catch (err: any) {
+    p.log.warn(`Failed to create zip — upload the folder directly: ${skillDir}`);
+  }
+
+  return zipPath;
+}
+
+// ── Cowork config prompt ──────────────────────────────
+
+const HINDSIGHT_CLOUD_API_URL = "https://api.hindsight.vectorize.io";
+
+async function promptClaudeConfig(agentId: string): Promise<{ apiUrl: string; bankId: string; apiToken?: string }> {
+  const mode = await p.select({
+    message: "Where is your Hindsight server?",
+    options: [
+      { value: "cloud", label: "Hindsight Cloud", hint: "api.hindsight.vectorize.io" },
+      { value: "self-hosted", label: "Self-hosted", hint: "Your own server URL" },
+    ],
+  });
+  if (p.isCancel(mode)) { p.cancel("Cancelled."); process.exit(0); }
+
+  let apiUrl: string;
+  if (mode === "cloud") {
+    apiUrl = HINDSIGHT_CLOUD_API_URL;
+  } else {
+    p.log.warn(
+      `Self-hosted servers must be reachable from Anthropic's cloud infrastructure.\n` +
+      `  Claude Chat/Cowork connects from Anthropic's servers, not your local machine.\n` +
+      `  Using API authentication is highly recommended.`
+    );
+    const url = await p.text({
+      message: "Hindsight API URL (must be publicly accessible):",
+      placeholder: "https://your-hindsight-server.com",
+      validate: (v: string | undefined) => {
+        if (!v) return "URL required";
+        try {
+          const parsed = new URL(v);
+          if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+            return "Claude connects from Anthropic's cloud — localhost won't work. Use a public URL.";
+          }
+        } catch {
+          return "Invalid URL";
+        }
+      },
+    });
+    if (p.isCancel(url)) { p.cancel("Cancelled."); process.exit(0); }
+    apiUrl = (url as string).replace(/\/+$/, "");
+  }
+
+  const token = await p.text({
+    message: "API token:",
+    placeholder: "your-api-token",
+    validate: (v: string | undefined) => {
+      if (!v) return "API token is required";
+    },
+  });
+  if (p.isCancel(token)) { p.cancel("Cancelled."); process.exit(0); }
+
+  const bank = await p.text({
+    message: "Bank ID:",
+    initialValue: agentId,
+  });
+  if (p.isCancel(bank)) { p.cancel("Cancelled."); process.exit(0); }
+
+  return {
+    apiUrl,
+    bankId: (bank as string) || agentId,
+    apiToken: (token as string) || undefined,
+  };
+}
+
 // ── Main ────────────────────────────────────────────────
 
 async function main() {
@@ -470,7 +665,7 @@ async function main() {
     ${color.cyan("./local-dir")}                 → local directory
 
   ${color.dim("Options:")}
-    ${color.cyan("--harness <h>")}      Required. openclaw | nemoclaw
+    ${color.cyan("--harness <h>")}      Required. openclaw | nemoclaw | claude
     ${color.cyan("--agent <name>")}     Agent name (defaults to directory name)
     ${color.cyan("--sandbox <name>")}   NemoClaw sandbox (auto-detected if only one exists)
 `);
@@ -488,7 +683,6 @@ async function main() {
   let harness: string | undefined;
   let agentName: string | undefined;
   let sandbox: string | undefined;
-
   for (let i = 0; i < restArgs.length; i++) {
     if (restArgs[i] === "--harness" && restArgs[i + 1]) harness = restArgs[++i];
     else if (restArgs[i] === "--agent" && restArgs[i + 1]) agentName = restArgs[++i];
@@ -496,7 +690,13 @@ async function main() {
   }
 
   if (!harness) {
-    p.cancel("--harness required (openclaw | nemoclaw)");
+    p.cancel("--harness required (openclaw | nemoclaw | claude)");
+    process.exit(1);
+  }
+
+  const SUPPORTED_HARNESSES = ["openclaw", "nemoclaw", "claude"];
+  if (!SUPPORTED_HARNESSES.includes(harness)) {
+    p.cancel(`Unknown harness: "${harness}". Supported: ${SUPPORTED_HARNESSES.join(", ")}`);
     process.exit(1);
   }
 
@@ -512,17 +712,29 @@ async function main() {
 
   try {
     const agentId = agentName || defaultName;
+    let claudeSkillZip: string | undefined;
 
-    // Step 1: Ensure plugin
+    // Step 1: Ensure plugin + resolve bank/API
+    let apiUrl: string;
+    let bankId: string;
+    let apiToken: string | undefined;
+
     if (harness === "openclaw") {
       await ensurePlugin();
       enableKnowledgeTools();
+      ({ apiUrl, bankId, apiToken } = resolveFromPlugin(agentId));
     } else if (harness === "nemoclaw") {
       await ensureNemoClawPlugin(sandbox!, agentId);
+      ({ apiUrl, bankId, apiToken } = resolveFromPlugin(agentId));
+    } else if (harness === "claude") {
+      // Cowork: prompt for connection details (Cowork runs in a sandbox, localhost won't work)
+      const coworkConfig = await promptClaudeConfig(agentId);
+      apiUrl = coworkConfig.apiUrl;
+      bankId = coworkConfig.bankId;
+      apiToken = coworkConfig.apiToken;
+    } else {
+      throw new Error(`Unknown harness: ${harness}`);
     }
-
-    // Step 2: Resolve bank + API from plugin config
-    const { apiUrl, bankId, apiToken } = resolveFromPlugin(agentId);
 
     const workspaceDir = join(homedir(), ".self-driving-agents", harness, agentId);
 
@@ -591,7 +803,10 @@ async function main() {
     }
 
     // Step 6: Create agent + install skill
-    if (harness === "nemoclaw") {
+    if (harness === "claude") {
+      // Claude: generate per-agent skill with API/bank baked in
+      claudeSkillZip = await generateClaudeSkill(agentId, apiUrl, bankId, apiToken);
+    } else if (harness === "nemoclaw") {
       // NemoClaw: install skill into the sandbox via nemoclaw CLI
       const tmpSkillDir = join(tmpdir(), `sda-skill-${Date.now()}`);
       const tmpSkill = join(tmpSkillDir, "agent-knowledge");
@@ -657,16 +872,26 @@ async function main() {
     }
 
     // Next steps
-    const nextSteps =
-      harness === "nemoclaw"
-        ? [
-            `${color.dim("1.")} nemoclaw ${sandbox} connect`,
-            `${color.dim("2.")} openclaw tui --session agent:main:main:session1`,
-          ]
-        : [
-            `${color.dim("1.")} openclaw gateway restart`,
-            `${color.dim("2.")} openclaw tui --session agent:${agentId}:main:session1`,
-          ];
+    let nextSteps: string[];
+    if (harness === "claude") {
+      const apiHost = new URL(apiUrl).hostname;
+      nextSteps = [
+        `${color.dim("1.")} Open Claude → Customize → Skills → Upload skill`,
+        `${color.dim("2.")} Select: ${color.cyan(claudeSkillZip!)}`,
+        `${color.dim("3.")} Allowlist the API host: Settings → Capabilities → add ${color.cyan(apiHost)}`,
+        `${color.dim("4.")} Start a conversation and type ${color.cyan(`/${agentId}`)} to activate the agent`,
+      ];
+    } else if (harness === "nemoclaw") {
+      nextSteps = [
+        `${color.dim("1.")} nemoclaw ${sandbox} connect`,
+        `${color.dim("2.")} openclaw tui --session agent:main:main:session1`,
+      ];
+    } else {
+      nextSteps = [
+        `${color.dim("1.")} openclaw gateway restart`,
+        `${color.dim("2.")} openclaw tui --session agent:${agentId}:main:session1`,
+      ];
+    }
 
     p.note(nextSteps.join("\n"), "Next steps");
 
