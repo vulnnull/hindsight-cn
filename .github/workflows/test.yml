@@ -48,6 +48,7 @@ jobs:
       integrations-pipecat: ${{ steps.filter.outputs.integrations-pipecat }}
       integrations-agentcore: ${{ steps.filter.outputs.integrations-agentcore }}
       integrations-smolagents: ${{ steps.filter.outputs.integrations-smolagents }}
+      integrations-dify: ${{ steps.filter.outputs.integrations-dify }}
       tools-agent-sdk: ${{ steps.filter.outputs.tools-agent-sdk }}
       tools-self-driving-agents: ${{ steps.filter.outputs.tools-self-driving-agents }}
       dev: ${{ steps.filter.outputs.dev }}
@@ -141,6 +142,8 @@ jobs:
             - 'hindsight-integrations/agentcore/**'
           integrations-smolagents:
             - 'hindsight-integrations/smolagents/**'
+          integrations-dify:
+            - 'hindsight-integrations/dify/**'
           tools-agent-sdk:
             - 'hindsight-tools/hindsight-agent-sdk/**'
           tools-self-driving-agents:
@@ -2506,6 +2509,40 @@ jobs:
       working-directory: ./hindsight-integrations/smolagents
       run: uv run pytest tests -v
 
+  test-dify-integration:
+    needs: [detect-changes]
+    if: >-
+      github.event_name != 'pull_request_review' &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.integrations-dify == 'true' ||
+      needs.detect-changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || '' }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        prune-cache: false
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        # Dify plugin runtime targets Python 3.12 (see manifest.yaml)
+        python-version: '3.12'
+
+    - name: Install dependencies
+      working-directory: ./hindsight-integrations/dify
+      run: uv pip install --system -e . pytest pytest-mock
+
+    - name: Run tests
+      working-directory: ./hindsight-integrations/dify
+      run: pytest tests -v
+
   test-crewai-integration:
     needs: [detect-changes]
     if: >-
@@ -3517,3 +3554,145 @@ jobs:
       run: |
         cd hindsight-dev
         uv run cli-coverage-check
+
+  # Report CI status back to the PR for pull_request_review events.
+  # GitHub does not automatically link pull_request_review check runs to the PR,
+  # so we create a commit status on the PR head SHA and post a comment.
+  report-pr-status:
+    if: github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && always()
+    needs:
+      - detect-changes
+      - check-integration-lockfiles
+      - build-api-python-versions
+      - build-typescript-client
+      - build-openclaw-integration
+      - smoke-openclaw-install
+      - test-claude-code-integration
+      - test-codex-integration
+      - build-ai-sdk-integration
+      - test-ai-sdk-integration-deno
+      - test-opencode-integration
+      - test-cloudflare-oauth-proxy-integration
+      - build-chat-integration
+      - test-paperclip-integration
+      - test-pipecat-integration
+      - build-control-plane
+      - build-docs
+      - test-rust-cli
+      - lint-helm-chart
+      - build-docker-images
+      - test-api
+      - test-api-oracle
+      - test-python-client
+      - test-python-client-oracle
+      - test-typescript-client
+      - test-typescript-client-oracle
+      - test-typescript-client-deno
+      - build-rust-cli-arm64
+      - test-rust-client
+      - test-go-client
+      - test-openclaw-integration
+      - test-integration
+      - test-ag2-integration
+      - test-smolagents-integration
+      - test-dify-integration
+      - test-crewai-integration
+      - test-litellm-integration
+      - test-pydantic-ai-integration
+      - test-llamaindex-integration
+      - test-agentcore-integration
+      - test-pip-slim
+      - test-embed
+      - test-embed-windows
+      - test-hindsight-all
+      - test-hindsight-agent-sdk
+      - test-self-driving-agents
+      - test-doc-examples
+      - test-upgrade
+      - verify-generated-files
+      - check-openapi-compatibility
+      - check-cli-coverage
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+      pull-requests: write
+    steps:
+      - name: Determine overall result
+        id: result
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const needs = ${{ toJSON(needs) }};
+            const entries = Object.entries(needs);
+            const failed = entries.filter(([, v]) => v.result === 'failure');
+            const skipped = entries.filter(([, v]) => v.result === 'skipped');
+            const succeeded = entries.filter(([, v]) => v.result === 'success');
+            const overall = failed.length > 0 ? 'failure' : 'success';
+            const icon = overall === 'success' ? '✅' : '❌';
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            let body = `## ${icon} CI results\n\n`;
+            body += `| Status | Count |\n|--------|-------|\n`;
+            body += `| ✅ Passed | ${succeeded.length} |\n`;
+            if (failed.length > 0) body += `| ❌ Failed | ${failed.length} |\n`;
+            if (skipped.length > 0) body += `| ⏭️ Skipped | ${skipped.length} |\n`;
+
+            if (failed.length > 0) {
+              body += `\n### Failed jobs\n`;
+              for (const [name] of failed) {
+                body += `- \`${name}\`\n`;
+              }
+            }
+
+            body += `\n[View full run](${runUrl})`;
+
+            core.setOutput('state', overall);
+            core.setOutput('description', failed.length > 0 ? 'Some CI checks failed' : 'All CI checks passed');
+            core.setOutput('body', body);
+            core.setOutput('run_url', runUrl);
+
+      - name: Report status to PR
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: '${{ steps.result.outputs.state }}',
+              context: 'CI / full-tests',
+              description: '${{ steps.result.outputs.description }}',
+              target_url: '${{ steps.result.outputs.run_url }}'
+            });
+
+      - name: Comment on PR
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const marker = '<!-- ci-full-test-report -->';
+            const body = `${marker}\n${{ steps.result.outputs.body }}`;
+
+            // Update existing comment if present, otherwise create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }

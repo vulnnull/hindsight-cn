@@ -261,6 +261,16 @@
       "icon": "/img/icons/smolagents.png"
     },
     {
+      "id": "dify",
+      "name": "Dify",
+      "description": "Persistent memory plugin for Dify workflows. Retain, Recall, and Reflect tools drop into any chatflow or agent app alongside Dify's other LLM and tool nodes.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "framework",
+      "link": "/sdks/integrations/dify",
+      "icon": "/img/icons/dify.png"
+    },
+    {
       "id": "hindclaw",
       "name": "HindClaw",
       "description": "Production memory infrastructure for AI agents — server-side access control via Hindsight extensions, Terraform provider for users/groups/banks/permissions, and an OpenClaw plugin with auto-managed embed.",
