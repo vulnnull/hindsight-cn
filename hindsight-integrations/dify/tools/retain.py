@@ -40,6 +40,4 @@ class RetainTool(Tool):
             "bank_id": bank_id,
         }
         yield self.create_json_message(result)
-        yield self.create_text_message(
-            f"Retained 1 memory in bank '{bank_id}'."
-        )
+        yield self.create_text_message(f"Retained 1 memory in bank '{bank_id}'.")

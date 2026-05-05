@@ -26,15 +26,11 @@ class HindsightProvider(ToolProvider):
         try:
             resp = requests.get(f"{api_url}/health", headers=headers, timeout=10)
         except requests.RequestException as e:
-            raise ToolProviderCredentialValidationError(
-                f"Could not reach Hindsight at {api_url}: {e}"
-            ) from e
+            raise ToolProviderCredentialValidationError(f"Could not reach Hindsight at {api_url}: {e}") from e
 
         if resp.status_code == 401 or resp.status_code == 403:
             raise ToolProviderCredentialValidationError(
                 "Hindsight rejected the API key. Check the value and try again."
             )
         if resp.status_code >= 400:
-            raise ToolProviderCredentialValidationError(
-                f"Hindsight health check failed (HTTP {resp.status_code})."
-            )
+            raise ToolProviderCredentialValidationError(f"Hindsight health check failed (HTTP {resp.status_code}).")

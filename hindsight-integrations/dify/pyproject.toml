@@ -1,5 +1,5 @@
 [project]
-name = "hindsight-dify-plugin"
+name = "hindsight-dify"
 version = "0.1.0"
 description = "Persistent long-term memory for Dify workflows via Hindsight."
 requires-python = ">=3.12"
