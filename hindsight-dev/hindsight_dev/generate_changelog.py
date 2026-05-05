@@ -60,6 +60,7 @@ INTEGRATIONS: dict[str, IntegrationMeta] = {
     "agentcore": IntegrationMeta("hindsight-agentcore", "Bedrock AgentCore"),
     "smolagents": IntegrationMeta("hindsight-smolagents", "SmolAgents"),
     "n8n": IntegrationMeta("@vectorize-io/n8n-nodes-hindsight", "n8n"),
+    "dify": IntegrationMeta("hindsight-dify", "Dify"),
 }
 
 VALID_INTEGRATIONS = list(INTEGRATIONS.keys())
