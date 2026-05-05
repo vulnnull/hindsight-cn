@@ -7,7 +7,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
-import { HindsightClient } from '@vectorize-io/hindsight-client';
+import { HindsightClient, type Budget } from '@vectorize-io/hindsight-client';
 
 interface HindsightCredentials {
 	apiUrl: string;
@@ -27,7 +27,7 @@ export class Hindsight implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Hindsight',
 		name: 'hindsight',
-		icon: 'file:hindsight.png',
+		icon: 'file:hindsight.svg',
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
@@ -240,16 +240,18 @@ export class Hindsight implements INodeType {
 					const tags = parseTags(tagsRaw);
 
 					const response = await client.recall(bankId, query, {
-						budget,
+						budget: budget as Budget,
 						maxTokens,
 						...(tags.length ? { tags } : {}),
-					} as IDataObject);
+					});
 					result = response as unknown as IDataObject;
 				} else if (operation === 'reflect') {
 					const query = this.getNodeParameter('reflectQuery', i) as string;
 					const budget = this.getNodeParameter('reflectBudget', i, 'mid') as string;
 
-					const response = await client.reflect(bankId, query, { budget } as IDataObject);
+					const response = await client.reflect(bankId, query, {
+						budget: budget as Budget,
+					});
 					result = response as unknown as IDataObject;
 				} else {
 					throw new NodeOperationError(this.getNode(), `Unknown operation: ${operation}`, {

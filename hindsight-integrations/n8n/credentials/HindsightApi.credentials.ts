@@ -40,7 +40,7 @@ export class HindsightApi implements ICredentialType {
 		type: 'generic',
 		properties: {
 			headers: {
-				Authorization: '={{ $credentials.apiKey ? "Bearer " + $credentials.apiKey : undefined }}',
+				Authorization: '={{ $credentials.apiKey ? "Bearer " + $credentials.apiKey : "" }}',
 			},
 		},
 	};

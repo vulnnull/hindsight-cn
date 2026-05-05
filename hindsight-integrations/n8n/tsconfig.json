@@ -19,6 +19,6 @@
     "incremental": true,
     "useUnknownInCatchVariables": false
   },
-  "include": ["nodes/**/*.ts", "credentials/**/*.ts"],
+  "include": ["index.ts", "nodes/**/*.ts", "credentials/**/*.ts"],
   "exclude": ["node_modules", "dist", "test", "**/*.test.ts"]
 }
