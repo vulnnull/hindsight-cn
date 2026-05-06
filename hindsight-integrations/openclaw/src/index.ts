@@ -99,7 +99,13 @@ export interface BankScopedClient {
     },
     timeoutMs?: number
   ): Promise<RecallResponse>;
-  setMission(mission: string): Promise<void>;
+  setMissions(opts: BankMissionsUpdate): Promise<void>;
+}
+
+export interface BankMissionsUpdate {
+  reflectMission?: string;
+  retainMission?: string;
+  observationsMission?: string;
 }
 
 function scopeClient(c: HindsightClient, bankId: string): BankScopedClient {
@@ -135,13 +141,57 @@ function scopeClient(c: HindsightClient, bankId: string): BankScopedClient {
         ),
       ]);
     },
-    async setMission(mission) {
-      // createBank upserts the reflect mission. openclaw's old setBankMission
-      // went through a dedicated PUT endpoint; this call lands on the same
-      // server-side handler via the non-deprecated path.
-      await c.createBank(bankId, { reflectMission: mission });
+    async setMissions(opts) {
+      // createBank upserts each mission column the request explicitly sets;
+      // unset fields are left untouched (server's get_config_updates() skips
+      // None values). This means a per-bank mission previously written via
+      // PATCH /banks/{id} survives unless the plugin is configured with the
+      // matching bank* / retain* / observations* mission.
+      await c.createBank(bankId, {
+        reflectMission: opts.reflectMission,
+        retainMission: opts.retainMission,
+        observationsMission: opts.observationsMission,
+      });
     },
   };
+}
+
+/**
+ * Stamp configured missions onto a bank exactly once per process lifetime.
+ * No-op if no mission fields are set in plugin config — this is what lets
+ * users manage per-bank missions out-of-band without the plugin clobbering
+ * them on every gateway restart.
+ */
+async function applyConfiguredMissions(
+  scoped: BankScopedClient,
+  config: PluginConfig
+): Promise<void> {
+  const missions: BankMissionsUpdate = {};
+  if (typeof config.bankMission === "string" && config.bankMission.length > 0) {
+    missions.reflectMission = config.bankMission;
+  }
+  if (typeof config.retainMission === "string" && config.retainMission.length > 0) {
+    missions.retainMission = config.retainMission;
+  }
+  if (typeof config.observationsMission === "string" && config.observationsMission.length > 0) {
+    missions.observationsMission = config.observationsMission;
+  }
+  if (
+    missions.reflectMission === undefined &&
+    missions.retainMission === undefined &&
+    missions.observationsMission === undefined
+  ) {
+    return;
+  }
+  await scoped.setMissions(missions);
+}
+
+function hasConfiguredMissions(config: PluginConfig): boolean {
+  return (
+    (typeof config.bankMission === "string" && config.bankMission.length > 0) ||
+    (typeof config.retainMission === "string" && config.retainMission.length > 0) ||
+    (typeof config.observationsMission === "string" && config.observationsMission.length > 0)
+  );
 }
 
 /**
@@ -295,14 +345,14 @@ async function lazyReinit(configOverride?: PluginConfig): Promise<void> {
     banksWithMissionSet.clear();
     client = new HindsightClient(clientOptions);
 
-    if (config.bankMission && usesStaticBank(config)) {
+    if (hasConfiguredMissions(config) && usesStaticBank(config)) {
       const bankId = getStaticBankId(config);
       try {
-        await scopeClient(client, bankId).setMission(config.bankMission);
+        await applyConfiguredMissions(scopeClient(client, bankId), config);
         banksWithMissionSet.add(bankId);
       } catch (err) {
         log.warn(
-          `could not set bank mission for ${bankId}: ${err instanceof Error ? err.message : err}`
+          `could not set bank missions for ${bankId}: ${err instanceof Error ? err.message : err}`
         );
       }
     }
@@ -368,15 +418,15 @@ if (typeof global !== "undefined") {
       const bankId = usesStaticBank(config) ? getStaticBankId(config) : deriveBankId(ctx, config);
       const scoped = scopeClient(client, bankId);
 
-      // Set bank mission on first use of this bank (if configured).
-      if (config.bankMission && !banksWithMissionSet.has(bankId)) {
+      // Stamp configured missions onto this bank on first use.
+      if (hasConfiguredMissions(config) && !banksWithMissionSet.has(bankId)) {
         try {
-          await scoped.setMission(config.bankMission);
+          await applyConfiguredMissions(scoped, config);
           banksWithMissionSet.add(bankId);
-          debug(`[Hindsight] Set mission for new bank: ${bankId}`);
+          debug(`[Hindsight] Set missions for new bank: ${bankId}`);
         } catch (error) {
-          // Log but don't fail - bank mission is not critical
-          log.warn(`could not set bank mission for ${bankId}: ${error}`);
+          // Log but don't fail - bank missions are not critical
+          log.warn(`could not set bank missions for ${bankId}: ${error}`);
         }
       }
 
@@ -1318,13 +1368,25 @@ export function normalizeRetainTags(value: unknown): string[] {
   return normalized;
 }
 
-function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
+export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
   const config = api.config.plugins?.entries?.["hindsight-openclaw"]?.config || {};
-  const defaultMission =
-    "You are an AI assistant helping users across multiple communication channels (Telegram, Slack, Discord, etc.). Remember user preferences, instructions, and important context from conversations to provide personalized assistance.";
 
+  // No default fallback for missions: if the user doesn't set one, the plugin
+  // does not stamp anything. This lets per-bank missions written via the API
+  // (PATCH /banks/{id}) survive gateway restarts. (#1270)
   return {
-    bankMission: config.bankMission || defaultMission,
+    bankMission:
+      typeof config.bankMission === "string" && config.bankMission.length > 0
+        ? config.bankMission
+        : undefined,
+    retainMission:
+      typeof config.retainMission === "string" && config.retainMission.length > 0
+        ? config.retainMission
+        : undefined,
+    observationsMission:
+      typeof config.observationsMission === "string" && config.observationsMission.length > 0
+        ? config.observationsMission
+        : undefined,
     embedPort: config.embedPort || 0,
     daemonIdleTimeout: config.daemonIdleTimeout !== undefined ? config.daemonIdleTimeout : 0,
     embedVersion: config.embedVersion || "latest",
@@ -1409,6 +1471,18 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
       : [],
     skipStatelessSessions: config.skipStatelessSessions !== false,
     debug: config.debug ?? false,
+    // Retain queue: kept off the strict whitelist before — user values were
+    // silently dropped before queue init read them. (#1443)
+    retainQueuePath:
+      typeof config.retainQueuePath === "string" && config.retainQueuePath.trim().length > 0
+        ? config.retainQueuePath
+        : undefined,
+    retainQueueMaxAgeMs:
+      typeof config.retainQueueMaxAgeMs === "number" ? config.retainQueueMaxAgeMs : undefined,
+    retainQueueFlushIntervalMs:
+      typeof config.retainQueueFlushIntervalMs === "number" && config.retainQueueFlushIntervalMs > 0
+        ? config.retainQueueFlushIntervalMs
+        : undefined,
   };
 }
 
@@ -1563,16 +1637,16 @@ export default function (api: MoltbotPluginAPI) {
               const defaultBankId = deriveBankId(undefined, pluginConfig);
               debug(`[Hindsight] Default bank: ${defaultBankId}`);
 
-              // Note: Bank mission will be set per-bank when dynamic bank IDs are enabled
-              // For now, set it on the static default bank only.
-              if (pluginConfig.bankMission && usesStaticBank(pluginConfig)) {
-                debug(`[Hindsight] Setting bank mission...`);
+              // Note: Missions are stamped per-bank when dynamic bank IDs are
+              // enabled. For static banks, stamp once here on init.
+              if (hasConfiguredMissions(pluginConfig) && usesStaticBank(pluginConfig)) {
+                debug(`[Hindsight] Setting bank missions...`);
                 try {
-                  await scopeClient(client, defaultBankId).setMission(pluginConfig.bankMission);
+                  await applyConfiguredMissions(scopeClient(client, defaultBankId), pluginConfig);
                   banksWithMissionSet.add(defaultBankId);
                 } catch (err) {
                   log.warn(
-                    `could not set bank mission for ${defaultBankId}: ${err instanceof Error ? err.message : err}`
+                    `could not set bank missions for ${defaultBankId}: ${err instanceof Error ? err.message : err}`
                   );
                 }
               }
@@ -1618,16 +1692,16 @@ export default function (api: MoltbotPluginAPI) {
               const defaultBankId = deriveBankId(undefined, pluginConfig);
               debug(`[Hindsight] Default bank: ${defaultBankId}`);
 
-              // Note: Bank mission will be set per-bank when dynamic bank IDs are enabled
-              // For now, set it on the static default bank only.
-              if (pluginConfig.bankMission && usesStaticBank(pluginConfig)) {
-                debug(`[Hindsight] Setting bank mission...`);
+              // Note: Missions are stamped per-bank when dynamic bank IDs are
+              // enabled. For static banks, stamp once here on init.
+              if (hasConfiguredMissions(pluginConfig) && usesStaticBank(pluginConfig)) {
+                debug(`[Hindsight] Setting bank missions...`);
                 try {
-                  await scopeClient(client, defaultBankId).setMission(pluginConfig.bankMission);
+                  await applyConfiguredMissions(scopeClient(client, defaultBankId), pluginConfig);
                   banksWithMissionSet.add(defaultBankId);
                 } catch (err) {
                   log.warn(
-                    `could not set bank mission for ${defaultBankId}: ${err instanceof Error ? err.message : err}`
+                    `could not set bank missions for ${defaultBankId}: ${err instanceof Error ? err.message : err}`
                   );
                 }
               }
@@ -1715,13 +1789,16 @@ export default function (api: MoltbotPluginAPI) {
             client = new HindsightClient(clientOptions);
             const defaultBankId = deriveBankId(undefined, reinitPluginConfig);
 
-            if (reinitPluginConfig.bankMission && usesStaticBank(reinitPluginConfig)) {
+            if (hasConfiguredMissions(reinitPluginConfig) && usesStaticBank(reinitPluginConfig)) {
               try {
-                await scopeClient(client, defaultBankId).setMission(reinitPluginConfig.bankMission);
+                await applyConfiguredMissions(
+                  scopeClient(client, defaultBankId),
+                  reinitPluginConfig
+                );
                 banksWithMissionSet.add(defaultBankId);
               } catch (err) {
                 log.warn(
-                  `could not set bank mission for ${defaultBankId}: ${err instanceof Error ? err.message : err}`
+                  `could not set bank missions for ${defaultBankId}: ${err instanceof Error ? err.message : err}`
                 );
               }
             }
@@ -1754,13 +1831,16 @@ export default function (api: MoltbotPluginAPI) {
             client = new HindsightClient(clientOptions);
             const defaultBankId = deriveBankId(undefined, reinitPluginConfig);
 
-            if (reinitPluginConfig.bankMission && usesStaticBank(reinitPluginConfig)) {
+            if (hasConfiguredMissions(reinitPluginConfig) && usesStaticBank(reinitPluginConfig)) {
               try {
-                await scopeClient(client, defaultBankId).setMission(reinitPluginConfig.bankMission);
+                await applyConfiguredMissions(
+                  scopeClient(client, defaultBankId),
+                  reinitPluginConfig
+                );
                 banksWithMissionSet.add(defaultBankId);
               } catch (err) {
                 log.warn(
-                  `could not set bank mission for ${defaultBankId}: ${err instanceof Error ? err.message : err}`
+                  `could not set bank missions for ${defaultBankId}: ${err instanceof Error ? err.message : err}`
                 );
               }
             }

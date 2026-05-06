@@ -21,8 +21,9 @@ import {
   extractInlineRetainTags,
   stripInlineRetainTags,
   stripInlineTimestampPrefix,
+  getPluginConfig,
 } from "./index.js";
-import type { PluginConfig, MemoryResult } from "./types.js";
+import type { PluginConfig, MemoryResult, MoltbotPluginAPI } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // stripMemoryTags
@@ -1175,5 +1176,93 @@ describe("meetsMinimumVersion", () => {
   it("returns false for malformed versions instead of throwing", () => {
     expect(meetsMinimumVersion("garbage", "0.5.0")).toBe(false);
     expect(meetsMinimumVersion("", "0.5.0")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getPluginConfig — whitelist normalisation
+// ---------------------------------------------------------------------------
+
+function makeApi(rawConfig: Record<string, unknown>): MoltbotPluginAPI {
+  return {
+    config: { plugins: { entries: { "hindsight-openclaw": { config: rawConfig } } } },
+    registerService: () => undefined,
+    on: () => undefined,
+    logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+  } as unknown as MoltbotPluginAPI;
+}
+
+describe("getPluginConfig — retainQueue whitelist (#1443)", () => {
+  it("passes retainQueuePath through when set to a non-empty string", () => {
+    const cfg = getPluginConfig(makeApi({ retainQueuePath: "/custom/path/retain.jsonl" }));
+    expect(cfg.retainQueuePath).toBe("/custom/path/retain.jsonl");
+  });
+
+  it("drops retainQueuePath when blank or non-string", () => {
+    expect(getPluginConfig(makeApi({ retainQueuePath: "   " })).retainQueuePath).toBeUndefined();
+    expect(getPluginConfig(makeApi({ retainQueuePath: 42 })).retainQueuePath).toBeUndefined();
+    expect(getPluginConfig(makeApi({})).retainQueuePath).toBeUndefined();
+  });
+
+  it("passes retainQueueMaxAgeMs through (including the sentinel -1)", () => {
+    expect(getPluginConfig(makeApi({ retainQueueMaxAgeMs: 86_400_000 })).retainQueueMaxAgeMs).toBe(
+      86_400_000
+    );
+    expect(getPluginConfig(makeApi({ retainQueueMaxAgeMs: -1 })).retainQueueMaxAgeMs).toBe(-1);
+  });
+
+  it("drops retainQueueMaxAgeMs when not a number", () => {
+    expect(
+      getPluginConfig(makeApi({ retainQueueMaxAgeMs: "86400000" })).retainQueueMaxAgeMs
+    ).toBeUndefined();
+  });
+
+  it("passes retainQueueFlushIntervalMs through when positive", () => {
+    expect(
+      getPluginConfig(makeApi({ retainQueueFlushIntervalMs: 30_000 })).retainQueueFlushIntervalMs
+    ).toBe(30_000);
+  });
+
+  it("drops retainQueueFlushIntervalMs when zero, negative, or non-number", () => {
+    expect(
+      getPluginConfig(makeApi({ retainQueueFlushIntervalMs: 0 })).retainQueueFlushIntervalMs
+    ).toBeUndefined();
+    expect(
+      getPluginConfig(makeApi({ retainQueueFlushIntervalMs: -5 })).retainQueueFlushIntervalMs
+    ).toBeUndefined();
+  });
+});
+
+describe("getPluginConfig — mission semantics (#1270, #1353)", () => {
+  it("does not substitute a default mission when bankMission is unset", () => {
+    const cfg = getPluginConfig(makeApi({}));
+    expect(cfg.bankMission).toBeUndefined();
+  });
+
+  it("treats empty-string bankMission as opt-out (no default fallback)", () => {
+    const cfg = getPluginConfig(makeApi({ bankMission: "" }));
+    expect(cfg.bankMission).toBeUndefined();
+  });
+
+  it("passes through an explicit bankMission verbatim", () => {
+    const cfg = getPluginConfig(makeApi({ bankMission: "You are Cooper, the orchestrator." }));
+    expect(cfg.bankMission).toBe("You are Cooper, the orchestrator.");
+  });
+
+  it("exposes retainMission and observationsMission when set", () => {
+    const cfg = getPluginConfig(
+      makeApi({
+        retainMission: "Extract architectural decisions only.",
+        observationsMission: "Synthesise stable preferences.",
+      })
+    );
+    expect(cfg.retainMission).toBe("Extract architectural decisions only.");
+    expect(cfg.observationsMission).toBe("Synthesise stable preferences.");
+  });
+
+  it("treats empty-string retainMission and observationsMission as unset", () => {
+    const cfg = getPluginConfig(makeApi({ retainMission: "", observationsMission: "" }));
+    expect(cfg.retainMission).toBeUndefined();
+    expect(cfg.observationsMission).toBeUndefined();
   });
 });

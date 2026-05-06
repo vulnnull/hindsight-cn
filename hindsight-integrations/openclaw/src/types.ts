@@ -64,7 +64,22 @@ export interface PluginHookAgentContext {
 }
 
 export interface PluginConfig {
+  /**
+   * Mission for the Reflect operation. Stamped onto the bank's `reflect_mission`
+   * field via createBank() on first use. Has no effect on retain or recall.
+   * Leave unset (or empty) to manage missions out-of-band via the API.
+   */
   bankMission?: string;
+  /**
+   * Mission for the Retain operation. Steers what gets extracted as facts.
+   * Stamped onto the bank's `retain_mission` field on first use.
+   */
+  retainMission?: string;
+  /**
+   * Mission for observation consolidation. Stamped onto the bank's
+   * `observations_mission` field on first use.
+   */
+  observationsMission?: string;
   embedPort?: number;
   daemonIdleTimeout?: number; // Seconds before daemon shuts down (0 = never)
   embedVersion?: string; // hindsight-embed version (default: "latest")
