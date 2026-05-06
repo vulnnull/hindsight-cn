@@ -126,6 +126,12 @@ export interface PluginConfig {
   retainQueueMaxAgeMs?: number; // Max age in ms for queued items. -1 = keep forever (default: -1)
   retainQueueFlushIntervalMs?: number; // How often to attempt flushing the queue in ms. Default: 60000 (1 min)
   enableKnowledgeTools?: boolean; // Register agent_knowledge_* tools. Default: false. Set to true by the self-driving-agents CLI.
+  /**
+   * Emit per-hook latency lines (`before_prompt_build` recall RPC time,
+   * `agent_end` retain RPC time, total hook time) at info level so users can
+   * diagnose latency without patching the dist. Default: false.
+   */
+  debugPerfTiming?: boolean;
 }
 
 export interface ServiceConfig {

@@ -186,6 +186,25 @@ async function applyConfiguredMissions(
   await scoped.setMissions(missions);
 }
 
+/**
+ * Format a single perf line for the `debugPerfTiming` flag. Pure function so
+ * the formatting can be unit-tested without standing up the full hook pipeline.
+ * Caller is responsible for stringifying durations with the `ms` suffix —
+ * counts and identifiers are rendered as-is.
+ */
+export function formatHookPerf(
+  hook: string,
+  hookTotalMs: number,
+  fields: Record<string, string | number | undefined>
+): string {
+  const parts = [`hook_total=${hookTotalMs}ms`];
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === undefined) continue;
+    parts.push(`${k}=${v}`);
+  }
+  return `perf: ${hook} ${parts.join(" ")}`;
+}
+
 function hasConfiguredMissions(config: PluginConfig): boolean {
   return (
     (typeof config.bankMission === "string" && config.bankMission.length > 0) ||
@@ -485,7 +504,7 @@ function getStaticBankId(pluginConfig: PluginConfig): string {
 /**
  * Strip plugin-injected memory tags from content to prevent retain feedback loop.
  * Removes <hindsight_memories> and <relevant_memories> blocks that were injected
- * during before_agent_start so they don't get re-stored into the memory bank.
+ * during before_prompt_build so they don't get re-stored into the memory bank.
  */
 export function stripMemoryTags(content: string): string {
   content = content.replace(/<hindsight_memories>[\s\S]*?<\/hindsight_memories>/g, "");
@@ -867,7 +886,7 @@ function isRetryableIdentitySkipReason(reason: IdentitySkipReason | undefined): 
  * flooding the log on every turn.
  */
 function logSkipOnce(
-  operation: "recall" | "retain" | "dispatch" | "agent_start",
+  operation: "recall" | "retain" | "dispatch",
   sessionKey: string | undefined,
   reason: IdentitySkipReason
 ): void {
@@ -1471,6 +1490,7 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
       : [],
     skipStatelessSessions: config.skipStatelessSessions !== false,
     debug: config.debug ?? false,
+    debugPerfTiming: config.debugPerfTiming === true,
     // Retain queue: kept off the strict whitelist before — user values were
     // silently dropped before queue init read them. (#1443)
     retainQueuePath:
@@ -1948,37 +1968,21 @@ export default function (api: MoltbotPluginAPI) {
       }
     });
 
-    api.on("before_agent_start", async (event: any, ctx?: PluginHookAgentContext) => {
-      try {
-        const sessionKey =
-          ctx?.sessionKey ?? (typeof event?.sessionKey === "string" ? event.sessionKey : undefined);
-        const { resolvedCtx, skipReason } = resolveAndCacheIdentity({
-          sessionKey,
-          ctx,
-          pluginConfig,
-        });
+    // No `before_agent_start` registration: the callback used to call
+    // `resolveAndCacheIdentity()` and emit a debug log, but `before_dispatch`
+    // already populates the identity cache earlier in the inbound path,
+    // `before_prompt_build` re-resolves before recall (and can infer
+    // `senderId` from prompt content when ctx is missing it), and `agent_end`
+    // re-resolves before retain. Subscribing here was duplicate work on the
+    // hot path. (#1354)
 
-        if (sessionKey && skipReason) {
-          debug(
-            `[Hindsight] before_agent_start skipping session ${sessionKey}: ${formatIdentitySkipReason(skipReason)}`
-          );
-          logSkipOnce("agent_start", sessionKey, skipReason);
-          return;
-        }
-        if (!resolvedCtx) {
-          return;
-        }
-        const bankId = deriveBankId(resolvedCtx, pluginConfig);
-        debug(
-          `[Hindsight] before_agent_start - bank: ${bankId}, channel: ${resolvedCtx.messageProvider}/${resolvedCtx.channelId}`
-        );
-      } catch (error) {
-        log.warn(`before_agent_start identity resolution error: ${error}`);
-      }
-    });
     // Auto-recall: Inject relevant memories before agent processes the message
     // Hook signature: (event, ctx) where event has {prompt, messages?} and ctx has agent context
     api.on("before_prompt_build", async (event: any, ctx?: PluginHookAgentContext) => {
+      // Optional perf instrumentation (#1406). Captured here at hook entry so
+      // the early-return paths below don't influence the measurement of slow
+      // recall calls — perf lines are only emitted on the recall path.
+      const perfHookStart = pluginConfig.debugPerfTiming ? Date.now() : 0;
       try {
         // Check if this provider is excluded
         if (ctx?.messageProvider && pluginConfig.excludeProviders?.includes(ctx.messageProvider)) {
@@ -2140,9 +2144,20 @@ export default function (api: MoltbotPluginAPI) {
           void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
         }
 
+        const recallStart = pluginConfig.debugPerfTiming ? Date.now() : 0;
         const response = await recallPromise;
+        const recallElapsedMs = pluginConfig.debugPerfTiming ? Date.now() - recallStart : 0;
 
         if (!response.results || response.results.length === 0) {
+          if (pluginConfig.debugPerfTiming) {
+            log.info(
+              formatHookPerf("before_prompt_build", Date.now() - perfHookStart, {
+                recall_main: `${recallElapsedMs}ms`,
+                source: existing ? "reused" : "fresh",
+                results: 0,
+              })
+            );
+          }
           debug("[Hindsight] No memories found for auto-recall");
           return;
         }
@@ -2172,6 +2187,16 @@ ${memoriesFormatted}
         debug(`[Hindsight] Auto-recall: Injecting ${results.length} memories from bank ${bankId}`);
         log.info(`injecting ${results.length} memories into context (bank: ${bankId})`);
         log.trackRecall(bankId, results.length);
+
+        if (pluginConfig.debugPerfTiming) {
+          log.info(
+            formatHookPerf("before_prompt_build", Date.now() - perfHookStart, {
+              recall_main: `${recallElapsedMs}ms`,
+              source: existing ? "reused" : "fresh",
+              results: results.length,
+            })
+          );
+        }
 
         // Inject recalled memories. Position is configurable to preserve prompt caching
         // when agents have large static system prompts.
@@ -2203,6 +2228,9 @@ ${memoriesFormatted}
 
     // Hook signature: (event, ctx) where event has {messages, success, error?, durationMs?}
     api.on("agent_end", async (event: any, ctx?: PluginHookAgentContext) => {
+      // Optional perf instrumentation (#1406). Only emitted when an actual
+      // retain RPC fires; the many early-return skip paths are not measured.
+      const perfHookStart = pluginConfig.debugPerfTiming ? Date.now() : 0;
       try {
         // Avoid cross-session contamination: only use context carried by this event.
         const eventSessionKey =
@@ -2418,8 +2446,13 @@ ${memoriesFormatted}
           `[Hindsight] Retaining to bank ${bankId}, document: ${retainRequest.documentId}, chars: ${transcript.length}\n---\n${transcript.substring(0, 500)}${transcript.length > 500 ? "\n...(truncated)" : ""}\n---`
         );
 
+        const retainStart = pluginConfig.debugPerfTiming ? Date.now() : 0;
+        let retainElapsedMs = 0;
+        let retainOutcome: "ok" | "queued" | "error" = "error";
         try {
           await client.retain(retainRequest);
+          retainElapsedMs = pluginConfig.debugPerfTiming ? Date.now() - retainStart : 0;
+          retainOutcome = "ok";
           log.trackRetain(bankId, messageCount);
           debug(
             `[Hindsight] Retained ${messageCount} messages to bank ${bankId} for session ${retainRequest.documentId}`
@@ -2430,9 +2463,11 @@ ${memoriesFormatted}
             flushRetainQueue().catch(() => {});
           }
         } catch (retainError) {
+          retainElapsedMs = pluginConfig.debugPerfTiming ? Date.now() - retainStart : 0;
           // Queue the failed retain for later delivery (external API mode only)
           if (retainQueue) {
             retainQueue.enqueue(bankId, retainRequest, retainRequest.metadata);
+            retainOutcome = "queued";
             const pending = retainQueue.size();
             log.warn(
               `API unreachable — retain queued (${pending} pending, bank: ${bankId}): ${retainError instanceof Error ? retainError.message : retainError}`
@@ -2440,6 +2475,17 @@ ${memoriesFormatted}
           } else {
             log.error("error retaining messages", retainError);
           }
+        }
+
+        if (pluginConfig.debugPerfTiming) {
+          log.info(
+            formatHookPerf("agent_end", Date.now() - perfHookStart, {
+              retain: `${retainElapsedMs}ms`,
+              outcome: retainOutcome,
+              bank: bankId,
+              messages: messageCount,
+            })
+          );
         }
       } catch (error) {
         log.error("error retaining messages", error);

@@ -22,6 +22,7 @@ import {
   stripInlineRetainTags,
   stripInlineTimestampPrefix,
   getPluginConfig,
+  formatHookPerf,
 } from "./index.js";
 import type { PluginConfig, MemoryResult, MoltbotPluginAPI } from "./types.js";
 
@@ -1230,6 +1231,53 @@ describe("getPluginConfig — retainQueue whitelist (#1443)", () => {
     expect(
       getPluginConfig(makeApi({ retainQueueFlushIntervalMs: -5 })).retainQueueFlushIntervalMs
     ).toBeUndefined();
+  });
+});
+
+describe("formatHookPerf (#1406)", () => {
+  it("emits the hook name, total ms, and field key=value pairs", () => {
+    const line = formatHookPerf("before_prompt_build", 4200, {
+      recall_main: "3800ms",
+      source: "fresh",
+      results: 3,
+    });
+    expect(line).toBe(
+      "perf: before_prompt_build hook_total=4200ms recall_main=3800ms source=fresh results=3"
+    );
+  });
+
+  it("renders agent_end fields including string outcome and numeric counts", () => {
+    const line = formatHookPerf("agent_end", 1200, {
+      retain: "1100ms",
+      outcome: "ok",
+      bank: "main",
+      messages: 4,
+    });
+    expect(line).toBe(
+      "perf: agent_end hook_total=1200ms retain=1100ms outcome=ok bank=main messages=4"
+    );
+  });
+
+  it("skips fields whose value is undefined", () => {
+    const line = formatHookPerf("before_prompt_build", 50, {
+      recall_main: undefined,
+      source: "skipped",
+      results: 0,
+    });
+    expect(line).toBe("perf: before_prompt_build hook_total=50ms source=skipped results=0");
+  });
+});
+
+describe("getPluginConfig — debugPerfTiming flag (#1406)", () => {
+  it("defaults to false when unset", () => {
+    expect(getPluginConfig(makeApi({})).debugPerfTiming).toBe(false);
+  });
+
+  it("only accepts strict true (not truthy)", () => {
+    expect(getPluginConfig(makeApi({ debugPerfTiming: true })).debugPerfTiming).toBe(true);
+    expect(getPluginConfig(makeApi({ debugPerfTiming: false })).debugPerfTiming).toBe(false);
+    expect(getPluginConfig(makeApi({ debugPerfTiming: "yes" })).debugPerfTiming).toBe(false);
+    expect(getPluginConfig(makeApi({ debugPerfTiming: 1 })).debugPerfTiming).toBe(false);
   });
 });
 
