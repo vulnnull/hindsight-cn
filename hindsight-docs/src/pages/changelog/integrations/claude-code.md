@@ -8,6 +8,12 @@ import PageHero from '@site/src/components/PageHero';
 
 [← Claude Code integration](/sdks/integrations/claude-code)
 
+## [0.6.2](https://github.com/vectorize-io/hindsight/tree/integrations/claude-code/v0.6.2)
+
+**Bug Fixes**
+
+- Fixes Claude Code integration setup by bootstrapping required Python dependencies in an isolated virtual environment under the plugin data directory.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/nicoloboschi.png?size=40" alt="@nicoloboschi" width="18" height="18" style={{borderRadius: "50%"}} />@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/012c100e" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>012c100e</a>
+
 ## [0.6.1](https://github.com/vectorize-io/hindsight/tree/integrations/claude-code/v0.6.1)
 
 **Features**
