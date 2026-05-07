@@ -94,6 +94,12 @@ All published images are [signed with Cosign](#verifying-image-signatures) — v
 
 The slim image corresponds to the [`hindsight-api-slim`](#bare-metal-pip) pip package. See [Configuration](./configuration#embeddings) for external provider options.
 
+### Bundling Custom Models in a Custom Image
+
+:::tip Production deployments with non-default local models
+If you use a non-default local embedder or reranker, bake the models into a custom image at build time rather than enabling the Helm `modelCache` PVC. See [`docker/docker-compose/custom-models/`](https://github.com/vectorize-io/hindsight/tree/main/docker/docker-compose/custom-models) for a runnable example.
+:::
+
 ### Available Tags
 
 ```bash
