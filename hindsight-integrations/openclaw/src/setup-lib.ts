@@ -123,6 +123,17 @@ export function defaultApiKeyEnvVar(provider: string): string {
 }
 
 /**
+ * Mask all but the last 4 chars of a secret so we can hint "yes, this is your
+ * configured token" without leaking the secret onto the user's terminal
+ * scrollback. Used by the wizard's reuse-existing-token prompt.
+ */
+export function maskSecret(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= 4) return "*".repeat(trimmed.length);
+  return `${"*".repeat(Math.max(4, trimmed.length - 4))}${trimmed.slice(-4)}`;
+}
+
+/**
  * Cloud mode credential: either a direct token value (stored inline as a
  * plaintext string in openclaw.json) or an env var name (stored as a
  * SecretRef that OpenClaw resolves from `process.env` at startup).

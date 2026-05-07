@@ -52,6 +52,32 @@ describe("envSecretRef", () => {
   });
 });
 
+describe("maskSecret", () => {
+  // Used by the wizard's reuse-existing-token prompt — show enough of the secret
+  // to hint identity without leaking it onto the user's terminal scrollback.
+  // We grab maskSecret out of setup-lib so the test doesn't need a TTY.
+  it("masks all but the last 4 chars for a typical token", async () => {
+    const { maskSecret } = await import("./setup-lib.js");
+    const token = "mypwd-1234";
+    const masked = maskSecret(token);
+    expect(masked).toHaveLength(token.length);
+    expect(masked.endsWith("1234")).toBe(true);
+    expect(masked.slice(0, -4)).toMatch(/^\*+$/);
+  });
+
+  it("returns all stars for very short values (≤ 4 chars)", async () => {
+    const { maskSecret } = await import("./setup-lib.js");
+    expect(maskSecret("abcd")).toEqual("****");
+    expect(maskSecret("ab")).toEqual("**");
+    expect(maskSecret("")).toEqual("");
+  });
+
+  it("trims surrounding whitespace before masking", async () => {
+    const { maskSecret } = await import("./setup-lib.js");
+    expect(maskSecret("  abc12345  ")).toEqual("****2345");
+  });
+});
+
 describe("ensurePluginConfig", () => {
   it("initializes the hindsight-openclaw entry on an empty config", () => {
     const cfg: OpenClawConfigShape = {};
