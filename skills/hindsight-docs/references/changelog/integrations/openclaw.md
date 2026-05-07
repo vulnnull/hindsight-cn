@@ -8,6 +8,12 @@ import PageHero from '@site/src/components/PageHero';
 
 ← OpenClaw integration
 
+## [0.7.4](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.7.4)
+
+**Bug Fixes**
+
+- Fixes OpenClaw integration configuration so the knowledge tools toggle is correctly honored.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}>@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/c95206e0" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>c95206e0</a>
+
 ## [0.7.3](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.7.3)
 
 **Improvements**
