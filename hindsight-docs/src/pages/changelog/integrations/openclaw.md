@@ -8,6 +8,12 @@ import PageHero from '@site/src/components/PageHero';
 
 [← OpenClaw integration](/sdks/integrations/openclaw)
 
+## [0.7.5](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.7.5)
+
+**Bug Fixes**
+
+- Setup wizard now correctly saves the “Allow conversation access” setting for OpenClaw.<span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/nicoloboschi" target="_blank" rel="noopener noreferrer" style={{color: "var(--ifm-color-primary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px", verticalAlign: "middle"}}><img src="https://github.com/nicoloboschi.png?size=40" alt="@nicoloboschi" width="18" height="18" style={{borderRadius: "50%"}} />@nicoloboschi</a><span style={{color: "var(--ifm-color-emphasis-500)", margin: "0 0.3em"}}>·</span><a href="https://github.com/vectorize-io/hindsight/commit/abf84872" target="_blank" rel="noopener noreferrer" style={{fontFamily: "var(--ifm-font-family-monospace, monospace)", fontSize: "0.85em", color: "var(--ifm-color-emphasis-600)"}}>abf84872</a>
+
 ## [0.7.4](https://github.com/vectorize-io/hindsight/tree/integrations/openclaw/v0.7.4)
 
 **Bug Fixes**
