@@ -83,6 +83,8 @@ docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
 - **API Server**: http://localhost:8888
 - **Control Plane** (Web UI): http://localhost:9999
 
+All published images are [signed with Cosign](#verifying-image-signatures) — verification is optional.
+
 ### Docker Image Variants
 
 | Variant | Size (AMD64) | Size (ARM64) | When to use |
@@ -107,6 +109,16 @@ ghcr.io/vectorize-io/hindsight-api:latest-slim
 
 # Control Plane only
 ghcr.io/vectorize-io/hindsight-control-plane:latest
+```
+
+### Verifying image signatures
+
+Images are signed with [Cosign](https://docs.sigstore.dev/cosign/signing/overview/) keyless OIDC. To verify any tag:
+
+```bash
+cosign verify ghcr.io/vectorize-io/hindsight:<tag> \
+  --certificate-identity-regexp '^https://github\.com/vectorize-io/hindsight/\.github/workflows/(sign-images|release)\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 ---
