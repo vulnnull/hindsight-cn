@@ -940,15 +940,30 @@ class WorkerPoller:
             if len(processing_info) > 10:
                 processing_str += f" +{len(processing_info) - 10} more"
 
-            # Get global stats from DB
+            # Get global stats from DB — scope the heavy COUNT/GROUP BY
+            # queries to schemas that actually have work. With N tenants the
+            # full fanout is 2*N queries every PROGRESS_LOG_INTERVAL; scoping
+            # via the routine (or per-schema EXISTS fallback) reduces this to
+            # 2*active_schemas which is typically << N.
             schemas = await self._get_schemas()
+            total_schema_count = len(schemas)
+
+            # Schemas with pending async_operations (uses server-side
+            # routine when installed, falls back to per-schema EXISTS).
+            schemas_with_pending = await self._scan_active_schemas(schemas)
+
+            # Also include schemas that have in-flight tasks on this worker
+            # so the "processing" worker_id GROUP BY still reports correctly.
+            schemas_with_active_tasks = {info.schema for info in active_tasks.values()}
+            schemas_to_query = schemas_with_pending | schemas_with_active_tasks
+
             global_pending = 0
             all_worker_counts: dict[str, int] = {}
             # operation_type -> aggregated bucket counts across schemas
             pending_breakdown: dict[str, dict[str, int]] = {}
 
             async with self._backend.acquire() as conn:
-                for schema in schemas:
+                for schema in schemas_to_query:
                     table = fq_table("async_operations", schema)
 
                     # Bucket pending rows by the same predicates the claim query
@@ -957,20 +972,24 @@ class WorkerPoller:
                     # retry backoff, etc.).
                     # Use SUM(CASE WHEN ...) instead of COUNT(*) FILTER (WHERE ...)
                     # for Oracle compatibility — FILTER is PG-specific.
-                    breakdown_rows = await conn.fetch(
-                        f"""
-                        SELECT
-                            operation_type,
-                            COUNT(*) AS total,
-                            SUM(CASE WHEN task_payload IS NULL THEN 1 ELSE 0 END) AS payload_null,
-                            SUM(CASE WHEN next_retry_at IS NOT NULL AND next_retry_at > now()
-                                THEN 1 ELSE 0 END) AS retry_blocked,
-                            SUM(CASE WHEN worker_id IS NOT NULL THEN 1 ELSE 0 END) AS assigned
-                        FROM {table}
-                        WHERE status = 'pending'
-                        GROUP BY operation_type
-                        """
-                    )
+                    try:
+                        breakdown_rows = await conn.fetch(
+                            f"""
+                            SELECT
+                                operation_type,
+                                COUNT(*) AS total,
+                                SUM(CASE WHEN task_payload IS NULL THEN 1 ELSE 0 END) AS payload_null,
+                                SUM(CASE WHEN next_retry_at IS NOT NULL AND next_retry_at > now()
+                                    THEN 1 ELSE 0 END) AS retry_blocked,
+                                SUM(CASE WHEN worker_id IS NOT NULL THEN 1 ELSE 0 END) AS assigned
+                            FROM {table}
+                            WHERE status = 'pending'
+                            GROUP BY operation_type
+                            """
+                        )
+                    except Exception:
+                        # Schema may be partially provisioned (table missing).
+                        breakdown_rows = []
                     for br in breakdown_rows:
                         op_type = br["operation_type"] or "unknown"
                         bucket = pending_breakdown.setdefault(
@@ -982,14 +1001,17 @@ class WorkerPoller:
                         bucket["assigned"] += br["assigned"]
                         global_pending += br["total"]
 
-                    worker_rows = await conn.fetch(
-                        f"""
-                        SELECT worker_id, COUNT(*) as count
-                        FROM {table}
-                        WHERE status = 'processing'
-                        GROUP BY worker_id
-                        """
-                    )
+                    try:
+                        worker_rows = await conn.fetch(
+                            f"""
+                            SELECT worker_id, COUNT(*) as count
+                            FROM {table}
+                            WHERE status = 'processing'
+                            GROUP BY worker_id
+                            """
+                        )
+                    except Exception:
+                        worker_rows = []
                     for wr in worker_rows:
                         wid = wr["worker_id"] or "unknown"
                         all_worker_counts[wid] = all_worker_counts.get(wid, 0) + wr["count"]
@@ -1005,14 +1027,19 @@ class WorkerPoller:
             pool_str = self._format_pool_stats()
             proc_str = self._format_proc_stats()
 
-            # Display None as "default" in logs
-            schemas_str = ", ".join(s if s else "default" for s in schemas)
+            queried_count = len(schemas_to_query)
+            # Display queried schemas (cap at 20 for readability)
+            queried_list = sorted(s if s else "default" for s in schemas_to_query)
+            schemas_str = ", ".join(queried_list[:20])
+            if len(queried_list) > 20:
+                schemas_str += f" +{len(queried_list) - 20} more"
             logger.info(
                 f"[WORKER_STATS] worker={self._worker_id} "
                 f"slots={in_flight}/{self._max_slots} | "
                 f"reserved: [{reserved_str}] | "
                 f"shared={tasks_in_shared}/{shared_pool_size}(avail={shared_available}) | "
-                f"global: pending={global_pending} (schemas: {schemas_str}) | "
+                f"global: pending={global_pending} "
+                f"(queried={queried_count}/{total_schema_count} schemas: {schemas_str}) | "
                 f"others: {others_str} | "
                 f"pool: {pool_str} | "
                 f"proc: {proc_str} | "
