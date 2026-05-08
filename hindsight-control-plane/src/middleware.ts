@@ -9,6 +9,7 @@ const PUBLIC_PATTERNS = [
   "/api/auth/",
   "/api/health",
   "/api/version",
+  "/logo.png",
   "/favicon",
   "/_next",
   "/fonts",
@@ -36,6 +37,11 @@ export function middleware(request: NextRequest) {
   const isAuthenticated = request.cookies.has(ACCESS_KEY_COOKIE);
 
   if (!isAuthenticated) {
+    // For API routes, return 401 JSON instead of redirecting to HTML login page
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     // Redirect to login page
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("returnTo", pathname);

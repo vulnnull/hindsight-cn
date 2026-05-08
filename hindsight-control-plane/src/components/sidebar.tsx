@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useBank } from "@/lib/bank-context";
 import { bankRoute } from "@/lib/bank-url";
-import { useFeatures } from "@/lib/features-context";
 import {
   Search,
   Sparkles,
@@ -13,7 +12,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Settings,
-  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -27,17 +25,7 @@ interface SidebarProps {
 
 export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
   const { currentBank } = useBank();
-  const { features } = useFeatures();
   const [isCollapsed, setIsCollapsed] = useState(true);
-
-  const handleLogout = useCallback(async () => {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } finally {
-      // Force a full reload to clear state and trigger middleware redirect
-      window.location.href = "/login";
-    }
-  }, []);
 
   if (!currentBank) {
     return null;
@@ -96,21 +84,6 @@ export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
           })}
         </ul>
       </nav>
-
-      {/* Logout button */}
-      <div className="p-3 border-t border-border">
-        <button
-          onClick={handleLogout}
-          className={cn(
-            "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors",
-            isCollapsed && "justify-center px-0"
-          )}
-          title={isCollapsed ? "Logout" : "Logout"}
-        >
-          <LogOut className="w-5 h-5" />
-          {!isCollapsed && <span>Logout</span>}
-        </button>
-      </div>
 
       {/* Collapse/Expand button at bottom */}
       <div className="p-3 border-t border-border">

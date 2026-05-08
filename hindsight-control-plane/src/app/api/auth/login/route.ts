@@ -7,10 +7,7 @@ export async function POST(request: NextRequest) {
 
   // If no access key is configured, return 503
   if (!accessKey) {
-    return NextResponse.json(
-      { error: "Access key not configured" },
-      { status: 503 }
-    );
+    return NextResponse.json({ error: "Access key not configured" }, { status: 503 });
   }
 
   let body: { key?: string };
