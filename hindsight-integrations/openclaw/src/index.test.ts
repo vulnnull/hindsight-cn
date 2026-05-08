@@ -814,8 +814,7 @@ describe("prepareRetentionTranscript", () => {
     const parsed = JSON.parse(result!.transcript);
     expect(parsed[0]).toEqual({
       role: "system",
-      content:
-        "[context]\nsender: U7JAF258R\nchannel: C04L6E0H3SQ\nprovider: slack\n[/context]",
+      content: "[context]\nsender: U7JAF258R\nchannel: C04L6E0H3SQ\nprovider: slack\n[/context]",
     });
     expect(parsed[1]).toEqual({ role: "user", content: "What's MIN-123 status?" });
     expect(result?.messageCount).toBe(2);
