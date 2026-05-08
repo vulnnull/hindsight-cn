@@ -288,7 +288,17 @@ def create_llm_provider(
             extra_args=config.llamacpp_extra_args,
         )
 
-    elif provider_lower in ("openai", "groq", "ollama", "lmstudio", "minimax", "deepseek", "volcano", "openrouter", "zai"):
+    elif provider_lower in (
+        "openai",
+        "groq",
+        "ollama",
+        "lmstudio",
+        "minimax",
+        "deepseek",
+        "volcano",
+        "openrouter",
+        "zai",
+    ):
         return OpenAICompatibleLLM(
             provider=provider,
             api_key=api_key,
