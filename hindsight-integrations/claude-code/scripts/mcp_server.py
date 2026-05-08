@@ -149,9 +149,9 @@ def agent_knowledge_delete_page(page_id: str) -> str:
 
 
 @mcp.tool()
-def agent_knowledge_recall(query: str, max_results: int = 10) -> str:
-    """Search across all retained conversations and documents for specific facts, numbers, or details not covered by your knowledge pages."""
-    resp = _client.recall(bank_id=_default_bank_id, query=query, max_tokens=max_results, budget="mid", timeout=10)
+def agent_knowledge_recall(query: str, max_tokens: int = 1024) -> str:
+    """Search across all retained conversations and documents for specific facts, numbers, or details not covered by your knowledge pages. max_tokens is the result token budget (server returns whatever fits)."""
+    resp = _client.recall(bank_id=_default_bank_id, query=query, max_tokens=max_tokens, budget="mid", timeout=10)
     return json.dumps(resp, indent=2)
 
 
