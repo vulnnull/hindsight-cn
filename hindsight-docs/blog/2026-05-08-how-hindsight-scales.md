@@ -4,8 +4,11 @@ description: "A design analysis of how Hindsight's memory operations scale with 
 authors: [nicoloboschi]
 date: 2026-05-08T12:00
 tags: [scaling, performance, architecture, engineering]
+image: /img/blog/how-hindsight-scales.png
 hide_table_of_contents: true
 ---
+
+![How Hindsight Scales](/img/blog/how-hindsight-scales.png)
 
 Agent memory systems face a scaling problem that traditional databases don't. It's not just "can we store more data" — it's "does the system stay fast, accurate, and affordable as memories pile up over weeks, months, and years."
 
