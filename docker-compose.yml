@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  hindsight:
+    image: transnull/hindsight-cn:latest
+    container_name: hindsight-cn
+    build:
+      context: .
+      dockerfile: docker/standalone/Dockerfile
+      args:
+        INCLUDE_API: "true"
+        INCLUDE_CP: "true"
+        PRELOAD_ML_MODELS: "false"
+        INCLUDE_LOCAL_MODELS: "false"
+    ports:
+      - "8888:8888"   # API
+      - "9999:9999"   # Control Plane Web UI
+    volumes:
+      - hindsight-pg0:/home/hindsight/.pg0
+    environment:
+      - HINDSIGHT_API_LLM_PROVIDER=${HINDSIGHT_API_LLM_PROVIDER:-openai}
+      - HINDSIGHT_API_LLM_API_KEY=${HINDSIGHT_API_LLM_API_KEY:?请设置 LLM API Key}
+      - HINDSIGHT_API_LLM_MODEL=${HINDSIGHT_API_LLM_MODEL:-gpt-4o-mini}
+      - HINDSIGHT_API_LLM_BASE_URL=${HINDSIGHT_API_LLM_BASE_URL:-}
+      - HINDSIGHT_API_HOST=0.0.0.0
+      - HINDSIGHT_API_PORT=8888
+      - HINDSIGHT_API_LOG_LEVEL=info
+    restart: unless-stopped
+
+volumes:
+  hindsight-pg0:
