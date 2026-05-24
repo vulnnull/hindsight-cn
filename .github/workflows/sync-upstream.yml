@@ -1,0 +1,58 @@
+name: 同步上游代码
+
+on:
+  schedule:
+    # 北京时间每天 06:00 / 18:00 自动检查上游更新（UTC 22:00 / 10:00）
+    - cron: "0 22 */1 * *"
+    - cron: "0 10 */1 * *"
+  workflow_dispatch: # 允许手动触发
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出本仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: 添加上游仓库
+        run: |
+          git remote add upstream https://github.com/vectorize-io/hindsight.git
+          git fetch upstream
+
+      - name: 检查上游更新
+        id: check
+        run: |
+          BEHIND=$(git rev-list --count HEAD..upstream/main 2>/dev/null || echo 0)
+          echo "behind=$BEHIND" >> $GITHUB_OUTPUT
+          echo "上游落后 $BEHIND 个提交"
+
+      - name: 合并上游变更
+        if: steps.check.outputs.behind > 0
+        run: |
+          git config user.name "hindsight-cn bot"
+          git config user.email "bot@hindsight-cn.local"
+          git merge upstream/main --no-edit --allow-unrelated-histories || true
+          # 检查是否有冲突
+          CONFLICTS=$(git diff --name-only --diff-filter=U)
+          if [ -n "$CONFLICTS" ]; then
+            echo "检测到冲突文件："
+            echo "$CONFLICTS"
+            # 自动优先使用本地（汉化）版本解决冲突
+            echo "$CONFLICTS" | while read file; do
+              echo "保留本地版本：$file"
+              git checkout --ours "$file"
+              git add "$file"
+            done
+            git commit --no-edit -m "fix: 自动解决上游合并冲突（保留中文汉化）"
+          fi
+
+      - name: 推送到本仓库
+        if: steps.check.outputs.behind > 0
+        run: git push origin main
