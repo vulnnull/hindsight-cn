@@ -2,99 +2,86 @@
 
 ![Hindsight Banner](./hindsight-docs/static/img/hindsight-github-banner.png)
 
-[Documentation](https://hindsight.vectorize.io) • [Paper](https://arxiv.org/abs/2512.12818) • [Cookbook](https://hindsight.vectorize.io/cookbook) • [Hindsight Cloud](https://ui.hindsight.vectorize.io/signup)
+[官方文档](https://hindsight.vectorize.io) · [论文](https://arxiv.org/abs/2512.12818) · [示例手册](https://hindsight.vectorize.io/cookbook)
 
 [![CI](https://github.com/vectorize-io/hindsight/actions/workflows/release.yml/badge.svg)](https://github.com/vectorize-io/hindsight/actions/workflows/release.yml)
-[![Slack Community](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![gitcgr](https://gitcgr.com/badge/vectorize-io/hindsight.svg)](https://gitcgr.com/vectorize-io/hindsight)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/hindsight-api?label=PyPI)
-![NPM Downloads](https://img.shields.io/npm/dm/%40vectorize-io%2Fhindsight-client?logoColor=orange&label=NPM&color=blue&link=https%3A%2F%2Fwww.npmjs.com%2Fpackage%2F%40vectorize-io%2Fhindsight-client)
-<br/>
+[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg)
+[![许可证: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![PyPI 下载量](https://img.shields.io/pypi/dm/hindsight-api?label=PyPI)
+![NPM 下载量](https://img.shields.io/npm/dm/%40vectorize-io%2Fhindsight-client?logoColor=orange&label=NPM&color=blue&link=https%3A%2F%2Fwww.npmjs.com%2Fpackage%2F%40vectorize-io%2Fhindsight-client)
 
-<a href="https://trendshift.io/repositories/15603" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15603" alt="vectorize-io%2Fhindsight | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 </div>
 
 ---
 
-## What is Hindsight?
+## 什么是 Hindsight？
 
-Hindsight™ is an agent memory system built to create smarter agents that learn over time. Most agent memory systems focus on recalling conversation history. Hindsight is focused on making agents that learn, not just remember.
-
+**Hindsight-CN** 是 [Hindsight](https://github.com/vectorize-io/hindsight) 的中文汉化版本。Hindsight™ 是一款 AI 代理记忆系统，旨在让智能体在时间推移中不断学习成长。与大多数仅关注对话历史回忆的记忆系统不同，Hindsight 专注于让智能体真正**学习**——而不仅仅是**记住**。
 
 <video src="https://github.com/user-attachments/assets/923b798d-3581-4897-bb62-9cfa5a931682" controls></video>
 
-It eliminates the shortcomings of alternative techniques such as RAG and knowledge graph and delivers state-of-the-art performance on long term memory tasks.
+它克服了 RAG（检索增强生成）和知识图谱等传统技术的局限性，在长期记忆任务上取得了业界领先的性能。
 
-## Memory Performance & Accuracy
+## 记忆性能与准确率
 
-Hindsight is the most accurate agent memory system ever tested according to benchmark performance. It has achieved state-of-the-art performance on the LongMemEval benchmark, widely used to assess memory system performance across a variety of conversational AI scenarios. The current reported performance of Hindsight and other agent memory solutions as of January 2026 is shown here:
+根据基准测试结果，Hindsight 是迄今为止经过测试的最准确的 AI 代理记忆系统。它在 LongMemEval 基准测试中取得了业界领先的成绩，该基准广泛用于评估各种对话式 AI 场景下记忆系统的性能。以下展示 Hindsight 与其他代理记忆解决方案截至 2026 年 1 月的报告性能：
 
-![Overview](./hindsight-docs/static/img/hindsight-benchmarks.png)
+![性能对比](./hindsight-docs/static/img/hindsight-benchmarks.png)
 
-The benchmark performance data for Hindsight has been independently reproduced by research collaborators at the Virginia Tech [Sanghani Center for Artificial Intelligence and Data Analytics](https://sanghani.cs.vt.edu/) and The Washington Post. Other scores are self-reported by software vendors.
+Hindsight 的基准测试数据已由弗吉尼亚理工大学 [Sanghani 人工智能与数据分析中心](https://sanghani.cs.vt.edu/) 和《华盛顿邮报》的研究合作者独立复现。其他厂商的分数由其自行报告。
 
-Hindsight is being used in production at Fortune 500 enterprises and by a growing number of AI startups. 
+Hindsight 已部署于财富 500 强企业的生产环境，并被越来越多的 AI 创业公司采用。
 
-## Adding Hindsight to Your AI Agents
+## 核心概念（中文本地化）
 
-The easiest way to use Hindsight with an existing agent is with the LLM Wrapper. You can add memory to your agent with 2 lines of code. That will swap your current LLM client out with the Hindsight wrapper. After that, memories will be stored and retrieved automatically as you make LLM calls.
+Hindsight 采用生物拟态数据结构组织代理记忆，模拟人类记忆的工作方式：
 
-If you need more control over how and when your agent stores and recalls memories, there's also a simple API you can integrate with using the SDKs or directly via HTTP.
+| 英文原称 | 中文译名 | 含义 |
+|---------|---------|------|
+| **World** | **世界常识** | 关于世界的普遍知识（"炉子很烫"） |
+| **Experience** | **经历记忆** | 智能体自身的经历（"我摸了炉子，真的很疼"） |
+| **Observation** | **观察** | 从记忆中提炼的即时观察 |
+| **Mental Model** | **思维模型** | 通过反思原始记忆和经历形成的认知理解 |
+| **Bank** | **记忆库** | 存储隔离的记忆空间（每个智能体一个"大脑"） |
 
-![Hindsight Banner](./hindsight-docs/static/img/migration-code.png)
+## 快速开始
 
----
-
-> 🤖 **Using a coding agent?** Install the Hindsight documentation skill for instant access to docs while you code:
-> ```bash
-> npx skills add https://github.com/vectorize-io/hindsight --skill hindsight-docs
-> ```
-> Works with Claude Code, Cursor, and other AI coding assistants.
-
----
-
-
-## Quick Start
-
-### Docker (recommended)
+### Docker（推荐）
 
 ```bash
-export OPENAI_API_KEY=sk-xxx
+export HINDSIGHT_API_LLM_API_KEY=你的API密钥
 
-docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
-  -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
-  -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
-  ghcr.io/vectorize-io/hindsight:latest
+docker run --rm -it -p 8888:8888 -p 9999:9999 \
+  -e HINDSIGHT_API_LLM_API_KEY=$HINDSIGHT_API_LLM_API_KEY \
+  -e HINDSIGHT_API_LLM_MODEL=gpt-4o-mini \
+  -e HINDSIGHT_API_LLM_BASE_URL=https://api.openai.com/v1 \
+  -v $HOME/.hindsight-cn:/home/hindsight/.pg0 \
+  transnull/hindsight-cn:latest
 ```
 
->API: http://localhost:8888
->UI: http://localhost:9999
+> API 地址: http://localhost:8888
+> Web 管理界面: http://localhost:9999/dashboard
 
-You can modify the LLM provider by setting `HINDSIGHT_API_LLM_PROVIDER`. Valid options are `openai`, `anthropic`, `gemini`, `groq`, `ollama`, `lmstudio`, and `minimax`. The documentation provides more details on [supported models](https://hindsight.vectorize.io/developer/models).
-
-
-
-### Docker (external PostgreSQL)
+### Docker Compose
 
 ```bash
-export OPENAI_API_KEY=sk-xxx
-export HINDSIGHT_DB_PASSWORD=choose-a-password
-cd docker/docker-compose
-docker compose up 
+# 克隆本仓库
+git clone https://github.com/vulnnull/hindsight-cn.git
+cd hindsight-cn
+
+# 编辑 .env 文件，填入 LLM 配置
+cp .env.example .env
+# HINDSIGHT_API_LLM_API_KEY=你的API密钥
+
+# 启动服务
+docker compose up -d
 ```
 
-> Oracle AI Database is also supported for enterprise deployments with full feature parity. See the [storage documentation](https://hindsight.vectorize.io/developer/storage) for details.
-
-
->API: http://localhost:8888
->UI: http://localhost:9999
-
-### Client
+### 客户端 SDK
 
 ```bash
 pip install hindsight-client -U
-# or
+# 或
 npm install @vectorize-io/hindsight-client
 ```
 
@@ -105,14 +92,14 @@ from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-# Retain: Store information
-client.retain(bank_id="my-bank", content="Alice works at Google as a software engineer")
+# 记忆存储（Retain）：存入信息
+client.retain(bank_id="my-bank", content="张三在谷歌担任软件工程师")
 
-# Recall: Search memories
-client.recall(bank_id="my-bank", query="What does Alice do?")
+# 记忆召回（Recall）：搜索记忆
+client.recall(bank_id="my-bank", query="张三的工作是什么？")
 
-# Reflect: Generate disposition-aware response
-client.reflect(bank_id="my-bank", query="Tell me about Alice")
+# 深度反思（Reflect）：基于记忆生成带情境感知的回复
+client.reflect(bank_id="my-bank", query="介绍一下张三")
 ```
 
 #### Node.js / TypeScript
@@ -127,17 +114,16 @@ const { HindsightClient } = require('@vectorize-io/hindsight-client');
 const main = async () => {
   const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 
-  await client.retain('my-bank', 'Alice loves hiking in Yosemite');
+  await client.retain('my-bank', '张三喜欢在优胜美地徒步');
 
-  const results = await client.recall('my-bank', 'What does Alice like?');
+  const results = await client.recall('my-bank', '张三喜欢什么？');
   console.log(results);
-}
+};
 
 main();
 ```
 
-
-### Python Embedded (no server required)
+### Python 嵌入式模式（无需独立服务器）
 
 ```bash
 pip install hindsight-all -U
@@ -149,167 +135,141 @@ from hindsight import HindsightServer, HindsightClient
 
 with HindsightServer(
     llm_provider="openai",
-    llm_model="gpt-5-mini", 
+    llm_model="gpt-5-mini",
     llm_api_key=os.environ["OPENAI_API_KEY"]
 ) as server:
     client = HindsightClient(base_url=server.url)
-    client.retain(bank_id="my-bank", content="Alice works at Google")
-    results = client.recall(bank_id="my-bank", query="Where does Alice work?")
+    client.retain(bank_id="my-bank", content="张三在谷歌工作")
+    results = client.recall(bank_id="my-bank", query="张三在哪里工作？")
 ```
 
-
 ---
 
-## Use Cases
+## 架构与操作
 
+![架构概览](./hindsight-docs/static/img/hindsight-overview.webp)
 
-Hindsight is built to support conversational AI agents as well as agents that are intended to perform tasks autonomously. The ideal use case for Hindsight are agents that require a blend of these features such as AI employees that need to handle open-ended tasks, change behavior based on user feedback, and learn to perform complex tasks to automate work at a level that approximates a human work. Hindsight can be used with simple AI workflows like those built with n8n and other similar tools, but may be overkill for such applications.
+Hindsight 提供三个核心操作与系统交互：
 
-### Per-User Memories and Chat History
+### 记忆存储（Retain）
 
-One of the simpler use cases you can use Hindsight for is to personalize AI chatbots and other conversational agents by storing and recalling memories associated with individual users.
-
-The requirements for this use case usually look something like this:
-
-![Per-User Memories](./hindsight-docs/static/img/per-user-memory-requirements.png)
-
-<video src="https://github.com/user-attachments/assets/4805e8e1-e7d1-47c6-a4f8-2344a5ec8906" controls></video>
-
-Satisfying these requirements in Hindsight is straightforward. When new user inputs and tool calls are ingested into Hindsight using the retain operation, custom metadata can be used to enrich the new memories. Metadata provides a convenient way to isolate memories that need to be restricted to a given user. Once these are fed into the retain operation, any raw memories and mental models that get created can be filtered when retrieving relevant memories. 
-
-![Per-User Memories](./hindsight-docs/static/img/per-user-memory-howto.png)
-
----
-
-## Architecture & Operations
-
-![Overview](./hindsight-docs/static/img/hindsight-overview.webp)
-
-Most agent memory implementations rely on basic vector search or sometimes use a knowledge graph. Hindsight uses biomimetic data structures to organize agent memories in a way that is more like how human memory works:
-
-- **World:** Facts about the world ("The stove gets hot")
-- **Experiences:** Agent's own experiences ("I touched the stove and it really hurt")
-- **Mental Models:** Learned understanding of the agent's world formed by reflecting on raw memories and experiences.
-
-Memories in Hindsight are stored in banks (i.e. memory banks). When memories are added to Hindsight, they are pushed into either the world facts or experiences memory pathway. They are then represented as a combination of entities, relationships, and time series with sparse/dense vector representations to aid in later recall.
-
-Hindsight provides three simple methods to interact with the system:
-
-- **Retain:** Provide information to Hindsight that you want it to remember
-- **Recall:** Retrieve memories from Hindsight
-- **Reflect:** Reflect on memories and experiences to generate new observations and insights from existing memories.
-
-### Retain
-
-The `retain` operation is used to push new memories into Hindsight. It tells Hindsight to _retain_ the information you pass in as an input.
+`retain` 操作用于将新记忆存入 Hindsight。
 
 ```python
 from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-# Simple
+# 简单存储
 client.retain(
     bank_id="my-bank",
-    content="Alice works at Google as a software engineer"
+    content="张三在谷歌担任软件工程师"
 )
 
-# With context and timestamp
+# 带上下文和时间戳
 client.retain(
     bank_id="my-bank",
-    content="Alice got promoted to senior engineer",
-    context="career update",
+    content="张三晋升为高级工程师",
+    context="职业更新",
     timestamp="2025-06-15T10:00:00Z"
 )
 ```
 
-Behind the scenes, the retain operation uses an LLM to extract key facts, temporal data, entities, and relationships. It passes these through a normalization process to transform extracted data into canonical entities, time series, and search indexes along with metadata. These representations create the pathways for accurate memory retrieval in the recall and reflect operations. 
+在后台，retain 操作利用 LLM 提取关键事实、时间数据、实体和关系，经过归一化处理后转换为规范化实体、时间序列和搜索索引。
 
-![Retain Operation](hindsight-docs/static/img/retain-operation.webp)
+![Retain 流程](hindsight-docs/static/img/retain-operation.webp)
 
-### Recall
+### 记忆召回（Recall）
 
-The recall operation is used to retrieve memories. These memories can come from any of the memory types (world, experiences, etc.)
-
-```python
-from hindsight_client import Hindsight
-
-client = Hindsight(base_url="http://localhost:8888")
-
-# Simple
-client.recall(bank_id="my-bank", query="What does Alice do?")
-
-# Temporal
-client.recall(bank_id="my-bank", query="What happened in June?")
-```
-
-Recall performs 4 retrieval strategies in parallel:
-- Semantic: Vector similarity
-- Keyword: BM25 exact matching
-- Graph: Entity/temporal/causal links
-- Temporal: Time range filtering
-
-![Retain Operation](hindsight-docs/static/img/recall-operation.webp)
-
-The individual results from the retrievals are merged, then ordered by relevance using reciprocal rank fusion and a cross-encoder reranking model.
-
-The final output is trimmed as needed to fit within the token limit.
-
-### Reflect
-
-The reflect operation is used to perform a more thorough analysis of existing memories. This allows the agent to form new connections between memories and build a more thorough understanding of its world.
-
-For example, the `reflect` operation can be used to support use cases such as:
-
-- An **AI Project Manager** reflecting on what risks need to be mitigated on a project.
-- A **Sales Agent** reflecting on why certain outreach messages have gotten responses while others haven't.
-- A **Support Agent** reflecting on opportunities where customers have questions not answered by current product documentation.
-
-The `reflect` operation can also be used to handle on-demand question answering or analysis which require more deep thinking.
+`recall` 操作用于检索记忆，支持从所有记忆类型中查询。
 
 ```python
 from hindsight_client import Hindsight
 
 client = Hindsight(base_url="http://localhost:8888")
 
-client.reflect(bank_id="my-bank", query="What should I know about Alice?")
+# 简单召回
+client.recall(bank_id="my-bank", query="张三的工作是什么？")
+
+# 时间范围召回
+client.recall(bank_id="my-bank", query="六月发生了什么？")
 ```
 
-![Retain Operation](hindsight-docs/static/img/reflect-operation.webp)
+召回操作并行执行 4 种检索策略：
+
+- **语义检索**：向量相似度匹配
+- **关键词检索**：BM25 精确匹配
+- **图谱检索**：实体/时间/因果关联
+- **时间检索**：时间范围过滤
+
+各检索结果经互惠排名融合（RRF）和交叉编码器重排序后输出。
+
+![Recall 流程](hindsight-docs/static/img/recall-operation.webp)
+
+### 深度反思（Reflect）
+
+`reflect` 操作用于对已有记忆进行更深入的分析，帮助智能体建立记忆之间的新连接，构建更全面的认知理解。
+
+```python
+from hindsight_client import Hindsight
+
+client = Hindsight(base_url="http://localhost:8888")
+
+client.reflect(bank_id="my-bank", query="关于张三我需要了解什么？")
+```
+
+![Reflect 流程](hindsight-docs/static/img/reflect-operation.webp)
 
 ---
 
-## Resources
+## 使用场景
 
-**Documentation:** 
+- **AI 项目经理**：反思项目中需要规避的风险
+- **销售智能体**：分析哪些推广信息获得了回复及原因
+- **客服智能体**：发现客户提出的、现有文档未能覆盖的问题
+- **个性化聊天**：为每个用户存储和召回个性化记忆
+
+---
+
+## 上游同步
+
+本仓库通过 GitHub Actions 定时同步 [vectorize-io/hindsight](https://github.com/vectorize-io/hindsight) 上游更新，同时保留中文汉化内容。遇冲突时自动优先使用本地汉化版本。
+
+---
+
+## 资源
+
+**官方文档：**
 - [https://hindsight.vectorize.io](https://hindsight.vectorize.io)
 
-**Clients:**
-- [Python](http://hindsight.vectorize.io/sdks/python)
-- [Node.js](http://hindsight.vectorize.io/sdks/nodejs)
+**客户端：**
+- [Python SDK](http://hindsight.vectorize.io/sdks/python)
+- [Node.js SDK](http://hindsight.vectorize.io/sdks/nodejs)
 - [REST API](https://hindsight.vectorize.io/api-reference)
 - [CLI](https://hindsight.vectorize.io/sdks/cli)
 
-**Community:**
+**社区：**
 - [Slack](https://join.slack.com/t/hindsight-space/shared_invite/zt-3nhbm4w29-LeSJ5Ixi6j8PdiYOCPlOgg)
 - [GitHub Issues](https://github.com/vectorize-io/hindsight/issues)
 
 ---
-## Star History
+
+## Star 历史
 
 [![Star History Chart](https://api.star-history.com/svg?repos=vectorize-io/hindsight&type=date&legend=top-left)](https://www.star-history.com/#vectorize-io/hindsight&type=date&legend=top-left)
----
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-## License
-
-MIT — see [LICENSE](./LICENSE)
 
 ---
 
-Built by [Vectorize.io](https://vectorize.io)
+## 贡献
+
+欢迎提交 Issue 和 Pull Request。
+
+## 许可证
+
+MIT 协议 — 参见 [LICENSE](./LICENSE)
+
+---
+
+原版由 [Vectorize.io](https://vectorize.io) 构建 · 中文汉化版由 [vulnnull](https://github.com/vulnnull) 维护
 
 <img src="https://umami-pixel.chris-latimer.workers.dev/?id=a8b043e6-6964-454d-80df-69b69d3f0d50&host=github.com&url=/vectorize-io/hindsight" width="1" height="1" alt="" />
