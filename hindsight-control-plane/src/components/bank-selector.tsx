@@ -70,16 +70,16 @@ function toIsoTimestamp(value: string): string {
 function formatTimeAgo(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
   const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return "just now";
+  if (seconds < 60) return "刚刚";
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return `${minutes}分钟前`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return `${hours}小时前`;
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
+  if (days < 30) return `${days}天前`;
   const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(months / 12)}y ago`;
+  if (months < 12) return `${months}个月前`;
+  return `${Math.floor(months / 12)}年前`;
 }
 
 function BankSelectorInner() {
@@ -194,7 +194,7 @@ function BankSelectorInner() {
         try {
           manifest = JSON.parse(templateJson.trim());
         } catch {
-          setTemplateError("Invalid JSON. Please check the template syntax.");
+          setTemplateError("无效的 JSON，请检查模板语法。");
           setIsCreating(false);
           return;
         }
@@ -203,7 +203,7 @@ function BankSelectorInner() {
           await client.importBankTemplate(newBankId.trim(), manifest);
         } catch (importError) {
           setTemplateError(
-            importError instanceof Error ? importError.message : "Failed to import template"
+            importError instanceof Error ? importError.message : "导入模板失败"
           );
           setIsCreating(false);
           return;
@@ -219,7 +219,7 @@ function BankSelectorInner() {
       setCurrentBank(newBankId.trim());
       router.push(bankRoute(newBankId.trim(), "?view=data"));
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "Failed to create bank");
+      setCreateError(error instanceof Error ? error.message : "创建记忆库失败");
     } finally {
       setIsCreating(false);
     }
@@ -250,9 +250,9 @@ function BankSelectorInner() {
   const scopeLabel = (tags: string[]) => tags.join(", ");
 
   const scopeQuestion = (tags: string[]): string => {
-    if (tags.length === 1) return `What happened with ${tags[0]}?`;
-    const allButLast = tags.slice(0, -1).join(", ");
-    return `What happened with ${allButLast} and ${tags[tags.length - 1]}?`;
+    if (tags.length === 1) return `${tags[0]}发生了什么？`;
+    const allButLast = tags.slice(0, -1).join("、");
+    return `${allButLast}和${tags[tags.length - 1]}发生了什么？`;
   };
 
   const computeScopes = (
@@ -330,7 +330,7 @@ function BankSelectorInner() {
     setUploadProgress("");
 
     try {
-      setUploadProgress(`Uploading ${selectedFiles.length} file(s)...`);
+      setUploadProgress(`正在上传 ${selectedFiles.length} 个文件...`);
 
       const perFileMeta = filesMetadata.map((meta) => ({
         ...(meta.context && { context: meta.context }),
@@ -482,22 +482,22 @@ function BankSelectorInner() {
               aria-expanded={open}
               className="w-[250px] justify-between font-bold border-2 border-primary hover:bg-accent"
             >
-              <span className="truncate">{currentBank || "Select a memory bank..."}</span>
+              <span className="truncate">{currentBank || "选择记忆库..."}</span>
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-[420px] p-0" align="start">
             <Command>
-              {sortedBanks.length > 0 && <CommandInput placeholder="Search memory banks..." />}
+              {sortedBanks.length > 0 && <CommandInput placeholder="搜索记忆库..." />}
               <CommandList>
                 <CommandEmpty>
                   {banksLoading ? (
                     <div className="flex items-center justify-center gap-2 py-2">
                       <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                      <span>Loading banks...</span>
+                      <span>加载中...</span>
                     </div>
                   ) : (
-                    "No memory banks yet."
+                    "暂无记忆库。"
                   )}
                 </CommandEmpty>
                 <CommandGroup>
@@ -546,7 +546,7 @@ function BankSelectorInner() {
                                 </span>
                               </>
                             ) : (
-                              <span className="italic text-muted-foreground/40">empty</span>
+                              <span className="italic text-muted-foreground/40">空</span>
                             )}
                           </span>
                         </div>
@@ -565,7 +565,7 @@ function BankSelectorInner() {
                   }}
                 >
                   <Plus className="h-4 w-4" />
-                  <span>Create new bank</span>
+                  <span>新建记忆库</span>
                 </button>
               </div>
             </Command>
@@ -582,11 +582,11 @@ function BankSelectorInner() {
             size="sm"
             className="h-9 gap-1.5"
             onClick={() => setDocDialogOpen(true)}
-            title="Add document to current bank"
+            title="向当前记忆库添加文档"
             data-add-document
           >
             <Plus className="h-4 w-4" />
-            <span>Add Document</span>
+            <span>添加文档</span>
           </Button>
         )}
 
@@ -599,7 +599,7 @@ function BankSelectorInner() {
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
-          title="View on GitHub"
+          title="在 GitHub 上查看"
         >
           <Github className="h-5 w-5" />
           <span className="text-sm font-medium">GitHub</span>
@@ -614,7 +614,7 @@ function BankSelectorInner() {
           size="icon"
           onClick={toggleTheme}
           className="h-9 w-9"
-          title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+          title={theme === "light" ? "切换深色模式" : "切换浅色模式"}
         >
           {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </Button>
@@ -626,7 +626,7 @@ function BankSelectorInner() {
               variant="ghost"
               size="icon"
               className="h-9 w-9"
-              title="Logout"
+              title="退出登录"
               onClick={async () => {
                 try {
                   await fetch("/api/auth/logout", { method: "POST" });
@@ -643,11 +643,11 @@ function BankSelectorInner() {
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogContent className="sm:max-w-[550px]">
             <DialogHeader>
-              <DialogTitle>Create New Memory Bank</DialogTitle>
+              <DialogTitle>新建记忆库</DialogTitle>
             </DialogHeader>
             <div className="py-4 space-y-4">
               <Input
-                placeholder="Enter bank ID..."
+                placeholder="输入记忆库 ID..."
                 value={newBankId}
                 onChange={(e) => setNewBankId(e.target.value)}
                 onKeyDown={(e) => {
@@ -669,7 +669,7 @@ function BankSelectorInner() {
                       }
                     }}
                   />
-                  <label className="text-sm font-medium">Import from template</label>
+                  <label className="text-sm font-medium">从模板导入</label>
                 </div>
                 {useTemplate && (
                   <a
@@ -678,15 +678,14 @@ function BankSelectorInner() {
                     rel="noopener noreferrer"
                     className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    Browse templates &rarr;
+                    浏览模板 →
                   </a>
                 )}
               </div>
               {useTemplate && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-2">
-                    Paste a template manifest JSON to pre-configure the bank with settings, mental
-                    models, and directives.
+                    粘贴模板清单 JSON，预配置记忆库的设置、思维模型和指令。
                   </p>
                   <Textarea
                     placeholder='{"version": "1", "bank": {...}, "mental_models": [...]}'
@@ -716,10 +715,10 @@ function BankSelectorInner() {
                   setTemplateError(null);
                 }}
               >
-                Cancel
+                取消
               </Button>
               <Button onClick={handleCreateBank} disabled={isCreating || !newBankId.trim()}>
-                {isCreating ? "Creating..." : "Create"}
+                {isCreating ? "创建中..." : "创建"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -728,9 +727,9 @@ function BankSelectorInner() {
         <Dialog open={docDialogOpen} onOpenChange={setDocDialogOpen}>
           <DialogContent className="sm:max-w-[750px] max-h-[90vh] flex flex-col">
             <DialogHeader>
-              <DialogTitle>Add New Document</DialogTitle>
+              <DialogTitle>添加新文档</DialogTitle>
               <p className="text-sm text-muted-foreground">
-                Add a new document to memory bank:{" "}
+                添加新文档到记忆库：
                 <span className="font-semibold">{currentBank}</span>
               </p>
             </DialogHeader>
@@ -741,7 +740,7 @@ function BankSelectorInner() {
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="text" className="flex items-center gap-2">
                     <FileText className="h-4 w-4" />
-                    Text
+                    文本
                   </TabsTrigger>
                   <TabsTrigger
                     value="upload"
@@ -753,16 +752,16 @@ function BankSelectorInner() {
                     ) : (
                       <Upload className="h-4 w-4" />
                     )}
-                    Upload Files
+                    上传文件
                   </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="text" className="mt-3">
-                  <label className="font-bold block mb-1 text-sm text-foreground">Content *</label>
+                  <label className="font-bold block mb-1 text-sm text-foreground">内容 *</label>
                   <Textarea
                     value={docContent}
                     onChange={(e) => setDocContent(e.target.value)}
-                    placeholder="Enter the document content..."
+                    placeholder="输入文档内容..."
                     className="min-h-[150px] resize-y"
                     autoFocus
                   />
@@ -773,12 +772,12 @@ function BankSelectorInner() {
                     <div className="flex flex-col items-center justify-center py-8 text-center space-y-3">
                       <Lock className="h-12 w-12 text-muted-foreground/50" />
                       <div>
-                        <p className="font-semibold text-foreground">File Upload API Disabled</p>
+                        <p className="font-semibold text-foreground">文件上传 API 未启用</p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          File upload is not enabled on this server.
+                          此服务器未启用文件上传功能。
                         </p>
                         <p className="text-xs text-muted-foreground mt-2">
-                          To enable, set{" "}
+                          如需启用，请设置{" "}
                           <code className="bg-muted px-1 py-0.5 rounded">
                             HINDSIGHT_API_ENABLE_FILE_UPLOAD_API=true
                           </code>
@@ -801,7 +800,7 @@ function BankSelectorInner() {
                       >
                         <Upload className="h-8 w-8 text-muted-foreground mb-2" />
                         <span className="text-sm text-muted-foreground">
-                          Click to select files or drag and drop
+                          点击选择文件或拖拽上传
                         </span>
                       </label>
 
@@ -827,7 +826,7 @@ function BankSelectorInner() {
                                     type="button"
                                     className="flex items-center gap-1.5 min-w-0 flex-1 text-left hover:opacity-75 transition-opacity"
                                     onClick={() => toggleFileExpanded(index)}
-                                    title="Edit metadata for this file"
+                                    title="编辑此文件的元数据"
                                   >
                                     {meta?.expanded ? (
                                       <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -860,22 +859,25 @@ function BankSelectorInner() {
                                       onValueChange={(v) => updateFileMeta(index, "advancedTab", v)}
                                     >
                                       <TabsList className="w-full border-b border-border bg-transparent h-8 p-0 gap-0 justify-start rounded-none">
-                                        {(["document", "tags", "source"] as const).map((t) => (
-                                          <TabsTrigger
-                                            key={t}
-                                            value={t}
-                                            className="rounded-none h-full px-4 text-xs font-medium bg-transparent shadow-none text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary -mb-px capitalize"
-                                          >
-                                            {t}
-                                          </TabsTrigger>
-                                        ))}
+                                        {(["document", "tags", "source"] as const).map((t) => {
+                                          const tabLabels: Record<string, string> = { document: "文档", tags: "标签", source: "来源" };
+                                          return (
+                                            <TabsTrigger
+                                              key={t}
+                                              value={t}
+                                              className="rounded-none h-full px-4 text-xs font-medium bg-transparent shadow-none text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary -mb-px"
+                                            >
+                                              {tabLabels[t]}
+                                            </TabsTrigger>
+                                          );
+                                        })}
                                       </TabsList>
                                       <div className="px-3 py-3 space-y-2">
                                         <TabsContent value="document" className="mt-0 space-y-2">
                                           <div className="grid grid-cols-2 gap-2">
                                             <div>
                                               <label className="font-bold block mb-1 text-sm text-foreground">
-                                                Event Date
+                                                事件日期
                                               </label>
                                               <Input
                                                 type="date"
@@ -888,7 +890,7 @@ function BankSelectorInner() {
                                             </div>
                                             <div>
                                               <label className="font-bold block mb-1 text-sm text-foreground">
-                                                Document ID
+                                                文档 ID
                                               </label>
                                               <Input
                                                 value={meta.document_id}
@@ -899,14 +901,14 @@ function BankSelectorInner() {
                                                     e.target.value
                                                   )
                                                 }
-                                                placeholder="Optional ID..."
+                                                placeholder="可选 ID..."
                                                 className="h-8 text-sm"
                                               />
                                             </div>
                                           </div>
                                           <div>
                                             <label className="font-bold block mb-1 text-sm text-foreground">
-                                              Strategy
+                                              策略
                                             </label>
                                             {bankStrategies.length > 0 ? (
                                               <Select
@@ -925,7 +927,7 @@ function BankSelectorInner() {
                                                 <SelectContent>
                                                   <SelectItem value="__none__">
                                                     <span className="text-muted-foreground italic">
-                                                      Default
+                                                      默认
                                                     </span>
                                                   </SelectItem>
                                                   {bankStrategies.map((name) => (
@@ -941,7 +943,7 @@ function BankSelectorInner() {
                                                 onChange={(e) =>
                                                   updateFileMeta(index, "strategy", e.target.value)
                                                 }
-                                                placeholder="Strategy name (optional)..."
+                                                placeholder="策略名称（可选）..."
                                                 className="h-8 text-sm"
                                               />
                                             )}
@@ -950,7 +952,7 @@ function BankSelectorInner() {
                                         <TabsContent value="tags" className="mt-0 space-y-2">
                                           <div>
                                             <label className="font-bold block mb-1 text-sm text-foreground">
-                                              Tags
+                                              标签
                                             </label>
                                             <Input
                                               value={meta.tags}
@@ -961,35 +963,34 @@ function BankSelectorInner() {
                                               className="h-8 text-sm"
                                             />
                                             <p className="text-xs text-muted-foreground mt-1">
-                                              Comma-separated — used to filter memories during
-                                              recall/reflect
+                                              逗号分隔 — 用于召回/反思时筛选记忆
                                             </p>
                                           </div>
                                         </TabsContent>
                                         <TabsContent value="source" className="mt-0 space-y-2">
                                           <div>
                                             <label className="font-bold block mb-1 text-sm text-foreground">
-                                              Context
+                                              上下文
                                             </label>
                                             <Input
                                               value={meta.context}
                                               onChange={(e) =>
                                                 updateFileMeta(index, "context", e.target.value)
                                               }
-                                              placeholder="Optional context..."
+                                              placeholder="可选上下文..."
                                               className="h-8 text-sm"
                                             />
                                           </div>
                                           <div>
                                             <label className="font-bold block mb-1 text-sm text-foreground">
-                                              Metadata
+                                              元数据
                                             </label>
                                             <Textarea
                                               value={meta.metadata}
                                               onChange={(e) =>
                                                 updateFileMeta(index, "metadata", e.target.value)
                                               }
-                                              placeholder={"source: slack\nchannel: engineering"}
+                                              placeholder={"来源: 钉钉\n频道: 技术部"}
                                               className="min-h-[52px] resize-y font-mono text-sm"
                                             />
                                           </div>
@@ -1015,12 +1016,12 @@ function BankSelectorInner() {
               {/* Context — text tab only */}
               {docTab === "text" && (
                 <div>
-                  <label className="font-bold block mb-1 text-sm text-foreground">Context</label>
+                  <label className="font-bold block mb-1 text-sm text-foreground">上下文</label>
                   <Input
                     type="text"
                     value={docContext}
                     onChange={(e) => setDocContext(e.target.value)}
-                    placeholder="Optional context about this document..."
+                    placeholder="可选，提供文档相关的背景信息..."
                   />
                 </div>
               )}
@@ -1037,19 +1038,19 @@ function BankSelectorInner() {
                         value="document"
                         className="rounded-none h-full px-4 text-xs font-medium bg-transparent shadow-none text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary -mb-px"
                       >
-                        Document
+                        文档
                       </TabsTrigger>
                       <TabsTrigger
                         value="tags"
                         className="rounded-none h-full px-4 text-xs font-medium bg-transparent shadow-none text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary -mb-px"
                       >
-                        Tags
+                        标签
                       </TabsTrigger>
                       <TabsTrigger
                         value="source"
                         className="rounded-none h-full px-4 text-xs font-medium bg-transparent shadow-none text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary -mb-px"
                       >
-                        Source
+                        来源
                       </TabsTrigger>
                     </TabsList>
 
@@ -1058,7 +1059,7 @@ function BankSelectorInner() {
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <label className="font-bold block mb-1 text-sm text-foreground">
-                              Event Date
+                              事件日期
                             </label>
                             <Input
                               type="date"
@@ -1069,19 +1070,19 @@ function BankSelectorInner() {
                           </div>
                           <div>
                             <label className="font-bold block mb-1 text-sm text-foreground">
-                              Document ID
+                              文档 ID
                             </label>
                             <Input
                               type="text"
                               value={docDocumentId}
                               onChange={(e) => setDocDocumentId(e.target.value)}
-                              placeholder="Optional document identifier..."
+                              placeholder="可选文档标识符..."
                             />
                           </div>
                         </div>
                         <div>
                           <label className="font-bold block mb-1 text-sm text-foreground">
-                            Strategy
+                            策略
                           </label>
                           {bankStrategies.length > 0 ? (
                             <Select
@@ -1093,7 +1094,7 @@ function BankSelectorInner() {
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="__none__">
-                                  <span className="text-muted-foreground italic">Default</span>
+                                  <span className="text-muted-foreground italic">默认</span>
                                 </SelectItem>
                                 {bankStrategies.map((name) => (
                                   <SelectItem key={name} value={name}>
@@ -1107,11 +1108,11 @@ function BankSelectorInner() {
                               type="text"
                               value={docStrategy}
                               onChange={(e) => setDocStrategy(e.target.value)}
-                              placeholder="Strategy name (optional)..."
+                              placeholder="策略名称（可选）..."
                             />
                           )}
                           <p className="text-xs text-muted-foreground mt-1">
-                            Override the bank&apos;s default extraction strategy for this document.
+                            覆盖此文档的默认提取策略。
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1124,7 +1125,7 @@ function BankSelectorInner() {
                             htmlFor="async-doc"
                             className="text-sm cursor-pointer text-foreground"
                           >
-                            Process in background (async)
+                            后台处理（异步）
                           </label>
                         </div>
                       </TabsContent>
@@ -1132,21 +1133,21 @@ function BankSelectorInner() {
                       <TabsContent value="tags" className="mt-0 space-y-3">
                         <div>
                           <label className="font-bold block mb-1 text-sm text-foreground">
-                            Tags
+                            标签
                           </label>
                           <Input
                             type="text"
                             value={docTags}
                             onChange={(e) => setDocTags(e.target.value)}
-                            placeholder="user_alice, session_123, project_x"
+                            placeholder="使用逗号分隔，如：user_alice, session_123"
                           />
                           <p className="text-xs text-muted-foreground mt-1">
-                            Comma-separated — used to filter memories during recall/reflect
+                            逗号分隔 — 用于在召回/反思时筛选记忆
                           </p>
                         </div>
                         <div>
                           <label className="font-bold block mb-1 text-sm text-foreground">
-                            Observation Scopes
+                            观察范围
                           </label>
                           <Select
                             value={docObservationScopes}
@@ -1160,10 +1161,10 @@ function BankSelectorInner() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="per_tag">Per tag</SelectItem>
-                              <SelectItem value="combined">Combined</SelectItem>
-                              <SelectItem value="all_combinations">All combinations</SelectItem>
-                              <SelectItem value="custom">Custom</SelectItem>
+                              <SelectItem value="per_tag">按标签</SelectItem>
+                              <SelectItem value="combined">组合</SelectItem>
+                              <SelectItem value="all_combinations">全部组合</SelectItem>
+                              <SelectItem value="custom">自定义</SelectItem>
                             </SelectContent>
                           </Select>
                           {docObservationScopes !== "custom" &&
@@ -1177,7 +1178,7 @@ function BankSelectorInner() {
                               if (tags.length === 0) {
                                 return (
                                   <p className="text-xs text-muted-foreground/60 mt-1.5 italic">
-                                    Add tags above to preview observation scopes
+                                    在上方添加标签以预览观察范围
                                   </p>
                                 );
                               }
@@ -1195,7 +1196,7 @@ function BankSelectorInner() {
                                   ))}
                                   {scopes.length > MAX && (
                                     <li className="text-xs text-muted-foreground">
-                                      +{scopes.length - MAX} more scopes
+                                      +{scopes.length - MAX} 个更多范围
                                     </li>
                                   )}
                                 </ul>
@@ -1215,30 +1216,30 @@ function BankSelectorInner() {
                       <TabsContent value="source" className="mt-0 space-y-3">
                         <div>
                           <label className="font-bold block mb-1 text-sm text-foreground">
-                            Metadata
+                            元数据
                           </label>
                           <Textarea
                             value={docMetadata}
                             onChange={(e) => setDocMetadata(e.target.value)}
-                            placeholder={"source: slack\nchannel: engineering"}
+                            placeholder={"来源: 钉钉\n频道: 技术部"}
                             className="min-h-[72px] resize-y font-mono text-sm"
                           />
                           <p className="text-xs text-muted-foreground mt-1">
-                            One <code className="bg-muted px-0.5 rounded">key: value</code> per line
+                            每行一个 <code className="bg-muted px-0.5 rounded">键: 值</code>
                           </p>
                         </div>
                         <div>
                           <label className="font-bold block mb-1 text-sm text-foreground">
-                            Entities
+                            实体
                           </label>
                           <Input
                             type="text"
                             value={docEntities}
                             onChange={(e) => setDocEntities(e.target.value)}
-                            placeholder="Alice, Google, ML model"
+                            placeholder="张三, 科技公司, AI 模型"
                           />
                           <p className="text-xs text-muted-foreground mt-1">
-                            Comma-separated hints merged with auto-extracted entities
+                            逗号分隔的提示，将与自动提取的实体合并
                           </p>
                         </div>
                       </TabsContent>
@@ -1269,14 +1270,14 @@ function BankSelectorInner() {
                   setUploadProgress("");
                 }}
               >
-                Cancel
+                取消
               </Button>
               {docTab === "text" ? (
                 <Button
                   onClick={handleCreateDocument}
                   disabled={isCreatingDoc || !docContent.trim()}
                 >
-                  {isCreatingDoc ? "Adding..." : "Add Document"}
+                  {isCreatingDoc ? "添加中..." : "添加文档"}
                 </Button>
               ) : (
                 <Button
@@ -1284,8 +1285,8 @@ function BankSelectorInner() {
                   disabled={isCreatingDoc || selectedFiles.length === 0}
                 >
                   {isCreatingDoc
-                    ? uploadProgress || "Uploading..."
-                    : `Upload ${selectedFiles.length} File${selectedFiles.length !== 1 ? "s" : ""}`}
+                    ? uploadProgress || "上传中..."
+                    : `上传 ${selectedFiles.length} 个文件`}
                 </Button>
               )}
             </DialogFooter>

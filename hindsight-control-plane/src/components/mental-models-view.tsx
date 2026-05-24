@@ -170,11 +170,11 @@ export function MentalModelsView() {
         if (updated.last_refreshed_at !== originalAt) {
           setMentalModels((prev) => prev.map((x) => (x.id === m.id ? updated : x)));
           if (selectedMentalModel?.id === m.id) setSelectedMentalModel(updated);
-          toast.success("Mental model refreshed");
+          toast.success("思维模型已刷新");
           return;
         }
       }
-      toast.error("Refresh timeout");
+      toast.error("刷新超时");
     } catch {
       // Error toast handled by API client interceptor
     } finally {
@@ -227,7 +227,7 @@ export function MentalModelsView() {
     return (
       <Card>
         <CardContent className="p-10 text-center">
-          <p className="text-muted-foreground">Select a memory bank to view mental models.</p>
+          <p className="text-muted-foreground">选择一个记忆库以查看思维模型。</p>
         </CardContent>
       </Card>
     );
@@ -244,7 +244,7 @@ export function MentalModelsView() {
       {loading ? (
         <div className="text-center py-12">
           <RefreshCw className="w-8 h-8 mx-auto mb-3 text-muted-foreground animate-spin" />
-          <p className="text-muted-foreground">Loading...</p>
+          <p className="text-muted-foreground">加载中...</p>
         </div>
       ) : (
         <>
@@ -254,7 +254,7 @@ export function MentalModelsView() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Filter mental models by name, query, or content..."
+              placeholder="按名称、查询或内容筛选思维模型..."
               className="w-80 h-9"
             />
             <TagFilterInput
@@ -272,15 +272,15 @@ export function MentalModelsView() {
             />
             <Button onClick={() => setShowCreateMentalModel(true)} size="sm">
               <Plus className="w-4 h-4 mr-2" />
-              Add Mental Model
+              添加思维模型
             </Button>
           </div>
 
           <div className="flex items-center justify-between mb-6">
             <div className="text-sm text-muted-foreground">
               {searchQuery || selectedTags.length > 0
-                ? `${filteredMentalModels.length} of ${mentalModels.length} mental models`
-                : `${mentalModels.length} mental model${mentalModels.length !== 1 ? "s" : ""}`}
+                ? `${filteredMentalModels.length} / ${mentalModels.length} 个思维模型`
+                : `${mentalModels.length} 个思维模型`}
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-lg p-1">
@@ -293,7 +293,7 @@ export function MentalModelsView() {
                   }`}
                 >
                   <FolderOpen className="w-4 h-4" />
-                  List
+                  列表
                 </button>
                 <button
                   onClick={() => setViewMode("dashboard")}
@@ -304,7 +304,7 @@ export function MentalModelsView() {
                   }`}
                 >
                   <LayoutGrid className="w-4 h-4" />
-                  Dashboard
+                  仪表盘
                 </button>
               </div>
             </div>
@@ -342,8 +342,8 @@ export function MentalModelsView() {
                                   }`}
                                 >
                                   {m.trigger?.refresh_after_consolidation
-                                    ? "Auto Refresh"
-                                    : "Manual"}
+                                    ? "自动刷新"
+                                    : "手动"}
                                 </span>
                               </div>
                             </div>
@@ -423,7 +423,7 @@ export function MentalModelsView() {
               {viewMode !== "files" && totalPages > 1 && (
                 <div className="flex items-center justify-between mt-3 pt-3 border-t">
                   <div className="text-xs text-muted-foreground">
-                    {startIndex + 1}-{Math.min(endIndex, filteredMentalModels.length)} of{" "}
+                    {startIndex + 1}-{Math.min(endIndex, filteredMentalModels.length)} / 共{" "}
                     {filteredMentalModels.length}
                   </div>
                   <div className="flex items-center gap-1">
@@ -475,8 +475,8 @@ export function MentalModelsView() {
               <Sparkles className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
                 {searchQuery
-                  ? "No mental models match your filter"
-                  : "No mental models yet. Create a mental model to generate and save a summary from your memories."}
+                  ? "没有符合筛选条件的思维模型"
+                  : "尚无思维模型。创建思维模型可从记忆生成并保存摘要。"}
               </p>
             </div>
           )}
@@ -496,24 +496,24 @@ export function MentalModelsView() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Mental Model</AlertDialogTitle>
+            <AlertDialogTitle>删除思维模型</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete{" "}
+              确定要删除{" "}
               <span className="font-semibold">&quot;{deleteTarget?.name}&quot;</span>?
               <br />
               <br />
-              <span className="text-destructive font-semibold">This action cannot be undone.</span>
+              <span className="text-destructive font-semibold">此操作不可撤销。</span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row justify-end space-x-2">
-            <AlertDialogCancel className="mt-0">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="mt-0">取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deleting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
-              Delete
+              删除
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -584,11 +584,11 @@ function RowActionsMenu({
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
         <DropdownMenuItem onClick={() => onEdit(m)}>
           <Pencil className="h-4 w-4 mr-2" />
-          Edit
+          编辑
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => onRefresh(m)} disabled={refreshing}>
           <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh Manually
+          手动刷新
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -596,7 +596,7 @@ function RowActionsMenu({
           className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400 focus:bg-red-500/10"
         >
           <Trash2 className="h-4 w-4 mr-2" />
-          Delete
+          删除
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -743,10 +743,10 @@ function CreateMentalModelDialog({
     >
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Create Mental Model</DialogTitle>
+          <DialogTitle>创建思维模型</DialogTitle>
           <DialogDescription>
-            Create a mental model by running a query. The content will be auto-generated and can be
-            refreshed later.
+            通过运行查询创建思维模型。内容将自动生成，并可以
+            稍后刷新。
           </DialogDescription>
         </DialogHeader>
 
@@ -767,7 +767,7 @@ function CreateMentalModelDialog({
                 <Input
                   value={form.id}
                   onChange={(e) => setForm({ ...form, id: e.target.value })}
-                  placeholder="e.g., team-communication"
+                  placeholder="例如：team-communication"
                 />
               </div>
               <div className="space-y-2">
@@ -775,7 +775,7 @@ function CreateMentalModelDialog({
                 <Input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g., Team Communication Preferences"
+                  placeholder="例如：团队沟通偏好"
                 />
               </div>
               <div className="space-y-2">
@@ -783,7 +783,7 @@ function CreateMentalModelDialog({
                 <Input
                   value={form.sourceQuery}
                   onChange={(e) => setForm({ ...form, sourceQuery: e.target.value })}
-                  placeholder="e.g., How does the team prefer to communicate?"
+                  placeholder="例如：团队偏好的沟通方式？"
                 />
               </div>
               <div className="space-y-2">
@@ -801,7 +801,7 @@ function CreateMentalModelDialog({
 
             <TabsContent value="options" className="space-y-6 pt-4">
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">Refresh</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">刷新</h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="auto-refresh"
@@ -814,11 +814,11 @@ function CreateMentalModelDialog({
                     htmlFor="auto-refresh"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    Auto-refresh after consolidation
+                    合并后自动刷新
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Refresh mode</label>
+                  <label className="text-sm font-medium text-foreground">刷新模式</label>
                   <Select
                     value={form.mode}
                     onValueChange={(value) => setForm({ ...form, mode: value as "full" | "delta" })}
@@ -828,23 +828,23 @@ function CreateMentalModelDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="full">
-                        Full — regenerate from scratch each refresh
+                        完全 — 每次刷新从头重新生成
                       </SelectItem>
                       <SelectItem value="delta">
-                        Delta — surgical edits, preserve unchanged content
+                        增量 — 精准修改，保留未变内容
                       </SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Delta mode applies minimal changes to the existing content. Falls back to a full
-                    rewrite on the first refresh and whenever the source query changes.
+                    增量模式对现有内容进行最小化修改。在首次刷新
+                    或源查询变更时会回退到完全重写。
                   </p>
                 </div>
               </section>
 
               <section className="space-y-4">
                 <h3 className="text-sm font-semibold text-foreground border-b pb-1">
-                  Other Mental Models
+                  其他思维模型
                 </h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
@@ -858,36 +858,35 @@ function CreateMentalModelDialog({
                     htmlFor="exclude-mental-models"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    Exclude all mental models
+                    排除所有思维模型
                   </label>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
-                    Exclude Mental Model IDs
+                    排除思维模型 ID
                   </label>
                   <Input
                     value={form.excludeMentalModelIds}
                     onChange={(e) => setForm({ ...form, excludeMentalModelIds: e.target.value })}
-                    placeholder="e.g., model-a, model-b (comma-separated)"
+                    placeholder="例如：model-a, model-b（逗号分隔）"
                   />
                 </div>
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">Tags</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">标签</h3>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Tags</label>
+                  <label className="text-sm font-medium text-foreground">标签</label>
                   <Input
                     value={form.tags}
                     onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                    placeholder="e.g., project-x, team-alpha (comma-separated)"
+                    placeholder="例如：project-x, team-alpha（逗号分隔）"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Tags scope the model during reflect <strong>and</strong> filter source memories
-                    during refresh (default <code>all_strict</code>: only memories carrying every
-                    listed tag are read). If no memories have these tags yet, refresh will produce
-                    empty content — backfill tags on memories, or adjust <em>Tags Match</em> /{" "}
-                    <em>Tag Groups</em> below.
+                    标签在反思时限定模型范围，并在刷新时<strong>同时</strong>筛选源记忆
+                    （默认 <code>all_strict</code>：仅读取包含所有列出标签的记忆）。如果尚无记忆包含这些标签，
+                    刷新将生成空内容——请补填记忆上的标签，或调整下方的<em>标签匹配</em> /{" "}
+                    <em>标签组</em>。
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -897,22 +896,22 @@ function CreateMentalModelDialog({
                     onValueChange={(v) => setForm({ ...form, tagsMatch: v === "default" ? "" : v })}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Default (all_strict when tags set)" />
+                      <SelectValue placeholder="默认（设置标签时为 all_strict）" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">Default (all_strict when tags set)</SelectItem>
-                      <SelectItem value="any">any — OR matching, includes untagged</SelectItem>
-                      <SelectItem value="all">all — AND matching, includes untagged</SelectItem>
+                      <SelectItem value="default">默认（设置标签时为 all_strict）</SelectItem>
+                      <SelectItem value="any">any — OR 匹配（包含未标记）</SelectItem>
+                      <SelectItem value="all">all — AND 匹配（包含未标记）</SelectItem>
                       <SelectItem value="any_strict">
-                        any_strict — OR matching, excludes untagged
+                        any_strict — OR 匹配（排除未标记）
                       </SelectItem>
                       <SelectItem value="all_strict">
-                        all_strict — AND matching, excludes untagged
+                        all_strict — AND 匹配（排除未标记）
                       </SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Controls how the model&apos;s tags filter memories during refresh.
+                    控制模型标签在刷新时如何筛选记忆。
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -925,17 +924,15 @@ function CreateMentalModelDialog({
                     className="font-mono text-xs"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Compound boolean tag expressions for refresh filtering. Overrides flat tags when
-                    set.
+                    用于刷新筛选的复合布尔标签表达式。设置后将覆盖平面标签。
                   </p>
                 </div>
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">Recall</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">召回</h3>
                 <p className="text-xs text-muted-foreground">
-                  Override how the internal recall behaves when this model refreshes. Leave blank to
-                  inherit the bank/global default.
+                  覆盖此模型刷新时内部召回的行为。留空以继承记忆库/全局默认值。
                 </p>
                 <div className="space-y-3">
                   <label className="text-sm font-medium text-foreground">Fact Types</label>
@@ -943,10 +940,10 @@ function CreateMentalModelDialog({
                     value={form.factTypes}
                     onChange={(v) => setForm({ ...form, factTypes: v as FactType[] })}
                   />
-                  <p className="text-xs text-muted-foreground">Leave empty to include all types.</p>
+                  <p className="text-xs text-muted-foreground">留空以包含所有类型。</p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Include chunks</label>
+                  <label className="text-sm font-medium text-foreground">包含分块</label>
                   <Select
                     value={form.includeChunks || "default"}
                     onValueChange={(v) =>
@@ -960,38 +957,38 @@ function CreateMentalModelDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">Default (inherit)</SelectItem>
-                      <SelectItem value="true">Yes — include raw chunk text</SelectItem>
-                      <SelectItem value="false">No — skip chunks (smaller prompt)</SelectItem>
+                      <SelectItem value="default">默认（继承）</SelectItem>
+                      <SelectItem value="true">是 — 包含原始分块文本</SelectItem>
+                      <SelectItem value="false">否 — 跳过分块（提示更小）</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Recall max tokens</label>
+                  <label className="text-sm font-medium text-foreground">召回最大 Token 数</label>
                   <Input
                     type="number"
                     value={form.recallMaxTokens}
                     onChange={(e) => setForm({ ...form, recallMaxTokens: e.target.value })}
-                    placeholder="Default (inherit)"
+                    placeholder="默认（继承）"
                     min="0"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Token budget for facts returned by recall.
+                    召回返回事实的 Token 预算。
                   </p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
-                    Recall chunks max tokens
+                    召回分块最大 Token 数
                   </label>
                   <Input
                     type="number"
                     value={form.recallChunksMaxTokens}
                     onChange={(e) => setForm({ ...form, recallChunksMaxTokens: e.target.value })}
-                    placeholder="Default (inherit)"
+                    placeholder="默认（继承）"
                     min="0"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Token budget for raw chunk text returned by recall.
+                    召回返回原始分块文本的 Token 预算。
                   </p>
                 </div>
               </section>
@@ -1001,7 +998,7 @@ function CreateMentalModelDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={creating}>
-            Cancel
+            取消
           </Button>
           <Button
             onClick={handleCreate}
@@ -1010,10 +1007,10 @@ function CreateMentalModelDialog({
             {creating ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                Generating...
+                生成中...
               </>
             ) : (
-              "Create"
+              "创建"
             )}
           </Button>
         </DialogFooter>
@@ -1143,9 +1140,9 @@ function UpdateMentalModelDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Update Mental Model</DialogTitle>
+          <DialogTitle>更新思维模型</DialogTitle>
           <DialogDescription>
-            Update the mental model configuration. Changes will take effect immediately.
+            更新思维模型配置。更改将立即生效。
           </DialogDescription>
         </DialogHeader>
 
@@ -1170,7 +1167,7 @@ function UpdateMentalModelDialog({
                 <Input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g., Team Communication Preferences"
+                  placeholder="例如：团队沟通偏好"
                 />
               </div>
               <div className="space-y-2">
@@ -1178,7 +1175,7 @@ function UpdateMentalModelDialog({
                 <Input
                   value={form.sourceQuery}
                   onChange={(e) => setForm({ ...form, sourceQuery: e.target.value })}
-                  placeholder="e.g., How does the team prefer to communicate?"
+                  placeholder="例如：团队偏好的沟通方式？"
                 />
               </div>
               <div className="space-y-2">
@@ -1196,7 +1193,7 @@ function UpdateMentalModelDialog({
 
             <TabsContent value="options" className="space-y-6 pt-4">
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">Refresh</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">刷新</h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="update-auto-refresh"
@@ -1209,11 +1206,11 @@ function UpdateMentalModelDialog({
                     htmlFor="update-auto-refresh"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    Auto-refresh after consolidation
+                    合并后自动刷新
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Refresh mode</label>
+                  <label className="text-sm font-medium text-foreground">刷新模式</label>
                   <Select
                     value={form.mode}
                     onValueChange={(value) => setForm({ ...form, mode: value as "full" | "delta" })}
@@ -1223,23 +1220,23 @@ function UpdateMentalModelDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="full">
-                        Full — regenerate from scratch each refresh
+                        完全 — 每次刷新从头重新生成
                       </SelectItem>
                       <SelectItem value="delta">
-                        Delta — surgical edits, preserve unchanged content
+                        增量 — 精准修改，保留未变内容
                       </SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Delta mode applies minimal changes to the existing content. Falls back to a full
-                    rewrite on the first refresh and whenever the source query changes.
+                    增量模式对现有内容进行最小化修改。在首次刷新
+                    或源查询变更时会回退到完全重写。
                   </p>
                 </div>
               </section>
 
               <section className="space-y-4">
                 <h3 className="text-sm font-semibold text-foreground border-b pb-1">
-                  Other Mental Models
+                  其他思维模型
                 </h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
@@ -1253,36 +1250,35 @@ function UpdateMentalModelDialog({
                     htmlFor="update-exclude-mental-models"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    Exclude all mental models
+                    排除所有思维模型
                   </label>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
-                    Exclude Mental Model IDs
+                    排除思维模型 ID
                   </label>
                   <Input
                     value={form.excludeMentalModelIds}
                     onChange={(e) => setForm({ ...form, excludeMentalModelIds: e.target.value })}
-                    placeholder="e.g., model-a, model-b (comma-separated)"
+                    placeholder="例如：model-a, model-b（逗号分隔）"
                   />
                 </div>
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">Tags</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">标签</h3>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Tags</label>
+                  <label className="text-sm font-medium text-foreground">标签</label>
                   <Input
                     value={form.tags}
                     onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                    placeholder="e.g., project-x, team-alpha (comma-separated)"
+                    placeholder="例如：project-x, team-alpha（逗号分隔）"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Tags scope the model during reflect <strong>and</strong> filter source memories
-                    during refresh (default <code>all_strict</code>: only memories carrying every
-                    listed tag are read). If no memories have these tags yet, refresh will produce
-                    empty content — backfill tags on memories, or adjust <em>Tags Match</em> /{" "}
-                    <em>Tag Groups</em> below.
+                    标签在反思时限定模型范围，并在刷新时<strong>同时</strong>筛选源记忆
+                    （默认 <code>all_strict</code>：仅读取包含所有列出标签的记忆）。如果尚无记忆包含这些标签，
+                    刷新将生成空内容——请补填记忆上的标签，或调整下方的<em>标签匹配</em> /{" "}
+                    <em>标签组</em>。
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -1292,22 +1288,22 @@ function UpdateMentalModelDialog({
                     onValueChange={(v) => setForm({ ...form, tagsMatch: v === "default" ? "" : v })}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Default (all_strict when tags set)" />
+                      <SelectValue placeholder="默认（设置标签时为 all_strict）" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">Default (all_strict when tags set)</SelectItem>
-                      <SelectItem value="any">any — OR matching, includes untagged</SelectItem>
-                      <SelectItem value="all">all — AND matching, includes untagged</SelectItem>
+                      <SelectItem value="default">默认（设置标签时为 all_strict）</SelectItem>
+                      <SelectItem value="any">any — OR 匹配（包含未标记）</SelectItem>
+                      <SelectItem value="all">all — AND 匹配（包含未标记）</SelectItem>
                       <SelectItem value="any_strict">
-                        any_strict — OR matching, excludes untagged
+                        any_strict — OR 匹配（排除未标记）
                       </SelectItem>
                       <SelectItem value="all_strict">
-                        all_strict — AND matching, excludes untagged
+                        all_strict — AND 匹配（排除未标记）
                       </SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Controls how the model&apos;s tags filter memories during refresh.
+                    控制模型标签在刷新时如何筛选记忆。
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -1320,17 +1316,15 @@ function UpdateMentalModelDialog({
                     className="font-mono text-xs"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Compound boolean tag expressions for refresh filtering. Overrides flat tags when
-                    set.
+                    用于刷新筛选的复合布尔标签表达式。设置后将覆盖平面标签。
                   </p>
                 </div>
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">Recall</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">召回</h3>
                 <p className="text-xs text-muted-foreground">
-                  Override how the internal recall behaves when this model refreshes. Leave blank to
-                  inherit the bank/global default.
+                  覆盖此模型刷新时内部召回的行为。留空以继承记忆库/全局默认值。
                 </p>
                 <div className="space-y-3">
                   <label className="text-sm font-medium text-foreground">Fact Types</label>
@@ -1338,10 +1332,10 @@ function UpdateMentalModelDialog({
                     value={form.factTypes}
                     onChange={(v) => setForm({ ...form, factTypes: v as FactType[] })}
                   />
-                  <p className="text-xs text-muted-foreground">Leave empty to include all types.</p>
+                  <p className="text-xs text-muted-foreground">留空以包含所有类型。</p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Include chunks</label>
+                  <label className="text-sm font-medium text-foreground">包含分块</label>
                   <Select
                     value={form.includeChunks || "default"}
                     onValueChange={(v) =>
@@ -1355,38 +1349,38 @@ function UpdateMentalModelDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">Default (inherit)</SelectItem>
-                      <SelectItem value="true">Yes — include raw chunk text</SelectItem>
-                      <SelectItem value="false">No — skip chunks (smaller prompt)</SelectItem>
+                      <SelectItem value="default">默认（继承）</SelectItem>
+                      <SelectItem value="true">是 — 包含原始分块文本</SelectItem>
+                      <SelectItem value="false">否 — 跳过分块（提示更小）</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Recall max tokens</label>
+                  <label className="text-sm font-medium text-foreground">召回最大 Token 数</label>
                   <Input
                     type="number"
                     value={form.recallMaxTokens}
                     onChange={(e) => setForm({ ...form, recallMaxTokens: e.target.value })}
-                    placeholder="Default (inherit)"
+                    placeholder="默认（继承）"
                     min="0"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Token budget for facts returned by recall.
+                    召回返回事实的 Token 预算。
                   </p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
-                    Recall chunks max tokens
+                    召回分块最大 Token 数
                   </label>
                   <Input
                     type="number"
                     value={form.recallChunksMaxTokens}
                     onChange={(e) => setForm({ ...form, recallChunksMaxTokens: e.target.value })}
-                    placeholder="Default (inherit)"
+                    placeholder="默认（继承）"
                     min="0"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Token budget for raw chunk text returned by recall.
+                    召回返回原始分块文本的 Token 预算。
                   </p>
                 </div>
               </section>
@@ -1396,7 +1390,7 @@ function UpdateMentalModelDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={updating}>
-            Cancel
+            取消
           </Button>
           <Button
             onClick={handleUpdate}
@@ -1405,10 +1399,10 @@ function UpdateMentalModelDialog({
             {updating ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                Updating...
+                更新中...
               </>
             ) : (
-              "Update"
+              "更新"
             )}
           </Button>
         </DialogFooter>
@@ -1501,7 +1495,7 @@ function FilesView({
                   )}
                   <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                     <span title={formatAbsoluteDateTime(selected.last_refreshed_at)}>
-                      Refreshed {formatRelativeTime(selected.last_refreshed_at)}
+                      上次刷新 {formatRelativeTime(selected.last_refreshed_at)}
                     </span>
                     {selected.tags.length > 0 && (
                       <div className="flex gap-1">
@@ -1519,7 +1513,7 @@ function FilesView({
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <Button variant="outline" size="sm" onClick={() => onOpenDetail(selected)}>
-                    Open
+                    打开
                   </Button>
                   <RowActionsMenu
                     m={selected}
@@ -1537,14 +1531,14 @@ function FilesView({
               </div>
             ) : (
               <p className="text-sm text-muted-foreground italic">
-                No content yet. Refresh this mental model to generate content.
+                尚无内容。刷新此思维模型以生成内容。
               </p>
             )}
           </article>
         ) : (
           <div className="p-10 text-center text-muted-foreground">
             <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">Select a mental model to view its content.</p>
+            <p className="text-sm">选择一个思维模型以查看内容。</p>
           </div>
         )}
       </section>

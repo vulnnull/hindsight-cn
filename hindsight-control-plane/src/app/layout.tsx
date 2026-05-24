@@ -6,8 +6,8 @@ import { ThemeProvider } from "@/lib/theme-context";
 import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
-  title: "Hindsight Control Plane",
-  description: "Control plane for the temporal semantic memory system",
+  title: "Hindsight 控制台",
+  description: "时序语义记忆系统控制台",
   icons: {
     icon: "/favicon.png",
   },
@@ -19,7 +19,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="zh-CN" suppressHydrationWarning>
       <body className="bg-background text-foreground">
         <ThemeProvider>
           <FeaturesProvider>

@@ -223,7 +223,7 @@ export function EntitiesView() {
             }`}
           >
             <ScatterChart className="w-4 h-4" />
-            Relations
+            关系
           </button>
           <button
             onClick={() => setViewMode("list")}
@@ -234,7 +234,7 @@ export function EntitiesView() {
             }`}
           >
             <List className="w-4 h-4" />
-            List
+            列表
           </button>
         </div>
       </div>
@@ -245,7 +245,7 @@ export function EntitiesView() {
             <div className="flex items-center justify-center py-20">
               <div className="text-center">
                 <div className="text-4xl mb-2">...</div>
-                <div className="text-sm text-muted-foreground">Loading entity graph...</div>
+                <div className="text-sm text-muted-foreground">加载实体关系图...</div>
               </div>
             </div>
           ) : constellationData.nodes.length > 0 ? (
@@ -255,7 +255,7 @@ export function EntitiesView() {
               onNodeClick={handleConstellationNodeClick}
               nodeSizeFn={nodeSizeFn}
               nodeHeatFn={recencyLookup ? nodeHeatFn : undefined}
-              heatLegendLabel={recencyLookup ? "recency · last co-occurrence" : undefined}
+              heatLegendLabel={recencyLookup ? "新近度 · 上次共现" : undefined}
               heatLegendEndpoints={
                 recencyLookup
                   ? [
@@ -264,15 +264,15 @@ export function EntitiesView() {
                     ]
                   : undefined
               }
-              sizeLegendLabel="co-occurrences"
+              sizeLegendLabel="共现次数"
               compactLabels
             />
           ) : (
             <div className="flex items-center justify-center py-20">
               <div className="text-center">
-                <div className="text-sm text-muted-foreground">No entity co-occurrences yet</div>
+                <div className="text-sm text-muted-foreground">暂无实体共现数据</div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  Two entities co-occur when they appear in the same memory.
+                  两个实体出现在同一记忆中时即为共现。
                 </div>
               </div>
             </div>
@@ -287,22 +287,22 @@ export function EntitiesView() {
             <div className="flex items-center justify-center py-20">
               <div className="text-center">
                 <div className="text-4xl mb-2">...</div>
-                <div className="text-sm text-muted-foreground">Loading entities...</div>
+                <div className="text-sm text-muted-foreground">加载实体中...</div>
               </div>
             </div>
           ) : entities.length > 0 ? (
             <>
               <div className="mb-4 text-sm text-muted-foreground">
-                {total} {total === 1 ? "entity" : "entities"}
+                {total} 个实体
               </div>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Mentions</TableHead>
-                      <TableHead>First Seen</TableHead>
-                      <TableHead>Last Seen</TableHead>
+                      <TableHead>名称</TableHead>
+                      <TableHead>提及次数</TableHead>
+                      <TableHead>首次出现</TableHead>
+                      <TableHead>最后出现</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -386,9 +386,9 @@ export function EntitiesView() {
             <div className="flex items-center justify-center py-20">
               <div className="text-center">
                 <div className="text-4xl mb-2">...</div>
-                <div className="text-sm text-muted-foreground">No entities found</div>
+                <div className="text-sm text-muted-foreground">未找到实体</div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  Entities are extracted from facts when memories are added.
+                  添加记忆时，实体从事实中提取。
                 </div>
               </div>
             </div>
@@ -406,7 +406,7 @@ export function EntitiesView() {
                 <h3 className="text-xl font-bold text-card-foreground">
                   {selectedEntity.canonical_name}
                 </h3>
-                <p className="text-sm text-muted-foreground mt-1">Entity details</p>
+                <p className="text-sm text-muted-foreground mt-1">实体详情</p>
               </div>
               <Button
                 variant="ghost"
@@ -423,7 +423,7 @@ export function EntitiesView() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 bg-muted/50 rounded-lg">
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                    Mentions
+                    提及次数
                   </div>
                   <div className="text-lg font-semibold text-card-foreground">
                     {selectedEntity.mention_count}
@@ -431,7 +431,7 @@ export function EntitiesView() {
                 </div>
                 <div className="p-4 bg-muted/50 rounded-lg">
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                    First Seen
+                    首次出现
                   </div>
                   <div className="text-sm font-medium text-card-foreground">
                     {formatDate(selectedEntity.first_seen)}
@@ -442,7 +442,7 @@ export function EntitiesView() {
               {/* ID */}
               <div className="p-4 bg-muted/50 rounded-lg">
                 <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                  Entity ID
+                  实体 ID
                 </div>
                 <code className="text-xs font-mono break-all text-muted-foreground">
                   {selectedEntity.id}

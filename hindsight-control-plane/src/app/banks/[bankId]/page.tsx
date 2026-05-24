@@ -107,8 +107,8 @@ export default function BankPage() {
     try {
       const result = await client.clearObservations(bankId);
       setShowClearObservationsDialog(false);
-      toast.success("Success", {
-        description: result.message || "Observations cleared successfully",
+      toast.success("成功", {
+        description: result.message || "观察已成功清除",
       });
     } catch (error) {
       // Error toast is shown automatically by the API client interceptor
@@ -150,7 +150,7 @@ export default function BankPage() {
     try {
       const result = await client.recoverConsolidation(bankId);
       toast.success(
-        `Recovered ${result.retried_count} failed ${result.retried_count === 1 ? "memory" : "memories"} for re-consolidation`
+        `已恢复 ${result.retried_count} 条失败的记忆以重新整合`
       );
     } catch (error) {
       // Error toast is shown automatically by the API client interceptor
@@ -173,15 +173,15 @@ export default function BankPage() {
               <div>
                 <div className="flex justify-between items-start mb-6">
                   <div>
-                    <h1 className="text-3xl font-bold mb-2 text-foreground">Bank Configuration</h1>
+                    <h1 className="text-3xl font-bold mb-2 text-foreground">记忆库配置</h1>
                     <p className="text-muted-foreground">
-                      Manage bank settings, profile, and operations.
+                      管理记忆库设置、配置文件和操作。
                     </p>
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="outline" size="sm">
-                        Actions
+                        操作
                         <MoreVertical className="w-4 h-4 ml-2" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -193,21 +193,21 @@ export default function BankPage() {
                             const manifest = await client.exportBankTemplate(bankId);
                             const json = JSON.stringify(manifest, null, 2);
                             await navigator.clipboard.writeText(json);
-                            toast.success("Template copied to clipboard");
+                            toast.success("模板已复制到剪贴板");
                           } catch {
-                            toast.error("Failed to export template");
+                            toast.error("导出模板失败");
                           }
                         }}
                       >
                         <Download className="w-4 h-4 mr-2" />
-                        Export Template
+                        导出模板
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         onClick={handleTriggerConsolidation}
                         disabled={isConsolidating || !observationsEnabled}
                         title={
-                          !observationsEnabled ? "Observations feature is not enabled" : undefined
+                          !observationsEnabled ? "观察功能未启用" : undefined
                         }
                       >
                         {isConsolidating ? (
@@ -215,16 +215,16 @@ export default function BankPage() {
                         ) : (
                           <Brain className="w-4 h-4 mr-2" />
                         )}
-                        {isConsolidating ? "Consolidating..." : "Run Consolidation"}
+                        {isConsolidating ? "整合中..." : "运行整合"}
                         {!observationsEnabled && (
-                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
+                          <span className="ml-auto text-xs text-muted-foreground">关闭</span>
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={handleRecoverConsolidation}
                         disabled={isRecoveringConsolidation || !observationsEnabled}
                         title={
-                          !observationsEnabled ? "Observations feature is not enabled" : undefined
+                          !observationsEnabled ? "观察功能未启用" : undefined
                         }
                       >
                         {isRecoveringConsolidation ? (
@@ -232,9 +232,9 @@ export default function BankPage() {
                         ) : (
                           <RotateCcw className="w-4 h-4 mr-2" />
                         )}
-                        {isRecoveringConsolidation ? "Recovering..." : "Recover Consolidation"}
+                        {isRecoveringConsolidation ? "恢复中..." : "恢复整合"}
                         {!observationsEnabled && (
-                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
+                          <span className="ml-auto text-xs text-muted-foreground">关闭</span>
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuItem
@@ -242,13 +242,13 @@ export default function BankPage() {
                         disabled={!observationsEnabled}
                         className="text-amber-600 dark:text-amber-400 focus:text-amber-700 dark:focus:text-amber-300"
                         title={
-                          !observationsEnabled ? "Observations feature is not enabled" : undefined
+                          !observationsEnabled ? "观察功能未启用" : undefined
                         }
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
-                        Clear Observations
+                        清除观察
                         {!observationsEnabled && (
-                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
+                          <span className="ml-auto text-xs text-muted-foreground">关闭</span>
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
@@ -256,12 +256,12 @@ export default function BankPage() {
                         onClick={() => setShowResetConfigDialog(true)}
                         disabled={!bankConfigEnabled}
                         className="text-amber-600 dark:text-amber-400 focus:text-amber-700 dark:focus:text-amber-300"
-                        title={!bankConfigEnabled ? "Bank Config API is disabled" : undefined}
+                        title={!bankConfigEnabled ? "记忆库配置 API 已禁用" : undefined}
                       >
                         <RotateCcw className="w-4 h-4 mr-2" />
-                        Reset Configuration
+                        重置配置
                         {!bankConfigEnabled && (
-                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
+                          <span className="ml-auto text-xs text-muted-foreground">关闭</span>
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
@@ -270,7 +270,7 @@ export default function BankPage() {
                         className="text-red-600 dark:text-red-400 focus:text-red-700 dark:focus:text-red-300"
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
-                        Delete Bank
+                        删除记忆库
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -287,7 +287,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      General
+                      概览
                       {bankConfigTab === "general" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -301,7 +301,7 @@ export default function BankPage() {
                             : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
-                        Configuration
+                        配置
                         {bankConfigTab === "configuration" && (
                           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                         )}
@@ -315,7 +315,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      Webhooks
+                      Webhook
                       {bankConfigTab === "webhooks" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -328,7 +328,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      Audit Logs
+                      审计日志
                       {bankConfigTab === "audit-logs" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -341,7 +341,7 @@ export default function BankPage() {
                   {bankConfigTab === "general" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        Overview statistics and background operations for this memory bank.
+                        此记忆库的概览统计和后台操作。
                       </p>
                       <div className="space-y-6">
                         <BankStatsView />
@@ -358,8 +358,7 @@ export default function BankPage() {
                   {bankConfigTab === "webhooks" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        Manage webhook endpoints to receive event notifications from this memory
-                        bank.
+                        管理 Webhook 端点以接收此记忆库的事件通知。
                       </p>
                       <WebhooksView />
                     </div>
@@ -367,7 +366,7 @@ export default function BankPage() {
                   {bankConfigTab === "audit-logs" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        View audit trail of all operations performed on this memory bank.
+                        查看此记忆库上执行的所有操作的审计记录。
                       </p>
                       <AuditLogsView />
                     </div>
@@ -379,9 +378,9 @@ export default function BankPage() {
             {/* Recall Tab */}
             {view === "recall" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">Recall</h1>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">召回</h1>
                 <p className="text-muted-foreground mb-6">
-                  Analyze memory recall with detailed trace information and retrieval methods.
+                  通过详细的追踪信息和检索方法分析记忆召回。
                 </p>
                 <SearchDebugView />
               </div>
@@ -390,10 +389,9 @@ export default function BankPage() {
             {/* Reflect Tab */}
             {view === "reflect" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">Reflect</h1>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">反思</h1>
                 <p className="text-muted-foreground mb-6">
-                  Run an agentic loop that autonomously gathers evidence and reasons through the
-                  lens of the bank&apos;s disposition to generate contextual responses.
+                  运行一个代理循环，自主收集证据并从记忆库性格视角推理，生成上下文相关的响应。
                 </p>
                 <ThinkView />
               </div>
@@ -402,9 +400,9 @@ export default function BankPage() {
             {/* Data/Memories Tab */}
             {view === "data" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">Memories</h1>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">记忆</h1>
                 <p className="text-muted-foreground mb-6">
-                  View and explore different types of memories stored in this memory bank.
+                  查看和探索此记忆库中存储的不同类型的记忆。
                 </p>
 
                 <div className="mb-6 border-b border-border">
@@ -417,7 +415,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      World Facts
+                      世界常识
                       {subTab === "world" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -430,7 +428,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      Experience
+                      经历记忆
                       {subTab === "experience" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -443,10 +441,10 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      Observations
+                      观察
                       {!observationsEnabled && (
                         <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                          Off
+                          关闭
                         </span>
                       )}
                       {subTab === "observations" && (
@@ -461,7 +459,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      Mental Models
+                      思维模型
                       {subTab === "mental-models" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -473,7 +471,7 @@ export default function BankPage() {
                   {subTab === "world" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        Objective facts about the world received from external sources.
+                        从外部来源接收的关于世界的客观事实。
                       </p>
                       <DataView key="world" factType="world" />
                     </div>
@@ -481,7 +479,7 @@ export default function BankPage() {
                   {subTab === "experience" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        The bank&apos;s own actions, interactions, and first-person experiences.
+                        记忆库自身的行动、交互和第一人称经验。
                       </p>
                       <DataView key="experience" factType="experience" />
                     </div>
@@ -490,8 +488,7 @@ export default function BankPage() {
                     (observationsEnabled ? (
                       <div>
                         <p className="text-sm text-muted-foreground mb-4">
-                          Consolidated knowledge synthesized from facts — patterns, preferences, and
-                          learnings that emerge from accumulated evidence.
+                          从事实中合成的整合知识 — 从累积证据中涌现的模式、偏好和学习成果。
                         </p>
                         <DataView key="observations" factType="observation" />
                       </div>
@@ -515,22 +512,21 @@ export default function BankPage() {
                           </svg>
                         </div>
                         <h3 className="text-lg font-semibold text-foreground mb-1">
-                          Observations Not Enabled
+                          观察功能未启用
                         </h3>
                         <p className="text-sm text-muted-foreground max-w-md">
-                          Observations consolidation is disabled on this server. Set{" "}
+                          此服务器上的观察整合功能已禁用。如需启用，请设置{" "}
                           <code className="px-1 py-0.5 bg-muted rounded text-xs">
                             HINDSIGHT_API_ENABLE_OBSERVATIONS=true
                           </code>{" "}
-                          to enable.
+                          。
                         </p>
                       </div>
                     ))}
                   {subTab === "mental-models" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        User-curated summaries generated from queries — reusable knowledge snapshots
-                        that can be refreshed as memories evolve.
+                        用户从查询中生成的摘要 — 可在记忆演进时刷新的可复用知识快照。
                       </p>
                       <MentalModelsView key="mental-models" />
                     </div>
@@ -542,9 +538,9 @@ export default function BankPage() {
             {/* Documents Tab */}
             {view === "documents" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">Documents</h1>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">文档</h1>
                 <p className="text-muted-foreground mb-6">
-                  Manage documents and retain new memories.
+                  管理文档并保留新记忆。
                 </p>
                 <DocumentsView />
               </div>
@@ -553,9 +549,9 @@ export default function BankPage() {
             {/* Entities Tab */}
             {view === "entities" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">Entities</h1>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">实体</h1>
                 <p className="text-muted-foreground mb-6">
-                  Explore entities (people, organizations, places) mentioned in memories.
+                  探索记忆中提及的实体（人物、组织、地点）。
                 </p>
                 <EntitiesView />
               </div>
@@ -568,22 +564,21 @@ export default function BankPage() {
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Memory Bank</AlertDialogTitle>
+            <AlertDialogTitle>删除记忆库</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Are you sure you want to delete the memory bank{" "}
-                  <span className="font-semibold text-foreground">{bankId}</span>?
+                  确定要删除记忆库{" "}
+                  <span className="font-semibold text-foreground">{bankId}</span> 吗？
                 </p>
                 <p className="text-red-600 dark:text-red-400 font-medium">
-                  This action cannot be undone. All memories, entities, documents, and the bank
-                  profile will be permanently deleted.
+                  此操作不可撤销。所有记忆、实体、文档和记忆库配置将被永久删除。
                 </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteBank}
               disabled={isDeleting}
@@ -592,12 +587,12 @@ export default function BankPage() {
               {isDeleting ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Deleting...
+                  删除中...
                 </>
               ) : (
                 <>
                   <Trash2 className="w-4 h-4 mr-2" />
-                  Delete Bank
+                  删除记忆库
                 </>
               )}
             </AlertDialogAction>
@@ -609,32 +604,32 @@ export default function BankPage() {
       <AlertDialog open={showResetConfigDialog} onOpenChange={setShowResetConfigDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reset Configuration</AlertDialogTitle>
+            <AlertDialogTitle>重置配置</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Are you sure you want to reset all configuration overrides for{" "}
-                  <span className="font-semibold text-foreground">{bankId}</span>?
+                  确定要重置{" "}
+                  <span className="font-semibold text-foreground">{bankId}</span>{" "}
+                  的所有配置覆盖吗？
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">
-                  All per-bank settings (retain, observations, reflect) will revert to server
-                  defaults. This does not affect memories, entities, or the bank profile.
+                  所有记忆库级别的设置（保留、观察、反思）将恢复为服务器默认值。这不影响记忆、实体或记忆库配置。
                 </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isResettingConfig}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isResettingConfig}>取消</AlertDialogCancel>
             <AlertDialogAction onClick={handleResetConfig} disabled={isResettingConfig}>
               {isResettingConfig ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Resetting...
+                  重置中...
                 </>
               ) : (
                 <>
                   <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset Configuration
+                  重置配置
                 </>
               )}
             </AlertDialogAction>
@@ -646,22 +641,22 @@ export default function BankPage() {
       <AlertDialog open={showClearObservationsDialog} onOpenChange={setShowClearObservationsDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear Observations</AlertDialogTitle>
+            <AlertDialogTitle>清除观察</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Are you sure you want to clear all observations for{" "}
-                  <span className="font-semibold text-foreground">{bankId}</span>?
+                  确定要清除{" "}
+                  <span className="font-semibold text-foreground">{bankId}</span>{" "}
+                  的所有观察吗？
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">
-                  This will delete all consolidated knowledge. Observations will be regenerated the
-                  next time consolidation runs.
+                  这将删除所有整合知识。观察将在下次整合运行时重新生成。
                 </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isClearingObservations}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isClearingObservations}>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleClearObservations}
               disabled={isClearingObservations}
@@ -670,12 +665,12 @@ export default function BankPage() {
               {isClearingObservations ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Clearing...
+                  清除中...
                 </>
               ) : (
                 <>
                   <Trash2 className="w-4 h-4 mr-2" />
-                  Clear Observations
+                  清除观察
                 </>
               )}
             </AlertDialogAction>

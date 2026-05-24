@@ -130,25 +130,25 @@ const TRAIT_LABELS: Record<
   { label: string; shortLabel: string; description: string; lowLabel: string; highLabel: string }
 > = {
   skepticism: {
-    label: "Skepticism",
+    label: "怀疑度",
     shortLabel: "S",
-    description: "How skeptical vs trusting when forming observations",
-    lowLabel: "Trusting",
-    highLabel: "Skeptical",
+    description: "形成观察时的怀疑与信任倾向",
+    lowLabel: "信任",
+    highLabel: "怀疑",
   },
   literalism: {
-    label: "Literalism",
+    label: "字面性",
     shortLabel: "L",
-    description: "How literally to interpret information when forming observations",
-    lowLabel: "Flexible",
-    highLabel: "Literal",
+    description: "形成观察时解读信息的字面程度",
+    lowLabel: "灵活",
+    highLabel: "字面",
   },
   empathy: {
-    label: "Empathy",
+    label: "共情度",
     shortLabel: "E",
-    description: "How much to consider emotional context when forming observations",
-    lowLabel: "Detached",
-    highLabel: "Empathetic",
+    description: "形成观察时考虑情感语境的程度",
+    lowLabel: "客观",
+    highLabel: "共情",
   },
 };
 
@@ -278,8 +278,8 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
       const result = await client.clearObservations(currentBank);
       setShowClearObservationsDialog(false);
       await loadData();
-      toast.success("Success", {
-        description: result.message || "Observations cleared successfully",
+      toast.success("成功", {
+        description: result.message || "观察已成功清除",
       });
     } catch (error) {
       // Error toast is shown automatically by the API client interceptor
@@ -369,9 +369,9 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
     return (
       <Card>
         <CardContent className="p-10 text-center">
-          <h3 className="text-xl font-semibold mb-2 text-card-foreground">No Bank Selected</h3>
+          <h3 className="text-xl font-semibold mb-2 text-card-foreground">未选择记忆库</h3>
           <p className="text-muted-foreground">
-            Please select a memory bank from the dropdown above to view its profile.
+            请从上方下拉菜单中选择一个记忆库以查看其配置。
           </p>
         </CardContent>
       </Card>
@@ -383,7 +383,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
       <Card>
         <CardContent className="text-center py-10">
           <Clock className="w-12 h-12 mx-auto mb-3 text-muted-foreground animate-pulse" />
-          <div className="text-lg text-muted-foreground">Loading profile...</div>
+          <div className="text-lg text-muted-foreground">加载配置中...</div>
         </CardContent>
       </Card>
     );
@@ -400,9 +400,9 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
                 <div>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <Brain className="w-5 h-5 text-primary" />
-                    Disposition Profile
+                    性格画像
                   </CardTitle>
-                  <CardDescription>Traits that shape the reasoning and perspective</CardDescription>
+                  <CardDescription>影响推理和视角的性格特征</CardDescription>
                 </div>
                 <Button onClick={() => setShowDispositionDialog(true)} variant="ghost" size="sm">
                   <Pencil className="h-4 w-4" />
@@ -455,10 +455,10 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
                 <div>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <Target className="w-5 h-5 text-primary" />
-                    Mission
+                    使命
                   </CardTitle>
                   <CardDescription>
-                    Affects how observations, reflect, and mental models are created
+                    影响观察、反思和思维模型的生成方式
                   </CardDescription>
                 </div>
                 <Button onClick={() => setShowMissionDialog(true)} variant="ghost" size="sm">
@@ -469,7 +469,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
             <CardContent>
               <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
                 {profile?.mission ||
-                  "No mission set. Set a mission to derive structural mental models and personalize reflect responses."}
+                  "未设置使命。设置使命以生成结构化思维模型并个性化反思响应。"}
               </p>
             </CardContent>
           </Card>
@@ -482,10 +482,10 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
           <div>
             <h3 className="text-lg font-semibold flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-rose-500" />
-              Directives
+              指令
             </h3>
             <p className="text-sm text-muted-foreground">
-              Hard rules that must be followed during reflect
+              反思时必须遵守的硬性规则
             </p>
           </div>
           <Button
@@ -495,7 +495,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
             className="h-8"
           >
             <Plus className="w-4 h-4 mr-1" />
-            Add
+            添加
           </Button>
         </div>
         {directives.length > 0 ? (
@@ -539,7 +539,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
           <div className="p-6 border border-dashed border-rose-500/30 rounded-lg text-center">
             <AlertTriangle className="w-6 h-6 mx-auto mb-2 text-rose-500/50" />
             <p className="text-sm text-muted-foreground">
-              No directives yet. Directives are hard rules that must be followed during reflect.
+              暂无指令。指令是反思时必须遵守的硬性规则。
             </p>
           </div>
         )}
@@ -549,28 +549,27 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Memory Bank</AlertDialogTitle>
+            <AlertDialogTitle>删除记忆库</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Are you sure you want to delete the memory bank{" "}
-                  <span className="font-semibold text-foreground">{currentBank}</span>?
+                  确定要删除记忆库{" "}
+                  <span className="font-semibold text-foreground">{currentBank}</span> 吗？
                 </p>
                 <p className="text-red-600 dark:text-red-400 font-medium">
-                  This action cannot be undone. All memories, entities, documents, and the bank
-                  profile will be permanently deleted.
+                  此操作不可撤销。所有记忆、实体、文档和记忆库配置将被永久删除。
                 </p>
                 {stats && (
                   <p>
-                    This will delete {stats.total_nodes} memories, {stats.total_documents}{" "}
-                    documents, and {stats.total_links} links.
+                    将删除 {stats.total_nodes} 条记忆、{stats.total_documents}{" "}
+                    个文档和 {stats.total_links} 条关联。
                   </p>
                 )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteBank}
               disabled={isDeleting}
@@ -579,12 +578,12 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
               {isDeleting ? (
                 <>
                   <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  Deleting...
+                  删除中...
                 </>
               ) : (
                 <>
                   <Trash2 className="w-4 h-4 mr-2" />
-                  Delete Bank
+                  删除记忆库
                 </>
               )}
             </AlertDialogAction>
@@ -596,25 +595,24 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
       <AlertDialog open={showClearObservationsDialog} onOpenChange={setShowClearObservationsDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear Observations</AlertDialogTitle>
+            <AlertDialogTitle>清除观察</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Are you sure you want to clear all observations for{" "}
-                  <span className="font-semibold text-foreground">{currentBank}</span>?
+                  确定要清除{" "}
+                  <span className="font-semibold text-foreground">{currentBank}</span> 的所有观察吗？
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">
-                  This will delete all consolidated knowledge. Observations will be regenerated the
-                  next time consolidation runs.
+                  这将删除所有整合知识。观察将在下次整合运行时重新生成。
                 </p>
                 {stats && stats.total_observations > 0 && (
-                  <p>This will delete {stats.total_observations} observations.</p>
+                  <p>将删除 {stats.total_observations} 条观察。</p>
                 )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isClearingObservations}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isClearingObservations}>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleClearObservations}
               disabled={isClearingObservations}
@@ -623,12 +621,12 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
               {isClearingObservations ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Clearing...
+                  清除中...
                 </>
               ) : (
                 <>
                   <Trash2 className="w-4 h-4 mr-2" />
-                  Clear Observations
+                  清除观察
                 </>
               )}
             </AlertDialogAction>
@@ -654,24 +652,24 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Directive</AlertDialogTitle>
+            <AlertDialogTitle>删除指令</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete{" "}
-              <span className="font-semibold">&quot;{directiveDeleteTarget?.name}&quot;</span>?
+              确定要删除{" "}
+              <span className="font-semibold">&quot;{directiveDeleteTarget?.name}&quot;</span> 吗？
               <br />
               <br />
-              <span className="text-destructive font-semibold">This action cannot be undone.</span>
+              <span className="text-destructive font-semibold">此操作不可撤销。</span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row justify-end space-x-2">
-            <AlertDialogCancel className="mt-0">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="mt-0">取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteDirective}
               disabled={deletingDirective}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deletingDirective ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
-              Delete
+              删除
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -759,8 +757,8 @@ function DispositionEditDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Edit Disposition Traits</DialogTitle>
-          <DialogDescription>Traits that shape the reasoning and perspective</DialogDescription>
+          <DialogTitle>编辑性格特征</DialogTitle>
+          <DialogDescription>影响推理和视角的性格特征</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -796,16 +794,16 @@ function DispositionEditDialog({
 
         <DialogFooter>
           <Button onClick={onClose} variant="outline" disabled={saving}>
-            Cancel
+            取消
           </Button>
           <Button onClick={handleSave} disabled={saving}>
             {saving ? (
               <>
                 <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                Saving...
+                保存中...
               </>
             ) : (
-              "Save Changes"
+              "保存更改"
             )}
           </Button>
         </DialogFooter>
@@ -849,9 +847,9 @@ function MissionEditDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Edit Mission</DialogTitle>
+          <DialogTitle>编辑使命</DialogTitle>
           <DialogDescription>
-            Affects how observations, reflect, and mental models are created
+            影响观察、反思和思维模型的生成方式
           </DialogDescription>
         </DialogHeader>
 
@@ -859,7 +857,7 @@ function MissionEditDialog({
           <Textarea
             value={editMission}
             onChange={(e) => setEditMission(e.target.value)}
-            placeholder="e.g., I am a PM for the engineering team. I help coordinate sprints and track project progress..."
+            placeholder="例如：我是工程团队的项目经理，负责协调冲刺和跟踪项目进度..."
             rows={8}
             className="resize-none"
           />
@@ -867,16 +865,16 @@ function MissionEditDialog({
 
         <DialogFooter>
           <Button onClick={onClose} variant="outline" disabled={saving}>
-            Cancel
+            取消
           </Button>
           <Button onClick={handleSave} disabled={saving}>
             {saving ? (
               <>
                 <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                Saving...
+                保存中...
               </>
             ) : (
-              "Save Changes"
+              "保存更改"
             )}
           </Button>
         </DialogFooter>
@@ -966,46 +964,46 @@ function DirectiveFormDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-rose-500" />
-            {mode === "create" ? "Create" : "Edit"} Directive
+            {mode === "create" ? "创建" : "编辑"}指令
           </DialogTitle>
           <DialogDescription>
-            Directives are hard rules that must be followed during reflect.
+            指令是反思时必须遵守的硬性规则。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Name *</label>
+            <label className="text-sm font-medium text-foreground">名称 *</label>
             <Input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="e.g., Competitor Policy"
+              placeholder="例如：竞争对手策略"
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Rule *</label>
+            <label className="text-sm font-medium text-foreground">规则 *</label>
             <Textarea
               value={form.content}
               onChange={(e) => setForm({ ...form, content: e.target.value })}
-              placeholder="e.g., Never mention competitor products directly."
+              placeholder="例如：不要直接提及竞争对手的产品。"
               className="min-h-[120px]"
             />
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">
-              Tags <span className="text-muted-foreground font-normal">(optional)</span>
+              标签 <span className="text-muted-foreground font-normal">（可选）</span>
             </label>
             <Input
               value={form.tags}
               onChange={(e) => setForm({ ...form, tags: e.target.value })}
-              placeholder="e.g., project-x, team-alpha (comma-separated)"
+              placeholder="例如：项目-x, 团队-alpha（逗号分隔）"
             />
           </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={handleClose} disabled={submitting}>
-            Cancel
+            取消
           </Button>
           <Button
             onClick={handleSubmit}
@@ -1013,7 +1011,7 @@ function DirectiveFormDialog({
             className="bg-rose-500 hover:bg-rose-600"
           >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
-            {mode === "create" ? "Create" : "Save"}
+            {mode === "create" ? "创建" : "保存"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1056,7 +1054,7 @@ function DirectiveDetailPanel({
                 </Button>
               </div>
               <span className="text-xs px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400">
-                directive
+                指令
               </span>
             </div>
           </div>
@@ -1079,7 +1077,7 @@ function DirectiveDetailPanel({
           {/* Description */}
           <div>
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-              Rule
+              规则
             </div>
             <div className="prose prose-base dark:prose-invert max-w-none">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{directive.content}</ReactMarkdown>
@@ -1090,7 +1088,7 @@ function DirectiveDetailPanel({
           {directive.tags && directive.tags.length > 0 && (
             <div>
               <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                Tags
+                标签
               </div>
               <div className="flex flex-wrap gap-2">
                 {directive.tags.map((tag) => (

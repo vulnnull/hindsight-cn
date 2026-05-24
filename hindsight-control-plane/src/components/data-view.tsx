@@ -84,9 +84,9 @@ export function DataView({
   // Which timestamp drives the constellation recency color
   type RecencyBasis = "mentioned_at" | "occurred_start" | "occurred_end";
   const RECENCY_BASIS_LABEL: Record<RecencyBasis, string> = {
-    mentioned_at: "mentioned",
-    occurred_start: "occurred (start)",
-    occurred_end: "occurred (end)",
+    mentioned_at: "提及时间",
+    occurred_start: "发生时间（起始）",
+    occurred_end: "发生时间（结束）",
   };
   const [recencyBasis, setRecencyBasis] = useState<RecencyBasis>("mentioned_at");
 
@@ -350,16 +350,16 @@ export function DataView({
       {loading && !data ? (
         <div className="text-center py-12">
           <RefreshCw className="w-8 h-8 mx-auto mb-3 text-muted-foreground animate-spin" />
-          <p className="text-muted-foreground">Loading memories...</p>
+          <p className="text-muted-foreground">加载记忆中...</p>
         </div>
       ) : data && data.total_units === 0 ? (
         <div className="text-center py-20">
           <FileText className="w-10 h-10 mx-auto mb-4 text-muted-foreground/50" />
-          <h3 className="text-base font-medium text-foreground mb-1">No memories</h3>
+          <h3 className="text-base font-medium text-foreground mb-1">暂无记忆</h3>
           {!documentId && !chunkId && (
             <>
               <p className="text-sm text-muted-foreground mb-6">
-                Add a document to start building this memory bank.
+                添加文档以开始构建此记忆库。
               </p>
               <Button
                 variant="default"
@@ -371,7 +371,7 @@ export function DataView({
                 }}
               >
                 <Plus className="w-4 h-4" />
-                Add Document
+                添加文档
               </Button>
             </>
           )}
@@ -399,7 +399,7 @@ export function DataView({
                         executeSearch();
                       }
                     }}
-                    placeholder="Filter by text or context (press Enter)..."
+                    placeholder="按文本或上下文筛选（按回车）..."
                     className="pl-8 h-9"
                   />
                 </div>
@@ -411,7 +411,7 @@ export function DataView({
 
           {compactMode ? (
             <div className="flex items-center justify-between mb-2 px-1">
-              <div className="text-xs text-muted-foreground">{data.total_units} memories</div>
+              <div className="text-xs text-muted-foreground">{data.total_units} 条记忆</div>
               <Button
                 variant="ghost"
                 size="sm"
@@ -425,7 +425,7 @@ export function DataView({
                 className="h-6 px-2 text-xs gap-1"
               >
                 <Settings2 className="w-3 h-3" />
-                Expand
+                展开
               </Button>
             </div>
           ) : (
@@ -445,15 +445,15 @@ export function DataView({
                     className="h-7 px-2 text-xs gap-1"
                   >
                     <Eye className="w-3 h-3" />
-                    Compact
+                    紧凑
                   </Button>
                 )}
                 <div className="text-sm text-muted-foreground">
                   {searchQuery || tagFilters.length > 0 ? (
-                    `${filteredTableRows.length} matching memories`
+                    `${filteredTableRows.length} 条匹配的记忆`
                   ) : data.table_rows?.length < data.total_units ? (
                     <span>
-                      Showing {data.table_rows?.length ?? 0} of {data.total_units} total memories
+                      显示 {data.table_rows?.length ?? 0} / {data.total_units} 条记忆
                       <button
                         onClick={() => {
                           const newLimit = Math.min(data.total_units, fetchLimit + 1000);
@@ -466,11 +466,11 @@ export function DataView({
                         }}
                         className="ml-2 text-primary hover:underline"
                       >
-                        Load more
+                        加载更多
                       </button>
                     </span>
                   ) : (
-                    `${data.total_units} total memories`
+                    `${data.total_units} 条记忆`
                   )}
                 </div>
 
@@ -484,19 +484,19 @@ export function DataView({
                     }`}
                     title={
                       consolidationStatus.pending_consolidation === 0
-                        ? `All memories consolidated${consolidationStatus.last_consolidated_at ? ` (last: ${new Date(consolidationStatus.last_consolidated_at).toLocaleString()})` : ""}`
-                        : `${consolidationStatus.pending_consolidation} memories pending consolidation`
+                        ? `所有记忆已整合${consolidationStatus.last_consolidated_at ? ` (上次: ${new Date(consolidationStatus.last_consolidated_at).toLocaleString()})` : ""}`
+                        : `${consolidationStatus.pending_consolidation} 条记忆待整合`
                     }
                   >
                     {consolidationStatus.pending_consolidation === 0 ? (
                       <>
                         <CheckCircle className="w-3 h-3" />
-                        In Sync
+                        已同步
                       </>
                     ) : (
                       <>
                         <Clock className="w-3 h-3" />
-                        {consolidationStatus.pending_consolidation} Pending
+                        {consolidationStatus.pending_consolidation} 待处理
                         <button
                           onClick={() =>
                             loadData(
@@ -507,7 +507,7 @@ export function DataView({
                           }
                           disabled={loading}
                           className="ml-0.5 opacity-70 hover:opacity-100 disabled:opacity-40 transition-opacity"
-                          title="Refresh observations"
+                          title="刷新观察"
                         >
                           <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
                         </button>
@@ -526,7 +526,7 @@ export function DataView({
                   }`}
                 >
                   <ScatterChart className="w-4 h-4" />
-                  Constellation
+                  星图
                 </button>
                 <button
                   onClick={() => setViewMode("graph")}
@@ -537,7 +537,7 @@ export function DataView({
                   }`}
                 >
                   <Network className="w-4 h-4" />
-                  Graph
+                  图
                 </button>
                 <button
                   onClick={() => setViewMode("table")}
@@ -548,7 +548,7 @@ export function DataView({
                   }`}
                 >
                   <List className="w-4 h-4" />
-                  Table
+                  表格
                 </button>
                 <button
                   onClick={() => setViewMode("timeline")}
@@ -559,7 +559,7 @@ export function DataView({
                   }`}
                 >
                   <Calendar className="w-4 h-4" />
-                  Timeline
+                  时间线
                 </button>
               </div>
             </div>
@@ -584,7 +584,7 @@ export function DataView({
               <button
                 onClick={() => setShowControlPanel(!showControlPanel)}
                 className="flex-shrink-0 w-5 h-[700px] bg-transparent hover:bg-muted/50 flex items-center justify-center transition-colors"
-                title={showControlPanel ? "Hide panel" : "Show panel"}
+                title={showControlPanel ? "隐藏面板" : "显示面板"}
               >
                 {showControlPanel ? (
                   <ChevronRight className="w-3 h-3 text-muted-foreground/60" />
@@ -611,7 +611,7 @@ export function DataView({
                     <div className="p-4 space-y-5">
                       {/* Legend & Stats */}
                       <div>
-                        <h3 className="text-sm font-semibold mb-3 text-foreground">Graph</h3>
+                        <h3 className="text-sm font-semibold mb-3 text-foreground">图</h3>
                         <div className="space-y-2">
                           {/* Nodes */}
                           <div className="flex items-center justify-between text-sm">
@@ -620,7 +620,7 @@ export function DataView({
                                 className="w-3 h-3 rounded-full"
                                 style={{ backgroundColor: "#0074d9" }}
                               />
-                              <span className="text-foreground">Nodes</span>
+                              <span className="text-foreground">节点</span>
                             </div>
                             <span className="font-mono text-foreground">
                               {Math.min(
@@ -632,8 +632,8 @@ export function DataView({
                           </div>
 
                           <div className="text-xs font-medium text-muted-foreground mt-2 mb-1">
-                            Links ({linkStats.total}){" "}
-                            <span className="text-muted-foreground/60">· click to filter</span>
+                            链接 ({linkStats.total}){" "}
+                            <span className="text-muted-foreground/60">· 点击筛选</span>
                           </div>
                           <button
                             onClick={() => toggleLinkType("semantic")}
@@ -645,7 +645,7 @@ export function DataView({
                           >
                             <div className="flex items-center gap-2">
                               <div className="w-4 h-0.5 bg-[#0074d9]" />
-                              <span className="text-foreground">Semantic</span>
+                              <span className="text-foreground">语义</span>
                             </div>
                             <span
                               className={`font-mono ${linkStats.semantic === 0 ? "text-destructive" : "text-foreground"}`}
@@ -663,7 +663,7 @@ export function DataView({
                           >
                             <div className="flex items-center gap-2">
                               <div className="w-4 h-0.5 bg-[#009296]" />
-                              <span className="text-foreground">Temporal</span>
+                              <span className="text-foreground">时序</span>
                             </div>
                             <span
                               className={`font-mono ${linkStats.temporal === 0 ? "text-destructive" : "text-foreground"}`}
@@ -681,7 +681,7 @@ export function DataView({
                           >
                             <div className="flex items-center gap-2">
                               <div className="w-4 h-0.5 bg-[#f59e0b]" />
-                              <span className="text-foreground">Entity</span>
+                              <span className="text-foreground">实体</span>
                             </div>
                             <span className="font-mono text-foreground">{linkStats.entity}</span>
                           </button>
@@ -695,7 +695,7 @@ export function DataView({
                           >
                             <div className="flex items-center gap-2">
                               <div className="w-4 h-0.5 bg-[#8b5cf6]" />
-                              <span className="text-foreground">Causal</span>
+                              <span className="text-foreground">因果</span>
                             </div>
                             <span
                               className={`font-mono ${linkStats.causal === 0 ? "text-muted-foreground" : "text-foreground"}`}
@@ -718,11 +718,11 @@ export function DataView({
 
                       {/* Controls Section */}
                       <div>
-                        <h3 className="text-sm font-semibold mb-3 text-foreground">Display</h3>
+                        <h3 className="text-sm font-semibold mb-3 text-foreground">显示</h3>
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
                             <Label htmlFor="show-labels" className="text-sm text-foreground">
-                              Show labels
+                              显示标签
                             </Label>
                             <Switch
                               id="show-labels"
@@ -737,15 +737,15 @@ export function DataView({
 
                       {/* Limits Section */}
                       <div>
-                        <h3 className="text-sm font-semibold mb-3 text-foreground">Performance</h3>
+                        <h3 className="text-sm font-semibold mb-3 text-foreground">性能</h3>
                         <div className="space-y-4">
                           <div>
                             <div className="flex items-center justify-between mb-2">
-                              <Label className="text-sm text-foreground">Max nodes</Label>
+                              <Label className="text-sm text-foreground">最大节点数</Label>
                               <span className="text-xs text-muted-foreground">
                                 {graph2DData.nodes.length > 50
                                   ? `${maxNodes ?? 50} / ${graph2DData.nodes.length}`
-                                  : `${maxNodes ?? "All"} / ${graph2DData.nodes.length}`}
+                                  : `${maxNodes ?? "全部"} / ${graph2DData.nodes.length}`}
                               </span>
                             </div>
                             <Slider
@@ -771,10 +771,10 @@ export function DataView({
                             />
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            All links between visible nodes are shown.
+                            显示可见节点之间的所有关联。
                             {graph2DData.nodes.length > 50 && (
                               <span className="block text-amber-600 dark:text-amber-400 mt-1">
-                                ⚠️ Limited to 50 nodes for performance. Total:{" "}
+                                ⚠️ 为保证性能，限制为 50 个节点。总计：{" "}
                                 {graph2DData.nodes.length}
                               </span>
                             )}
@@ -786,7 +786,7 @@ export function DataView({
 
                       {/* Hint */}
                       <div className="text-xs text-muted-foreground/60 text-center pt-2">
-                        Click a node to see details
+                        点击节点查看详情
                       </div>
                     </div>
                   )}
@@ -806,10 +806,10 @@ export function DataView({
                   nodeColorFn={nodeColorFn}
                   linkColorFn={linkColorFn}
                   nodeSizeFn={factType === "observation" ? observationNodeSizeFn : undefined}
-                  sizeLegendLabel={factType === "observation" ? "source facts" : undefined}
+                  sizeLegendLabel={factType === "observation" ? "源事实" : undefined}
                   nodeHeatFn={recencyLookup ? recencyHeatFn : undefined}
                   heatLegendLabel={
-                    recencyLookup ? `recency · ${RECENCY_BASIS_LABEL[recencyBasis]}` : undefined
+                    recencyLookup ? `时效性 · ${RECENCY_BASIS_LABEL[recencyBasis]}` : undefined
                   }
                   heatLegendEndpoints={
                     recencyLookup
@@ -828,7 +828,7 @@ export function DataView({
                   <button
                     onClick={() => setShowControlPanel(!showControlPanel)}
                     className="flex-shrink-0 w-5 h-[700px] bg-transparent hover:bg-muted/50 flex items-center justify-center transition-colors"
-                    title={showControlPanel ? "Hide panel" : "Show panel"}
+                    title={showControlPanel ? "隐藏面板" : "显示面板"}
                   >
                     {showControlPanel ? (
                       <ChevronRight className="w-3 h-3 text-muted-foreground" />
@@ -850,15 +850,13 @@ export function DataView({
                       ) : (
                         <div className="p-4 space-y-4">
                           <h3 className="text-sm font-semibold text-foreground">
-                            Constellation View
+                            星图视图
                           </h3>
                           <p className="text-xs text-muted-foreground">
-                            Canvas-rendered memory map with spatial label deconfliction. Scroll to
-                            zoom, drag to pan, hover to explore entity connections. Click a memory
-                            to view details.
+                            Canvas 渲染的记忆图谱，支持空间标签去冲突。滚轮缩放，拖拽平移，悬停探索实体关联。点击记忆查看详情。
                           </p>
                           <div className="space-y-2 pt-2">
-                            <h4 className="text-xs font-medium text-muted-foreground">Color by</h4>
+                            <h4 className="text-xs font-medium text-muted-foreground">着色依据</h4>
                             <Select
                               value={recencyBasis}
                               onValueChange={(v) => setRecencyBasis(v as RecencyBasis)}
@@ -867,15 +865,15 @@ export function DataView({
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="mentioned_at">Mentioned</SelectItem>
-                                <SelectItem value="occurred_start">Occurred (start)</SelectItem>
-                                <SelectItem value="occurred_end">Occurred (end)</SelectItem>
+                                <SelectItem value="mentioned_at">提及时间</SelectItem>
+                                <SelectItem value="occurred_start">发生时间（起始）</SelectItem>
+                                <SelectItem value="occurred_end">发生时间（结束）</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
                           <div className="space-y-2 pt-2">
                             <h4 className="text-xs font-medium text-muted-foreground">
-                              Link types
+                              关联类型
                             </h4>
                             {Object.entries({
                               semantic: "#0074d9",
@@ -905,11 +903,11 @@ export function DataView({
                           </div>
                           <div className="text-xs text-muted-foreground space-y-1 pt-2">
                             <div>
-                              Nodes:{" "}
+                              节点：{" "}
                               <span className="text-foreground">{graph2DData.nodes.length}</span>
                             </div>
                             <div>
-                              Links:{" "}
+                              关联：{" "}
                               <span className="text-foreground">{graph2DData.links.length}</span>
                             </div>
                           </div>
@@ -941,22 +939,22 @@ export function DataView({
                                 <TableHead
                                   className={factType === "observation" ? "w-[35%]" : "w-[38%]"}
                                 >
-                                  {factType === "observation" ? "Observation" : "Memory"}
+                                  {factType === "observation" ? "观察" : "记忆"}
                                 </TableHead>
-                                <TableHead className="w-[15%]">Entities</TableHead>
-                                <TableHead className="w-[15%]">Tags</TableHead>
+                                <TableHead className="w-[15%]">实体</TableHead>
+                                <TableHead className="w-[15%]">标签</TableHead>
                                 {factType === "observation" && (
-                                  <TableHead className="w-[10%]">Sources</TableHead>
+                                  <TableHead className="w-[10%]">来源</TableHead>
                                 )}
                                 <TableHead
                                   className={factType === "observation" ? "w-[12%]" : "w-[16%]"}
                                 >
-                                  Occurred
+                                  发生时间
                                 </TableHead>
                                 <TableHead
                                   className={factType === "observation" ? "w-[13%]" : "w-[16%]"}
                                 >
-                                  Mentioned
+                                  提及时间
                                 </TableHead>
                               </TableRow>
                             </TableHeader>
@@ -1065,7 +1063,7 @@ export function DataView({
                           {totalPages > 1 && (
                             <div className="flex items-center justify-between mt-3 pt-3 border-t">
                               <div className="text-xs text-muted-foreground">
-                                {startIndex + 1}-{Math.min(endIndex, filteredTableRows.length)} of{" "}
+                                {startIndex + 1}-{Math.min(endIndex, filteredTableRows.length)} / 共{" "}
                                 {filteredTableRows.length}
                               </div>
                               <div className="flex items-center gap-1">
@@ -1117,8 +1115,8 @@ export function DataView({
                   ) : (
                     <div className="text-center py-12 text-muted-foreground">
                       {data.table_rows?.length > 0
-                        ? "No memories match your filter"
-                        : "No memories found"}
+                        ? "没有匹配筛选条件的记忆"
+                        : "未找到记忆"}
                     </div>
                   )}
                 </div>
@@ -1139,7 +1137,7 @@ export function DataView({
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
             <div className="text-4xl mb-2">📊</div>
-            <div className="text-sm text-muted-foreground">No data available</div>
+            <div className="text-sm text-muted-foreground">暂无数据</div>
           </div>
         </div>
       )}
@@ -1291,12 +1289,12 @@ function TimelineView({
     return (
       <div className="flex flex-col items-center justify-center py-12">
         <Calendar className="w-12 h-12 text-muted-foreground mb-3" />
-        <div className="text-base font-medium text-foreground mb-1">No Timeline Data</div>
+        <div className="text-base font-medium text-foreground mb-1">暂无时间线数据</div>
         <div className="text-xs text-muted-foreground text-center max-w-md">
-          No memories have occurred_at dates.
+          没有记忆包含发生时间。
           {itemsWithoutDates.length > 0 && (
             <span className="block mt-1">
-              {itemsWithoutDates.length} memories without dates in Table View.
+              {itemsWithoutDates.length} 条无日期的记忆可在表格视图中查看。
             </span>
           )}
         </div>
@@ -1316,10 +1314,10 @@ function TimelineView({
   };
 
   const granularityLabels: Record<Granularity, string> = {
-    year: "Year",
-    month: "Month",
-    week: "Week",
-    day: "Day",
+    year: "年",
+    month: "月",
+    week: "周",
+    day: "日",
   };
 
   return (
@@ -1329,8 +1327,8 @@ function TimelineView({
         {/* Controls */}
         <div className="flex items-center justify-between mb-3 gap-4">
           <div className="text-xs text-muted-foreground">
-            {sortedItems.length} memories
-            {itemsWithoutDates.length > 0 && ` · ${itemsWithoutDates.length} without dates`}
+            {sortedItems.length} 条记忆
+            {itemsWithoutDates.length > 0 && ` · ${itemsWithoutDates.length} 条无日期`}
             {dateRange && (
               <span className="ml-2 text-foreground">
                 ({dateRange.first.toLocaleDateString("en-US", { month: "short", year: "numeric" })}{" "}
@@ -1348,7 +1346,7 @@ function TimelineView({
                 onClick={zoomOut}
                 disabled={granularity === "year"}
                 className="h-7 w-7 p-0"
-                title="Zoom out"
+                title="缩小"
               >
                 <ZoomOut className="h-3 w-3" />
               </Button>
@@ -1361,7 +1359,7 @@ function TimelineView({
                 onClick={zoomIn}
                 disabled={granularity === "day"}
                 className="h-7 w-7 p-0"
-                title="Zoom in"
+                title="放大"
               >
                 <ZoomIn className="h-3 w-3" />
               </Button>
@@ -1375,7 +1373,7 @@ function TimelineView({
                 onClick={() => scrollToGroup(0)}
                 disabled={timelineGroups.length <= 1}
                 className="h-7 w-7 p-0"
-                title="First"
+                title="首页"
               >
                 <ChevronsLeft className="h-3 w-3" />
               </Button>
@@ -1385,7 +1383,7 @@ function TimelineView({
                 onClick={() => scrollToGroup(currentIndex - 1)}
                 disabled={currentIndex === 0}
                 className="h-7 w-7 p-0"
-                title="Previous"
+                title="上一页"
               >
                 <ChevronLeft className="h-3 w-3" />
               </Button>
@@ -1398,7 +1396,7 @@ function TimelineView({
                 onClick={() => scrollToGroup(currentIndex + 1)}
                 disabled={currentIndex >= timelineGroups.length - 1}
                 className="h-7 w-7 p-0"
-                title="Next"
+                title="下一页"
               >
                 <ChevronRight className="h-3 w-3" />
               </Button>
@@ -1408,7 +1406,7 @@ function TimelineView({
                 onClick={() => scrollToGroup(timelineGroups.length - 1)}
                 disabled={timelineGroups.length <= 1}
                 className="h-7 w-7 p-0"
-                title="Last"
+                title="末页"
               >
                 <ChevronsRight className="h-3 w-3" />
               </Button>
@@ -1432,7 +1430,7 @@ function TimelineView({
                 </div>
                 <div className="w-2 h-2 rounded-full bg-primary z-10" />
                 <span className="ml-2 text-[10px] text-muted-foreground">
-                  {group.items.length} {group.items.length === 1 ? "item" : "items"}
+                  {group.items.length} 条
                 </span>
               </div>
 

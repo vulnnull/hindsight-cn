@@ -25,36 +25,36 @@ import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const ACTION_OPTIONS = [
-  { value: "all", label: "All actions" },
-  { value: "retain", label: "Retain" },
-  { value: "recall", label: "Recall" },
-  { value: "reflect", label: "Reflect" },
-  { value: "create_bank", label: "Create Bank" },
-  { value: "update_bank", label: "Update Bank" },
-  { value: "delete_bank", label: "Delete Bank" },
-  { value: "clear_memories", label: "Clear Memories" },
-  { value: "consolidation", label: "Consolidation" },
-  { value: "batch_retain", label: "Batch Retain" },
-  { value: "create_mental_model", label: "Create Mental Model" },
-  { value: "refresh_mental_model", label: "Refresh Mental Model" },
-  { value: "delete_mental_model", label: "Delete Mental Model" },
-  { value: "create_directive", label: "Create Directive" },
-  { value: "delete_directive", label: "Delete Directive" },
-  { value: "file_convert_retain", label: "File Convert & Retain" },
-  { value: "webhook_delivery", label: "Webhook Delivery" },
+  { value: "all", label: "所有操作" },
+  { value: "retain", label: "记忆入库" },
+  { value: "recall", label: "召回" },
+  { value: "reflect", label: "反思" },
+  { value: "create_bank", label: "创建记忆库" },
+  { value: "update_bank", label: "更新记忆库" },
+  { value: "delete_bank", label: "删除记忆库" },
+  { value: "clear_memories", label: "清除记忆" },
+  { value: "consolidation", label: "整合" },
+  { value: "batch_retain", label: "批量入库" },
+  { value: "create_mental_model", label: "创建思维模型" },
+  { value: "refresh_mental_model", label: "刷新思维模型" },
+  { value: "delete_mental_model", label: "删除思维模型" },
+  { value: "create_directive", label: "创建指令" },
+  { value: "delete_directive", label: "删除指令" },
+  { value: "file_convert_retain", label: "文件转换入库" },
+  { value: "webhook_delivery", label: "Webhook 投递" },
 ];
 
 const TRANSPORT_OPTIONS = [
-  { value: "all", label: "All transports" },
+  { value: "all", label: "所有传输方式" },
   { value: "http", label: "HTTP" },
   { value: "mcp", label: "MCP" },
-  { value: "system", label: "System" },
+  { value: "system", label: "系统" },
 ];
 
 const PERIOD_OPTIONS = [
-  { value: "1d", label: "Today" },
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
+  { value: "1d", label: "今天" },
+  { value: "7d", label: "过去 7 天" },
+  { value: "30d", label: "过去 30 天" },
 ];
 
 function formatDuration(startedAt: string | null, endedAt: string | null): string {
@@ -143,7 +143,7 @@ function AuditChart({ bankId }: { bankId: string }) {
   return (
     <Card>
       <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0 gap-3">
-        <CardTitle className="text-sm font-semibold">Request Volume</CardTitle>
+        <CardTitle className="text-sm font-semibold">请求量</CardTitle>
         <div className="flex gap-2">
           <Select
             value={chartAction || "all"}
@@ -184,11 +184,11 @@ function AuditChart({ bankId }: { bankId: string }) {
         <div className="h-[120px]">
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              Loading...
+            加载中…
             </div>
           ) : chartData.length === 0 ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              No data for this period
+              此时间段暂无数据
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -333,7 +333,7 @@ export function AuditLogsView() {
       <div className="flex items-center gap-3 flex-wrap">
         <Select value={actionFilter || "all"} onValueChange={handleActionFilterChange}>
           <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="All actions" />
+            <SelectValue placeholder="所有操作" />
           </SelectTrigger>
           <SelectContent position="popper" className="max-h-[300px] overflow-y-auto">
             {ACTION_OPTIONS.map((opt) => (
@@ -346,7 +346,7 @@ export function AuditLogsView() {
 
         <Select value={transportFilter || "all"} onValueChange={handleTransportFilterChange}>
           <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="All transports" />
+            <SelectValue placeholder="所有传输方式" />
           </SelectTrigger>
           <SelectContent position="popper" className="max-h-[300px] overflow-y-auto">
             {TRANSPORT_OPTIONS.map((opt) => (
@@ -362,11 +362,11 @@ export function AuditLogsView() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent position="popper">
-            <SelectItem value="all">All time</SelectItem>
-            <SelectItem value="1h">Last hour</SelectItem>
-            <SelectItem value="1d">Last 24 hours</SelectItem>
-            <SelectItem value="7d">Last 7 days</SelectItem>
-            <SelectItem value="30d">Last 30 days</SelectItem>
+            <SelectItem value="all">全部时间</SelectItem>
+            <SelectItem value="1h">过去 1 小时</SelectItem>
+            <SelectItem value="1d">过去 24 小时</SelectItem>
+            <SelectItem value="7d">过去 7 天</SelectItem>
+            <SelectItem value="30d">过去 30 天</SelectItem>
           </SelectContent>
         </Select>
 
@@ -377,11 +377,11 @@ export function AuditLogsView() {
           disabled={loading}
         >
           <RefreshCw className={`w-4 h-4 mr-1 ${loading ? "animate-spin" : ""}`} />
-          Refresh
+          刷新
         </Button>
 
         <span className="text-sm text-muted-foreground ml-auto">
-          {total} {total === 1 ? "entry" : "entries"}
+          {total} 条
         </span>
       </div>
 
@@ -389,17 +389,17 @@ export function AuditLogsView() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[200px]">Time</TableHead>
-            <TableHead>Action</TableHead>
-            <TableHead className="w-[100px]">Transport</TableHead>
-            <TableHead className="w-[100px]">Duration</TableHead>
+            <TableHead className="w-[200px]">时间</TableHead>
+            <TableHead>操作</TableHead>
+            <TableHead className="w-[100px]">传输</TableHead>
+            <TableHead className="w-[100px]">耗时</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {logs.length === 0 ? (
             <TableRow>
               <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                {loading ? "Loading..." : "No audit logs found"}
+                {loading ? "加载中…" : "暂无审计日志"}
               </TableCell>
             </TableRow>
           ) : (
@@ -429,7 +429,7 @@ export function AuditLogsView() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">
-            Page {currentPage} of {totalPages}
+            第 {currentPage} 页，共 {totalPages} 页
           </span>
           <div className="flex gap-2">
             <Button
@@ -439,7 +439,7 @@ export function AuditLogsView() {
               disabled={offset === 0}
             >
               <ChevronLeft className="w-4 h-4 mr-1" />
-              Previous
+              上一页
             </Button>
             <Button
               variant="outline"
@@ -447,7 +447,7 @@ export function AuditLogsView() {
               onClick={() => handlePageChange(offset + limit)}
               disabled={offset + limit >= total}
             >
-              Next
+              下一页
               <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
           </div>
@@ -458,25 +458,25 @@ export function AuditLogsView() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Audit Log: {selectedLog?.action}</DialogTitle>
+            <DialogTitle>审计日志：{selectedLog?.action}</DialogTitle>
           </DialogHeader>
           {selectedLog && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="text-muted-foreground">Action:</span>{" "}
+                  <span className="text-muted-foreground">操作：</span>{" "}
                   <span className="font-medium">{selectedLog.action}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Transport:</span>{" "}
+                  <span className="text-muted-foreground">传输方式：</span>{" "}
                   <TransportBadge transport={selectedLog.transport} />
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Started:</span>{" "}
+                  <span className="text-muted-foreground">开始时间：</span>{" "}
                   <span className="font-mono">{formatDateTime(selectedLog.started_at)}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Duration:</span>{" "}
+                  <span className="text-muted-foreground">耗时：</span>{" "}
                   <span className="font-mono">
                     {formatDuration(selectedLog.started_at, selectedLog.ended_at)}
                   </span>
@@ -485,7 +485,7 @@ export function AuditLogsView() {
 
               {selectedLog.request && (
                 <div>
-                  <h4 className="text-sm font-semibold mb-2">Request</h4>
+                  <h4 className="text-sm font-semibold mb-2">请求</h4>
                   <pre className="bg-muted p-3 rounded-md text-xs overflow-x-auto max-h-[200px] overflow-y-auto">
                     {JSON.stringify(selectedLog.request, null, 2)}
                   </pre>
@@ -494,7 +494,7 @@ export function AuditLogsView() {
 
               {selectedLog.response && (
                 <div>
-                  <h4 className="text-sm font-semibold mb-2">Response</h4>
+                  <h4 className="text-sm font-semibold mb-2">响应</h4>
                   <pre className="bg-muted p-3 rounded-md text-xs overflow-x-auto max-h-[200px] overflow-y-auto">
                     {JSON.stringify(selectedLog.response, null, 2)}
                   </pre>
@@ -503,7 +503,7 @@ export function AuditLogsView() {
 
               {selectedLog.metadata && Object.keys(selectedLog.metadata).length > 0 && (
                 <div>
-                  <h4 className="text-sm font-semibold mb-2">Metadata</h4>
+                  <h4 className="text-sm font-semibold mb-2">元数据</h4>
                   <pre className="bg-muted p-3 rounded-md text-xs overflow-x-auto">
                     {JSON.stringify(selectedLog.metadata, null, 2)}
                   </pre>

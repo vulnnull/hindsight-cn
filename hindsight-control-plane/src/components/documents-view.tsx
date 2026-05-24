@@ -58,16 +58,16 @@ function formatRelativeTime(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
   const seconds = Math.floor((now - then) / 1000);
-  if (seconds < 60) return "just now";
+  if (seconds < 60) return "刚刚";
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return `${minutes}分钟前`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return `${hours}小时前`;
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
+  if (days < 30) return `${days}天前`;
   const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(months / 12)}y ago`;
+  if (months < 12) return `${months}个月前`;
+  return `${Math.floor(months / 12)}年前`;
 }
 
 function formatBytes(bytes: number): string {
@@ -149,21 +149,21 @@ function MemoryComposition({
   const counts = nodesByFactType ?? { world: 0, experience: 0, observation: 0 };
   const total = counts.world + counts.experience + counts.observation;
   const items = [
-    { name: "World", value: counts.world, color: COMPOSITION_COLORS.world },
-    { name: "Experience", value: counts.experience, color: COMPOSITION_COLORS.experience },
-    { name: "Observations", value: counts.observation, color: COMPOSITION_COLORS.observation },
+    { name: "世界常识", value: counts.world, color: COMPOSITION_COLORS.world },
+    { name: "经历记忆", value: counts.experience, color: COMPOSITION_COLORS.experience },
+    { name: "观察", value: counts.observation, color: COMPOSITION_COLORS.observation },
   ];
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-[0.08em]">
-          Memory composition
+          记忆构成
         </h4>
         <span className="text-xs text-muted-foreground tabular-nums">{total.toLocaleString()}</span>
       </div>
       {total === 0 ? (
-        <div className="text-xs text-muted-foreground py-2">No memories yet</div>
+        <div className="text-xs text-muted-foreground py-2">暂无记忆</div>
       ) : (
         <>
           <div className="h-1.5 flex w-full rounded-full overflow-hidden bg-muted">
@@ -225,7 +225,7 @@ function ChunkMemoriesHeader({
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          {ft === "observation" ? "Obs" : ft.charAt(0).toUpperCase() + ft.slice(1)}
+          {ft === "observation" ? "观察" : ft === "world" ? "世界常识" : "经历记忆"}
         </button>
       ))}
     </div>
@@ -253,7 +253,7 @@ function ChunkRow({ chunk }: { chunk: any }) {
           #{chunk.chunk_index}
         </span>
         <span className="text-[11px] text-muted-foreground/60 shrink-0">
-          {text.length.toLocaleString()} chars
+          {text.length.toLocaleString()} 字符
         </span>
         {!expanded && <span className="text-xs text-foreground/50 truncate">{preview}</span>}
       </button>
@@ -274,7 +274,7 @@ function ChunkRow({ chunk }: { chunk: any }) {
                 className="h-6 px-2 text-xs gap-1"
               >
                 <Eye className="w-3 h-3" />
-                Compact
+                紧凑视图
               </Button>
             </div>
             <div className="flex-1 min-h-0">
@@ -442,12 +442,12 @@ export function DocumentsView() {
       const result = await client.reprocessDocument(selectedDocument.id, currentBank);
       setReprocessResult({
         success: true,
-        message: `Reprocessing started (operation: ${result.operation_id})`,
+        message: `重新处理已启动（操作：${result.operation_id}）`,
       });
     } catch (error) {
       setReprocessResult({
         success: false,
-        message: "Error reprocessing document: " + (error as Error).message,
+        message: "重新处理文档时出错：" + (error as Error).message,
       });
     } finally {
       setReprocessing(false);
@@ -465,7 +465,7 @@ export function DocumentsView() {
       const result = await client.deleteDocument(documentId, currentBank);
       setDeleteResult({
         success: true,
-        message: `Deleted document and ${result.memory_units_deleted} memory units.`,
+        message: `已删除文档及 ${result.memory_units_deleted} 个记忆单元。`,
       });
 
       // Close panel if this document was selected
@@ -479,7 +479,7 @@ export function DocumentsView() {
       console.error("Error deleting document:", error);
       setDeleteResult({
         success: false,
-        message: "Error deleting document: " + (error as Error).message,
+        message: "删除文档时出错：" + (error as Error).message,
       });
     } finally {
       setDeletingDocumentId(null);
@@ -602,13 +602,13 @@ export function DocumentsView() {
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
             <div className="text-4xl mb-2">⏳</div>
-            <div className="text-sm text-muted-foreground">Loading documents...</div>
+            <div className="text-sm text-muted-foreground">加载文档中...</div>
           </div>
         </div>
       ) : documents.length > 0 ? (
         <>
           <div className="mb-4 text-sm text-muted-foreground">
-            {total} {total === 1 ? "document" : "documents"}
+            {total} 个文档
           </div>
           {/* Documents Table */}
           <div className="w-full">
@@ -617,7 +617,7 @@ export function DocumentsView() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search documents (ID)..."
+                placeholder="搜索文档 (ID)..."
                 className="max-w-2xl"
               />
             </div>
@@ -626,13 +626,13 @@ export function DocumentsView() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Document ID</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Updated</TableHead>
-                    <TableHead>Tags</TableHead>
-                    <TableHead>Metadata</TableHead>
-                    <TableHead>Size</TableHead>
-                    <TableHead>Memory Units</TableHead>
+                    <TableHead>文档 ID</TableHead>
+                    <TableHead>创建时间</TableHead>
+                    <TableHead>更新时间</TableHead>
+                    <TableHead>标签</TableHead>
+                    <TableHead>元数据</TableHead>
+                    <TableHead>大小</TableHead>
+                    <TableHead>记忆单元</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -698,7 +698,7 @@ export function DocumentsView() {
                   ) : (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center">
-                        Click "Load Documents" to view data
+                        点击加载文档以查看数据
                       </TableCell>
                     </TableRow>
                   )}
@@ -710,7 +710,7 @@ export function DocumentsView() {
             {totalPages > 1 && (
               <div className="flex items-center justify-between mt-3 pt-3 border-t px-5">
                 <div className="text-xs text-muted-foreground">
-                  {offset + 1}-{Math.min(offset + ITEMS_PER_PAGE, total)} of {total}
+                  {offset + 1}-{Math.min(offset + ITEMS_PER_PAGE, total)} / 共 {total}
                 </div>
                 <div className="flex items-center gap-1">
                   <Button
@@ -761,7 +761,7 @@ export function DocumentsView() {
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
             <div className="text-4xl mb-2">📄</div>
-            <div className="text-sm text-muted-foreground">No documents found</div>
+            <div className="text-sm text-muted-foreground">未找到文档</div>
           </div>
         </div>
       )}
@@ -772,7 +772,7 @@ export function DocumentsView() {
           <DialogHeader className="pr-10">
             <DialogTitle className="flex items-center gap-2">
               <span className="truncate font-mono text-sm">
-                {selectedDocument?.id ?? "Document"}
+                {selectedDocument?.id ?? "文档"}
               </span>
             </DialogTitle>
           </DialogHeader>
@@ -781,7 +781,7 @@ export function DocumentsView() {
             <div className="flex items-center justify-center flex-1">
               <div className="text-center">
                 <div className="text-4xl mb-2">⏳</div>
-                <div className="text-sm text-muted-foreground">Loading document...</div>
+                <div className="text-sm text-muted-foreground">加载文档中...</div>
               </div>
             </div>
           ) : selectedDocument ? (
@@ -790,11 +790,11 @@ export function DocumentsView() {
                 <TabsList className="grid grid-cols-3 w-full max-w-md">
                   <TabsTrigger value="general" className="flex items-center gap-1.5">
                     <Settings className="w-3.5 h-3.5" />
-                    General
+                    概览
                   </TabsTrigger>
                   <TabsTrigger value="content" className="flex items-center gap-1.5">
                     <FileText className="w-3.5 h-3.5" />
-                    Content
+                    内容
                   </TabsTrigger>
                   <TabsTrigger
                     value="chunks"
@@ -806,7 +806,7 @@ export function DocumentsView() {
                     }}
                   >
                     <Layers className="w-3.5 h-3.5" />
-                    Chunks{chunksLoaded ? ` (${chunksTotal})` : ""}
+                    片段{chunksLoaded ? ` (${chunksTotal})` : ""}
                   </TabsTrigger>
                 </TabsList>
                 <DropdownMenu>
@@ -816,7 +816,7 @@ export function DocumentsView() {
                       size="sm"
                       className="h-8 w-8 p-0 shrink-0"
                       disabled={reprocessing}
-                      aria-label="Actions"
+                      aria-label="操作"
                     >
                       <MoreVertical className="h-4 w-4" />
                     </Button>
@@ -824,7 +824,7 @@ export function DocumentsView() {
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onClick={reprocessDocument} disabled={reprocessing}>
                       <RefreshCw className="h-4 w-4 mr-2" />
-                      Reprocess
+                      重新处理
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
@@ -837,7 +837,7 @@ export function DocumentsView() {
                       className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400 focus:bg-red-500/10"
                     >
                       <Trash2 className="h-4 w-4 mr-2" />
-                      Delete
+                      删除
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -862,7 +862,7 @@ export function DocumentsView() {
                               ) : (
                                 <Check className="h-3 w-3" />
                               )}
-                              Save
+                              保存
                             </Button>
                             <Button
                               variant="outline"
@@ -872,7 +872,7 @@ export function DocumentsView() {
                               className="h-7 px-3 gap-1 text-xs"
                             >
                               <X className="h-3 w-3" />
-                              Cancel
+                              取消
                             </Button>
                           </div>
                         </div>
@@ -883,8 +883,8 @@ export function DocumentsView() {
                           autoFocus
                         />
                         <p className="text-xs text-muted-foreground">
-                          Saving will re-ingest this document via retain (upsert). Existing memory
-                          units for this document will be replaced.
+                          保存将通过 retain（upsert）重新摄入此文档。该文档的现有记忆
+                          单元将被替换。
                         </p>
                       </div>
                     ) : (
@@ -893,11 +893,11 @@ export function DocumentsView() {
                           <div className="flex items-center gap-1.5">
                             <FileText className="w-3.5 h-3.5" />
                             <span className="font-semibold uppercase tracking-wide">
-                              Stored content
+                              已存储内容
                             </span>
                             <span className="text-muted-foreground/70">
                               &middot;{" "}
-                              {selectedDocument.original_text?.length?.toLocaleString() ?? 0} chars
+                              {selectedDocument.original_text?.length?.toLocaleString() ?? 0} 字符
                             </span>
                           </div>
                           <Button
@@ -907,7 +907,7 @@ export function DocumentsView() {
                             className="h-6 px-2 gap-1 text-xs"
                           >
                             <Pencil className="h-3 w-3" />
-                            Edit
+                            编辑
                           </Button>
                         </div>
                         <pre className="p-4 text-[11px] leading-5 text-foreground/80 whitespace-pre-wrap font-mono">
@@ -923,9 +923,9 @@ export function DocumentsView() {
                     {/* Memories constellation — first */}
                     <Tabs defaultValue="world" className="flex flex-col">
                       <TabsList className="w-fit">
-                        <TabsTrigger value="world">World</TabsTrigger>
-                        <TabsTrigger value="experience">Experience</TabsTrigger>
-                        <TabsTrigger value="observation">Observations</TabsTrigger>
+                        <TabsTrigger value="world">世界常识</TabsTrigger>
+                        <TabsTrigger value="experience">经历记忆</TabsTrigger>
+                        <TabsTrigger value="observation">观察</TabsTrigger>
                       </TabsList>
                       <div className="mt-2">
                         <TabsContent value="world" className="mt-0">
@@ -950,27 +950,27 @@ export function DocumentsView() {
 
                     {/* Info cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <InfoCard title="Document" icon={<FileText className="w-3.5 h-3.5" />}>
+                      <InfoCard title="文档" icon={<FileText className="w-3.5 h-3.5" />}>
                         {selectedDocument.created_at && (
                           <MetadataRow
-                            label="Created"
+                            label="创建时间"
                             value={new Date(selectedDocument.created_at).toLocaleString()}
                           />
                         )}
                         {selectedDocument.updated_at && (
                           <MetadataRow
-                            label="Updated"
+                            label="更新时间"
                             value={new Date(selectedDocument.updated_at).toLocaleString()}
                           />
                         )}
                         {selectedDocument.original_text && (
                           <MetadataRow
-                            label="Size"
+                            label="大小"
                             value={formatBytes(new Blob([selectedDocument.original_text]).size)}
                           />
                         )}
                         <MetadataRow
-                          label="Tags"
+                          label="标签"
                           value={
                             editingTags ? (
                               <div className="flex items-center gap-2">
@@ -1021,7 +1021,7 @@ export function DocumentsView() {
                                     ))}
                                   </div>
                                 ) : (
-                                  <span className="text-sm text-muted-foreground italic">none</span>
+                                  <span className="text-sm text-muted-foreground italic">无</span>
                                 )}
                                 <Button
                                   variant="ghost"
@@ -1037,13 +1037,13 @@ export function DocumentsView() {
                         />
                         {selectedDocument.retain_params?.context && (
                           <MetadataRow
-                            label="Context"
+                            label="上下文"
                             value={selectedDocument.retain_params.context}
                           />
                         )}
                         {selectedDocument.retain_params?.event_date && (
                           <MetadataRow
-                            label="Event Date"
+                            label="事件日期"
                             value={new Date(
                               selectedDocument.retain_params.event_date
                             ).toLocaleString()}
@@ -1052,7 +1052,7 @@ export function DocumentsView() {
                         {selectedDocument.retain_params?.metadata &&
                           Object.keys(selectedDocument.retain_params.metadata).length > 0 && (
                             <MetadataRow
-                              label="Metadata"
+                              label="元数据"
                               value={
                                 <MetadataBadges
                                   metadata={selectedDocument.retain_params.metadata}
@@ -1063,7 +1063,7 @@ export function DocumentsView() {
                       </InfoCard>
 
                       <InfoCard
-                        title="Memory Composition"
+                        title="记忆构成"
                         icon={<Network className="w-3.5 h-3.5" />}
                       >
                         <MemoryComposition nodesByFactType={selectedDocument.nodes_by_fact_type} />
@@ -1078,7 +1078,7 @@ export function DocumentsView() {
                     <div className="flex items-center justify-center py-20">
                       <div className="text-center">
                         <div className="text-4xl mb-2">⏳</div>
-                        <div className="text-sm text-muted-foreground">Loading chunks...</div>
+                        <div className="text-sm text-muted-foreground">加载分块中...</div>
                       </div>
                     </div>
                   ) : chunks.length > 0 ? (
@@ -1092,7 +1092,7 @@ export function DocumentsView() {
                       <div className="text-center">
                         <div className="text-4xl mb-2">📄</div>
                         <div className="text-sm text-muted-foreground">
-                          No chunks found for this document
+                          此文档未找到片段
                         </div>
                       </div>
                     </div>
@@ -1100,7 +1100,7 @@ export function DocumentsView() {
                     <div className="flex items-center justify-center py-20">
                       <div className="text-center">
                         <div className="text-sm text-muted-foreground">
-                          Click the Chunks tab to load chunks
+                          点击片段选项卡加载片段
                         </div>
                       </div>
                     </div>
@@ -1119,31 +1119,31 @@ export function DocumentsView() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Document</AlertDialogTitle>
+            <AlertDialogTitle>删除文档</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete document{" "}
+              确定要删除文档{" "}
               <span className="font-mono font-semibold">&quot;{documentToDelete?.id}&quot;</span>?
               <br />
               <br />
-              This will also delete{" "}
+              这将同时删除{" "}
               {documentToDelete?.memoryCount !== undefined ? (
-                <span className="font-semibold">{documentToDelete.memoryCount} memory units</span>
+                <span className="font-semibold">{documentToDelete.memoryCount} 个记忆单元</span>
               ) : (
-                "all memory units"
+                "所有记忆单元"
               )}{" "}
-              extracted from this document.
+              从该文档中提取的。
               <br />
               <br />
-              <span className="text-destructive font-semibold">This action cannot be undone.</span>
+              <span className="text-destructive font-semibold">此操作不可撤销.</span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDeleteDocument}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              删除
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1154,12 +1154,12 @@ export function DocumentsView() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {deleteResult?.success ? "Document Deleted" : "Error"}
+              {deleteResult?.success ? "文档已删除" : "错误"}
             </AlertDialogTitle>
             <AlertDialogDescription>{deleteResult?.message}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setDeleteResult(null)}>OK</AlertDialogAction>
+            <AlertDialogAction onClick={() => setDeleteResult(null)}>确定</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1172,12 +1172,12 @@ export function DocumentsView() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {reprocessResult?.success ? "Reprocessing Started" : "Error"}
+              {reprocessResult?.success ? "重新处理已启动" : "错误"}
             </AlertDialogTitle>
             <AlertDialogDescription>{reprocessResult?.message}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setReprocessResult(null)}>OK</AlertDialogAction>
+            <AlertDialogAction onClick={() => setReprocessResult(null)}>确定</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

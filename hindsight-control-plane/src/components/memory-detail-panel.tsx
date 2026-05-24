@@ -66,10 +66,10 @@ export function MemoryDetailPanel({
   // Determine the display title based on memory type
   const getMemoryTypeTitle = () => {
     const factType = displayMemory?.fact_type || displayMemory?.type;
-    if (factType === "observation") return "Observation";
-    if (factType === "world") return "World Fact";
-    if (factType === "experience") return "Experience";
-    return "Memory Details";
+    if (factType === "observation") return "观察";
+    if (factType === "world") return "世界常识";
+    if (factType === "experience") return "经历记忆";
+    return "记忆详情";
   };
   const memoryTypeTitle = getMemoryTypeTitle();
 
@@ -122,23 +122,23 @@ export function MemoryDetailPanel({
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-muted-foreground">Loading memory details...</span>
+              <span className="ml-2 text-muted-foreground">加载记忆详情中...</span>
             </div>
           ) : (
             <div className="space-y-5">
               {/* Text */}
               <div>
-                <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Text</div>
+                <div className="text-xs font-bold text-muted-foreground uppercase mb-2">文本</div>
                 <div className="text-sm whitespace-pre-wrap leading-relaxed text-foreground">
                   {displayMemory.text}
                 </div>
               </div>
 
-              {/* Context (not shown for observations) */}
+              {/* 上下文 (not shown for observations) */}
               {displayMemory.context && !isObservation && (
                 <div>
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                    Context
+                    上下文
                   </div>
                   <div className="text-sm text-foreground">{displayMemory.context}</div>
                 </div>
@@ -148,7 +148,7 @@ export function MemoryDetailPanel({
               {displayMemory.occurred_start && (
                 <div>
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                    Occurred
+                    发生时间
                   </div>
                   <div className="flex items-center gap-2 text-sm text-foreground">
                     <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -169,7 +169,7 @@ export function MemoryDetailPanel({
               {displayMemory.mentioned_at && (
                 <div>
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                    Mentioned
+                    提及时间
                   </div>
                   <div className="flex items-center gap-2 text-sm text-foreground">
                     <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -178,14 +178,14 @@ export function MemoryDetailPanel({
                 </div>
               )}
 
-              {/* Entities */}
+              {/* 实体 */}
               {displayMemory.entities &&
                 (Array.isArray(displayMemory.entities)
                   ? displayMemory.entities.length > 0
                   : displayMemory.entities) && (
                   <div>
                     <div className="text-xs font-bold text-muted-foreground uppercase mb-3">
-                      Entities
+                      实体
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {(Array.isArray(displayMemory.entities)
@@ -216,7 +216,7 @@ export function MemoryDetailPanel({
               {displayMemory.source_memories && displayMemory.source_memories.length > 0 && (
                 <div className="border-t border-border pt-5">
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-3">
-                    Source Memories ({displayMemory.source_memories.length})
+                    来源记忆 ({displayMemory.source_memories.length})
                   </div>
                   <div className="space-y-3">
                     {displayMemory.source_memories.map((source: any, i: number) => (
@@ -240,18 +240,18 @@ export function MemoryDetailPanel({
                             className="h-6 text-xs"
                             onClick={() => setSourceMemoryModalId(source.id)}
                           >
-                            View
+                            查看
                           </Button>
                         </div>
                         <p className="text-sm text-foreground mb-3">{source.text}</p>
                         {source.context && (
                           <p className="text-xs text-muted-foreground mb-3 italic">
-                            Context: {source.context}
+                            上下文: {source.context}
                           </p>
                         )}
                         <div className="grid grid-cols-2 gap-2 text-xs">
                           <div className="p-2 bg-background/50 rounded">
-                            <div className="text-muted-foreground mb-0.5">Occurred</div>
+                            <div className="text-muted-foreground mb-0.5">发生时间</div>
                             <div className="font-medium">
                               {source.occurred_start
                                 ? new Date(source.occurred_start).toLocaleString()
@@ -259,7 +259,7 @@ export function MemoryDetailPanel({
                             </div>
                           </div>
                           <div className="p-2 bg-background/50 rounded">
-                            <div className="text-muted-foreground mb-0.5">Mentioned</div>
+                            <div className="text-muted-foreground mb-0.5">提及时间</div>
                             <div className="font-medium">
                               {source.mentioned_at
                                 ? new Date(source.mentioned_at).toLocaleString()
@@ -282,7 +282,7 @@ export function MemoryDetailPanel({
                       variant="secondary"
                       className="flex-1"
                     >
-                      View Document
+                      查看文档
                     </Button>
                   )}
                   {displayMemory.chunk_id && (
@@ -291,13 +291,13 @@ export function MemoryDetailPanel({
                       variant="secondary"
                       className="flex-1"
                     >
-                      View Chunk
+                      查看片段
                     </Button>
                   )}
                 </div>
               )}
 
-              {/* View History button (observations only) */}
+              {/* 查看历史 button (observations only) */}
               {isObservation && (
                 <div className="border-t border-border pt-5">
                   <Button
@@ -306,16 +306,16 @@ export function MemoryDetailPanel({
                     onClick={() => setHistoryModalOpen(true)}
                   >
                     <History className="h-4 w-4" />
-                    View History
+                    查看历史
                   </Button>
                 </div>
               )}
 
-              {/* Memory ID */}
+              {/* 记忆 ID */}
               {memoryId && (
                 <div>
                   <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                    Memory ID
+                    记忆 ID
                   </div>
                   <div className="flex items-center gap-2">
                     <code className="text-xs font-mono text-muted-foreground">{memoryId}</code>
@@ -386,23 +386,23 @@ export function MemoryDetailPanel({
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-sm text-muted-foreground">Loading...</span>
+            <span className="ml-2 text-sm text-muted-foreground">加载中...</span>
           </div>
         ) : (
           <div className={gap}>
             {/* Text */}
             <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
               <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
-                Text
+                文本
               </div>
               <div className={`${textSize} whitespace-pre-wrap`}>{displayMemory.text}</div>
             </div>
 
-            {/* Context */}
+            {/* 上下文 */}
             {displayMemory.context && (
               <div>
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
-                  Context
+                  上下文
                 </div>
                 <div className={textSize}>{displayMemory.context}</div>
               </div>
@@ -412,7 +412,7 @@ export function MemoryDetailPanel({
             {displayMemory.occurred_start && (
               <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
-                  Occurred
+                  发生时间
                 </div>
                 <div className={`flex items-center gap-2 ${textSize}`}>
                   <Calendar
@@ -435,7 +435,7 @@ export function MemoryDetailPanel({
             {displayMemory.mentioned_at && (
               <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
-                  Mentioned
+                  提及时间
                 </div>
                 <div className={`flex items-center gap-2 ${textSize}`}>
                   <Calendar
@@ -446,14 +446,14 @@ export function MemoryDetailPanel({
               </div>
             )}
 
-            {/* Entities */}
+            {/* 实体 */}
             {displayMemory.entities &&
               (Array.isArray(displayMemory.entities)
                 ? displayMemory.entities.length > 0
                 : displayMemory.entities) && (
                 <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
                   <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-2`}>
-                    Entities
+                    实体
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {(Array.isArray(displayMemory.entities)
@@ -481,7 +481,7 @@ export function MemoryDetailPanel({
             {displayMemory.tags && displayMemory.tags.length > 0 && (
               <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-2`}>
-                  Tags
+                  标签
                 </div>
                 <TagList tags={displayMemory.tags} size={compact ? "xs" : "sm"} />
               </div>
@@ -497,7 +497,7 @@ export function MemoryDetailPanel({
                     variant="secondary"
                     className={`flex-1 ${compact ? "h-7 text-xs" : ""}`}
                   >
-                    View Document
+                    查看文档
                   </Button>
                 )}
                 {displayMemory.chunk_id && (
@@ -507,7 +507,7 @@ export function MemoryDetailPanel({
                     variant="secondary"
                     className={`flex-1 ${compact ? "h-7 text-xs" : ""}`}
                   >
-                    View Chunk
+                    查看片段
                   </Button>
                 )}
               </div>
@@ -517,7 +517,7 @@ export function MemoryDetailPanel({
             {displayMemory.source_memories && displayMemory.source_memories.length > 0 && (
               <div className={`${compact ? "p-2" : "p-3"} bg-muted rounded-lg`}>
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-2`}>
-                  Source Memories ({displayMemory.source_memories.length})
+                  来源记忆 ({displayMemory.source_memories.length})
                 </div>
                 <div className="space-y-2">
                   {displayMemory.source_memories.map((source: any, i: number) => (
@@ -541,13 +541,13 @@ export function MemoryDetailPanel({
                           className="h-5 text-[10px] px-2"
                           onClick={() => setSourceMemoryModalId(source.id)}
                         >
-                          View
+                          查看
                         </Button>
                       </div>
                       <p className={`${textSize} mb-1`}>{source.text}</p>
                       {source.context && (
                         <p className="text-[10px] text-muted-foreground italic">
-                          Context: {source.context}
+                          上下文: {source.context}
                         </p>
                       )}
                     </div>
@@ -556,11 +556,11 @@ export function MemoryDetailPanel({
               </div>
             )}
 
-            {/* Memory ID */}
+            {/* 记忆 ID */}
             {memoryId && (
               <div>
                 <div className={`${labelSize} font-bold text-muted-foreground uppercase mb-1`}>
-                  Memory ID
+                  记忆 ID
                 </div>
                 <div className="flex items-center gap-2">
                   <code

@@ -40,7 +40,7 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
         setError(null);
       } catch (err) {
         console.error("Error loading features:", err);
-        setError("Failed to load feature flags");
+        setError("无法加载功能标志");
         // Use defaults on error
         setFeatures(defaultFeatures);
       } finally {
