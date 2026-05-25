@@ -176,7 +176,7 @@ To switch between backends:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-codex`, `claude-code`, `anthropic`, `gemini`, `groq`, `minimax`, `deepseek`, `zai`, `opencode-go`, `ollama`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `litellmrouter`, `volcano`, `openrouter`, `none` | `openai` |
+| `HINDSIGHT_API_LLM_PROVIDER` | Provider: `openai`, `openai-codex`, `claude-code`, `anthropic`, `gemini`, `groq`, `minimax`, `deepseek`, `zai`, `opencode-go`, `ollama`, `ollama-cloud`, `lmstudio`, `llamacpp`, `vertexai`, `bedrock`, `litellm`, `litellmrouter`, `volcano`, `openrouter`, `none` | `openai` |
 | `HINDSIGHT_API_LLM_API_KEY` | API key for LLM provider | - |
 | `HINDSIGHT_API_LLM_MODEL` | Model name | `gpt-5-mini` |
 | `HINDSIGHT_API_LLM_BASE_URL` | Custom LLM endpoint | Provider default |
@@ -230,6 +230,11 @@ export HINDSIGHT_API_LLM_VERTEXAI_REGION=us-central1
 export HINDSIGHT_API_LLM_PROVIDER=ollama
 export HINDSIGHT_API_LLM_BASE_URL=http://localhost:11434/v1
 export HINDSIGHT_API_LLM_MODEL=llama3
+
+# Ollama Cloud (hosted Ollama endpoint, requires API key)
+export HINDSIGHT_API_LLM_PROVIDER=ollama-cloud
+export HINDSIGHT_API_LLM_API_KEY=your-ollama-cloud-api-key
+export HINDSIGHT_API_LLM_MODEL=gemma3:12b
 
 # LM Studio (local, no API key)
 export HINDSIGHT_API_LLM_PROVIDER=lmstudio

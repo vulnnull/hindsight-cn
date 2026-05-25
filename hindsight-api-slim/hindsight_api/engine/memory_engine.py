@@ -602,6 +602,8 @@ class MemoryEngine(MemoryEngineInterface):
                 memory_llm_base_url = "https://api.groq.com/openai/v1"
             elif memory_llm_provider.lower() == "ollama":
                 memory_llm_base_url = "http://localhost:11434/v1"
+            elif memory_llm_provider.lower() == "ollama-cloud":
+                memory_llm_base_url = "https://ollama.com/v1"
             else:
                 memory_llm_base_url = ""
 
@@ -674,6 +676,8 @@ class MemoryEngine(MemoryEngineInterface):
                 retain_base_url = "https://api.groq.com/openai/v1"
             elif retain_provider.lower() == "ollama":
                 retain_base_url = "http://localhost:11434/v1"
+            elif retain_provider.lower() == "ollama-cloud":
+                retain_base_url = "https://ollama.com/v1"
             else:
                 retain_base_url = ""
 
@@ -698,6 +702,8 @@ class MemoryEngine(MemoryEngineInterface):
                 reflect_base_url = "https://api.groq.com/openai/v1"
             elif reflect_provider.lower() == "ollama":
                 reflect_base_url = "http://localhost:11434/v1"
+            elif reflect_provider.lower() == "ollama-cloud":
+                reflect_base_url = "https://ollama.com/v1"
             else:
                 reflect_base_url = ""
 
@@ -722,6 +728,8 @@ class MemoryEngine(MemoryEngineInterface):
                 consolidation_base_url = "https://api.groq.com/openai/v1"
             elif consolidation_provider.lower() == "ollama":
                 consolidation_base_url = "http://localhost:11434/v1"
+            elif consolidation_provider.lower() == "ollama-cloud":
+                consolidation_base_url = "https://ollama.com/v1"
             else:
                 consolidation_base_url = ""
 
