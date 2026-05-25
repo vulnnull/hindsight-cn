@@ -21,6 +21,8 @@ ARG INCLUDE_API=true
 ARG INCLUDE_CP=true
 ARG PRELOAD_ML_MODELS=true
 ARG INCLUDE_LOCAL_MODELS=true
+ARG EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+ARG RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 
 # =============================================================================
 # Stage: API Builder
@@ -205,6 +207,8 @@ print('Tiktoken encoding cached successfully')" && break; \
 # Includes retry logic with exponential backoff for transient network failures
 ARG PRELOAD_ML_MODELS
 ARG INCLUDE_LOCAL_MODELS
+ARG EMBEDDING_MODEL
+ARG RERANKER_MODEL
 ENV HF_HUB_DOWNLOAD_TIMEOUT=600
 RUN if [ "$PRELOAD_ML_MODELS" = "true" ] && [ "$INCLUDE_LOCAL_MODELS" = "true" ]; then \
     MAX_RETRIES=3; \
@@ -215,9 +219,9 @@ RUN if [ "$PRELOAD_ML_MODELS" = "true" ] && [ "$INCLUDE_LOCAL_MODELS" = "true" ]
 import os; os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = '600'; \
 from sentence_transformers import SentenceTransformer, CrossEncoder; \
 print('Downloading embedding model...'); \
-SentenceTransformer('BAAI/bge-small-en-v1.5'); \
+SentenceTransformer('$EMBEDDING_MODEL', trust_remote_code=True); \
 print('Downloading cross-encoder model...'); \
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
+CrossEncoder('$RERANKER_MODEL', trust_remote_code=True); \
 print('Models cached successfully')" && break; \
       if [ $i -lt $MAX_RETRIES ]; then \
         echo "Attempt $i failed, retrying in ${RETRY_DELAY}s..."; \
@@ -225,7 +229,7 @@ print('Models cached successfully')" && break; \
         RETRY_DELAY=$((RETRY_DELAY * 2)); \
       fi; \
     done; \
-    if [ $i -eq $MAX_RETRIES ] && ! /app/api/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5')" 2>/dev/null; then \
+    if [ $i -eq $MAX_RETRIES ] && ! /app/api/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('$EMBEDDING_MODEL', trust_remote_code=True)" 2>/dev/null; then \
       echo "ERROR: Failed to download models after $MAX_RETRIES attempts"; \
       exit 1; \
     fi; \
@@ -365,6 +369,8 @@ print('Tiktoken encoding cached successfully')" && break; \
 # Includes retry logic with exponential backoff for transient network failures
 ARG PRELOAD_ML_MODELS
 ARG INCLUDE_LOCAL_MODELS
+ARG EMBEDDING_MODEL
+ARG RERANKER_MODEL
 ENV HF_HUB_DOWNLOAD_TIMEOUT=600
 RUN if [ "$PRELOAD_ML_MODELS" = "true" ] && [ "$INCLUDE_LOCAL_MODELS" = "true" ]; then \
     MAX_RETRIES=3; \
@@ -375,9 +381,9 @@ RUN if [ "$PRELOAD_ML_MODELS" = "true" ] && [ "$INCLUDE_LOCAL_MODELS" = "true" ]
 import os; os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = '600'; \
 from sentence_transformers import SentenceTransformer, CrossEncoder; \
 print('Downloading embedding model...'); \
-SentenceTransformer('BAAI/bge-small-en-v1.5'); \
+SentenceTransformer('$EMBEDDING_MODEL', trust_remote_code=True); \
 print('Downloading cross-encoder model...'); \
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
+CrossEncoder('$RERANKER_MODEL', trust_remote_code=True); \
 print('Models cached successfully')" && break; \
       if [ $i -lt $MAX_RETRIES ]; then \
         echo "Attempt $i failed, retrying in ${RETRY_DELAY}s..."; \
@@ -385,7 +391,7 @@ print('Models cached successfully')" && break; \
         RETRY_DELAY=$((RETRY_DELAY * 2)); \
       fi; \
     done; \
-    if [ $i -eq $MAX_RETRIES ] && ! /app/api/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5')" 2>/dev/null; then \
+    if [ $i -eq $MAX_RETRIES ] && ! /app/api/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('$EMBEDDING_MODEL', trust_remote_code=True)" 2>/dev/null; then \
       echo "ERROR: Failed to download models after $MAX_RETRIES attempts"; \
       exit 1; \
     fi; \

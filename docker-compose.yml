@@ -10,8 +10,10 @@ services:
       args:
         INCLUDE_API: "true"
         INCLUDE_CP: "true"
-        PRELOAD_ML_MODELS: "false"
-        INCLUDE_LOCAL_MODELS: "false"
+        PRELOAD_ML_MODELS: "true"
+        INCLUDE_LOCAL_MODELS: "true"
+        EMBEDDING_MODEL: "BAAI/bge-m3"
+        RERANKER_MODEL: "BAAI/bge-reranker-v2-m3"
     ports:
       - "8888:8888"   # API
       - "9999:9999"   # Control Plane Web UI
@@ -25,6 +27,16 @@ services:
       - HINDSIGHT_API_HOST=0.0.0.0
       - HINDSIGHT_API_PORT=8888
       - HINDSIGHT_API_LOG_LEVEL=info
+      # Local ML models (baked into image)
+      - HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
+      - HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-m3
+      - HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE=true
+      - HINDSIGHT_API_RERANKER_PROVIDER=local
+      - HINDSIGHT_API_RERANKER_LOCAL_MODEL=BAAI/bge-reranker-v2-m3
+      - HINDSIGHT_API_RERANKER_LOCAL_TRUST_REMOTE_CODE=true
+      # Prevent runtime model downloads (use baked-in models)
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
     restart: unless-stopped
 
 volumes:
