@@ -9,10 +9,12 @@
 #   PRELOAD_ML_MODELS=true/false   - 构建时预下载 ML 模型（默认：true）
 #                                     仅在 INCLUDE_LOCAL_MODELS=true 时生效
 #                                     注意：tiktoken 编码始终预加载（离线部署必需）
-#   EMBEDDING_MODEL=<模型>         - Embedding 模型（默认：BAAI/bge-small-en-v1.5）
-#                                     中文推荐：BAAI/bge-m3
-#   RERANKER_MODEL=<模型>          - 交叉编码器 Reranker 模型（默认：cross-encoder/ms-marco-MiniLM-L-6-v2）
-#                                     中文推荐：BAAI/bge-reranker-v2-m3
+#   EMBEDDING_MODEL=<模型>         - Embedding 模型（默认：BAAI/bge-small-zh-v1.5）
+#                                     英文推荐：BAAI/bge-small-en-v1.5
+#                                     高质量中文：BAAI/bge-m3（需要更多资源）
+#   RERANKER_MODEL=<模型>          - 交叉编码器 Reranker 模型（默认：cross-encoder/mmarco-mMiniLMv2-L12-H384-v1）
+#                                     英文推荐：cross-encoder/ms-marco-MiniLM-L-6-v2
+#                                     高质量中文：BAAI/bge-reranker-v2-m3（需要更多资源）
 #
 # 示例：
 #   docker build -t hindsight .                                          # 完整版（API + 控制面板）
@@ -20,15 +22,17 @@
 #   docker build -t hindsight-cp --build-arg INCLUDE_API=false .         # 仅控制面板
 #   docker build -t hindsight --build-arg PRELOAD_ML_MODELS=false .      # 跳过模型预下载
 #   docker build -t hindsight --build-arg INCLUDE_LOCAL_MODELS=false .   # 跳过本地 ML 依赖（使用外部提供商时）
+#   docker build --build-arg EMBEDDING_MODEL=BAAI/bge-small-en-v1.5 \
+#                --build-arg RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2 .  # 英文版
 #   docker build --build-arg EMBEDDING_MODEL=BAAI/bge-m3 \
-#                --build-arg RERANKER_MODEL=BAAI/bge-reranker-v2-m3 .    # 中文优化版
+#                --build-arg RERANKER_MODEL=BAAI/bge-reranker-v2-m3 .              # 高质量中文版（需要更多资源）
 
 ARG INCLUDE_API=true
 ARG INCLUDE_CP=true
 ARG PRELOAD_ML_MODELS=true
 ARG INCLUDE_LOCAL_MODELS=true
-ARG EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
-ARG RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+ARG EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+ARG RERANKER_MODEL=cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
 
 # =============================================================================
 # Stage: API Builder

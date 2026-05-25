@@ -15,7 +15,8 @@
 
 ## 特性
 
-- **多语言优化** — 内嵌 `BAAI/bge-m3` 中文 Embedding + `BAAI/bge-reranker-v2-m3` 中文 Reranker
+- **中文优化** — 内嵌 `BAAI/bge-small-zh-v1.5` 中文 Embedding + `mmarco-mMiniLMv2` 多语言 Reranker
+- **轻量高效** — 模型总占用约 550MB，NAS 等低性能设备也可流畅运行
 - **全架构支持** — `linux/arm64` + `linux/amd64` 双架构镜像
 - **开箱即用** — 模型内嵌镜像，无需联网下载，离线环境可用
 - **Web 管理界面** — 全中文控制面板，可视化管理记忆库
@@ -121,22 +122,29 @@ with HindsightServer(
 
 ## 中文模型配置
 
-镜像默认内嵌以下中文优化模型：
+镜像默认内嵌以下轻量中文优化模型，总占用约 **550MB**：
 
-| 组件 | 模型 | 维度 | 特点 |
-|------|------|------|------|
-| Embedding | `BAAI/bge-m3` | 1024 | 多语言，中文效果优秀 |
-| Reranker | `BAAI/bge-reranker-v2-m3` | — | 多语言交叉编码器 |
+| 组件 | 模型 | 维度 | 大小 | 特点 |
+|------|------|------|------|------|
+| Embedding | `BAAI/bge-small-zh-v1.5` | 512 | ~100MB | 中文专用，轻量高效 |
+| Reranker | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | — | ~450MB | 多语言（含中文），基于 MMARCO 训练 |
 
 ### 自定义模型
 
 **构建时替换**（需重新构建镜像）：
 
 ```bash
+# 英文版
 docker build \
-  --build-arg EMBEDDING_MODEL="BAAI/bge-small-zh-v1.5" \
+  --build-arg EMBEDDING_MODEL="BAAI/bge-small-en-v1.5" \
+  --build-arg RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2" \
+  -t my-hindsight .
+
+# 高质量中文版（需要更多资源）
+docker build \
+  --build-arg EMBEDDING_MODEL="BAAI/bge-m3" \
   --build-arg RERANKER_MODEL="BAAI/bge-reranker-v2-m3" \
-  -t my-hindsight-cn .
+  -t my-hindsight .
 ```
 
 **运行时覆盖**（无需重新构建）：
@@ -148,13 +156,19 @@ environment:
   - HINDSIGHT_API_RERANKER_PROVIDER=none             # 关闭 Reranker
 ```
 
-### 其他可用模型
+### 模型选型参考
 
-| 模型 | 大小 | 维度 | 适用场景 |
-|------|------|------|---------|
-| `BAAI/bge-m3` | ~560MB | 1024 | 通用推荐，中文效果最好 |
-| `BAAI/bge-small-zh-v1.5` | ~33MB | 512 | 轻量中文专用 |
-| `BAAI/bge-base-zh-v1.5` | ~400MB | 768 | 中文专用，精度更高 |
+| Embedding 模型 | 大小 | 维度 | 适用场景 |
+|----------------|------|------|---------|
+| `BAAI/bge-small-zh-v1.5` | ~100MB | 512 | 中文专用，轻量推荐 |
+| `BAAI/bge-m3` | ~560MB | 1024 | 多语言，中文效果最好 |
+| `BAAI/bge-small-en-v1.5` | ~80MB | 384 | 英文专用，原版默认 |
+
+| Reranker 模型 | 大小 | 适用场景 |
+|---------------|------|---------|
+| `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | ~450MB | 多语言（含中文），推荐 |
+| `BAAI/bge-reranker-v2-m3` | ~568MB | 高质量中文，需要更多资源 |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` | ~80MB | 英文专用，原版默认 |
 
 ## 架构
 
@@ -175,8 +189,9 @@ environment:
 | 特性 | 原版 (vectorize-io) | 中文版 (vulnnull) |
 |------|--------------------|--------------------|
 | UI 语言 | 英文 | 中文 |
-| Embedding | `bge-small-en-v1.5`（英文） | `bge-m3`（多语言） |
-| Reranker | `ms-marco-MiniLM-L-6-v2`（英文） | `bge-reranker-v2-m3`（多语言） |
+| Embedding | `bge-small-en-v1.5`（英文，384维） | `bge-small-zh-v1.5`（中文，512维） |
+| Reranker | `ms-marco-MiniLM-L-6-v2`（英文） | `mmarco-mMiniLMv2`（多语言含中文） |
+| 模型总大小 | ~160MB | ~550MB |
 | 镜像架构 | amd64 | arm64 + amd64 |
 | LLM 适配 | OpenAI 为主 | 额外支持 MiniMax、DeepSeek、智谱 |
 | HuggingFace | 默认源 | 支持 `hf-mirror.com` 镜像 |
