@@ -7994,20 +7994,54 @@ class MemoryEngine(MemoryEngineInterface):
                 params.append(content)
                 param_idx += 1
                 updates.append("last_refreshed_at = NOW()")
-                # Record history entry with the previous content
+                # Record history entry with the previous content.
+                #
+                # Cap the array to the most recent N entries at write time
+                # (see HINDSIGHT_API_MENTAL_MODEL_HISTORY_MAX_ENTRIES).
+                #
+                # Each entry stores only the slim slice of previous_reflect_response
+                # that consumers actually read: `based_on` (the fact references that
+                # backed that version). The full reflect_response can be hundreds of
+                # KB once `text`, fact bodies, scoring, and embeddings are included;
+                # storing the full payload made each UPDATE rewrite ~10-20 MB of TOAST
+                # per refresh, which prevented HOT updates and accumulated dead
+                # tuples faster than autovacuum could reclaim them. The slim shape
+                # keeps per-row size in the ~hundreds-of-KB range, which fits in a
+                # single heap page and re-enables HOT updates.
                 if get_config().enable_mental_model_history:
+                    slim_reflect_response: dict[str, Any] | None = None
+                    if previous_reflect_response is not None:
+                        based_on = previous_reflect_response.get("based_on")
+                        if based_on is not None:
+                            slim_reflect_response = {"based_on": based_on}
                     history_entry = json.dumps(
                         [
                             {
                                 "previous_content": previous_content,
-                                "previous_reflect_response": previous_reflect_response,
+                                "previous_reflect_response": slim_reflect_response,
                                 "changed_at": datetime.now(timezone.utc).isoformat(),
                             }
                         ]
                     )
-                    updates.append(f"history = COALESCE(history, '[]'::jsonb) || ${param_idx}::jsonb")
-                    params.append(history_entry)
+                    max_entries = get_config().mental_model_history_max_entries
+                    history_param_idx = param_idx
                     param_idx += 1
+                    max_entries_param_idx = param_idx
+                    param_idx += 1
+                    updates.append(
+                        "history = ("
+                        "  SELECT COALESCE(jsonb_agg(elem ORDER BY idx), '[]'::jsonb) "
+                        "  FROM jsonb_array_elements("
+                        f"    COALESCE(history, '[]'::jsonb) || ${history_param_idx}::jsonb"
+                        "  ) WITH ORDINALITY a(elem, idx) "
+                        "  WHERE idx > GREATEST("
+                        "    jsonb_array_length(COALESCE(history, '[]'::jsonb)) + 1"
+                        f"    - ${max_entries_param_idx}, 0"
+                        "  )"
+                        ")"
+                    )
+                    params.append(history_entry)
+                    params.append(max_entries)
                 # Also update embedding (convert to string for asyncpg vector type)
                 embedding_text = f"{name or ''} {content}"
                 embedding = await embedding_utils.generate_embeddings_batch(self.embeddings, [embedding_text])
