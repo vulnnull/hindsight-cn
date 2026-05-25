@@ -1,4 +1,4 @@
-# Hindsight Docker Image
+# Hindsight Docker Image (CN - Chinese Optimized)
 # Supports building API-only, Control Plane-only, or both
 #
 # Build args:
@@ -9,6 +9,10 @@
 #   PRELOAD_ML_MODELS=true/false   - Pre-download ML models during build (default: true)
 #                                     Only effective when INCLUDE_LOCAL_MODELS=true
 #                                     NOTE: tiktoken encodings are ALWAYS preloaded (required for air-gapped deployments)
+#   EMBEDDING_MODEL=<model>        - Embedding model (default: BAAI/bge-small-en-v1.5)
+#                                     CN recommended: BAAI/bge-m3
+#   RERANKER_MODEL=<model>         - Cross-encoder reranker model (default: cross-encoder/ms-marco-MiniLM-L-6-v2)
+#                                     CN recommended: BAAI/bge-reranker-v2-m3
 #
 # Examples:
 #   docker build -t hindsight .                                          # Both (standalone)
@@ -16,6 +20,8 @@
 #   docker build -t hindsight-cp --build-arg INCLUDE_API=false .         # Control Plane only
 #   docker build -t hindsight --build-arg PRELOAD_ML_MODELS=false .      # Skip ML model preload
 #   docker build -t hindsight --build-arg INCLUDE_LOCAL_MODELS=false .   # Skip local ML deps (for external providers)
+#   docker build --build-arg EMBEDDING_MODEL=BAAI/bge-m3 \
+#                --build-arg RERANKER_MODEL=BAAI/bge-reranker-v2-m3 .    # Chinese optimized
 
 ARG INCLUDE_API=true
 ARG INCLUDE_CP=true
