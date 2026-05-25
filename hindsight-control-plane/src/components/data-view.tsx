@@ -482,8 +482,8 @@ export function DataView({
                     }`}
                     title={
                       consolidationStatus.pending_consolidation === 0
-                        ? `所有记忆已整合${consolidationStatus.last_consolidated_at ? ` (上次: ${new Date(consolidationStatus.last_consolidated_at).toLocaleString()})` : ""}`
-                        : `${consolidationStatus.pending_consolidation} 条记忆待整合`
+                        ? `所有记忆已归纳${consolidationStatus.last_consolidated_at ? ` (上次: ${new Date(consolidationStatus.last_consolidated_at).toLocaleString()})` : ""}`
+                        : `${consolidationStatus.pending_consolidation} 条记忆待归纳`
                     }
                   >
                     {consolidationStatus.pending_consolidation === 0 ? (
@@ -505,7 +505,7 @@ export function DataView({
                           }
                           disabled={loading}
                           className="ml-0.5 opacity-70 hover:opacity-100 disabled:opacity-40 transition-opacity"
-                          title="刷新观察"
+                          title="刷新沉淀认知"
                         >
                           <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
                         </button>
@@ -932,7 +932,7 @@ export function DataView({
                                 <TableHead
                                   className={factType === "observation" ? "w-[35%]" : "w-[38%]"}
                                 >
-                                  {factType === "observation" ? "观察" : "记忆"}
+                                  {factType === "observation" ? "沉淀认知" : "记忆"}
                                 </TableHead>
                                 <TableHead className="w-[15%]">实体</TableHead>
                                 <TableHead className="w-[15%]">标签</TableHead>

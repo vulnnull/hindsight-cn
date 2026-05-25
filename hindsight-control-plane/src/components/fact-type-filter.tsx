@@ -12,7 +12,7 @@ const FACT_TYPE_CONFIG: Record<
 > = {
   // Aligned with the stats-chart palette (bank-stats-view.tsx CHART_COLORS).
   world: {
-    label: "世界常识",
+    label: "客观知识",
     active:
       "bg-violet-500/15 text-violet-700 border-violet-400 dark:text-violet-300 dark:border-violet-500",
     inactive:
@@ -20,14 +20,14 @@ const FACT_TYPE_CONFIG: Record<
     dot: "bg-violet-500",
   },
   experience: {
-    label: "经历记忆",
+    label: "亲身经历",
     active: "bg-pink-500/15 text-pink-700 border-pink-400 dark:text-pink-300 dark:border-pink-500",
     inactive:
       "border-border text-muted-foreground hover:border-pink-300 hover:text-pink-600 dark:hover:text-pink-400",
     dot: "bg-pink-500",
   },
   observation: {
-    label: "观察",
+    label: "沉淀认知",
     active:
       "bg-indigo-500/15 text-indigo-700 border-indigo-400 dark:text-indigo-300 dark:border-indigo-500",
     inactive:
@@ -70,7 +70,7 @@ function FactTypePill({
 export function FactTypeFilter({
   value,
   onChange,
-  label = "事实类型：",
+  label = "记忆类型：",
 }: {
   value: FactType[];
   onChange: (next: FactType[]) => void;

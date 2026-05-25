@@ -57,7 +57,7 @@ function getFactTypeDisplay(factType: string) {
   }
   if (factType === "mental-models") {
     return {
-      label: "思维模型",
+      label: "知识摘要",
       color: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
     };
   }
@@ -708,7 +708,7 @@ export function MentalModelDetailModal({
         <DialogContent className="w-[95vw] max-w-[95vw] h-[92vh] sm:max-w-[95vw] flex flex-col overflow-hidden">
           <DialogHeader className="pr-10">
             <DialogTitle className="flex items-center gap-2">
-              <span className="truncate">{mentalModel?.name ?? "思维模型"}</span>
+              <span className="truncate">{mentalModel?.name ?? "知识摘要"}</span>
               {mentalModel && (
                 <Button
                   variant="ghost"
@@ -815,14 +815,14 @@ export function MentalModelDetailModal({
                         {mentalModel.is_stale === true ? (
                           <span
                             className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-400"
-                            title="自上次刷新以来，该思维模型范围内有新的记忆被摄入"
+                            title="自上次刷新以来，该知识摘要范围内有新的记忆被摄入"
                           >
                             过期
                           </span>
                         ) : mentalModel.is_stale === false ? (
                           <span
                             className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-green-500/15 text-green-700 dark:text-green-400"
-                            title="自上次刷新以来，该思维模型范围内没有新记忆"
+                            title="自上次刷新以来，该知识摘要范围内没有新记忆"
                           >
                             同步中
                           </span>
@@ -1024,7 +1024,7 @@ function ConfigurationTab({ mentalModel }: { mentalModel: MentalModel }) {
             )
           }
         />
-        <Metadata label="排除思维模型" value={t.exclude_mental_models ? "是" : "否"} />
+        <Metadata label="排除知识摘要" value={t.exclude_mental_models ? "是" : "否"} />
         {excludeIds.length > 0 && (
           <Metadata
             label="已排除 ID"

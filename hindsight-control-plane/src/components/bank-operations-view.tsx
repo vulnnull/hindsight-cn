@@ -92,10 +92,10 @@ type OperationDetails =
 
 const OPERATION_TYPE_OPTIONS = [
   { value: "all", label: "全部类型" },
-  { value: "retain", label: "保留" },
-  { value: "consolidation", label: "整合" },
-  { value: "refresh_mental_model", label: "思维模型刷新" },
-  { value: "file_convert_retain", label: "文件转换与保留" },
+  { value: "retain", label: "存储" },
+  { value: "consolidation", label: "归纳" },
+  { value: "refresh_mental_model", label: "知识摘要刷新" },
+  { value: "file_convert_retain", label: "文件转换与存储" },
   { value: "webhook_delivery", label: "Webhook 投递" },
 ];
 

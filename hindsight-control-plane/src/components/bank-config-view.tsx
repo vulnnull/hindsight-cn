@@ -313,7 +313,7 @@ export function BankConfigView() {
       await client.updateBankConfig(bankId, payload);
       setBaseConfig((prev) => ({ ...prev, ...payload }));
     } catch (err: any) {
-      setRetainError(err.message || "保存保留设置失败");
+      setRetainError(err.message || "保存存储设置失败");
     } finally {
       setRetainSaving(false);
     }
@@ -327,7 +327,7 @@ export function BankConfigView() {
       await client.updateBankConfig(bankId, observationsEdits);
       setBaseConfig((prev) => ({ ...prev, ...observationsEdits }));
     } catch (err: any) {
-      setObservationsError(err.message || "保存观察设置失败");
+      setObservationsError(err.message || "保存沉淀认知设置失败");
     } finally {
       setObservationsSaving(false);
     }
@@ -346,7 +346,7 @@ export function BankConfigView() {
       });
       setBaseProfile(reflectEdits);
     } catch (err: any) {
-      setReflectError(err.message || "保存反思设置失败");
+      setReflectError(err.message || "保存深思设置失败");
     } finally {
       setReflectSaving(false);
     }
@@ -416,8 +416,8 @@ export function BankConfigView() {
       <div className="space-y-8">
         {/* Retain + Strategies Section */}
         <ConfigSection
-          title="保留"
-          description="默认提取设置和命名策略。在保留请求中传入策略名称以覆盖默认值。"
+          title="存储"
+          description="默认提取设置和命名策略。在存储请求中传入策略名称可覆盖默认值。"
           error={retainError}
           dirty={retainDirty}
           saving={retainSaving}
@@ -460,14 +460,14 @@ export function BankConfigView() {
 
         {/* Observations Section */}
         <ConfigSection
-          title="观察"
-          description="控制事实如何合成为持久观察"
+          title="沉淀认知"
+          description="控制原始事实如何归纳为稳定认知"
           error={observationsError}
           dirty={observationsDirty}
           saving={observationsSaving}
           onSave={saveObservations}
         >
-          <FieldRow label="启用观察" description="启用将事实自动整合为观察">
+          <FieldRow label="启用沉淀认知" description="启用将原始事实自动归纳为稳定认知">
             <div className="flex justify-end">
               <Switch
                 checked={observationsEdits.enable_observations ?? false}
@@ -478,13 +478,13 @@ export function BankConfigView() {
             </div>
           </FieldRow>
           <TextareaRow
-            label="使命"
-            description="此记忆库应合成为持久观察的内容。替换内置整合规则 — 留空使用服务器默认值。"
+            label="归纳方向"
+            description="此记忆库应归纳为稳定认知的内容。覆盖内置归纳规则 — 留空使用服务器默认值。"
             value={observationsEdits.observations_mission ?? ""}
             onChange={(v) =>
               setObservationsEdits((prev) => ({ ...prev, observations_mission: v || null }))
             }
-            placeholder="例如：观察是关于人员和项目的稳定事实。始终包含偏好、技能和重复模式。忽略一次性事件和临时状态。"
+            placeholder="例如：归纳内容应聚焦人员和项目的稳定事实。始终包含偏好、技能和重复模式。忽略一次性事件和临时状态。"
             rows={3}
           />
           <FieldRow
@@ -566,42 +566,42 @@ export function BankConfigView() {
 
         {/* Reflect Section */}
         <ConfigSection
-          title="反思"
-          description="塑造记忆库在反思操作中的推理和响应方式"
+          title="深思"
+          description="设定深思时的推理风格和响应方式"
           error={reflectError}
           dirty={reflectDirty}
           saving={reflectSaving}
           onSave={saveReflect}
         >
           <TextareaRow
-            label="使命"
-            description="代理身份和目的。用作反思时的上下文框架。"
+            label="角色定位"
+            description="智能体的身份定位和职责。作为深思时的上下文框架。"
             value={reflectEdits.reflect_mission}
             onChange={(v) => setReflectEdits((prev) => ({ ...prev, reflect_mission: v }))}
             placeholder="例如：你是一名资深工程助手。始终基于文档化的决策和理由来回答。忽略推测。直接而精确。"
             rows={3}
           />
           <TraitRow
-            label="怀疑度"
-            description="评估论断时的怀疑与信任倾向"
-            lowLabel="信任"
-            highLabel="怀疑"
+            label="批判性"
+            description="评估论断时偏向质疑还是信任"
+            lowLabel="包容"
+            highLabel="严谨"
             value={reflectEdits.disposition_skepticism}
             onChange={(v) => setReflectEdits((prev) => ({ ...prev, disposition_skepticism: v }))}
           />
           <TraitRow
-            label="字面性"
-            description="解读信息的字面程度"
-            lowLabel="灵活"
-            highLabel="字面"
+            label="解读方式"
+            description="按字面意思还是结合语境理解信息"
+            lowLabel="意会优先"
+            highLabel="咬文嚼字"
             value={reflectEdits.disposition_literalism}
             onChange={(v) => setReflectEdits((prev) => ({ ...prev, disposition_literalism: v }))}
           />
           <TraitRow
-            label="共情度"
-            description="权重情感语境的程度"
-            lowLabel="客观"
-            highLabel="共情"
+            label="情感敏感度"
+            description="多大程度上考虑情感因素"
+            lowLabel="理性"
+            highLabel="感性"
             value={reflectEdits.disposition_empathy}
             onChange={(v) => setReflectEdits((prev) => ({ ...prev, disposition_empathy: v }))}
           />
@@ -731,7 +731,7 @@ function RetainStrategyForm({
     <div className="divide-y divide-border/40">
       <FieldRow
         label="提取模式"
-        description="控制提取事实的激进程度。concise = 选择性提取，verbose = 捕获所有内容，verbatim = 原样存储块（仍提取实体/时间），chunks = 不使用 LLM，custom = 自定义规则。"
+        description="控制事实提取的粒度。concise = 精简提取，verbose = 全面提取，verbatim = 原文存储（仍提取实体和时间），chunks = 不使用 LLM，custom = 自定义规则。"
       >
         <Select
           value={modeValue}
@@ -769,8 +769,8 @@ function RetainStrategyForm({
         />
       </FieldRow>
       <TextareaRow
-        label="使命"
-        description="此记忆库在提取时应关注的内容。引导 LLM 但不替换提取规则。"
+        label="关注重点"
+        description="存储记忆时应重点关注的内容。引导 LLM 提取方向，但不替换底层提取规则。"
         value={values.retain_mission ?? ""}
         onChange={(v) => onChange({ retain_mission: v || null })}
         placeholder={isOverride ? "继承自默认" : "例如：始终包含技术决策、API 设计选择和架构权衡。"}
@@ -786,8 +786,8 @@ function RetainStrategyForm({
         />
       )}
       <FieldRow
-        label="自由形式实体"
-        description="在实体标签之外同时提取常规命名实体（人物、地点、概念）。禁用则仅提取实体标签。"
+        label="开放实体提取"
+        description="同时提取常规命名实体（人物、地点、概念），不仅限于实体标签。关闭后仅提取预定义的实体标签。"
       >
         <div className="flex justify-end items-center gap-2">
           <Label className="text-sm text-muted-foreground cursor-pointer select-none">

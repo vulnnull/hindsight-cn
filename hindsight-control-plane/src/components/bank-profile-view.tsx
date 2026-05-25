@@ -130,25 +130,25 @@ const TRAIT_LABELS: Record<
   { label: string; shortLabel: string; description: string; lowLabel: string; highLabel: string }
 > = {
   skepticism: {
-    label: "怀疑度",
+    label: "批判性",
     shortLabel: "S",
-    description: "形成观察时的怀疑与信任倾向",
-    lowLabel: "信任",
-    highLabel: "怀疑",
+    description: "形成认知时偏向质疑还是信任",
+    lowLabel: "包容",
+    highLabel: "严谨",
   },
   literalism: {
-    label: "字面性",
+    label: "解读方式",
     shortLabel: "L",
-    description: "形成观察时解读信息的字面程度",
-    lowLabel: "灵活",
-    highLabel: "字面",
+    description: "形成认知时按字面还是结合语境理解信息",
+    lowLabel: "意会优先",
+    highLabel: "咬文嚼字",
   },
   empathy: {
-    label: "共情度",
+    label: "情感敏感度",
     shortLabel: "E",
-    description: "形成观察时考虑情感语境的程度",
-    lowLabel: "客观",
-    highLabel: "共情",
+    description: "形成认知时多大程度上考虑情感因素",
+    lowLabel: "理性",
+    highLabel: "感性",
   },
 };
 
@@ -398,9 +398,9 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
                 <div>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <Brain className="w-5 h-5 text-primary" />
-                    性格画像
+                    性格倾向
                   </CardTitle>
-                  <CardDescription>影响推理和视角的性格特征</CardDescription>
+                  <CardDescription>影响推理风格和视角的性格特征</CardDescription>
                 </div>
                 <Button onClick={() => setShowDispositionDialog(true)} variant="ghost" size="sm">
                   <Pencil className="h-4 w-4" />
@@ -453,9 +453,9 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
                 <div>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <Target className="w-5 h-5 text-primary" />
-                    使命
+                    角色定位
                   </CardTitle>
-                  <CardDescription>影响观察、反思和思维模型的生成方式</CardDescription>
+                  <CardDescription>影响沉淀认知、深思和知识摘要的生成方式</CardDescription>
                 </div>
                 <Button onClick={() => setShowMissionDialog(true)} variant="ghost" size="sm">
                   <Pencil className="h-4 w-4" />
@@ -464,7 +464,8 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
             </CardHeader>
             <CardContent>
               <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
-                {profile?.mission || "未设置使命。设置使命以生成结构化思维模型并个性化反思响应。"}
+                {profile?.mission ||
+                  "未设置角色定位。设置后可自动生成结构化的知识摘要，并个性化深思的响应风格。"}
               </p>
             </CardContent>
           </Card>
@@ -477,9 +478,9 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
           <div>
             <h3 className="text-lg font-semibold flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-rose-500" />
-              指令
+              行为规则
             </h3>
-            <p className="text-sm text-muted-foreground">反思时必须遵守的硬性规则</p>
+            <p className="text-sm text-muted-foreground">深思时必须遵守的准则</p>
           </div>
           <Button
             onClick={() => setShowCreateDirective(true)}
@@ -532,7 +533,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
           <div className="p-6 border border-dashed border-rose-500/30 rounded-lg text-center">
             <AlertTriangle className="w-6 h-6 mx-auto mb-2 text-rose-500/50" />
             <p className="text-sm text-muted-foreground">
-              暂无指令。指令是反思时必须遵守的硬性规则。
+              暂无行为规则。行为规则是深思时必须遵守的准则。
             </p>
           </div>
         )}
@@ -588,18 +589,18 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
       <AlertDialog open={showClearObservationsDialog} onOpenChange={setShowClearObservationsDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>清除观察</AlertDialogTitle>
+            <AlertDialogTitle>清除沉淀认知</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
                   确定要清除 <span className="font-semibold text-foreground">{currentBank}</span>{" "}
-                  的所有观察吗？
+                  的所有沉淀认知吗？
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">
-                  这将删除所有整合知识。观察将在下次整合运行时重新生成。
+                  这将删除所有归纳知识。沉淀认知将在下次归纳运行时重新生成。
                 </p>
                 {stats && stats.total_observations > 0 && (
-                  <p>将删除 {stats.total_observations} 条观察。</p>
+                  <p>将删除 {stats.total_observations} 条沉淀认知。</p>
                 )}
               </div>
             </AlertDialogDescription>
@@ -619,7 +620,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
               ) : (
                 <>
                   <Trash2 className="w-4 h-4 mr-2" />
-                  清除观察
+                  清除沉淀认知
                 </>
               )}
             </AlertDialogAction>
@@ -645,7 +646,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除指令</AlertDialogTitle>
+            <AlertDialogTitle>删除行为规则</AlertDialogTitle>
             <AlertDialogDescription>
               确定要删除{" "}
               <span className="font-semibold">&quot;{directiveDeleteTarget?.name}&quot;</span> 吗？
@@ -750,8 +751,8 @@ function DispositionEditDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>编辑性格特征</DialogTitle>
-          <DialogDescription>影响推理和视角的性格特征</DialogDescription>
+          <DialogTitle>编辑性格倾向</DialogTitle>
+          <DialogDescription>影响推理风格和视角的性格特征</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -840,8 +841,8 @@ function MissionEditDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>编辑使命</DialogTitle>
-          <DialogDescription>影响观察、反思和思维模型的生成方式</DialogDescription>
+          <DialogTitle>编辑角色定位</DialogTitle>
+          <DialogDescription>影响沉淀认知、深思和知识摘要的生成方式</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2 py-4">
@@ -955,9 +956,9 @@ function DirectiveFormDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-rose-500" />
-            {mode === "create" ? "创建" : "编辑"}指令
+            {mode === "create" ? "创建" : "编辑"}行为规则
           </DialogTitle>
-          <DialogDescription>指令是反思时必须遵守的硬性规则。</DialogDescription>
+          <DialogDescription>行为规则是深思时必须遵守的准则。</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -1043,7 +1044,7 @@ function DirectiveDetailPanel({
                 </Button>
               </div>
               <span className="text-xs px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400">
-                指令
+                行为规则
               </span>
             </div>
           </div>

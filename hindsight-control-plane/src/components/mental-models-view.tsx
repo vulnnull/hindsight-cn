@@ -170,7 +170,7 @@ export function MentalModelsView() {
         if (updated.last_refreshed_at !== originalAt) {
           setMentalModels((prev) => prev.map((x) => (x.id === m.id ? updated : x)));
           if (selectedMentalModel?.id === m.id) setSelectedMentalModel(updated);
-          toast.success("思维模型已刷新");
+          toast.success("知识摘要已刷新");
           return;
         }
       }
@@ -227,7 +227,7 @@ export function MentalModelsView() {
     return (
       <Card>
         <CardContent className="p-10 text-center">
-          <p className="text-muted-foreground">选择一个记忆库以查看思维模型。</p>
+          <p className="text-muted-foreground">选择一个记忆库以查看知识摘要。</p>
         </CardContent>
       </Card>
     );
@@ -254,7 +254,7 @@ export function MentalModelsView() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="按名称、查询或内容筛选思维模型..."
+              placeholder="按名称、查询或内容筛选知识摘要..."
               className="w-80 h-9"
             />
             <TagFilterInput
@@ -272,15 +272,15 @@ export function MentalModelsView() {
             />
             <Button onClick={() => setShowCreateMentalModel(true)} size="sm">
               <Plus className="w-4 h-4 mr-2" />
-              添加思维模型
+              添加知识摘要
             </Button>
           </div>
 
           <div className="flex items-center justify-between mb-6">
             <div className="text-sm text-muted-foreground">
               {searchQuery || selectedTags.length > 0
-                ? `${filteredMentalModels.length} / ${mentalModels.length} 个思维模型`
-                : `${mentalModels.length} 个思维模型`}
+                ? `${filteredMentalModels.length} / ${mentalModels.length} 个知识摘要`
+                : `${mentalModels.length} 个知识摘要`}
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-lg p-1">
@@ -473,8 +473,8 @@ export function MentalModelsView() {
               <Sparkles className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
                 {searchQuery
-                  ? "没有符合筛选条件的思维模型"
-                  : "尚无思维模型。创建思维模型可从记忆生成并保存摘要。"}
+                  ? "没有符合筛选条件的知识摘要"
+                  : "尚无知识摘要。创建知识摘要可从记忆生成并保存摘要。"}
               </p>
             </div>
           )}
@@ -494,7 +494,7 @@ export function MentalModelsView() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除思维模型</AlertDialogTitle>
+            <AlertDialogTitle>删除知识摘要</AlertDialogTitle>
             <AlertDialogDescription>
               确定要删除 <span className="font-semibold">&quot;{deleteTarget?.name}&quot;</span>?
               <br />
@@ -740,9 +740,9 @@ function CreateMentalModelDialog({
     >
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>创建思维模型</DialogTitle>
+          <DialogTitle>创建知识摘要</DialogTitle>
           <DialogDescription>
-            通过运行查询创建思维模型。内容将自动生成，并可以 稍后刷新。
+            通过运行查询创建知识摘要。内容将自动生成，并可以 稍后刷新。
           </DialogDescription>
         </DialogHeader>
 
@@ -835,7 +835,7 @@ function CreateMentalModelDialog({
 
               <section className="space-y-4">
                 <h3 className="text-sm font-semibold text-foreground border-b pb-1">
-                  其他思维模型
+                  其他知识摘要
                 </h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
@@ -849,11 +849,11 @@ function CreateMentalModelDialog({
                     htmlFor="exclude-mental-models"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    排除所有思维模型
+                    排除所有知识摘要
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">排除思维模型 ID</label>
+                  <label className="text-sm font-medium text-foreground">排除知识摘要 ID</label>
                   <Input
                     value={form.excludeMentalModelIds}
                     onChange={(e) => setForm({ ...form, excludeMentalModelIds: e.target.value })}
@@ -1126,8 +1126,8 @@ function UpdateMentalModelDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>更新思维模型</DialogTitle>
-          <DialogDescription>更新思维模型配置。更改将立即生效。</DialogDescription>
+          <DialogTitle>更新知识摘要</DialogTitle>
+          <DialogDescription>更新知识摘要配置。更改将立即生效。</DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="general" className="py-2 flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -1215,7 +1215,7 @@ function UpdateMentalModelDialog({
 
               <section className="space-y-4">
                 <h3 className="text-sm font-semibold text-foreground border-b pb-1">
-                  其他思维模型
+                  其他知识摘要
                 </h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
@@ -1229,11 +1229,11 @@ function UpdateMentalModelDialog({
                     htmlFor="update-exclude-mental-models"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    排除所有思维模型
+                    排除所有知识摘要
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">排除思维模型 ID</label>
+                  <label className="text-sm font-medium text-foreground">排除知识摘要 ID</label>
                   <Input
                     value={form.excludeMentalModelIds}
                     onChange={(e) => setForm({ ...form, excludeMentalModelIds: e.target.value })}
@@ -1505,14 +1505,14 @@ function FilesView({
               </div>
             ) : (
               <p className="text-sm text-muted-foreground italic">
-                尚无内容。刷新此思维模型以生成内容。
+                尚无内容。刷新此知识摘要以生成内容。
               </p>
             )}
           </article>
         ) : (
           <div className="p-10 text-center text-muted-foreground">
             <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">选择一个思维模型以查看内容。</p>
+            <p className="text-sm">选择一个知识摘要以查看内容。</p>
           </div>
         )}
       </section>

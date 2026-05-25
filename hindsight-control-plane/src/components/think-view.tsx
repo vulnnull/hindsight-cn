@@ -413,7 +413,7 @@ export function ThinkView() {
                     添加指令
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    注入到提示词中的硬性规则，代理必须遵循
+                    注入到提示词中的准则，代理必须遵循
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-0">

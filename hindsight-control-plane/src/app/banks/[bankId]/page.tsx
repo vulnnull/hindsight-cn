@@ -108,7 +108,7 @@ export default function BankPage() {
       const result = await client.clearObservations(bankId);
       setShowClearObservationsDialog(false);
       toast.success("成功", {
-        description: result.message || "观察已成功清除",
+        description: result.message || "沉淀认知已成功清除",
       });
     } catch (error) {
       // Error toast is shown automatically by the API client interceptor
@@ -202,14 +202,14 @@ export default function BankPage() {
                       <DropdownMenuItem
                         onClick={handleTriggerConsolidation}
                         disabled={isConsolidating || !observationsEnabled}
-                        title={!observationsEnabled ? "观察功能未启用" : undefined}
+                        title={!observationsEnabled ? "沉淀认知功能未启用" : undefined}
                       >
                         {isConsolidating ? (
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         ) : (
                           <Brain className="w-4 h-4 mr-2" />
                         )}
-                        {isConsolidating ? "整合中..." : "运行整合"}
+                        {isConsolidating ? "归纳中..." : "运行归纳"}
                         {!observationsEnabled && (
                           <span className="ml-auto text-xs text-muted-foreground">关闭</span>
                         )}
@@ -217,14 +217,14 @@ export default function BankPage() {
                       <DropdownMenuItem
                         onClick={handleRecoverConsolidation}
                         disabled={isRecoveringConsolidation || !observationsEnabled}
-                        title={!observationsEnabled ? "观察功能未启用" : undefined}
+                        title={!observationsEnabled ? "沉淀认知功能未启用" : undefined}
                       >
                         {isRecoveringConsolidation ? (
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         ) : (
                           <RotateCcw className="w-4 h-4 mr-2" />
                         )}
-                        {isRecoveringConsolidation ? "恢复中..." : "恢复整合"}
+                        {isRecoveringConsolidation ? "恢复中..." : "恢复归纳"}
                         {!observationsEnabled && (
                           <span className="ml-auto text-xs text-muted-foreground">关闭</span>
                         )}
@@ -233,7 +233,7 @@ export default function BankPage() {
                         onClick={() => setShowClearObservationsDialog(true)}
                         disabled={!observationsEnabled}
                         className="text-amber-600 dark:text-amber-400 focus:text-amber-700 dark:focus:text-amber-300"
-                        title={!observationsEnabled ? "观察功能未启用" : undefined}
+                        title={!observationsEnabled ? "沉淀认知功能未启用" : undefined}
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
                         清除观察
@@ -277,7 +277,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      概览
+                      总览
                       {bankConfigTab === "general" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -368,10 +368,8 @@ export default function BankPage() {
             {/* Recall Tab */}
             {view === "recall" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">召回</h1>
-                <p className="text-muted-foreground mb-6">
-                  通过详细的追踪信息和检索方法分析记忆召回。
-                </p>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">检索</h1>
+                <p className="text-muted-foreground mb-6">通过详细的追踪信息分析记忆检索过程。</p>
                 <SearchDebugView />
               </div>
             )}
@@ -379,9 +377,9 @@ export default function BankPage() {
             {/* Reflect Tab */}
             {view === "reflect" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">反思</h1>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">深思</h1>
                 <p className="text-muted-foreground mb-6">
-                  运行一个代理循环，自主收集证据并从记忆库性格视角推理，生成上下文相关的响应。
+                  运行智能体循环，自主收集证据并基于性格倾向进行推理，生成结合记忆的上下文响应。
                 </p>
                 <ThinkView />
               </div>
@@ -392,7 +390,7 @@ export default function BankPage() {
               <div>
                 <h1 className="text-3xl font-bold mb-2 text-foreground">记忆</h1>
                 <p className="text-muted-foreground mb-6">
-                  查看和探索此记忆库中存储的不同类型的记忆。
+                  浏览和探索此记忆库中存储的不同类型记忆。
                 </p>
 
                 <div className="mb-6 border-b border-border">
@@ -405,7 +403,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      世界常识
+                      客观知识
                       {subTab === "world" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -418,7 +416,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      经历记忆
+                      亲身经历
                       {subTab === "experience" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -431,7 +429,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      观察
+                      沉淀认知
                       {!observationsEnabled && (
                         <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                           关闭
@@ -449,7 +447,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      思维模型
+                      知识摘要
                       {subTab === "mental-models" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -461,7 +459,7 @@ export default function BankPage() {
                   {subTab === "world" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        从外部来源接收的关于世界的客观事实。
+                        从外部输入中提取的客观事实和通用知识。
                       </p>
                       <DataView key="world" factType="world" />
                     </div>
@@ -469,7 +467,7 @@ export default function BankPage() {
                   {subTab === "experience" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        记忆库自身的行动、交互和第一人称经验。
+                        智能体自身的操作记录和第一人称经历。
                       </p>
                       <DataView key="experience" factType="experience" />
                     </div>
@@ -478,7 +476,7 @@ export default function BankPage() {
                     (observationsEnabled ? (
                       <div>
                         <p className="text-sm text-muted-foreground mb-4">
-                          从事实中合成的整合知识 — 从累积证据中涌现的模式、偏好和学习成果。
+                          从原始事实中归纳提炼的稳定认知 — 积累后形成的模式、偏好和经验总结。
                         </p>
                         <DataView key="observations" factType="observation" />
                       </div>
@@ -502,10 +500,10 @@ export default function BankPage() {
                           </svg>
                         </div>
                         <h3 className="text-lg font-semibold text-foreground mb-1">
-                          观察功能未启用
+                          沉淀认知功能未启用
                         </h3>
                         <p className="text-sm text-muted-foreground max-w-md">
-                          此服务器上的观察整合功能已禁用。如需启用，请设置{" "}
+                          此服务器上的沉淀认知功能已禁用。如需启用，请设置{" "}
                           <code className="px-1 py-0.5 bg-muted rounded text-xs">
                             HINDSIGHT_API_ENABLE_OBSERVATIONS=true
                           </code>{" "}
@@ -516,7 +514,7 @@ export default function BankPage() {
                   {subTab === "mental-models" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        用户从查询中生成的摘要 — 可在记忆演进时刷新的可复用知识快照。
+                        基于检索查询生成的知识总结 — 可随记忆更新而刷新的持久化知识快照。
                       </p>
                       <MentalModelsView key="mental-models" />
                     </div>
@@ -529,7 +527,7 @@ export default function BankPage() {
             {view === "documents" && (
               <div>
                 <h1 className="text-3xl font-bold mb-2 text-foreground">文档</h1>
-                <p className="text-muted-foreground mb-6">管理文档并保留新记忆。</p>
+                <p className="text-muted-foreground mb-6">管理文档并存储新记忆。</p>
                 <DocumentsView />
               </div>
             )}
@@ -633,10 +631,10 @@ export default function BankPage() {
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
                   确定要清除 <span className="font-semibold text-foreground">{bankId}</span>{" "}
-                  的所有观察吗？
+                  的所有沉淀认知吗？
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">
-                  这将删除所有整合知识。观察将在下次整合运行时重新生成。
+                  这将删除所有归纳知识。沉淀认知将在下次归纳运行时重新生成。
                 </p>
               </div>
             </AlertDialogDescription>
