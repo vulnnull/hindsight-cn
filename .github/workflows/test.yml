@@ -734,6 +734,9 @@ jobs:
         rm -rf node_modules/lightningcss node_modules/@tailwindcss
         npm install lightningcss @tailwindcss/postcss @tailwindcss/node
 
+    - name: Test Control Plane
+      run: npm test --workspace=hindsight-control-plane
+
     - name: Build Control Plane
       run: npm run build --workspace=hindsight-control-plane
 
@@ -3215,6 +3218,9 @@ jobs:
         npm install --workspace=hindsight-control-plane
         rm -rf node_modules/lightningcss node_modules/@tailwindcss
         npm install lightningcss @tailwindcss/postcss @tailwindcss/node
+
+    - name: Test Control Plane
+      run: npm test --workspace=hindsight-control-plane
 
     - name: Build Control Plane
       run: npm run build --workspace=hindsight-control-plane
