@@ -801,9 +801,7 @@ export function SearchDebugView() {
                                     toggleExpandResults(resultsKey);
                                   }}
                                 >
-                                  {showAll
-                                    ? `收起`
-                                    : `查看全部 ${trace.rrf_merged.length} 条结果`}
+                                  {showAll ? `收起` : `查看全部 ${trace.rrf_merged.length} 条结果`}
                                 </button>
                               )}
                             </div>
@@ -837,9 +835,7 @@ export function SearchDebugView() {
                             </div>
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="font-semibold text-foreground">
-                                  综合评分
-                                </span>
+                                <span className="font-semibold text-foreground">综合评分</span>
                                 <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
                                   重排序
                                 </span>
@@ -927,9 +923,7 @@ export function SearchDebugView() {
                                     toggleExpandResults(resultsKey);
                                   }}
                                 >
-                                  {showAll
-                                    ? `收起`
-                                    : `查看全部 ${trace.reranked.length} 条结果`}
+                                  {showAll ? `收起` : `查看全部 ${trace.reranked.length} 条结果`}
                                 </button>
                               )}
                             </div>

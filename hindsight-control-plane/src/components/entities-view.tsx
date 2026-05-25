@@ -292,9 +292,7 @@ export function EntitiesView() {
             </div>
           ) : entities.length > 0 ? (
             <>
-              <div className="mb-4 text-sm text-muted-foreground">
-                {total} 个实体
-              </div>
+              <div className="mb-4 text-sm text-muted-foreground">{total} 个实体</div>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>

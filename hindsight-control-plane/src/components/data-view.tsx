@@ -358,9 +358,7 @@ export function DataView({
           <h3 className="text-base font-medium text-foreground mb-1">暂无记忆</h3>
           {!documentId && !chunkId && (
             <>
-              <p className="text-sm text-muted-foreground mb-6">
-                添加文档以开始构建此记忆库。
-              </p>
+              <p className="text-sm text-muted-foreground mb-6">添加文档以开始构建此记忆库。</p>
               <Button
                 variant="default"
                 size="sm"
@@ -536,8 +534,7 @@ export function DataView({
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <Network className="w-4 h-4" />
-                  图
+                  <Network className="w-4 h-4" />图
                 </button>
                 <button
                   onClick={() => setViewMode("table")}
@@ -774,8 +771,7 @@ export function DataView({
                             显示可见节点之间的所有关联。
                             {graph2DData.nodes.length > 50 && (
                               <span className="block text-amber-600 dark:text-amber-400 mt-1">
-                                ⚠️ 为保证性能，限制为 50 个节点。总计：{" "}
-                                {graph2DData.nodes.length}
+                                ⚠️ 为保证性能，限制为 50 个节点。总计： {graph2DData.nodes.length}
                               </span>
                             )}
                           </p>
@@ -849,11 +845,10 @@ export function DataView({
                         />
                       ) : (
                         <div className="p-4 space-y-4">
-                          <h3 className="text-sm font-semibold text-foreground">
-                            星图视图
-                          </h3>
+                          <h3 className="text-sm font-semibold text-foreground">星图视图</h3>
                           <p className="text-xs text-muted-foreground">
-                            Canvas 渲染的记忆图谱，支持空间标签去冲突。滚轮缩放，拖拽平移，悬停探索实体关联。点击记忆查看详情。
+                            Canvas
+                            渲染的记忆图谱，支持空间标签去冲突。滚轮缩放，拖拽平移，悬停探索实体关联。点击记忆查看详情。
                           </p>
                           <div className="space-y-2 pt-2">
                             <h4 className="text-xs font-medium text-muted-foreground">着色依据</h4>
@@ -872,9 +867,7 @@ export function DataView({
                             </Select>
                           </div>
                           <div className="space-y-2 pt-2">
-                            <h4 className="text-xs font-medium text-muted-foreground">
-                              关联类型
-                            </h4>
+                            <h4 className="text-xs font-medium text-muted-foreground">关联类型</h4>
                             {Object.entries({
                               semantic: "#0074d9",
                               temporal: "#009296",
@@ -1114,9 +1107,7 @@ export function DataView({
                     })()
                   ) : (
                     <div className="text-center py-12 text-muted-foreground">
-                      {data.table_rows?.length > 0
-                        ? "没有匹配筛选条件的记忆"
-                        : "未找到记忆"}
+                      {data.table_rows?.length > 0 ? "没有匹配筛选条件的记忆" : "未找到记忆"}
                     </div>
                   )}
                 </div>

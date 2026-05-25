@@ -202,9 +202,7 @@ function BankSelectorInner() {
         try {
           await client.importBankTemplate(newBankId.trim(), manifest);
         } catch (importError) {
-          setTemplateError(
-            importError instanceof Error ? importError.message : "导入模板失败"
-          );
+          setTemplateError(importError instanceof Error ? importError.message : "导入模板失败");
           setIsCreating(false);
           return;
         }
@@ -860,7 +858,11 @@ function BankSelectorInner() {
                                     >
                                       <TabsList className="w-full border-b border-border bg-transparent h-8 p-0 gap-0 justify-start rounded-none">
                                         {(["document", "tags", "source"] as const).map((t) => {
-                                          const tabLabels: Record<string, string> = { document: "文档", tags: "标签", source: "来源" };
+                                          const tabLabels: Record<string, string> = {
+                                            document: "文档",
+                                            tags: "标签",
+                                            source: "来源",
+                                          };
                                           return (
                                             <TabsTrigger
                                               key={t}

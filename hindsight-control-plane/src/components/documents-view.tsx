@@ -607,9 +607,7 @@ export function DocumentsView() {
         </div>
       ) : documents.length > 0 ? (
         <>
-          <div className="mb-4 text-sm text-muted-foreground">
-            {total} 个文档
-          </div>
+          <div className="mb-4 text-sm text-muted-foreground">{total} 个文档</div>
           {/* Documents Table */}
           <div className="w-full">
             <div className="px-5 mb-4">
@@ -771,9 +769,7 @@ export function DocumentsView() {
         <DialogContent className="w-[95vw] max-w-[95vw] h-[92vh] sm:max-w-[95vw] flex flex-col overflow-hidden">
           <DialogHeader className="pr-10">
             <DialogTitle className="flex items-center gap-2">
-              <span className="truncate font-mono text-sm">
-                {selectedDocument?.id ?? "文档"}
-              </span>
+              <span className="truncate font-mono text-sm">{selectedDocument?.id ?? "文档"}</span>
             </DialogTitle>
           </DialogHeader>
 
@@ -883,8 +879,7 @@ export function DocumentsView() {
                           autoFocus
                         />
                         <p className="text-xs text-muted-foreground">
-                          保存将通过 retain（upsert）重新摄入此文档。该文档的现有记忆
-                          单元将被替换。
+                          保存将通过 retain（upsert）重新摄入此文档。该文档的现有记忆 单元将被替换。
                         </p>
                       </div>
                     ) : (
@@ -1062,10 +1057,7 @@ export function DocumentsView() {
                           )}
                       </InfoCard>
 
-                      <InfoCard
-                        title="记忆构成"
-                        icon={<Network className="w-3.5 h-3.5" />}
-                      >
+                      <InfoCard title="记忆构成" icon={<Network className="w-3.5 h-3.5" />}>
                         <MemoryComposition nodesByFactType={selectedDocument.nodes_by_fact_type} />
                       </InfoCard>
                     </div>
@@ -1091,17 +1083,13 @@ export function DocumentsView() {
                     <div className="flex items-center justify-center py-20">
                       <div className="text-center">
                         <div className="text-4xl mb-2">📄</div>
-                        <div className="text-sm text-muted-foreground">
-                          此文档未找到片段
-                        </div>
+                        <div className="text-sm text-muted-foreground">此文档未找到片段</div>
                       </div>
                     </div>
                   ) : (
                     <div className="flex items-center justify-center py-20">
                       <div className="text-center">
-                        <div className="text-sm text-muted-foreground">
-                          点击片段选项卡加载片段
-                        </div>
+                        <div className="text-sm text-muted-foreground">点击片段选项卡加载片段</div>
                       </div>
                     </div>
                   )}
@@ -1153,9 +1141,7 @@ export function DocumentsView() {
       <AlertDialog open={!!deleteResult} onOpenChange={(open) => !open && setDeleteResult(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {deleteResult?.success ? "文档已删除" : "错误"}
-            </AlertDialogTitle>
+            <AlertDialogTitle>{deleteResult?.success ? "文档已删除" : "错误"}</AlertDialogTitle>
             <AlertDialogDescription>{deleteResult?.message}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

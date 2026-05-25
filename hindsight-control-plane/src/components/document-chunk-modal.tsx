@@ -60,9 +60,7 @@ export function DocumentChunkModal({ type, id, onClose }: DocumentChunkModalProp
         <DialogHeader>
           <DialogTitle>{type === "document" ? "文档详情" : "片段详情"}</DialogTitle>
           <DialogDescription>
-            {type === "document"
-              ? "查看原始文档文本和元数据"
-              : "查看片段文本和元数据"}
+            {type === "document" ? "查看原始文档文本和元数据" : "查看片段文本和元数据"}
           </DialogDescription>
         </DialogHeader>
 
@@ -71,7 +69,9 @@ export function DocumentChunkModal({ type, id, onClose }: DocumentChunkModalProp
             <div className="flex items-center justify-center py-20">
               <div className="text-center">
                 <div className="text-4xl mb-2">⏳</div>
-                <div className="text-sm text-muted-foreground">正在加载 {type === "document" ? "文档" : "片段"}...</div>
+                <div className="text-sm text-muted-foreground">
+                  正在加载 {type === "document" ? "文档" : "片段"}...
+                </div>
               </div>
             </div>
           ) : error ? (

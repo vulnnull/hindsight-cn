@@ -370,9 +370,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
       <Card>
         <CardContent className="p-10 text-center">
           <h3 className="text-xl font-semibold mb-2 text-card-foreground">未选择记忆库</h3>
-          <p className="text-muted-foreground">
-            请从上方下拉菜单中选择一个记忆库以查看其配置。
-          </p>
+          <p className="text-muted-foreground">请从上方下拉菜单中选择一个记忆库以查看其配置。</p>
         </CardContent>
       </Card>
     );
@@ -457,9 +455,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
                     <Target className="w-5 h-5 text-primary" />
                     使命
                   </CardTitle>
-                  <CardDescription>
-                    影响观察、反思和思维模型的生成方式
-                  </CardDescription>
+                  <CardDescription>影响观察、反思和思维模型的生成方式</CardDescription>
                 </div>
                 <Button onClick={() => setShowMissionDialog(true)} variant="ghost" size="sm">
                   <Pencil className="h-4 w-4" />
@@ -468,8 +464,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
             </CardHeader>
             <CardContent>
               <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
-                {profile?.mission ||
-                  "未设置使命。设置使命以生成结构化思维模型并个性化反思响应。"}
+                {profile?.mission || "未设置使命。设置使命以生成结构化思维模型并个性化反思响应。"}
               </p>
             </CardContent>
           </Card>
@@ -484,9 +479,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
               <AlertTriangle className="w-5 h-5 text-rose-500" />
               指令
             </h3>
-            <p className="text-sm text-muted-foreground">
-              反思时必须遵守的硬性规则
-            </p>
+            <p className="text-sm text-muted-foreground">反思时必须遵守的硬性规则</p>
           </div>
           <Button
             onClick={() => setShowCreateDirective(true)}
@@ -561,8 +554,8 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
                 </p>
                 {stats && (
                   <p>
-                    将删除 {stats.total_nodes} 条记忆、{stats.total_documents}{" "}
-                    个文档和 {stats.total_links} 条关联。
+                    将删除 {stats.total_nodes} 条记忆、{stats.total_documents} 个文档和{" "}
+                    {stats.total_links} 条关联。
                   </p>
                 )}
               </div>
@@ -599,8 +592,8 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  确定要清除{" "}
-                  <span className="font-semibold text-foreground">{currentBank}</span> 的所有观察吗？
+                  确定要清除 <span className="font-semibold text-foreground">{currentBank}</span>{" "}
+                  的所有观察吗？
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">
                   这将删除所有整合知识。观察将在下次整合运行时重新生成。
@@ -848,9 +841,7 @@ function MissionEditDialog({
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>编辑使命</DialogTitle>
-          <DialogDescription>
-            影响观察、反思和思维模型的生成方式
-          </DialogDescription>
+          <DialogDescription>影响观察、反思和思维模型的生成方式</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2 py-4">
@@ -966,9 +957,7 @@ function DirectiveFormDialog({
             <AlertTriangle className="w-5 h-5 text-rose-500" />
             {mode === "create" ? "创建" : "编辑"}指令
           </DialogTitle>
-          <DialogDescription>
-            指令是反思时必须遵守的硬性规则。
-          </DialogDescription>
+          <DialogDescription>指令是反思时必须遵守的硬性规则。</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">

@@ -416,7 +416,8 @@ export function BankOperationsView() {
             {totalOperations > limit && (
               <div className="flex items-center justify-between mt-4 pt-4 border-t">
                 <p className="text-sm text-muted-foreground">
-                  显示第 {offset + 1}-{Math.min(offset + limit, totalOperations)} 条，共 {totalOperations} 条
+                  显示第 {offset + 1}-{Math.min(offset + limit, totalOperations)} 条，共{" "}
+                  {totalOperations} 条
                 </p>
                 <div className="flex gap-2">
                   <Button
@@ -589,9 +590,7 @@ export function BankOperationsView() {
                   {selectedOperation.result_metadata &&
                     Object.keys(selectedOperation.result_metadata).length > 0 && (
                       <div>
-                        <div className="text-sm font-medium text-muted-foreground mb-2">
-                          元数据
-                        </div>
+                        <div className="text-sm font-medium text-muted-foreground mb-2">元数据</div>
                         <pre className="rounded-lg border bg-muted/30 p-3 text-xs font-mono overflow-x-auto max-h-96 whitespace-pre-wrap break-words">
                           {JSON.stringify(selectedOperation.result_metadata, null, 2)}
                         </pre>
@@ -687,9 +686,7 @@ export function BankOperationsView() {
                     return (
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-sm font-medium text-muted-foreground">
-                            原始载荷
-                          </div>
+                          <div className="text-sm font-medium text-muted-foreground">原始载荷</div>
                           {!loadedThisOp && (
                             <Button
                               variant="outline"

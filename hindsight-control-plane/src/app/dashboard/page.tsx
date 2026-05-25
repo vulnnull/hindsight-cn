@@ -25,9 +25,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-center h-[calc(100vh-80px)] bg-muted/20">
           <div className="text-center p-10 bg-card rounded-lg border-2 border-border shadow-lg max-w-md">
             <h3 className="text-2xl font-bold mb-3 text-card-foreground">欢迎使用 Hindsight</h3>
-            <p className="text-muted-foreground">
-              从上方下拉菜单中选择一个记忆库以开始使用。
-            </p>
+            <p className="text-muted-foreground">从上方下拉菜单中选择一个记忆库以开始使用。</p>
           </div>
         </div>
       </div>

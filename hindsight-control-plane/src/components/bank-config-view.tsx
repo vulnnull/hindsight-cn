@@ -423,10 +423,7 @@ export function BankConfigView() {
           saving={retainSaving}
           onSave={saveRetain}
         >
-          <FieldRow
-            label="默认策略"
-            description="未在请求中指定策略时自动应用。"
-          >
+          <FieldRow label="默认策略" description="未在请求中指定策略时自动应用。">
             <Select
               value={strategiesEdits.retain_default_strategy ?? "__none__"}
               onValueChange={(v) =>
@@ -470,10 +467,7 @@ export function BankConfigView() {
           saving={observationsSaving}
           onSave={saveObservations}
         >
-          <FieldRow
-            label="启用观察"
-            description="启用将事实自动整合为观察"
-          >
+          <FieldRow label="启用观察" description="启用将事实自动整合为观察">
             <div className="flex justify-end">
               <Switch
                 checked={observationsEdits.enable_observations ?? false}
@@ -779,11 +773,7 @@ function RetainStrategyForm({
         description="此记忆库在提取时应关注的内容。引导 LLM 但不替换提取规则。"
         value={values.retain_mission ?? ""}
         onChange={(v) => onChange({ retain_mission: v || null })}
-        placeholder={
-          isOverride
-            ? "继承自默认"
-            : "例如：始终包含技术决策、API 设计选择和架构权衡。"
-        }
+        placeholder={isOverride ? "继承自默认" : "例如：始终包含技术决策、API 设计选择和架构权衡。"}
         rows={3}
       />
       {showCustomField && (
@@ -1517,8 +1507,7 @@ function MapFieldsEditor({
                   }}
                   className="text-[11px] text-muted-foreground/60 hover:text-foreground inline-flex items-center gap-1 ml-2.5"
                 >
-                  <Plus className="h-2.5 w-2.5" />
-                  值
+                  <Plus className="h-2.5 w-2.5" />值
                 </button>
               </div>
             )}
@@ -1675,7 +1664,8 @@ function GeminiSafetyEditor({
   return (
     <div className="px-6 py-4 space-y-3">
       <p className="text-xs text-muted-foreground">
-        设置每个危害类别的屏蔽阈值。"关闭"表示完全禁用过滤（Gemini 2.5+ 的默认值）。阈值越低，屏蔽的内容越多。{" "}
+        设置每个危害类别的屏蔽阈值。"关闭"表示完全禁用过滤（Gemini 2.5+
+        的默认值）。阈值越低，屏蔽的内容越多。{" "}
         <a
           href="https://ai.google.dev/gemini-api/docs/safety-settings"
           target="_blank"

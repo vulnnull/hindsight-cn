@@ -478,9 +478,7 @@ export function WebhooksView() {
               />
             </button>
           </div>
-          <p className="text-sm text-muted-foreground">
-            共 {webhooks.length} 个 Webhook
-          </p>
+          <p className="text-sm text-muted-foreground">共 {webhooks.length} 个 Webhook</p>
         </div>
         <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
           <Plus className="w-4 h-4 mr-2" />
@@ -606,9 +604,7 @@ export function WebhooksView() {
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>添加 Webhook</DialogTitle>
-            <DialogDescription>
-              配置 Webhook 端点以接收事件通知。
-            </DialogDescription>
+            <DialogDescription>配置 Webhook 端点以接收事件通知。</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
@@ -1098,9 +1094,7 @@ export function WebhooksView() {
               )}
             </>
           ) : (
-            <p className="text-muted-foreground text-center py-8 text-sm">
-              暂无投递记录。
-            </p>
+            <p className="text-muted-foreground text-center py-8 text-sm">暂无投递记录。</p>
           )}
         </DialogContent>
       </Dialog>

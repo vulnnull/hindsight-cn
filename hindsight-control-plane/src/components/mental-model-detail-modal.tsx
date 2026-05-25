@@ -539,9 +539,7 @@ function MentalModelHistoryView({
           <SideBySideDiff before={entry.previous_content} after={afterContent} />
         ) : (
           <div className="border border-border rounded-lg p-3">
-            <span className="text-sm text-muted-foreground italic">
-              无先前内容
-            </span>
+            <span className="text-sm text-muted-foreground italic">无先前内容</span>
           </div>
         )}
       </div>
@@ -808,9 +806,7 @@ export function MentalModelDetailModal({
                     <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border bg-muted/50 text-xs text-muted-foreground">
                       <div className="flex items-center gap-1.5">
                         <FileText className="w-3.5 h-3.5" />
-                        <span className="font-semibold uppercase tracking-wide">
-                          已存储内容
-                        </span>
+                        <span className="font-semibold uppercase tracking-wide">已存储内容</span>
                         <span className="text-muted-foreground/70">
                           &middot; {mentalModel.content.length.toLocaleString()}字符
                         </span>
@@ -958,9 +954,7 @@ function ConfigurationTab({ mentalModel }: { mentalModel: MentalModel }) {
           }
         />
         <Metadata label="名称" value={mentalModel.name} />
-        {mentalModel.source_query && (
-          <Metadata label="源查询" value={mentalModel.source_query} />
-        )}
+        {mentalModel.source_query && <Metadata label="源查询" value={mentalModel.source_query} />}
         <Metadata
           label="标签"
           value={

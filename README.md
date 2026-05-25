@@ -217,4 +217,4 @@ MIT 协议 — 参见 [LICENSE](./LICENSE)
 
 ---
 
-原版由 [Vectorize.io](https://vectorize.io) 构建 · 中文版由 [vulnnull](https://github.com/vulnnull) 维护
+原版由 [Vectorize.io](https://vectorize.io) 构建 · 中文版由 [vulnnull](https://github.com/vulnnull) 维护 · [Linux DO 社区](https://linux.do/)

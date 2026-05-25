@@ -647,8 +647,8 @@ export function ThinkView() {
                                           {tc.output && (
                                             <div>
                                               <p className="text-[10px] font-semibold text-muted-foreground mb-1">
-                                              输出：
-                                            </p>
+                                                输出：
+                                              </p>
                                               <div className="bg-muted p-1.5 rounded text-xs overflow-auto max-h-32">
                                                 <JsonView
                                                   src={tc.output}

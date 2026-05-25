@@ -341,9 +341,7 @@ export function MentalModelsView() {
                                       : "bg-slate-500/10 text-slate-600 dark:text-slate-400"
                                   }`}
                                 >
-                                  {m.trigger?.refresh_after_consolidation
-                                    ? "自动刷新"
-                                    : "手动"}
+                                  {m.trigger?.refresh_after_consolidation ? "自动刷新" : "手动"}
                                 </span>
                               </div>
                             </div>
@@ -498,8 +496,7 @@ export function MentalModelsView() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除思维模型</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除{" "}
-              <span className="font-semibold">&quot;{deleteTarget?.name}&quot;</span>?
+              确定要删除 <span className="font-semibold">&quot;{deleteTarget?.name}&quot;</span>?
               <br />
               <br />
               <span className="text-destructive font-semibold">此操作不可撤销。</span>
@@ -745,8 +742,7 @@ function CreateMentalModelDialog({
         <DialogHeader>
           <DialogTitle>创建思维模型</DialogTitle>
           <DialogDescription>
-            通过运行查询创建思维模型。内容将自动生成，并可以
-            稍后刷新。
+            通过运行查询创建思维模型。内容将自动生成，并可以 稍后刷新。
           </DialogDescription>
         </DialogHeader>
 
@@ -827,17 +823,12 @@ function CreateMentalModelDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="full">
-                        完全 — 每次刷新从头重新生成
-                      </SelectItem>
-                      <SelectItem value="delta">
-                        增量 — 精准修改，保留未变内容
-                      </SelectItem>
+                      <SelectItem value="full">完全 — 每次刷新从头重新生成</SelectItem>
+                      <SelectItem value="delta">增量 — 精准修改，保留未变内容</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    增量模式对现有内容进行最小化修改。在首次刷新
-                    或源查询变更时会回退到完全重写。
+                    增量模式对现有内容进行最小化修改。在首次刷新 或源查询变更时会回退到完全重写。
                   </p>
                 </div>
               </section>
@@ -862,9 +853,7 @@ function CreateMentalModelDialog({
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    排除思维模型 ID
-                  </label>
+                  <label className="text-sm font-medium text-foreground">排除思维模型 ID</label>
                   <Input
                     value={form.excludeMentalModelIds}
                     onChange={(e) => setForm({ ...form, excludeMentalModelIds: e.target.value })}
@@ -883,8 +872,9 @@ function CreateMentalModelDialog({
                     placeholder="例如：project-x, team-alpha（逗号分隔）"
                   />
                   <p className="text-xs text-muted-foreground">
-                    标签在反思时限定模型范围，并在刷新时<strong>同时</strong>筛选源记忆
-                    （默认 <code>all_strict</code>：仅读取包含所有列出标签的记忆）。如果尚无记忆包含这些标签，
+                    标签在反思时限定模型范围，并在刷新时<strong>同时</strong>筛选源记忆 （默认{" "}
+                    <code>all_strict</code>
+                    ：仅读取包含所有列出标签的记忆）。如果尚无记忆包含这些标签，
                     刷新将生成空内容——请补填记忆上的标签，或调整下方的<em>标签匹配</em> /{" "}
                     <em>标签组</em>。
                   </p>
@@ -902,9 +892,7 @@ function CreateMentalModelDialog({
                       <SelectItem value="default">默认（设置标签时为 all_strict）</SelectItem>
                       <SelectItem value="any">any — OR 匹配（包含未标记）</SelectItem>
                       <SelectItem value="all">all — AND 匹配（包含未标记）</SelectItem>
-                      <SelectItem value="any_strict">
-                        any_strict — OR 匹配（排除未标记）
-                      </SelectItem>
+                      <SelectItem value="any_strict">any_strict — OR 匹配（排除未标记）</SelectItem>
                       <SelectItem value="all_strict">
                         all_strict — AND 匹配（排除未标记）
                       </SelectItem>
@@ -972,9 +960,7 @@ function CreateMentalModelDialog({
                     placeholder="默认（继承）"
                     min="0"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    召回返回事实的 Token 预算。
-                  </p>
+                  <p className="text-xs text-muted-foreground">召回返回事实的 Token 预算。</p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
@@ -1141,9 +1127,7 @@ function UpdateMentalModelDialog({
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>更新思维模型</DialogTitle>
-          <DialogDescription>
-            更新思维模型配置。更改将立即生效。
-          </DialogDescription>
+          <DialogDescription>更新思维模型配置。更改将立即生效。</DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="general" className="py-2 flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -1219,17 +1203,12 @@ function UpdateMentalModelDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="full">
-                        完全 — 每次刷新从头重新生成
-                      </SelectItem>
-                      <SelectItem value="delta">
-                        增量 — 精准修改，保留未变内容
-                      </SelectItem>
+                      <SelectItem value="full">完全 — 每次刷新从头重新生成</SelectItem>
+                      <SelectItem value="delta">增量 — 精准修改，保留未变内容</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    增量模式对现有内容进行最小化修改。在首次刷新
-                    或源查询变更时会回退到完全重写。
+                    增量模式对现有内容进行最小化修改。在首次刷新 或源查询变更时会回退到完全重写。
                   </p>
                 </div>
               </section>
@@ -1254,9 +1233,7 @@ function UpdateMentalModelDialog({
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    排除思维模型 ID
-                  </label>
+                  <label className="text-sm font-medium text-foreground">排除思维模型 ID</label>
                   <Input
                     value={form.excludeMentalModelIds}
                     onChange={(e) => setForm({ ...form, excludeMentalModelIds: e.target.value })}
@@ -1275,8 +1252,9 @@ function UpdateMentalModelDialog({
                     placeholder="例如：project-x, team-alpha（逗号分隔）"
                   />
                   <p className="text-xs text-muted-foreground">
-                    标签在反思时限定模型范围，并在刷新时<strong>同时</strong>筛选源记忆
-                    （默认 <code>all_strict</code>：仅读取包含所有列出标签的记忆）。如果尚无记忆包含这些标签，
+                    标签在反思时限定模型范围，并在刷新时<strong>同时</strong>筛选源记忆 （默认{" "}
+                    <code>all_strict</code>
+                    ：仅读取包含所有列出标签的记忆）。如果尚无记忆包含这些标签，
                     刷新将生成空内容——请补填记忆上的标签，或调整下方的<em>标签匹配</em> /{" "}
                     <em>标签组</em>。
                   </p>
@@ -1294,9 +1272,7 @@ function UpdateMentalModelDialog({
                       <SelectItem value="default">默认（设置标签时为 all_strict）</SelectItem>
                       <SelectItem value="any">any — OR 匹配（包含未标记）</SelectItem>
                       <SelectItem value="all">all — AND 匹配（包含未标记）</SelectItem>
-                      <SelectItem value="any_strict">
-                        any_strict — OR 匹配（排除未标记）
-                      </SelectItem>
+                      <SelectItem value="any_strict">any_strict — OR 匹配（排除未标记）</SelectItem>
                       <SelectItem value="all_strict">
                         all_strict — AND 匹配（排除未标记）
                       </SelectItem>
@@ -1364,9 +1340,7 @@ function UpdateMentalModelDialog({
                     placeholder="默认（继承）"
                     min="0"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    召回返回事实的 Token 预算。
-                  </p>
+                  <p className="text-xs text-muted-foreground">召回返回事实的 Token 预算。</p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">

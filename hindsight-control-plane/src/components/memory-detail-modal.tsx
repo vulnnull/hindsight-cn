@@ -381,9 +381,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                         }}
                       />
                     ) : (
-                      <p className="text-sm text-muted-foreground italic">
-                        尚无历史记录。
-                      </p>
+                      <p className="text-sm text-muted-foreground italic">尚无历史记录。</p>
                     )}
                   </TabsContent>
                 </div>
@@ -576,9 +574,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                         </div>
                       </>
                     ) : (
-                      <div className="text-center py-12 text-muted-foreground">
-                        无可用片段数据
-                      </div>
+                      <div className="text-center py-12 text-muted-foreground">无可用片段数据</div>
                     )}
                   </TabsContent>
 
@@ -650,9 +646,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                         </div>
                       </>
                     ) : (
-                      <div className="text-center py-12 text-muted-foreground">
-                        无可用文档数据
-                      </div>
+                      <div className="text-center py-12 text-muted-foreground">无可用文档数据</div>
                     )}
                   </TabsContent>
                 </div>

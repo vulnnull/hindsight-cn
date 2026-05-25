@@ -149,9 +149,7 @@ export default function BankPage() {
     setIsRecoveringConsolidation(true);
     try {
       const result = await client.recoverConsolidation(bankId);
-      toast.success(
-        `已恢复 ${result.retried_count} 条失败的记忆以重新整合`
-      );
+      toast.success(`已恢复 ${result.retried_count} 条失败的记忆以重新整合`);
     } catch (error) {
       // Error toast is shown automatically by the API client interceptor
     } finally {
@@ -174,9 +172,7 @@ export default function BankPage() {
                 <div className="flex justify-between items-start mb-6">
                   <div>
                     <h1 className="text-3xl font-bold mb-2 text-foreground">记忆库配置</h1>
-                    <p className="text-muted-foreground">
-                      管理记忆库设置、配置文件和操作。
-                    </p>
+                    <p className="text-muted-foreground">管理记忆库设置、配置文件和操作。</p>
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -206,9 +202,7 @@ export default function BankPage() {
                       <DropdownMenuItem
                         onClick={handleTriggerConsolidation}
                         disabled={isConsolidating || !observationsEnabled}
-                        title={
-                          !observationsEnabled ? "观察功能未启用" : undefined
-                        }
+                        title={!observationsEnabled ? "观察功能未启用" : undefined}
                       >
                         {isConsolidating ? (
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -223,9 +217,7 @@ export default function BankPage() {
                       <DropdownMenuItem
                         onClick={handleRecoverConsolidation}
                         disabled={isRecoveringConsolidation || !observationsEnabled}
-                        title={
-                          !observationsEnabled ? "观察功能未启用" : undefined
-                        }
+                        title={!observationsEnabled ? "观察功能未启用" : undefined}
                       >
                         {isRecoveringConsolidation ? (
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -241,9 +233,7 @@ export default function BankPage() {
                         onClick={() => setShowClearObservationsDialog(true)}
                         disabled={!observationsEnabled}
                         className="text-amber-600 dark:text-amber-400 focus:text-amber-700 dark:focus:text-amber-300"
-                        title={
-                          !observationsEnabled ? "观察功能未启用" : undefined
-                        }
+                        title={!observationsEnabled ? "观察功能未启用" : undefined}
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
                         清除观察
@@ -539,9 +529,7 @@ export default function BankPage() {
             {view === "documents" && (
               <div>
                 <h1 className="text-3xl font-bold mb-2 text-foreground">文档</h1>
-                <p className="text-muted-foreground mb-6">
-                  管理文档并保留新记忆。
-                </p>
+                <p className="text-muted-foreground mb-6">管理文档并保留新记忆。</p>
                 <DocumentsView />
               </div>
             )}
@@ -568,8 +556,8 @@ export default function BankPage() {
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  确定要删除记忆库{" "}
-                  <span className="font-semibold text-foreground">{bankId}</span> 吗？
+                  确定要删除记忆库 <span className="font-semibold text-foreground">{bankId}</span>{" "}
+                  吗？
                 </p>
                 <p className="text-red-600 dark:text-red-400 font-medium">
                   此操作不可撤销。所有记忆、实体、文档和记忆库配置将被永久删除。
@@ -608,8 +596,7 @@ export default function BankPage() {
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  确定要重置{" "}
-                  <span className="font-semibold text-foreground">{bankId}</span>{" "}
+                  确定要重置 <span className="font-semibold text-foreground">{bankId}</span>{" "}
                   的所有配置覆盖吗？
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">
@@ -645,8 +632,7 @@ export default function BankPage() {
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  确定要清除{" "}
-                  <span className="font-semibold text-foreground">{bankId}</span>{" "}
+                  确定要清除 <span className="font-semibold text-foreground">{bankId}</span>{" "}
                   的所有观察吗？
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">

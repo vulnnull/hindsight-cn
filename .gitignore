@@ -52,6 +52,11 @@ hindsight-cli/target
 hindsight-clients/rust/target
 .claude/*
 !.claude/skills/
+.claude-plugin/
+.claude-plugin/*/*
+*.sesskey
+CLAUDE.md
+AGENTS.md
 whats-next.md
 TASK.md
 # Changelog is now tracked in hindsight-docs/src/pages/changelog.md

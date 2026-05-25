@@ -184,7 +184,7 @@ function AuditChart({ bankId }: { bankId: string }) {
         <div className="h-[120px]">
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            加载中…
+              加载中…
             </div>
           ) : chartData.length === 0 ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
@@ -380,9 +380,7 @@ export function AuditLogsView() {
           刷新
         </Button>
 
-        <span className="text-sm text-muted-foreground ml-auto">
-          {total} 条
-        </span>
+        <span className="text-sm text-muted-foreground ml-auto">{total} 条</span>
       </div>
 
       {/* Table */}

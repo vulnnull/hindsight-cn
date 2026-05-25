@@ -222,7 +222,8 @@ export function ObservationHistoryView({
       {/* Navigation header */}
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          变更 <span className="font-semibold text-foreground">{history.length - idx}</span>/{history.length} &middot; {new Date(entry.changed_at).toLocaleString()}
+          变更 <span className="font-semibold text-foreground">{history.length - idx}</span>/
+          {history.length} &middot; {new Date(entry.changed_at).toLocaleString()}
         </span>
         <div className="flex items-center gap-1">
           <Button
