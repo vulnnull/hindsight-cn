@@ -1,27 +1,27 @@
-# Hindsight Docker Image (CN - Chinese Optimized)
-# Supports building API-only, Control Plane-only, or both
+# Hindsight-CN Docker 镜像（中文优化版）
+# 支持：仅 API、仅控制面板、或两者兼有
 #
-# Build args:
-#   INCLUDE_API=true/false         - Include API (default: true)
-#   INCLUDE_CP=true/false          - Include Control Plane (default: true)
-#   INCLUDE_LOCAL_MODELS=true/false - Include local ML models for embeddings/reranking (default: true)
-#                                     Set to false when using external providers (TEI, OpenAI, Cohere)
-#   PRELOAD_ML_MODELS=true/false   - Pre-download ML models during build (default: true)
-#                                     Only effective when INCLUDE_LOCAL_MODELS=true
-#                                     NOTE: tiktoken encodings are ALWAYS preloaded (required for air-gapped deployments)
-#   EMBEDDING_MODEL=<model>        - Embedding model (default: BAAI/bge-small-en-v1.5)
-#                                     CN recommended: BAAI/bge-m3
-#   RERANKER_MODEL=<model>         - Cross-encoder reranker model (default: cross-encoder/ms-marco-MiniLM-L-6-v2)
-#                                     CN recommended: BAAI/bge-reranker-v2-m3
+# 构建参数：
+#   INCLUDE_API=true/false         - 包含 API（默认：true）
+#   INCLUDE_CP=true/false          - 包含控制面板（默认：true）
+#   INCLUDE_LOCAL_MODELS=true/false - 包含本地 ML 模型用于 Embedding/Reranker（默认：true）
+#                                     使用外部提供商（TEI、OpenAI、Cohere）时设为 false
+#   PRELOAD_ML_MODELS=true/false   - 构建时预下载 ML 模型（默认：true）
+#                                     仅在 INCLUDE_LOCAL_MODELS=true 时生效
+#                                     注意：tiktoken 编码始终预加载（离线部署必需）
+#   EMBEDDING_MODEL=<模型>         - Embedding 模型（默认：BAAI/bge-small-en-v1.5）
+#                                     中文推荐：BAAI/bge-m3
+#   RERANKER_MODEL=<模型>          - 交叉编码器 Reranker 模型（默认：cross-encoder/ms-marco-MiniLM-L-6-v2）
+#                                     中文推荐：BAAI/bge-reranker-v2-m3
 #
-# Examples:
-#   docker build -t hindsight .                                          # Both (standalone)
-#   docker build -t hindsight-api --build-arg INCLUDE_CP=false .         # API only
-#   docker build -t hindsight-cp --build-arg INCLUDE_API=false .         # Control Plane only
-#   docker build -t hindsight --build-arg PRELOAD_ML_MODELS=false .      # Skip ML model preload
-#   docker build -t hindsight --build-arg INCLUDE_LOCAL_MODELS=false .   # Skip local ML deps (for external providers)
+# 示例：
+#   docker build -t hindsight .                                          # 完整版（API + 控制面板）
+#   docker build -t hindsight-api --build-arg INCLUDE_CP=false .         # 仅 API
+#   docker build -t hindsight-cp --build-arg INCLUDE_API=false .         # 仅控制面板
+#   docker build -t hindsight --build-arg PRELOAD_ML_MODELS=false .      # 跳过模型预下载
+#   docker build -t hindsight --build-arg INCLUDE_LOCAL_MODELS=false .   # 跳过本地 ML 依赖（使用外部提供商时）
 #   docker build --build-arg EMBEDDING_MODEL=BAAI/bge-m3 \
-#                --build-arg RERANKER_MODEL=BAAI/bge-reranker-v2-m3 .    # Chinese optimized
+#                --build-arg RERANKER_MODEL=BAAI/bge-reranker-v2-m3 .    # 中文优化版
 
 ARG INCLUDE_API=true
 ARG INCLUDE_CP=true

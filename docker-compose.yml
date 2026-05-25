@@ -15,11 +15,12 @@ services:
         EMBEDDING_MODEL: "BAAI/bge-m3"
         RERANKER_MODEL: "BAAI/bge-reranker-v2-m3"
     ports:
-      - "8888:8888"   # API
-      - "9999:9999"   # Control Plane Web UI
+      - "8888:8888"   # API 服务
+      - "9999:9999"   # Web 管理界面
     volumes:
       - hindsight-pg0:/home/hindsight/.pg0
     environment:
+      # LLM 配置
       - HINDSIGHT_API_LLM_PROVIDER=${HINDSIGHT_API_LLM_PROVIDER:-openai}
       - HINDSIGHT_API_LLM_API_KEY=${HINDSIGHT_API_LLM_API_KEY:?请设置 LLM API Key}
       - HINDSIGHT_API_LLM_MODEL=${HINDSIGHT_API_LLM_MODEL:-gpt-4o-mini}
@@ -27,14 +28,14 @@ services:
       - HINDSIGHT_API_HOST=0.0.0.0
       - HINDSIGHT_API_PORT=8888
       - HINDSIGHT_API_LOG_LEVEL=info
-      # Local ML models (baked into image)
+      # 本地 ML 模型（已内嵌到镜像中）
       - HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
       - HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-m3
       - HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE=true
       - HINDSIGHT_API_RERANKER_PROVIDER=local
       - HINDSIGHT_API_RERANKER_LOCAL_MODEL=BAAI/bge-reranker-v2-m3
       - HINDSIGHT_API_RERANKER_LOCAL_TRUST_REMOTE_CODE=true
-      # Prevent runtime model downloads (use baked-in models)
+      # 禁止运行时联网下载模型（使用镜像内嵌模型）
       - HF_HUB_OFFLINE=1
       - TRANSFORMERS_OFFLINE=1
     restart: unless-stopped

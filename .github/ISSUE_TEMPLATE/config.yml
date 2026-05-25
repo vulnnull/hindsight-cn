@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Questions & Help
-    url: https://github.com/vectorize-io/hindsight/discussions/categories/q-a
-    about: Please ask questions and get help in Discussions instead of opening an issue.
-  - name: Ideas & Feedback
-    url: https://github.com/vectorize-io/hindsight/discussions/categories/ideas
-    about: Share ideas or give feedback in Discussions.
+  - name: 提问与求助
+    url: https://github.com/vulnnull/hindsight-cn/discussions
+    about: 请在 Discussions 中提问或寻求帮助，而不是直接创建 Issue。
+  - name: 功能建议与反馈
+    url: https://github.com/vulnnull/hindsight-cn/discussions
+    about: 在 Discussions 中分享你的想法或反馈。

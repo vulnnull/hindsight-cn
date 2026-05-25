@@ -1,134 +1,105 @@
-# Contributing to Hindsight
+# 贡献指南
 
-Thanks for your interest in contributing to Hindsight!
+感谢你对 Hindsight-CN 的关注！
 
-## Getting Started
+## 快速开始
 
-1. Fork and clone the repository
+1. Fork 并克隆本仓库
    ```bash
-   git clone git@github.com:vectorize-io/hindsight.git
-   cd hindsight
+   git clone https://github.com/vulnnull/hindsight-cn.git
+   cd hindsight-cn
    ```
-2. Set up your environment:
+
+2. 配置环境：
    ```bash
    cp .env.example .env
    ```
-   Edit the .env to add LLM API key and config as required
+   编辑 `.env` 文件，填入 LLM API 密钥和相关配置
 
-3. Install dependencies:
+3. 安装依赖：
    ```bash
-   # Python dependencies
+   # Python 依赖
    uv sync --directory hindsight-api/
 
-   # Node dependencies (uses npm workspaces)
+   # Node.js 依赖（使用 npm workspaces）
    npm install
    ```
 
-## Development
+## 本地开发
 
-### Running the API locally
+### 启动 API 服务
 
 ```bash
 ./scripts/dev/start-api.sh
 ```
 
-### Running the Control Plane locally
+### 启动控制面板
 
 ```bash
 ./scripts/dev/start-control-plane.sh
 ```
 
-### Running the documentation locally
+### 启动文档站
 
 ```bash
 ./scripts/dev/start-docs.sh
 ```
 
-### Running tests
+### 运行测试
 
 ```bash
 cd hindsight-api
 uv run pytest tests/
 ```
 
-### Code Style
+## 代码风格
 
-We use [Ruff](https://docs.astral.sh/ruff/) for Python linting and formatting, and ESLint/Prettier for TypeScript.
+Python 使用 [Ruff](https://docs.astral.sh/ruff/) 进行检查和格式化，TypeScript 使用 ESLint/Prettier。
 
-#### Setting up git hooks (recommended)
-
-Set up git hooks to automatically lint and format code before each commit:
+### 配置 Git Hooks（推荐）
 
 ```bash
 ./scripts/setup-hooks.sh
 ```
 
-This configures git to use the hooks in `.githooks/`, which run all scripts in `scripts/hooks/` on commit. The lint hook runs in parallel:
-- **Python**: `ruff check --fix`, `ruff format`, `ty check`
-- **TypeScript**: `eslint --fix`, `prettier`
+这会配置 Git 在每次提交前自动运行 `.githooks/` 中的钩子脚本。Lint 钩子并行执行：
+- **Python**：`ruff check --fix`、`ruff format`、`ty check`
+- **TypeScript**：`eslint --fix`、`prettier`
 
-#### Manual linting and formatting
+### 手动检查和格式化
 
 ```bash
-# Run all lints (same as pre-commit)
+# 运行所有 lint（与 pre-commit 相同）
 ./scripts/hooks/lint.sh
 
-# Or run individually for Python:
+# 或单独运行 Python 检查：
 cd hindsight-api
-uv run ruff check --fix .   # Lint and auto-fix
-uv run ruff format .        # Format code
-uv run ty check hindsight_api  # Type check
+uv run ruff check --fix .   # 检查并自动修复
+uv run ruff format .        # 格式化代码
+uv run ty check hindsight_api  # 类型检查
 ```
 
-#### Style guidelines
+### 风格准则
 
-- Use Python type hints
-- Follow existing code patterns
-- Keep functions focused and well-named
+- 使用 Python 类型注解
+- 遵循现有代码模式
+- 保持函数职责单一、命名清晰
 
-## Pull Requests
+## 提交 Pull Request
 
-1. Create a feature branch from `main`
-2. Make your changes
-3. Run tests to ensure nothing breaks
-4. Submit a PR with a clear description of changes
+1. 从 `main` 创建功能分支
+2. 进行修改
+3. 运行测试确保无误
+4. 提交 PR 并附上清晰的变更描述
 
-## Release Process
+## 报告问题
 
-The project uses `scripts/release.sh` for creating releases. This script automates the entire release workflow:
+在 GitHub 上提交 Issue，包含以下信息：
+- 问题描述
+- 复现步骤
+- 期望行为与实际行为
+- 环境信息（操作系统、Python 版本等）
 
-1. Bumps version in all components (API, clients, CLI, control plane, Helm)
-2. **Regenerates OpenAPI spec and client SDKs** (Python, TypeScript, Rust)
-3. Updates documentation versioning
-4. Creates a commit and git tag
-5. Pushes to GitHub (triggers CI/CD to publish packages)
+## 疑问？
 
-### Usage
-
-```bash
-./scripts/release.sh <version>
-```
-
-**Example:**
-```bash
-./scripts/release.sh 0.5.0
-```
-
-### Important for Developers
-
-- During development, version bumps in `__init__.py` do NOT require client regeneration
-- Clients are only regenerated during releases
-- Do not manually run `./scripts/generate-clients.sh` unless testing generation changes
-- Client version comments will reflect the API version from the latest release
-
-## Reporting Issues
-
-Open an issue on GitHub with:
-- Clear description of the problem
-- Steps to reproduce
-- Expected vs actual behavior
-- Environment details (OS, Python version)
-
-## Questions?
-
-Open a discussion on GitHub or reach out to the maintainers.
+在 GitHub 上发起 Discussion 或联系维护者。

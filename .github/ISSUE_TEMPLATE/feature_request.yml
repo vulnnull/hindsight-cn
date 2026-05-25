@@ -1,82 +1,82 @@
-name: Feature Request
-description: Suggest a new feature or enhancement
+name: 功能请求
+description: 建议新功能或改进
 labels: ["enhancement", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting a feature! Please describe what you'd like to see added.
+        感谢你的建议！请描述你希望添加的功能。
 
   - type: textarea
     id: use-case
     attributes:
-      label: Use Case
-      description: Describe your specific use case. What are you building? What's your goal?
+      label: 使用场景
+      description: 描述你的具体使用场景，你在构建什么？目标是什么？
       placeholder: |
-        I'm building an AI agent that needs to...
-        My application handles...
+        我在构建一个 AI 智能体，需要...
+        我的应用需要处理...
     validations:
       required: true
 
   - type: textarea
     id: problem
     attributes:
-      label: Problem Statement
-      description: What problem are you facing? What's missing or difficult today?
-      placeholder: Currently I have to... which causes...
+      label: 当前痛点
+      description: 你面临什么问题？目前缺少什么或哪里不好用？
+      placeholder: 目前我不得不...这导致了...
     validations:
       required: true
 
   - type: textarea
     id: benefit
     attributes:
-      label: How This Feature Would Help
-      description: Explain how this feature would improve your workflow or solve your problem
-      placeholder: With this feature, I would be able to...
+      label: 功能价值
+      description: 这个功能如何改善你的工作流或解决问题？
+      placeholder: 有了这个功能，我就可以...
     validations:
       required: true
 
   - type: textarea
     id: solution
     attributes:
-      label: Proposed Solution
-      description: Describe your ideal solution (optional - we may have ideas too!)
-      placeholder: It would be great if Hindsight could...
+      label: 建议方案
+      description: 描述你理想的解决方案（可选，我们也许有其他想法！）
+      placeholder: 如果 Hindsight 能...就太好了
     validations:
       required: false
 
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives Considered
-      description: Have you considered any alternative solutions or workarounds?
+      label: 考虑过的替代方案
+      description: 你是否考虑过其他替代方案或临时解决方案？
     validations:
       required: false
 
   - type: dropdown
     id: priority
     attributes:
-      label: Priority
-      description: How important is this feature to you?
+      label: 优先级
+      description: 这个功能对你有多重要？
       options:
-        - Nice to have
-        - Important - affects my workflow
-        - Critical - blocking my use case
+        - 有了更好
+        - 重要 — 影响工作流
+        - 关键 — 阻塞使用
     validations:
       required: true
 
   - type: textarea
     id: additional
     attributes:
-      label: Additional Context
-      description: Any other context, mockups, or examples?
+      label: 补充信息
+      description: 还有其他上下文、截图或示例吗？
     validations:
       required: false
 
   - type: checkboxes
     id: checklist
     attributes:
-      label: Checklist
+      label: 检查清单
       options:
-        - label: I would be willing to contribute this feature
+        - label: 我愿意贡献代码实现此功能
           required: false

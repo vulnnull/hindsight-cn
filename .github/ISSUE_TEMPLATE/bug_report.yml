@@ -1,71 +1,73 @@
-name: Bug Report
-description: Report a bug or unexpected behavior
+name: Bug 报告
+description: 报告 Bug 或异常行为
 labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report a bug! Please fill out the sections below.
+        感谢你花时间报告 Bug！请填写以下信息。
 
   - type: textarea
     id: description
     attributes:
-      label: Bug Description
-      description: A clear and concise description of the bug
-      placeholder: What happened?
+      label: Bug 描述
+      description: 清晰简洁地描述遇到的问题
+      placeholder: 发生了什么？
     validations:
       required: true
 
   - type: textarea
     id: reproduction
     attributes:
-      label: Steps to Reproduce
-      description: Steps to reproduce the behavior
+      label: 复现步骤
+      description: 描述如何复现此问题
       placeholder: |
-        1. Configure '...'
-        2. Call '...'
-        3. See error
+        1. 配置 '...'
+        2. 调用 '...'
+        3. 出现错误
     validations:
       required: true
 
   - type: textarea
     id: expected
     attributes:
-      label: Expected Behavior
-      description: What did you expect to happen?
+      label: 期望行为
+      description: 你期望发生什么？
     validations:
       required: true
 
   - type: textarea
     id: actual
     attributes:
-      label: Actual Behavior
-      description: What actually happened?
+      label: 实际行为
+      description: 实际发生了什么？
     validations:
       required: true
 
   - type: input
     id: version
     attributes:
-      label: Version
-      description: What version are you using?
-      placeholder: e.g., 0.1.0 or commit hash
+      label: 版本号
+      description: 你使用的是哪个版本？
+      placeholder: 例如 0.6.2 或 commit hash
     validations:
       required: false
 
   - type: dropdown
     id: llm-provider
     attributes:
-      label: LLM Provider
-      description: Which LLM provider are you using?
+      label: LLM 提供商
+      description: 你使用的是哪个 LLM 提供商？
       options:
         - OpenAI
         - Anthropic
         - Gemini
+        - MiniMax
+        - DeepSeek
+        - 智谱 AI
         - Groq
         - Ollama
         - LM Studio
-        - Other
+        - 其他
     validations:
       required: false
-
