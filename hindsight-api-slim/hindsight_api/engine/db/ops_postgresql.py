@@ -141,9 +141,9 @@ class PostgreSQLOps(DataAccessOps):
                 RETURNING id
             """
         else:
-            # pg_textsearch and pgroonga: search_vector is a dummy TEXT column;
-            # the actual full-text index operates on the base text columns
-            # directly, so we don't populate search_vector at insert time.
+            # pg_textsearch, pgroonga, and pg_search: search_vector is a dummy
+            # TEXT column; the actual full-text index operates on the base text
+            # columns directly, so we don't populate search_vector at insert time.
             query = f"""
                 WITH input_data AS (
                     SELECT * FROM unnest(

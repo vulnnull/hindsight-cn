@@ -566,13 +566,14 @@ DEFAULT_RERANKER_GOOGLE_MODEL = "semantic-ranker-default-004"
 # Vector extension (pgvector, vchord, pgvectorscale, or AlloyDB ScaNN)
 DEFAULT_VECTOR_EXTENSION = "pgvector"  # Options: "pgvector", "vchord", "pgvectorscale", "scann"
 
-# Text search extension (native PostgreSQL, vchord BM25, Timescale pg_textsearch, or pgroonga)
-DEFAULT_TEXT_SEARCH_EXTENSION = "native"  # Options: "native", "vchord", "pg_textsearch", "pgroonga"
+# Text search extension (native PostgreSQL, vchord BM25, Timescale pg_textsearch,
+# pgroonga, or ParadeDB pg_search)
+DEFAULT_TEXT_SEARCH_EXTENSION = "native"  # Options: "native", "vchord", "pg_textsearch", "pgroonga", "pg_search"
 
 # PostgreSQL text search dictionary used by the native tsvector backend. Only
 # affects text_search_extension == "native"; other backends use their own
 # tokenizers (vchord: llmlingua2, pg_textsearch: hardcoded english,
-# pgroonga: TokenBigram polyglot).
+# pgroonga: TokenBigram polyglot, pg_search: per-field Tantivy tokenizer).
 DEFAULT_TEXT_SEARCH_EXTENSION_NATIVE_LANGUAGE = "english"
 
 # LiteLLM defaults
@@ -907,10 +908,11 @@ class HindsightConfig:
     migration_database_url: str | None
     database_schema: str
     vector_extension: str  # "pgvector", "vchord", "pgvectorscale", or "scann"
-    text_search_extension: str  # "native", "vchord", "pg_textsearch", or "pgroonga"
+    text_search_extension: str  # "native", "vchord", "pg_textsearch", "pgroonga", or "pg_search"
     # PostgreSQL text search dictionary for the "native" backend (ignored by
     # other backends). Only the "native" backend reads this field; pgroonga
-    # uses TokenBigram, vchord uses llmlingua2, pg_textsearch hardcodes english.
+    # uses TokenBigram, vchord uses llmlingua2, pg_textsearch hardcodes english,
+    # pg_search uses Tantivy per-field tokenizers.
     text_search_extension_native_language: str
     # When set, every LLM-generated artifact (retain facts, consolidation
     # observations, reflect responses) is forced into this language regardless
@@ -1381,7 +1383,7 @@ class HindsightConfig:
         validate_extension(self.vector_extension)
 
         # Validate text_search_extension
-        valid_text_search = ("native", "vchord", "pg_textsearch", "pgroonga")
+        valid_text_search = ("native", "vchord", "pg_textsearch", "pgroonga", "pg_search")
         if self.text_search_extension not in valid_text_search:
             raise ValueError(
                 f"Invalid text_search_extension: {self.text_search_extension}. Must be one of: {', '.join(valid_text_search)}"
