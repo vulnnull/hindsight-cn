@@ -208,6 +208,9 @@ from .search.reranking import CrossEncoderReranker, apply_combined_scoring
 from .search.tags import TagGroup, TagsMatch, build_tags_where_clause
 from .task_backend import TaskBackend
 
+RetainOutboxCallback = Callable[[asyncpg.Connection], Awaitable[None]]
+RetainOutboxCallbackFactory = Callable[[list[RetainContentDict]], RetainOutboxCallback | None]
+
 
 def _is_oracledb_connection_error(e: Exception) -> bool:
     """Check if an exception is an Oracle connection/interface error."""
@@ -906,9 +909,8 @@ class MemoryEngine(MemoryEngineInterface):
             request_context=context,
             operation_id=operation_id,
             strategy=strategy,
-            outbox_callback=self._build_retain_outbox_callback(
+            outbox_callback_factory=self._build_retain_outbox_callback_factory(
                 bank_id=bank_id,
-                contents=contents,
                 operation_id=operation_id,
                 schema=_current_schema.get(),
             ),
@@ -1426,10 +1428,10 @@ class MemoryEngine(MemoryEngineInterface):
     def _build_retain_outbox_callback(
         self,
         bank_id: str,
-        contents: list[dict],
+        contents: list[RetainContentDict],
         operation_id: str | None,
         schema: str | None = None,
-    ) -> "Callable[[asyncpg.Connection], Awaitable[None]] | None":
+    ) -> RetainOutboxCallback | None:
         """Build a transactional outbox callback for retain.completed webhook events.
 
         Returns a coroutine function that queues one webhook delivery row per content
@@ -1473,6 +1475,31 @@ class MemoryEngine(MemoryEngineInterface):
                 await webhook_manager.fire_event_with_conn(event, conn, schema=resolved_schema)
 
         return _callback
+
+    def _build_retain_outbox_callback_factory(
+        self,
+        bank_id: str,
+        operation_id: str | None,
+        schema: str | None = None,
+    ) -> RetainOutboxCallbackFactory:
+        """Build retain outbox callbacks for grouped retain batches.
+
+        The factory captures one operation_id so per-document webhook events from
+        the same logical retain operation keep a shared event operation_id.
+        """
+        op_id = operation_id or uuid.uuid4().hex
+
+        def _factory(
+            callback_contents: list[RetainContentDict],
+        ) -> RetainOutboxCallback | None:
+            return self._build_retain_outbox_callback(
+                bank_id=bank_id,
+                contents=callback_contents,
+                operation_id=op_id,
+                schema=schema,
+            )
+
+        return _factory
 
     async def _update_webhook_delivery_metadata(
         self, operation_id: str, status_code: int | None, response_body: str | None
@@ -2400,7 +2427,8 @@ class MemoryEngine(MemoryEngineInterface):
         document_tags: list[str] | None = None,
         return_usage: bool = False,
         operation_id: str | None = None,
-        outbox_callback: "Callable[[asyncpg.Connection], Awaitable[None]] | None" = None,
+        outbox_callback: RetainOutboxCallback | None = None,
+        outbox_callback_factory: RetainOutboxCallbackFactory | None = None,
         strategy: str | None = None,
     ):
         """
@@ -2488,6 +2516,9 @@ class MemoryEngine(MemoryEngineInterface):
                 if "document_id" not in item:
                     item["document_id"] = document_id
 
+        if outbox_callback is None and outbox_callback_factory is not None:
+            outbox_callback = outbox_callback_factory(contents)
+
         # Validate no duplicate document_ids in the batch
         # Having duplicate document_ids causes race conditions in document upserts during parallel processing
         doc_ids = [item.get("document_id") for item in contents if item.get("document_id")]
@@ -2574,6 +2605,7 @@ class MemoryEngine(MemoryEngineInterface):
                     # Outbox callback runs inside the last sub-batch's transaction so the
                     # webhook delivery row is committed atomically with the final retain data.
                     outbox_callback=outbox_callback if i == len(sub_batches) else None,
+                    outbox_callback_factory=outbox_callback_factory if i == len(sub_batches) else None,
                 )
                 # sub_results aligns 1:1 with sub_batch items; map each
                 # back to its source input via origin_indices so callers
@@ -2605,6 +2637,7 @@ class MemoryEngine(MemoryEngineInterface):
                 operation_id=operation_id,
                 strategy=strategy,
                 outbox_callback=outbox_callback,
+                outbox_callback_factory=outbox_callback_factory,
             )
 
         # Call post-operation hook if validator is configured
@@ -2654,7 +2687,8 @@ class MemoryEngine(MemoryEngineInterface):
         fact_type_override: str | None = None,
         document_tags: list[str] | None = None,
         operation_id: str | None = None,
-        outbox_callback: "Callable[[asyncpg.Connection], Awaitable[None]] | None" = None,
+        outbox_callback: RetainOutboxCallback | None = None,
+        outbox_callback_factory: RetainOutboxCallbackFactory | None = None,
         strategy: str | None = None,
     ) -> tuple[list[list[str]], "TokenUsage", int | None]:
         """
@@ -2717,6 +2751,7 @@ class MemoryEngine(MemoryEngineInterface):
                 operation_id=operation_id,
                 schema=_current_schema.get(),
                 outbox_callback=outbox_callback,
+                outbox_callback_factory=outbox_callback_factory,
                 db_semaphore=self._put_semaphore,
             )
 
