@@ -140,37 +140,19 @@ If you need to switch from one extension to another:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` | Text search backend: `native`, `vchord`, or `pg_textsearch` | `native` |
+| `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` | Text search backend: `native`, `vchord`, `pg_textsearch`, or `pgroonga` | `native` |
+| `HINDSIGHT_API_TEXT_SEARCH_EXTENSION_NATIVE_LANGUAGE` | PostgreSQL text search dictionary used by the `native` backend (e.g. `english`, `french`, `simple`, `zhparser`) | `english` |
+| `HINDSIGHT_API_LLM_OUTPUT_LANGUAGE` | When set, forces every LLM-generated artifact (retain facts, consolidation observations, reflect responses) into this language. Free-form (e.g. `Spanish`, `Japanese`). | unset |
 
-Hindsight supports three text search backends for BM25 keyword retrieval:
-- **native**: PostgreSQL's built-in full-text search (`tsvector` + GIN indexes)
-- **vchord**: VectorChord BM25 (`bm25vector` + BM25 indexes) - requires `vchord_bm25` extension
-- **pg_textsearch**: Timescale BM25 (text columns + BM25 indexes) - requires `pg_textsearch` extension
+Hindsight supports four backends for BM25 keyword retrieval:
+- **native** — PostgreSQL's built-in full-text search (`tsvector` + GIN). Language configurable.
+- **vchord** — VectorChord BM25 (uses the `llmlingua2` multilingual tokenizer).
+- **pg_textsearch** — Timescale's pg_textsearch extension. English-only.
+- **pgroonga** — pgroonga full-text search. Multilingual / CJK out of the box.
 
-**When to use native:**
-- Standard PostgreSQL deployment (no extra extensions)
-- Simpler setup and wider compatibility
-- Works well for most use cases
+To switch backends: set `HINDSIGHT_API_TEXT_SEARCH_EXTENSION`. With existing data, you'll get an error and migration instructions; with an empty database the columns/indexes are recreated automatically on startup.
 
-**When to use vchord:**
-- Already using vchord for vector search (good integration)
-- Want better BM25 ranking performance
-- Need advanced tokenization (uses `llmlingua2` tokenizer)
-
-**When to use pg_textsearch:**
-- Want industry-standard BM25 ranking with better relevance than native PostgreSQL
-- Need efficient top-K queries with Block-Max WAND optimization
-- Prefer lower memory footprint compared to vchord
-- Already using Timescale or have `pg_textsearch` available
-
-**Switching backends:**
-
-To switch between backends:
-1. Set `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` to your desired backend (`native`, `vchord`, or `pg_textsearch`)
-2. If your database has existing data, you'll get an error with migration instructions
-3. For empty databases, the columns/indexes will be automatically recreated on startup
-
-**Note:** VectorChord uses the `llmlingua2` tokenizer for multilingual support, while native and pg_textsearch use PostgreSQL's English tokenizer.
+For non-English banks (especially CJK) and the language/extraction-language tradeoffs, see the [Multilingual Support](./multilingual) page.
 
 ### LLM Provider
 

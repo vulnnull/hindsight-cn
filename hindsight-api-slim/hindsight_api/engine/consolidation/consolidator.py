@@ -1299,7 +1299,11 @@ async def _consolidate_batch_with_llm(
                 f"(out of {max_observations_per_scope}). Prefer UPDATE over CREATE when possible."
             )
 
-    prompt_template = build_batch_consolidation_prompt(config.observations_mission, observation_capacity_note)
+    prompt_template = build_batch_consolidation_prompt(
+        config.observations_mission,
+        observation_capacity_note,
+        llm_output_language=getattr(config, "llm_output_language", None),
+    )
     prompt = prompt_template.format(
         facts_text=facts_lines,
         observations_text=observations_text,

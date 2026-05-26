@@ -6396,6 +6396,7 @@ class MemoryEngine(MemoryEngineInterface):
                         include_recall=include_recall,
                         budget=effective_budget,
                         max_context_tokens=max_context_tokens,
+                        llm_output_language=getattr(resolved_reflect_config, "llm_output_language", None),
                     ),
                     timeout=wall_timeout,
                 )
