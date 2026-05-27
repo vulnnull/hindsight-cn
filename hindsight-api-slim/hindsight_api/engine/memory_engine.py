@@ -1578,10 +1578,17 @@ class MemoryEngine(MemoryEngineInterface):
                             message=str(e),
                         )
 
-                    # Retryable: use RetryTaskAt if under the retry limit, else re-raise (poller marks failed)
+                    # Retryable: use RetryTaskAt if under the retry limit, else re-raise (poller marks failed).
+                    # Retry count and backoff come from config (HINDSIGHT_API_WORKER_MAX_RETRIES and
+                    # HINDSIGHT_API_WORKER_TASK_RETRY_BACKOFF_SECONDS). Defaults of 3 x 60s give a
+                    # 4-minute total window; operators expecting a longer provider outage can raise them.
+                    config = get_config()
                     retry_count = task_dict.get("_retry_count", 0)
-                    if retry_count < 3:
-                        raise RetryTaskAt(retry_at=datetime.now(UTC) + timedelta(seconds=60), message=str(e))
+                    if retry_count < config.worker_max_retries:
+                        raise RetryTaskAt(
+                            retry_at=datetime.now(UTC) + timedelta(seconds=config.worker_task_retry_backoff_seconds),
+                            message=str(e),
+                        )
                     raise
 
     async def _fire_consolidation_webhook(
