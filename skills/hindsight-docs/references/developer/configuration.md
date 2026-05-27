@@ -1328,6 +1328,7 @@ Configuration for background task processing. By default, the API processes task
 | `HINDSIGHT_API_WORKER_RETAIN_MAX_SLOTS` | Reserved slots for retain tasks within `WORKER_MAX_SLOTS` | `0` |
 | `HINDSIGHT_API_WORKER_FILE_CONVERT_RETAIN_MAX_SLOTS` | Reserved slots for file_convert_retain tasks within `WORKER_MAX_SLOTS` | `0` |
 | `HINDSIGHT_API_WORKER_REFRESH_MENTAL_MODEL_MAX_SLOTS` | Reserved slots for refresh_mental_model tasks within `WORKER_MAX_SLOTS` | `0` |
+| `HINDSIGHT_API_WORKER_GRAPH_MAINTENANCE_MAX_SLOTS` | Reserved slots for graph_maintenance tasks within `WORKER_MAX_SLOTS` | `0` |
 
 :::note Slot reservations and shared pool
 Per-operation `*_MAX_SLOTS` values are **reservations within** `WORKER_MAX_SLOTS`, not additive pools. The sum of all reservations must not exceed `WORKER_MAX_SLOTS` (startup raises `ValueError` otherwise). Remaining capacity (`WORKER_MAX_SLOTS - sum of reservations`) forms a **shared pool** usable by any operation type on a first-come basis; operation types whose reserved capacity is full can also overflow into the shared pool. Consolidation's bank-serialization constraint (no two consolidation tasks for the same bank concurrently) is preserved regardless of which pool claims the slot.

@@ -1,3 +1,6 @@
+---
+sidebar_position: 9
+---
 
 # Operations
 
@@ -5,11 +8,20 @@ Hindsight runs several maintenance and ingestion tasks asynchronously instead of
 
 This page explains each operation type, when it fires, and how to inspect or manage it.
 
-{/* Import raw source files */}
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import CodeSnippet from '@site/src/components/CodeSnippet';
 
-> **💡 Prerequisites**
-> 
+{/* Import raw source files */}
+import operationsPy from '!!raw-loader!@site/examples/api/operations.py';
+import operationsMjs from '!!raw-loader!@site/examples/api/operations.mjs';
+import operationsSh from '!!raw-loader!@site/examples/api/operations.sh';
+import operationsGo from '!!raw-loader!@site/examples/api/operations.go';
+
+:::tip Prerequisites
 Make sure you've completed the [Quick Start](./quickstart) and understand [how retain works](./retain).
+:::
+
 ## How operations work
 
 When an API call needs background work, the request handler writes a row to the `async_operations` table with `status=pending` and returns immediately. A worker (running either in-process inside the API by default, or as a dedicated service — see [Services - Worker Service](../services#worker-service)) polls the table, claims pending rows, executes the corresponding handler, and marks the row `completed` or `failed`.
@@ -104,215 +116,96 @@ Query parameters:
 | `offset` | Pagination offset. |
 | `exclude_parents` | Exclude parent batch operations from results (large `retain_batch` calls create one parent + N children). |
 
-### Python
-
-```python
-# Section 'operations-list' not found in api/operations.py
-```
-
-### Node.js
-
-```javascript
-// List recent operations for a bank (default: 20 most recent).
-const { data: recent } = await sdk.listOperations({
-    client: apiClient,
-    path: { bank_id: 'my-bank' },
-});
-for (const op of recent.operations) {
-    console.log(op.id, op.task_type, op.status);
-}
-
-// Filter by status and type.
-const { data: pendingRecompute } = await sdk.listOperations({
-    client: apiClient,
-    path: { bank_id: 'my-bank' },
-    query: { status: 'pending', type: 'graph_maintenance' },
-});
-
-// Hide retain_batch parent rows (show only individual child retain jobs).
-const { data: flat } = await sdk.listOperations({
-    client: apiClient,
-    path: { bank_id: 'my-bank' },
-    query: { exclude_parents: true },
-});
-```
-
-### CLI
-
-```bash
-hindsight operation list my-bank
-```
-
-### Go
-
-```go
-# Section 'operations-list' not found in api/operations.go
-```
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={operationsPy} section="operations-list" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={operationsMjs} section="operations-list" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={operationsSh} section="operations-list" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={operationsGo} section="operations-list" language="go" />
+</TabItem>
+</Tabs>
 
 `items_count` is operation-specific — non-zero only for retain-shaped operations (it counts content items in the submission).
 
 ### Get operation status
 
-### Python
-
-```python
-# Section 'operations-get' not found in api/operations.py
-```
-
-### Node.js
-
-```javascript
-const { data: status } = await sdk.getOperationStatus({
-    client: apiClient,
-    path: { bank_id: 'my-bank', operation_id: '550e8400-e29b-41d4-a716-446655440000' },
-});
-console.log(status.status, status.error_message);
-
-// Include the submission payload (can be large for retain batches).
-const { data: detailed } = await sdk.getOperationStatus({
-    client: apiClient,
-    path: { bank_id: 'my-bank', operation_id: '550e8400-e29b-41d4-a716-446655440000' },
-    query: { include_payload: true },
-});
-```
-
-### CLI
-
-```bash
-hindsight operation get my-bank "$OPERATION_ID"
-```
-
-### Go
-
-```go
-# Section 'operations-get' not found in api/operations.go
-```
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={operationsPy} section="operations-get" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={operationsMjs} section="operations-get" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={operationsSh} section="operations-get" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={operationsGo} section="operations-get" language="go" />
+</TabItem>
+</Tabs>
 
 ### Cancel a pending operation
 
 Returns `409` if the operation is already in `processing`, `completed`, or `failed` state.
 
-### Python
-
-```python
-# Section 'operations-cancel' not found in api/operations.py
-```
-
-### Node.js
-
-```javascript
-// Cancel a pending operation before a worker claims it.
-// Returns 409 if the operation is already processing/completed/failed.
-await sdk.cancelOperation({
-    client: apiClient,
-    path: { bank_id: 'my-bank', operation_id: '550e8400-e29b-41d4-a716-446655440000' },
-});
-```
-
-### CLI
-
-```bash
-hindsight operation cancel my-bank "$OPERATION_ID"
-```
-
-### Go
-
-```go
-# Section 'operations-cancel' not found in api/operations.go
-```
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={operationsPy} section="operations-cancel" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={operationsMjs} section="operations-cancel" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={operationsSh} section="operations-cancel" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={operationsGo} section="operations-cancel" language="go" />
+</TabItem>
+</Tabs>
 
 ### Retry a failed operation
 
 The row's status resets to `pending` and the worker picks it up again. Returns `409` if the operation isn't in `failed` or `cancelled` state.
 
-### Python
-
-```python
-# Section 'operations-retry' not found in api/operations.py
-```
-
-### Node.js
-
-```javascript
-// Re-queue a failed (or cancelled) operation.
-// Returns 409 if the operation isn't in failed/cancelled state.
-await sdk.retryOperation({
-    client: apiClient,
-    path: { bank_id: 'my-bank', operation_id: '550e8400-e29b-41d4-a716-446655440000' },
-});
-```
-
-### CLI
-
-```bash
-hindsight operation retry my-bank "$OPERATION_ID"
-```
-
-### Go
-
-```go
-# Section 'operations-retry' not found in api/operations.go
-```
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={operationsPy} section="operations-retry" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={operationsMjs} section="operations-retry" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={operationsSh} section="operations-retry" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={operationsGo} section="operations-retry" language="go" />
+</TabItem>
+</Tabs>
 
 ## Async retain example
 
 Submit a batch asynchronously and poll until the operation completes:
 
-### Python
-
-```python
-# Section 'operations-async-retain' not found in api/operations.py
-```
-
-### Node.js
-
-```javascript
-// Submit a large batch asynchronously — the call returns immediately with an
-// operation_id you can poll.
-const submission = await client.retainBatch('my-bank', [
-    { content: 'Alice joined Google in 2023' },
-    { content: 'Bob prefers Python over JavaScript' },
-], { async: true });
-const operationId = submission.operation_id;
-
-while (true) {
-    const { data: s } = await sdk.getOperationStatus({
-        client: apiClient,
-        path: { bank_id: 'my-bank', operation_id: operationId },
-    });
-    if (['completed', 'failed', 'cancelled'].includes(s.status)) {
-        console.log(`finished: ${s.status}`);
-        break;
-    }
-    await new Promise((r) => setTimeout(r, 2000));
-}
-```
-
-### CLI
-
-```bash
-# Submit an async retain and capture the operation_id from the JSON response.
-OPERATION_ID=$(
-  hindsight memory retain my-bank "Alice joined Google in 2023" --async -o json \
-    | jq -r '.operation_id'
-)
-
-# Poll until the worker finishes — completed/failed/cancelled are all terminal.
-while true; do
-  STATUS=$(hindsight operation get my-bank "$OPERATION_ID" -o json | jq -r '.status')
-  if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "cancelled" ]; then
-    echo "finished: $STATUS"
-    break
-  fi
-  sleep 2
-done
-```
-
-### Go
-
-```go
-# Section 'operations-async-retain' not found in api/operations.go
-```
+<Tabs>
+<TabItem value="python" label="Python">
+<CodeSnippet code={operationsPy} section="operations-async-retain" language="python" />
+</TabItem>
+<TabItem value="node" label="Node.js">
+<CodeSnippet code={operationsMjs} section="operations-async-retain" language="javascript" />
+</TabItem>
+<TabItem value="cli" label="CLI">
+<CodeSnippet code={operationsSh} section="operations-async-retain" language="bash" />
+</TabItem>
+<TabItem value="go" label="Go">
+<CodeSnippet code={operationsGo} section="operations-async-retain" language="go" />
+</TabItem>
+</Tabs>
 
 ## Worker tuning
 
