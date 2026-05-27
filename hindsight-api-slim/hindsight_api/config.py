@@ -566,7 +566,8 @@ DEFAULT_RERANKER_OPENROUTER_MODEL = "cohere/rerank-v3.5"
 
 # ZeroEntropy defaults
 DEFAULT_EMBEDDINGS_ZEROENTROPY_MODEL = "zembed-1"
-DEFAULT_EMBEDDINGS_ZEROENTROPY_BASE_URL = "https://api.zeroentropy.dev"
+# Shared between embeddings (zembed-1) and reranker (zerank-*) — the host is the same.
+DEFAULT_ZEROENTROPY_BASE_URL = "https://api.zeroentropy.dev"
 # ZeroEntropy's API default is 2560, but Hindsight defaults to 1280 so the
 # provider works with pgvector HNSW's 2000-dimension index limit out of the box.
 DEFAULT_EMBEDDINGS_ZEROENTROPY_DIMENSIONS = 1280
@@ -1261,7 +1262,7 @@ class HindsightConfig:
     embeddings_openai_dimensions: int | None = None
     embeddings_zeroentropy_api_key: str | None = None
     embeddings_zeroentropy_model: str = DEFAULT_EMBEDDINGS_ZEROENTROPY_MODEL
-    embeddings_zeroentropy_base_url: str = DEFAULT_EMBEDDINGS_ZEROENTROPY_BASE_URL
+    embeddings_zeroentropy_base_url: str = DEFAULT_ZEROENTROPY_BASE_URL
     embeddings_zeroentropy_dimensions: int = DEFAULT_EMBEDDINGS_ZEROENTROPY_DIMENSIONS
     embeddings_zeroentropy_encoding_format: str = DEFAULT_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT
     embeddings_zeroentropy_batch_size: int = DEFAULT_EMBEDDINGS_ZEROENTROPY_BATCH_SIZE
@@ -1468,11 +1469,6 @@ class HindsightConfig:
                 f"provider: {self.retain_llm_provider or self.llm_provider})"
             )
 
-        if self.embeddings_provider.lower() == "zeroentropy":
-            valid_dimensions = frozenset({2560, 1280, 640, 320, 160, 80, 40})
-            if self.embeddings_zeroentropy_dimensions not in valid_dimensions:
-                values = ", ".join(str(dim) for dim in sorted(valid_dimensions, reverse=True))
-                raise ValueError(f"{ENV_EMBEDDINGS_ZEROENTROPY_DIMENSIONS} must be one of {values}")
         # Warn if local ML dependencies are missing when configured.
         # Don't hard-fail here — the actual ImportError fires at model init time
         # with a clear message. This early warning catches it before startup proceeds.
@@ -1675,7 +1671,7 @@ class HindsightConfig:
                 ENV_EMBEDDINGS_ZEROENTROPY_MODEL, DEFAULT_EMBEDDINGS_ZEROENTROPY_MODEL
             ),
             embeddings_zeroentropy_base_url=os.getenv(
-                ENV_EMBEDDINGS_ZEROENTROPY_BASE_URL, DEFAULT_EMBEDDINGS_ZEROENTROPY_BASE_URL
+                ENV_EMBEDDINGS_ZEROENTROPY_BASE_URL, DEFAULT_ZEROENTROPY_BASE_URL
             ),
             embeddings_zeroentropy_dimensions=_parse_positive_int(
                 ENV_EMBEDDINGS_ZEROENTROPY_DIMENSIONS,
@@ -1684,7 +1680,7 @@ class HindsightConfig:
             ),
             embeddings_zeroentropy_encoding_format=_parse_optional_choice(
                 ENV_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT,
-                os.getenv(ENV_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT) or DEFAULT_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT,
+                os.getenv(ENV_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT),
                 frozenset({"float", "base64"}),
             )
             or DEFAULT_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT,
