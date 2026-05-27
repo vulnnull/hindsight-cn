@@ -466,17 +466,17 @@ two slots that retain/consolidation cannot consume.
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_DIMENSIONS` | Optional requested output dimensions for OpenAI `text-embedding-3` models (e.g., `384` to match an existing pgvector schema) | - |
 | `HINDSIGHT_API_EMBEDDINGS_OPENROUTER_API_KEY` | OpenRouter API key for embeddings (falls back to `HINDSIGHT_API_OPENROUTER_API_KEY`, then `HINDSIGHT_API_LLM_API_KEY`) | - |
 | `HINDSIGHT_API_EMBEDDINGS_OPENROUTER_MODEL` | OpenRouter embedding model | `perplexity/pplx-embed-v1-0.6b` |
+| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_API_KEY` | ZeroEntropy API key for embeddings | - |
+| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_MODEL` | ZeroEntropy embedding model | `zembed-1` |
+| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_BASE_URL` | Custom base URL for ZeroEntropy-compatible API | `https://api.zeroentropy.dev` |
+| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_DIMENSIONS` | Output dimensions for `zembed-1`. Supported values: `2560`, `1280`, `640`, `320`, `160`, `80`, `40` | `1280` |
+| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT` | Response encoding: `float` or `base64`. Hindsight decodes either format to float vectors before storage. | `float` |
+| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_BATCH_SIZE` | Max inputs per ZeroEntropy embed request | `100` |
+| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_LATENCY` | Optional latency mode: `fast` or `slow`. Leave unset to use ZeroEntropy's default routing. | - |
 | `HINDSIGHT_API_EMBEDDINGS_COHERE_API_KEY` | Cohere API key for embeddings | - |
 | `HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL` | Cohere embedding model | `embed-english-v3.0` |
 | `HINDSIGHT_API_EMBEDDINGS_COHERE_BASE_URL` | Custom base URL for Cohere-compatible API (e.g., Azure-hosted) | - |
 | `HINDSIGHT_API_EMBEDDINGS_COHERE_OUTPUT_DIMENSIONS` | Output embedding dimensions for Cohere (e.g., `256`, `512`, `1024`). When set, overrides the model's default dimension. | - |
-| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_API_KEY` | ZeroEntropy API key for zembed-1 embeddings | - |
-| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_MODEL` | ZeroEntropy embedding model | `zembed-1` |
-| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_BASE_URL` | ZeroEntropy API base URL. Use `https://eu-api.zeroentropy.dev` for EU routing. | `https://api.zeroentropy.dev` |
-| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_DIMENSIONS` | zembed-1 output dimensions: `2560`, `1280`, `640`, `320`, `160`, `80`, or `40`. Hindsight defaults to `1280` to stay under pgvector HNSW's 2000-dimension limit. | `1280` |
-| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT` | Response encoding: `float` or `base64`. Hindsight decodes either format to float vectors before storage. | `float` |
-| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_LATENCY` | Optional ZeroEntropy latency mode: `fast` or `slow`. Unset lets ZeroEntropy auto-select. | - |
-| `HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_BATCH_SIZE` | Max inputs per ZeroEntropy `/v1/models/embed` call | `100` |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_API_BASE` | LiteLLM proxy base URL for embeddings | `http://localhost:4000` |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_API_KEY` | LiteLLM proxy API key for embeddings (optional, depends on proxy config) | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL` | LiteLLM embedding model (use provider prefix, e.g., `cohere/embed-english-v3.0`) | `text-embedding-3-small` |
@@ -555,6 +555,14 @@ export HINDSIGHT_API_EMBEDDINGS_PROVIDER=openrouter
 export HINDSIGHT_API_EMBEDDINGS_OPENROUTER_API_KEY=your-openrouter-api-key  # or reuses HINDSIGHT_API_LLM_API_KEY
 export HINDSIGHT_API_EMBEDDINGS_OPENROUTER_MODEL=perplexity/pplx-embed-v1-0.6b
 
+# ZeroEntropy - zembed-1
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=zeroentropy
+export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_API_KEY=your-api-key
+export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_MODEL=zembed-1
+export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_DIMENSIONS=1280
+# export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT=base64  # optional
+# export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_LATENCY=fast  # optional
+
 # Cohere - cloud-based embeddings
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=cohere
 export HINDSIGHT_API_EMBEDDINGS_COHERE_API_KEY=your-api-key
@@ -567,14 +575,6 @@ export HINDSIGHT_API_EMBEDDINGS_PROVIDER=cohere
 export HINDSIGHT_API_EMBEDDINGS_COHERE_API_KEY=your-azure-api-key
 export HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL=embed-english-v3.0
 export HINDSIGHT_API_EMBEDDINGS_COHERE_BASE_URL=https://your-azure-cohere-endpoint.com
-
-# ZeroEntropy - zembed-1 embeddings
-export HINDSIGHT_API_EMBEDDINGS_PROVIDER=zeroentropy
-export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_API_KEY=your-zeroentropy-api-key
-export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_MODEL=zembed-1
-export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_DIMENSIONS=1280  # supported: 2560, 1280, 640, 320, 160, 80, 40
-# export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_ENCODING_FORMAT=base64  # optional
-# export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_LATENCY=fast  # or slow; unset lets ZeroEntropy auto-select
 
 # LiteLLM proxy - unified gateway for multiple providers
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=litellm
@@ -630,6 +630,8 @@ Supported OpenAI embedding dimensions:
 - `text-embedding-ada-002`: 1536 dimensions (legacy)
 
 Google's `gemini-embedding-001` produces 3072 dimensions natively but supports configurable output dimensionality. Set `HINDSIGHT_API_EMBEDDINGS_GEMINI_OUTPUT_DIMENSIONALITY` to control the output size (default: 768).
+
+ZeroEntropy's `zembed-1` supports Matryoshka dimensions: `2560`, `1280`, `640`, `320`, `160`, `80`, and `40`. Hindsight defaults to `1280` for this provider.
 :::
 
 ### Reranker

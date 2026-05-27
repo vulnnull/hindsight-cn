@@ -15,6 +15,7 @@ import pytest
 from hindsight_api.config import _get_raw_config
 from hindsight_api.engine.consolidation import consolidator as consolidator_mod
 from hindsight_api.engine.memory_engine import MemoryEngine
+from tests.llm_judge import assert_meets_criteria
 
 
 @pytest.fixture(autouse=True)
@@ -96,18 +97,20 @@ async def _instrumented_consolidate(
         max_observations_per_scope=max_observations_per_scope,
     )
 
-    _debug_log.append(_ConsolidationDebugEntry(
-        facts=facts_lines,
-        observations_text=observations_text,
-        response=_ConsolidationResponse(
-            creates=[_ActionLog(text=c.text, source_fact_ids=c.source_fact_ids) for c in result.creates],
-            updates=[
-                _ActionLog(text=u.text, observation_id=u.observation_id, source_fact_ids=u.source_fact_ids)
-                for u in result.updates
-            ],
-            deletes=[_ActionLog(text="", observation_id=d.observation_id) for d in result.deletes],
-        ),
-    ))
+    _debug_log.append(
+        _ConsolidationDebugEntry(
+            facts=facts_lines,
+            observations_text=observations_text,
+            response=_ConsolidationResponse(
+                creates=[_ActionLog(text=c.text, source_fact_ids=c.source_fact_ids) for c in result.creates],
+                updates=[
+                    _ActionLog(text=u.text, observation_id=u.observation_id, source_fact_ids=u.source_fact_ids)
+                    for u in result.updates
+                ],
+                deletes=[_ActionLog(text="", observation_id=d.observation_id) for d in result.deletes],
+            ),
+        )
+    )
 
     return result
 
@@ -134,11 +137,11 @@ def _print_consolidation_debug(entry: _ConsolidationDebugEntry, index: int) -> N
     print("\n  LLM RESPONSE:")
     if resp.creates:
         for c in resp.creates:
-            print(f"    CREATE: \"{c.text}\" (from facts: {[fid[:8] + '..' for fid in c.source_fact_ids]})")
+            print(f'    CREATE: "{c.text}" (from facts: {[fid[:8] + ".." for fid in c.source_fact_ids]})')
     if resp.updates:
         for u in resp.updates:
             print(
-                f"    UPDATE [{u.observation_id[:8]}..]: \"{u.text}\""
+                f'    UPDATE [{u.observation_id[:8]}..]: "{u.text}"'
                 f" (from facts: {[fid[:8] + '..' for fid in u.source_fact_ids]})"
             )
     if resp.deletes:
@@ -163,8 +166,10 @@ def _parse_history(hist: Any) -> list[str]:
 
 @pytest.mark.asyncio
 @pytest.mark.flaky(reruns=2, reruns_delay=5)
-async def test_horse_farm_observation_history(memory: MemoryEngine, request_context: Any) -> None:
+@pytest.mark.hs_llm_core
+async def test_horse_farm_observation_history(memory_real_llm: MemoryEngine, request_context: Any) -> None:
     """Retain a sequence of horse facts and inspect how observations evolve."""
+    memory = memory_real_llm
     bank_id = f"test-horses-{uuid.uuid4().hex[:8]}"
 
     await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
@@ -204,9 +209,9 @@ async def test_horse_farm_observation_history(memory: MemoryEngine, request_cont
 
     try:
         for i, content in enumerate(messages):
-            print(f"\n{'='*80}")
-            print(f"RETAIN #{i+1} ({event_dates[i].date()}): {content}")
-            print(f"{'='*80}")
+            print(f"\n{'=' * 80}")
+            print(f"RETAIN #{i + 1} ({event_dates[i].date()}): {content}")
+            print(f"{'=' * 80}")
 
             log_start = len(_debug_log)
 
@@ -243,9 +248,9 @@ async def test_horse_farm_observation_history(memory: MemoryEngine, request_cont
         consolidator_mod._consolidate_batch_with_llm = _original_consolidate
 
     # Final summary
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("FINAL STATE")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     pool = await memory._get_pool()
     async with pool.acquire() as conn:
         observations = await conn.fetch(
@@ -268,9 +273,9 @@ async def test_horse_farm_observation_history(memory: MemoryEngine, request_cont
                 print(f"  - [proof={obs['proof_count']}] {obs['text']}")
 
     # Create a mental model to synthesize the observations
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("MENTAL MODEL")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     # Patch reflect _execute_tool to log tool inputs/outputs
     from hindsight_api.engine.reflect import agent as reflect_agent_mod
@@ -283,7 +288,9 @@ async def test_horse_farm_observation_history(memory: MemoryEngine, request_cont
         print(f"\n  [REFLECT TOOL] {normalized}(args={args})")
         if isinstance(result, dict):
             if "observations" in result:
-                print(f"    Observations returned ({result.get('count', '?')}, freshness={result.get('freshness', '?')}):")
+                print(
+                    f"    Observations returned ({result.get('count', '?')}, freshness={result.get('freshness', '?')}):"
+                )
                 for obs in result.get("observations", []):
                     print(f"      - [proof={obs.get('proof_count', '?')}] {obs.get('text', '?')}")
             if "memories" in result:
@@ -347,31 +354,24 @@ async def test_horse_farm_observation_history(memory: MemoryEngine, request_cont
                         continue
                 print(f"  - [{item.get('fact_type', '?')}] {item.get('text', '?')}")
 
-    # Verify the mental model captures key facts. The synthesis step is a
-    # real LLM call and occasionally drops one name (typically Daisy, which
-    # is only mentioned once with no follow-up events), so require coverage
-    # rather than exhaustive name presence — the assertion is about whether
-    # the pipeline synthesizes the herd story end-to-end, not about
-    # perfect recall of every horse.
-    content_lower = content.lower()
-
-    all_names = ["daisy", "buttercup", "midnight", "shadow", "twister"]
-    mentioned = [n for n in all_names if n in content_lower]
-    assert len(mentioned) >= 4, (
-        f"Mental model should mention at least 4 of 5 horse names. "
-        f"Mentioned: {mentioned}. Got:\n{content}"
-    )
-    # The two horses involved in events must be named — without them the
-    # timeline section can't function.
-    assert "buttercup" in content_lower, f"Mental model must mention Buttercup (sold). Got:\n{content}"
-    assert "shadow" in content_lower, f"Mental model must mention Shadow (died). Got:\n{content}"
-
-    assert "sold" in content_lower or "sale" in content_lower, (
-        f"Mental model should mention Buttercup was sold. Got:\n{content}"
-    )
-
-    assert "died" in content_lower or "passed" in content_lower or "death" in content_lower, (
-        f"Mental model should mention Shadow's death. Got:\n{content}"
+    # Verify the mental model captures key facts via LLM judge. The synthesis
+    # step occasionally drops one name (typically Daisy, only mentioned once
+    # with no follow-up events), so accept ≥4 of 5 names rather than all 5 —
+    # the assertion is whether the pipeline synthesizes the herd story
+    # end-to-end, not perfect recall of every horse.
+    await assert_meets_criteria(
+        response=content,
+        criteria=(
+            "The mental model mentions at least 4 of these 5 horse names: "
+            "Daisy, Buttercup, Midnight, Shadow, Twister. "
+            "Buttercup and Shadow MUST both be named (they are the two horses "
+            "involved in events). It also mentions that Buttercup was sold and "
+            "that Shadow died or passed away."
+        ),
+        context=(
+            "Input events: Had 2 horses (Daisy, Buttercup). Sold Buttercup. "
+            "Got more horses (Midnight, Shadow, Twister). Shadow died."
+        ),
     )
 
     # Cleanup

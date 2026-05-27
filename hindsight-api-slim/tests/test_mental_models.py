@@ -10,6 +10,7 @@ import pytest
 
 from hindsight_api.engine.memory_engine import MemoryEngine, fq_table
 from hindsight_api.engine.retain import embedding_utils
+from tests.llm_judge import assert_meets_criteria, evaluate
 
 
 @pytest.fixture
@@ -378,8 +379,10 @@ class TestReflect:
 class TestDirectivesInReflect:
     """Test that directives are followed during reflect operations."""
 
-    async def test_reflect_follows_language_directive(self, memory: MemoryEngine, request_context):
+    @pytest.mark.hs_llm_core
+    async def test_reflect_follows_language_directive(self, memory_real_llm: MemoryEngine, request_context):
         """Test that reflect follows a directive to respond in a specific language."""
+        memory = memory_real_llm
         bank_id = f"test-directive-reflect-{uuid.uuid4().hex[:8]}"
 
         # Ensure bank exists
@@ -405,25 +408,8 @@ class TestDirectivesInReflect:
             request_context=request_context,
         )
 
-        # Check that the response contains French words/patterns
-        # Common French words that would appear when talking about someone's job
-        french_indicators = [
-            "elle",
-            "travaille",
-            "une",
-            "qui",
-            "chez",
-            "logiciel",
-            "ingénieur",
-            "ingénieure",
-            "développeur",
-            "développeuse",
-            "ingénierie",
-            "française",
-        ]
-
         # Run reflect query (retry once since small LLMs may not always follow language directives)
-        french_word_count = 0
+        result = None
         for _attempt in range(2):
             result = await memory.reflect_async(
                 bank_id=bank_id,
@@ -433,13 +419,19 @@ class TestDirectivesInReflect:
             assert result.text is not None
             assert len(result.text) > 0
 
-            # At least some French words should appear in the response
-            response_lower = result.text.lower()
-            french_word_count = sum(1 for word in french_indicators if word in response_lower)
-            if french_word_count >= 2:
+            # Use LLM judge to check if response is in French
+            verdict = await evaluate(
+                response=result.text,
+                criteria="The response is written primarily in French (not English).",
+            )
+            if verdict.meets_criteria:
                 break
 
-        assert french_word_count >= 2, f"Expected French response, but got: {result.text[:200]}"
+        await assert_meets_criteria(
+            response=result.text,
+            criteria="The response is written primarily in French (not English).",
+            msg=f"Expected French response, but got: {result.text[:200]}",
+        )
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
@@ -1214,8 +1206,14 @@ class TestMentalModelStaleness:
         await memory.delete_bank(bank_id, request_context=request_context)
 
 
+@pytest.mark.hs_llm_core
 class TestMentalModelRefreshTagSecurity:
     """Test that mental model refresh respects tag-based security boundaries."""
+
+    @pytest.fixture
+    def memory(self, memory_real_llm):
+        """Override to use real LLM for this class."""
+        return memory_real_llm
 
     async def test_refresh_with_tags_only_accesses_same_tagged_models(self, memory: MemoryEngine, request_context):
         """Test that refreshing a mental model with tags can only access other models with the same tags.
@@ -1301,32 +1299,19 @@ class TestMentalModelRefreshTagSecurity:
 
         # SECURITY CHECK: The refreshed content should ONLY include information from
         # memories/models tagged with user:alice, NOT from user:bob or untagged
-        refreshed_content = refreshed["content"].lower()
-
-        # Should include Alice's content (either from facts or mental models)
-        assert "alice" in refreshed_content, (
-            "Refreshed model should access memories/models with matching tags (user:alice)"
-        )
-
-        # MUST NOT include Bob's content (security violation)
-        # Use word boundary matching to avoid false positives (e.g., "team" contains "tea")
-        import re
-
-        def contains_word(text: str, word: str) -> bool:
-            """Check if text contains word as a whole word (not substring)."""
-            return bool(re.search(rf"\b{re.escape(word)}\b", text, re.IGNORECASE))
-
-        assert (
-            not contains_word(refreshed_content, "bob")
-            and not contains_word(refreshed_content, "python")
-            and not contains_word(refreshed_content, "tea")
-        ), (
-            f"SECURITY VIOLATION: Refreshed model accessed memories/models with different tags (user:bob). Content: {refreshed['content']}"
-        )
-
-        # MUST NOT include untagged content (security violation)
-        assert "100 employees" not in refreshed_content and "growing fast" not in refreshed_content, (
-            f"SECURITY VIOLATION: Refreshed model accessed untagged memories/models. Content: {refreshed['content']}"
+        await assert_meets_criteria(
+            response=refreshed["content"],
+            criteria=(
+                "The content mentions Alice and her work (frontend, React, morning preference, coffee). "
+                "It does NOT mention Bob, Python (as a programming language Bob uses), tea, "
+                "100 employees, or 'growing fast'. Minor phrasing variations are acceptable."
+            ),
+            context=(
+                "Alice's data: frontend React engineer, works mornings, drinks coffee, favorite color blue. "
+                "Bob's data (MUST NOT appear): backend Python engineer, works at night, drinks tea. "
+                "Untagged data (MUST NOT appear): company has 100 employees, growing fast."
+            ),
+            msg="SECURITY VIOLATION: Refreshed model accessed data from other tags or untagged memories",
         )
 
         # Cleanup
@@ -1484,8 +1469,20 @@ class TestMentalModelRefreshTagSecurity:
         await memory.delete_bank(bank_id, request_context=request_context)
 
 
+@pytest.mark.hs_llm_core
+# All tests in this class drive the reflect agent against Gemini 2.5 Flash Lite,
+# which occasionally bails out of the loop with "I don't have information."
+# instead of synthesising the retrieved memories.  Apply @pytest.mark.flaky at
+# class scope so every method gets the same retry budget; the judge assertions
+# still catch persistent breakage.
+@pytest.mark.flaky(reruns=2, reruns_delay=2)
 class TestMentalModelTriggerTagsConfig:
     """Test trigger-level tags_match and tag_groups configuration for mental model refresh."""
+
+    @pytest.fixture
+    def memory(self, memory_real_llm):
+        """Override to use real LLM for this class."""
+        return memory_real_llm
 
     async def test_trigger_tags_match_any_includes_untagged_content(self, memory: MemoryEngine, request_context):
         """Test that setting trigger.tags_match='any' allows a tagged model to see untagged memories.
@@ -1529,20 +1526,19 @@ class TestMentalModelTriggerTagsConfig:
             request_context=request_context,
         )
 
-        refreshed_content = refreshed["content"].lower()
-
-        # Should include tagged content
-        assert "alice" in refreshed_content or "react" in refreshed_content or "frontend" in refreshed_content, (
-            f"Refreshed model should include tagged memories. Content: {refreshed['content']}"
+        await assert_meets_criteria(
+            response=refreshed["content"],
+            criteria=(
+                "The content includes BOTH: "
+                "(1) tagged content about Alice (frontend engineer, React, TypeScript), AND "
+                "(2) untagged content about the company (San Francisco headquarters or 50 million revenue). "
+                "Both categories of information must be present."
+            ),
+            context=(
+                "Tagged memories [living]: Alice is a frontend engineer (React, TypeScript). "
+                "Untagged memories: company HQ in San Francisco, annual revenue 50 million."
+            ),
         )
-
-        # Should ALSO include untagged content (the fix for #786)
-        assert (
-            "san francisco" in refreshed_content
-            or "50 million" in refreshed_content
-            or "headquarters" in refreshed_content
-            or "revenue" in refreshed_content
-        ), f"With tags_match='any', refreshed model should include untagged memories. Content: {refreshed['content']}"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -1579,21 +1575,19 @@ class TestMentalModelTriggerTagsConfig:
             request_context=request_context,
         )
 
-        refreshed_content = refreshed["content"].lower()
-
-        import re
-
-        def contains_word(text: str, word: str) -> bool:
-            return bool(re.search(rf"\b{re.escape(word)}\b", text, re.IGNORECASE))
-
-        # MUST NOT include Bob's content (security boundary preserved)
-        assert not contains_word(refreshed_content, "bob") and not contains_word(refreshed_content, "python"), (
-            f"Default behavior should still enforce all_strict isolation. Content: {refreshed['content']}"
-        )
-
-        # MUST NOT include untagged content (strict excludes untagged)
-        assert "200 employees" not in refreshed_content, (
-            f"Default behavior should exclude untagged content. Content: {refreshed['content']}"
+        await assert_meets_criteria(
+            response=refreshed["content"],
+            criteria=(
+                "The content does NOT mention Bob, Python (as Bob's language), or 200 employees. "
+                "It should only contain information about Alice (frontend, React). "
+                "Minor phrasing variations are acceptable."
+            ),
+            context=(
+                "Alice's data (should appear): frontend engineer, React. "
+                "Bob's data (MUST NOT appear): backend engineer, Python. "
+                "Untagged data (MUST NOT appear): 200 employees worldwide."
+            ),
+            msg="Default all_strict isolation was violated",
         )
 
         await memory.delete_bank(bank_id, request_context=request_context)

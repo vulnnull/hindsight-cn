@@ -685,6 +685,7 @@ Generate a concise, top-N personalized AI/ML news brief in response to user-trig
 
 
 @pytestmark_gemini
+@pytest.mark.hs_llm_core
 class TestDeltaRefreshGeminiEval:
     """Real-LLM evals for the structured-delta refresh path.
 

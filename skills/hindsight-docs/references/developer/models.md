@@ -423,8 +423,8 @@ Converts text into dense vector representations for semantic similarity search.
 | `openai` | OpenAI embeddings API | Production, high quality |
 | `cohere` | Cohere embeddings API | Production, multilingual |
 | `google` | Google embeddings (Gemini API or Vertex AI) | Production, multilingual, high quality |
-| `zeroentropy` | ZeroEntropy zembed-1 embeddings API | Production, high-recall retrieval |
 | `tei` | HuggingFace Text Embeddings Inference | Production, self-hosted |
+| `zeroentropy` | ZeroEntropy zembed-1 | Production, high quality retrieval |
 | `litellm` | LiteLLM proxy (unified gateway) | Multi-provider setups |
 | `litellm-sdk` | LiteLLM SDK (direct API, no proxy) | Multi-provider, simpler setup |
 
@@ -462,9 +462,9 @@ Google's `gemini-embedding-001` supports configurable output dimensionality via 
 
 | Model | Dimensions | Use Case |
 |-------|------------|----------|
-| `zembed-1` | 1280 default in Hindsight; supports 2560, 1280, 640, 320, 160, 80, 40 | High-recall multilingual retrieval |
+| `zembed-1` | 1280 default (2560/1280/640/320/160/80/40 configurable) | High quality asymmetric retrieval |
 
-Hindsight uses ZeroEntropy's document embedding mode for retained content and query embedding mode for recall/search queries. ZeroEntropy's API default is 2560 dimensions; Hindsight defaults to 1280 so pgvector HNSW works without changing the vector extension.
+Hindsight sends retained memory text to ZeroEntropy as `document` inputs and recall/search text as `query` inputs. ZeroEntropy's API default is 2560 dimensions; Hindsight defaults to 1280 so pgvector HNSW works without changing the vector extension.
 
 > **⚠️ Embedding Dimensions**
 > 
@@ -486,12 +486,6 @@ export HINDSIGHT_API_EMBEDDINGS_PROVIDER=cohere
 export HINDSIGHT_API_COHERE_API_KEY=your-api-key
 export HINDSIGHT_API_EMBEDDINGS_COHERE_MODEL=embed-english-v3.0
 
-# ZeroEntropy
-export HINDSIGHT_API_EMBEDDINGS_PROVIDER=zeroentropy
-export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_API_KEY=xxxxxxxxxxxx
-export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_MODEL=zembed-1
-export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_DIMENSIONS=1280
-
 # Google (API key auth)
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=google
 export HINDSIGHT_API_EMBEDDINGS_GEMINI_API_KEY=xxxxxxxxxxxx
@@ -505,6 +499,12 @@ export HINDSIGHT_API_EMBEDDINGS_VERTEXAI_PROJECT_ID=your-gcp-project-id
 # TEI (self-hosted)
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=tei
 export HINDSIGHT_API_EMBEDDINGS_TEI_URL=http://localhost:8080
+
+# ZeroEntropy
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=zeroentropy
+export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_API_KEY=your-api-key
+export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_MODEL=zembed-1
+export HINDSIGHT_API_EMBEDDINGS_ZEROENTROPY_DIMENSIONS=1280
 
 # LiteLLM proxy
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=litellm
