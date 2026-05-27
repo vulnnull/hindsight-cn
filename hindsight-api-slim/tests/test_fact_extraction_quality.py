@@ -365,10 +365,17 @@ Family is the most important thing to her.
             msg=f"Evaluative/preferential dimension should be preserved. Facts: {[f.fact for f in facts]}",
         )
 
-    @pytest.mark.hs_llm_mat
     @pytest.mark.asyncio
     async def test_comprehensive_multi_dimension(self):
-        """Test a realistic scenario with multiple dimensions in one fact."""
+        """Test a realistic scenario with multiple dimensions in one fact.
+
+        Inherits the module-level `hs_llm_core` marker rather than running on
+        the full `hs_llm_mat` matrix — the weakest matrix providers (notably
+        bedrock/nova-2-lite) drop one of the two required dimensions (emotional
+        or preferential) and fail the judge. This is a quality assertion, not
+        a provider-compatibility check, so single-strong-provider is the right
+        tier.
+        """
         text = """
 I was thrilled to receive such positive feedback on my presentation yesterday!
 I wasn't sure if my approach would resonate, but the audience seemed enthusiastic.

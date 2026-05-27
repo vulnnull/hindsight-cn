@@ -160,7 +160,15 @@ class TestDispositionInfluence:
         This catches the case where the disposition trait isn't wired into the prompt
         at all — both responses would then look equally confident.
         """
-        claim = "Sam is supposedly the most productive engineer on the team by a wide margin."
+        # Skepticism only has something to express when there's *something to
+        # be skeptical of*. With a single assertive claim and no contradicting
+        # signal, both low- and high-skepticism reflects converge on the same
+        # restatement (verified on gemini-2.5-flash-lite). We store one
+        # assertive claim plus one piece of contradicting evidence so the
+        # high-skepticism bank can flag the tension while the low-skepticism
+        # bank still defers to the headline claim.
+        claim = "Sam is the most productive engineer on the team by a wide margin."
+        contradicting = "Sam's manager noted Sam had missed two deadlines last quarter."
         query = "What can you tell me about Sam's productivity?"
 
         bank_low = f"test-disposition-low-{uuid.uuid4().hex[:8]}"
@@ -174,6 +182,7 @@ class TestDispositionInfluence:
                     request_context=request_context,
                 )
                 await memory.retain_async(bank_id=bank_id, content=claim, request_context=request_context)
+                await memory.retain_async(bank_id=bank_id, content=contradicting, request_context=request_context)
 
             low_result = await memory.reflect_async(bank_id=bank_low, query=query, request_context=request_context)
             high_result = await memory.reflect_async(bank_id=bank_high, query=query, request_context=request_context)
@@ -193,15 +202,20 @@ class TestDispositionInfluence:
                 response=comparison,
                 criteria=(
                     "Response A shows more skepticism than Response B about the productivity "
-                    "claim — A uses more hedging language ('apparently', 'reportedly', 'might', "
-                    "'allegedly', etc.) or more explicitly flags the claim as unverified, while "
-                    "B states it more directly or with less qualification.  If the two responses "
-                    "show the same level of skepticism, the criterion is NOT met."
+                    "claim — A acknowledges the tension between 'most productive' and the missed "
+                    "deadlines, uses hedging language ('apparently', 'mixed signals', 'might', etc.), "
+                    "or more explicitly flags the headline claim as unverified or qualified. "
+                    "B states the 'most productive' claim more directly, downplays the missed "
+                    "deadlines, or treats the headline claim as authoritative. If both responses "
+                    "show the same level of skepticism — e.g. both restate the claim with similar "
+                    "qualification — the criterion is NOT met."
                 ),
                 context=(
-                    "Both banks stored the same claim ('Sam is supposedly the most productive "
-                    "engineer...') and were asked the same query.  The only difference is "
-                    "their skepticism disposition trait.  A: skepticism=5, B: skepticism=1."
+                    "Both banks stored TWO facts: the headline claim 'Sam is the most productive "
+                    "engineer on the team by a wide margin.' AND a contradicting signal 'Sam's "
+                    "manager noted Sam had missed two deadlines last quarter.' They were asked "
+                    "the same query. The only configuration difference is the skepticism "
+                    "disposition trait. A: skepticism=5, B: skepticism=1."
                 ),
                 msg=(
                     f"Disposition should make response A more skeptical than B.\n"
