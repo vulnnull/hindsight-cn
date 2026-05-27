@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { useBank } from "@/lib/bank-context";
 import { client } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,7 @@ const OPERATION_TYPE_OPTIONS = [
 ];
 
 export function BankOperationsView() {
+  const t = useTranslations("bankOperations");
   const { currentBank } = useBank();
   const [operations, setOperations] = useState<Operation[]>([]);
   const [totalOperations, setTotalOperations] = useState(0);
@@ -242,11 +244,11 @@ export function BankOperationsView() {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold">Background Operations</h3>
+            <h3 className="text-lg font-semibold">{t("title")}</h3>
             <button
               onClick={() => loadOperations()}
               className="p-1 rounded hover:bg-muted transition-colors"
-              title="Refresh operations"
+              title={t("refreshOperations")}
               disabled={loading}
             >
               <RefreshCw
@@ -265,7 +267,7 @@ export function BankOperationsView() {
             onValueChange={(val) => handleTaskTypeFilterChange(val === "all" ? null : val)}
           >
             <SelectTrigger className="h-9 w-[180px] text-sm">
-              <SelectValue placeholder="All types" />
+              <SelectValue placeholder={t("allTypes")} />
             </SelectTrigger>
             <SelectContent>
               {OPERATION_TYPE_OPTIONS.map((opt) => (
@@ -451,7 +453,7 @@ export function BankOperationsView() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Operation Details</DialogTitle>
+            <DialogTitle>{t("operationDetails")}</DialogTitle>
             <DialogDescription>
               {selectedOperation?.operation_id && (
                 <span className="font-mono text-xs">{selectedOperation.operation_id}</span>
@@ -537,7 +539,9 @@ export function BankOperationsView() {
                     )}
                     {selectedOperation.result_metadata?.items_count !== undefined && (
                       <div>
-                        <div className="text-sm font-medium text-muted-foreground">Total Items</div>
+                        <div className="text-sm font-medium text-muted-foreground">
+                          {t("totalItems")}
+                        </div>
                         <div className="mt-1 text-sm">
                           {selectedOperation.result_metadata.items_count}
                         </div>
@@ -616,10 +620,11 @@ export function BankOperationsView() {
                     selectedOperation.child_operations.length > 0 && (
                       <div>
                         <div className="text-sm font-medium text-muted-foreground mb-2">
-                          Sub-batches (
-                          {selectedOperation.result_metadata?.num_sub_batches ||
-                            selectedOperation.child_operations.length}
-                          )
+                          {t("subBatchesCount", {
+                            count:
+                              selectedOperation.result_metadata?.num_sub_batches ||
+                              selectedOperation.child_operations.length,
+                          })}
                         </div>
                         <Table>
                           <TableHeader>
@@ -689,7 +694,7 @@ export function BankOperationsView() {
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-sm font-medium text-muted-foreground">
-                            Raw payload
+                            {t("rawPayload")}
                           </div>
                           {!loadedThisOp && (
                             <Button
@@ -704,7 +709,7 @@ export function BankOperationsView() {
                               ) : (
                                 <Code className="w-3 h-3 mr-1" />
                               )}
-                              Load raw
+                              {t("loadRaw")}
                             </Button>
                           )}
                         </div>
@@ -719,10 +724,7 @@ export function BankOperationsView() {
                               : "No raw payload stored for this operation."}
                           </p>
                         ) : (
-                          <p className="text-xs text-muted-foreground">
-                            Shows the full parameters the operation was submitted with (may be
-                            large).
-                          </p>
+                          <p className="text-xs text-muted-foreground">{t("rawPayloadHelp")}</p>
                         )}
                       </div>
                     );
