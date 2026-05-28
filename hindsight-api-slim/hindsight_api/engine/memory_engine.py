@@ -106,6 +106,25 @@ _PROTECTED_TABLES = frozenset(
 # Enable runtime SQL validation (can be disabled in production for performance)
 _VALIDATE_SQL_SCHEMAS = True
 
+# Consolidation retry: indefinite retry with capped exponential backoff.
+# Transient upstream outages (LLM provider down, DB flapping, tenant-ext
+# blip) must eventually recover; the worker should keep trying rather than
+# silently dead-lettering a bank's consolidation backlog. Deterministic
+# failures (integrity violations, embedding dimension mismatches) are
+# filtered upstream by `_is_non_retryable_task_error` and never reach the
+# retry path. The dedup-by-bank guard prevents per-op retries from
+# multiplying when a peer consolidation is already pending for the bank.
+_CONSOLIDATION_RETRY_BACKOFF_BASE_SECONDS = 60
+_CONSOLIDATION_RETRY_BACKOFF_MAX_SECONDS = 1800  # 30 min cap
+
+
+def _consolidation_retry_backoff_seconds(retry_count: int) -> int:
+    """Capped exponential backoff: 60, 120, 240, 480, 960, 1800, 1800, …"""
+    return min(
+        _CONSOLIDATION_RETRY_BACKOFF_BASE_SECONDS * (2**retry_count),
+        _CONSOLIDATION_RETRY_BACKOFF_MAX_SECONDS,
+    )
+
 
 class UnqualifiedTableError(Exception):
     """Raised when SQL contains unqualified table references."""
@@ -1500,6 +1519,38 @@ class MemoryEngine(MemoryEngineInterface):
                             error_message=str(e),
                             schema=schema,
                         )
+
+                        # When another consolidation is already pending for the same
+                        # bank, skip the retry. The pending op will process the same
+                        # unconsolidated rows when it runs, so retrying ours just
+                        # multiplies retry budgets during a long transient outage
+                        # (every retain enqueues a fresh op, each independently
+                        # consuming `_retry_count` slots — a retry storm).
+                        bank_id_for_dedup = task_dict.get("bank_id", "")
+                        if bank_id_for_dedup and await self._has_other_pending_consolidation(
+                            bank_id=bank_id_for_dedup,
+                            operation_id=operation_id,
+                        ):
+                            logger.info(
+                                f"Consolidation {operation_id} for bank {bank_id_for_dedup} hit "
+                                f"transient error; another consolidation is already pending for "
+                                f"this bank — skipping retry."
+                            )
+                            raise
+
+                        # Indefinite retry with capped exponential backoff.
+                        # Transient outages (LLM provider down, DB flapping) must
+                        # eventually recover; the alternative (cap after 3 retries
+                        # and mark failed) silently dead-letters the bank's backlog.
+                        # The dedup-by-bank guard above prevents this from causing
+                        # a retry storm when multiple ops exist for the same bank.
+                        retry_count = task_dict.get("_retry_count", 0)
+                        backoff = _consolidation_retry_backoff_seconds(retry_count)
+                        raise RetryTaskAt(
+                            retry_at=datetime.now(UTC) + timedelta(seconds=backoff),
+                            message=str(e),
+                        )
+
                     # Retryable: use RetryTaskAt if under the retry limit, else re-raise (poller marks failed)
                     retry_count = task_dict.get("_retry_count", 0)
                     if retry_count < 3:
@@ -9599,6 +9650,42 @@ class MemoryEngine(MemoryEngineInterface):
                 cursor,
             )
         return [dict(row) for row in rows]
+
+    async def _has_other_pending_consolidation(
+        self,
+        *,
+        bank_id: str,
+        operation_id: str,
+    ) -> bool:
+        """Return True if any consolidation op other than ``operation_id`` is
+        ``pending`` for ``bank_id``.
+
+        Used by the task-retry path to skip retrying a transient consolidation
+        failure when another pending op already covers the same bank — the other
+        op will process the same unconsolidated rows when it runs.
+
+        A check failure (DB hiccup) returns ``False`` so the caller proceeds
+        with the normal retry path rather than swallowing a real failure.
+        """
+        backend = await self._get_backend()
+        try:
+            async with acquire_with_retry(backend) as conn:
+                existing = await conn.fetchval(
+                    f"""
+                    SELECT 1 FROM {fq_table("async_operations")}
+                    WHERE bank_id = $1
+                      AND operation_type = 'consolidation'
+                      AND status = 'pending'
+                      AND operation_id != $2
+                    LIMIT 1
+                    """,
+                    bank_id,
+                    uuid.UUID(operation_id),
+                )
+            return existing is not None
+        except Exception as e:
+            logger.warning(f"Failed to check for other pending consolidation ops for bank {bank_id}: {e}")
+            return False
 
     async def _submit_async_operation(
         self,
