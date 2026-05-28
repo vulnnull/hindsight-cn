@@ -455,6 +455,7 @@ WORKER_SLOT_RESERVATION_TYPES: dict[str, tuple[str, int]] = {
     "refresh_mental_model": ("HINDSIGHT_API_WORKER_REFRESH_MENTAL_MODEL_MAX_SLOTS", 0),
     "graph_maintenance": ("HINDSIGHT_API_WORKER_GRAPH_MAINTENANCE_MAX_SLOTS", 0),
 }
+ENV_WORKER_CONSOLIDATION_BANK_PRIORITY = "HINDSIGHT_API_WORKER_CONSOLIDATION_BANK_PRIORITY"
 ENV_RETAIN_MAX_CONCURRENT = "HINDSIGHT_API_RETAIN_MAX_CONCURRENT"
 
 # Reflect agent settings
@@ -907,6 +908,40 @@ def _validate_recall_budget_function(function: str) -> str:
     return function_lower
 
 
+def _parse_bank_priority(raw: str) -> dict[str, int]:
+    """Parse ``bank-pattern:priority,...`` into ``{pattern: priority}``.
+
+    ``*`` in a pattern is kept as-is here; the SQL layer converts it to ``%``
+    for LIKE matching.  A bare ``*`` key is the catch-all default for unlisted
+    banks.  Returns an empty dict when *raw* is blank.
+    """
+    result: dict[str, int] = {}
+    raw = raw.strip()
+    if not raw:
+        return result
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if ":" not in entry:
+            raise ValueError(f"Invalid bank priority entry '{entry}': expected 'bank-pattern:priority'")
+        pattern, priority_str = entry.rsplit(":", 1)
+        pattern = pattern.strip()
+        priority_str = priority_str.strip()
+        if not pattern:
+            raise ValueError(f"Empty bank pattern in entry '{entry}'")
+        try:
+            priority = int(priority_str)
+        except ValueError:
+            raise ValueError(
+                f"Invalid priority '{priority_str}' in entry '{entry}': must be an integer"
+            ) from None
+        if priority < 1:
+            raise ValueError(f"Priority must be >= 1, got {priority} in entry '{entry}'")
+        result[pattern] = priority
+    return result
+
+
 def _get_default_model_for_provider(provider: str) -> str:
     """Get the default model for a given provider."""
     return PROVIDER_DEFAULT_MODELS.get(provider.lower(), DEFAULT_LLM_MODEL)
@@ -1266,6 +1301,7 @@ class HindsightConfig:
     worker_http_port: int
     worker_max_slots: int
     worker_slot_reservations: dict[str, int]
+    worker_consolidation_bank_priority: dict[str, int]
     retain_max_concurrent: int
 
     # Reflect agent settings
@@ -2028,6 +2064,9 @@ class HindsightConfig:
                 for op_type, (env_var, default) in WORKER_SLOT_RESERVATION_TYPES.items()
                 if int(os.getenv(env_var, str(default))) > 0
             },
+            worker_consolidation_bank_priority=_parse_bank_priority(
+                os.getenv(ENV_WORKER_CONSOLIDATION_BANK_PRIORITY, "")
+            ),
             retain_max_concurrent=int(os.getenv(ENV_RETAIN_MAX_CONCURRENT, str(DEFAULT_RETAIN_MAX_CONCURRENT))),
             # Reflect agent settings
             reflect_max_iterations=int(os.getenv(ENV_REFLECT_MAX_ITERATIONS, str(DEFAULT_REFLECT_MAX_ITERATIONS))),
