@@ -111,6 +111,16 @@
       "icon": "/img/icons/claudecode.svg"
     },
     {
+      "id": "grok-build",
+      "name": "Grok Build",
+      "description": "Automatic long-term memory for Grok Build (xAI) via Hindsight hooks. Captures every conversation, recalls relevant context on every prompt.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "tool",
+      "link": "/sdks/integrations/grok-build",
+      "icon": "/img/icons/grok-build.png"
+    },
+    {
       "id": "codex",
       "name": "Codex",
       "description": "Automatic long-term memory for Codex CLI via Hindsight hooks. Captures every conversation, recalls relevant context on every prompt.",
