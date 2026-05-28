@@ -276,6 +276,14 @@ ENV_RERANKER_TEI_URL = "HINDSIGHT_API_RERANKER_TEI_URL"
 ENV_RERANKER_TEI_BATCH_SIZE = "HINDSIGHT_API_RERANKER_TEI_BATCH_SIZE"
 ENV_RERANKER_TEI_MAX_CONCURRENT = "HINDSIGHT_API_RERANKER_TEI_MAX_CONCURRENT"
 ENV_RERANKER_TEI_HTTP_TIMEOUT = "HINDSIGHT_API_RERANKER_TEI_HTTP_TIMEOUT"
+ENV_RERANKER_COHERE_TIMEOUT = "HINDSIGHT_API_RERANKER_COHERE_TIMEOUT"
+ENV_RERANKER_OPENROUTER_TIMEOUT = "HINDSIGHT_API_RERANKER_OPENROUTER_TIMEOUT"
+ENV_RERANKER_ZEROENTROPY_TIMEOUT = "HINDSIGHT_API_RERANKER_ZEROENTROPY_TIMEOUT"
+ENV_RERANKER_SILICONFLOW_TIMEOUT = "HINDSIGHT_API_RERANKER_SILICONFLOW_TIMEOUT"
+ENV_RERANKER_ALIBABA_TIMEOUT = "HINDSIGHT_API_RERANKER_ALIBABA_TIMEOUT"
+ENV_RERANKER_LITELLM_TIMEOUT = "HINDSIGHT_API_RERANKER_LITELLM_TIMEOUT"
+ENV_RERANKER_LITELLM_SDK_TIMEOUT = "HINDSIGHT_API_RERANKER_LITELLM_SDK_TIMEOUT"
+ENV_RERANKER_GOOGLE_TIMEOUT = "HINDSIGHT_API_RERANKER_GOOGLE_TIMEOUT"
 ENV_RERANKER_MAX_CANDIDATES = "HINDSIGHT_API_RERANKER_MAX_CANDIDATES"
 ENV_RERANKER_FLASHRANK_MODEL = "HINDSIGHT_API_RERANKER_FLASHRANK_MODEL"
 ENV_RERANKER_FLASHRANK_CACHE_DIR = "HINDSIGHT_API_RERANKER_FLASHRANK_CACHE_DIR"
@@ -555,6 +563,16 @@ DEFAULT_RERANKER_LOCAL_BATCH_SIZE = 32  # Batch size for local reranker predict(
 DEFAULT_RERANKER_TEI_BATCH_SIZE = 128
 DEFAULT_RERANKER_TEI_MAX_CONCURRENT = 8
 DEFAULT_RERANKER_TEI_HTTP_TIMEOUT = 30.0  # HTTP timeout for TEI reranker requests (seconds)
+# HTTP timeout (seconds) for remote rerank providers. Defaults match the previous
+# hardcoded constructor defaults so unset envs keep current behavior.
+DEFAULT_RERANKER_COHERE_TIMEOUT = 60.0
+DEFAULT_RERANKER_OPENROUTER_TIMEOUT = 60.0
+DEFAULT_RERANKER_ZEROENTROPY_TIMEOUT = 60.0
+DEFAULT_RERANKER_SILICONFLOW_TIMEOUT = 60.0
+DEFAULT_RERANKER_ALIBABA_TIMEOUT = 60.0
+DEFAULT_RERANKER_LITELLM_TIMEOUT = 60.0
+DEFAULT_RERANKER_LITELLM_SDK_TIMEOUT = 60.0
+DEFAULT_RERANKER_GOOGLE_TIMEOUT = 60.0
 DEFAULT_RERANKER_MAX_CANDIDATES = 300
 DEFAULT_RERANKER_FLASHRANK_MODEL = "ms-marco-MiniLM-L-12-v2"  # Best balance of speed and quality
 DEFAULT_RERANKER_FLASHRANK_CACHE_DIR = None  # Use default cache directory
@@ -1081,26 +1099,34 @@ class HindsightConfig:
     reranker_cohere_api_key: str | None
     reranker_cohere_model: str
     reranker_cohere_base_url: str | None
+    reranker_cohere_timeout: float
     reranker_openrouter_api_key: str | None
     reranker_openrouter_model: str
+    reranker_openrouter_timeout: float
     reranker_litellm_api_base: str
     reranker_litellm_api_key: str | None
     reranker_litellm_model: str
     reranker_litellm_max_tokens_per_doc: int | None
+    reranker_litellm_timeout: float
     reranker_litellm_sdk_api_key: str | None
     reranker_litellm_sdk_model: str
     reranker_litellm_sdk_api_base: str | None
+    reranker_litellm_sdk_timeout: float
     reranker_zeroentropy_api_key: str | None
     reranker_zeroentropy_model: str
     reranker_zeroentropy_base_url: str | None
+    reranker_zeroentropy_timeout: float
     reranker_siliconflow_api_key: str | None
     reranker_siliconflow_model: str
     reranker_siliconflow_base_url: str
+    reranker_siliconflow_timeout: float
     reranker_alibaba_api_key: str | None
     reranker_alibaba_model: str
+    reranker_alibaba_timeout: float
     reranker_google_model: str
     reranker_google_project_id: str | None
     reranker_google_service_account_key: str | None
+    reranker_google_timeout: float
 
     # Server
     host: str
@@ -1781,11 +1807,15 @@ class HindsightConfig:
             reranker_cohere_api_key=os.getenv(ENV_RERANKER_COHERE_API_KEY) or os.getenv(ENV_COHERE_API_KEY),
             reranker_cohere_model=os.getenv(ENV_RERANKER_COHERE_MODEL, DEFAULT_RERANKER_COHERE_MODEL),
             reranker_cohere_base_url=os.getenv(ENV_RERANKER_COHERE_BASE_URL) or None,
+            reranker_cohere_timeout=float(os.getenv(ENV_RERANKER_COHERE_TIMEOUT, str(DEFAULT_RERANKER_COHERE_TIMEOUT))),
             # OpenRouter reranker (with fallback to shared OpenRouter key, then LLM key)
             reranker_openrouter_api_key=os.getenv(ENV_RERANKER_OPENROUTER_API_KEY)
             or os.getenv(ENV_OPENROUTER_API_KEY)
             or os.getenv(ENV_LLM_API_KEY),
             reranker_openrouter_model=os.getenv(ENV_RERANKER_OPENROUTER_MODEL, DEFAULT_RERANKER_OPENROUTER_MODEL),
+            reranker_openrouter_timeout=float(
+                os.getenv(ENV_RERANKER_OPENROUTER_TIMEOUT, str(DEFAULT_RERANKER_OPENROUTER_TIMEOUT))
+            ),
             # LiteLLM reranker (with backward-compatible fallback to shared config)
             reranker_litellm_api_base=os.getenv(ENV_RERANKER_LITELLM_API_BASE)
             or os.getenv(ENV_LITELLM_API_BASE, DEFAULT_LITELLM_API_BASE),
@@ -1794,29 +1824,45 @@ class HindsightConfig:
             reranker_litellm_max_tokens_per_doc=int(v)
             if (v := os.getenv(ENV_RERANKER_LITELLM_MAX_TOKENS_PER_DOC))
             else DEFAULT_RERANKER_LITELLM_MAX_TOKENS_PER_DOC,
+            reranker_litellm_timeout=float(
+                os.getenv(ENV_RERANKER_LITELLM_TIMEOUT, str(DEFAULT_RERANKER_LITELLM_TIMEOUT))
+            ),
             # LiteLLM SDK reranker (direct API access)
             reranker_litellm_sdk_api_key=os.getenv(ENV_RERANKER_LITELLM_SDK_API_KEY),
             reranker_litellm_sdk_model=os.getenv(ENV_RERANKER_LITELLM_SDK_MODEL, DEFAULT_RERANKER_LITELLM_SDK_MODEL),
             reranker_litellm_sdk_api_base=os.getenv(ENV_RERANKER_LITELLM_SDK_API_BASE) or None,
+            reranker_litellm_sdk_timeout=float(
+                os.getenv(ENV_RERANKER_LITELLM_SDK_TIMEOUT, str(DEFAULT_RERANKER_LITELLM_SDK_TIMEOUT))
+            ),
             # ZeroEntropy reranker
             reranker_zeroentropy_api_key=os.getenv(ENV_RERANKER_ZEROENTROPY_API_KEY),
             reranker_zeroentropy_model=os.getenv(ENV_RERANKER_ZEROENTROPY_MODEL, DEFAULT_RERANKER_ZEROENTROPY_MODEL),
             reranker_zeroentropy_base_url=os.getenv(ENV_RERANKER_ZEROENTROPY_BASE_URL) or None,
+            reranker_zeroentropy_timeout=float(
+                os.getenv(ENV_RERANKER_ZEROENTROPY_TIMEOUT, str(DEFAULT_RERANKER_ZEROENTROPY_TIMEOUT))
+            ),
             # SiliconFlow reranker (Cohere-compatible /rerank endpoint)
             reranker_siliconflow_api_key=os.getenv(ENV_RERANKER_SILICONFLOW_API_KEY),
             reranker_siliconflow_model=os.getenv(ENV_RERANKER_SILICONFLOW_MODEL, DEFAULT_RERANKER_SILICONFLOW_MODEL),
             reranker_siliconflow_base_url=os.getenv(
                 ENV_RERANKER_SILICONFLOW_BASE_URL, DEFAULT_RERANKER_SILICONFLOW_BASE_URL
             ),
+            reranker_siliconflow_timeout=float(
+                os.getenv(ENV_RERANKER_SILICONFLOW_TIMEOUT, str(DEFAULT_RERANKER_SILICONFLOW_TIMEOUT))
+            ),
             # Alibaba Cloud DashScope reranker
             reranker_alibaba_api_key=os.getenv(ENV_RERANKER_ALIBABA_API_KEY),
             reranker_alibaba_model=os.getenv(ENV_RERANKER_ALIBABA_MODEL, DEFAULT_RERANKER_ALIBABA_MODEL),
+            reranker_alibaba_timeout=float(
+                os.getenv(ENV_RERANKER_ALIBABA_TIMEOUT, str(DEFAULT_RERANKER_ALIBABA_TIMEOUT))
+            ),
             # Google Discovery Engine reranker (with fallback to LLM Vertex AI keys)
             reranker_google_model=os.getenv(ENV_RERANKER_GOOGLE_MODEL, DEFAULT_RERANKER_GOOGLE_MODEL),
             reranker_google_project_id=os.getenv(ENV_RERANKER_GOOGLE_PROJECT_ID)
             or os.getenv(ENV_LLM_VERTEXAI_PROJECT_ID),
             reranker_google_service_account_key=os.getenv(ENV_RERANKER_GOOGLE_SERVICE_ACCOUNT_KEY)
             or os.getenv(ENV_LLM_VERTEXAI_SERVICE_ACCOUNT_KEY),
+            reranker_google_timeout=float(os.getenv(ENV_RERANKER_GOOGLE_TIMEOUT, str(DEFAULT_RERANKER_GOOGLE_TIMEOUT))),
             # Server
             host=os.getenv(ENV_HOST, DEFAULT_HOST),
             port=int(os.getenv(ENV_PORT, DEFAULT_PORT)),
