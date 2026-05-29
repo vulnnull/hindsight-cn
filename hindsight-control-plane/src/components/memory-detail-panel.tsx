@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { TagList } from "@/components/ui/tag-list";
 import { Copy, Check, X, Loader2, Calendar, History } from "lucide-react";
@@ -23,6 +24,8 @@ export function MemoryDetailPanel({
   inPanel = false,
   bankId,
 }: MemoryDetailPanelProps) {
+  const t = useTranslations("memoryDetailPanel");
+  const tModal = useTranslations("memoryDetailModal");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [modalType, setModalType] = useState<"document" | "chunk" | null>(null);
   const [modalId, setModalId] = useState<string | null>(null);
@@ -255,7 +258,7 @@ export function MemoryDetailPanel({
                             <div className="font-medium">
                               {source.occurred_start
                                 ? new Date(source.occurred_start).toLocaleString()
-                                : "N/A"}
+                                : t("notAvailable")}
                             </div>
                           </div>
                           <div className="p-2 bg-background/50 rounded">
@@ -263,7 +266,7 @@ export function MemoryDetailPanel({
                             <div className="font-medium">
                               {source.mentioned_at
                                 ? new Date(source.mentioned_at).toLocaleString()
-                                : "N/A"}
+                                : t("notAvailable")}
                             </div>
                           </div>
                         </div>

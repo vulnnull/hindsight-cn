@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { useBank } from "@/lib/bank-context";
 import { bankRoute } from "@/lib/bank-url";
 import {
@@ -24,6 +25,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
+  const t = useTranslations("bank.sidebar");
+  const tBank = useTranslations("bank");
   const { currentBank } = useBank();
   const [isCollapsed, setIsCollapsed] = useState(true);
 

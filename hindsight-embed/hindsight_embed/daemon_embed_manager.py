@@ -6,6 +6,7 @@ consolidating daemon lifecycle, profile management, and database URL resolution.
 """
 
 import logging
+import math
 import os
 import platform
 import re
@@ -30,12 +31,42 @@ console = Console(stderr=True)
 # Suppress noisy httpx logs
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+
+def _parse_float_env(name: str, default: float) -> float:
+    """Parse a float environment variable, falling back on invalid values."""
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _safe_non_negative_float(value: float, fallback: float) -> float:
+    """Return a finite non-negative float, or fallback for invalid values."""
+    return value if math.isfinite(value) and value >= 0 else fallback
+
+
+def _safe_positive_float(value: float, fallback: float) -> float:
+    """Return a finite positive float, or fallback for invalid values."""
+    return value if math.isfinite(value) and value > 0 else fallback
+
+
 # Constants
 # Allow CI/Windows to extend the startup budget — pg0-embedded's Windows wheel
 # unpacks and runs initdb on first boot, which takes noticeably longer on cold
 # runners than POSIX.
 DAEMON_STARTUP_TIMEOUT = int(os.getenv("HINDSIGHT_EMBED_DAEMON_STARTUP_TIMEOUT", "180"))
 DEFAULT_DAEMON_IDLE_TIMEOUT = 0  # 0 = disabled (no auto-exit)
+# When another process is concurrently starting the daemon, the TCP port can be
+# bound before /health returns 200. Give that warming daemon a short grace window
+# before treating the listener as stale/foreign and attempting to reclaim it.
+PORT_HEALTH_GRACE_TIMEOUT = _safe_non_negative_float(
+    _parse_float_env("HINDSIGHT_EMBED_PORT_HEALTH_GRACE_TIMEOUT", 30.0),
+    30.0,
+)
+PORT_HEALTH_CHECK_INTERVAL = _safe_positive_float(
+    _parse_float_env("HINDSIGHT_EMBED_PORT_HEALTH_CHECK_INTERVAL", 0.5),
+    0.5,
+)
 
 
 def _detach_popen_kwargs(log_handle: IO[bytes]) -> dict:
@@ -219,6 +250,40 @@ class DaemonEmbedManager(EmbedManager):
             return True  # Already gone
         return False
 
+    @staticmethod
+    def _port_health_ok(port: int) -> bool:
+        """Return True when the listener on port responds like initialized Hindsight."""
+        try:
+            with httpx.Client(timeout=2) as client:
+                response = client.get(f"http://127.0.0.1:{port}/health")
+                if response.status_code != 200:
+                    return False
+                try:
+                    health = response.json()
+                except Exception:
+                    return False
+                return health.get("status") == "healthy" and health.get("database") == "connected"
+        except Exception:
+            return False
+
+    def _wait_for_port_health(self, port: int, timeout: float | None = None) -> bool:
+        """Wait briefly for a just-bound daemon port to become healthy."""
+        timeout = _safe_non_negative_float(
+            PORT_HEALTH_GRACE_TIMEOUT if timeout is None else timeout,
+            0.0,
+        )
+        interval = _safe_positive_float(PORT_HEALTH_CHECK_INTERVAL, 0.5)
+        deadline = time.monotonic() + timeout
+        while True:
+            if not self._is_port_in_use(port):
+                return False
+            if self._port_health_ok(port):
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(interval, remaining))
+
     def _clear_port(self, port: int) -> bool:
         """
         Ensure the port is free before starting a daemon.
@@ -229,29 +294,27 @@ class DaemonEmbedManager(EmbedManager):
             The caller's "start" is effectively a no-op: the daemon is already up.
             Killing it would race concurrent starts (one process kills the other's
             freshly-started daemon, both rush to rebind the port).
-          * Port occupied but /health is unreachable / non-200 → treat as a stale
-            hindsight daemon (or foreign process) and attempt to reclaim by killing
-            the PID listening on the port. This preserves the original intent of
-            clearing stale daemons from version upgrades.
+          * Port occupied but /health is unreachable, non-200, or does not return
+            Hindsight's initialized health payload → treat as a stale daemon (or
+            foreign process) and attempt to reclaim by killing the PID listening
+            on the port. This preserves the original intent of clearing stale
+            daemons from version upgrades.
           * Kill failed, or non-hindsight process occupying the port → False.
         """
         if not self._is_port_in_use(port):
             return True
 
-        # Port is occupied — check if it's a healthy hindsight daemon.
-        health_ok = False
-        try:
-            with httpx.Client(timeout=2) as client:
-                response = client.get(f"http://127.0.0.1:{port}/health")
-                health_ok = response.status_code == 200
-        except Exception:
-            health_ok = False
-
-        if health_ok:
+        # Port is occupied — check if it's a healthy Hindsight daemon. In
+        # concurrent startup races the socket can bind before /health returns
+        # 200, so wait briefly before deciding the listener is stale/foreign.
+        if self._wait_for_port_health(port):
             logger.debug(f"Port {port} already serving a healthy hindsight daemon; reusing it")
             return True
 
-        # Unhealthy — attempt to reclaim by killing the listener.
+        # Unhealthy after grace window — attempt to reclaim by killing the listener.
+        if not self._is_port_in_use(port):
+            return True
+
         pid = self._find_pid_on_port(port)
         if pid is None:
             logger.warning(f"Port {port} is in use by another process")
@@ -546,6 +609,8 @@ class DaemonEmbedManager(EmbedManager):
 
     def _find_ui_command(self) -> list[str]:
         """Find the command to run the control plane UI."""
+        import shutil
+
         # Check if we're in development mode (monorepo)
         dev_cp_path = Path(__file__).parent.parent.parent / "hindsight-control-plane"
         cli_js = dev_cp_path / "bin" / "cli.js"
@@ -559,7 +624,13 @@ class DaemonEmbedManager(EmbedManager):
         # `npx` prompts before installing missing packages on first run unless `-y` is set.
         # The UI starts in the background with stdout/stderr redirected to a log file, so an
         # interactive prompt would be invisible to users and the health-check loop would time out.
-        return ["npx", "-y", f"@vectorize-io/hindsight-control-plane@{cp_version}"]
+        # On Windows, detached processes may not inherit the parent's PATH, so resolve the
+        # absolute path to npx to avoid "Command not found" errors.
+        npx_path = shutil.which("npx")
+        if npx_path is None:
+            # Fallback to bare command so the FileNotFoundError handler can report it cleanly
+            return ["npx", "-y", f"@vectorize-io/hindsight-control-plane@{cp_version}"]
+        return [npx_path, "-y", f"@vectorize-io/hindsight-control-plane@{cp_version}"]
 
     def get_ui_url(self, profile: str, ui_port: int | None = None, hostname: str | None = None) -> str:
         """Get the URL for the UI serving this profile."""

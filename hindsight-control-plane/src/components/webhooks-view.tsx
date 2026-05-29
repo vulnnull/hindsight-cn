@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { useBank } from "@/lib/bank-context";
 import { client, Webhook, WebhookDelivery, WebhookHttpConfig } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,7 @@ interface KVEditorProps {
 }
 
 function KVEditor({ label, pairs, onChange }: KVEditorProps) {
+  const t = useTranslations("webhooksView");
   const addPair = () => onChange([...pairs, { key: "", value: "" }]);
   const removePair = (i: number) => onChange(pairs.filter((_, idx) => idx !== i));
   const updatePair = (i: number, field: "key" | "value", val: string) => {
@@ -142,6 +144,7 @@ function KVEditor({ label, pairs, onChange }: KVEditorProps) {
                 type="button"
                 onClick={() => removePair(i)}
                 className="text-muted-foreground hover:text-foreground shrink-0"
+                aria-label={t("kvRemovePair")}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -153,7 +156,8 @@ function KVEditor({ label, pairs, onChange }: KVEditorProps) {
   );
 }
 
-function statusBadge(status: string) {
+function StatusBadge({ status }: { status: string }) {
+  const t = useTranslations("webhooksView");
   if (status === "completed")
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
@@ -189,6 +193,7 @@ function DeliveryTableRow({
   delivery: WebhookDelivery;
   formatDate: (d: string | null) => string;
 }) {
+  const t = useTranslations("webhooksView");
   const [expanded, setExpanded] = useState(false);
   const hasDetails = delivery.last_response_body || delivery.last_error;
 
@@ -209,7 +214,9 @@ function DeliveryTableRow({
             <span className="w-4 h-4 inline-block" />
           )}
         </TableCell>
-        <TableCell>{statusBadge(delivery.status)}</TableCell>
+        <TableCell>
+          <StatusBadge status={delivery.status} />
+        </TableCell>
         <TableCell>
           {delivery.last_response_status != null ? (
             <span
@@ -292,6 +299,7 @@ function webhookToForm(webhook: Webhook): CreateWebhookForm {
 }
 
 export function WebhooksView() {
+  const t = useTranslations("webhooksView");
   const { currentBank } = useBank();
   const [webhooks, setWebhooks] = useState<Webhook[]>([]);
   const [loading, setLoading] = useState(false);
@@ -619,12 +627,12 @@ export function WebhooksView() {
             {/* URL */}
             <div className="space-y-1.5">
               <Label htmlFor="webhook-url">
-                URL <span className="text-red-500">*</span>
+                {t("formUrlLabel")} <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="webhook-url"
                 type="url"
-                placeholder="https://example.com/webhook"
+                placeholder={t("formUrlPlaceholder")}
                 value={form.url}
                 onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))}
               />
@@ -692,6 +700,7 @@ export function WebhooksView() {
                   onClick={() => setShowSecret((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   tabIndex={-1}
+                  aria-label={showSecret ? t("formHideSecret") : t("formShowSecret")}
                 >
                   {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -808,12 +817,12 @@ export function WebhooksView() {
             {/* URL */}
             <div className="space-y-1.5">
               <Label htmlFor="edit-webhook-url">
-                URL <span className="text-red-500">*</span>
+                {t("formUrlLabel")} <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="edit-webhook-url"
                 type="url"
-                placeholder="https://example.com/webhook"
+                placeholder={t("formUrlPlaceholder")}
                 value={editForm.url}
                 onChange={(e) => setEditForm((prev) => ({ ...prev, url: e.target.value }))}
               />
@@ -880,6 +889,7 @@ export function WebhooksView() {
                   onClick={() => setShowEditSecret((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   tabIndex={-1}
+                  aria-label={showEditSecret ? t("formHideSecret") : t("formShowSecret")}
                 >
                   {showEditSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>

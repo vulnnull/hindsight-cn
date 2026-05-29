@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ type TagsMatch = "any" | "all" | "any_strict" | "all_strict";
 type ViewMode = "results" | "trace" | "json";
 
 export function SearchDebugView() {
+  const t = useTranslations("searchDebug");
   const { currentBank } = useBank();
 
   // Query state
@@ -895,17 +897,17 @@ export function SearchDebugView() {
                                             = {(r.rerank_score || r.score || 0).toFixed(4)}
                                           </span>
                                           {sc.cross_encoder_score_normalized !== undefined && (
-                                            <span title="Cross-encoder score (primary relevance signal)">
+                                            <span title={t("tooltipCrossEncoder")}>
                                               CE: {sc.cross_encoder_score_normalized.toFixed(3)}
                                             </span>
                                           )}
                                           {sc.temporal !== undefined && sc.temporal !== 0.5 && (
-                                            <span title="Temporal proximity boost (±10% — only active for temporal queries)">
+                                            <span title={t("tooltipTemporal")}>
                                               Tmp: {sc.temporal.toFixed(3)}
                                             </span>
                                           )}
                                           {sc.recency !== undefined && (
-                                            <span title="Recency boost (±10% — based on memory age)">
+                                            <span title={t("tooltipRecency")}>
                                               Rec: {sc.recency.toFixed(3)}
                                             </span>
                                           )}
@@ -949,7 +951,7 @@ export function SearchDebugView() {
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-foreground">最终结果</span>
                         <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">
-                          output
+                          {t("output")}
                         </span>
                       </div>
                       <div className="text-sm text-muted-foreground mt-0.5">

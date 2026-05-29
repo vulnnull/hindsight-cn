@@ -1,15 +1,13 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 export type FactType = "world" | "experience" | "observation";
 
 export const ALL_FACT_TYPES: FactType[] = ["world", "experience", "observation"];
 
-const FACT_TYPE_CONFIG: Record<
-  FactType,
-  { label: string; active: string; inactive: string; dot: string }
-> = {
+const FACT_TYPE_CONFIG: Record<FactType, { active: string; inactive: string; dot: string }> = {
   // Aligned with the stats-chart palette (bank-stats-view.tsx CHART_COLORS).
   world: {
     label: "客观知识",
@@ -45,6 +43,7 @@ function FactTypePill({
   active: boolean;
   onToggle: () => void;
 }) {
+  const t = useTranslations("factTypeFilter");
   const cfg = FACT_TYPE_CONFIG[ft];
   return (
     <button
@@ -58,7 +57,7 @@ function FactTypePill({
       <span
         className={cn("h-1.5 w-1.5 rounded-full", active ? cfg.dot : "bg-muted-foreground/50")}
       />
-      {cfg.label}
+      {t(ft)}
     </button>
   );
 }
@@ -76,12 +75,16 @@ export function FactTypeFilter({
   onChange: (next: FactType[]) => void;
   label?: string;
 }) {
+  const t = useTranslations("factTypeFilter");
+  const resolvedLabel = label ?? t("defaultLabel");
   const toggle = (ft: FactType) =>
     onChange(value.includes(ft) ? value.filter((f) => f !== ft) : [...value, ft]);
 
   return (
     <div className="flex items-center gap-2">
-      {label && <span className="text-sm font-medium text-muted-foreground">{label}</span>}
+      {resolvedLabel && (
+        <span className="text-sm font-medium text-muted-foreground">{resolvedLabel}</span>
+      )}
       <div className="flex gap-1.5">
         {ALL_FACT_TYPES.map((ft) => (
           <FactTypePill key={ft} ft={ft} active={value.includes(ft)} onToggle={() => toggle(ft)} />

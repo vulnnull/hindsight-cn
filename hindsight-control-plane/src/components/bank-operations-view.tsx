@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { useBank } from "@/lib/bank-context";
 import { client } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,7 @@ const OPERATION_TYPE_OPTIONS = [
 ];
 
 export function BankOperationsView() {
+  const t = useTranslations("bankOperations");
   const { currentBank } = useBank();
   const [operations, setOperations] = useState<Operation[]>([]);
   const [totalOperations, setTotalOperations] = useState(0);

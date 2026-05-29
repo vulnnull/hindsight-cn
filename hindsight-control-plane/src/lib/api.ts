@@ -5,6 +5,7 @@
 
 import { toast } from "sonner";
 import { bankApi, bankStatsApi, documentApi, memoryApi } from "./bank-url";
+import { stripBasePath, withBasePath } from "./base-path";
 
 export interface WebhookHttpConfig {
   method: string;
@@ -120,7 +121,7 @@ export interface BankTemplateImportResponse {
 export class ControlPlaneClient {
   private async fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     try {
-      const response = await fetch(path, {
+      const response = await fetch(withBasePath(path), {
         ...options,
         headers: {
           "Content-Type": "application/json",
@@ -1187,6 +1188,16 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Clear a mental model's content. The next refresh re-synthesizes from scratch.
+   */
+  async clearMentalModel(bankId: string, mentalModelId: string) {
+    return this.fetchApi<MentalModel>(
+      bankApi(bankId, `/mental-models/${encodeURIComponent(mentalModelId)}/clear`),
+      { method: "POST" }
+    );
+  }
+
+  /**
    * Get the refresh history of a mental model
    */
   async getMentalModelHistory(bankId: string, mentalModelId: string) {
@@ -1260,7 +1271,7 @@ export class ControlPlaneClient {
     formData.append("request", JSON.stringify(requestData));
 
     // Use fetch directly for multipart/form-data
-    const response = await fetch(`/api/files/retain`, {
+    const response = await fetch(withBasePath("/api/files/retain"), {
       method: "POST",
       body: formData,
       // Don't set Content-Type - browser will set it with boundary

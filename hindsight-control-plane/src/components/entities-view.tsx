@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ type ViewMode = "relations" | "list";
 const ITEMS_PER_PAGE = 50;
 
 export function EntitiesView() {
+  const t = useTranslations("entitiesView");
   const { currentBank } = useBank();
   const [entities, setEntities] = useState<Entity[]>([]);
   const [loading, setLoading] = useState(false);
@@ -205,7 +207,7 @@ export function EntitiesView() {
   );
 
   const formatDate = (dateStr?: string) => {
-    if (!dateStr) return "N/A";
+    if (!dateStr) return t("na");
     return new Date(dateStr).toLocaleDateString();
   };
 

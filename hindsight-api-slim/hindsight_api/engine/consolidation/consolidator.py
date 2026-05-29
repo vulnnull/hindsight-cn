@@ -230,6 +230,7 @@ async def run_consolidation_job(
     bank_id: str,
     request_context: "RequestContext",
     operation_id: str | None = None,
+    observation_scopes: list[list[str]] | None = None,
 ) -> dict[str, Any]:
     """
     Run consolidation job for a bank.
@@ -240,6 +241,10 @@ async def run_consolidation_job(
         memory_engine: MemoryEngine instance
         bank_id: Bank identifier
         request_context: Request context for authentication
+        operation_id: Optional operation ID for tracking
+        observation_scopes: Optional list of tag scopes. When provided, only
+            unconsolidated memories whose tags contain all tags in at least one
+            scope are processed.
 
     Returns:
         Dict with consolidation results
@@ -281,6 +286,18 @@ async def run_consolidation_job(
 
         perf.record_timing("fetch_bank", time.time() - t0)
 
+        # Build optional scope filter clause.  When observation_scopes is provided,
+        # only process memories whose tags contain all tags in at least one scope.
+        scope_clause = ""
+        scope_params: list[Any] = [bank_id]
+        if observation_scopes:
+            or_parts: list[str] = []
+            for scope_tags in observation_scopes:
+                idx = len(scope_params) + 1
+                or_parts.append(f"tags @> ${idx}::varchar[]")
+                scope_params.append(scope_tags)
+            scope_clause = " AND (" + " OR ".join(or_parts) + ")"
+
         # Count total unconsolidated memories for progress logging
         total_count = await conn.fetchval(
             f"""
@@ -290,8 +307,9 @@ async def run_consolidation_job(
               AND consolidated_at IS NULL
               AND consolidation_failed_at IS NULL
               AND fact_type IN ('experience', 'world')
+              {scope_clause}
             """,
-            bank_id,
+            *scope_params,
         )
 
     if total_count == 0:
@@ -330,6 +348,9 @@ async def run_consolidation_job(
         # Fetch next batch of unconsolidated memories
         async with acquire_with_retry(pool) as conn:
             t0 = time.time()
+            # scope_params[0] is bank_id; append fetch_limit after scope params
+            fetch_params = list(scope_params) + [fetch_limit]
+            limit_idx = len(fetch_params)
             memories = await conn.fetch(
                 f"""
                 SELECT id, text, fact_type, occurred_start, occurred_end, event_date, tags, mentioned_at,
@@ -339,11 +360,11 @@ async def run_consolidation_job(
                   AND consolidated_at IS NULL
                   AND consolidation_failed_at IS NULL
                   AND fact_type IN ('experience', 'world')
+                  {scope_clause}
                 ORDER BY created_at ASC
-                LIMIT $2
+                LIMIT ${limit_idx}
                 """,
-                bank_id,
-                fetch_limit,
+                *fetch_params,
             )
             perf.record_timing("fetch_memories", time.time() - t0)
 
@@ -575,17 +596,24 @@ async def run_consolidation_job(
                 hit_round_limit = True
                 break
 
-    # Re-submit consolidation if we hit the round limit and there's likely more work
+    # Re-submit consolidation if we hit the round limit and there's likely more work.
+    # Any failure here must propagate: swallowing it (the prior behavior) leaves the
+    # bank with backlog and no queued work — silently stuck — because the outer op
+    # gets marked completed in the success path. Letting the exception bubble up to
+    # execute_task's retry handler means the op is retried with backoff; on retry the
+    # consolidator skips already-consolidated rows via the consolidated_at filter and
+    # picks up the remainder. Issue #1842.
     if hit_round_limit:
         remaining = total_count - stats["memories_processed"]
         logger.info(
             f"[CONSOLIDATION] bank={bank_id} hit round limit of {max_memories_per_round} memories,"
             f" ~{remaining} remaining. Re-queuing consolidation."
         )
-        try:
-            await memory_engine.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
-        except Exception as e:
-            logger.warning(f"[CONSOLIDATION] bank={bank_id} failed to re-queue consolidation: {e}")
+        await memory_engine.submit_async_consolidation(
+            bank_id=bank_id,
+            request_context=request_context,
+            observation_scopes=observation_scopes,
+        )
 
     # Build summary
     perf.log(
@@ -1226,6 +1254,44 @@ def _build_observations_for_llm(
     return obs_list
 
 
+def _dedupe_updates(updates: list[_UpdateAction], *, batch_label: str) -> list[_UpdateAction]:
+    """Collapse `updates` that target the same `observation_id`.
+
+    LLMs occasionally emit several update entries for one observation in a
+    single response (one per facet drawn from the same fact). Without
+    deduplication the downstream loop would issue separate DB writes for each
+    and the last write would silently overwrite the earlier ones. We keep the
+    last text (the LLM's most recent attempt) and union all contributing
+    `source_fact_ids`, then warn so the misbehavior is visible in logs.
+    """
+    if len(updates) < 2:
+        return list(updates)
+
+    by_id: dict[str, _UpdateAction] = {}
+    collisions = 0
+    for upd in updates:
+        existing = by_id.get(upd.observation_id)
+        if existing is None:
+            by_id[upd.observation_id] = upd
+            continue
+        collisions += 1
+        merged_ids = list(dict.fromkeys([*existing.source_fact_ids, *upd.source_fact_ids]))
+        by_id[upd.observation_id] = _UpdateAction(
+            text=upd.text,
+            observation_id=upd.observation_id,
+            source_fact_ids=merged_ids,
+        )
+
+    if collisions:
+        logger.warning(
+            f"[CONSOLIDATION] {batch_label}: LLM emitted {collisions} duplicate update(s) targeting "
+            f"the same observation_id ({len(updates)} updates -> {len(by_id)} after dedup). "
+            "Kept the last text and unioned source_fact_ids."
+        )
+
+    return list(by_id.values())
+
+
 async def _consolidate_batch_with_llm(
     llm_config: Any,
     memories: list[dict[str, Any]],
@@ -1274,7 +1340,11 @@ async def _consolidate_batch_with_llm(
                 f"(out of {max_observations_per_scope}). Prefer UPDATE over CREATE when possible."
             )
 
-    prompt_template = build_batch_consolidation_prompt(config.observations_mission, observation_capacity_note)
+    prompt_template = build_batch_consolidation_prompt(
+        config.observations_mission,
+        observation_capacity_note,
+        llm_output_language=getattr(config, "llm_output_language", None),
+    )
     prompt = prompt_template.format(
         facts_text=facts_lines,
         observations_text=observations_text,
@@ -1315,9 +1385,10 @@ async def _consolidate_batch_with_llm(
                         f"(max_observations_per_scope={max_observations_per_scope})"
                     )
                     creates = creates[:remaining_observation_slots]
+            updates = _dedupe_updates(response.updates, batch_label=batch_label)
             return _BatchLLMResult(
                 creates=creates,
-                updates=response.updates,
+                updates=updates,
                 deletes=response.deletes,
                 obs_count=len(union_observations),
                 prompt_chars=len(prompt),
@@ -1386,9 +1457,16 @@ async def _create_observation_directly(
                     tokenize($3, 'llmlingua2')::bm25_catalog.bm25vector)
             RETURNING id
         """
-    else:  # native or pg_textsearch
-        # Native PostgreSQL: search_vector is GENERATED ALWAYS, don't include it
-        # pg_textsearch: indexes operate on base columns directly, don't populate search_vector
+    else:  # native, pg_textsearch, pgroonga, or pg_search
+        # pg_textsearch / pgroonga / pg_search: indexes operate on base text
+        # columns directly, so the dummy search_vector column is left NULL.
+        # Native: the migration p4q5r6s7t8u9 dropped the GENERATED expression on
+        # search_vector to allow per-deployment language configuration; the
+        # batch insert path in ops_postgresql.insert_facts_batch now populates
+        # it via to_tsvector($lang, ...). This single-observation INSERT does
+        # not, so observations under the native backend currently land with
+        # NULL search_vector and are not BM25-searchable until reflected/
+        # re-ingested. Tracking a separate fix for that gap.
         query = f"""
             INSERT INTO {fq_table("memory_units")} (
                 id, bank_id, text, fact_type, embedding, proof_count, source_memory_ids, history,

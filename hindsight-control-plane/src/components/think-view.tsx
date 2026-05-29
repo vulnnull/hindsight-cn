@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ type ViewMode = "answer" | "trace" | "json";
 type BasedOnTab = "directives" | "mental_models" | "observations" | "world" | "experience";
 
 export function ThinkView() {
+  const t = useTranslations("thinkView");
   const { currentBank } = useBank();
   const [query, setQuery] = useState("");
   const [budget, setBudget] = useState<"low" | "mid" | "high">("mid");
@@ -305,7 +307,7 @@ export function ThinkView() {
                 type="text"
                 value={excludeMentalModelIds}
                 onChange={(e) => setExcludeMentalModelIds(e.target.value)}
-                placeholder="model-a, model-b"
+                placeholder={t("excludeIdsPlaceholder")}
                 className="h-8 w-48"
               />
             </div>
@@ -495,17 +497,19 @@ export function ThinkView() {
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">执行追踪</CardTitle>
                     <CardDescription className="text-xs">
-                      {result.iterations || 0} iteration
-                      {(result.iterations || 0) !== 1 ? "s" : ""} •{" "}
-                      {(result.trace?.llm_calls?.reduce(
-                        (sum: number, lc: any) => sum + lc.duration_ms,
-                        0
-                      ) || 0) +
-                        (result.trace?.tool_calls?.reduce(
-                          (sum: number, tc: any) => sum + tc.duration_ms,
-                          0
-                        ) || 0)}
-                      ms total
+                      {t("executionTraceDescription", {
+                        iterations: result.iterations || 0,
+                        iterationsPlural: (result.iterations || 0) !== 1 ? "s" : "",
+                        totalMs:
+                          (result.trace?.llm_calls?.reduce(
+                            (sum: number, lc: any) => sum + lc.duration_ms,
+                            0
+                          ) || 0) +
+                          (result.trace?.tool_calls?.reduce(
+                            (sum: number, tc: any) => sum + tc.duration_ms,
+                            0
+                          ) || 0),
+                      })}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -851,7 +855,7 @@ export function ThinkView() {
                         <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                         <div>
                           <p className="font-medium text-sm text-amber-900 dark:text-amber-100">
-                            No facts found
+                            {t("noFactsFound")}
                           </p>
                           <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
                             没有使用任何记忆来生成此回答。
@@ -1041,7 +1045,9 @@ export function ThinkView() {
                   </div>
                 )}
                 <div className="pt-2 border-t">
-                  <h3 className="text-sm font-medium text-muted-foreground">ID</h3>
+                  <h3 className="text-sm font-medium text-muted-foreground">
+                    {t("observationIdField")}
+                  </h3>
                   <p className="mt-1 font-mono text-xs text-muted-foreground">
                     {selectedObservation.id}
                   </p>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -63,6 +64,7 @@ function diffWords(a: string, b: string): { type: "same" | "removed" | "added"; 
 }
 
 function TextDiff({ before, after }: { before: string; after: string }) {
+  const t = useTranslations("observationHistory");
   const parts = diffWords(before, after);
   const hasChanges = parts.some((p) => p.type !== "same");
   if (!hasChanges) return <span className="text-sm text-muted-foreground italic">未更改</span>;
@@ -92,6 +94,7 @@ function TextDiff({ before, after }: { before: string; after: string }) {
 }
 
 function TagsDiff({ before, after }: { before: string[]; after: string[] }) {
+  const tr = useTranslations("observationHistory");
   const removed = before.filter((t) => !after.includes(t));
   const added = after.filter((t) => !before.includes(t));
   const kept = before.filter((t) => after.includes(t));
@@ -159,6 +162,7 @@ function DateDiff({
 }
 
 function SourceFactItem({ fact }: { fact: NonNullable<HistoryEntry["source_facts"]>[number] }) {
+  const t = useTranslations("observationHistory");
   const typeColors =
     fact.type === "experience"
       ? "bg-green-500/10 text-green-700 dark:text-green-400"
@@ -203,6 +207,7 @@ export function ObservationHistoryView({
   history: HistoryEntry[];
   current: CurrentState;
 }) {
+  const t = useTranslations("observationHistory");
   // index 0 = most recent change
   const entries = [...history].reverse();
   const [idx, setIdx] = useState(0);

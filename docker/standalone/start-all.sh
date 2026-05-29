@@ -19,6 +19,12 @@ if [ -d "$PG0_DATA_DIR" ]; then
         echo "   如果后续看到所有迁移从头开始运行，说明数据可能已丢失。"
         echo "   参见：https://github.com/vectorize-io/hindsight/issues/675"
     fi
+
+    return 0
+}
+
+if [ "${HINDSIGHT_START_ALL_SOURCE_ONLY:-false}" = "true" ]; then
+    return 0 2>/dev/null || exit 0
 fi
 
 # 服务开关（默认全部启用）

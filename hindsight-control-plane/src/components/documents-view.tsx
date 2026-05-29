@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { DataView } from "./data-view";
@@ -146,6 +147,7 @@ function MemoryComposition({
 }: {
   nodesByFactType: { world: number; experience: number; observation: number } | undefined;
 }) {
+  const t = useTranslations("dataView");
   const counts = nodesByFactType ?? { world: 0, experience: 0, observation: 0 };
   const total = counts.world + counts.experience + counts.observation;
   const items = [
@@ -315,6 +317,8 @@ function ChunkRow({ chunk }: { chunk: any }) {
 }
 
 export function DocumentsView() {
+  const t = useTranslations("documentsView");
+  const tCommon = useTranslations("common");
   const { currentBank } = useBank();
   const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -972,7 +976,7 @@ export function DocumentsView() {
                                 <Input
                                   value={tagInput}
                                   onChange={(e) => setTagInput(e.target.value)}
-                                  placeholder="tag1, tag2, tag3"
+                                  placeholder={t("tagsInputPlaceholder")}
                                   className="text-sm h-7 w-64"
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") saveDocumentTags();

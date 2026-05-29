@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { client, type TagGroup, type TagsMatch } from "@/lib/api";
 import { formatAbsoluteDateTime, formatRelativeTime } from "@/lib/relative-time";
 import { CompactMarkdown } from "./compact-markdown";
@@ -43,6 +44,7 @@ import {
   Sparkles,
   Loader2,
   Trash2,
+  Eraser,
   RefreshCw,
   ChevronLeft,
   ChevronRight,
@@ -104,6 +106,7 @@ interface MentalModel {
 type ViewMode = "dashboard" | "files";
 
 export function MentalModelsView() {
+  const t = useTranslations("mentalModels");
   const { currentBank } = useBank();
   const [mentalModels, setMentalModels] = useState<MentalModel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -124,6 +127,11 @@ export function MentalModelsView() {
     name: string;
   } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [clearTarget, setClearTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   // Tag filtering happens server-side; only the search text is applied locally.
   const filteredMentalModels = mentalModels.filter((m) => {
@@ -199,6 +207,23 @@ export function MentalModelsView() {
       // Error toast is shown automatically by the API client interceptor
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (!currentBank || !clearTarget) return;
+
+    setClearing(true);
+    try {
+      const updated = await client.clearMentalModel(currentBank, clearTarget.id);
+      setMentalModels((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+      if (selectedMentalModel?.id === updated.id) setSelectedMentalModel(updated);
+      toast.success("Mental model content cleared");
+      setClearTarget(null);
+    } catch {
+      // Error toast handled by API client interceptor
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -353,6 +378,9 @@ export function MentalModelsView() {
                                 setShowUpdateDialog(true);
                               }}
                               onRefresh={handleRowRefresh}
+                              onClear={(target) =>
+                                setClearTarget({ id: target.id, name: target.name })
+                              }
                               onDelete={(target) =>
                                 setDeleteTarget({ id: target.id, name: target.name })
                               }
@@ -413,6 +441,7 @@ export function MentalModelsView() {
                     setShowUpdateDialog(true);
                   }}
                   onRefresh={handleRowRefresh}
+                  onClear={(target) => setClearTarget({ id: target.id, name: target.name })}
                   onDelete={(target) => setDeleteTarget({ id: target.id, name: target.name })}
                 />
               )}
@@ -520,6 +549,7 @@ export function MentalModelsView() {
         mentalModelId={selectedMentalModel?.id ?? null}
         onClose={() => setSelectedMentalModel(null)}
         onDelete={(m) => setDeleteTarget({ id: m.id, name: m.name })}
+        onClear={(m) => setClearTarget({ id: m.id, name: m.name })}
         onEdit={(m) => {
           setMentalModelToUpdate(m);
           setShowUpdateDialog(true);
@@ -555,6 +585,7 @@ function RowActionsMenu({
   refreshing,
   onEdit,
   onRefresh,
+  onClear,
   onDelete,
   triggerClassName,
 }: {
@@ -562,9 +593,11 @@ function RowActionsMenu({
   refreshing: boolean;
   onEdit: (m: MentalModel) => void;
   onRefresh: (m: MentalModel) => void;
+  onClear: (m: MentalModel) => void;
   onDelete: (m: MentalModel) => void;
   triggerClassName?: string;
 }) {
+  const t = useTranslations("mentalModels");
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -573,7 +606,7 @@ function RowActionsMenu({
           size="sm"
           className={`p-0 text-muted-foreground ${triggerClassName ?? "h-8 w-8"}`}
           onClick={(e) => e.stopPropagation()}
-          aria-label="Actions"
+          aria-label={t("actionsAriaLabel")}
         >
           <MoreVertical className="h-4 w-4" />
         </Button>
@@ -609,6 +642,7 @@ function CreateMentalModelDialog({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const t = useTranslations("mentalModels");
   const { currentBank } = useBank();
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
@@ -653,7 +687,7 @@ function CreateMentalModelDialog({
         try {
           tagGroups = JSON.parse(form.tagGroups.trim());
         } catch {
-          toast.error("Invalid JSON in Tag Groups field");
+          toast.error(t("invalidTagGroupsJson"));
           return;
         }
       }
@@ -749,17 +783,17 @@ function CreateMentalModelDialog({
         <Tabs defaultValue="general" className="py-2 flex-1 flex flex-col min-h-0 overflow-hidden">
           <TabsList className="w-full">
             <TabsTrigger value="general" className="flex-1">
-              General
+              {t("tabGeneral")}
             </TabsTrigger>
             <TabsTrigger value="options" className="flex-1">
-              Options
+              {t("tabOptions")}
             </TabsTrigger>
           </TabsList>
 
-          <div className="flex-1 overflow-y-auto mt-2 pr-1">
+          <div className="flex-1 overflow-y-auto mt-2 px-1.5">
             <TabsContent value="general" className="space-y-4 pt-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">ID</label>
+                <label className="text-sm font-medium text-foreground">{t("fieldId")}</label>
                 <Input
                   value={form.id}
                   onChange={(e) => setForm({ ...form, id: e.target.value })}
@@ -767,7 +801,7 @@ function CreateMentalModelDialog({
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Name *</label>
+                <label className="text-sm font-medium text-foreground">{t("fieldName")}</label>
                 <Input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -775,20 +809,22 @@ function CreateMentalModelDialog({
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Source Query *</label>
-                <Input
+                <label className="text-sm font-medium text-foreground">
+                  {t("fieldSourceQuery")}
+                </label>
+                <Textarea
                   value={form.sourceQuery}
                   onChange={(e) => setForm({ ...form, sourceQuery: e.target.value })}
                   placeholder="例如：团队偏好的沟通方式？"
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Max Tokens</label>
+                <label className="text-sm font-medium text-foreground">{t("fieldMaxTokens")}</label>
                 <Input
                   type="number"
                   value={form.maxTokens}
                   onChange={(e) => setForm({ ...form, maxTokens: e.target.value })}
-                  placeholder="2048"
+                  placeholder={t("fieldMaxTokensPlaceholder")}
                   min="256"
                   max="8192"
                 />
@@ -880,7 +916,9 @@ function CreateMentalModelDialog({
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Tags Match</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsTagsMatchLabel")}
+                  </label>
                   <Select
                     value={form.tagsMatch}
                     onValueChange={(v) => setForm({ ...form, tagsMatch: v === "default" ? "" : v })}
@@ -903,7 +941,9 @@ function CreateMentalModelDialog({
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Tag Groups (JSON)</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsTagGroupsLabel")}
+                  </label>
                   <Textarea
                     value={form.tagGroups}
                     onChange={(e) => setForm({ ...form, tagGroups: e.target.value })}
@@ -923,7 +963,9 @@ function CreateMentalModelDialog({
                   覆盖此模型刷新时内部召回的行为。留空以继承记忆库/全局默认值。
                 </p>
                 <div className="space-y-3">
-                  <label className="text-sm font-medium text-foreground">Fact Types</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsFactTypesLabel")}
+                  </label>
                   <FactTypeCheckboxGroup
                     value={form.factTypes}
                     onChange={(v) => setForm({ ...form, factTypes: v as FactType[] })}
@@ -1016,6 +1058,7 @@ function UpdateMentalModelDialog({
   onClose: () => void;
   onUpdated: (updated: MentalModel) => void;
 }) {
+  const t = useTranslations("mentalModels");
   const { currentBank } = useBank();
   const [updating, setUpdating] = useState(false);
   const buildFormState = () => ({
@@ -1080,7 +1123,7 @@ function UpdateMentalModelDialog({
         try {
           tagGroups = JSON.parse(form.tagGroups.trim());
         } catch {
-          toast.error("Invalid JSON in Tag Groups field");
+          toast.error(t("invalidTagGroupsJson"));
           return;
         }
       }
@@ -1133,21 +1176,21 @@ function UpdateMentalModelDialog({
         <Tabs defaultValue="general" className="py-2 flex-1 flex flex-col min-h-0 overflow-hidden">
           <TabsList className="w-full">
             <TabsTrigger value="general" className="flex-1">
-              General
+              {t("tabGeneral")}
             </TabsTrigger>
             <TabsTrigger value="options" className="flex-1">
-              Options
+              {t("tabOptions")}
             </TabsTrigger>
           </TabsList>
 
-          <div className="flex-1 overflow-y-auto mt-2 pr-1">
+          <div className="flex-1 overflow-y-auto mt-2 px-1.5">
             <TabsContent value="general" className="space-y-4 pt-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">ID</label>
+                <label className="text-sm font-medium text-muted-foreground">{t("fieldId")}</label>
                 <Input value={mentalModel.id} disabled className="bg-muted" />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Name *</label>
+                <label className="text-sm font-medium text-foreground">{t("fieldName")}</label>
                 <Input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -1155,20 +1198,22 @@ function UpdateMentalModelDialog({
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Source Query *</label>
-                <Input
+                <label className="text-sm font-medium text-foreground">
+                  {t("fieldSourceQuery")}
+                </label>
+                <Textarea
                   value={form.sourceQuery}
                   onChange={(e) => setForm({ ...form, sourceQuery: e.target.value })}
                   placeholder="例如：团队偏好的沟通方式？"
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Max Tokens</label>
+                <label className="text-sm font-medium text-foreground">{t("fieldMaxTokens")}</label>
                 <Input
                   type="number"
                   value={form.maxTokens}
                   onChange={(e) => setForm({ ...form, maxTokens: e.target.value })}
-                  placeholder="2048"
+                  placeholder={t("fieldMaxTokensPlaceholder")}
                   min="256"
                   max="8192"
                 />
@@ -1260,7 +1305,9 @@ function UpdateMentalModelDialog({
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Tags Match</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsTagsMatchLabel")}
+                  </label>
                   <Select
                     value={form.tagsMatch || "default"}
                     onValueChange={(v) => setForm({ ...form, tagsMatch: v === "default" ? "" : v })}
@@ -1283,7 +1330,9 @@ function UpdateMentalModelDialog({
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Tag Groups (JSON)</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsTagGroupsLabel")}
+                  </label>
                   <Textarea
                     value={form.tagGroups}
                     onChange={(e) => setForm({ ...form, tagGroups: e.target.value })}
@@ -1303,7 +1352,9 @@ function UpdateMentalModelDialog({
                   覆盖此模型刷新时内部召回的行为。留空以继承记忆库/全局默认值。
                 </p>
                 <div className="space-y-3">
-                  <label className="text-sm font-medium text-foreground">Fact Types</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsFactTypesLabel")}
+                  </label>
                   <FactTypeCheckboxGroup
                     value={form.factTypes}
                     onChange={(v) => setForm({ ...form, factTypes: v as FactType[] })}
@@ -1393,6 +1444,7 @@ function FilesView({
   refreshingIds,
   onEdit,
   onRefresh,
+  onClear,
   onDelete,
 }: {
   mentalModels: MentalModel[];
@@ -1402,8 +1454,10 @@ function FilesView({
   refreshingIds: Set<string>;
   onEdit: (m: MentalModel) => void;
   onRefresh: (m: MentalModel) => void;
+  onClear: (m: MentalModel) => void;
   onDelete: (m: MentalModel) => void;
 }) {
+  const t = useTranslations("mentalModels");
   const effectiveId =
     selectedId && mentalModels.some((m) => m.id === selectedId)
       ? selectedId
@@ -1494,6 +1548,7 @@ function FilesView({
                     refreshing={refreshingIds.has(selected.id)}
                     onEdit={onEdit}
                     onRefresh={onRefresh}
+                    onClear={onClear}
                     onDelete={onDelete}
                   />
                 </div>

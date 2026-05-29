@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import {
@@ -18,6 +19,7 @@ interface DocumentChunkModalProps {
 }
 
 export function DocumentChunkModal({ type, id, onClose }: DocumentChunkModalProps) {
+  const t = useTranslations("documentChunkModal");
   const { currentBank } = useBank();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);

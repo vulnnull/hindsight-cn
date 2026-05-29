@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,8 @@ export function DataView({
   compact = false,
   onExpandToggle,
 }: DataViewProps) {
+  const t = useTranslations("dataView");
+  const tAddDoc = useTranslations("addDocument");
   const { currentBank } = useBank();
   const [viewMode, setViewMode] = useState<ViewMode>("constellation");
   const [compactMode, setCompactMode] = useState(compact);
@@ -1153,6 +1156,7 @@ function TimelineView({
   bankId?: string;
   onMemoryClick: (id: string) => void;
 }) {
+  const t = useTranslations("dataView");
   const [granularity, setGranularity] = useState<Granularity>("month");
   const [currentIndex, setCurrentIndex] = useState(0);
   const timelineRef = useRef<HTMLDivElement>(null);

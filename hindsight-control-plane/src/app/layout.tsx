@@ -1,9 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { BankProvider } from "@/lib/bank-context";
-import { FeaturesProvider } from "@/lib/features-context";
-import { ThemeProvider } from "@/lib/theme-context";
-import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
   title: "Hindsight 控制台",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useTranslations } from "next-intl";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useRouter } from "next/navigation";
@@ -152,8 +153,39 @@ const TRAIT_LABELS: Record<
   },
 };
 
+function useTraitLabels() {
+  const t = useTranslations("bankProfile");
+  return {
+    skepticism: {
+      label: t("skepticismLabel"),
+      shortLabel: TRAIT_SHORT_LABELS.skepticism,
+      description: t("skepticismDescription"),
+      lowLabel: t("skepticismLow"),
+      highLabel: t("skepticismHigh"),
+    },
+    literalism: {
+      label: t("literalismLabel"),
+      shortLabel: TRAIT_SHORT_LABELS.literalism,
+      description: t("literalismDescription"),
+      lowLabel: t("literalismLow"),
+      highLabel: t("literalismHigh"),
+    },
+    empathy: {
+      label: t("empathyLabel"),
+      shortLabel: TRAIT_SHORT_LABELS.empathy,
+      description: t("empathyDescription"),
+      lowLabel: t("empathyLow"),
+      highLabel: t("empathyHigh"),
+    },
+  } as const;
+}
+
 export function BankProfileView({ hideReflectFields = false }: { hideReflectFields?: boolean }) {
   const router = useRouter();
+  const t = useTranslations("bankProfile");
+  const tCommon = useTranslations("common");
+  const tBank = useTranslations("bank");
+  const traitLabels = useTraitLabels();
   const { currentBank, setCurrentBank, loadBanks } = useBank();
   const { features } = useFeatures();
   const observationsEnabled = features?.observations ?? false;
@@ -410,15 +442,15 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
             <CardContent>
               {profile && (
                 <div className="space-y-4">
-                  {(Object.keys(TRAIT_LABELS) as Array<keyof DispositionTraits>).map((trait) => (
+                  {TRAIT_KEYS.map((trait) => (
                     <div key={trait} className="space-y-2">
                       <div className="flex justify-between items-center">
                         <div>
                           <label className="text-sm font-medium text-foreground">
-                            {TRAIT_LABELS[trait].label}
+                            {traitLabels[trait].label}
                           </label>
                           <p className="text-xs text-muted-foreground">
-                            {TRAIT_LABELS[trait].description}
+                            {traitLabels[trait].description}
                           </p>
                         </div>
                         <span className="text-sm font-bold text-primary">
@@ -427,7 +459,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">
-                          {TRAIT_LABELS[trait].lowLabel}
+                          {traitLabels[trait].lowLabel}
                         </span>
                         <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                           <div
@@ -436,7 +468,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
                           />
                         </div>
                         <span className="text-xs text-muted-foreground">
-                          {TRAIT_LABELS[trait].highLabel}
+                          {traitLabels[trait].highLabel}
                         </span>
                       </div>
                     </div>
@@ -725,6 +757,8 @@ function DispositionEditDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const t = useTranslations("bankProfile");
+  const traitLabels = useTraitLabels();
   const { currentBank } = useBank();
   const [saving, setSaving] = useState(false);
   const [editDisposition, setEditDisposition] = useState<DispositionTraits>(disposition);
@@ -756,20 +790,20 @@ function DispositionEditDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {(Object.keys(TRAIT_LABELS) as Array<keyof DispositionTraits>).map((trait) => (
+          {TRAIT_KEYS.map((trait) => (
             <div key={trait} className="space-y-2">
               <div className="flex justify-between items-center">
                 <div>
                   <label className="text-sm font-medium text-foreground">
-                    {TRAIT_LABELS[trait].label}
+                    {traitLabels[trait].label}
                   </label>
-                  <p className="text-xs text-muted-foreground">{TRAIT_LABELS[trait].description}</p>
+                  <p className="text-xs text-muted-foreground">{traitLabels[trait].description}</p>
                 </div>
                 <span className="text-sm font-bold text-primary">{editDisposition[trait]}/5</span>
               </div>
               <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>{TRAIT_LABELS[trait].lowLabel}</span>
-                <span>{TRAIT_LABELS[trait].highLabel}</span>
+                <span>{traitLabels[trait].lowLabel}</span>
+                <span>{traitLabels[trait].highLabel}</span>
               </div>
               <input
                 type="range"
@@ -817,6 +851,7 @@ function MissionEditDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const t = useTranslations("bankProfile");
   const { currentBank } = useBank();
   const [saving, setSaving] = useState(false);
   const [editMission, setEditMission] = useState(mission);
@@ -892,6 +927,7 @@ function DirectiveFormDialog({
   onCreated?: (d: Directive) => void;
   onSaved?: (d: Directive) => void;
 }) {
+  const t = useTranslations("bankProfile");
   const { currentBank } = useBank();
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ name: "", content: "", tags: "" });
@@ -1022,6 +1058,7 @@ function DirectiveDetailPanel({
   onDelete: () => void;
   onUpdated: (d: Directive) => void;
 }) {
+  const t = useTranslations("bankProfile");
   const [showEditModal, setShowEditModal] = useState(false);
 
   return (
@@ -1096,7 +1133,7 @@ function DirectiveDetailPanel({
           {/* ID */}
           <div>
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-              ID
+              {t("directiveDetailIdLabel")}
             </div>
             <code className="text-sm font-mono break-all text-muted-foreground">
               {directive.id}

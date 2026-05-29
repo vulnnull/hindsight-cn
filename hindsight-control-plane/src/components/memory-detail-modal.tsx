@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -43,6 +44,7 @@ interface MemoryDetailModalProps {
 }
 
 export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetailModalProps) {
+  const t = useTranslations("memoryDetailModal");
   const { currentBank } = useBank();
   const [memory, setMemory] = useState<MemoryDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -181,7 +183,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
           ) : error ? (
             <div className="flex items-center justify-center py-20">
               <div className="text-center text-destructive">
-                <div className="text-sm">Error: {error}</div>
+                <div className="text-sm">{t("errorPrefix", { message: error })}</div>
               </div>
             </div>
           ) : memory ? (

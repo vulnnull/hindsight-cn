@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { useBank } from "@/lib/bank-context";
 import { useFeatures } from "@/lib/features-context";
 import { client, MentalModel } from "@/lib/api";
@@ -406,9 +407,17 @@ interface OpsStatusEntry {
 }
 
 function OperationsCard({ byStatus }: { byStatus: Record<string, number> }) {
+  const t = useTranslations("bankStats");
+  const statusLabel: Record<string, string> = {
+    completed: t("opsCompleted"),
+    processing: t("opsProcessing"),
+    pending: t("opsPending"),
+    failed: t("opsFailed"),
+    cancelled: t("opsCancelled"),
+  };
   const entries: OpsStatusEntry[] = OPS_STATUS_ORDER.map((s) => ({
     status: s,
-    label: OPS_STATUS_LABELS[s],
+    label: statusLabel[s] ?? OPS_STATUS_LABELS[s],
     value: byStatus[s] || 0,
     color: OPS_STATUS_COLORS[s],
   }));
@@ -489,6 +498,7 @@ function ConsolidationCard({
   total: number;
   lastConsolidatedAt: string | null;
 }) {
+  const t = useTranslations("bankStats");
   const [failedOpen, setFailedOpen] = useState(false);
   const hasFailed = failed > 0;
 
@@ -566,7 +576,7 @@ function ConsolidationCard({
               </span>
             </div>
             <span className="text-base font-semibold text-foreground block leading-tight">
-              {formatRelativeTime(lastConsolidatedAt)}
+              {formatRelativeTime(lastConsolidatedAt, t as RelativeTimeTranslator)}
             </span>
           </div>
         </div>
@@ -591,6 +601,8 @@ function FailedConsolidationsDialog({
   open: boolean;
   onOpenChange: (value: boolean) => void;
 }) {
+  const t = useTranslations("bankStats");
+  const tFailed = useTranslations("failedConsolidations");
   const { currentBank } = useBank();
   const [items, setItems] = useState<FailedMemoryItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -629,9 +641,7 @@ function FailedConsolidationsDialog({
       if (res.retried_count > 0) {
         await client.triggerConsolidation(currentBank);
       }
-      toast.success(
-        `Queued ${res.retried_count} memor${res.retried_count === 1 ? "y" : "ies"} for re-consolidation`
-      );
+      toast.success(tFailed("recoverSuccess", { count: res.retried_count }));
       setRefreshTick((t) => t + 1);
     } catch {
       // toast shown by interceptor
@@ -681,7 +691,7 @@ function FailedConsolidationsDialog({
               {items.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                    {formatRelativeTime(row.consolidation_failed_at)}
+                    {formatRelativeTime(row.consolidation_failed_at, t as RelativeTimeTranslator)}
                   </TableCell>
                   <TableCell className="text-xs capitalize">{row.fact_type}</TableCell>
                   <TableCell className="text-sm">
@@ -709,6 +719,7 @@ function MentalModelsCard({
   models: MentalModel[];
   lastConsolidatedAt: string | null;
 }) {
+  const t = useTranslations("bankStats");
   const total = models.length;
   const consolidatedTime = lastConsolidatedAt ? new Date(lastConsolidatedAt).getTime() : 0;
   const upToDate = models.filter((m) => {
@@ -781,6 +792,8 @@ const AXIS_TICK_STYLE = {
 };
 
 export function BankStatsView() {
+  const t = useTranslations("bankStats");
+  const timeFieldLabels = getTimeFieldLabels(t as TimeFieldTranslator);
   const { currentBank } = useBank();
   const { features } = useFeatures();
   const observationsEnabled = features?.observations ?? false;
@@ -870,6 +883,12 @@ export function BankStatsView() {
   const toggleSeries = (k: FactKey) => setEnabledSeries((prev) => ({ ...prev, [k]: !prev[k] }));
 
   const consolidatedDone = Math.max(0, stats.total_nodes - stats.pending_consolidation);
+
+  const factLabel: Record<FactKey, string> = {
+    world: t("world"),
+    experience: t("experience"),
+    observation: t("observations"),
+  };
 
   return (
     <div className="space-y-8">
@@ -988,14 +1007,14 @@ export function BankStatsView() {
                   <button
                     key={tf}
                     onClick={() => setTimeField(tf)}
-                    title={TIME_FIELD_LABELS[tf].long}
+                    title={timeFieldLabels[tf].long}
                     className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors ${
                       timeField === tf
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    {TIME_FIELD_LABELS[tf].short}
+                    {timeFieldLabels[tf].short}
                   </button>
                 ))}
               </div>
@@ -1021,7 +1040,7 @@ export function BankStatsView() {
                             opacity: on ? 1 : 0.3,
                           }}
                         />
-                        {meta.label}
+                        {factLabel[k]}
                       </button>
                     );
                   })}
@@ -1085,7 +1104,7 @@ export function BankStatsView() {
                             key={k}
                             type="monotone"
                             dataKey={k}
-                            name={FACT_META[k].label}
+                            name={factLabel[k]}
                             stackId="a"
                             stroke={FACT_META[k].color}
                             strokeWidth={2}

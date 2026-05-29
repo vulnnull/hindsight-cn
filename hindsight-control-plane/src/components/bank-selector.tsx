@@ -3,9 +3,12 @@
 import * as React from "react";
 import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useBank } from "@/lib/bank-context";
 import { bankRoute } from "@/lib/bank-url";
+import { withBasePath } from "@/lib/base-path";
 import { client } from "@/lib/api";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -85,6 +88,10 @@ function formatTimeAgo(isoDate: string): string {
 function BankSelectorInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const tNav = useTranslations("nav");
+  const tNavBank = useTranslations("nav.bank");
+  const tCommon = useTranslations("common");
+  const tAddDocument = useTranslations("addDocument");
   const { currentBank, setCurrentBank, banks, bankInfos, banksLoading, loadBanks } = useBank();
   const { theme, toggleTheme } = useTheme();
   const { features } = useFeatures();
@@ -454,7 +461,7 @@ function BankSelectorInner() {
       <div className="flex items-center gap-4 text-sm">
         {/* Logo */}
         <Image
-          src="/logo.png"
+          src={withBasePath("/logo.png")}
           alt="Hindsight"
           width={40}
           height={40}
@@ -617,6 +624,8 @@ function BankSelectorInner() {
           {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </Button>
 
+        <LanguageSwitcher />
+
         {features?.access_key_auth && (
           <>
             <div className="h-8 w-px bg-border" />
@@ -627,9 +636,9 @@ function BankSelectorInner() {
               title="退出登录"
               onClick={async () => {
                 try {
-                  await fetch("/api/auth/logout", { method: "POST" });
+                  await fetch(withBasePath("/api/auth/logout"), { method: "POST" });
                 } finally {
-                  window.location.href = "/login";
+                  window.location.href = withBasePath("/login");
                 }
               }}
             >
@@ -961,7 +970,7 @@ function BankSelectorInner() {
                                               onChange={(e) =>
                                                 updateFileMeta(index, "tags", e.target.value)
                                               }
-                                              placeholder="tag1, tag2..."
+                                              placeholder={tAddDocument("fileTagsPlaceholder")}
                                               className="h-8 text-sm"
                                             />
                                             <p className="text-xs text-muted-foreground mt-1">
@@ -1306,7 +1315,7 @@ export function BankSelector() {
         <div className="bg-card text-card-foreground px-5 py-3 border-b-4 border-primary-gradient">
           <div className="flex items-center gap-4 text-sm">
             <Image
-              src="/logo.png"
+              src={withBasePath("/logo.png")}
               alt="Hindsight"
               width={40}
               height={40}

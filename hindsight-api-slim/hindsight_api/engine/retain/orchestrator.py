@@ -100,13 +100,15 @@ from .types import (
     ChunkMetadata,
     EntityResolutionResult,
     Phase1Result,
-    Phase3Context,
     ProcessedFact,
     RetainContent,
     RetainContentDict,
 )
 
 logger = logging.getLogger(__name__)
+
+RetainOutboxCallback = Callable[[asyncpg.Connection], Awaitable[None]]
+RetainOutboxCallbackFactory = Callable[[list[RetainContentDict]], RetainOutboxCallback | None]
 
 
 def _build_retain_params(contents_dicts, document_tags=None, doc_contents=None):
@@ -256,30 +258,27 @@ async def _insert_facts_and_links(
     skip_semantic_links: bool = False,
     outbox_callback=None,
     ops=None,
-) -> tuple[list[list[str]], Phase3Context]:
+) -> list[list[str]]:
     """
     Phase 2 of the retain pipeline: insert facts and retrieval-critical links.
 
     Runs inside a single database transaction to ensure atomicity of the data
     that retrieval depends on (facts, unit_entities, temporal/semantic/causal links).
 
-    Entity link generation and insertion for UI visualization are NOT done here —
-    only the unit_entities INSERT (FK to memory_units) stays in the transaction.
-    Entity link building is deferred to Phase 3 (post-transaction, best-effort).
+    Entity edges for UI graph visualization are derived on demand from
+    unit_entities by the /graph endpoint, so no entity rows are written to
+    memory_links here.
     """
     set_stage("retain.phase2.insert_facts")
     unit_ids = await fact_storage.insert_facts_batch(conn, bank_id, processed_facts, ops=ops)
     step_start = time.time()
     log_buffer.append(f"  Insert facts: {len(unit_ids)} units in {time.time() - step_start:.3f}s")
 
-    # Context for Phase 3 entity link building (after transaction commits)
-    phase3_context = Phase3Context()
-
     if unit_ids:
         # Entity resolution was done in Phase 1 (separate connection).
         # Remap placeholder IDs to actual unit IDs.
         step_start = time.time()
-        remapped_entity_to_unit, remapped_unit_to_entity_ids, remapped_semantic = _remap_phase1_results(
+        remapped_entity_to_unit, _remapped_unit_to_entity_ids, remapped_semantic = _remap_phase1_results(
             resolved_entity_ids, entity_to_unit, unit_to_entity_ids, semantic_ann_links or [], unit_ids
         )
         # Update semantic_ann_links with remapped IDs for Phase 2
@@ -293,13 +292,6 @@ async def _insert_facts_and_links(
         ]
         await entity_resolver.link_units_to_entities_batch(unit_entity_pairs, conn=conn)
         log_buffer.append(f"  Insert unit_entities: {len(unit_entity_pairs)} pairs in {time.time() - step_start:.3f}s")
-        # Save context for Phase 3 entity link building (after commit)
-        phase3_context = Phase3Context(
-            unit_ids=unit_ids,
-            resolved_entity_ids=resolved_entity_ids,
-            entity_to_unit=remapped_entity_to_unit,
-            unit_to_entity_ids=remapped_unit_to_entity_ids,
-        )
 
         # Create temporal links
         step_start = time.time()
@@ -340,52 +332,10 @@ async def _insert_facts_and_links(
     # an IndexError (see issue #1037).
     result_unit_ids = _map_results_to_contents(contents, processed_facts, unit_ids if unit_ids else [])
 
-    if outbox_callback:
+    if outbox_callback is not None:
         await outbox_callback(conn)
 
-    return result_unit_ids, phase3_context
-
-
-async def _build_and_insert_entity_links_phase3(
-    pool: Any,
-    entity_resolver,
-    bank_id: str,
-    phase3_ctx: Phase3Context,
-    log_buffer: list[str],
-) -> None:
-    """
-    Phase 3 helper: build entity links from resolved data and insert them.
-
-    Runs on a fresh connection after the main transaction has committed.
-    Entity links are for UI graph visualization only — retrieval uses
-    the unit_entities self-join instead.
-    """
-    set_stage("retain.phase3.entity_links")
-    p3_unit_ids = phase3_ctx.unit_ids
-    p3_resolved = phase3_ctx.resolved_entity_ids
-    p3_entity_to_unit = phase3_ctx.entity_to_unit
-    p3_unit_to_entity_ids = phase3_ctx.unit_to_entity_ids
-
-    if not p3_unit_ids or not p3_resolved:
-        return
-
-    async with acquire_with_retry(pool) as conn:
-        step_start = time.time()
-        entity_links = await entity_processing.build_entity_links(
-            entity_resolver,
-            conn,
-            bank_id,
-            p3_unit_ids,
-            p3_resolved,
-            p3_entity_to_unit,
-            p3_unit_to_entity_ids,
-            log_buffer,
-            skip_unit_entities_insert=True,  # Already inserted in Phase 2
-            ops=pool.ops,
-        )
-        if entity_links:
-            await entity_processing.insert_entity_links_batch(conn, entity_links, bank_id, ops=pool.ops)
-        log_buffer.append(f"  Entity links (viz): {len(entity_links)} links in {time.time() - step_start:.3f}s")
+    return result_unit_ids
 
 
 async def _extract_and_embed(
@@ -449,8 +399,10 @@ async def retain_batch(
     document_tags: list[str] | None = None,
     operation_id: str | None = None,
     schema: str | None = None,
-    outbox_callback: Callable[["asyncpg.Connection"], Awaitable[None]] | None = None,
+    outbox_callback: RetainOutboxCallback | None = None,
+    outbox_callback_factory: RetainOutboxCallbackFactory | None = None,
     db_semaphore: "asyncio.Semaphore | None" = None,
+    document_body_override: str | None = None,
 ) -> tuple[list[list[str]], TokenUsage, int | None]:
     """
     Process a batch of content through the retain pipeline.
@@ -507,6 +459,10 @@ async def retain_batch(
             total_usage = TokenUsage()
             total_processed_tokens: int | None = 0
             for doc_key, (group_dicts, group_contents) in groups.items():
+                group_outbox_callback = (
+                    outbox_callback_factory(group_dicts) if outbox_callback_factory is not None else outbox_callback
+                )
+
                 group_ids, group_usage, group_processed = await retain_batch(
                     pool=pool,
                     embeddings_model=embeddings_model,
@@ -522,8 +478,10 @@ async def retain_batch(
                     document_tags=document_tags,
                     operation_id=operation_id,
                     schema=schema,
-                    outbox_callback=outbox_callback,
+                    outbox_callback=group_outbox_callback,
+                    outbox_callback_factory=outbox_callback_factory,
                     db_semaphore=db_semaphore,
+                    document_body_override=document_body_override,
                 )
                 for group_idx, orig_idx in enumerate(original_indices[doc_key]):
                     if group_idx < len(group_ids):
@@ -665,6 +623,7 @@ async def retain_batch(
             schema,
             outbox_callback,
             db_semaphore,
+            document_body_override=document_body_override,
         )
         if delta_result is not None:
             return delta_result
@@ -721,6 +680,7 @@ async def retain_batch(
         schema=schema,
         outbox_callback=outbox_callback,
         db_semaphore=db_semaphore,
+        document_body_override=document_body_override,
     )
 
 
@@ -858,6 +818,7 @@ async def _streaming_retain_batch(
     schema: str | None = None,
     outbox_callback: Callable[["asyncpg.Connection"], Awaitable[None]] | None = None,
     db_semaphore: "asyncio.Semaphore | None" = None,
+    document_body_override: str | None = None,
 ) -> tuple[list[list[str]], TokenUsage]:
     """
     Process a large document in streaming mini-batches to bound memory usage.
@@ -891,7 +852,15 @@ async def _streaming_retain_batch(
     # document exists with a matching content_hash and has committed chunks,
     # the producer can skip already-extracted chunks to avoid duplicate work.
     existing_chunk_hashes: set[str] = set()
-    combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
+    # When the caller is processing a sub-batch sliced out of an oversized
+    # item (see _split_contents_into_sub_batches), document_body_override
+    # carries the full original document body. Use it for the doc-row write
+    # so documents.original_text stores the complete payload, not just this
+    # slice (issue #1838).
+    if document_body_override is not None:
+        combined_content = document_body_override
+    else:
+        combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
     # Memory: contents_dicts content strings are now captured in combined_content.
     # Clear them from the dicts to release the per-item copies (can be multi-MB each).
     for d in contents_dicts:
@@ -1191,7 +1160,6 @@ async def _streaming_retain_batch(
 
             p2_start = time.time()
             batch_result_ids = None
-            phase3_ctx = None
             async with acquire_with_retry(pool) as conn:
                 async with conn.transaction():
                     # --- Document ownership gate ---
@@ -1280,7 +1248,7 @@ async def _streaming_retain_batch(
 
                     # Insert facts and links — skip semantic links entirely in streaming
                     # mode; they are created in a single final ANN pass after all batches.
-                    batch_result_ids, phase3_ctx = await _insert_facts_and_links(
+                    batch_result_ids = await _insert_facts_and_links(
                         conn,
                         entity_resolver,
                         bank_id,
@@ -1300,15 +1268,13 @@ async def _streaming_retain_batch(
 
                 logger.info(f"[streaming] Phase 2 (write txn): {time.time() - p2_start:.3f}s")
 
-                # Best-effort: entity viz + stats (fast, not semantic ANN)
-                if phase3_ctx is not None:
-                    try:
-                        await entity_resolver.flush_pending_stats()
-                        await _build_and_insert_entity_links_phase3(
-                            pool, entity_resolver, bank_id, phase3_ctx, log_buffer
-                        )
-                    except Exception:
-                        logger.warning(f"Phase 3 stats (consumer batch {consumer_batch_idx + 1}) failed", exc_info=True)
+                # Best-effort: flush entity_cooccurrences and other deferred stats.
+                try:
+                    await entity_resolver.flush_pending_stats()
+                except Exception:
+                    logger.warning(
+                        f"Entity stats flush (consumer batch {consumer_batch_idx + 1}) failed", exc_info=True
+                    )
 
             logger.info(
                 f"[streaming] Consumer batch {consumer_batch_idx + 1} total "
@@ -1537,6 +1503,8 @@ async def _try_delta_retain(
     schema,
     outbox_callback,
     db_semaphore: "asyncio.Semaphore | None" = None,
+    *,
+    document_body_override: str | None = None,
 ) -> tuple[list[list[str]], TokenUsage, int | None] | None:
     """
     Attempt delta retain for a document upsert. Returns result tuple if delta
@@ -1622,6 +1590,7 @@ async def _try_delta_retain(
             log_buffer,
             start_time,
             outbox_callback,
+            document_body_override=document_body_override,
         )
 
     # Build content items for only the changed/new chunks
@@ -1638,6 +1607,7 @@ async def _try_delta_retain(
             log_buffer,
             start_time,
             outbox_callback,
+            document_body_override=document_body_override,
         )
 
     # Extract facts and generate embeddings (shared pipeline)
@@ -1697,7 +1667,13 @@ async def _try_delta_retain(
 
                 # Update document metadata (no delete)
                 step_start = time.time()
-                combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
+                # When this sub-batch is one slice of an oversized item
+                # split across multiple sub-batches, store the full body
+                # (issue #1838) instead of just the slice.
+                if document_body_override is not None:
+                    combined_content = document_body_override
+                else:
+                    combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
                 retain_params, merged_tags = _build_retain_params(contents_dicts, document_tags)
                 await fact_storage.upsert_document_metadata(
                     conn,
@@ -1766,7 +1742,7 @@ async def _try_delta_retain(
                 # Insert facts and retrieval-critical links.
                 # Use delta_contents (the changed/new chunks) as the content list,
                 # since extracted_facts have content_index relative to delta_contents.
-                result_unit_ids, phase3_ctx = await _insert_facts_and_links(
+                result_unit_ids = await _insert_facts_and_links(
                     conn,
                     entity_resolver,
                     bank_id,
@@ -1783,12 +1759,11 @@ async def _try_delta_retain(
                     ops=pool.ops,
                 )
 
-            # PHASE 3 — Best-Effort Display Data (post-transaction)
+            # Flush deferred entity_cooccurrences stats (post-transaction, best-effort).
             try:
                 await entity_resolver.flush_pending_stats()
-                await _build_and_insert_entity_links_phase3(pool, entity_resolver, bank_id, phase3_ctx, log_buffer)
             except Exception:
-                logger.warning("Phase 3 (best-effort display data) failed — retrieval unaffected", exc_info=True)
+                logger.warning("Entity stats flush failed — retrieval unaffected", exc_info=True)
 
             total_time = time.time() - start_time
             log_buffer.append(f"{'=' * 60}")
@@ -1823,6 +1798,8 @@ async def _delta_metadata_only(
     log_buffer,
     start_time,
     outbox_callback,
+    *,
+    document_body_override: str | None = None,
 ):
     """Handle the case where no chunks changed — just update document metadata and tags."""
     async with acquire_with_retry(pool) as conn:
@@ -1833,7 +1810,12 @@ async def _delta_metadata_only(
                 document_id,
                 bank_id,
             )
-            combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
+            # When this sub-batch is a slice of an oversized item, write the
+            # full original body (issue #1838) instead of just the slice.
+            if document_body_override is not None:
+                combined_content = document_body_override
+            else:
+                combined_content = "\n".join([c.get("content", "") for c in contents_dicts])
             retain_params, merged_tags = _build_retain_params(contents_dicts, document_tags)
             await fact_storage.upsert_document_metadata(
                 conn,
@@ -1844,7 +1826,7 @@ async def _delta_metadata_only(
                 merged_tags,
             )
             await fact_storage.update_memory_units_tags(conn, bank_id, document_id, merged_tags)
-            if outbox_callback:
+            if outbox_callback is not None:
                 await outbox_callback(conn)
 
     total_time = time.time() - start_time

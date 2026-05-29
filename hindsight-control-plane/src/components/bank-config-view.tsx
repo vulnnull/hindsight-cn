@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { useBank } from "@/lib/bank-context";
 import { useFeatures } from "@/lib/features-context";
 import { client } from "@/lib/api";
@@ -111,10 +112,23 @@ const GEMINI_THRESHOLDS = [
   { value: "BLOCK_ONLY_HIGH", label: "仅屏蔽高级" },
 ] as const;
 
-const DEFAULT_GEMINI_SAFETY_SETTINGS: GeminiSafetySetting[] = GEMINI_HARM_CATEGORIES.map((c) => ({
-  category: c.value,
-  threshold: "BLOCK_NONE",
-}));
+function getGeminiThresholds(t: (key: string) => string): { value: string; label: string }[] {
+  return [
+    { value: "HARM_BLOCK_THRESHOLD_UNSPECIFIED", label: t("geminiThresholdUnspecified") },
+    { value: "OFF", label: t("geminiThresholdOff") },
+    { value: "BLOCK_NONE", label: t("geminiThresholdBlockNone") },
+    { value: "BLOCK_LOW_AND_ABOVE", label: t("geminiThresholdBlockLowAndAbove") },
+    { value: "BLOCK_MEDIUM_AND_ABOVE", label: t("geminiThresholdBlockMediumAndAbove") },
+    { value: "BLOCK_ONLY_HIGH", label: t("geminiThresholdBlockOnlyHigh") },
+  ];
+}
+
+const DEFAULT_GEMINI_SAFETY_SETTINGS: GeminiSafetySetting[] = GEMINI_HARM_CATEGORY_VALUES.map(
+  (value) => ({
+    category: value,
+    threshold: "BLOCK_NONE",
+  })
+);
 
 // ─── MCP tool catalogue ───────────────────────────────────────────────────────
 
@@ -150,7 +164,92 @@ const MCP_TOOL_GROUPS: { label: string; tools: string[] }[] = [
   { label: "标签", tools: ["list_tags"] },
 ];
 
-const ALL_TOOLS: string[] = MCP_TOOL_GROUPS.flatMap((g) => g.tools);
+function getMcpToolGroups(t: (key: string) => string): McpToolGroup[] {
+  return [
+    {
+      key: "core",
+      label: t("mcpGroupCore"),
+      tools: ["retain", "sync_retain", "recall", "reflect"],
+    },
+    {
+      key: "bankManagement",
+      label: t("mcpGroupBankManagement"),
+      tools: [
+        "list_banks",
+        "create_bank",
+        "get_bank",
+        "get_bank_stats",
+        "update_bank",
+        "delete_bank",
+        "clear_memories",
+      ],
+    },
+    {
+      key: "mentalModels",
+      label: t("mcpGroupMentalModels"),
+      tools: [
+        "list_mental_models",
+        "get_mental_model",
+        "create_mental_model",
+        "update_mental_model",
+        "delete_mental_model",
+        "refresh_mental_model",
+        "clear_mental_model",
+      ],
+    },
+    {
+      key: "directives",
+      label: t("mcpGroupDirectives"),
+      tools: ["list_directives", "create_directive", "delete_directive"],
+    },
+    { key: "memories", label: t("mcpGroupMemories"), tools: ["list_memories", "get_memory"] },
+    {
+      key: "documents",
+      label: t("mcpGroupDocuments"),
+      tools: ["list_documents", "get_document", "delete_document"],
+    },
+    {
+      key: "operations",
+      label: t("mcpGroupOperations"),
+      tools: ["list_operations", "get_operation", "cancel_operation"],
+    },
+    { key: "tags", label: t("mcpGroupTags"), tools: ["list_tags"] },
+  ];
+}
+
+const MCP_ALL_TOOLS: string[] = [
+  "retain",
+  "sync_retain",
+  "recall",
+  "reflect",
+  "list_banks",
+  "create_bank",
+  "get_bank",
+  "get_bank_stats",
+  "update_bank",
+  "delete_bank",
+  "clear_memories",
+  "list_mental_models",
+  "get_mental_model",
+  "create_mental_model",
+  "update_mental_model",
+  "delete_mental_model",
+  "refresh_mental_model",
+  "clear_mental_model",
+  "list_directives",
+  "create_directive",
+  "delete_directive",
+  "list_memories",
+  "get_memory",
+  "list_documents",
+  "get_document",
+  "delete_document",
+  "list_operations",
+  "get_operation",
+  "cancel_operation",
+  "list_tags",
+];
+const ALL_TOOLS: string[] = MCP_ALL_TOOLS;
 
 // ─── Slice helpers ────────────────────────────────────────────────────────────
 
@@ -213,6 +312,7 @@ const DEFAULT_PROFILE: ProfileData = {
 // ─── BankConfigView ───────────────────────────────────────────────────────────
 
 export function BankConfigView() {
+  const t = useTranslations("bankConfig");
   const { currentBank: bankId } = useBank();
   const { features } = useFeatures();
   const bankConfigEnabled = features?.bank_config_api ?? true; // optimistic default while loading
@@ -653,7 +753,7 @@ export function BankConfigView() {
         >
           {/* Gemini subsection */}
           <div className="px-6 py-4 space-y-4">
-            <p className="text-sm font-semibold">Gemini / Vertex AI</p>
+            <p className="text-sm font-semibold">{t("geminiSubsectionTitle")}</p>
             <div className="pl-4 border-l-2 border-border/40 space-y-4">
               <FieldRow
                 label="安全设置"
@@ -724,6 +824,7 @@ function RetainStrategyForm({
   onChange: (patch: Partial<RetainFormValues>) => void;
   isOverride?: boolean;
 }) {
+  const t = useTranslations("bankConfig");
   const modeValue = values.retain_extraction_mode ?? (isOverride ? INHERIT_SENTINEL : "");
   const showCustomField = values.retain_extraction_mode === "custom";
 
@@ -856,6 +957,8 @@ function RetainStrategiesPanel({
   strategies: Record<string, Record<string, any>> | null;
   onStrategiesChange: (v: Record<string, Record<string, any>> | null) => void;
 }) {
+  const t = useTranslations("bankConfig");
+  const tCommon = useTranslations("common");
   const [local, setLocal] = useState<LocalStrategy[]>(() => fromStrategiesDict(strategies));
   const [selectedTab, setSelectedTab] = useState<number | "default">("default");
   const [pendingDelete, setPendingDelete] = useState<LocalStrategy | null>(null);
@@ -1040,6 +1143,8 @@ function ToolSelector({
   selected: string[];
   onChange: (tools: string[]) => void;
 }) {
+  const t = useTranslations("bankConfig");
+  const mcpToolGroups = getMcpToolGroups(t);
   const selectedSet = new Set(selected);
 
   const toggleTool = (tool: string) => {
@@ -1049,10 +1154,10 @@ function ToolSelector({
     } else {
       next.add(tool);
     }
-    onChange(ALL_TOOLS.filter((t) => next.has(t)));
+    onChange(ALL_TOOLS.filter((tool) => next.has(tool)));
   };
 
-  const allSelected = ALL_TOOLS.every((t) => selectedSet.has(t));
+  const allSelected = ALL_TOOLS.every((tool) => selectedSet.has(tool));
   const noneSelected = selected.length === 0;
 
   const toggleAll = () => {
@@ -1070,11 +1175,11 @@ function ToolSelector({
         </button>
       </div>
       <div className="space-y-4">
-        {MCP_TOOL_GROUPS.map((group) => {
-          const groupSelected = group.tools.filter((t) => selectedSet.has(t)).length;
+        {mcpToolGroups.map((group) => {
+          const groupSelected = group.tools.filter((tool) => selectedSet.has(tool)).length;
           const groupAll = groupSelected === group.tools.length;
           return (
-            <div key={group.label}>
+            <div key={group.key}>
               <div className="flex items-center justify-between mb-1.5">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                   {group.label}
@@ -1084,11 +1189,11 @@ function ToolSelector({
                   onClick={() => {
                     const next = new Set(selectedSet);
                     if (groupAll) {
-                      group.tools.forEach((t) => next.delete(t));
+                      group.tools.forEach((tool) => next.delete(tool));
                     } else {
-                      group.tools.forEach((t) => next.add(t));
+                      group.tools.forEach((tool) => next.add(tool));
                     }
-                    onChange(ALL_TOOLS.filter((t) => next.has(t)));
+                    onChange(ALL_TOOLS.filter((tool) => next.has(tool)));
                   }}
                   className="text-xs text-primary hover:underline"
                 >
@@ -1146,6 +1251,7 @@ function ConfigSection({
   saving: boolean;
   onSave: () => void;
 }) {
+  const t = useTranslations("bankConfig");
   return (
     <section className="space-y-3">
       <div>
@@ -1328,6 +1434,13 @@ function MapFieldsEditor({
   extraControls?: React.ReactNode;
   examplePrefix?: string;
 }) {
+  const t = useTranslations("bankConfig");
+  const FIELD_TYPE_LABELS: Record<MapField["type"], string> = {
+    text: t("fieldTypeText"),
+    value: t("fieldTypeValue"),
+    "multi-values": t("fieldTypeMultiValues"),
+    map: t("fieldTypeMap"),
+  };
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
   const updateField = (oldName: string, patch: Partial<MapField>) => {
@@ -1547,6 +1660,7 @@ function EntityLabelsEditor({
   value: LabelGroup[];
   onChange: (attrs: LabelGroup[]) => void;
 }) {
+  const t = useTranslations("entityLabelsEditor");
   const updateAttr = (i: number, patch: Partial<LabelGroup>) => {
     const next = value.map((a, idx) => (idx === i ? { ...a, ...patch } : a));
     onChange(next);
@@ -1571,7 +1685,7 @@ function EntityLabelsEditor({
         </div>
         {value.length > 0 && (
           <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full shrink-0">
-            {value.length} label{value.length !== 1 ? "s" : ""}
+            {t("labelCount", { count: value.length })}
           </span>
         )}
       </div>
@@ -1649,12 +1763,15 @@ function GeminiSafetyEditor({
   value: GeminiSafetySetting[];
   onChange: (settings: GeminiSafetySetting[]) => void;
 }) {
+  const t = useTranslations("bankConfig");
+  const harmCategories = getGeminiHarmCategories(t);
+  const thresholds = getGeminiThresholds(t);
   const getThreshold = (category: string): string => {
     return value.find((s) => s.category === category)?.threshold ?? "BLOCK_MEDIUM_AND_ABOVE";
   };
 
   const setThreshold = (category: string, threshold: string) => {
-    const next = GEMINI_HARM_CATEGORIES.map((c) => ({
+    const next = harmCategories.map((c) => ({
       category: c.value,
       threshold: c.value === category ? threshold : getThreshold(c.value),
     }));
@@ -1676,7 +1793,7 @@ function GeminiSafetyEditor({
         </a>
       </p>
       <div className="space-y-2">
-        {GEMINI_HARM_CATEGORIES.map((cat) => (
+        {harmCategories.map((cat) => (
           <div key={cat.value} className="flex items-center justify-between gap-4">
             <span className="text-sm">{cat.label}</span>
             <Select
@@ -1687,9 +1804,9 @@ function GeminiSafetyEditor({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {GEMINI_THRESHOLDS.map((t) => (
-                  <SelectItem key={t.value} value={t.value} className="text-xs">
-                    {t.label}
+                {thresholds.map((th) => (
+                  <SelectItem key={th.value} value={th.value} className="text-xs">
+                    {th.label}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { useBank } from "@/lib/bank-context";
 import { client, AuditLogEntry, AuditStatsBucket } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -106,6 +107,9 @@ function TransportBadge({ transport }: { transport: string }) {
 // ---- Chart Section ----
 
 function AuditChart({ bankId }: { bankId: string }) {
+  const t = useTranslations("auditLogsView");
+  const actionOptions = getActionOptions(t);
+  const periodOptions = getPeriodOptions(t);
   const [period, setPeriod] = useState("7d");
   const [chartAction, setChartAction] = useState<string | null>(null);
   const [buckets, setBuckets] = useState<AuditStatsBucket[]>([]);
@@ -157,14 +161,14 @@ function AuditChart({ bankId }: { bankId: string }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent position="popper" className="max-h-[300px] overflow-y-auto">
-              {ACTION_OPTIONS.map((opt) => (
+              {actionOptions.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
                   {opt.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          {PERIOD_OPTIONS.map((opt) => (
+          {periodOptions.map((opt) => (
             <Button
               key={opt.value}
               variant={period === opt.value ? "default" : "outline"}
@@ -229,6 +233,9 @@ function AuditChart({ bankId }: { bankId: string }) {
 // ---- Main Component ----
 
 export function AuditLogsView() {
+  const t = useTranslations("auditLogsView");
+  const actionOptions = getActionOptions(t);
+  const transportOptions = getTransportOptions(t);
   const { currentBank } = useBank();
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -336,7 +343,7 @@ export function AuditLogsView() {
             <SelectValue placeholder="所有操作" />
           </SelectTrigger>
           <SelectContent position="popper" className="max-h-[300px] overflow-y-auto">
-            {ACTION_OPTIONS.map((opt) => (
+            {actionOptions.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
               </SelectItem>
@@ -349,7 +356,7 @@ export function AuditLogsView() {
             <SelectValue placeholder="所有传输方式" />
           </SelectTrigger>
           <SelectContent position="popper" className="max-h-[300px] overflow-y-auto">
-            {TRANSPORT_OPTIONS.map((opt) => (
+            {transportOptions.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
               </SelectItem>
