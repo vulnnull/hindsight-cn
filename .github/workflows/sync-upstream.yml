@@ -31,26 +31,65 @@ jobs:
         run: |
           BEHIND=$(git rev-list --count HEAD..upstream/main 2>/dev/null || echo 0)
           echo "behind=$BEHIND" >> $GITHUB_OUTPUT
-          echo "上游落后 $BEHIND 个提交"
+          echo "落后上游 $BEHIND 个提交"
 
       - name: 合并上游变更
         if: steps.check.outputs.behind > 0
+        env:
+          # 控制面板目录：这些文件使用上游 i18n 版本（上游已有完整 zh-CN 支持）
+          CP_PREFIX: "hindsight-control-plane/"
         run: |
           git config user.name "hindsight-cn bot"
           git config user.email "bot@hindsight-cn.local"
-          git merge upstream/main --no-edit --allow-unrelated-histories || true
-          # 检查是否有冲突
-          CONFLICTS=$(git diff --name-only --diff-filter=U)
-          if [ -n "$CONFLICTS" ]; then
-            echo "检测到冲突文件："
+
+          # 使用策略式合并：控制面板文件优先上游版本（i18n），其他保留本地版本
+          set +e
+          git merge upstream/main --no-edit -X ours
+          MERGE_EXIT=$?
+          set -e
+
+          if [ $MERGE_EXIT -eq 0 ]; then
+            echo "合并成功，无冲突"
+          else
+            echo "存在树级冲突，逐文件解决..."
+
+            # 获取所有未合并文件
+            CONFLICTS=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
+            CONFLICT_COUNT=$(echo "$CONFLICTS" | grep -c . 2>/dev/null || echo 0)
+            echo "冲突文件数：$CONFLICT_COUNT"
             echo "$CONFLICTS"
-            # 自动优先使用本地（汉化）版本解决冲突
-            echo "$CONFLICTS" | while read file; do
-              echo "保留本地版本：$file"
-              git checkout --ours "$file"
-              git add "$file"
-            done
-            git commit --no-edit -m "fix: 自动解决上游合并冲突（保留中文汉化）"
+
+            # 逐个处理冲突文件
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+
+              # 控制面板文件：优先使用上游版本（上游有完整 i18n 支持）
+              if [[ "$file" == "$CP_PREFIX"* ]]; then
+                echo "  [上游] $file（控制面板，使用上游 i18n 版本）"
+                if git show "upstream/main:$file" > /dev/null 2>&1; then
+                  git checkout --theirs -- "$file" 2>/dev/null || true
+                else
+                  git rm --force "$file" 2>/dev/null || true
+                fi
+              else
+                # 其他文件：保留本地版本
+                echo "  [本地] $file（保留本地修改）"
+                if [ -e "$file" ]; then
+                  git checkout --ours -- "$file" 2>/dev/null || true
+                else
+                  git rm --force "$file" 2>/dev/null || true
+                fi
+              fi
+              git add --force "$file" 2>/dev/null || true
+            done <<< "$CONFLICTS"
+
+            # 提交合并结果
+            if ! git diff --cached --quiet 2>/dev/null; then
+              git commit --no-edit
+              echo "冲突解决完成，已提交"
+            else
+              echo "无实际变更需要提交"
+            fi
           fi
 
       - name: 推送到本仓库
