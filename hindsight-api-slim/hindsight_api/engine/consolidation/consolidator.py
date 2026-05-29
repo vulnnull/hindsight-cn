@@ -596,21 +596,24 @@ async def run_consolidation_job(
                 hit_round_limit = True
                 break
 
-    # Re-submit consolidation if we hit the round limit and there's likely more work
+    # Re-submit consolidation if we hit the round limit and there's likely more work.
+    # Any failure here must propagate: swallowing it (the prior behavior) leaves the
+    # bank with backlog and no queued work — silently stuck — because the outer op
+    # gets marked completed in the success path. Letting the exception bubble up to
+    # execute_task's retry handler means the op is retried with backoff; on retry the
+    # consolidator skips already-consolidated rows via the consolidated_at filter and
+    # picks up the remainder. Issue #1842.
     if hit_round_limit:
         remaining = total_count - stats["memories_processed"]
         logger.info(
             f"[CONSOLIDATION] bank={bank_id} hit round limit of {max_memories_per_round} memories,"
             f" ~{remaining} remaining. Re-queuing consolidation."
         )
-        try:
-            await memory_engine.submit_async_consolidation(
-                bank_id=bank_id,
-                request_context=request_context,
-                observation_scopes=observation_scopes,
-            )
-        except Exception as e:
-            logger.warning(f"[CONSOLIDATION] bank={bank_id} failed to re-queue consolidation: {e}")
+        await memory_engine.submit_async_consolidation(
+            bank_id=bank_id,
+            request_context=request_context,
+            observation_scopes=observation_scopes,
+        )
 
     # Build summary
     perf.log(
