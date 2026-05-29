@@ -102,9 +102,7 @@ export function SearchDebugView() {
 
   const runSearch = async () => {
     if (!currentBank) {
-      toast.error("Validation error", {
-        description: "请先选择一个记忆库",
-      });
+      toast.error(t("errorSelectBank"));
       return;
     }
 
@@ -114,9 +112,7 @@ export function SearchDebugView() {
 
     // Must select at least one type
     if (factTypes.length === 0) {
-      toast.error("Validation error", {
-        description: "请至少选择一种类型（世界常识、经历记忆或观察）",
-      });
+      toast.error(t("errorSelectFactType"));
       return;
     }
 
@@ -164,8 +160,8 @@ export function SearchDebugView() {
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center justify-center py-16">
           <Database className="h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="text-xl font-semibold mb-2">未选择记忆库</h3>
-          <p className="text-muted-foreground">选择一个记忆库以开始召回。</p>
+          <h3 className="text-xl font-semibold mb-2">{t("noBankSelected")}</h3>
+          <p className="text-muted-foreground">{t("noBankSelectedDescription")}</p>
         </CardContent>
       </Card>
     );
@@ -183,19 +179,19 @@ export function SearchDebugView() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="您想要召回什么？"
+                placeholder={t("queryPlaceholder")}
                 className="pl-10 h-12 text-lg"
                 onKeyDown={(e) => e.key === "Enter" && runSearch()}
               />
             </div>
             <Button onClick={runSearch} disabled={loading || !query} className="h-12 px-8">
-              {loading ? "搜索中…" : "召回"}
+              {loading ? t("searching") : t("recall")}
             </Button>
           </div>
 
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-6 mt-4 pt-4 border-t">
-            <FactTypeFilter value={factTypes} onChange={setFactTypes} label="类型：" />
+            <FactTypeFilter value={factTypes} onChange={setFactTypes} label={t("typesLabel")} />
 
             <div className="h-6 w-px bg-border" />
 
@@ -207,16 +203,16 @@ export function SearchDebugView() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">低</SelectItem>
-                  <SelectItem value="mid">中</SelectItem>
-                  <SelectItem value="high">高</SelectItem>
+                  <SelectItem value="low">{t("budgetLow")}</SelectItem>
+                  <SelectItem value="mid">{t("budgetMid")}</SelectItem>
+                  <SelectItem value="high">{t("budgetHigh")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             {/* Max Tokens */}
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Token 数:</span>
+              <span className="text-sm text-muted-foreground">{t("tokensLabel")}</span>
               <Input
                 type="number"
                 value={maxTokens}
@@ -233,7 +229,7 @@ export function SearchDebugView() {
                 value={queryDate}
                 onChange={(e) => setQueryDate(e.target.value)}
                 className="h-8"
-                placeholder="查询日期"
+                placeholder={t("queryDatePlaceholder")}
               />
             </div>
 
@@ -247,7 +243,7 @@ export function SearchDebugView() {
                   onCheckedChange={(c) => setIncludeChunks(c as boolean)}
                 />
                 <FileText className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm">分块</span>
+                <span className="text-sm">{t("chunks")}</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox
@@ -255,7 +251,7 @@ export function SearchDebugView() {
                   onCheckedChange={(c) => setIncludeEntities(c as boolean)}
                 />
                 <Users className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm">实体</span>
+                <span className="text-sm">{t("entities")}</span>
               </label>
             </div>
           </div>
@@ -268,7 +264,7 @@ export function SearchDebugView() {
                 type="text"
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
-                placeholder="按标签筛选（逗号分隔）"
+                placeholder={t("tagsPlaceholder")}
                 className="h-8"
               />
             </div>
@@ -277,10 +273,10 @@ export function SearchDebugView() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="any">任一（含未标记）</SelectItem>
-                <SelectItem value="all">全部（含未标记）</SelectItem>
-                <SelectItem value="any_strict">任一（严格）</SelectItem>
-                <SelectItem value="all_strict">全部（严格）</SelectItem>
+                <SelectItem value="any">{t("tagsMatchAny")}</SelectItem>
+                <SelectItem value="all">{t("tagsMatchAll")}</SelectItem>
+                <SelectItem value="any_strict">{t("tagsMatchAnyStrict")}</SelectItem>
+                <SelectItem value="all_strict">{t("tagsMatchAllStrict")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -292,7 +288,7 @@ export function SearchDebugView() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4" />
-            <p className="text-muted-foreground">正在搜索记忆...</p>
+            <p className="text-muted-foreground">{t("searchingMemories")}</p>
           </CardContent>
         </Card>
       )}
@@ -303,17 +299,17 @@ export function SearchDebugView() {
           {trace?.summary && (
             <div className="flex items-center gap-6 text-sm">
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">结果数:</span>
+                <span className="text-muted-foreground">{t("resultsLabel")}</span>
                 <span className="font-semibold">{results.length}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">耗时:</span>
+                <span className="text-muted-foreground">{t("durationLabel")}</span>
                 <span className="font-semibold">
                   {trace.summary.total_duration_seconds?.toFixed(2)}s
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">访问节点:</span>
+                <span className="text-muted-foreground">{t("nodesVisitedLabel")}</span>
                 <span className="font-semibold">{trace.summary.total_nodes_visited}</span>
               </div>
 
@@ -331,7 +327,11 @@ export function SearchDebugView() {
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    {mode === "results" ? "结果" : mode === "trace" ? "追踪" : "JSON"}
+                    {mode === "results"
+                      ? t("viewResults")
+                      : mode === "trace"
+                        ? t("viewTrace")
+                        : t("viewJson")}
                   </button>
                 ))}
               </div>
@@ -347,7 +347,7 @@ export function SearchDebugView() {
                   <CardHeader className="py-3">
                     <CardTitle className="text-base flex items-center gap-2">
                       <Database className="h-4 w-4 text-orange-500" />
-                      <span>观察</span>
+                      <span>Observations</span>
                       <span className="text-xs text-muted-foreground">({observations.length})</span>
                     </CardTitle>
                   </CardHeader>
@@ -360,10 +360,10 @@ export function SearchDebugView() {
                         <p className="text-sm text-foreground">{obs.text}</p>
                         <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                           <span className="px-2 py-0.5 rounded bg-orange-500/10 text-orange-600">
-                            观察
+                            Observation
                           </span>
-                          <span>证明数: {obs.proof_count || 1}</span>
-                          <span>相关性: {(obs.relevance || 0).toFixed(3)}</span>
+                          <span>{t("proofCount", { count: obs.proof_count || 1 })}</span>
+                          <span>{t("relevance", { value: (obs.relevance || 0).toFixed(3) })}</span>
                         </div>
                       </div>
                     ))}
@@ -377,7 +377,7 @@ export function SearchDebugView() {
                   <Card>
                     <CardContent className="flex flex-col items-center justify-center py-12">
                       <Search className="h-12 w-12 text-muted-foreground mb-4" />
-                      <p className="text-muted-foreground">未找到与此查询相关的记忆。</p>
+                      <p className="text-muted-foreground">{t("noMemoriesFound")}</p>
                     </CardContent>
                   </Card>
                 ) : (
@@ -414,7 +414,7 @@ export function SearchDebugView() {
                             </div>
                             <div className="flex-shrink-0 text-right">
                               <div className="text-sm font-semibold">{(score ?? 0).toFixed(3)}</div>
-                              <div className="text-xs text-muted-foreground">分数</div>
+                              <div className="text-xs text-muted-foreground">{t("scoreLabel")}</div>
                             </div>
                             <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                           </div>
@@ -447,7 +447,7 @@ export function SearchDebugView() {
                     <div>
                       <div className="text-xs font-medium text-muted-foreground mb-3 flex items-center gap-2">
                         <div className="flex-1 h-px bg-border" />
-                        <span>并行检索</span>
+                        <span>{t("parallelRetrieval")}</span>
                         <div className="flex-1 h-px bg-border" />
                       </div>
 
@@ -517,7 +517,7 @@ export function SearchDebugView() {
                                         {factType}
                                       </span>
                                       <span className="text-xs text-muted-foreground">
-                                        {methods.length} 个方法
+                                        {t("methodsCount", { count: methods.length })}
                                       </span>
                                     </div>
                                     {/* Method summary pills */}
@@ -672,8 +672,10 @@ export function SearchDebugView() {
                                                         }}
                                                       >
                                                         {showAll
-                                                          ? `收起`
-                                                          : `查看全部 ${methodResults.length} 条结果`}
+                                                          ? t("showLess")
+                                                          : t("viewAllResults", {
+                                                              count: methodResults.length,
+                                                            })}
                                                       </button>
                                                     )}
                                                   </div>
@@ -737,13 +739,15 @@ export function SearchDebugView() {
                             </div>
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="font-semibold text-foreground">RRF 融合</span>
+                                <span className="font-semibold text-foreground">
+                                  {t("rrfFusion")}
+                                </span>
                                 <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                                  融合
+                                  {t("rrfMerge")}
                                 </span>
                               </div>
                               <div className="text-sm text-muted-foreground mt-0.5">
-                                对所有检索结果进行倒数排名融合
+                                {t("rrfDescription")}
                               </div>
                             </div>
                             <div className="text-2xl font-bold text-foreground">
@@ -789,7 +793,7 @@ export function SearchDebugView() {
                                         {r.text}
                                       </p>
                                       <div className="text-xs text-muted-foreground mt-1">
-                                        RRF 分数: {(r.rrf_score || r.score || 0).toFixed(4)}
+                                        {t("rrfScore")} {(r.rrf_score || r.score || 0).toFixed(4)}
                                       </div>
                                     </div>
                                   </div>
@@ -803,7 +807,9 @@ export function SearchDebugView() {
                                     toggleExpandResults(resultsKey);
                                   }}
                                 >
-                                  {showAll ? `收起` : `查看全部 ${trace.rrf_merged.length} 条结果`}
+                                  {showAll
+                                    ? t("showLess")
+                                    : t("viewAllResults", { count: trace.rrf_merged.length })}
                                 </button>
                               )}
                             </div>
@@ -837,9 +843,11 @@ export function SearchDebugView() {
                             </div>
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="font-semibold text-foreground">综合评分</span>
+                                <span className="font-semibold text-foreground">
+                                  {t("combinedScoring")}
+                                </span>
                                 <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                                  重排序
+                                  {t("rerank")}
                                 </span>
                               </div>
                               <div className="text-sm text-muted-foreground mt-0.5">
@@ -925,7 +933,9 @@ export function SearchDebugView() {
                                     toggleExpandResults(resultsKey);
                                   }}
                                 >
-                                  {showAll ? `收起` : `查看全部 ${trace.reranked.length} 条结果`}
+                                  {showAll
+                                    ? t("showLess")
+                                    : t("viewAllResults", { count: trace.reranked.length })}
                                 </button>
                               )}
                             </div>
@@ -949,13 +959,13 @@ export function SearchDebugView() {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-foreground">最终结果</span>
+                        <span className="font-semibold text-foreground">{t("finalResults")}</span>
                         <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">
                           {t("output")}
                         </span>
                       </div>
                       <div className="text-sm text-muted-foreground mt-0.5">
-                        所有处理步骤后的最佳结果
+                        {t("finalResultsDescription")}
                       </div>
                     </div>
                     <div className="text-2xl font-bold text-primary">{results?.length || 0}</div>
@@ -969,7 +979,7 @@ export function SearchDebugView() {
           {viewMode === "json" && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">原始响应</CardTitle>
+                <CardTitle className="text-lg">{t("rawResponse")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="bg-muted p-4 rounded-lg overflow-auto max-h-[600px]">
@@ -996,9 +1006,9 @@ export function SearchDebugView() {
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Search className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">准备召回</h3>
+            <h3 className="text-lg font-semibold mb-2">{t("readyToRecall")}</h3>
             <p className="text-muted-foreground text-center max-w-md">
-              输入查询词搜索记忆库。使用筛选器按事实类型、预算等缩小范围。
+              {t("readyToRecallDescription")}
             </p>
           </CardContent>
         </Card>

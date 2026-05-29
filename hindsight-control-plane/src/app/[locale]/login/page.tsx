@@ -45,10 +45,10 @@ function LoginForm() {
         router.refresh();
       } else {
         const data = await res.json().catch(() => null);
-        setError(data?.error || "访问密钥无效");
+        setError(data?.error || t("invalidKey"));
       }
     } catch {
-      setError("无法连接到服务器");
+      setError(t("connectFailed"));
     } finally {
       setLoading(false);
     }
@@ -69,7 +69,7 @@ function LoginForm() {
             className="mx-auto"
             unoptimized
           />
-          <CardDescription>请输入访问密钥以继续</CardDescription>
+          <CardDescription>{t("description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -77,7 +77,7 @@ function LoginForm() {
               <Input
                 id="access-key"
                 type="password"
-                placeholder="输入访问密钥"
+                placeholder={t("accessKeyPlaceholder")}
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 autoComplete="off"
@@ -87,7 +87,7 @@ function LoginForm() {
             {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
             <Button type="submit" className="w-full" disabled={loading || !key}>
-              {loading ? "登录中..." : "登录"}
+              {loading ? t("signingIn") : t("signIn")}
             </Button>
           </form>
         </CardContent>

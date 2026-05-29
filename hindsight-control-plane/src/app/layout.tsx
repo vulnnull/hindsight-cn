@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Hindsight 控制台",
-  description: "时序语义记忆系统控制台",
+  title: "Hindsight Control Plane",
+  description: "Control plane for the temporal semantic memory system",
   icons: {
     icon: "/favicon.png",
   },
@@ -14,16 +14,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <html lang="zh-CN" suppressHydrationWarning>
-      <body className="bg-background text-foreground">
-        <ThemeProvider>
-          <FeaturesProvider>
-            <BankProvider>{children}</BankProvider>
-          </FeaturesProvider>
-        </ThemeProvider>
-        <Toaster />
-      </body>
-    </html>
-  );
+  // The root layout is a minimal shell. Locale-aware content,
+  // providers, and <html lang> are handled in [locale]/layout.tsx.
+  return children;
 }

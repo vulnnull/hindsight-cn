@@ -121,7 +121,7 @@ function KVEditor({ label, pairs, onChange }: KVEditorProps) {
           onClick={addPair}
         >
           <Plus className="w-3 h-3 mr-1" />
-          添加
+          {t("kvAdd")}
         </Button>
       </div>
       {pairs.length > 0 && (
@@ -129,13 +129,13 @@ function KVEditor({ label, pairs, onChange }: KVEditorProps) {
           {pairs.map((pair, i) => (
             <div key={i} className="flex items-center gap-2">
               <Input
-                placeholder="键"
+                placeholder={t("kvKeyPlaceholder")}
                 value={pair.key}
                 onChange={(e) => updatePair(i, "key", e.target.value)}
                 className="h-8 text-sm flex-1"
               />
               <Input
-                placeholder="值"
+                placeholder={t("kvValuePlaceholder")}
                 value={pair.value}
                 onChange={(e) => updatePair(i, "value", e.target.value)}
                 className="h-8 text-sm flex-1"
@@ -162,21 +162,21 @@ function StatusBadge({ status }: { status: string }) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
         <CheckCircle className="w-3 h-3" />
-        已送达
+        {t("deliveryStatusDelivered")}
       </span>
     );
   if (status === "pending")
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
         <Clock className="w-3 h-3" />
-        待处理
+        {t("deliveryStatusPending")}
       </span>
     );
   if (status === "failed")
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
         <AlertCircle className="w-3 h-3" />
-        失败
+        {t("deliveryStatusFailed")}
       </span>
     );
   return (
@@ -247,7 +247,7 @@ function DeliveryTableRow({
               {delivery.last_error && (
                 <div className="space-y-1">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    错误
+                    {t("expandedError")}
                   </p>
                   <p className="font-mono text-xs text-red-600 dark:text-red-400 break-all">
                     {delivery.last_error}
@@ -257,7 +257,7 @@ function DeliveryTableRow({
               {delivery.last_response_body && (
                 <div className="space-y-1">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    响应体
+                    {t("expandedResponseBody")}
                     {delivery.last_attempt_at && (
                       <span className="ml-2 normal-case font-normal">
                         · {formatDate(delivery.last_attempt_at)}
@@ -462,7 +462,7 @@ export function WebhooksView() {
   };
 
   const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "无";
+    if (!dateStr) return t("formatDateNA");
     return new Date(dateStr).toLocaleString();
   };
 
@@ -474,11 +474,12 @@ export function WebhooksView() {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold">Webhook</h3>
+            <h3 className="text-lg font-semibold">{t("title")}</h3>
             <button
               onClick={() => loadWebhooks()}
               className="p-1 rounded hover:bg-muted transition-colors"
-              title="刷新 Webhook"
+              title={t("refreshTitle")}
+              aria-label={t("refreshAriaLabel")}
               disabled={loading}
             >
               <RefreshCw
@@ -486,11 +487,13 @@ export function WebhooksView() {
               />
             </button>
           </div>
-          <p className="text-sm text-muted-foreground">共 {webhooks.length} 个 Webhook</p>
+          <p className="text-sm text-muted-foreground">
+            {t("webhookCount", { count: webhooks.length })}
+          </p>
         </div>
         <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
           <Plus className="w-4 h-4 mr-2" />
-          添加 Webhook
+          {t("addWebhook")}
         </Button>
       </div>
 
@@ -500,11 +503,11 @@ export function WebhooksView() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>URL</TableHead>
-                <TableHead>方法</TableHead>
-                <TableHead>事件类型</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>创建时间</TableHead>
+                <TableHead>{t("tableHeaderUrl")}</TableHead>
+                <TableHead>{t("tableHeaderMethod")}</TableHead>
+                <TableHead>{t("tableHeaderEventTypes")}</TableHead>
+                <TableHead>{t("tableHeaderStatus")}</TableHead>
+                <TableHead>{t("tableHeaderCreatedAt")}</TableHead>
                 <TableHead className="w-[120px]"></TableHead>
               </TableRow>
             </TableHeader>
@@ -531,7 +534,7 @@ export function WebhooksView() {
                           </span>
                         ))
                       ) : (
-                        <span className="text-xs text-muted-foreground">所有事件</span>
+                        <span className="text-xs text-muted-foreground">{t("allEvents")}</span>
                       )}
                     </div>
                   </TableCell>
@@ -539,11 +542,11 @@ export function WebhooksView() {
                     {webhook.enabled ? (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                         <CheckCircle className="w-3 h-3" />
-                        已启用
+                        {t("statusEnabled")}
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground border border-border">
-                        已禁用
+                        {t("statusDisabled")}
                       </span>
                     )}
                   </TableCell>
@@ -557,17 +560,18 @@ export function WebhooksView() {
                         size="sm"
                         className="h-7 text-xs"
                         onClick={() => handleViewDeliveries(webhook)}
-                        title="查看投递记录"
+                        title={t("viewDeliveriesTitle")}
                       >
                         <Eye className="w-3 h-3 mr-1" />
-                        投递记录
+                        {t("deliveriesButton")}
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         className="h-7 text-xs text-muted-foreground hover:text-foreground"
                         onClick={() => handleOpenEdit(webhook)}
-                        title="编辑 Webhook"
+                        title={t("editWebhookTitle")}
+                        aria-label={t("editWebhookAriaLabel")}
                       >
                         <Pencil className="w-3 h-3" />
                       </Button>
@@ -577,7 +581,8 @@ export function WebhooksView() {
                         className="h-7 text-xs text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
                         onClick={() => setDeleteConfirmWebhook(webhook)}
                         disabled={deletingId === webhook.id}
-                        title="删除 Webhook"
+                        title={t("deleteWebhookTitle")}
+                        aria-label={t("deleteWebhookAriaLabel")}
                       >
                         {deletingId === webhook.id ? (
                           <Loader2 className="w-3 h-3 animate-spin" />
@@ -593,9 +598,7 @@ export function WebhooksView() {
           </Table>
         </div>
       ) : (
-        <p className="text-muted-foreground text-center py-8 text-sm">
-          尚未配置 Webhook。添加一个以接收事件通知。
-        </p>
+        <p className="text-muted-foreground text-center py-8 text-sm">{t("emptyStateCanManage")}</p>
       )}
 
       {/* Create Webhook Dialog */}
@@ -611,14 +614,14 @@ export function WebhooksView() {
       >
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>添加 Webhook</DialogTitle>
-            <DialogDescription>配置 Webhook 端点以接收事件通知。</DialogDescription>
+            <DialogTitle>{t("createDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("createDialogDescription")}</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             {/* Type (display only for now) */}
             <div className="space-y-1.5">
-              <Label>类型</Label>
+              <Label>{t("formTypeLabel")}</Label>
               <div className="flex items-center h-9 px-3 rounded-md border border-border bg-muted text-sm text-muted-foreground">
                 HTTP
               </div>
@@ -641,7 +644,7 @@ export function WebhooksView() {
             {/* Method + Timeout row */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>请求方法</Label>
+                <Label>{t("formMethodLabel")}</Label>
                 <Select
                   value={form.http_config.method}
                   onValueChange={(v) =>
@@ -661,7 +664,7 @@ export function WebhooksView() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="webhook-timeout">超时（秒）</Label>
+                <Label htmlFor="webhook-timeout">{t("formTimeoutLabel")}</Label>
                 <Input
                   id="webhook-timeout"
                   type="number"
@@ -684,13 +687,14 @@ export function WebhooksView() {
             {/* Secret */}
             <div className="space-y-1.5">
               <Label htmlFor="webhook-secret">
-                密钥 <span className="text-muted-foreground text-xs">（可选）</span>
+                {t("formSecretLabel")}{" "}
+                <span className="text-muted-foreground text-xs">{t("formSecretOptional")}</span>
               </Label>
               <div className="relative">
                 <Input
                   id="webhook-secret"
                   type={showSecret ? "text" : "password"}
-                  placeholder="签名密钥"
+                  placeholder={t("formSecretPlaceholderOptional")}
                   value={form.secret}
                   onChange={(e) => setForm((prev) => ({ ...prev, secret: e.target.value }))}
                   className="pr-10"
@@ -709,7 +713,7 @@ export function WebhooksView() {
 
             {/* Custom Headers */}
             <KVEditor
-              label="自定义请求头"
+              label={t("formCustomHeaders")}
               pairs={form.http_config.headers}
               onChange={(pairs) =>
                 setForm((prev) => ({
@@ -721,7 +725,7 @@ export function WebhooksView() {
 
             {/* Custom Query Params */}
             <KVEditor
-              label="查询参数"
+              label={t("formQueryParams")}
               pairs={form.http_config.params}
               onChange={(pairs) =>
                 setForm((prev) => ({
@@ -733,7 +737,7 @@ export function WebhooksView() {
 
             {/* Event Types */}
             <div className="space-y-2">
-              <Label>事件类型</Label>
+              <Label>{t("formEventTypes")}</Label>
               <div className="space-y-2">
                 {AVAILABLE_EVENT_TYPES.map((eventType) => (
                   <div key={eventType} className="flex items-center gap-2">
@@ -760,7 +764,7 @@ export function WebhooksView() {
                 checked={form.enabled}
                 onCheckedChange={(checked) => setForm((prev) => ({ ...prev, enabled: checked }))}
               />
-              <Label htmlFor="webhook-enabled">已启用</Label>
+              <Label htmlFor="webhook-enabled">{t("formEnabled")}</Label>
             </div>
           </div>
 
@@ -770,16 +774,16 @@ export function WebhooksView() {
               onClick={() => setCreateDialogOpen(false)}
               disabled={creating}
             >
-              取消
+              {t("cancel")}
             </Button>
             <Button onClick={handleCreate} disabled={creating || !form.url}>
               {creating ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  创建中…
+                  {t("creating")}
                 </>
               ) : (
-                "创建 Webhook"
+                t("createWebhook")
               )}
             </Button>
           </DialogFooter>
@@ -801,14 +805,14 @@ export function WebhooksView() {
       >
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>编辑 Webhook</DialogTitle>
-            <DialogDescription>更新 Webhook 配置。</DialogDescription>
+            <DialogTitle>{t("editDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("editDialogDescription")}</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             {/* Type */}
             <div className="space-y-1.5">
-              <Label>类型</Label>
+              <Label>{t("formTypeLabel")}</Label>
               <div className="flex items-center h-9 px-3 rounded-md border border-border bg-muted text-sm text-muted-foreground">
                 HTTP
               </div>
@@ -831,7 +835,7 @@ export function WebhooksView() {
             {/* Method + Timeout */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>请求方法</Label>
+                <Label>{t("formMethodLabel")}</Label>
                 <Select
                   value={editForm.http_config.method}
                   onValueChange={(v) =>
@@ -851,7 +855,7 @@ export function WebhooksView() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="edit-webhook-timeout">超时（秒）</Label>
+                <Label htmlFor="edit-webhook-timeout">{t("formTimeoutLabel")}</Label>
                 <Input
                   id="edit-webhook-timeout"
                   type="number"
@@ -873,12 +877,12 @@ export function WebhooksView() {
 
             {/* Secret */}
             <div className="space-y-1.5">
-              <Label htmlFor="edit-webhook-secret">密钥</Label>
+              <Label htmlFor="edit-webhook-secret">{t("formSecretLabel")}</Label>
               <div className="relative">
                 <Input
                   id="edit-webhook-secret"
                   type={showEditSecret ? "text" : "password"}
-                  placeholder="留空则保留现有密钥"
+                  placeholder={t("formSecretPlaceholderEdit")}
                   value={editForm.secret}
                   disabled={clearSecret}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, secret: e.target.value }))}
@@ -907,14 +911,14 @@ export function WebhooksView() {
                   htmlFor="edit-clear-secret"
                   className="text-xs text-muted-foreground cursor-pointer"
                 >
-                  清除现有密钥
+                  {t("formClearSecret")}
                 </Label>
               </div>
             </div>
 
             {/* Custom Headers */}
             <KVEditor
-              label="自定义请求头"
+              label={t("formCustomHeaders")}
               pairs={editForm.http_config.headers}
               onChange={(pairs) =>
                 setEditForm((prev) => ({
@@ -926,7 +930,7 @@ export function WebhooksView() {
 
             {/* Custom Query Params */}
             <KVEditor
-              label="查询参数"
+              label={t("formQueryParams")}
               pairs={editForm.http_config.params}
               onChange={(pairs) =>
                 setEditForm((prev) => ({
@@ -938,7 +942,7 @@ export function WebhooksView() {
 
             {/* Event Types */}
             <div className="space-y-2">
-              <Label>事件类型</Label>
+              <Label>{t("formEventTypes")}</Label>
               <div className="space-y-2">
                 {AVAILABLE_EVENT_TYPES.map((eventType) => (
                   <div key={eventType} className="flex items-center gap-2">
@@ -974,22 +978,22 @@ export function WebhooksView() {
                   setEditForm((prev) => ({ ...prev, enabled: checked }))
                 }
               />
-              <Label htmlFor="edit-webhook-enabled">已启用</Label>
+              <Label htmlFor="edit-webhook-enabled">{t("formEnabled")}</Label>
             </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditDialogOpen(false)} disabled={saving}>
-              取消
+              {t("cancel")}
             </Button>
             <Button onClick={handleSave} disabled={saving || !editForm.url}>
               {saving ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  保存中…
+                  {t("saving")}
                 </>
               ) : (
-                "保存更改"
+                t("saveChanges")
               )}
             </Button>
           </DialogFooter>
@@ -1005,10 +1009,8 @@ export function WebhooksView() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>删除 Webhook</DialogTitle>
-            <DialogDescription>
-              确认删除此 Webhook？此操作不可撤销，所有待处理的投递将被取消。
-            </DialogDescription>
+            <DialogTitle>{t("deleteDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("deleteDialogDescription")}</DialogDescription>
           </DialogHeader>
           {deleteConfirmWebhook && (
             <div className="py-2">
@@ -1019,7 +1021,7 @@ export function WebhooksView() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteConfirmWebhook(null)}>
-              取消
+              {t("cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -1029,10 +1031,10 @@ export function WebhooksView() {
               {deletingId ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  删除中…
+                  {t("deleting")}
                 </>
               ) : (
-                "删除 Webhook"
+                t("deleteWebhookConfirm")
               )}
             </Button>
           </DialogFooter>
@@ -1052,7 +1054,7 @@ export function WebhooksView() {
       >
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Webhook 投递记录</DialogTitle>
+            <DialogTitle>{t("deliveriesDialogTitle")}</DialogTitle>
             {selectedWebhook && (
               <DialogDescription className="font-mono text-xs truncate">
                 {selectedWebhook.url}
@@ -1071,11 +1073,13 @@ export function WebhooksView() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-8 pl-3 pr-0" />
-                      <TableHead>状态</TableHead>
-                      <TableHead>HTTP</TableHead>
-                      <TableHead className="text-center">尝试次数</TableHead>
-                      <TableHead>事件</TableHead>
-                      <TableHead>创建时间</TableHead>
+                      <TableHead>{t("deliveriesTableHeaderStatus")}</TableHead>
+                      <TableHead>{t("deliveriesTableHeaderHttp")}</TableHead>
+                      <TableHead className="text-center">
+                        {t("deliveriesTableHeaderAttempts")}
+                      </TableHead>
+                      <TableHead>{t("deliveriesTableHeaderEvent")}</TableHead>
+                      <TableHead>{t("deliveriesTableHeaderCreatedAt")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1098,13 +1102,13 @@ export function WebhooksView() {
                     disabled={loadingMoreDeliveries}
                   >
                     {loadingMoreDeliveries && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                    加载更多
+                    {t("loadMore")}
                   </Button>
                 </div>
               )}
             </>
           ) : (
-            <p className="text-muted-foreground text-center py-8 text-sm">暂无投递记录。</p>
+            <p className="text-muted-foreground text-center py-8 text-sm">{t("noDeliveries")}</p>
           )}
         </DialogContent>
       </Dialog>

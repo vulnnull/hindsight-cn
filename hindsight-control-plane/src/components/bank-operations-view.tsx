@@ -92,12 +92,13 @@ type OperationDetails =
     };
 
 const OPERATION_TYPE_OPTIONS = [
-  { value: "all", label: "全部类型" },
-  { value: "retain", label: "存储" },
-  { value: "consolidation", label: "归纳" },
-  { value: "refresh_mental_model", label: "知识摘要刷新" },
-  { value: "file_convert_retain", label: "文件转换与存储" },
-  { value: "webhook_delivery", label: "Webhook 投递" },
+  { value: "all", label: "All types" },
+  { value: "retain", label: "Retain" },
+  { value: "consolidation", label: "Consolidation" },
+  { value: "refresh_mental_model", label: "Mental Model Refresh" },
+  { value: "file_convert_retain", label: "File Convert & Retain" },
+  { value: "webhook_delivery", label: "Webhook Delivery" },
+  { value: "graph_maintenance", label: "Graph Maintenance" },
 ];
 
 export function BankOperationsView() {
@@ -202,7 +203,7 @@ export function BankOperationsView() {
       setSelectedOperation(details);
     } catch (error) {
       console.error("Error loading operation details:", error);
-      setSelectedOperation({ error: "加载操作详情失败" });
+      setSelectedOperation({ error: "Failed to load operation details" });
     } finally {
       setLoadingDetails(false);
     }
@@ -244,11 +245,11 @@ export function BankOperationsView() {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold">后台操作</h3>
+            <h3 className="text-lg font-semibold">{t("title")}</h3>
             <button
               onClick={() => loadOperations()}
               className="p-1 rounded hover:bg-muted transition-colors"
-              title="刷新操作"
+              title={t("refreshOperations")}
               disabled={loading}
             >
               <RefreshCw
@@ -257,7 +258,7 @@ export function BankOperationsView() {
             </button>
           </div>
           <p className="text-sm text-muted-foreground">
-            {totalOperations} 个操作
+            {totalOperations} operation{totalOperations !== 1 ? "s" : ""}
             {statusFilter ? ` (${statusFilter})` : ""}
           </p>
         </div>
@@ -267,7 +268,7 @@ export function BankOperationsView() {
             onValueChange={(val) => handleTaskTypeFilterChange(val === "all" ? null : val)}
           >
             <SelectTrigger className="h-9 w-[180px] text-sm">
-              <SelectValue placeholder="全部类型" />
+              <SelectValue placeholder={t("allTypes")} />
             </SelectTrigger>
             <SelectContent>
               {OPERATION_TYPE_OPTIONS.map((opt) => (
@@ -284,12 +285,12 @@ export function BankOperationsView() {
           </Select>
           <div className="flex gap-1 bg-muted p-1 rounded-lg">
             {[
-              { value: null, label: "全部" },
-              { value: "pending", label: "等待中" },
-              { value: "processing", label: "处理中" },
-              { value: "completed", label: "已完成" },
-              { value: "failed", label: "失败" },
-              { value: "cancelled", label: "已取消" },
+              { value: null, label: "All" },
+              { value: "pending", label: "Pending" },
+              { value: "processing", label: "Processing" },
+              { value: "completed", label: "Completed" },
+              { value: "failed", label: "Failed" },
+              { value: "cancelled", label: "Cancelled" },
             ].map((filter) => (
               <button
                 key={filter.value ?? "all"}
@@ -314,9 +315,9 @@ export function BankOperationsView() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[100px]">ID</TableHead>
-                    <TableHead>类型</TableHead>
-                    <TableHead>创建时间</TableHead>
-                    <TableHead>状态</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead className="w-[80px]"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -338,13 +339,13 @@ export function BankOperationsView() {
                         {op.status === "pending" && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                             <Clock className="w-3 h-3" />
-                            等待中
+                            pending
                           </span>
                         )}
                         {op.status === "processing" && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
                             <Loader2 className="w-3 h-3 animate-spin" />
-                            处理中
+                            processing
                           </span>
                         )}
                         {op.status === "failed" && (
@@ -353,19 +354,19 @@ export function BankOperationsView() {
                             title={op.error_message ?? undefined}
                           >
                             <AlertCircle className="w-3 h-3" />
-                            失败
+                            failed
                           </span>
                         )}
                         {op.status === "completed" && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                             <CheckCircle className="w-3 h-3" />
-                            已完成
+                            completed
                           </span>
                         )}
                         {op.status === "cancelled" && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-500/10 text-gray-600 dark:text-gray-400 border border-gray-500/20">
                             <Ban className="w-3 h-3" />
-                            已取消
+                            cancelled
                           </span>
                         )}
                       </TableCell>
@@ -386,7 +387,7 @@ export function BankOperationsView() {
                             ) : (
                               <X className="w-3 h-3 mr-1" />
                             )}
-                            {cancellingOpId === op.id ? "" : "取消"}
+                            {cancellingOpId === op.id ? "" : "Cancel"}
                           </Button>
                         )}
                         {(op.status === "failed" || op.status === "cancelled") && (
@@ -405,7 +406,7 @@ export function BankOperationsView() {
                             ) : (
                               <RotateCcw className="w-3 h-3 mr-1" />
                             )}
-                            {retryingOpId === op.id ? "" : "重试"}
+                            {retryingOpId === op.id ? "" : "Retry"}
                           </Button>
                         )}
                       </TableCell>
@@ -418,8 +419,8 @@ export function BankOperationsView() {
             {totalOperations > limit && (
               <div className="flex items-center justify-between mt-4 pt-4 border-t">
                 <p className="text-sm text-muted-foreground">
-                  显示第 {offset + 1}-{Math.min(offset + limit, totalOperations)} 条，共{" "}
-                  {totalOperations} 条
+                  Showing {offset + 1}-{Math.min(offset + limit, totalOperations)} of{" "}
+                  {totalOperations}
                 </p>
                 <div className="flex gap-2">
                   <Button
@@ -428,7 +429,7 @@ export function BankOperationsView() {
                     onClick={() => handlePageChange(Math.max(0, offset - limit))}
                     disabled={offset === 0}
                   >
-                    上一页
+                    Previous
                   </Button>
                   <Button
                     variant="outline"
@@ -436,7 +437,7 @@ export function BankOperationsView() {
                     onClick={() => handlePageChange(offset + limit)}
                     disabled={offset + limit >= totalOperations}
                   >
-                    下一页
+                    Next
                   </Button>
                 </div>
               </div>
@@ -444,7 +445,7 @@ export function BankOperationsView() {
           </>
         ) : (
           <p className="text-muted-foreground text-center py-8 text-sm">
-            暂无{statusFilter ? `${statusFilter} ` : ""}操作
+            No {statusFilter ? `${statusFilter} ` : ""}operations
           </p>
         )}
       </div>
@@ -453,7 +454,7 @@ export function BankOperationsView() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>操作详情</DialogTitle>
+            <DialogTitle>{t("operationDetails")}</DialogTitle>
             <DialogDescription>
               {selectedOperation?.operation_id && (
                 <span className="font-mono text-xs">{selectedOperation.operation_id}</span>
@@ -473,65 +474,65 @@ export function BankOperationsView() {
                   {/* Basic Info */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <div className="text-sm font-medium text-muted-foreground">状态</div>
+                      <div className="text-sm font-medium text-muted-foreground">Status</div>
                       <div className="mt-1">
                         {selectedOperation.status === "pending" && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                             <Clock className="w-3 h-3" />
-                            等待中
+                            pending
                           </span>
                         )}
                         {selectedOperation.status === "processing" && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
                             <Loader2 className="w-3 h-3 animate-spin" />
-                            处理中
+                            processing
                           </span>
                         )}
                         {selectedOperation.status === "failed" && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
                             <AlertCircle className="w-3 h-3" />
-                            失败
+                            failed
                           </span>
                         )}
                         {selectedOperation.status === "completed" && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                             <CheckCircle className="w-3 h-3" />
-                            已完成
+                            completed
                           </span>
                         )}
                         {selectedOperation.status === "cancelled" && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-500/10 text-gray-600 dark:text-gray-400 border border-gray-500/20">
                             <Ban className="w-3 h-3" />
-                            已取消
+                            cancelled
                           </span>
                         )}
                       </div>
                     </div>
                     <div>
-                      <div className="text-sm font-medium text-muted-foreground">类型</div>
+                      <div className="text-sm font-medium text-muted-foreground">Type</div>
                       <div className="mt-1 font-mono text-sm">
                         {selectedOperation.operation_type}
                       </div>
                     </div>
                     <div>
-                      <div className="text-sm font-medium text-muted-foreground">创建时间</div>
+                      <div className="text-sm font-medium text-muted-foreground">Created</div>
                       <div className="mt-1 text-sm">
                         {selectedOperation.created_at
                           ? new Date(selectedOperation.created_at).toLocaleString()
-                          : "无"}
+                          : "N/A"}
                       </div>
                     </div>
                     <div>
-                      <div className="text-sm font-medium text-muted-foreground">更新时间</div>
+                      <div className="text-sm font-medium text-muted-foreground">Updated</div>
                       <div className="mt-1 text-sm">
                         {selectedOperation.updated_at
                           ? new Date(selectedOperation.updated_at).toLocaleString()
-                          : "无"}
+                          : "N/A"}
                       </div>
                     </div>
                     {selectedOperation.completed_at && (
                       <div>
-                        <div className="text-sm font-medium text-muted-foreground">完成时间</div>
+                        <div className="text-sm font-medium text-muted-foreground">Completed</div>
                         <div className="mt-1 text-sm">
                           {new Date(selectedOperation.completed_at).toLocaleString()}
                         </div>
@@ -539,7 +540,9 @@ export function BankOperationsView() {
                     )}
                     {selectedOperation.result_metadata?.items_count !== undefined && (
                       <div>
-                        <div className="text-sm font-medium text-muted-foreground">总条目数</div>
+                        <div className="text-sm font-medium text-muted-foreground">
+                          {t("totalItems")}
+                        </div>
                         <div className="mt-1 text-sm">
                           {selectedOperation.result_metadata.items_count}
                         </div>
@@ -565,7 +568,7 @@ export function BankOperationsView() {
                           ) : (
                             <X className="w-3 h-3 mr-1" />
                           )}
-                          取消
+                          Cancel
                         </Button>
                       )}
                       {(selectedOperation.status === "failed" ||
@@ -582,7 +585,7 @@ export function BankOperationsView() {
                           ) : (
                             <RotateCcw className="w-3 h-3 mr-1" />
                           )}
-                          重试
+                          Retry
                         </Button>
                       )}
                     </div>
@@ -592,7 +595,9 @@ export function BankOperationsView() {
                   {selectedOperation.result_metadata &&
                     Object.keys(selectedOperation.result_metadata).length > 0 && (
                       <div>
-                        <div className="text-sm font-medium text-muted-foreground mb-2">元数据</div>
+                        <div className="text-sm font-medium text-muted-foreground mb-2">
+                          Metadata
+                        </div>
                         <pre className="rounded-lg border bg-muted/30 p-3 text-xs font-mono overflow-x-auto max-h-96 whitespace-pre-wrap break-words">
                           {JSON.stringify(selectedOperation.result_metadata, null, 2)}
                         </pre>
@@ -603,7 +608,7 @@ export function BankOperationsView() {
                   {selectedOperation.error_message && (
                     <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3">
                       <div className="text-sm font-medium text-red-600 dark:text-red-400 mb-1">
-                        错误
+                        Error
                       </div>
                       <div className="text-sm text-red-600/80 dark:text-red-400/80 font-mono">
                         {selectedOperation.error_message}
@@ -616,18 +621,19 @@ export function BankOperationsView() {
                     selectedOperation.child_operations.length > 0 && (
                       <div>
                         <div className="text-sm font-medium text-muted-foreground mb-2">
-                          子批次（
-                          {selectedOperation.result_metadata?.num_sub_batches ||
-                            selectedOperation.child_operations.length}
-                          ）
+                          {t("subBatchesCount", {
+                            count:
+                              selectedOperation.result_metadata?.num_sub_batches ||
+                              selectedOperation.child_operations.length,
+                          })}
                         </div>
                         <Table>
                           <TableHeader>
                             <TableRow>
-                              <TableHead className="w-[60px]">索引</TableHead>
+                              <TableHead className="w-[60px]">Index</TableHead>
                               <TableHead className="w-[100px]">ID</TableHead>
-                              <TableHead className="w-[80px]">条目</TableHead>
-                              <TableHead>状态</TableHead>
+                              <TableHead className="w-[80px]">Items</TableHead>
+                              <TableHead>Status</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -642,13 +648,13 @@ export function BankOperationsView() {
                                   {child.status === "pending" && (
                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400">
                                       <Clock className="w-3 h-3" />
-                                      等待中
+                                      pending
                                     </span>
                                   )}
                                   {child.status === "processing" && (
                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400">
                                       <Loader2 className="w-3 h-3 animate-spin" />
-                                      处理中
+                                      processing
                                     </span>
                                   )}
                                   {child.status === "failed" && (
@@ -657,19 +663,19 @@ export function BankOperationsView() {
                                       title={child.error_message ?? undefined}
                                     >
                                       <AlertCircle className="w-3 h-3" />
-                                      失败
+                                      failed
                                     </span>
                                   )}
                                   {child.status === "completed" && (
                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                                       <CheckCircle className="w-3 h-3" />
-                                      已完成
+                                      completed
                                     </span>
                                   )}
                                   {child.status === "cancelled" && (
                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-500/10 text-gray-600 dark:text-gray-400">
                                       <Ban className="w-3 h-3" />
-                                      已取消
+                                      cancelled
                                     </span>
                                   )}
                                 </TableCell>
@@ -688,7 +694,9 @@ export function BankOperationsView() {
                     return (
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-sm font-medium text-muted-foreground">原始载荷</div>
+                          <div className="text-sm font-medium text-muted-foreground">
+                            {t("rawPayload")}
+                          </div>
                           {!loadedThisOp && (
                             <Button
                               variant="outline"
@@ -702,7 +710,7 @@ export function BankOperationsView() {
                               ) : (
                                 <Code className="w-3 h-3 mr-1" />
                               )}
-                              加载原始数据
+                              {t("loadRaw")}
                             </Button>
                           )}
                         </div>
@@ -713,13 +721,11 @@ export function BankOperationsView() {
                         ) : loadedThisOp ? (
                           <p className="text-xs text-muted-foreground">
                             {isParent
-                              ? "这是一个父操作 — 原始载荷存储在每个子批次中。请打开子操作查看其载荷。"
-                              : "此操作没有存储原始载荷。"}
+                              ? "This is a parent operation — the raw payload is stored on each sub-batch. Open a child operation to inspect its payload."
+                              : "No raw payload stored for this operation."}
                           </p>
                         ) : (
-                          <p className="text-xs text-muted-foreground">
-                            显示操作提交时的完整参数（可能较大）。
-                          </p>
+                          <p className="text-xs text-muted-foreground">{t("rawPayloadHelp")}</p>
                         )}
                       </div>
                     );

@@ -2,7 +2,7 @@ export function formatRelativeTime(dateStr: string): string {
   const then = new Date(dateStr).getTime();
   const diffSec = Math.round((Date.now() - then) / 1000);
   const abs = Math.abs(diffSec);
-  if (abs < 60) return diffSec >= 0 ? "刚刚" : "即将";
+  if (abs < 60) return diffSec >= 0 ? "just now" : "in a moment";
   const units: [number, Intl.RelativeTimeFormatUnit][] = [
     [60, "second"],
     [60, "minute"],
@@ -19,16 +19,16 @@ export function formatRelativeTime(dateStr: string): string {
     value = value / factor;
     unit = nextUnit;
   }
-  return new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" }).format(-Math.round(value), unit);
+  return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(-Math.round(value), unit);
 }
 
 export function formatAbsoluteDateTime(dateStr: string): string {
   const date = new Date(dateStr);
-  return `${date.toLocaleDateString("zh-CN", {
+  return `${date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-  })} ${date.toLocaleTimeString("zh-CN", {
+  })} at ${date.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,

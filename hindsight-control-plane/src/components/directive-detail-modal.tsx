@@ -74,7 +74,7 @@ export function DirectiveDetailModal({ directiveId, onClose }: DirectiveDetailMo
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col p-6">
         <VisuallyHidden>
-          <DialogTitle>指令详情</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
         </VisuallyHidden>
         {loading ? (
           <div className="flex items-center justify-center py-20">

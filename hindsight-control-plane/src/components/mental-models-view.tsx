@@ -178,11 +178,11 @@ export function MentalModelsView() {
         if (updated.last_refreshed_at !== originalAt) {
           setMentalModels((prev) => prev.map((x) => (x.id === m.id ? updated : x)));
           if (selectedMentalModel?.id === m.id) setSelectedMentalModel(updated);
-          toast.success("知识摘要已刷新");
+          toast.success(t("toastRefreshed"));
           return;
         }
       }
-      toast.error("刷新超时");
+      toast.error(t("toastRefreshTimeout"));
     } catch {
       // Error toast handled by API client interceptor
     } finally {
@@ -252,7 +252,7 @@ export function MentalModelsView() {
     return (
       <Card>
         <CardContent className="p-10 text-center">
-          <p className="text-muted-foreground">选择一个记忆库以查看知识摘要。</p>
+          <p className="text-muted-foreground">{t("selectBankPrompt")}</p>
         </CardContent>
       </Card>
     );
@@ -269,7 +269,7 @@ export function MentalModelsView() {
       {loading ? (
         <div className="text-center py-12">
           <RefreshCw className="w-8 h-8 mx-auto mb-3 text-muted-foreground animate-spin" />
-          <p className="text-muted-foreground">加载中...</p>
+          <p className="text-muted-foreground">{t("loading")}</p>
         </div>
       ) : (
         <>
@@ -279,7 +279,7 @@ export function MentalModelsView() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="按名称、查询或内容筛选知识摘要..."
+              placeholder={t("filterPlaceholder")}
               className="w-80 h-9"
             />
             <TagFilterInput
@@ -297,15 +297,18 @@ export function MentalModelsView() {
             />
             <Button onClick={() => setShowCreateMentalModel(true)} size="sm">
               <Plus className="w-4 h-4 mr-2" />
-              添加知识摘要
+              {t("addMentalModel")}
             </Button>
           </div>
 
           <div className="flex items-center justify-between mb-6">
             <div className="text-sm text-muted-foreground">
               {searchQuery || selectedTags.length > 0
-                ? `${filteredMentalModels.length} / ${mentalModels.length} 个知识摘要`
-                : `${mentalModels.length} 个知识摘要`}
+                ? t("countFiltered", {
+                    filtered: filteredMentalModels.length,
+                    total: mentalModels.length,
+                  })
+                : t("count", { count: mentalModels.length })}
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-lg p-1">
@@ -318,7 +321,7 @@ export function MentalModelsView() {
                   }`}
                 >
                   <FolderOpen className="w-4 h-4" />
-                  列表
+                  {t("viewList")}
                 </button>
                 <button
                   onClick={() => setViewMode("dashboard")}
@@ -329,7 +332,7 @@ export function MentalModelsView() {
                   }`}
                 >
                   <LayoutGrid className="w-4 h-4" />
-                  仪表盘
+                  {t("viewDashboard")}
                 </button>
               </div>
             </div>
@@ -366,7 +369,9 @@ export function MentalModelsView() {
                                       : "bg-slate-500/10 text-slate-600 dark:text-slate-400"
                                   }`}
                                 >
-                                  {m.trigger?.refresh_after_consolidation ? "自动刷新" : "手动"}
+                                  {m.trigger?.refresh_after_consolidation
+                                    ? t("badgeAutoRefresh")
+                                    : t("badgeManual")}
                                 </span>
                               </div>
                             </div>
@@ -450,7 +455,7 @@ export function MentalModelsView() {
               {viewMode !== "files" && totalPages > 1 && (
                 <div className="flex items-center justify-between mt-3 pt-3 border-t">
                   <div className="text-xs text-muted-foreground">
-                    {startIndex + 1}-{Math.min(endIndex, filteredMentalModels.length)} / 共{" "}
+                    {startIndex + 1}-{Math.min(endIndex, filteredMentalModels.length)} of{" "}
                     {filteredMentalModels.length}
                   </div>
                   <div className="flex items-center gap-1">
@@ -501,9 +506,7 @@ export function MentalModelsView() {
             <div className="p-6 border border-dashed border-border rounded-lg text-center">
               <Sparkles className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
-                {searchQuery
-                  ? "没有符合筛选条件的知识摘要"
-                  : "尚无知识摘要。创建知识摘要可从记忆生成并保存摘要。"}
+                {searchQuery ? t("emptyFilterMatch") : t("emptyNoModels")}
               </p>
             </div>
           )}
@@ -523,23 +526,47 @@ export function MentalModelsView() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除知识摘要</AlertDialogTitle>
+            <AlertDialogTitle>{t("deleteDialogTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除 <span className="font-semibold">&quot;{deleteTarget?.name}&quot;</span>?
+              {t("deleteDialogDescription", { name: deleteTarget?.name ?? "" })}
               <br />
               <br />
-              <span className="text-destructive font-semibold">此操作不可撤销。</span>
+              <span className="text-destructive font-semibold">{t("deleteDialogWarning")}</span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row justify-end space-x-2">
-            <AlertDialogCancel className="mt-0">取消</AlertDialogCancel>
+            <AlertDialogCancel className="mt-0">{t("deleteDialogCancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deleting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
-              删除
+              {t("deleteDialogConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!clearTarget} onOpenChange={(open) => !open && setClearTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("clearDialogTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t.rich("clearDialogDescription", {
+                name: clearTarget?.name ?? "",
+                bold: (chunks) => <span className="font-semibold">{chunks}</span>,
+              })}
+              <br />
+              <br />
+              {t("clearDialogReSynth")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row justify-end space-x-2">
+            <AlertDialogCancel className="mt-0">{t("cancelButton")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleClear} disabled={clearing}>
+              {clearing ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+              {t("clearDialogConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -614,11 +641,15 @@ function RowActionsMenu({
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
         <DropdownMenuItem onClick={() => onEdit(m)}>
           <Pencil className="h-4 w-4 mr-2" />
-          编辑
+          {t("actionEdit")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => onRefresh(m)} disabled={refreshing}>
           <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
-          手动刷新
+          {t("actionRefresh")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onClear(m)}>
+          <Eraser className="h-4 w-4 mr-2" />
+          {t("actionClearContent")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -626,7 +657,7 @@ function RowActionsMenu({
           className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400 focus:bg-red-500/10"
         >
           <Trash2 className="h-4 w-4 mr-2" />
-          删除
+          {t("actionDelete")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -774,10 +805,8 @@ function CreateMentalModelDialog({
     >
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>创建知识摘要</DialogTitle>
-          <DialogDescription>
-            通过运行查询创建知识摘要。内容将自动生成，并可以 稍后刷新。
-          </DialogDescription>
+          <DialogTitle>{t("createDialogTitle")}</DialogTitle>
+          <DialogDescription>{t("createDialogDescription")}</DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="general" className="py-2 flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -797,7 +826,7 @@ function CreateMentalModelDialog({
                 <Input
                   value={form.id}
                   onChange={(e) => setForm({ ...form, id: e.target.value })}
-                  placeholder="例如：team-communication"
+                  placeholder={t("fieldIdPlaceholder")}
                 />
               </div>
               <div className="space-y-2">
@@ -805,7 +834,7 @@ function CreateMentalModelDialog({
                 <Input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="例如：团队沟通偏好"
+                  placeholder={t("fieldNamePlaceholder")}
                 />
               </div>
               <div className="space-y-2">
@@ -815,7 +844,9 @@ function CreateMentalModelDialog({
                 <Textarea
                   value={form.sourceQuery}
                   onChange={(e) => setForm({ ...form, sourceQuery: e.target.value })}
-                  placeholder="例如：团队偏好的沟通方式？"
+                  placeholder={t("fieldSourceQueryPlaceholder")}
+                  className="min-h-[140px] font-mono text-sm leading-6 whitespace-pre-wrap"
+                  spellCheck={false}
                 />
               </div>
               <div className="space-y-2">
@@ -833,7 +864,9 @@ function CreateMentalModelDialog({
 
             <TabsContent value="options" className="space-y-6 pt-4">
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">刷新</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">
+                  {t("optionsSectionRefresh")}
+                </h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="auto-refresh"
@@ -846,11 +879,13 @@ function CreateMentalModelDialog({
                     htmlFor="auto-refresh"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    合并后自动刷新
+                    {t("optionsAutoRefreshLabel")}
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">刷新模式</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsRefreshModeLabel")}
+                  </label>
                   <Select
                     value={form.mode}
                     onValueChange={(value) => setForm({ ...form, mode: value as "full" | "delta" })}
@@ -859,19 +894,19 @@ function CreateMentalModelDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="full">完全 — 每次刷新从头重新生成</SelectItem>
-                      <SelectItem value="delta">增量 — 精准修改，保留未变内容</SelectItem>
+                      <SelectItem value="full">{t("optionsRefreshModeFull")}</SelectItem>
+                      <SelectItem value="delta">{t("optionsRefreshModeDelta")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    增量模式对现有内容进行最小化修改。在首次刷新 或源查询变更时会回退到完全重写。
+                    {t("optionsRefreshModeDeltaDescription")}
                   </p>
                 </div>
               </section>
 
               <section className="space-y-4">
                 <h3 className="text-sm font-semibold text-foreground border-b pb-1">
-                  其他知识摘要
+                  {t("optionsSectionOtherModels")}
                 </h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
@@ -885,35 +920,35 @@ function CreateMentalModelDialog({
                     htmlFor="exclude-mental-models"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    排除所有知识摘要
+                    {t("optionsExcludeAllLabel")}
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">排除知识摘要 ID</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsExcludeIdsLabel")}
+                  </label>
                   <Input
                     value={form.excludeMentalModelIds}
                     onChange={(e) => setForm({ ...form, excludeMentalModelIds: e.target.value })}
-                    placeholder="例如：model-a, model-b（逗号分隔）"
+                    placeholder={t("optionsExcludeIdsPlaceholder")}
                   />
                 </div>
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">标签</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">
+                  {t("optionsSectionTags")}
+                </h3>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">标签</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsTagsLabel")}
+                  </label>
                   <Input
                     value={form.tags}
                     onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                    placeholder="例如：project-x, team-alpha（逗号分隔）"
+                    placeholder={t("optionsTagsPlaceholder")}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    标签在反思时限定模型范围，并在刷新时<strong>同时</strong>筛选源记忆 （默认{" "}
-                    <code>all_strict</code>
-                    ：仅读取包含所有列出标签的记忆）。如果尚无记忆包含这些标签，
-                    刷新将生成空内容——请补填记忆上的标签，或调整下方的<em>标签匹配</em> /{" "}
-                    <em>标签组</em>。
-                  </p>
+                  <p className="text-xs text-muted-foreground">{t("optionsTagsDescription")}</p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
@@ -924,20 +959,18 @@ function CreateMentalModelDialog({
                     onValueChange={(v) => setForm({ ...form, tagsMatch: v === "default" ? "" : v })}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="默认（设置标签时为 all_strict）" />
+                      <SelectValue placeholder={t("optionsTagsMatchDefaultPlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">默认（设置标签时为 all_strict）</SelectItem>
-                      <SelectItem value="any">any — OR 匹配（包含未标记）</SelectItem>
-                      <SelectItem value="all">all — AND 匹配（包含未标记）</SelectItem>
-                      <SelectItem value="any_strict">any_strict — OR 匹配（排除未标记）</SelectItem>
-                      <SelectItem value="all_strict">
-                        all_strict — AND 匹配（排除未标记）
-                      </SelectItem>
+                      <SelectItem value="default">{t("optionsTagsMatchDefault")}</SelectItem>
+                      <SelectItem value="any">{t("optionsTagsMatchAny")}</SelectItem>
+                      <SelectItem value="all">{t("optionsTagsMatchAll")}</SelectItem>
+                      <SelectItem value="any_strict">{t("optionsTagsMatchAnyStrict")}</SelectItem>
+                      <SelectItem value="all_strict">{t("optionsTagsMatchAllStrict")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    控制模型标签在刷新时如何筛选记忆。
+                    {t("optionsTagsMatchDescription")}
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -952,16 +985,16 @@ function CreateMentalModelDialog({
                     className="font-mono text-xs"
                   />
                   <p className="text-xs text-muted-foreground">
-                    用于刷新筛选的复合布尔标签表达式。设置后将覆盖平面标签。
+                    {t("optionsTagGroupsDescription")}
                   </p>
                 </div>
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">召回</h3>
-                <p className="text-xs text-muted-foreground">
-                  覆盖此模型刷新时内部召回的行为。留空以继承记忆库/全局默认值。
-                </p>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">
+                  {t("optionsSectionRecall")}
+                </h3>
+                <p className="text-xs text-muted-foreground">{t("optionsRecallDescription")}</p>
                 <div className="space-y-3">
                   <label className="text-sm font-medium text-foreground">
                     {t("optionsFactTypesLabel")}
@@ -970,10 +1003,12 @@ function CreateMentalModelDialog({
                     value={form.factTypes}
                     onChange={(v) => setForm({ ...form, factTypes: v as FactType[] })}
                   />
-                  <p className="text-xs text-muted-foreground">留空以包含所有类型。</p>
+                  <p className="text-xs text-muted-foreground">{t("optionsFactTypesEmpty")}</p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">包含分块</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsIncludeChunksLabel")}
+                  </label>
                   <Select
                     value={form.includeChunks || "default"}
                     onValueChange={(v) =>
@@ -987,36 +1022,40 @@ function CreateMentalModelDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">默认（继承）</SelectItem>
-                      <SelectItem value="true">是 — 包含原始分块文本</SelectItem>
-                      <SelectItem value="false">否 — 跳过分块（提示更小）</SelectItem>
+                      <SelectItem value="default">{t("optionsIncludeChunksDefault")}</SelectItem>
+                      <SelectItem value="true">{t("optionsIncludeChunksYes")}</SelectItem>
+                      <SelectItem value="false">{t("optionsIncludeChunksNo")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">召回最大 Token 数</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsRecallMaxTokensLabel")}
+                  </label>
                   <Input
                     type="number"
                     value={form.recallMaxTokens}
                     onChange={(e) => setForm({ ...form, recallMaxTokens: e.target.value })}
-                    placeholder="默认（继承）"
+                    placeholder={t("optionsRecallMaxTokensPlaceholder")}
                     min="0"
                   />
-                  <p className="text-xs text-muted-foreground">召回返回事实的 Token 预算。</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("optionsRecallMaxTokensDescription")}
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
-                    召回分块最大 Token 数
+                    {t("optionsRecallChunksMaxTokensLabel")}
                   </label>
                   <Input
                     type="number"
                     value={form.recallChunksMaxTokens}
                     onChange={(e) => setForm({ ...form, recallChunksMaxTokens: e.target.value })}
-                    placeholder="默认（继承）"
+                    placeholder={t("optionsRecallChunksMaxTokensPlaceholder")}
                     min="0"
                   />
                   <p className="text-xs text-muted-foreground">
-                    召回返回原始分块文本的 Token 预算。
+                    {t("optionsRecallChunksMaxTokensDescription")}
                   </p>
                 </div>
               </section>
@@ -1026,7 +1065,7 @@ function CreateMentalModelDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={creating}>
-            取消
+            {t("cancelButton")}
           </Button>
           <Button
             onClick={handleCreate}
@@ -1035,10 +1074,10 @@ function CreateMentalModelDialog({
             {creating ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                生成中...
+                {t("creatingButton")}
               </>
             ) : (
-              "创建"
+              t("createButton")
             )}
           </Button>
         </DialogFooter>
@@ -1169,8 +1208,8 @@ function UpdateMentalModelDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>更新知识摘要</DialogTitle>
-          <DialogDescription>更新知识摘要配置。更改将立即生效。</DialogDescription>
+          <DialogTitle>{t("updateDialogTitle")}</DialogTitle>
+          <DialogDescription>{t("updateDialogDescription")}</DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="general" className="py-2 flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -1194,7 +1233,7 @@ function UpdateMentalModelDialog({
                 <Input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="例如：团队沟通偏好"
+                  placeholder={t("fieldNamePlaceholder")}
                 />
               </div>
               <div className="space-y-2">
@@ -1204,7 +1243,9 @@ function UpdateMentalModelDialog({
                 <Textarea
                   value={form.sourceQuery}
                   onChange={(e) => setForm({ ...form, sourceQuery: e.target.value })}
-                  placeholder="例如：团队偏好的沟通方式？"
+                  placeholder={t("fieldSourceQueryPlaceholder")}
+                  className="min-h-[140px] font-mono text-sm leading-6 whitespace-pre-wrap"
+                  spellCheck={false}
                 />
               </div>
               <div className="space-y-2">
@@ -1222,7 +1263,9 @@ function UpdateMentalModelDialog({
 
             <TabsContent value="options" className="space-y-6 pt-4">
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">刷新</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">
+                  {t("optionsSectionRefresh")}
+                </h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="update-auto-refresh"
@@ -1235,11 +1278,13 @@ function UpdateMentalModelDialog({
                     htmlFor="update-auto-refresh"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    合并后自动刷新
+                    {t("optionsAutoRefreshLabel")}
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">刷新模式</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsRefreshModeLabel")}
+                  </label>
                   <Select
                     value={form.mode}
                     onValueChange={(value) => setForm({ ...form, mode: value as "full" | "delta" })}
@@ -1248,19 +1293,19 @@ function UpdateMentalModelDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="full">完全 — 每次刷新从头重新生成</SelectItem>
-                      <SelectItem value="delta">增量 — 精准修改，保留未变内容</SelectItem>
+                      <SelectItem value="full">{t("optionsRefreshModeFull")}</SelectItem>
+                      <SelectItem value="delta">{t("optionsRefreshModeDelta")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    增量模式对现有内容进行最小化修改。在首次刷新 或源查询变更时会回退到完全重写。
+                    {t("optionsRefreshModeDeltaDescription")}
                   </p>
                 </div>
               </section>
 
               <section className="space-y-4">
                 <h3 className="text-sm font-semibold text-foreground border-b pb-1">
-                  其他知识摘要
+                  {t("optionsSectionOtherModels")}
                 </h3>
                 <div className="flex items-center space-x-2">
                   <Checkbox
@@ -1274,35 +1319,35 @@ function UpdateMentalModelDialog({
                     htmlFor="update-exclude-mental-models"
                     className="text-sm font-medium text-foreground cursor-pointer"
                   >
-                    排除所有知识摘要
+                    {t("optionsExcludeAllLabel")}
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">排除知识摘要 ID</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsExcludeIdsLabel")}
+                  </label>
                   <Input
                     value={form.excludeMentalModelIds}
                     onChange={(e) => setForm({ ...form, excludeMentalModelIds: e.target.value })}
-                    placeholder="例如：model-a, model-b（逗号分隔）"
+                    placeholder={t("optionsExcludeIdsPlaceholder")}
                   />
                 </div>
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">标签</h3>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">
+                  {t("optionsSectionTags")}
+                </h3>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">标签</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsTagsLabel")}
+                  </label>
                   <Input
                     value={form.tags}
                     onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                    placeholder="例如：project-x, team-alpha（逗号分隔）"
+                    placeholder={t("optionsTagsPlaceholder")}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    标签在反思时限定模型范围，并在刷新时<strong>同时</strong>筛选源记忆 （默认{" "}
-                    <code>all_strict</code>
-                    ：仅读取包含所有列出标签的记忆）。如果尚无记忆包含这些标签，
-                    刷新将生成空内容——请补填记忆上的标签，或调整下方的<em>标签匹配</em> /{" "}
-                    <em>标签组</em>。
-                  </p>
+                  <p className="text-xs text-muted-foreground">{t("optionsTagsDescription")}</p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
@@ -1313,20 +1358,18 @@ function UpdateMentalModelDialog({
                     onValueChange={(v) => setForm({ ...form, tagsMatch: v === "default" ? "" : v })}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="默认（设置标签时为 all_strict）" />
+                      <SelectValue placeholder={t("optionsTagsMatchDefaultPlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">默认（设置标签时为 all_strict）</SelectItem>
-                      <SelectItem value="any">any — OR 匹配（包含未标记）</SelectItem>
-                      <SelectItem value="all">all — AND 匹配（包含未标记）</SelectItem>
-                      <SelectItem value="any_strict">any_strict — OR 匹配（排除未标记）</SelectItem>
-                      <SelectItem value="all_strict">
-                        all_strict — AND 匹配（排除未标记）
-                      </SelectItem>
+                      <SelectItem value="default">{t("optionsTagsMatchDefault")}</SelectItem>
+                      <SelectItem value="any">{t("optionsTagsMatchAny")}</SelectItem>
+                      <SelectItem value="all">{t("optionsTagsMatchAll")}</SelectItem>
+                      <SelectItem value="any_strict">{t("optionsTagsMatchAnyStrict")}</SelectItem>
+                      <SelectItem value="all_strict">{t("optionsTagsMatchAllStrict")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    控制模型标签在刷新时如何筛选记忆。
+                    {t("optionsTagsMatchDescription")}
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -1341,16 +1384,16 @@ function UpdateMentalModelDialog({
                     className="font-mono text-xs"
                   />
                   <p className="text-xs text-muted-foreground">
-                    用于刷新筛选的复合布尔标签表达式。设置后将覆盖平面标签。
+                    {t("optionsTagGroupsDescription")}
                   </p>
                 </div>
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-sm font-semibold text-foreground border-b pb-1">召回</h3>
-                <p className="text-xs text-muted-foreground">
-                  覆盖此模型刷新时内部召回的行为。留空以继承记忆库/全局默认值。
-                </p>
+                <h3 className="text-sm font-semibold text-foreground border-b pb-1">
+                  {t("optionsSectionRecall")}
+                </h3>
+                <p className="text-xs text-muted-foreground">{t("optionsRecallDescription")}</p>
                 <div className="space-y-3">
                   <label className="text-sm font-medium text-foreground">
                     {t("optionsFactTypesLabel")}
@@ -1359,10 +1402,12 @@ function UpdateMentalModelDialog({
                     value={form.factTypes}
                     onChange={(v) => setForm({ ...form, factTypes: v as FactType[] })}
                   />
-                  <p className="text-xs text-muted-foreground">留空以包含所有类型。</p>
+                  <p className="text-xs text-muted-foreground">{t("optionsFactTypesEmpty")}</p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">包含分块</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsIncludeChunksLabel")}
+                  </label>
                   <Select
                     value={form.includeChunks || "default"}
                     onValueChange={(v) =>
@@ -1376,36 +1421,40 @@ function UpdateMentalModelDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">默认（继承）</SelectItem>
-                      <SelectItem value="true">是 — 包含原始分块文本</SelectItem>
-                      <SelectItem value="false">否 — 跳过分块（提示更小）</SelectItem>
+                      <SelectItem value="default">{t("optionsIncludeChunksDefault")}</SelectItem>
+                      <SelectItem value="true">{t("optionsIncludeChunksYes")}</SelectItem>
+                      <SelectItem value="false">{t("optionsIncludeChunksNo")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">召回最大 Token 数</label>
+                  <label className="text-sm font-medium text-foreground">
+                    {t("optionsRecallMaxTokensLabel")}
+                  </label>
                   <Input
                     type="number"
                     value={form.recallMaxTokens}
                     onChange={(e) => setForm({ ...form, recallMaxTokens: e.target.value })}
-                    placeholder="默认（继承）"
+                    placeholder={t("optionsRecallMaxTokensPlaceholder")}
                     min="0"
                   />
-                  <p className="text-xs text-muted-foreground">召回返回事实的 Token 预算。</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("optionsRecallMaxTokensDescription")}
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
-                    召回分块最大 Token 数
+                    {t("optionsRecallChunksMaxTokensLabel")}
                   </label>
                   <Input
                     type="number"
                     value={form.recallChunksMaxTokens}
                     onChange={(e) => setForm({ ...form, recallChunksMaxTokens: e.target.value })}
-                    placeholder="默认（继承）"
+                    placeholder={t("optionsRecallChunksMaxTokensPlaceholder")}
                     min="0"
                   />
                   <p className="text-xs text-muted-foreground">
-                    召回返回原始分块文本的 Token 预算。
+                    {t("optionsRecallChunksMaxTokensDescription")}
                   </p>
                 </div>
               </section>
@@ -1415,7 +1464,7 @@ function UpdateMentalModelDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={updating}>
-            取消
+            {t("cancelButton")}
           </Button>
           <Button
             onClick={handleUpdate}
@@ -1424,10 +1473,10 @@ function UpdateMentalModelDialog({
             {updating ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                更新中...
+                {t("updatingButton")}
               </>
             ) : (
-              "更新"
+              t("updateButton")
             )}
           </Button>
         </DialogFooter>
@@ -1523,7 +1572,7 @@ function FilesView({
                   )}
                   <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                     <span title={formatAbsoluteDateTime(selected.last_refreshed_at)}>
-                      上次刷新 {formatRelativeTime(selected.last_refreshed_at)}
+                      Refreshed {formatRelativeTime(selected.last_refreshed_at)}
                     </span>
                     {selected.tags.length > 0 && (
                       <div className="flex gap-1">
@@ -1541,7 +1590,7 @@ function FilesView({
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <Button variant="outline" size="sm" onClick={() => onOpenDetail(selected)}>
-                    打开
+                    Open
                   </Button>
                   <RowActionsMenu
                     m={selected}
@@ -1559,15 +1608,13 @@ function FilesView({
                 <CompactMarkdown>{selected.content}</CompactMarkdown>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground italic">
-                尚无内容。刷新此知识摘要以生成内容。
-              </p>
+              <p className="text-sm text-muted-foreground italic">{t("emptyContent")}</p>
             )}
           </article>
         ) : (
           <div className="p-10 text-center text-muted-foreground">
             <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">选择一个知识摘要以查看内容。</p>
+            <p className="text-sm">{t("selectModelPrompt")}</p>
           </div>
         )}
       </section>

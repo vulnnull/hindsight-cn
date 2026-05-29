@@ -25,38 +25,46 @@ import {
 import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer } from "recharts";
 
-const ACTION_OPTIONS = [
-  { value: "all", label: "所有操作" },
-  { value: "retain", label: "记忆入库" },
-  { value: "recall", label: "召回" },
-  { value: "reflect", label: "反思" },
-  { value: "create_bank", label: "创建记忆库" },
-  { value: "update_bank", label: "更新记忆库" },
-  { value: "delete_bank", label: "删除记忆库" },
-  { value: "clear_memories", label: "清除记忆" },
-  { value: "consolidation", label: "整合" },
-  { value: "batch_retain", label: "批量入库" },
-  { value: "create_mental_model", label: "创建思维模型" },
-  { value: "refresh_mental_model", label: "刷新思维模型" },
-  { value: "delete_mental_model", label: "删除思维模型" },
-  { value: "create_directive", label: "创建指令" },
-  { value: "delete_directive", label: "删除指令" },
-  { value: "file_convert_retain", label: "文件转换入库" },
-  { value: "webhook_delivery", label: "Webhook 投递" },
-];
+type TranslateFn = (key: string) => string;
 
-const TRANSPORT_OPTIONS = [
-  { value: "all", label: "所有传输方式" },
-  { value: "http", label: "HTTP" },
-  { value: "mcp", label: "MCP" },
-  { value: "system", label: "系统" },
-];
+function getActionOptions(t: TranslateFn) {
+  return [
+    { value: "all", label: t("actionAll") },
+    { value: "retain", label: t("actionRetain") },
+    { value: "recall", label: t("actionRecall") },
+    { value: "reflect", label: t("actionReflect") },
+    { value: "create_bank", label: t("actionCreateBank") },
+    { value: "update_bank", label: t("actionUpdateBank") },
+    { value: "delete_bank", label: t("actionDeleteBank") },
+    { value: "clear_memories", label: t("actionClearMemories") },
+    { value: "consolidation", label: t("actionConsolidation") },
+    { value: "batch_retain", label: t("actionBatchRetain") },
+    { value: "create_mental_model", label: t("actionCreateMentalModel") },
+    { value: "refresh_mental_model", label: t("actionRefreshMentalModel") },
+    { value: "delete_mental_model", label: t("actionDeleteMentalModel") },
+    { value: "create_directive", label: t("actionCreateDirective") },
+    { value: "delete_directive", label: t("actionDeleteDirective") },
+    { value: "file_convert_retain", label: t("actionFileConvertRetain") },
+    { value: "webhook_delivery", label: t("actionWebhookDelivery") },
+  ];
+}
 
-const PERIOD_OPTIONS = [
-  { value: "1d", label: "今天" },
-  { value: "7d", label: "过去 7 天" },
-  { value: "30d", label: "过去 30 天" },
-];
+function getTransportOptions(t: TranslateFn) {
+  return [
+    { value: "all", label: t("transportAll") },
+    { value: "http", label: t("transportHttp") },
+    { value: "mcp", label: t("transportMcp") },
+    { value: "system", label: t("transportSystem") },
+  ];
+}
+
+function getPeriodOptions(t: TranslateFn) {
+  return [
+    { value: "1d", label: t("periodToday") },
+    { value: "7d", label: t("periodLast7Days") },
+    { value: "30d", label: t("periodLast30Days") },
+  ];
+}
 
 function formatDuration(startedAt: string | null, endedAt: string | null): string {
   if (!startedAt || !endedAt) return "—";
@@ -147,7 +155,7 @@ function AuditChart({ bankId }: { bankId: string }) {
   return (
     <Card>
       <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0 gap-3">
-        <CardTitle className="text-sm font-semibold">请求量</CardTitle>
+        <CardTitle className="text-sm font-semibold">{t("requestVolume")}</CardTitle>
         <div className="flex gap-2">
           <Select
             value={chartAction || "all"}
@@ -188,11 +196,11 @@ function AuditChart({ bankId }: { bankId: string }) {
         <div className="h-[120px]">
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              加载中…
+              {t("chartLoading")}
             </div>
           ) : chartData.length === 0 ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              此时间段暂无数据
+              {t("chartNoData")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -340,7 +348,7 @@ export function AuditLogsView() {
       <div className="flex items-center gap-3 flex-wrap">
         <Select value={actionFilter || "all"} onValueChange={handleActionFilterChange}>
           <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="所有操作" />
+            <SelectValue placeholder={t("actionAll")} />
           </SelectTrigger>
           <SelectContent position="popper" className="max-h-[300px] overflow-y-auto">
             {actionOptions.map((opt) => (
@@ -353,7 +361,7 @@ export function AuditLogsView() {
 
         <Select value={transportFilter || "all"} onValueChange={handleTransportFilterChange}>
           <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="所有传输方式" />
+            <SelectValue placeholder={t("transportAll")} />
           </SelectTrigger>
           <SelectContent position="popper" className="max-h-[300px] overflow-y-auto">
             {transportOptions.map((opt) => (
@@ -369,11 +377,11 @@ export function AuditLogsView() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent position="popper">
-            <SelectItem value="all">全部时间</SelectItem>
-            <SelectItem value="1h">过去 1 小时</SelectItem>
-            <SelectItem value="1d">过去 24 小时</SelectItem>
-            <SelectItem value="7d">过去 7 天</SelectItem>
-            <SelectItem value="30d">过去 30 天</SelectItem>
+            <SelectItem value="all">{t("dateRangeAll")}</SelectItem>
+            <SelectItem value="1h">{t("dateRangeLastHour")}</SelectItem>
+            <SelectItem value="1d">{t("dateRangeLast24Hours")}</SelectItem>
+            <SelectItem value="7d">{t("dateRangeLast7Days")}</SelectItem>
+            <SelectItem value="30d">{t("dateRangeLast30Days")}</SelectItem>
           </SelectContent>
         </Select>
 
@@ -384,27 +392,29 @@ export function AuditLogsView() {
           disabled={loading}
         >
           <RefreshCw className={`w-4 h-4 mr-1 ${loading ? "animate-spin" : ""}`} />
-          刷新
+          {t("refresh")}
         </Button>
 
-        <span className="text-sm text-muted-foreground ml-auto">{total} 条</span>
+        <span className="text-sm text-muted-foreground ml-auto">
+          {t("entryCount", { count: total })}
+        </span>
       </div>
 
       {/* Table */}
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[200px]">时间</TableHead>
-            <TableHead>操作</TableHead>
-            <TableHead className="w-[100px]">传输</TableHead>
-            <TableHead className="w-[100px]">耗时</TableHead>
+            <TableHead className="w-[200px]">{t("tableHeaderTime")}</TableHead>
+            <TableHead>{t("tableHeaderAction")}</TableHead>
+            <TableHead className="w-[100px]">{t("tableHeaderTransport")}</TableHead>
+            <TableHead className="w-[100px]">{t("tableHeaderDuration")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {logs.length === 0 ? (
             <TableRow>
               <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                {loading ? "加载中…" : "暂无审计日志"}
+                {loading ? t("tableLoading") : t("tableNoLogs")}
               </TableCell>
             </TableRow>
           ) : (
@@ -434,7 +444,7 @@ export function AuditLogsView() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">
-            第 {currentPage} 页，共 {totalPages} 页
+            {t("paginationPage", { current: currentPage, total: totalPages })}
           </span>
           <div className="flex gap-2">
             <Button
@@ -444,7 +454,7 @@ export function AuditLogsView() {
               disabled={offset === 0}
             >
               <ChevronLeft className="w-4 h-4 mr-1" />
-              上一页
+              {t("previous")}
             </Button>
             <Button
               variant="outline"
@@ -452,7 +462,7 @@ export function AuditLogsView() {
               onClick={() => handlePageChange(offset + limit)}
               disabled={offset + limit >= total}
             >
-              下一页
+              {t("next")}
               <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
           </div>
@@ -463,25 +473,27 @@ export function AuditLogsView() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>审计日志：{selectedLog?.action}</DialogTitle>
+            <DialogTitle>
+              {t("detailDialogTitle", { action: selectedLog?.action ?? "" })}
+            </DialogTitle>
           </DialogHeader>
           {selectedLog && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="text-muted-foreground">操作：</span>{" "}
+                  <span className="text-muted-foreground">{t("detailAction")}</span>{" "}
                   <span className="font-medium">{selectedLog.action}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">传输方式：</span>{" "}
+                  <span className="text-muted-foreground">{t("detailTransport")}</span>{" "}
                   <TransportBadge transport={selectedLog.transport} />
                 </div>
                 <div>
-                  <span className="text-muted-foreground">开始时间：</span>{" "}
+                  <span className="text-muted-foreground">{t("detailStarted")}</span>{" "}
                   <span className="font-mono">{formatDateTime(selectedLog.started_at)}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">耗时：</span>{" "}
+                  <span className="text-muted-foreground">{t("detailDuration")}</span>{" "}
                   <span className="font-mono">
                     {formatDuration(selectedLog.started_at, selectedLog.ended_at)}
                   </span>
@@ -490,7 +502,7 @@ export function AuditLogsView() {
 
               {selectedLog.request && (
                 <div>
-                  <h4 className="text-sm font-semibold mb-2">请求</h4>
+                  <h4 className="text-sm font-semibold mb-2">{t("detailRequest")}</h4>
                   <pre className="bg-muted p-3 rounded-md text-xs overflow-x-auto max-h-[200px] overflow-y-auto">
                     {JSON.stringify(selectedLog.request, null, 2)}
                   </pre>
@@ -499,7 +511,7 @@ export function AuditLogsView() {
 
               {selectedLog.response && (
                 <div>
-                  <h4 className="text-sm font-semibold mb-2">响应</h4>
+                  <h4 className="text-sm font-semibold mb-2">{t("detailResponse")}</h4>
                   <pre className="bg-muted p-3 rounded-md text-xs overflow-x-auto max-h-[200px] overflow-y-auto">
                     {JSON.stringify(selectedLog.response, null, 2)}
                   </pre>
@@ -508,7 +520,7 @@ export function AuditLogsView() {
 
               {selectedLog.metadata && Object.keys(selectedLog.metadata).length > 0 && (
                 <div>
-                  <h4 className="text-sm font-semibold mb-2">元数据</h4>
+                  <h4 className="text-sm font-semibold mb-2">{t("detailMetadata")}</h4>
                   <pre className="bg-muted p-3 rounded-md text-xs overflow-x-auto">
                     {JSON.stringify(selectedLog.metadata, null, 2)}
                   </pre>

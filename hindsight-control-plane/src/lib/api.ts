@@ -131,9 +131,10 @@ export class ControlPlaneClient {
 
       if (!response.ok) {
         // Redirect to login on 401 (session expired or not authenticated)
-        if (response.status === 401 && !window.location.pathname.startsWith("/login")) {
-          window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
-          throw new Error("未授权");
+        const currentPath = stripBasePath(`${window.location.pathname}${window.location.search}`);
+        if (response.status === 401 && !currentPath.startsWith("/login")) {
+          window.location.href = withBasePath(`/login?returnTo=${encodeURIComponent(currentPath)}`);
+          throw new Error("Unauthorized");
         }
 
         // Try to parse error response
@@ -162,19 +163,19 @@ export class ControlPlaneClient {
 
         if (status >= 400 && status < 500) {
           // Client errors (4xx) - validation, bad request, etc. - show as warning
-          toast.warning("客户端错误", {
+          toast.warning("Client Error", {
             description,
             duration: 5000,
           });
         } else if (status >= 500) {
           // Server errors (5xx) - show as error
-          toast.error("服务器错误", {
+          toast.error("Server Error", {
             description,
             duration: 5000,
           });
         } else {
           // Other HTTP errors - show as error
-          toast.error("API 错误", {
+          toast.error("API Error", {
             description,
             duration: 5000,
           });
@@ -191,8 +192,8 @@ export class ControlPlaneClient {
     } catch (error) {
       // If it's not a response error (network error, etc.), show toast
       if (!(error as any).status) {
-        toast.error("网络错误", {
-          description: error instanceof Error ? error.message : "无法连接到服务器",
+        toast.error("Network Error", {
+          description: error instanceof Error ? error.message : "Failed to connect to server",
           duration: 5000,
         });
       }

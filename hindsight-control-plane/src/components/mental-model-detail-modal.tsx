@@ -77,23 +77,32 @@ type HistoryEntry = {
 
 function getFactTypeDisplay(factType: string, t?: (key: string) => string) {
   if (factType === "directives") {
-    return { label: "指令", color: "bg-purple-500/10 text-purple-600 dark:text-purple-400" };
+    return {
+      label: t ? t("factTypeDirective") : "directive",
+      color: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+    };
   }
   if (factType === "mental-models") {
     return {
-      label: "知识摘要",
+      label: t ? t("factTypeMentalModel") : "mental model",
       color: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
     };
   }
   if (factType === "world") {
-    return { label: "世界常识", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" };
+    return {
+      label: t ? t("factTypeWorld") : "world",
+      color: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+    };
   }
   if (factType === "experience") {
-    return { label: "经历记忆", color: "bg-green-500/10 text-green-600 dark:text-green-400" };
+    return {
+      label: t ? t("factTypeExperience") : "experience",
+      color: "bg-green-500/10 text-green-600 dark:text-green-400",
+    };
   }
   if (factType === "observation") {
     return {
-      label: "观察",
+      label: t ? t("factTypeObservation") : "observation",
       color: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
     };
   }
@@ -126,7 +135,7 @@ function BasedOnList({
   }, [based_on]);
 
   if (groups.length === 0) {
-    return <p className="text-sm text-muted-foreground italic">暂无基于数据。</p>;
+    return <p className="text-sm text-muted-foreground italic">{t("noBasedOnData")}</p>;
   }
 
   return (
@@ -171,7 +180,7 @@ function BasedOnList({
                           else onViewMemory?.(fact.id);
                         }}
                       >
-                        查看 →
+                        {t("viewArrow")}
                       </button>
                     )}
                   </li>
@@ -356,7 +365,8 @@ function SideBySideDiff({ before, after }: { before: string; after: string }) {
   const palette = DIFF_PALETTE[theme];
   const { left, right } = diffLines(before, after);
   const hasChanges = left.some((l) => l.type !== "same") || right.some((r) => r.type !== "same");
-  if (!hasChanges) return <span className="text-sm text-muted-foreground italic">未变更</span>;
+  if (!hasChanges)
+    return <span className="text-sm text-muted-foreground italic">{t("unchanged")}</span>;
 
   return (
     <div
@@ -364,8 +374,8 @@ function SideBySideDiff({ before, after }: { before: string; after: string }) {
       style={{ color: palette.body }}
     >
       <div>
-        <div className="px-3 py-1.5 bg-muted text-muted-foreground font-sans font-semibold text-xs uppercase tracking-wide border-b border-border">
-          之前
+        <div className="px-3 py-1.5 bg-muted text-foreground font-sans font-semibold text-xs uppercase tracking-wide border-b border-border">
+          {t("diffBefore")}
         </div>
         {left.map((line, idx) => (
           <div
@@ -378,8 +388,8 @@ function SideBySideDiff({ before, after }: { before: string; after: string }) {
         ))}
       </div>
       <div>
-        <div className="px-3 py-1.5 bg-muted text-muted-foreground font-sans font-semibold text-xs uppercase tracking-wide border-b border-border">
-          之后
+        <div className="px-3 py-1.5 bg-muted text-foreground font-sans font-semibold text-xs uppercase tracking-wide border-b border-border">
+          {t("diffAfter")}
         </div>
         {right.map((line, idx) => (
           <div
@@ -435,7 +445,7 @@ function BasedOnDiff({
   }, [before, after]);
 
   if (diff.length === 0) {
-    return <p className="text-sm text-muted-foreground italic">暂无基于数据。</p>;
+    return <p className="text-sm text-muted-foreground italic">{t("noBasedOnData")}</p>;
   }
 
   const renderFact = (fact: BasedOnFact, factType: string, mode: "added" | "removed" | "kept") => {
@@ -474,7 +484,7 @@ function BasedOnDiff({
               else onViewMemory(fact.id);
             }}
           >
-            查看 →
+            {t("viewArrow")}
           </button>
         )}
       </li>
@@ -504,7 +514,9 @@ function BasedOnDiff({
                 </span>
               )}
               {group.kept.length > 0 && (
-                <span className="text-xs text-muted-foreground">{group.kept.length} 保留</span>
+                <span className="text-xs text-muted-foreground">
+                  {t("keptCount", { count: group.kept.length })}
+                </span>
               )}
             </div>
             <ul className="divide-y divide-border/40">
@@ -548,7 +560,7 @@ function MentalModelHistoryView({
           <span className="font-semibold text-foreground">v{history.length - idx}</span> →{" "}
           <span className="font-semibold text-foreground">
             v{history.length - idx + 1}
-            {idx === 0 ? " (当前)" : ""}
+            {idx === 0 ? t("versionCurrent") : ""}
           </span>{" "}
           &middot; {t("changedAt", { date: new Date(entry.changed_at).toLocaleString() })}
         </span>
@@ -575,18 +587,20 @@ function MentalModelHistoryView({
       </div>
 
       <div>
-        <SectionLabel>内容差异</SectionLabel>
+        <SectionLabel>{t("contentDiff")}</SectionLabel>
         {entry.previous_content !== null ? (
           <SideBySideDiff before={entry.previous_content} after={afterContent} />
         ) : (
           <div className="border border-border rounded-lg p-3">
-            <span className="text-sm text-muted-foreground italic">无先前内容</span>
+            <span className="text-sm text-muted-foreground italic">
+              {t("previousContentNotAvailable")}
+            </span>
           </div>
         )}
       </div>
 
       <div>
-        <SectionLabel>基于数据差异</SectionLabel>
+        <SectionLabel>{t("basedOnDiff")}</SectionLabel>
         {snapshot?.based_on ? (
           <BasedOnDiff
             before={beforeBasedOn}
@@ -595,9 +609,7 @@ function MentalModelHistoryView({
             onViewDirective={onViewDirective}
           />
         ) : (
-          <p className="text-sm text-muted-foreground italic">
-            此版本未记录（在启用反思快照追踪之前生成）。
-          </p>
+          <p className="text-sm text-muted-foreground italic">{t("basedOnNotCaptured")}</p>
         )}
       </div>
     </div>
@@ -751,7 +763,7 @@ export function MentalModelDetailModal({
         <DialogContent className="w-[95vw] max-w-[95vw] h-[92vh] sm:max-w-[95vw] flex flex-col overflow-hidden">
           <DialogHeader className="pr-10">
             <DialogTitle className="flex items-center gap-2">
-              <span className="truncate">{mentalModel?.name ?? "知识摘要"}</span>
+              <span className="truncate">{mentalModel?.name ?? t("mentalModelFallback")}</span>
               {mentalModel && (
                 <Button
                   variant="ghost"
@@ -759,7 +771,7 @@ export function MentalModelDetailModal({
                   className="h-7 w-7 p-0 shrink-0"
                   onClick={handleReload}
                   disabled={reloading}
-                  title="重新加载数据"
+                  title={t("reloadData")}
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${reloading ? "animate-spin" : ""}`} />
                 </Button>
@@ -767,7 +779,7 @@ export function MentalModelDetailModal({
               {mentalModel?.trigger?.refresh_after_consolidation && (
                 <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-medium">
                   <Zap className="w-3 h-3" />
-                  自动刷新
+                  {t("autoRefresh")}
                 </span>
               )}
             </DialogTitle>
@@ -793,15 +805,15 @@ export function MentalModelDetailModal({
                 <TabsList className="grid grid-cols-3 w-full max-w-md">
                   <TabsTrigger value="content" className="flex items-center gap-1.5">
                     <FileText className="w-3.5 h-3.5" />
-                    内容
+                    {t("tabContent")}
                   </TabsTrigger>
                   <TabsTrigger value="configuration" className="flex items-center gap-1.5">
                     <Settings className="w-3.5 h-3.5" />
-                    配置
+                    {t("tabConfiguration")}
                   </TabsTrigger>
                   <TabsTrigger value="history" className="flex items-center gap-1.5">
                     <HistoryIcon className="w-3.5 h-3.5" />
-                    历史
+                    {t("tabHistory")}
                   </TabsTrigger>
                 </TabsList>
                 <DropdownMenu>
@@ -820,12 +832,12 @@ export function MentalModelDetailModal({
                     {onEdit && (
                       <DropdownMenuItem onClick={() => onEdit(mentalModel)}>
                         <Pencil className="h-4 w-4 mr-2" />
-                        编辑
+                        {t("actionEdit")}
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuItem onClick={handleRefresh} disabled={refreshing}>
                       <RefreshCw className="h-4 w-4 mr-2" />
-                      手动刷新
+                      {t("actionRefreshManually")}
                     </DropdownMenuItem>
                     {onClear && (
                       <DropdownMenuItem onClick={() => onClear(mentalModel)}>
@@ -841,7 +853,7 @@ export function MentalModelDetailModal({
                           className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400 focus:bg-red-500/10"
                         >
                           <Trash2 className="h-4 w-4 mr-2" />
-                          删除
+                          {t("actionDelete")}
                         </DropdownMenuItem>
                       </>
                     )}
@@ -855,25 +867,27 @@ export function MentalModelDetailModal({
                     <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border bg-muted/50 text-xs text-muted-foreground">
                       <div className="flex items-center gap-1.5">
                         <FileText className="w-3.5 h-3.5" />
-                        <span className="font-semibold uppercase tracking-wide">已存储内容</span>
+                        <span className="font-semibold uppercase tracking-wide">
+                          {t("storedContent")}
+                        </span>
                         <span className="text-muted-foreground/70">
-                          &middot; {mentalModel.content.length.toLocaleString()}字符
+                          &middot; {t("charsCount", { count: mentalModel.content.length })}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
                         {mentalModel.is_stale === true ? (
                           <span
                             className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-400"
-                            title="自上次刷新以来，该知识摘要范围内有新的记忆被摄入"
+                            title={t("staleTitle")}
                           >
-                            过期
+                            {t("stale")}
                           </span>
                         ) : mentalModel.is_stale === false ? (
                           <span
                             className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-green-500/15 text-green-700 dark:text-green-400"
-                            title="自上次刷新以来，该知识摘要范围内没有新记忆"
+                            title={t("inSyncTitle")}
                           >
-                            同步中
+                            {t("inSync")}
                           </span>
                         ) : null}
                         <span
@@ -881,7 +895,9 @@ export function MentalModelDetailModal({
                           className="flex items-center gap-1"
                         >
                           <RefreshCw className="w-3 h-3" />
-                          上次刷新 {formatRelativeTime(mentalModel.last_refreshed_at)}
+                          {t("lastRefreshed", {
+                            time: formatRelativeTime(mentalModel.last_refreshed_at),
+                          })}
                         </span>
                       </div>
                     </div>
@@ -900,9 +916,7 @@ export function MentalModelDetailModal({
                         onViewDirective={(id) => setViewDirectiveId(id)}
                       />
                     ) : (
-                      <p className="text-sm text-muted-foreground">
-                        无可用源数据。点击"刷新"以重新生成并记录来源。
-                      </p>
+                      <p className="text-sm text-muted-foreground">{t("noSourceData")}</p>
                     )}
                   </div>
                 </TabsContent>
@@ -925,7 +939,7 @@ export function MentalModelDetailModal({
                       onViewDirective={(id) => setViewDirectiveId(id)}
                     />
                   ) : (
-                    <p className="text-sm text-muted-foreground italic">暂无历史记录。</p>
+                    <p className="text-sm text-muted-foreground italic">{t("noHistory")}</p>
                   )}
                 </TabsContent>
               </div>
@@ -996,19 +1010,35 @@ function ConfigurationTab({ mentalModel }: { mentalModel: MentalModel }) {
   const excludeIds = trigger.exclude_mental_model_ids ?? [];
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <InfoCard title="标识" icon={<FileText className="w-3.5 h-3.5" />}>
+      <InfoCard title={t("identityTitle")} icon={<FileText className="w-3.5 h-3.5" />}>
         <Metadata
-          label="标识符"
+          label={t("labelId")}
           value={
             <code className="text-xs font-mono text-muted-foreground break-all">
               {mentalModel.id}
             </code>
           }
         />
-        <Metadata label="名称" value={mentalModel.name} />
-        {mentalModel.source_query && <Metadata label="源查询" value={mentalModel.source_query} />}
+        <Metadata label={t("labelName")} value={mentalModel.name} />
+        {mentalModel.source_query && (
+          <Metadata
+            label={t("labelSourceQuery")}
+            value={
+              <pre
+                className="text-sm font-mono text-foreground bg-muted/30 border border-border/60 rounded p-2 leading-6 m-0"
+                style={{
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
+                }}
+              >
+                {mentalModel.source_query}
+              </pre>
+            }
+          />
+        )}
         <Metadata
-          label="标签"
+          label={t("labelTags")}
           value={
             mentalModel.tags?.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
@@ -1021,48 +1051,54 @@ function ConfigurationTab({ mentalModel }: { mentalModel: MentalModel }) {
                 ))}
               </div>
             ) : (
-              <span className="text-muted-foreground italic text-sm">无</span>
+              <span className="text-muted-foreground italic text-sm">{t("noTags")}</span>
             )
           }
         />
       </InfoCard>
 
-      <InfoCard title="时间信息" icon={<RefreshCw className="w-3.5 h-3.5" />}>
-        <Metadata label="创建时间" value={formatDateTime(mentalModel.created_at)} />
+      <InfoCard title={t("timingTitle")} icon={<RefreshCw className="w-3.5 h-3.5" />}>
+        <Metadata label={t("labelCreated")} value={formatDateTime(mentalModel.created_at)} />
         <Metadata
-          label="上次刷新"
+          label={t("labelLastRefreshed")}
           value={
             <span title={formatDateTime(mentalModel.last_refreshed_at)}>
               {formatRelativeTime(mentalModel.last_refreshed_at)}
             </span>
           }
         />
-        <Metadata label="最大 Token 数" value={mentalModel.max_tokens.toLocaleString()} />
+        <Metadata label={t("labelMaxTokens")} value={mentalModel.max_tokens.toLocaleString()} />
       </InfoCard>
 
-      <InfoCard title="刷新触发器" icon={<Zap className="w-3.5 h-3.5" />}>
+      <InfoCard title={t("refreshTriggerTitle")} icon={<Zap className="w-3.5 h-3.5" />}>
         <Metadata
-          label="刷新模式"
+          label={t("labelRefreshMode")}
           value={
-            t.mode === "delta" ? (
-              <Pill label="增量" color="bg-purple-500/10 text-purple-600 dark:text-purple-400" />
+            trigger.mode === "delta" ? (
+              <Pill
+                label={t("pillDelta")}
+                color="bg-purple-500/10 text-purple-600 dark:text-purple-400"
+              />
             ) : (
-              <Pill label="完全" />
+              <Pill label={t("pillFull")} />
             )
           }
         />
         <Metadata
-          label="合并后自动刷新"
+          label={t("labelAutoRefreshAfterConsolidation")}
           value={
-            t.refresh_after_consolidation ? (
-              <Pill label="已启用" color="bg-green-500/10 text-green-600 dark:text-green-400" />
+            trigger.refresh_after_consolidation ? (
+              <Pill
+                label={t("pillEnabled")}
+                color="bg-green-500/10 text-green-600 dark:text-green-400"
+              />
             ) : (
-              <Pill label="已禁用" />
+              <Pill label={t("pillDisabled")} />
             )
           }
         />
         <Metadata
-          label="事实类型"
+          label={t("labelFactTypes")}
           value={
             factTypes.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
@@ -1072,14 +1108,17 @@ function ConfigurationTab({ mentalModel }: { mentalModel: MentalModel }) {
                 })}
               </div>
             ) : (
-              <span className="text-muted-foreground italic text-sm">全部</span>
+              <span className="text-muted-foreground italic text-sm">{t("factTypesAll")}</span>
             )
           }
         />
-        <Metadata label="排除知识摘要" value={t.exclude_mental_models ? "是" : "否"} />
+        <Metadata
+          label={t("labelExcludeMentalModels")}
+          value={trigger.exclude_mental_models ? t("valueYes") : t("valueNo")}
+        />
         {excludeIds.length > 0 && (
           <Metadata
-            label="已排除 ID"
+            label={t("labelExcludedIds")}
             value={
               <div className="flex flex-wrap gap-1.5">
                 {excludeIds.map((id) => (
@@ -1096,17 +1135,9 @@ function ConfigurationTab({ mentalModel }: { mentalModel: MentalModel }) {
         )}
       </InfoCard>
 
-      <InfoCard title="召回参数" icon={<Settings className="w-3.5 h-3.5" />}>
+      <InfoCard title={t("recallParamsTitle")} icon={<Settings className="w-3.5 h-3.5" />}>
         <Metadata
-          label="包含分块"
-          value={t.include_chunks == null ? "default" : t.include_chunks ? "是" : "否"}
-        />
-        <Metadata
-          label="召回最大 Token 数"
-          value={t.recall_max_tokens != null ? t.recall_max_tokens.toLocaleString() : "default"}
-        />
-        <Metadata
-          label="召回分块最大 Token 数"
+          label={t("labelIncludeChunks")}
           value={
             trigger.include_chunks == null
               ? t("includeChunksDefault")
@@ -1116,14 +1147,30 @@ function ConfigurationTab({ mentalModel }: { mentalModel: MentalModel }) {
           }
         />
         <Metadata
-          label="标签匹配"
-          value={t.tags_match ? <Pill label={t.tags_match} /> : "default"}
+          label={t("labelRecallMaxTokens")}
+          value={
+            trigger.recall_max_tokens != null
+              ? trigger.recall_max_tokens.toLocaleString()
+              : t("recallMaxTokensDefault")
+          }
+        />
+        <Metadata
+          label={t("labelRecallChunksMaxTokens")}
+          value={
+            trigger.recall_chunks_max_tokens != null
+              ? trigger.recall_chunks_max_tokens.toLocaleString()
+              : t("recallChunksMaxTokensDefault")
+          }
+        />
+        <Metadata
+          label={t("labelTagsMatch")}
+          value={trigger.tags_match ? <Pill label={trigger.tags_match} /> : t("tagsMatchDefault")}
         />
       </InfoCard>
 
       {tagGroups.length > 0 && (
         <div className="md:col-span-2">
-          <InfoCard title="标签组" icon={<Settings className="w-3.5 h-3.5" />}>
+          <InfoCard title={t("tagGroupsTitle")} icon={<Settings className="w-3.5 h-3.5" />}>
             <pre className="text-xs font-mono bg-muted/40 rounded p-3 overflow-x-auto border border-border/60">
               {JSON.stringify(tagGroups, null, 2)}
             </pre>

@@ -110,8 +110,8 @@ export default function BankPage() {
     try {
       const result = await client.clearObservations(bankId);
       setShowClearObservationsDialog(false);
-      toast.success("成功", {
-        description: result.message || "沉淀认知已成功清除",
+      toast.success(t("observationsCleared"), {
+        description: result.message || t("observationsClearedDefault"),
       });
     } catch (error) {
       // Error toast is shown automatically by the API client interceptor
@@ -152,7 +152,7 @@ export default function BankPage() {
     setIsRecoveringConsolidation(true);
     try {
       const result = await client.recoverConsolidation(bankId);
-      toast.success(`已恢复 ${result.retried_count} 条失败的记忆以重新整合`);
+      toast.success(t("recoveredMemories", { count: result.retried_count }));
     } catch (error) {
       // Error toast is shown automatically by the API client interceptor
     } finally {
@@ -174,13 +174,15 @@ export default function BankPage() {
               <div>
                 <div className="flex justify-between items-start mb-6">
                   <div>
-                    <h1 className="text-3xl font-bold mb-2 text-foreground">记忆库配置</h1>
-                    <p className="text-muted-foreground">管理记忆库设置、配置文件和操作。</p>
+                    <h1 className="text-3xl font-bold mb-2 text-foreground">
+                      {t("bankConfiguration")}
+                    </h1>
+                    <p className="text-muted-foreground">{t("bankConfigurationDescription")}</p>
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="outline" size="sm">
-                        操作
+                        {t("actions")}
                         <MoreVertical className="w-4 h-4 ml-2" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -192,56 +194,62 @@ export default function BankPage() {
                             const manifest = await client.exportBankTemplate(bankId);
                             const json = JSON.stringify(manifest, null, 2);
                             await navigator.clipboard.writeText(json);
-                            toast.success("模板已复制到剪贴板");
+                            toast.success(t("templateCopied"));
                           } catch {
-                            toast.error("导出模板失败");
+                            toast.error(t("failedToExportTemplate"));
                           }
                         }}
                       >
                         <Download className="w-4 h-4 mr-2" />
-                        导出模板
+                        {t("exportTemplate")}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         onClick={handleTriggerConsolidation}
                         disabled={isConsolidating || !observationsEnabled}
-                        title={!observationsEnabled ? "沉淀认知功能未启用" : undefined}
+                        title={
+                          !observationsEnabled ? "Observations feature is not enabled" : undefined
+                        }
                       >
                         {isConsolidating ? (
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         ) : (
                           <Brain className="w-4 h-4 mr-2" />
                         )}
-                        {isConsolidating ? "归纳中..." : "运行归纳"}
+                        {isConsolidating ? t("consolidating") : t("runConsolidation")}
                         {!observationsEnabled && (
-                          <span className="ml-auto text-xs text-muted-foreground">关闭</span>
+                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={handleRecoverConsolidation}
                         disabled={isRecoveringConsolidation || !observationsEnabled}
-                        title={!observationsEnabled ? "沉淀认知功能未启用" : undefined}
+                        title={
+                          !observationsEnabled ? "Observations feature is not enabled" : undefined
+                        }
                       >
                         {isRecoveringConsolidation ? (
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         ) : (
                           <RotateCcw className="w-4 h-4 mr-2" />
                         )}
-                        {isRecoveringConsolidation ? "恢复中..." : "恢复归纳"}
+                        {isRecoveringConsolidation ? t("recovering") : t("recoverConsolidation")}
                         {!observationsEnabled && (
-                          <span className="ml-auto text-xs text-muted-foreground">关闭</span>
+                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => setShowClearObservationsDialog(true)}
                         disabled={!observationsEnabled}
                         className="text-amber-600 dark:text-amber-400 focus:text-amber-700 dark:focus:text-amber-300"
-                        title={!observationsEnabled ? "沉淀认知功能未启用" : undefined}
+                        title={
+                          !observationsEnabled ? "Observations feature is not enabled" : undefined
+                        }
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
-                        清除观察
+                        {t("clearObservations")}
                         {!observationsEnabled && (
-                          <span className="ml-auto text-xs text-muted-foreground">关闭</span>
+                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
@@ -249,12 +257,12 @@ export default function BankPage() {
                         onClick={() => setShowResetConfigDialog(true)}
                         disabled={!bankConfigEnabled}
                         className="text-amber-600 dark:text-amber-400 focus:text-amber-700 dark:focus:text-amber-300"
-                        title={!bankConfigEnabled ? "记忆库配置 API 已禁用" : undefined}
+                        title={!bankConfigEnabled ? "Bank Config API is disabled" : undefined}
                       >
                         <RotateCcw className="w-4 h-4 mr-2" />
-                        重置配置
+                        {t("resetConfiguration")}
                         {!bankConfigEnabled && (
-                          <span className="ml-auto text-xs text-muted-foreground">关闭</span>
+                          <span className="ml-auto text-xs text-muted-foreground">Off</span>
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
@@ -263,7 +271,7 @@ export default function BankPage() {
                         className="text-red-600 dark:text-red-400 focus:text-red-700 dark:focus:text-red-300"
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
-                        删除记忆库
+                        {t("deleteBank")}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -280,7 +288,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      总览
+                      {t("general")}
                       {bankConfigTab === "general" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -294,7 +302,7 @@ export default function BankPage() {
                             : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
-                        配置
+                        {t("configuration")}
                         {bankConfigTab === "configuration" && (
                           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                         )}
@@ -308,7 +316,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      Webhook
+                      {t("webhooks")}
                       {bankConfigTab === "webhooks" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -321,7 +329,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      审计日志
+                      {t("auditLogs")}
                       {bankConfigTab === "audit-logs" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -334,7 +342,7 @@ export default function BankPage() {
                   {bankConfigTab === "general" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        此记忆库的概览统计和后台操作。
+                        {t("overviewAndOperations")}
                       </p>
                       <div className="space-y-6">
                         <BankStatsView />
@@ -351,7 +359,7 @@ export default function BankPage() {
                   {bankConfigTab === "webhooks" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        管理 Webhook 端点以接收此记忆库的事件通知。
+                        {t("webhooksDescription")}
                       </p>
                       <WebhooksView />
                     </div>
@@ -359,7 +367,7 @@ export default function BankPage() {
                   {bankConfigTab === "audit-logs" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        查看此记忆库上执行的所有操作的审计记录。
+                        {t("auditLogsDescription")}
                       </p>
                       <AuditLogsView />
                     </div>
@@ -371,8 +379,8 @@ export default function BankPage() {
             {/* Recall Tab */}
             {view === "recall" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">检索</h1>
-                <p className="text-muted-foreground mb-6">通过详细的追踪信息分析记忆检索过程。</p>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">{t("recallAnalyzer")}</h1>
+                <p className="text-muted-foreground mb-6">{t("recallAnalyzerDescription")}</p>
                 <SearchDebugView />
               </div>
             )}
@@ -380,10 +388,8 @@ export default function BankPage() {
             {/* Reflect Tab */}
             {view === "reflect" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">深思</h1>
-                <p className="text-muted-foreground mb-6">
-                  运行智能体循环，自主收集证据并基于性格倾向进行推理，生成结合记忆的上下文响应。
-                </p>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">{t("reflect")}</h1>
+                <p className="text-muted-foreground mb-6">{t("reflectDescription")}</p>
                 <ThinkView />
               </div>
             )}
@@ -391,10 +397,8 @@ export default function BankPage() {
             {/* Data/Memories Tab */}
             {view === "data" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">记忆</h1>
-                <p className="text-muted-foreground mb-6">
-                  浏览和探索此记忆库中存储的不同类型记忆。
-                </p>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">{t("memories")}</h1>
+                <p className="text-muted-foreground mb-6">{t("memoriesDescription")}</p>
 
                 <div className="mb-6 border-b border-border">
                   <div className="flex gap-1">
@@ -406,7 +410,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      客观知识
+                      {t("worldFacts")}
                       {subTab === "world" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -419,7 +423,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      亲身经历
+                      {t("experience")}
                       {subTab === "experience" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -432,10 +436,10 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      沉淀认知
+                      {t("observations")}
                       {!observationsEnabled && (
                         <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                          关闭
+                          Off
                         </span>
                       )}
                       {subTab === "observations" && (
@@ -450,7 +454,7 @@ export default function BankPage() {
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      知识摘要
+                      {t("mentalModels")}
                       {subTab === "mental-models" && (
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
@@ -462,7 +466,7 @@ export default function BankPage() {
                   {subTab === "world" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        从外部输入中提取的客观事实和通用知识。
+                        {t("worldFactsDescription")}
                       </p>
                       <DataView key="world" factType="world" />
                     </div>
@@ -470,7 +474,7 @@ export default function BankPage() {
                   {subTab === "experience" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        智能体自身的操作记录和第一人称经历。
+                        {t("experienceDescription")}
                       </p>
                       <DataView key="experience" factType="experience" />
                     </div>
@@ -479,7 +483,7 @@ export default function BankPage() {
                     (observationsEnabled ? (
                       <div>
                         <p className="text-sm text-muted-foreground mb-4">
-                          从原始事实中归纳提炼的稳定认知 — 积累后形成的模式、偏好和经验总结。
+                          {t("observationsDescription")}
                         </p>
                         <DataView key="observations" factType="observation" />
                       </div>
@@ -503,21 +507,23 @@ export default function BankPage() {
                           </svg>
                         </div>
                         <h3 className="text-lg font-semibold text-foreground mb-1">
-                          沉淀认知功能未启用
+                          {t("observationsNotEnabled")}
                         </h3>
                         <p className="text-sm text-muted-foreground max-w-md">
-                          此服务器上的沉淀认知功能已禁用。如需启用，请设置{" "}
-                          <code className="px-1 py-0.5 bg-muted rounded text-xs">
-                            HINDSIGHT_API_ENABLE_OBSERVATIONS=true
-                          </code>{" "}
-                          。
+                          {t.rich("observationsDisabledMessage", {
+                            envVar: () => (
+                              <code className="px-1 py-0.5 bg-muted rounded text-xs">
+                                HINDSIGHT_API_ENABLE_OBSERVATIONS=true
+                              </code>
+                            ),
+                          })}
                         </p>
                       </div>
                     ))}
                   {subTab === "mental-models" && (
                     <div>
                       <p className="text-sm text-muted-foreground mb-4">
-                        基于检索查询生成的知识总结 — 可随记忆更新而刷新的持久化知识快照。
+                        {t("mentalModelsDescription")}
                       </p>
                       <MentalModelsView key="mental-models" />
                     </div>
@@ -529,8 +535,8 @@ export default function BankPage() {
             {/* Documents Tab */}
             {view === "documents" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">文档</h1>
-                <p className="text-muted-foreground mb-6">管理文档并存储新记忆。</p>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">{t("documents")}</h1>
+                <p className="text-muted-foreground mb-6">{t("documentsDescription")}</p>
                 <DocumentsView />
               </div>
             )}
@@ -538,10 +544,8 @@ export default function BankPage() {
             {/* Entities Tab */}
             {view === "entities" && (
               <div>
-                <h1 className="text-3xl font-bold mb-2 text-foreground">实体</h1>
-                <p className="text-muted-foreground mb-6">
-                  探索记忆中提及的实体（人物、组织、地点）。
-                </p>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">{t("entities")}</h1>
+                <p className="text-muted-foreground mb-6">{t("entitiesDescription")}</p>
                 <EntitiesView />
               </div>
             )}
@@ -553,21 +557,22 @@ export default function BankPage() {
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除记忆库</AlertDialogTitle>
+            <AlertDialogTitle>{t("deleteMemoryBank")}</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  确定要删除记忆库 <span className="font-semibold text-foreground">{bankId}</span>{" "}
-                  吗？
+                  {t.rich("deleteBankPrompt", {
+                    bankName: () => <span className="font-semibold text-foreground">{bankId}</span>,
+                  })}
                 </p>
                 <p className="text-red-600 dark:text-red-400 font-medium">
-                  此操作不可撤销。所有记忆、实体、文档和记忆库配置将被永久删除。
+                  {t("deleteBankWarning")}
                 </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>取消</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>{tCommon("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteBank}
               disabled={isDeleting}
@@ -576,12 +581,12 @@ export default function BankPage() {
               {isDeleting ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  删除中...
+                  {t("deleting")}
                 </>
               ) : (
                 <>
                   <Trash2 className="w-4 h-4 mr-2" />
-                  删除记忆库
+                  {t("deleteBank")}
                 </>
               )}
             </AlertDialogAction>
@@ -593,31 +598,32 @@ export default function BankPage() {
       <AlertDialog open={showResetConfigDialog} onOpenChange={setShowResetConfigDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>重置配置</AlertDialogTitle>
+            <AlertDialogTitle>{t("resetConfigTitle")}</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  确定要重置 <span className="font-semibold text-foreground">{bankId}</span>{" "}
-                  的所有配置覆盖吗？
+                  {t.rich("resetConfigPrompt", {
+                    bankName: () => <span className="font-semibold text-foreground">{bankId}</span>,
+                  })}
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">
-                  所有记忆库级别的设置（保留、观察、反思）将恢复为服务器默认值。这不影响记忆、实体或记忆库配置。
+                  {t("resetConfigWarning")}
                 </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isResettingConfig}>取消</AlertDialogCancel>
+            <AlertDialogCancel disabled={isResettingConfig}>{tCommon("cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleResetConfig} disabled={isResettingConfig}>
               {isResettingConfig ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  重置中...
+                  {t("resetting")}
                 </>
               ) : (
                 <>
                   <RotateCcw className="w-4 h-4 mr-2" />
-                  重置配置
+                  {t("resetConfiguration")}
                 </>
               )}
             </AlertDialogAction>
@@ -629,21 +635,24 @@ export default function BankPage() {
       <AlertDialog open={showClearObservationsDialog} onOpenChange={setShowClearObservationsDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>清除观察</AlertDialogTitle>
+            <AlertDialogTitle>{t("clearObservationsTitle")}</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  确定要清除 <span className="font-semibold text-foreground">{bankId}</span>{" "}
-                  的所有沉淀认知吗？
+                  {t.rich("clearObservationsPrompt", {
+                    bankName: () => <span className="font-semibold text-foreground">{bankId}</span>,
+                  })}
                 </p>
                 <p className="text-amber-600 dark:text-amber-400 font-medium">
-                  这将删除所有归纳知识。沉淀认知将在下次归纳运行时重新生成。
+                  {t("clearObservationsWarning")}
                 </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isClearingObservations}>取消</AlertDialogCancel>
+            <AlertDialogCancel disabled={isClearingObservations}>
+              {tCommon("cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleClearObservations}
               disabled={isClearingObservations}
@@ -652,12 +661,12 @@ export default function BankPage() {
               {isClearingObservations ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  清除中...
+                  {t("clearing")}
                 </>
               ) : (
                 <>
                   <Trash2 className="w-4 h-4 mr-2" />
-                  清除观察
+                  {t("clearObservations")}
                 </>
               )}
             </AlertDialogAction>

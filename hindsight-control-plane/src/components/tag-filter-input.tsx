@@ -27,7 +27,7 @@ export function TagFilterInput({
   onChange,
   bankId,
   fetchSuggestions,
-  placeholder = "按标签筛选…",
+  placeholder,
   className,
   matchMode,
   onMatchModeChange,
@@ -205,7 +205,7 @@ export function TagFilterInput({
             onClick={() => onChange([])}
             className="text-xs text-muted-foreground hover:text-foreground underline"
           >
-            清除
+            {t("clear")}
           </button>
         </div>
       )}
@@ -220,9 +220,9 @@ export function TagFilterInput({
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground"
             }`}
-            title="匹配任一选中标签"
+            title={t("matchAnyTooltip")}
           >
-            任一
+            {t("matchAny")}
           </button>
           <button
             type="button"
@@ -232,9 +232,9 @@ export function TagFilterInput({
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground"
             }`}
-            title="匹配全部选中标签"
+            title={t("matchAllTooltip")}
           >
-            全部
+            {t("matchAll")}
           </button>
         </div>
       )}

@@ -160,10 +160,10 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
 
   // Determine the display title based on memory type
   const getMemoryTypeTitle = () => {
-    if (memory?.type === "observation") return "观察";
-    if (memory?.type === "world") return "世界常识";
-    if (memory?.type === "experience") return "经历记忆";
-    return "记忆详情";
+    if (memory?.type === "observation") return t("typeObservation");
+    if (memory?.type === "world") return t("typeWorldFact");
+    if (memory?.type === "experience") return t("typeExperience");
+    return t("defaultTitle");
   };
 
   const isObservation = memory?.type === "observation";
@@ -173,7 +173,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>{memory ? getMemoryTypeTitle() : "记忆详情"}</DialogTitle>
+            <DialogTitle>{memory ? getMemoryTypeTitle() : t("defaultTitle")}</DialogTitle>
           </DialogHeader>
 
           {loading ? (
@@ -197,12 +197,13 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="memory" className="flex items-center gap-1.5">
                     <FileText className="w-3.5 h-3.5" />
-                    观察
+                    {t("tabObservation")}
                   </TabsTrigger>
                   <TabsTrigger value="history" className="flex items-center gap-1.5">
                     <History className="w-3.5 h-3.5" />
-                    历史
-                    {history && history.length > 0 ? ` (${history.length})` : ""}
+                    {history && history.length > 0
+                      ? t("tabHistoryWithCount", { count: history.length })
+                      : t("tabHistory")}
                   </TabsTrigger>
                 </TabsList>
 
@@ -211,7 +212,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {/* Text */}
                     <div>
                       <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                        文本
+                        {t("sectionText")}
                       </div>
                       <p className="text-sm text-foreground leading-relaxed">{memory.text}</p>
                     </div>
@@ -220,7 +221,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {memory.occurred_start && (
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                          发生时间
+                          {t("sectionOccurred")}
                         </div>
                         <div className="flex items-center gap-2 text-sm text-foreground">
                           <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -241,7 +242,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {memory.mentioned_at && (
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                          提及时间
+                          {t("sectionMentioned")}
                         </div>
                         <div className="flex items-center gap-2 text-sm text-foreground">
                           <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -250,12 +251,12 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                       </div>
                     )}
 
-                    {/* 实体 */}
+                    {/* Entities */}
                     {memory.entities && memory.entities.length > 0 && (
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2 flex items-center gap-1">
                           <Users className="w-3 h-3" />
-                          实体
+                          {t("sectionEntities")}
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {memory.entities.map((entity, idx) => (
@@ -273,12 +274,12 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {/* Tags */}
                     <TagList tags={memory.tags} showLabel />
 
-                    {/* 观察范围 */}
+                    {/* Observation Scopes */}
                     {memory.observation_scopes && (
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2 flex items-center gap-1">
                           <Tag className="w-3 h-3" />
-                          观察范围
+                          {t("sectionObservationScopes")}
                         </div>
                         {typeof memory.observation_scopes === "string" ? (
                           <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
@@ -298,7 +299,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {memory.source_memories && memory.source_memories.length > 0 && (
                       <div className="border-t border-border pt-4">
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-3">
-                          源记忆 ({memory.source_memories.length})
+                          {t("sectionSourceMemories", { count: memory.source_memories.length })}
                         </div>
                         <div className="space-y-3">
                           {memory.source_memories.map((source, i) => (
@@ -322,19 +323,21 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                                   className="h-6 text-xs"
                                   onClick={() => setSourceMemoryModalId(source.id)}
                                 >
-                                  查看
+                                  {t("sourceMemoryViewButton")}
                                 </Button>
                               </div>
                               <p className="text-sm text-foreground mb-2">{source.text}</p>
                               {source.context && (
                                 <p className="text-xs text-muted-foreground mb-2 italic">
-                                  上下文: {source.context}
+                                  {t("sourceContextPrefix", { context: source.context })}
                                 </p>
                               )}
                               <div className="grid grid-cols-2 gap-2 text-xs">
                                 {source.occurred_start && (
                                   <div className="p-2 bg-background/50 rounded">
-                                    <div className="text-muted-foreground mb-0.5">发生时间</div>
+                                    <div className="text-muted-foreground mb-0.5">
+                                      {t("sourceOccurred")}
+                                    </div>
                                     <div className="font-medium">
                                       {new Date(source.occurred_start).toLocaleString()}
                                     </div>
@@ -342,7 +345,9 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                                 )}
                                 {source.mentioned_at && (
                                   <div className="p-2 bg-background/50 rounded">
-                                    <div className="text-muted-foreground mb-0.5">提及时间</div>
+                                    <div className="text-muted-foreground mb-0.5">
+                                      {t("sourceMentioned")}
+                                    </div>
                                     <div className="font-medium">
                                       {new Date(source.mentioned_at).toLocaleString()}
                                     </div>
@@ -358,7 +363,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {/* ID */}
                     <div>
                       <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                        记忆 ID
+                        {t("sectionMemoryId")}
                       </div>
                       <code className="text-xs font-mono text-muted-foreground break-all">
                         {memory.id}
@@ -383,7 +388,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                         }}
                       />
                     ) : (
-                      <p className="text-sm text-muted-foreground italic">尚无历史记录。</p>
+                      <p className="text-sm text-muted-foreground italic">{t("noHistoryYet")}</p>
                     )}
                   </TabsContent>
                 </div>
@@ -398,7 +403,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="memory" className="flex items-center gap-1.5">
                     <FileText className="w-3.5 h-3.5" />
-                    {memory.type === "world" ? "世界常识" : "经历记忆"}
+                    {memory.type === "world" ? t("tabWorldFact") : t("tabExperience")}
                   </TabsTrigger>
                   <TabsTrigger
                     value="chunk"
@@ -406,7 +411,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     className="flex items-center gap-1.5"
                   >
                     <Layers className="w-3.5 h-3.5" />
-                    片段
+                    {t("tabChunk")}
                   </TabsTrigger>
                   <TabsTrigger
                     value="document"
@@ -414,7 +419,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     className="flex items-center gap-1.5"
                   >
                     <FileText className="w-3.5 h-3.5" />
-                    文档
+                    {t("tabDocument")}
                   </TabsTrigger>
                 </TabsList>
 
@@ -423,7 +428,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {/* Memory text */}
                     <div>
                       <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                        文本
+                        {t("sectionMemoryText")}
                       </div>
                       <p className="text-sm text-foreground leading-relaxed">{memory.text}</p>
                     </div>
@@ -432,7 +437,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {memory.context && (
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                          上下文
+                          {t("sectionContext")}
                         </div>
                         <div className="text-sm text-foreground">{memory.context}</div>
                       </div>
@@ -442,7 +447,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {memory.occurred_start && (
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                          发生时间
+                          {t("sectionOccurred")}
                         </div>
                         <div className="flex items-center gap-2 text-sm text-foreground">
                           <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -463,7 +468,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {memory.mentioned_at && (
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                          提及时间
+                          {t("sectionMentionedAt")}
                         </div>
                         <div className="flex items-center gap-2 text-sm text-foreground">
                           <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -472,12 +477,12 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                       </div>
                     )}
 
-                    {/* 实体 */}
+                    {/* Entities */}
                     {memory.entities && memory.entities.length > 0 && (
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2 flex items-center gap-1">
                           <Users className="w-3 h-3" />
-                          实体
+                          {t("sectionEntities")}
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {memory.entities.map((entity, idx) => (
@@ -495,12 +500,12 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {/* Tags */}
                     <TagList tags={memory.tags} showLabel />
 
-                    {/* 观察范围 */}
+                    {/* Observation Scopes */}
                     {memory.observation_scopes && (
                       <div>
                         <div className="text-xs font-bold text-muted-foreground uppercase mb-2 flex items-center gap-1">
                           <Tag className="w-3 h-3" />
-                          观察范围
+                          {t("sectionObservationScopes")}
                         </div>
                         {typeof memory.observation_scopes === "string" ? (
                           <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
@@ -519,7 +524,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                     {/* ID */}
                     <div>
                       <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                        记忆 ID
+                        {t("sectionMemoryId")}
                       </div>
                       <code className="text-xs font-mono text-muted-foreground break-all">
                         {memory.id}
@@ -537,17 +542,17 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                         <div className="grid grid-cols-2 gap-3">
                           <div className="p-3 bg-muted rounded-lg">
                             <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                              片段索引
+                              {t("sectionChunkIndex")}
                             </div>
                             <div className="text-sm text-foreground">{chunk.chunk_index}</div>
                           </div>
                           {chunk.chunk_text && (
                             <div className="p-3 bg-muted rounded-lg">
                               <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                                文本长度
+                                {t("sectionTextLength")}
                               </div>
                               <div className="text-sm text-foreground">
-                                {chunk.chunk_text.length.toLocaleString()} 字符
+                                {t("textLengthValue", { count: chunk.chunk_text.length })}
                               </div>
                             </div>
                           )}
@@ -556,7 +561,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                         {chunk.chunk_text && (
                           <div>
                             <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                              片段文本
+                              {t("sectionChunkText")}
                             </div>
                             <div className="p-4 bg-muted rounded-lg border border-border max-h-[300px] overflow-y-auto">
                               <pre className="text-sm whitespace-pre-wrap font-mono text-foreground">
@@ -568,7 +573,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
 
                         <div className="p-3 bg-muted rounded-lg">
                           <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                            片段 ID
+                            {t("sectionChunkId")}
                           </div>
                           <code className="text-xs font-mono text-muted-foreground break-all">
                             {chunk.chunk_id}
@@ -576,7 +581,9 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                         </div>
                       </>
                     ) : (
-                      <div className="text-center py-12 text-muted-foreground">无可用片段数据</div>
+                      <div className="text-center py-12 text-muted-foreground">
+                        {t("noChunkData")}
+                      </div>
                     )}
                   </TabsContent>
 
@@ -591,7 +598,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                           {document.created_at && (
                             <div className="p-3 bg-muted rounded-lg">
                               <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                                创建时间
+                                {t("sectionCreated")}
                               </div>
                               <div className="text-sm text-foreground">
                                 {new Date(document.created_at).toLocaleString()}
@@ -600,7 +607,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                           )}
                           <div className="p-3 bg-muted rounded-lg">
                             <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                              记忆单元
+                              {t("sectionMemoryUnits")}
                             </div>
                             <div className="text-sm text-foreground">
                               {document.memory_unit_count}
@@ -612,16 +619,16 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                           <>
                             <div className="p-3 bg-muted rounded-lg">
                               <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                                文本长度
+                                {t("sectionTextLength")}
                               </div>
                               <div className="text-sm text-foreground">
-                                {document.original_text.length.toLocaleString()} 字符
+                                {t("textLengthValue", { count: document.original_text.length })}
                               </div>
                             </div>
 
                             <div>
                               <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
-                                原始文本
+                                {t("sectionOriginalText")}
                               </div>
                               <div className="p-4 bg-muted rounded-lg border border-border max-h-[300px] overflow-y-auto">
                                 <pre className="text-sm whitespace-pre-wrap font-mono text-foreground">
@@ -640,7 +647,7 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
 
                         <div className="p-3 bg-muted rounded-lg">
                           <div className="text-xs font-bold text-muted-foreground uppercase mb-1">
-                            文档 ID
+                            {t("sectionDocumentId")}
                           </div>
                           <code className="text-xs font-mono text-muted-foreground break-all">
                             {document.id}
@@ -648,7 +655,9 @@ export function MemoryDetailModal({ memoryId, onClose, initialTab }: MemoryDetai
                         </div>
                       </>
                     ) : (
-                      <div className="text-center py-12 text-muted-foreground">无可用文档数据</div>
+                      <div className="text-center py-12 text-muted-foreground">
+                        {t("noDocumentData")}
+                      </div>
                     )}
                   </TabsContent>
                 </div>

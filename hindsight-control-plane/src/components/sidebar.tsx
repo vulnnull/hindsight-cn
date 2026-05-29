@@ -35,12 +35,12 @@ export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
   }
 
   const navItems = [
-    { id: "data" as NavItem, label: "记忆", icon: Database },
-    { id: "recall" as NavItem, label: "召回", icon: Search },
-    { id: "reflect" as NavItem, label: "反思", icon: Sparkles },
-    { id: "documents" as NavItem, label: "文档", icon: FileText },
-    { id: "entities" as NavItem, label: "实体", icon: Users },
-    { id: "profile" as NavItem, label: "记忆库配置", icon: Settings },
+    { id: "data" as NavItem, label: t("memories"), icon: Database },
+    { id: "recall" as NavItem, label: t("recall"), icon: Search },
+    { id: "reflect" as NavItem, label: t("reflect"), icon: Sparkles },
+    { id: "documents" as NavItem, label: t("documents"), icon: FileText },
+    { id: "entities" as NavItem, label: t("entities"), icon: Users },
+    { id: "profile" as NavItem, label: tBank("bankConfiguration"), icon: Settings },
   ];
 
   return (
@@ -96,14 +96,14 @@ export function Sidebar({ currentTab, onTabChange }: SidebarProps) {
             "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors",
             isCollapsed && "justify-center px-0"
           )}
-          title={isCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          title={isCollapsed ? t("expandSidebar") : t("collapseSidebar")}
         >
           {isCollapsed ? (
             <ChevronRight className="w-5 h-5" />
           ) : (
             <>
               <ChevronLeft className="w-5 h-5" />
-              <span>收起</span>
+              <span>{t("collapse")}</span>
             </>
           )}
         </button>

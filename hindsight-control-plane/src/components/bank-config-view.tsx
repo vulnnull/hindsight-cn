@@ -96,21 +96,21 @@ type GeminiEdits = {
 
 // ─── Gemini safety settings catalogue ────────────────────────────────────────
 
-const GEMINI_HARM_CATEGORIES = [
-  { value: "HARM_CATEGORY_HARASSMENT", label: "骚扰" },
-  { value: "HARM_CATEGORY_HATE_SPEECH", label: "仇恨言论" },
-  { value: "HARM_CATEGORY_SEXUALLY_EXPLICIT", label: "色情内容" },
-  { value: "HARM_CATEGORY_DANGEROUS_CONTENT", label: "危险内容" },
+const GEMINI_HARM_CATEGORY_VALUES = [
+  "HARM_CATEGORY_HARASSMENT",
+  "HARM_CATEGORY_HATE_SPEECH",
+  "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+  "HARM_CATEGORY_DANGEROUS_CONTENT",
 ] as const;
 
-const GEMINI_THRESHOLDS = [
-  { value: "HARM_BLOCK_THRESHOLD_UNSPECIFIED", label: "未指定（使用 Gemini 默认）" },
-  { value: "OFF", label: "关闭（过滤器已禁用）" },
-  { value: "BLOCK_NONE", label: "不屏蔽" },
-  { value: "BLOCK_LOW_AND_ABOVE", label: "屏蔽低级及以上" },
-  { value: "BLOCK_MEDIUM_AND_ABOVE", label: "屏蔽中级及以上" },
-  { value: "BLOCK_ONLY_HIGH", label: "仅屏蔽高级" },
-] as const;
+function getGeminiHarmCategories(t: (key: string) => string): { value: string; label: string }[] {
+  return [
+    { value: "HARM_CATEGORY_HARASSMENT", label: t("geminiCategoryHarassment") },
+    { value: "HARM_CATEGORY_HATE_SPEECH", label: t("geminiCategoryHateSpeech") },
+    { value: "HARM_CATEGORY_SEXUALLY_EXPLICIT", label: t("geminiCategorySexuallyExplicit") },
+    { value: "HARM_CATEGORY_DANGEROUS_CONTENT", label: t("geminiCategoryDangerousContent") },
+  ];
+}
 
 function getGeminiThresholds(t: (key: string) => string): { value: string; label: string }[] {
   return [
@@ -132,37 +132,7 @@ const DEFAULT_GEMINI_SAFETY_SETTINGS: GeminiSafetySetting[] = GEMINI_HARM_CATEGO
 
 // ─── MCP tool catalogue ───────────────────────────────────────────────────────
 
-const MCP_TOOL_GROUPS: { label: string; tools: string[] }[] = [
-  { label: "核心", tools: ["retain", "sync_retain", "recall", "reflect"] },
-  {
-    label: "记忆库管理",
-    tools: [
-      "list_banks",
-      "create_bank",
-      "get_bank",
-      "get_bank_stats",
-      "update_bank",
-      "delete_bank",
-      "clear_memories",
-    ],
-  },
-  {
-    label: "思维模型",
-    tools: [
-      "list_mental_models",
-      "get_mental_model",
-      "create_mental_model",
-      "update_mental_model",
-      "delete_mental_model",
-      "refresh_mental_model",
-    ],
-  },
-  { label: "指令", tools: ["list_directives", "create_directive", "delete_directive"] },
-  { label: "记忆", tools: ["list_memories", "get_memory"] },
-  { label: "文档", tools: ["list_documents", "get_document", "delete_document"] },
-  { label: "操作", tools: ["list_operations", "get_operation", "cancel_operation"] },
-  { label: "标签", tools: ["list_tags"] },
-];
+type McpToolGroup = { key: string; label: string; tools: string[] };
 
 function getMcpToolGroups(t: (key: string) => string): McpToolGroup[] {
   return [
@@ -413,7 +383,7 @@ export function BankConfigView() {
       await client.updateBankConfig(bankId, payload);
       setBaseConfig((prev) => ({ ...prev, ...payload }));
     } catch (err: any) {
-      setRetainError(err.message || "保存存储设置失败");
+      setRetainError(err.message || t("retainFailedToSave"));
     } finally {
       setRetainSaving(false);
     }
@@ -427,7 +397,7 @@ export function BankConfigView() {
       await client.updateBankConfig(bankId, observationsEdits);
       setBaseConfig((prev) => ({ ...prev, ...observationsEdits }));
     } catch (err: any) {
-      setObservationsError(err.message || "保存沉淀认知设置失败");
+      setObservationsError(err.message || t("observationsFailedToSave"));
     } finally {
       setObservationsSaving(false);
     }
@@ -446,7 +416,7 @@ export function BankConfigView() {
       });
       setBaseProfile(reflectEdits);
     } catch (err: any) {
-      setReflectError(err.message || "保存深思设置失败");
+      setReflectError(err.message || t("reflectFailedToSave"));
     } finally {
       setReflectSaving(false);
     }
@@ -460,7 +430,7 @@ export function BankConfigView() {
       await client.updateBankConfig(bankId, mcpEdits);
       setBaseConfig((prev) => ({ ...prev, ...mcpEdits }));
     } catch (err: any) {
-      setMcpError(err.message || "保存 MCP 设置失败");
+      setMcpError(err.message || t("mcpFailedToSave"));
     } finally {
       setMcpSaving(false);
     }
@@ -474,7 +444,7 @@ export function BankConfigView() {
       await client.updateBankConfig(bankId, geminiEdits);
       setBaseConfig((prev) => ({ ...prev, ...geminiEdits }));
     } catch (err: any) {
-      setGeminiError(err.message || "保存 Gemini 设置失败");
+      setGeminiError(err.message || t("geminiFailedToSave"));
     } finally {
       setGeminiSaving(false);
     }
@@ -483,7 +453,7 @@ export function BankConfigView() {
   if (!bankId) {
     return (
       <div className="flex items-center justify-center py-12">
-        <p className="text-muted-foreground">未选择记忆库</p>
+        <p className="text-muted-foreground">{t("noBankSelected")}</p>
       </div>
     );
   }
@@ -491,13 +461,13 @@ export function BankConfigView() {
   if (!bankConfigEnabled) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-        <p className="text-base font-medium text-foreground">记忆库配置已禁用</p>
+        <p className="text-base font-medium text-foreground">{t("apiDisabledTitle")}</p>
         <p className="text-sm text-muted-foreground max-w-sm">
-          设置{" "}
-          <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-            HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true
-          </code>{" "}
-          以启用每个记忆库的配置。
+          {t.rich("apiDisabledDescription", {
+            code: (chunks) => (
+              <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{chunks}</code>
+            ),
+          })}
         </p>
       </div>
     );
@@ -516,14 +486,14 @@ export function BankConfigView() {
       <div className="space-y-8">
         {/* Retain + Strategies Section */}
         <ConfigSection
-          title="存储"
-          description="默认提取设置和命名策略。在存储请求中传入策略名称可覆盖默认值。"
+          title={t("retainTitle")}
+          description={t("retainSectionDescription")}
           error={retainError}
           dirty={retainDirty}
           saving={retainSaving}
           onSave={saveRetain}
         >
-          <FieldRow label="默认策略" description="未在请求中指定策略时自动应用。">
+          <FieldRow label={t("defaultStrategyLabel")} description={t("defaultStrategyDescription")}>
             <Select
               value={strategiesEdits.retain_default_strategy ?? "__none__"}
               onValueChange={(v) =>
@@ -538,7 +508,7 @@ export function BankConfigView() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">
-                  <span className="text-muted-foreground italic">默认</span>
+                  <span className="text-muted-foreground italic">{t("default")}</span>
                 </SelectItem>
                 {Object.keys(strategiesEdits.retain_strategies ?? {}).map((name) => (
                   <SelectItem key={name} value={name}>
@@ -560,14 +530,17 @@ export function BankConfigView() {
 
         {/* Observations Section */}
         <ConfigSection
-          title="沉淀认知"
-          description="控制原始事实如何归纳为稳定认知"
+          title={t("observationsTitle")}
+          description={t("observationsDescription")}
           error={observationsError}
           dirty={observationsDirty}
           saving={observationsSaving}
           onSave={saveObservations}
         >
-          <FieldRow label="启用沉淀认知" description="启用将原始事实自动归纳为稳定认知">
+          <FieldRow
+            label={t("enableObservationsLabel")}
+            description={t("enableObservationsDescription")}
+          >
             <div className="flex justify-end">
               <Switch
                 checked={observationsEdits.enable_observations ?? false}
@@ -578,19 +551,16 @@ export function BankConfigView() {
             </div>
           </FieldRow>
           <TextareaRow
-            label="归纳方向"
-            description="此记忆库应归纳为稳定认知的内容。覆盖内置归纳规则 — 留空使用服务器默认值。"
+            label={t("missionLabel")}
+            description={t("observationsMissionDescription")}
             value={observationsEdits.observations_mission ?? ""}
             onChange={(v) =>
               setObservationsEdits((prev) => ({ ...prev, observations_mission: v || null }))
             }
-            placeholder="例如：归纳内容应聚焦人员和项目的稳定事实。始终包含偏好、技能和重复模式。忽略一次性事件和临时状态。"
+            placeholder={t("observationsMissionPlaceholder")}
             rows={3}
           />
-          <FieldRow
-            label="LLM 批处理大小"
-            description="单次整合调用中发送给 LLM 的事实数量。值越大，LLM 调用越少，但提示越大。留空使用服务器默认值。"
-          >
+          <FieldRow label={t("llmBatchSizeLabel")} description={t("llmBatchSizeDescription")}>
             <Input
               type="number"
               min={1}
@@ -604,12 +574,12 @@ export function BankConfigView() {
                     : null,
                 }))
               }
-              placeholder="服务器默认"
+              placeholder={t("serverDefault")}
             />
           </FieldRow>
           <FieldRow
-            label="源事实最大 Token 数"
-            description="整合时包含在观察中的源事实总 Token 预算。-1 = 不限。"
+            label={t("sourceFactsMaxTokensLabel")}
+            description={t("sourceFactsMaxTokensDescription")}
           >
             <Input
               type="number"
@@ -623,12 +593,12 @@ export function BankConfigView() {
                     : null,
                 }))
               }
-              placeholder="服务器默认"
+              placeholder={t("serverDefault")}
             />
           </FieldRow>
           <FieldRow
-            label="每条观察的源事实最大 Token 数"
-            description="整合时每条观察的源事实 Token 上限。-1 = 不限。"
+            label={t("sourceFactsMaxTokensPerObservationLabel")}
+            description={t("sourceFactsMaxTokensPerObservationDescription")}
           >
             <Input
               type="number"
@@ -642,12 +612,12 @@ export function BankConfigView() {
                     : null,
                 }))
               }
-              placeholder="服务器默认"
+              placeholder={t("serverDefault")}
             />
           </FieldRow>
           <FieldRow
-            label="每个范围的最大观察数"
-            description="每个标签范围允许的最大观察数。-1 = 不限。"
+            label={t("maxObservationsPerScopeLabel")}
+            description={t("maxObservationsPerScopeDescription")}
           >
             <Input
               type="number"
@@ -659,49 +629,49 @@ export function BankConfigView() {
                   max_observations_per_scope: e.target.value ? parseInt(e.target.value, 10) : null,
                 }))
               }
-              placeholder="服务器默认"
+              placeholder={t("serverDefault")}
             />
           </FieldRow>
         </ConfigSection>
 
         {/* Reflect Section */}
         <ConfigSection
-          title="深思"
-          description="设定深思时的推理风格和响应方式"
+          title={t("reflectTitle")}
+          description={t("reflectDescription")}
           error={reflectError}
           dirty={reflectDirty}
           saving={reflectSaving}
           onSave={saveReflect}
         >
           <TextareaRow
-            label="角色定位"
-            description="智能体的身份定位和职责。作为深思时的上下文框架。"
+            label={t("missionLabel")}
+            description={t("reflectMissionDescription")}
             value={reflectEdits.reflect_mission}
             onChange={(v) => setReflectEdits((prev) => ({ ...prev, reflect_mission: v }))}
-            placeholder="例如：你是一名资深工程助手。始终基于文档化的决策和理由来回答。忽略推测。直接而精确。"
+            placeholder={t("reflectMissionPlaceholder")}
             rows={3}
           />
           <TraitRow
-            label="批判性"
-            description="评估论断时偏向质疑还是信任"
-            lowLabel="包容"
-            highLabel="严谨"
+            label={t("skepticismLabel")}
+            description={t("skepticismDescription")}
+            lowLabel={t("skepticismLowLabel")}
+            highLabel={t("skepticismHighLabel")}
             value={reflectEdits.disposition_skepticism}
             onChange={(v) => setReflectEdits((prev) => ({ ...prev, disposition_skepticism: v }))}
           />
           <TraitRow
-            label="解读方式"
-            description="按字面意思还是结合语境理解信息"
-            lowLabel="意会优先"
-            highLabel="咬文嚼字"
+            label={t("literalismLabel")}
+            description={t("literalismDescription")}
+            lowLabel={t("literalismLowLabel")}
+            highLabel={t("literalismHighLabel")}
             value={reflectEdits.disposition_literalism}
             onChange={(v) => setReflectEdits((prev) => ({ ...prev, disposition_literalism: v }))}
           />
           <TraitRow
-            label="情感敏感度"
-            description="多大程度上考虑情感因素"
-            lowLabel="理性"
-            highLabel="感性"
+            label={t("empathyLabel")}
+            description={t("empathyDescription")}
+            lowLabel={t("empathyLowLabel")}
+            highLabel={t("empathyHighLabel")}
             value={reflectEdits.disposition_empathy}
             onChange={(v) => setReflectEdits((prev) => ({ ...prev, disposition_empathy: v }))}
           />
@@ -709,17 +679,14 @@ export function BankConfigView() {
 
         {/* MCP Tools Section */}
         <ConfigSection
-          title="MCP 工具"
-          description="限制此记忆库向代理暴露的 MCP 工具"
+          title={t("mcpToolsTitle")}
+          description={t("mcpToolsDescription")}
           error={mcpError}
           dirty={mcpDirty}
           saving={mcpSaving}
           onSave={saveMCP}
         >
-          <FieldRow
-            label="限制工具"
-            description="关闭时所有工具可用。开启后，此记忆库只能调用选中的工具。"
-          >
+          <FieldRow label={t("restrictToolsLabel")} description={t("restrictToolsDescription")}>
             <div className="flex items-center gap-2 justify-end">
               <Switch
                 checked={mcpEdits.mcp_enabled_tools !== null}
@@ -730,7 +697,7 @@ export function BankConfigView() {
                 }
               />
               <Label className="text-xs text-muted-foreground">
-                {mcpEdits.mcp_enabled_tools !== null ? "已启用" : "已禁用"}
+                {mcpEdits.mcp_enabled_tools !== null ? t("enabled") : t("disabled")}
               </Label>
             </div>
           </FieldRow>
@@ -744,8 +711,8 @@ export function BankConfigView() {
 
         {/* Models Section */}
         <ConfigSection
-          title="模型"
-          description="供应商特定的模型设置"
+          title={t("modelsTitle")}
+          description={t("modelsDescription")}
           error={geminiError}
           dirty={geminiDirty}
           saving={geminiSaving}
@@ -756,17 +723,17 @@ export function BankConfigView() {
             <p className="text-sm font-semibold">{t("geminiSubsectionTitle")}</p>
             <div className="pl-4 border-l-2 border-border/40 space-y-4">
               <FieldRow
-                label="安全设置"
+                label={t("safetySettingsLabel")}
                 description={
                   <>
-                    关闭时使用 Gemini 默认安全阈值。开启后可按危害类别配置阈值。{" "}
+                    {t("safetySettingsDescriptionPart1")}{" "}
                     <a
                       href="https://ai.google.dev/gemini-api/docs/safety-settings"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="underline hover:text-foreground transition-colors"
                     >
-                      了解更多
+                      {t("safetySettingsLearnMore")}
                     </a>
                   </>
                 }
@@ -783,7 +750,7 @@ export function BankConfigView() {
                     }
                   />
                   <Label className="text-xs text-muted-foreground">
-                    {geminiEdits.llm_gemini_safety_settings !== null ? "自定义" : "默认"}
+                    {geminiEdits.llm_gemini_safety_settings !== null ? t("custom") : t("default")}
                   </Label>
                 </div>
               </FieldRow>
@@ -830,10 +797,7 @@ function RetainStrategyForm({
 
   return (
     <div className="divide-y divide-border/40">
-      <FieldRow
-        label="提取模式"
-        description="控制事实提取的粒度。concise = 精简提取，verbose = 全面提取，verbatim = 原文存储（仍提取实体和时间），chunks = 不使用 LLM，custom = 自定义规则。"
-      >
+      <FieldRow label={t("extractionModeLabel")} description={t("extractionModeDescription")}>
         <Select
           value={modeValue}
           onValueChange={(val) =>
@@ -841,12 +805,12 @@ function RetainStrategyForm({
           }
         >
           <SelectTrigger className="w-full">
-            <SelectValue placeholder={isOverride ? "继承自默认" : undefined} />
+            <SelectValue placeholder={isOverride ? t("inherited") : undefined} />
           </SelectTrigger>
           <SelectContent>
             {isOverride && (
               <SelectItem value={INHERIT_SENTINEL}>
-                <span className="text-muted-foreground italic">继承</span>
+                <span className="text-muted-foreground italic">{t("inherited")}</span>
               </SelectItem>
             )}
             {EXTRACTION_MODES.map((opt) => (
@@ -857,7 +821,7 @@ function RetainStrategyForm({
           </SelectContent>
         </Select>
       </FieldRow>
-      <FieldRow label="分块大小" description="处理的文本块大小（字符数）">
+      <FieldRow label={t("chunkSizeLabel")} description={t("chunkSizeDescription")}>
         <Input
           type="number"
           min={500}
@@ -866,33 +830,30 @@ function RetainStrategyForm({
           onChange={(e) =>
             onChange({ retain_chunk_size: e.target.value ? parseFloat(e.target.value) : null })
           }
-          placeholder={isOverride ? "继承自默认" : undefined}
+          placeholder={isOverride ? t("inherited") : undefined}
         />
       </FieldRow>
       <TextareaRow
-        label="关注重点"
-        description="存储记忆时应重点关注的内容。引导 LLM 提取方向，但不替换底层提取规则。"
+        label={t("missionLabel")}
+        description={t("retainMissionDescription")}
         value={values.retain_mission ?? ""}
         onChange={(v) => onChange({ retain_mission: v || null })}
-        placeholder={isOverride ? "继承自默认" : "例如：始终包含技术决策、API 设计选择和架构权衡。"}
+        placeholder={isOverride ? t("inherited") : t("retainMissionPlaceholder")}
         rows={3}
       />
       {showCustomField && (
         <TextareaRow
-          label="自定义提取提示"
-          description="完全替换内置提取规则。仅在提取模式设为自定义时生效。"
+          label={t("customExtractionPromptLabel")}
+          description={t("customExtractionPromptDescription")}
           value={values.retain_custom_instructions ?? ""}
           onChange={(v) => onChange({ retain_custom_instructions: v || null })}
           rows={5}
         />
       )}
-      <FieldRow
-        label="开放实体提取"
-        description="同时提取常规命名实体（人物、地点、概念），不仅限于实体标签。关闭后仅提取预定义的实体标签。"
-      >
+      <FieldRow label={t("freeFormEntitiesLabel")} description={t("freeFormEntitiesDescription")}>
         <div className="flex justify-end items-center gap-2">
           <Label className="text-sm text-muted-foreground cursor-pointer select-none">
-            {(values.entities_allow_free_form ?? true) ? "已启用" : "已禁用"}
+            {(values.entities_allow_free_form ?? true) ? t("enabled") : t("disabled")}
           </Label>
           <Switch
             checked={values.entities_allow_free_form ?? true}
@@ -1026,7 +987,7 @@ function RetainStrategiesPanel({
               : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
           }`}
         >
-          默认
+          {t("default")}
         </button>
 
         {/* Named strategy tabs */}
@@ -1041,7 +1002,7 @@ function RetainStrategiesPanel({
             onClick={() => setSelectedTab(s.id)}
           >
             <span className="font-mono">
-              {s.name || <span className="italic font-normal opacity-50">未命名</span>}
+              {s.name || <span className="italic font-normal opacity-50">{t("unnamed")}</span>}
             </span>
             <button
               type="button"
@@ -1062,7 +1023,7 @@ function RetainStrategiesPanel({
           className="py-3 px-3 text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5"
         >
           <Plus className="h-3.5 w-3.5" />
-          添加策略
+          {t("addStrategy")}
         </button>
       </div>
 
@@ -1073,16 +1034,16 @@ function RetainStrategiesPanel({
         ) : activeStrategy ? (
           <div>
             <div className="px-6 py-3 flex items-center gap-3 border-b border-border/40">
-              <label className="text-xs text-muted-foreground shrink-0">名称</label>
+              <label className="text-xs text-muted-foreground shrink-0">{t("nameLabel")}</label>
               <div className="flex flex-col gap-1">
                 <Input
                   value={activeStrategy.name}
                   onChange={(e) => updateStrategy(activeStrategy.id, { name: e.target.value })}
-                  placeholder="策略名称（如 fast）"
+                  placeholder={t("strategyNamePlaceholder")}
                   className={`h-7 text-xs font-mono max-w-[200px] ${!activeStrategy.name.trim() ? "border-destructive focus-visible:ring-destructive" : ""}`}
                 />
                 {!activeStrategy.name.trim() && (
-                  <p className="text-xs text-destructive">名称为必填项</p>
+                  <p className="text-xs text-destructive">{t("nameIsRequired")}</p>
                 )}
               </div>
             </div>
@@ -1108,14 +1069,12 @@ function RetainStrategiesPanel({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              删除策略 &ldquo;{pendingDelete?.name || "未命名"}&rdquo;？
+              {t("deleteStrategyTitle", { name: pendingDelete?.name || t("unnamed") })}
             </AlertDialogTitle>
-            <AlertDialogDescription>
-              将移除此策略及其所有覆盖设置。此操作不可撤销。
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("deleteStrategyDescription")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
@@ -1125,7 +1084,7 @@ function RetainStrategiesPanel({
                 }
               }}
             >
-              删除
+              {tCommon("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1168,10 +1127,10 @@ function ToolSelector({
     <div className="px-6 py-4 space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          {selected.length} / {ALL_TOOLS.length} 个工具已启用
+          {t("toolsEnabled", { selected: selected.length, total: ALL_TOOLS.length })}
         </p>
         <button type="button" onClick={toggleAll} className="text-xs text-primary hover:underline">
-          {allSelected ? "取消全选" : "全选"}
+          {allSelected ? t("deselectAll") : t("selectAll")}
         </button>
       </div>
       <div className="space-y-4">
@@ -1197,7 +1156,7 @@ function ToolSelector({
                   }}
                   className="text-xs text-primary hover:underline"
                 >
-                  {groupAll ? "取消全选" : "全选"}
+                  {groupAll ? t("deselect") : t("selectAll")}
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1223,11 +1182,7 @@ function ToolSelector({
           );
         })}
       </div>
-      {noneSelected && (
-        <p className="text-xs text-destructive">
-          警告：未选择任何工具 — 代理将无法对此记忆库进行任何 MCP 调用。
-        </p>
-      )}
+      {noneSelected && <p className="text-xs text-destructive">{t("noToolsWarning")}</p>}
     </div>
   );
 }
@@ -1273,10 +1228,10 @@ function ConfigSection({
             {saving ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                保存中...
+                {t("saving")}
               </>
             ) : (
-              "保存更改"
+              t("saveChanges")
             )}
           </Button>
         </div>
@@ -1405,21 +1360,14 @@ function exampleBadge(
   attr: { type: string; values?: LabelValue[]; fields?: Record<string, MapField> }
 ): string {
   if (attr.type === "map" && attr.fields && Object.keys(attr.fields).length > 0)
-    return `例如：${Object.keys(attr.fields)
+    return `e.g. ${Object.keys(attr.fields)
       .slice(0, 2)
       .map((f) => `${key}:${f}:<value>`)
       .join(", ")}`;
-  if (attr.type === "text") return `例如：${key}:<any text>`;
-  if ((attr.values?.length ?? 0) > 0) return `例如：${key}:${attr.values![0].value || "<value>"}`;
-  return `例如：${key}:<value>`;
+  if (attr.type === "text") return `e.g. ${key}:<any text>`;
+  if ((attr.values?.length ?? 0) > 0) return `e.g. ${key}:${attr.values![0].value || "<value>"}`;
+  return `e.g. ${key}:<value>`;
 }
-
-const FIELD_TYPE_LABELS: Record<MapField["type"], string> = {
-  text: "文本",
-  value: "单值",
-  "multi-values": "多值",
-  map: "映射",
-};
 
 function MapFieldsEditor({
   fields,
@@ -1480,7 +1428,7 @@ function MapFieldsEditor({
       }
     >
       {Object.keys(fields).length === 0 && (
-        <p className="text-xs text-muted-foreground italic">暂无字段。</p>
+        <p className="text-xs text-muted-foreground italic">{t("noFieldsYet")}</p>
       )}
       {Object.entries(fields).map(([fieldName, field], fi) => {
         const isNestedMap = field.type === "map";
@@ -1507,13 +1455,13 @@ function MapFieldsEditor({
                 <span className="w-[18px] shrink-0" />
               )}
               <Input
-                placeholder="字段名"
+                placeholder={t("fieldNamePlaceholder")}
                 value={fieldName}
                 onChange={(e) => renameField(fieldName, e.target.value)}
                 className="h-7 text-xs font-mono w-28 shrink-0"
               />
               <Input
-                placeholder="提取提示：提取什么"
+                placeholder={t("extractorHintWhatPlaceholder")}
                 value={field.description}
                 onChange={(e) => updateField(fieldName, { description: e.target.value })}
                 className="h-7 text-xs flex-1 min-w-0"
@@ -1575,13 +1523,13 @@ function MapFieldsEditor({
             {isOpen && hasEnum && (
               <div className="ml-6 space-y-0.5 py-1">
                 {(field.values ?? []).length === 0 && (
-                  <p className="text-[11px] text-muted-foreground italic">暂无值。</p>
+                  <p className="text-[11px] text-muted-foreground italic">{t("noValuesYet")}</p>
                 )}
                 {(field.values ?? []).map((v, vi) => (
                   <div key={vi} className="flex items-center gap-1.5 group/val">
                     <span className="text-muted-foreground/50 text-[10px] shrink-0">&#x2022;</span>
                     <Input
-                      placeholder="值"
+                      placeholder={t("addValueShort")}
                       value={v.value}
                       onChange={(e) => {
                         const newValues = [...(field.values ?? [])];
@@ -1591,7 +1539,7 @@ function MapFieldsEditor({
                       className="h-6 text-[11px] font-mono w-24 shrink-0 border-dashed"
                     />
                     <Input
-                      placeholder="提取提示：何时选取此值"
+                      placeholder={t("extractorHintWhichPlaceholder")}
                       value={v.description}
                       onChange={(e) => {
                         const newValues = [...(field.values ?? [])];
@@ -1620,7 +1568,8 @@ function MapFieldsEditor({
                   }}
                   className="text-[11px] text-muted-foreground/60 hover:text-foreground inline-flex items-center gap-1 ml-2.5"
                 >
-                  <Plus className="h-2.5 w-2.5" />值
+                  <Plus className="h-2.5 w-2.5" />
+                  {t("addValueShort")}
                 </button>
               </div>
             )}
@@ -1633,7 +1582,7 @@ function MapFieldsEditor({
         className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
       >
         <Plus className="h-3 w-3" />
-        字段
+        {t("addField")}
       </button>
     </div>
   );
@@ -1678,10 +1627,8 @@ function EntityLabelsEditor({
     <div className="px-6 py-4 space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium">实体标签</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            在保留时逐条记忆提取。每个字段都是可选的 — 只在明确适用时填充。
-          </p>
+          <p className="text-sm font-medium">{t("entityLabelsTitle")}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{t("entityLabelsDescription")}</p>
         </div>
         {value.length > 0 && (
           <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full shrink-0">
@@ -1691,7 +1638,7 @@ function EntityLabelsEditor({
       </div>
 
       {value.length === 0 && (
-        <p className="text-xs text-muted-foreground italic">未定义实体标签。</p>
+        <p className="text-xs text-muted-foreground italic">{t("noEntityLabelsDefined")}</p>
       )}
 
       <div className="space-y-2">
@@ -1726,14 +1673,14 @@ function EntityLabelsEditor({
               extraControls={
                 <label
                   className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 cursor-pointer select-none"
-                  title="同时将提取的值作为标签存储在记忆上（不仅是实体）"
+                  title={t("alsoStoreAsTagTooltip")}
                 >
                   <Checkbox
                     checked={attr.tag}
                     onCheckedChange={(checked) => updateAttr(i, { tag: !!checked })}
                     className="h-4 w-4"
                   />
-                  + 标签
+                  {t("plusTag")}
                 </label>
               }
               examplePrefix={attr.key}
@@ -1748,7 +1695,7 @@ function EntityLabelsEditor({
         className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
       >
         <Plus className="h-3.5 w-3.5" />
-        添加标签
+        {t("addLabel")}
       </button>
     </div>
   );
@@ -1781,15 +1728,14 @@ function GeminiSafetyEditor({
   return (
     <div className="px-6 py-4 space-y-3">
       <p className="text-xs text-muted-foreground">
-        设置每个危害类别的屏蔽阈值。"关闭"表示完全禁用过滤（Gemini 2.5+
-        的默认值）。阈值越低，屏蔽的内容越多。{" "}
+        {t("geminiSafetyEditorDescriptionPart1")}{" "}
         <a
           href="https://ai.google.dev/gemini-api/docs/safety-settings"
           target="_blank"
           rel="noopener noreferrer"
           className="underline hover:text-foreground transition-colors"
         >
-          了解更多
+          {t("geminiSafetyEditorLearnMore")}
         </a>
       </p>
       <div className="space-y-2">

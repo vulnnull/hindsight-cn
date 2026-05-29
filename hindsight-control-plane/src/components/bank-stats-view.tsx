@@ -75,11 +75,24 @@ type Period = "1h" | "12h" | "1d" | "7d" | "30d" | "90d";
 const PERIODS: Period[] = ["1h", "12h", "1d", "7d", "30d", "90d"];
 
 type TimeField = "created_at" | "mentioned_at" | "occurred_start";
-const TIME_FIELD_LABELS: Record<TimeField, { short: string; long: string }> = {
-  created_at: { short: "入库", long: "记录被入库的时间" },
-  mentioned_at: { short: "提及", long: "事实被提及的时间（事件时间）" },
-  occurred_start: { short: "发生", long: "底层事件开始的时间" },
-};
+type TimeFieldLabel = { short: string; long: string };
+type TimeFieldTranslator = (
+  key:
+    | "timeFieldIngestedShort"
+    | "timeFieldIngestedLong"
+    | "timeFieldMentionedShort"
+    | "timeFieldMentionedLong"
+    | "timeFieldOccurredShort"
+    | "timeFieldOccurredLong"
+) => string;
+
+function getTimeFieldLabels(t: TimeFieldTranslator): Record<TimeField, TimeFieldLabel> {
+  return {
+    created_at: { short: t("timeFieldIngestedShort"), long: t("timeFieldIngestedLong") },
+    mentioned_at: { short: t("timeFieldMentionedShort"), long: t("timeFieldMentionedLong") },
+    occurred_start: { short: t("timeFieldOccurredShort"), long: t("timeFieldOccurredLong") },
+  };
+}
 const TIME_FIELDS: TimeField[] = ["created_at", "mentioned_at", "occurred_start"];
 
 interface TimeseriesBucket {
@@ -116,9 +129,9 @@ const CHART_COLORS = {
 };
 
 const FACT_META: Record<FactKey, { label: string; color: string }> = {
-  world: { label: "世界常识", color: CHART_COLORS.world },
-  experience: { label: "经历记忆", color: CHART_COLORS.experience },
-  observation: { label: "观察", color: CHART_COLORS.observation },
+  world: { label: "World", color: CHART_COLORS.world },
+  experience: { label: "Experience", color: CHART_COLORS.experience },
+  observation: { label: "Observations", color: CHART_COLORS.observation },
 };
 
 function formatCompact(n: number): string {
@@ -216,16 +229,26 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-function formatRelativeTime(ts: string | null): string {
-  if (!ts) return "从未";
+type RelativeTimeTranslator = (
+  key:
+    | "relativeTimeNever"
+    | "relativeTimeJustNow"
+    | "relativeTimeMinutes"
+    | "relativeTimeHours"
+    | "relativeTimeDays",
+  values?: Record<string, number>
+) => string;
+
+function formatRelativeTime(ts: string | null, t?: RelativeTimeTranslator): string {
+  if (!ts) return t ? t("relativeTimeNever") : "Never";
   const diff = Date.now() - new Date(ts).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "刚刚";
-  if (mins < 60) return `${mins}分钟前`;
+  if (mins < 1) return t ? t("relativeTimeJustNow") : "just now";
+  if (mins < 60) return t ? t("relativeTimeMinutes", { mins }) : `${mins}m ago`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}小时前`;
+  if (hours < 24) return t ? t("relativeTimeHours", { hours }) : `${hours}h ago`;
   const days = Math.floor(hours / 24);
-  return `${days}天前`;
+  return t ? t("relativeTimeDays", { days }) : `${days}d ago`;
 }
 
 // Bucket timestamps arrive from the memories-timeseries endpoint, which is
@@ -392,11 +415,11 @@ const OPS_STATUS_COLORS: Record<string, string> = {
   cancelled: "#6b7280", // gray-500
 };
 const OPS_STATUS_LABELS: Record<string, string> = {
-  completed: "已完成",
-  processing: "处理中",
-  pending: "等待中",
-  failed: "失败",
-  cancelled: "已取消",
+  completed: "completed",
+  processing: "processing",
+  pending: "pending",
+  failed: "failed",
+  cancelled: "cancelled",
 };
 
 interface OpsStatusEntry {
@@ -434,16 +457,16 @@ function OperationsCard({ byStatus }: { byStatus: Record<string, number> }) {
       <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-sm font-semibold flex items-center gap-2">
           <Activity className="w-3.5 h-3.5 text-muted-foreground" />
-          操作
+          {t("operations")}
         </CardTitle>
         <span className="text-xs text-muted-foreground tabular-nums">
-          <CompactNumber value={total} /> 总计
+          <CompactNumber value={total} /> {t("totalSuffix")}
         </span>
       </CardHeader>
       <CardContent>
         {total === 0 ? (
           <div className="h-[100px] flex items-center justify-center text-sm text-muted-foreground">
-            暂无操作
+            {t("noOperationsYet")}
           </div>
         ) : (
           <div className="space-y-3">
@@ -505,7 +528,7 @@ function ConsolidationCard({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">整合</CardTitle>
+        <CardTitle className="text-sm font-semibold">{t("consolidation")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <ProgressRow done={done} total={total} doneColor={CHART_COLORS.success} />
@@ -514,7 +537,7 @@ function ConsolidationCard({
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-3 h-3 text-emerald-500" />
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                完成
+                {t("done")}
               </span>
             </div>
             <CompactNumber
@@ -526,7 +549,7 @@ function ConsolidationCard({
             <div className="flex items-center gap-1.5">
               <AlertCircle className="w-3 h-3 text-amber-500" />
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                等待
+                {t("pending")}
               </span>
             </div>
             <CompactNumber
@@ -543,7 +566,7 @@ function ConsolidationCard({
                 ? "cursor-pointer hover:bg-red-500/10 focus:outline-none focus:ring-2 focus:ring-red-500/40"
                 : "cursor-default"
             }`}
-            title={hasFailed ? "查看失败的记忆" : undefined}
+            title={hasFailed ? t("viewFailedMemoriesLabel") : undefined}
           >
             <div className="flex items-center gap-1.5">
               <XCircle
@@ -556,7 +579,7 @@ function ConsolidationCard({
                   hasFailed ? "text-red-600 dark:text-red-400" : "text-muted-foreground"
                 }`}
               >
-                失败
+                {t("failed")}
               </span>
             </div>
             <span
@@ -572,7 +595,7 @@ function ConsolidationCard({
             <div className="flex items-center gap-1.5">
               <Clock className="w-3 h-3 text-muted-foreground" />
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                上次
+                {t("last")}
               </span>
             </div>
             <span className="text-base font-semibold text-foreground block leading-tight">
@@ -656,35 +679,33 @@ function FailedConsolidationsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <XCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
-            整合失败
+            {tFailed("title")}
           </DialogTitle>
-          <DialogDescription>
-            整合永久失败的源记忆。恢复操作会重置它们，以便在下次整合运行时重试。
-          </DialogDescription>
+          <DialogDescription>{tFailed("description")}</DialogDescription>
         </DialogHeader>
         <div className="flex items-center justify-between gap-2 py-2">
           <span className="text-sm text-muted-foreground">
-            {loading ? "加载中…" : `${total} 条失败`}
+            {loading ? tFailed("loading") : tFailed("totalFailed", { total })}
           </span>
           <Button size="sm" onClick={handleRecover} disabled={recovering || loading || total === 0}>
             <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${recovering ? "animate-spin" : ""}`} />
-            全部恢复
+            {tFailed("recoverAll")}
           </Button>
         </div>
         <div className="flex-1 min-h-0 overflow-auto border border-border rounded-md">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[140px]">失败时间</TableHead>
-                <TableHead className="w-[100px]">类型</TableHead>
-                <TableHead>内容</TableHead>
+                <TableHead className="w-[140px]">{tFailed("colFailedAt")}</TableHead>
+                <TableHead className="w-[100px]">{tFailed("colType")}</TableHead>
+                <TableHead>{tFailed("colText")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {items.length === 0 && !loading && (
                 <TableRow>
                   <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
-                    暂无失败整合记录。
+                    {tFailed("noFailedConsolidations")}
                   </TableCell>
                 </TableRow>
               )}
@@ -734,12 +755,12 @@ function MentalModelsCard({
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-semibold flex items-center gap-2">
           <Brain className="w-3.5 h-3.5 text-muted-foreground" />
-          思维模型
+          {t("mentalModels")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {total === 0 ? (
-          <div className="text-sm text-muted-foreground py-4">暂无思维模型</div>
+          <div className="text-sm text-muted-foreground py-4">{t("noMentalModels")}</div>
         ) : (
           <>
             <ProgressRow done={upToDate} total={total} doneColor={CHART_COLORS.success} />
@@ -748,7 +769,7 @@ function MentalModelsCard({
                 <div className="flex items-center gap-1.5">
                   <CheckCircle2 className="w-3 h-3 text-emerald-500" />
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                    已同步
+                    {t("upToDate")}
                   </span>
                 </div>
                 <span className="text-base font-semibold tabular-nums text-foreground block">
@@ -759,7 +780,7 @@ function MentalModelsCard({
                 <div className="flex items-center gap-1.5">
                   <AlertCircle className="w-3 h-3 text-amber-500" />
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                    过期
+                    {t("stale")}
                   </span>
                 </div>
                 <span className="text-base font-semibold tabular-nums text-foreground block">
@@ -770,7 +791,7 @@ function MentalModelsCard({
                 <div className="flex items-center gap-1.5">
                   <Brain className="w-3 h-3 text-muted-foreground" />
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                    总计
+                    {t("total")}
                   </span>
                 </div>
                 <span className="text-base font-semibold tabular-nums text-foreground block">
@@ -894,66 +915,66 @@ export function BankStatsView() {
     <div className="space-y-8">
       {/* MEMORY STORE — unified card: top stat strip + composition + link types */}
       <section>
-        <SectionHeading>记忆存储</SectionHeading>
+        <SectionHeading>{t("memoryStore")}</SectionHeading>
         <Card>
           <CardContent className="p-0">
             {/* Stat strip */}
             <div className="grid grid-cols-1 md:grid-cols-3 md:divide-x divide-y md:divide-y-0 divide-border/60">
-              <InlineStat icon={Database} label="记忆" value={stats.total_nodes} />
-              <InlineStat icon={FolderOpen} label="文档" value={stats.total_documents} />
-              <InlineStat icon={Link2} label="关联" value={stats.total_links} />
+              <InlineStat icon={Database} label={t("memories")} value={stats.total_nodes} />
+              <InlineStat icon={FolderOpen} label={t("documents")} value={stats.total_documents} />
+              <InlineStat icon={Link2} label={t("links")} value={stats.total_links} />
             </div>
 
             {/* Composition + Link types side by side */}
             <div className="grid grid-cols-1 md:grid-cols-2 md:divide-x divide-y md:divide-y-0 divide-border/60 border-t border-border/60">
               <div className="p-5">
                 <Distribution
-                  title="记忆构成"
+                  title={t("memoryComposition")}
                   items={[
                     {
-                      name: "世界常识",
+                      name: t("world"),
                       value: stats.nodes_by_fact_type?.world || 0,
                       color: CHART_COLORS.world,
                     },
                     {
-                      name: "经历记忆",
+                      name: t("experience"),
                       value: stats.nodes_by_fact_type?.experience || 0,
                       color: CHART_COLORS.experience,
                     },
                     ...(observationsEnabled
                       ? [
                           {
-                            name: "观察",
+                            name: t("observations"),
                             value: stats.total_observations || 0,
                             color: CHART_COLORS.observation,
                           },
                         ]
                       : []),
                   ]}
-                  emptyLabel="暂无记忆"
+                  emptyLabel={t("noMemoriesYet")}
                 />
               </div>
               <div className="p-5">
                 <Distribution
-                  title="关联类型"
+                  title={t("linkTypes")}
                   items={[
                     {
-                      name: "时序",
+                      name: t("temporal"),
                       value: stats.links_by_link_type?.temporal || 0,
                       color: CHART_COLORS.temporal,
                     },
                     {
-                      name: "语义",
+                      name: t("semantic"),
                       value: stats.links_by_link_type?.semantic || 0,
                       color: CHART_COLORS.semantic,
                     },
                     {
-                      name: "实体",
+                      name: t("entity"),
                       value: stats.links_by_link_type?.entity || 0,
                       color: CHART_COLORS.entity,
                     },
                   ]}
-                  emptyLabel="暂无关联"
+                  emptyLabel={t("noLinksYet")}
                 />
               </div>
             </div>
@@ -963,7 +984,7 @@ export function BankStatsView() {
 
       {/* CONSOLIDATION */}
       <section>
-        <SectionHeading>整合</SectionHeading>
+        <SectionHeading>{t("consolidation")}</SectionHeading>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <ConsolidationCard
             done={consolidatedDone}
@@ -978,13 +999,15 @@ export function BankStatsView() {
 
       {/* ACTIVITY */}
       <section>
-        <SectionHeading>活动</SectionHeading>
+        <SectionHeading>{t("activity")}</SectionHeading>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <Card className="lg:col-span-2">
             <CardHeader className="pb-2 space-y-2">
               <div className="flex flex-row items-center justify-between">
                 <CardTitle className="text-sm font-semibold">
-                  {TIME_FIELD_LABELS[timeField].short}时间记忆分布
+                  {t("memoriesByTimeChartTitle", {
+                    field: timeFieldLabels[timeField].short.toLowerCase(),
+                  })}
                 </CardTitle>
                 <div className="flex items-center gap-0.5 rounded-md bg-muted/60 p-0.5">
                   {PERIODS.map((p) => (
@@ -1046,14 +1069,14 @@ export function BankStatsView() {
                   })}
                 </div>
                 <span className="text-xs text-muted-foreground tabular-nums">
-                  <CompactNumber value={ingestedTotal} /> 总计
+                  <CompactNumber value={ingestedTotal} /> {t("totalSuffix")}
                 </span>
               </div>
             </CardHeader>
             <CardContent>
               {chartData.length === 0 || ingestedTotal === 0 ? (
                 <div className="h-[180px] flex items-center justify-center text-sm text-muted-foreground">
-                  此时间段内没有入库的记忆
+                  {t("noMemoriesIngestedInPeriod")}
                 </div>
               ) : (
                 <div className="h-[180px]">

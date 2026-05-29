@@ -187,8 +187,8 @@ export function ThinkView() {
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center justify-center py-16">
           <Database className="h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="text-xl font-semibold mb-2">未选择记忆库</h3>
-          <p className="text-muted-foreground">选择一个记忆库以开始反思。</p>
+          <h3 className="text-xl font-semibold mb-2">{t("noBankSelected")}</h3>
+          <p className="text-muted-foreground">{t("noBankSelectedDescription")}</p>
         </CardContent>
       </Card>
     );
@@ -206,13 +206,13 @@ export function ThinkView() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="您想要反思什么？"
+                placeholder={t("queryPlaceholder")}
                 className="pl-10 h-12 text-lg"
                 onKeyDown={(e) => e.key === "Enter" && runReflect()}
               />
             </div>
             <Button onClick={runReflect} disabled={loading || !query} className="h-12 px-8">
-              {loading ? "反思中…" : "反思"}
+              {loading ? t("reflecting") : t("reflect")}
             </Button>
           </div>
 
@@ -220,22 +220,22 @@ export function ThinkView() {
           <div className="flex flex-wrap items-center gap-6 mt-4 pt-4 border-t">
             {/* Budget */}
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-muted-foreground">预算:</span>
+              <span className="text-sm font-medium text-muted-foreground">{t("budgetLabel")}</span>
               <Select value={budget} onValueChange={(value: any) => setBudget(value)}>
                 <SelectTrigger className="w-24 h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">低</SelectItem>
-                  <SelectItem value="mid">中</SelectItem>
-                  <SelectItem value="high">高</SelectItem>
+                  <SelectItem value="low">{t("budgetLow")}</SelectItem>
+                  <SelectItem value="mid">{t("budgetMid")}</SelectItem>
+                  <SelectItem value="high">{t("budgetHigh")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             {/* Max Tokens */}
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Token 数:</span>
+              <span className="text-sm text-muted-foreground">{t("tokensLabel")}</span>
               <Input
                 type="number"
                 value={maxTokens}
@@ -253,14 +253,14 @@ export function ThinkView() {
                   checked={includeFacts}
                   onCheckedChange={(c) => setIncludeFacts(c as boolean)}
                 />
-                <span className="text-sm">包含来源</span>
+                <span className="text-sm">{t("includeSource")}</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox
                   checked={includeToolCalls}
                   onCheckedChange={(c) => setIncludeToolCalls(c as boolean)}
                 />
-                <span className="text-sm">包含工具调用</span>
+                <span className="text-sm">{t("includeTools")}</span>
               </label>
             </div>
           </div>
@@ -273,7 +273,7 @@ export function ThinkView() {
                 type="text"
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
-                placeholder="按标签筛选（逗号分隔）"
+                placeholder={t("tagsPlaceholder")}
                 className="h-8"
               />
             </div>
@@ -282,10 +282,10 @@ export function ThinkView() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="any">任一（含未标记）</SelectItem>
-                <SelectItem value="all">全部（含未标记）</SelectItem>
-                <SelectItem value="any_strict">任一（严格）</SelectItem>
-                <SelectItem value="all_strict">全部（严格）</SelectItem>
+                <SelectItem value="any">{t("tagsMatchAny")}</SelectItem>
+                <SelectItem value="all">{t("tagsMatchAll")}</SelectItem>
+                <SelectItem value="any_strict">{t("tagsMatchAnyStrict")}</SelectItem>
+                <SelectItem value="all_strict">{t("tagsMatchAllStrict")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -299,10 +299,10 @@ export function ThinkView() {
                 checked={excludeMentalModels}
                 onCheckedChange={(c) => setExcludeMentalModels(c as boolean)}
               />
-              <span className="text-sm">排除思维模型</span>
+              <span className="text-sm">{t("excludeMentalModels")}</span>
             </label>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">排除 ID:</span>
+              <span className="text-sm text-muted-foreground">{t("excludeIdsLabel")}</span>
               <Input
                 type="text"
                 value={excludeMentalModelIds}
@@ -320,7 +320,7 @@ export function ThinkView() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4" />
-            <p className="text-muted-foreground">正在反思记忆...</p>
+            <p className="text-muted-foreground">{t("reflectingOnMemories")}</p>
           </CardContent>
         </Card>
       )}
@@ -333,13 +333,13 @@ export function ThinkView() {
             {result.usage && (
               <>
                 <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">输入 Token 数:</span>
+                  <span className="text-muted-foreground">{t("inputTokensLabel")}</span>
                   <span className="font-semibold">
                     {result.usage.input_tokens?.toLocaleString()}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">输出 Token 数:</span>
+                  <span className="text-muted-foreground">{t("outputTokensLabel")}</span>
                   <span className="font-semibold">
                     {result.usage.output_tokens?.toLocaleString()}
                   </span>
@@ -348,7 +348,7 @@ export function ThinkView() {
             )}
             {result.trace?.tool_calls && (
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">工具调用:</span>
+                <span className="text-muted-foreground">{t("toolCallsLabel")}</span>
                 <span className="font-semibold">{result.trace.tool_calls.length}</span>
                 <span className="text-muted-foreground">
                   (
@@ -362,7 +362,7 @@ export function ThinkView() {
             )}
             {result.trace?.llm_calls && (
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">LLM 调用:</span>
+                <span className="text-muted-foreground">{t("llmCallsLabel")}</span>
                 <span className="font-semibold">{result.trace.llm_calls.length}</span>
                 <span className="text-muted-foreground">
                   (
@@ -386,7 +386,11 @@ export function ThinkView() {
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {mode === "answer" ? "回答" : mode === "trace" ? "追踪" : "JSON"}
+                  {mode === "answer"
+                    ? t("viewAnswer")
+                    : mode === "trace"
+                      ? t("viewTrace")
+                      : t("viewJson")}
                 </button>
               ))}
             </div>
@@ -398,7 +402,7 @@ export function ThinkView() {
               {/* Main Answer */}
               <Card>
                 <CardHeader>
-                  <CardTitle>回答</CardTitle>
+                  <CardTitle>{t("answerTitle")}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="prose prose-sm max-w-none dark:prose-invert">
@@ -412,10 +416,10 @@ export function ThinkView() {
                 <CardHeader className="py-4">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <MessageSquare className="w-4 h-4" />
-                    添加指令
+                    {t("addDirectiveTitle")}
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    注入到提示词中的准则，代理必须遵循
+                    {t("addDirectiveDescription")}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-0">
@@ -423,7 +427,7 @@ export function ThinkView() {
                     <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
                       <span className="text-lg">&#10003;</span>
                       <span className="text-sm font-medium">
-                        指令已保存至 {FEEDBACK_DIRECTIVE_NAME}
+                        {t("directiveSaved", { name: FEEDBACK_DIRECTIVE_NAME })}
                       </span>
                     </div>
                   ) : (
@@ -431,7 +435,7 @@ export function ThinkView() {
                       <Textarea
                         value={feedback}
                         onChange={(e) => setFeedback(e.target.value)}
-                        placeholder="例如：始终用正式英语回答..."
+                        placeholder={t("directivePlaceholder")}
                         className="flex-1 min-h-[60px] resize-none"
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -444,7 +448,7 @@ export function ThinkView() {
                         disabled={feedbackSubmitting || !feedback.trim()}
                         className="self-end"
                       >
-                        {feedbackSubmitting ? "保存中…" : "保存"}
+                        {feedbackSubmitting ? t("savingDirective") : t("saveDirective")}
                       </Button>
                     </div>
                   )}
@@ -462,10 +466,10 @@ export function ThinkView() {
                   <CardHeader className="bg-emerald-50 dark:bg-emerald-950 py-3">
                     <CardTitle className="flex items-center gap-2 text-base">
                       <Brain className="w-4 h-4 text-emerald-600" />
-                      已创建的观察（{result.observations_created.length}）
+                      {t("observationsCreatedTitle", { count: result.observations_created.length })}
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      本次反思过程中学到的新观察
+                      {t("observationsCreatedDescription")}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="pt-4">
@@ -495,7 +499,7 @@ export function ThinkView() {
                 {/* Left: Execution Trace (LLM + Tool Calls) */}
                 <Card className="h-fit">
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-base">执行追踪</CardTitle>
+                    <CardTitle className="text-base">{t("executionTraceTitle")}</CardTitle>
                     <CardDescription className="text-xs">
                       {t("executionTraceDescription", {
                         iterations: result.iterations || 0,
@@ -517,9 +521,9 @@ export function ThinkView() {
                       <div className="flex items-start gap-3 p-3 bg-muted border border-border rounded-lg">
                         <Info className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                         <div>
-                          <p className="font-medium text-sm text-foreground">未包含</p>
+                          <p className="font-medium text-sm text-foreground">{t("notIncluded")}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            启用"包含工具调用"以查看追踪。
+                            {t("enableIncludeTools")}
                           </p>
                         </div>
                       </div>
@@ -599,7 +603,7 @@ export function ThinkView() {
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between">
                                       <span className="font-medium text-sm">
-                                        {item.isFinal ? "已生成回答" : "代理决策中"}
+                                        {item.isFinal ? t("responseGenerated") : t("agentDecided")}
                                       </span>
                                       <span className="text-xs text-muted-foreground flex items-center gap-1">
                                         <Clock className="w-3 h-3" />
@@ -607,7 +611,7 @@ export function ThinkView() {
                                       </span>
                                     </div>
                                     <span className="text-xs text-muted-foreground">
-                                      {item.isFinal ? "最终答案" : "调用了以下工具"}
+                                      {item.isFinal ? t("finalAnswer") : t("calledToolsBelow")}
                                     </span>
                                   </div>
                                 </div>
@@ -619,7 +623,11 @@ export function ThinkView() {
                                   </div>
                                   <div className="flex-1 min-w-0 space-y-2">
                                     <div className="text-xs text-muted-foreground">
-                                      正在执行 {item.tools?.length} 个工具
+                                      {(item.tools?.length ?? 0) !== 1
+                                        ? t("executingToolsPlural", {
+                                            count: item.tools?.length ?? 0,
+                                          })
+                                        : t("executingTools", { count: item.tools?.length ?? 0 })}
                                     </div>
                                     {item.tools?.map((tc: any, tcIdx: number) => (
                                       <div
@@ -638,7 +646,7 @@ export function ThinkView() {
                                         <div className="p-2 space-y-2">
                                           <div>
                                             <p className="text-[10px] font-semibold text-muted-foreground mb-1">
-                                              输入：
+                                              {t("toolInputLabel")}
                                             </p>
                                             <div className="bg-muted p-1.5 rounded text-xs overflow-auto max-h-32">
                                               <JsonView
@@ -651,7 +659,7 @@ export function ThinkView() {
                                           {tc.output && (
                                             <div>
                                               <p className="text-[10px] font-semibold text-muted-foreground mb-1">
-                                                输出：
+                                                {t("toolOutputLabel")}
                                               </p>
                                               <div className="bg-muted p-1.5 rounded text-xs overflow-auto max-h-32">
                                                 <JsonView
@@ -676,9 +684,9 @@ export function ThinkView() {
                       <div className="flex items-start gap-3 p-3 bg-muted border border-border rounded-lg">
                         <Info className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                         <div>
-                          <p className="font-medium text-sm text-foreground">无操作</p>
+                          <p className="font-medium text-sm text-foreground">{t("noOperations")}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            本次反思未进行任何 LLM 或工具调用。
+                            {t("noOperationsDescription")}
                           </p>
                         </div>
                       </div>
@@ -689,14 +697,16 @@ export function ThinkView() {
                 {/* Right: Based On Facts */}
                 <Card className="h-fit">
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-base">依据</CardTitle>
+                    <CardTitle className="text-base">{t("basedOnTitle")}</CardTitle>
                     <CardDescription className="text-xs">
-                      {(result.based_on?.memories?.length || 0) +
-                        (result.based_on?.observations?.filter(
-                          (o: any) => o.subtype !== "directive"
-                        )?.length || 0) +
-                        (result.based_on?.directives?.length || 0)}{" "}
-                      个项目
+                      {t("basedOnDescription", {
+                        count:
+                          (result.based_on?.memories?.length || 0) +
+                          (result.based_on?.observations?.filter(
+                            (o: any) => o.subtype !== "directive"
+                          )?.length || 0) +
+                          (result.based_on?.directives?.length || 0),
+                      })}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -704,9 +714,11 @@ export function ThinkView() {
                       <div className="flex items-start gap-3 p-3 bg-muted border border-border rounded-lg">
                         <Info className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                         <div>
-                          <p className="font-medium text-sm text-foreground">未包含</p>
+                          <p className="font-medium text-sm text-foreground">
+                            {t("notIncludedBasedOn")}
+                          </p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            启用"包含来源"以查看记忆。
+                            {t("enableIncludeSource")}
                           </p>
                         </div>
                       </div>
@@ -731,15 +743,23 @@ export function ThinkView() {
 
                         // Build tabs array with all categories
                         const tabs: { id: BasedOnTab; label: string; count: number }[] = [
-                          { id: "directives", label: "指令", count: directives.length },
+                          { id: "directives", label: t("tabDirectives"), count: directives.length },
                           {
                             id: "mental_models",
-                            label: "思维模型",
+                            label: t("tabMentalModels"),
                             count: mentalModelFacts.length,
                           },
-                          { id: "observations", label: "观察", count: observations.length },
-                          { id: "world", label: "世界常识", count: worldFacts.length },
-                          { id: "experience", label: "经历记忆", count: experienceFacts.length },
+                          {
+                            id: "observations",
+                            label: t("tabObservations"),
+                            count: observations.length,
+                          },
+                          { id: "world", label: t("tabWorld"), count: worldFacts.length },
+                          {
+                            id: "experience",
+                            label: t("tabExperience"),
+                            count: experienceFacts.length,
+                          },
                         ];
 
                         const currentTab = activeBasedOnTab;
@@ -844,7 +864,7 @@ export function ThinkView() {
                               </div>
                             ) : (
                               <p className="text-sm text-muted-foreground text-center py-4">
-                                暂无项目
+                                {t("noTabItems", { tab: currentTab })}
                               </p>
                             )}
                           </div>
@@ -858,7 +878,7 @@ export function ThinkView() {
                             {t("noFactsFound")}
                           </p>
                           <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
-                            没有使用任何记忆来生成此回答。
+                            {t("noFactsFoundDescription")}
                           </p>
                         </div>
                       </div>
@@ -873,7 +893,7 @@ export function ThinkView() {
           {viewMode === "json" && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">原始响应</CardTitle>
+                <CardTitle className="text-lg">{t("rawResponseTitle")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="bg-muted p-4 rounded-lg overflow-auto max-h-[600px]">
@@ -890,9 +910,9 @@ export function ThinkView() {
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Sparkles className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">准备反思</h3>
+            <h3 className="text-lg font-semibold mb-2">{t("readyToReflect")}</h3>
             <p className="text-muted-foreground text-center max-w-md">
-              输入一个问题以查询记忆库并生成具有配置感知的响应。
+              {t("readyToReflectDescription")}
             </p>
           </CardContent>
         </Card>
@@ -908,7 +928,7 @@ export function ThinkView() {
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
                 <Shield className="w-5 h-5" />
-                <h2 className="text-lg font-semibold">指令</h2>
+                <h2 className="text-lg font-semibold">Directive</h2>
               </div>
               <Button
                 variant="ghost"
@@ -928,20 +948,20 @@ export function ThinkView() {
             ) : (
               <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm font-medium text-muted-foreground">名称</h3>
+                  <h3 className="text-sm font-medium text-muted-foreground">Name</h3>
                   <p className="mt-1 font-medium">
                     {fullDirective?.name || selectedDirective.name}
                   </p>
                 </div>
                 {fullDirective?.description && (
                   <div>
-                    <h3 className="text-sm font-medium text-muted-foreground">描述</h3>
+                    <h3 className="text-sm font-medium text-muted-foreground">Description</h3>
                     <p className="mt-1 text-sm">{fullDirective.description}</p>
                   </div>
                 )}
                 {fullDirective?.tags && fullDirective.tags.length > 0 && (
                   <div>
-                    <h3 className="text-sm font-medium text-muted-foreground mb-1">标签</h3>
+                    <h3 className="text-sm font-medium text-muted-foreground mb-1">Tags</h3>
                     <div className="flex flex-wrap gap-1">
                       {fullDirective.tags.map((tag: string) => (
                         <span
@@ -958,7 +978,7 @@ export function ThinkView() {
                 {/* Show content from directive */}
                 {(fullDirective?.content || selectedDirective.content) && (
                   <div>
-                    <h3 className="text-sm font-medium text-muted-foreground mb-2">内容</h3>
+                    <h3 className="text-sm font-medium text-muted-foreground mb-2">Content</h3>
                     <div className="p-3 bg-muted rounded-lg">
                       <div className="text-sm text-muted-foreground whitespace-pre-wrap">
                         {fullDirective?.content || selectedDirective.content}
@@ -985,7 +1005,7 @@ export function ThinkView() {
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
                 <Brain className="w-5 h-5" />
-                <h2 className="text-lg font-semibold">观察</h2>
+                <h2 className="text-lg font-semibold">{t("observationPanelTitle")}</h2>
               </div>
               <Button
                 variant="ghost"
@@ -1005,7 +1025,9 @@ export function ThinkView() {
             ) : (
               <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm font-medium text-muted-foreground">文本</h3>
+                  <h3 className="text-sm font-medium text-muted-foreground">
+                    {t("observationTextField")}
+                  </h3>
                   <div className="mt-1 prose prose-sm max-w-none dark:prose-invert">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {fullObservation?.text || selectedObservation.text}
@@ -1014,7 +1036,9 @@ export function ThinkView() {
                 </div>
                 {fullObservation?.tags && fullObservation.tags.length > 0 && (
                   <div>
-                    <h3 className="text-sm font-medium text-muted-foreground mb-1">标签</h3>
+                    <h3 className="text-sm font-medium text-muted-foreground mb-1">
+                      {t("observationTagsField")}
+                    </h3>
                     <div className="flex flex-wrap gap-1">
                       {fullObservation.tags.map((tag: string) => (
                         <span
@@ -1031,7 +1055,9 @@ export function ThinkView() {
                 {fullObservation?.source_memories && fullObservation.source_memories.length > 0 && (
                   <div>
                     <h3 className="text-sm font-medium text-muted-foreground mb-2">
-                      源记忆（{fullObservation.source_memories.length}）
+                      {t("observationSourceMemoriesField", {
+                        count: fullObservation.source_memories.length,
+                      })}
                     </h3>
                     <div className="space-y-2">
                       {fullObservation.source_memories.map((mem: any, i: number) => (
