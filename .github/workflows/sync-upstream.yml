@@ -35,45 +35,41 @@ jobs:
 
       - name: 合并上游变更
         if: steps.check.outputs.behind > 0
+        id: merge
         env:
-          # 控制面板目录：这些文件使用上游 i18n 版本（上游已有完整 zh-CN 支持）
           CP_PREFIX: "hindsight-control-plane/"
         run: |
           git config user.name "hindsight-cn bot"
           git config user.email "bot@hindsight-cn.local"
 
+          # 保存合并前的 HEAD（用于恢复工作流文件）
+          PRE_MERGE_HEAD=$(git rev-parse HEAD)
+
           # 使用策略式合并：控制面板文件优先上游版本（i18n），其他保留本地版本
           set +e
-          git merge upstream/main --no-edit -X ours
+          git merge upstream/main --no-commit -X ours
           MERGE_EXIT=$?
           set -e
 
-          if [ $MERGE_EXIT -eq 0 ]; then
-            echo "合并成功，无冲突"
-          else
+          if [ $MERGE_EXIT -ne 0 ]; then
             echo "存在树级冲突，逐文件解决..."
 
-            # 获取所有未合并文件
             CONFLICTS=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
             CONFLICT_COUNT=$(echo "$CONFLICTS" | grep -c . 2>/dev/null || echo 0)
             echo "冲突文件数：$CONFLICT_COUNT"
-            echo "$CONFLICTS"
 
-            # 逐个处理冲突文件
             while IFS= read -r file; do
               [ -z "$file" ] && continue
 
-              # 控制面板文件：优先使用上游版本（上游有完整 i18n 支持）
               if [[ "$file" == "$CP_PREFIX"* ]]; then
-                echo "  [上游] $file（控制面板，使用上游 i18n 版本）"
+                echo "  [上游] $file"
                 if git show "upstream/main:$file" > /dev/null 2>&1; then
                   git checkout --theirs -- "$file" 2>/dev/null || true
                 else
                   git rm --force "$file" 2>/dev/null || true
                 fi
               else
-                # 其他文件：保留本地版本
-                echo "  [本地] $file（保留本地修改）"
+                echo "  [本地] $file"
                 if [ -e "$file" ]; then
                   git checkout --ours -- "$file" 2>/dev/null || true
                 else
@@ -82,16 +78,23 @@ jobs:
               fi
               git add --force "$file" 2>/dev/null || true
             done <<< "$CONFLICTS"
+          fi
 
-            # 提交合并结果
-            if ! git diff --cached --quiet 2>/dev/null; then
-              git commit --no-edit
-              echo "冲突解决完成，已提交"
-            else
-              echo "无实际变更需要提交"
-            fi
+          # 恢复 .github/workflows/ 到合并前的版本
+          # GITHUB_TOKEN 没有 workflows 权限，不能推送工作流文件变更
+          git checkout "$PRE_MERGE_HEAD" -- .github/workflows/ 2>/dev/null || true
+          git add .github/workflows/
+
+          # 提交合并结果
+          if ! git diff --cached --quiet 2>/dev/null; then
+            git commit --no-edit
+            echo "合并完成"
+            echo "merged=true" >> $GITHUB_OUTPUT
+          else
+            echo "无实际变更需要提交"
+            echo "merged=false" >> $GITHUB_OUTPUT
           fi
 
       - name: 推送到本仓库
-        if: steps.check.outputs.behind > 0
+        if: steps.check.outputs.behind > 0 && steps.merge.outputs.merged == 'true'
         run: git push origin main
