@@ -413,8 +413,8 @@ class EntityResolver:
         # to 0.15 (from default 0.3) catches most substring relationships while
         # staying fully index-based.
         await conn.execute("SET pg_trgm.similarity_threshold = 0.15")
-        rows = []
         try:
+            rows = []
             for entity_text_batch in self._chunked(entity_texts, self.entity_resolution_batch_size):
                 rows.extend(
                     await conn.fetch(
@@ -432,16 +432,13 @@ class EntityResolver:
                         entity_text_batch,
                     )
                 )
-        except Exception:
+        finally:
+            # asyncpg returns connections to the pool with session state intact,
+            # so the lowered threshold would leak to future borrowers without RESET.
             try:
                 await conn.execute("RESET pg_trgm.similarity_threshold")
             except Exception:
-                logger.warning(
-                    "Failed to reset pg_trgm similarity threshold after candidate lookup error", exc_info=True
-                )
-            raise
-        else:
-            await conn.execute("RESET pg_trgm.similarity_threshold")
+                logger.warning("Failed to reset pg_trgm similarity threshold after candidate lookup", exc_info=True)
 
         # Group candidates by query_text
         all_candidates: dict[str, list] = {t: [] for t in entity_texts}
@@ -515,23 +512,28 @@ class EntityResolver:
         entities_table = fq_table("entities")
 
         try:
-            # Batch all entity texts into a single query using JSON_TABLE to
+            # Batch entity texts into bounded sub-queries using JSON_TABLE to
             # expand the list into rows. UTL_MATCH.JARO_WINKLER_SIMILARITY
             # returns 0-100; threshold 70 ≈ pg_trgm similarity 0.15.
-            entity_texts_json = json.dumps(entity_texts)
-            rows = await conn.fetch(
-                f"""
-                SELECT e.id, e.canonical_name, e.metadata, e.last_seen, e.mention_count,
-                       q.query_text
-                FROM JSON_TABLE($2, '$[*]' COLUMNS (query_text VARCHAR2(4000) PATH '$')) q
-                JOIN {entities_table} e ON (
-                    e.bank_id = $1
-                    AND UTL_MATCH.JARO_WINKLER_SIMILARITY(LOWER(e.canonical_name), LOWER(q.query_text)) > 70
+            # Bounded batches mirror the PG trigram path so very wide retain
+            # batches don't time out a single JOIN on large banks.
+            rows = []
+            for entity_text_batch in self._chunked(entity_texts, self.entity_resolution_batch_size):
+                rows.extend(
+                    await conn.fetch(
+                        f"""
+                        SELECT e.id, e.canonical_name, e.metadata, e.last_seen, e.mention_count,
+                               q.query_text
+                        FROM JSON_TABLE($2, '$[*]' COLUMNS (query_text VARCHAR2(4000) PATH '$')) q
+                        JOIN {entities_table} e ON (
+                            e.bank_id = $1
+                            AND UTL_MATCH.JARO_WINKLER_SIMILARITY(LOWER(e.canonical_name), LOWER(q.query_text)) > 70
+                        )
+                        """,
+                        bank_id,
+                        json.dumps(entity_text_batch),
+                    )
                 )
-                """,
-                bank_id,
-                entity_texts_json,
-            )
         except Exception as e:
             # UTL_MATCH may not be available (ORA-06550, ORA-00904, etc.)
             # Catch broadly because Oracle error types vary depending on driver.

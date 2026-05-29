@@ -196,3 +196,25 @@ class TestPgTrgmAutoDetection:
         assert {entity for batch in batches for entity in batch} == {f"Entity {idx}" for idx in range(5)}
         conn.execute.assert_any_await("SET pg_trgm.similarity_threshold = 0.15")
         conn.execute.assert_any_await("RESET pg_trgm.similarity_threshold")
+
+    @pytest.mark.asyncio
+    async def test_trigram_resets_threshold_even_when_fetch_raises(self):
+        """If a batch fetch fails, RESET must still run so the lowered threshold doesn't leak to the pooled connection."""
+        resolver = _make_resolver(entity_lookup="trigram", entity_resolution_batch_size=2)
+        conn = _make_conn(pg_trgm_available=True)
+        conn.fetch = AsyncMock(side_effect=RuntimeError("simulated timeout"))
+
+        with (
+            patch("hindsight_api.engine.entity_resolver.fq_table", side_effect=lambda table: table),
+            patch.object(resolver, "_resolve_from_candidates", new=AsyncMock(return_value=[])),
+            pytest.raises(RuntimeError, match="simulated timeout"),
+        ):
+            await resolver._resolve_entities_batch_trigram(
+                conn=conn,
+                bank_id="test-bank",
+                entities_data=[{"text": "Alice"}, {"text": "Bob"}],
+                unit_event_date=None,
+            )
+
+        conn.execute.assert_any_await("SET pg_trgm.similarity_threshold = 0.15")
+        conn.execute.assert_any_await("RESET pg_trgm.similarity_threshold")
