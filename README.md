@@ -69,56 +69,103 @@ Hindsight 模拟人类记忆的工作方式，将信息组织为四种类型：
 | 类型 | 说明 | 示例 |
 |------|------|------|
 | **世界常识** | 普遍知识 | "Python 是 Guido van Rossum 创建的" |
-| **经历记忆** | 个人经历 | "用户上周去了北京出差" |
+| **交互记录** | 个人经历 | "用户上周去了北京出差" |
 | **观察** | 即时观察 | 从对话中提取的即时信息 |
 | **思维模型** | 认知理解 | "用户偏好函数式编程风格" |
 
 所有记忆存储在隔离的**记忆库**（Bank）中，每个智能体拥有独立的"大脑"。
 
-## 使用示例
+---
 
-### Python
+## 智能体接入
 
-```python
-from hindsight_client import Hindsight
+Hindsight-CN 为 AI 智能体提供长期记忆能力——自动存储对话、智能检索历史上下文。以下展示三种主流智能体的接入方式。
 
-client = Hindsight(base_url="http://localhost:8888")
+### OpenClaw
 
-# 存储记忆
-client.retain(bank_id="agent-1", content="张三在谷歌担任高级工程师，擅长分布式系统")
+通过官方插件一键接入，支持自动存储/检索、按智能体/频道/用户隔离记忆库。
 
-# 检索记忆
-results = client.recall(bank_id="agent-1", query="张三的技术方向是什么？")
+```bash
+# 1. 安装插件
+openclaw plugins install @vectorize-io/hindsight-openclaw
 
-# 深度反思
-insight = client.reflect(bank_id="agent-1", query="关于张三的职业发展，有什么值得关注的？")
+# 2. 交互式配置（选择「外部 API」模式）
+npx --package @vectorize-io/hindsight-openclaw hindsight-openclaw-setup
 ```
 
-### Node.js
+配置指向本地 Hindsight-CN 实例（`~/.openclaw/openclaw.json`）：
 
-```javascript
-const { HindsightClient } = require('@vectorize-io/hindsight-client');
-
-const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
-
-await client.retain('agent-1', '张三最近在学 Rust');
-const results = await client.recall('agent-1', '张三在学什么？');
+```json
+{
+  "plugins": {
+    "entries": {
+      "hindsight-openclaw": {
+        "enabled": true,
+        "config": {
+          "hindsightApiUrl": "http://localhost:8888",
+          "dynamicBankGranularity": ["agent", "channel", "user"],
+          "autoRecall": true,
+          "autoRetain": true
+        }
+      }
+    }
+  }
+}
 ```
 
-### Python 嵌入式（无需独立服务器）
+### Hermes Agent
 
-```python
-from hindsight import HindsightServer, HindsightClient
+Hermes 原生支持 Hindsight 作为记忆提供商，支持三种记忆模式。
 
-with HindsightServer(
-    llm_provider="openai",
-    llm_model="MiniMax-M2.7",
-    llm_api_key="你的API密钥",
-    llm_base_url="https://api.minimaxi.com/v1"
-) as server:
-    client = HindsightClient(base_url=server.url)
-    client.retain(bank_id="test", content="测试中文记忆存储")
+```bash
+# 1. 一行配置
+hermes memory setup    # 选择「hindsight」
+
+# 2. 禁用 Hermes 内置记忆工具（避免冲突）
+hermes tools disable memory
 ```
+
+手动配置指向本地 Hindsight-CN（`~/.hermes/hindsight/config.json`）：
+
+```json
+{
+  "mode": "local_external",
+  "api_url": "http://localhost:8888",
+  "bank_id": "hermes",
+  "memory_mode": "hybrid",
+  "auto_recall": true,
+  "auto_retain": true
+}
+```
+
+| 模式 | 说明 |
+|------|------|
+| `hybrid`（推荐） | 自动注入记忆 + 手动工具并存 |
+| `context` | 仅自动注入，不暴露工具给模型 |
+| `tools` | 仅手动工具，模型自行决定何时检索 |
+
+### Claude Code
+
+通过 MCP 协议接入，支持 Hooks 自动存储/检索 + MCP 工具手动操作。
+
+```bash
+# 方式一：安装官方插件
+claude plugin marketplace add vectorize-io/hindsight
+claude plugin install hindsight-memory
+
+# 方式二：手动配置 MCP 连接
+claude mcp add --transport http hindsight http://localhost:8888/mcp
+```
+
+连接后可使用 `agent_knowledge_*` 系列工具管理记忆：
+
+```bash
+# 在 Claude Code 对话中使用
+> 使用 agent_knowledge_recall 搜索"张三的技术方向"
+> 使用 agent_knowledge_ingest 存储"项目使用 Vue 3 + TypeScript 技术栈"
+```
+
+---
 
 ## 中文模型配置
 
@@ -176,11 +223,11 @@ environment:
 
 ### 三大核心操作
 
-**Retain（存储）** — 存入信息，LLM 自动提取事实、实体和关系
-
-**Recall（检索）** — 四路并行搜索（语义 + 关键词 + 图谱 + 时间），经重排序后返回最相关结果
-
-**Reflect（反思）** — 基于记忆库生成带情境感知的深度分析
+| 操作 | 说明 |
+|------|------|
+| **Retain（存储）** | 存入信息，LLM 自动提取事实、实体和关系 |
+| **Recall（检索）** | 四路并行搜索（语义 + 关键词 + 图谱 + 时间），经重排序后返回最相关结果 |
+| **Reflect（反思）** | 基于记忆库生成带情境感知的深度分析 |
 
 ---
 
