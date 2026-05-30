@@ -84,6 +84,14 @@ fi
 
 echo "✅ API 构建完成"
 
+# 预下载 tiktoken 编码（运行时必需）
+PYTHON_BIN="$API_DIR/bin/python"
+if [ "$IS_WINDOWS" = "true" ]; then
+    PYTHON_BIN="$API_DIR/Scripts/python.exe"
+fi
+echo "  预下载 tiktoken 编码..."
+"$PYTHON_BIN" -c "import tiktoken; tiktoken.get_encoding('cl100k_base')" 2>/dev/null || true
+
 # =============================================================================
 # 下载 ML 模型
 # =============================================================================
@@ -136,20 +144,25 @@ CP_DIR="$BUILD_DIR/control-plane"
 
 # 从根目录安装 workspace 依赖（含 @vectorize-io/hindsight-client）
 cd "$SRC_DIR"
-npm ci --quiet --workspaces
+npm ci --quiet
 
 # 构建 TypeScript client（dist/ 被 .gitignore 忽略）
-cd "$SRC_DIR/hindsight-clients/typescript"
-npm run build
+npm run build --workspace=hindsight-clients/typescript
+
+# 修复跨平台原生模块（lightningcss/tailwindcss）
+rm -rf node_modules/lightningcss node_modules/@tailwindcss 2>/dev/null || true
+npm install lightningcss @tailwindcss/postcss @tailwindcss/node 2>/dev/null || true
 
 cd "$SRC_DIR/hindsight-control-plane"
-INCLUDE_CP=true npm exec -- next build
+INCLUDE_CP=true npm run build
 
-mkdir -p "$CP_DIR"
-cp -r .next/standalone/* "$CP_DIR/"
-mkdir -p "$CP_DIR/.next"
-cp -r .next/static "$CP_DIR/.next/static"
-cp -r public "$CP_DIR/public" 2>/dev/null || true
+# npm run build 已执行 build:standalone，直接使用 standalone/ 目录
+if [ ! -f standalone/server.js ]; then
+    echo "❌ standalone 构建失败：找不到 standalone/server.js"
+    exit 1
+fi
+
+cp -r standalone "$CP_DIR"
 
 echo "✅ 控制面板构建完成"
 

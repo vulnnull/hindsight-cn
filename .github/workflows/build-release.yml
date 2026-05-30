@@ -30,14 +30,19 @@ jobs:
         include:
           - runner: ubuntu-latest
             platform: linux/amd64
+            artifact: linux-amd64
           - runner: ubuntu-24.04-arm
             platform: linux/arm64
+            artifact: linux-arm64
           - runner: macos-latest
             platform: darwin/arm64
+            artifact: darwin-arm64
           - runner: macos-13
             platform: darwin/amd64
+            artifact: darwin-amd64
           - runner: windows-latest
             platform: windows/amd64
+            artifact: windows-amd64
 
     runs-on: ${{ matrix.runner }}
     steps:
@@ -99,7 +104,7 @@ jobs:
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: hindsight-cn-${{ matrix.platform }}
+          name: hindsight-cn-${{ matrix.artifact }}
           path: |
             hindsight-cn-*.tar.gz
             hindsight-cn-*.zip
