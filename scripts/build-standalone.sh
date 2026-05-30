@@ -133,9 +133,16 @@ fi
 echo ""
 echo "📦 [3/4] 构建控制面板..."
 CP_DIR="$BUILD_DIR/control-plane"
-cd "$SRC_DIR/hindsight-control-plane"
 
-npm ci --quiet
+# 从根目录安装 workspace 依赖（含 @vectorize-io/hindsight-client）
+cd "$SRC_DIR"
+npm ci --quiet --workspaces
+
+# 构建 TypeScript client（dist/ 被 .gitignore 忽略）
+cd "$SRC_DIR/hindsight-clients/typescript"
+npm run build
+
+cd "$SRC_DIR/hindsight-control-plane"
 INCLUDE_CP=true npm exec -- next build
 
 mkdir -p "$CP_DIR"

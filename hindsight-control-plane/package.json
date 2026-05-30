@@ -56,7 +56,6 @@
     "cmdk": "^1.1.1",
     "cytoscape": "^3.33.1",
     "cytoscape-fcose": "^2.2.0",
-    "eslint": "^9.39.1",
     "eslint-config-next": "^16.0.1",
     "lucide-react": "^0.553.0",
     "next": "^16.2.6",
@@ -80,11 +79,12 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
-    "@eslint/js": "^9.39.2",
+    "@eslint/js": "^9.39.4",
     "@vectorize-io/hindsight-client": "file:../hindsight-clients/typescript",
+    "eslint": "^10.4.1",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "prettier": "^3.7.4",
+    "prettier": "^3.8.3",
     "tsx": "^4.22.3",
     "typescript-eslint": "^8.50.0",
     "vitest": "^4.1.7"
