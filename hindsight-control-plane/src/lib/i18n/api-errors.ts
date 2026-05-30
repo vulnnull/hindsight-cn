@@ -1,15 +1,7 @@
 import { defaultLocale, locales, type Locale } from "@/i18n/config";
 
-import de from "@/messages/de.json";
 import en from "@/messages/en.json";
-import es from "@/messages/es.json";
-import fr from "@/messages/fr.json";
-import ja from "@/messages/ja.json";
-import ko from "@/messages/ko.json";
-import pt from "@/messages/pt.json";
-import yueHant from "@/messages/yue-Hant.json";
 import zhCN from "@/messages/zh-CN.json";
-import zhTW from "@/messages/zh-TW.json";
 
 type CookieValue = string | { value?: string } | undefined;
 export type RequestLike = {
@@ -24,16 +16,8 @@ type ApiErrorPayload = Record<string, unknown> & {
 };
 
 const resources = {
-  de,
   en,
-  es,
-  fr,
-  ja,
-  ko,
-  pt,
   "zh-CN": zhCN,
-  "zh-TW": zhTW,
-  "yue-Hant": yueHant,
 } satisfies Record<Locale, Record<string, unknown>>;
 
 const localeSet = new Set<string>(locales);
@@ -44,17 +28,6 @@ const localeAliases: Partial<Record<string, Locale>> = {
   "zh-Hans": "zh-CN",
   "zh-Hans-CN": "zh-CN",
   "zh-SG": "zh-CN",
-  "zh-Hant": "zh-TW",
-  "zh-Hant-TW": "zh-TW",
-  yue: "yue-Hant",
-  "yue-Hant-HK": "yue-Hant",
-  "yue-Hant-MO": "yue-Hant",
-  "yue-HK": "yue-Hant",
-  "yue-MO": "yue-Hant",
-  "zh-HK": "yue-Hant",
-  "zh-Hant-HK": "yue-Hant",
-  "zh-MO": "yue-Hant",
-  "zh-Hant-MO": "yue-Hant",
 } satisfies Record<string, Locale>;
 
 function parseCookieHeader(cookieHeader: string | null | undefined): Map<string, string> {
@@ -133,7 +106,6 @@ function resolveLocaleTag(value: string | undefined): Locale | undefined {
   if (normalizedAlias) return normalizedAlias;
 
   const language = value.split("-")[0];
-  if (language === "yue") return "yue-Hant";
   if (language === "zh") return "zh-CN";
 
   return locales.find((locale) => locale.split("-")[0] === language);
