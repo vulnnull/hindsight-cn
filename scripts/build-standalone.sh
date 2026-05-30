@@ -287,7 +287,8 @@ EOF
 # 打包
 cd "$SRC_DIR/dist"
 if [ "$IS_WINDOWS" = "true" ]; then
-    # Windows 用 zip
+    # Windows: 转换 MSYS 路径为 Windows 路径
+    WIN_SRC=$(cygpath -w "$SRC_DIR")
     if command -v zip >/dev/null; then
         zip -r -q "$SRC_DIR/${PKG_NAME}.zip" "$PKG_NAME"
         SIZE=$(du -sh "$SRC_DIR/${PKG_NAME}.zip" | cut -f1)
@@ -295,8 +296,8 @@ if [ "$IS_WINDOWS" = "true" ]; then
         echo "✅ 构建完成！"
         echo "   文件：${PKG_NAME}.zip（${SIZE}）"
     else
-        # PowerShell fallback
-        powershell -Command "Compress-Archive -Path '$PKG_NAME' -DestinationPath '$SRC_DIR/${PKG_NAME}.zip'"
+        # PowerShell fallback（使用 Windows 路径）
+        powershell -Command "Compress-Archive -Path '${WIN_SRC}\\dist\\${PKG_NAME}' -DestinationPath '${WIN_SRC}\\${PKG_NAME}.zip'"
         echo ""
         echo "✅ 构建完成！"
         echo "   文件：${PKG_NAME}.zip"
