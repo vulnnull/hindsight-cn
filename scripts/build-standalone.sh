@@ -147,6 +147,7 @@ INCLUDE_CP=true npm exec -- next build
 
 mkdir -p "$CP_DIR"
 cp -r .next/standalone/* "$CP_DIR/"
+mkdir -p "$CP_DIR/.next"
 cp -r .next/static "$CP_DIR/.next/static"
 cp -r public "$CP_DIR/public" 2>/dev/null || true
 

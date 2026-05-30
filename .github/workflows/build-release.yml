@@ -29,15 +29,15 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-latest
-            platform: linux-amd64
+            platform: linux/amd64
           - runner: ubuntu-24.04-arm
-            platform: linux-arm64
+            platform: linux/arm64
           - runner: macos-latest
-            platform: darwin-arm64
+            platform: darwin/arm64
           - runner: macos-13
-            platform: darwin-amd64
+            platform: darwin/amd64
           - runner: windows-latest
-            platform: windows-amd64
+            platform: windows/amd64
 
     runs-on: ${{ matrix.runner }}
     steps:
