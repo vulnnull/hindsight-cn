@@ -1,0 +1,131 @@
+name: 构建独立发行包
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（如 0.7.1）"
+        required: true
+        default: "0.7.1"
+      include_models:
+        description: "包含 ML 模型"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux-amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+          - runner: macos-latest
+            platform: darwin-arm64
+          - runner: macos-13
+            platform: darwin-amd64
+          - runner: windows-latest
+            platform: windows-amd64
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置版本号
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ver=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "ver=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 安装系统依赖（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake gcc g++ > /dev/null
+
+      - name: 安装系统依赖（Windows）
+        if: runner.os == 'Windows'
+        run: choco install cmake --installargs '"ADD_CMAKE_TO_PATH=System"' -y
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: 设置 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 设置 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 构建（Unix）
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x scripts/build-standalone.sh
+          TARGET_PLATFORM=${{ matrix.platform }} \
+          VERSION=${{ steps.version.outputs.ver }} \
+          INCLUDE_MODELS=${{ inputs.include_models || 'true' }} \
+          bash scripts/build-standalone.sh
+
+      - name: 构建（Windows）
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ steps.version.outputs.ver }}
+          INCLUDE_MODELS: ${{ inputs.include_models || 'true' }}
+        run: bash scripts/build-standalone.sh
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: hindsight-cn-${{ matrix.platform }}
+          path: |
+            hindsight-cn-*.tar.gz
+            hindsight-cn-*.zip
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载所有构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: 列出产物
+        run: ls -lh release-assets/
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
