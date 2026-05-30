@@ -158,15 +158,36 @@ rm -rf node_modules/lightningcss node_modules/@tailwindcss 2>/dev/null || true
 npm install lightningcss @tailwindcss/postcss @tailwindcss/node 2>/dev/null || true
 
 cd "$SRC_DIR/hindsight-control-plane"
-INCLUDE_CP=true npm run build
 
-# npm run build 已执行 build:standalone，直接使用 standalone/ 目录
-if [ ! -f standalone/server.js ]; then
-    echo "❌ standalone 构建失败：找不到 standalone/server.js"
-    exit 1
+if [ "$IS_WINDOWS" = "true" ]; then
+    # Windows: npm run build:standalone 使用 bash 语法，CMD 无法执行
+    # 直接执行 next build 然后手动组装 standalone
+    INCLUDE_CP=true npx next build
+
+    # 手动组装 standalone（等价于 package.json 的 build:standalone）
+    SERVER_JS=$(find .next/standalone -path '*/node_modules' -prune -o -name 'server.js' -print | head -1)
+    if [ -z "$SERVER_JS" ]; then
+        echo "❌ standalone 构建失败：找不到 server.js"
+        exit 1
+    fi
+    STANDALONE_ROOT=$(dirname "$SERVER_JS")
+    mkdir -p "$CP_DIR"
+    cp -r "$STANDALONE_ROOT"/* "$CP_DIR/"
+    cp -r .next/standalone/node_modules "$CP_DIR/node_modules" 2>/dev/null || true
+    mkdir -p "$CP_DIR/.next"
+    cp -r .next/static "$CP_DIR/.next/static"
+    mkdir -p "$CP_DIR/public"
+    cp -r public/* "$CP_DIR/public/" 2>/dev/null || true
+else
+    # Unix: 直接使用 npm run build（含 build:standalone）
+    INCLUDE_CP=true npm run build
+
+    if [ ! -f standalone/server.js ]; then
+        echo "❌ standalone 构建失败：找不到 standalone/server.js"
+        exit 1
+    fi
+    cp -r standalone "$CP_DIR"
 fi
-
-cp -r standalone "$CP_DIR"
 
 echo "✅ 控制面板构建完成"
 
