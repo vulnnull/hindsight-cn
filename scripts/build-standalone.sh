@@ -144,7 +144,11 @@ CP_DIR="$BUILD_DIR/control-plane"
 
 # 从根目录安装 workspace 依赖（含 @vectorize-io/hindsight-client）
 cd "$SRC_DIR"
-npm ci --quiet
+if [ "$IS_WINDOWS" = "true" ]; then
+    npm ci --quiet --ignore-scripts
+else
+    npm ci --quiet
+fi
 
 # 构建 TypeScript client（dist/ 被 .gitignore 忽略）
 npm run build --workspace=hindsight-clients/typescript
