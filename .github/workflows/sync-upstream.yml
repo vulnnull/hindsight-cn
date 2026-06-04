@@ -82,6 +82,8 @@ jobs:
 
           # 恢复 .github/workflows/ 到合并前的版本
           # GITHUB_TOKEN 没有 workflows 权限，不能推送工作流文件变更
+          # 先清空再恢复，确保上游新增的 workflow 文件也被移除
+          rm -rf .github/workflows/
           git checkout "$PRE_MERGE_HEAD" -- .github/workflows/ 2>/dev/null || true
           git add .github/workflows/
 
