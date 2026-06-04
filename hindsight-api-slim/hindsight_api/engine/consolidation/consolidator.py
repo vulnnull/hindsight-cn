@@ -31,6 +31,13 @@ from pydantic import BaseModel, field_validator
 
 from ...config import get_config
 from ..db_utils import acquire_with_retry
+from ..llm_trace import (
+    record_created_memory_ids,
+    record_source_memory_ids,
+    reset_trace_context,
+    set_trace_context,
+    trace_context_of,
+)
 from ..llm_wrapper import sanitize_llm_output
 from ..memory_engine import Budget, fq_table
 from ..retain import embedding_utils
@@ -44,6 +51,38 @@ if TYPE_CHECKING:
     from ..response_models import MemoryFact, RecallResult
 
 logger = logging.getLogger(__name__)
+
+
+def _norm_obs_text(text: str) -> str:
+    """Whitespace-normalised observation text for exact-duplicate matching.
+
+    Collapses runs of whitespace only; case is preserved. The reconciliation guard
+    drops a CREATE on the premise that an exact-text match loses no information — but
+    case-folding would also drop a create differing only in case (e.g. "TLS" vs "tls"),
+    which *does* lose information, so we match case-sensitively.
+    """
+    return " ".join((text or "").split()).strip()
+
+
+def _duplicate_create_target(
+    create_text: str,
+    shown_obs_by_text: "dict[str, MemoryFact]",
+    update_texts: set[str],
+) -> str | None:
+    """Return a human label for what ``create_text`` duplicates, or None if novel.
+
+    A CREATE is a duplicate when its normalised text matches an observation that was
+    already shown to the LLM, or the text of an UPDATE issued in the same response
+    (the model occasionally UPDATEs the twin to text X and also CREATEs X). Exact-text
+    match means no information is lost by dropping the CREATE.
+    """
+    norm = _norm_obs_text(create_text)
+    matched = shown_obs_by_text.get(norm)
+    if matched is not None:
+        return f"shown observation {str(matched.id)[:8]}"
+    if norm in update_texts:
+        return "an UPDATE in this response"
+    return None
 
 
 @dataclass
@@ -167,6 +206,9 @@ async def _filter_live_source_memories(
 class _CreateAction(BaseModel):
     text: str
     source_fact_ids: list[str]  # memory UUIDs from the NEW FACTS list
+    # One-sentence justification from the LLM (why CREATE vs UPDATE). Diagnostic
+    # only — surfaced in the consolidation trace to explain duplicate creates.
+    reason: str = ""
 
     @field_validator("text", mode="before")
     @classmethod
@@ -178,6 +220,7 @@ class _UpdateAction(BaseModel):
     text: str
     observation_id: str  # UUID of the existing observation to update
     source_fact_ids: list[str]  # memory UUIDs from the NEW FACTS list
+    reason: str = ""  # LLM's one-sentence justification (diagnostic only)
 
     @field_validator("text", mode="before")
     @classmethod
@@ -187,6 +230,7 @@ class _UpdateAction(BaseModel):
 
 class _DeleteAction(BaseModel):
     observation_id: str  # UUID of the observation to remove
+    reason: str = ""  # LLM's one-sentence justification (diagnostic only)
 
 
 class _ConsolidationBatchResponse(BaseModel):
@@ -361,8 +405,36 @@ async def run_consolidation_job(
 
     # Build a configured LLM wrapper that applies per-bank settings (e.g. safety settings)
     # to every call without leaking across operations.
-    llm_config = memory_engine._consolidation_llm_config.with_config(config)
+    llm_config = memory_engine._consolidation_llm_config.with_config(config, bank_id=bank_id, operation="consolidation")
 
+    # Bind the operation trace context for the whole run so the create/update DB
+    # sites (deep inside _process_memory_batch) can accumulate the observations
+    # this consolidation produced and the source memories it consumed onto the
+    # trace — flushed onto every trace row on exit by attach_memory_ids.
+    trace_ctx = trace_context_of(llm_config)
+    trace_token = set_trace_context(trace_ctx) if trace_ctx is not None else None
+    try:
+        return await _run_consolidation_job(
+            memory_engine, bank_id, request_context, config, llm_config, operation_id, observation_scopes
+        )
+    finally:
+        if trace_token is not None:
+            reset_trace_context(trace_token)
+            # Fire-and-forget: patched on a background task, off the consolidation
+            # critical path.
+            memory_engine._llm_recorder.attach_memory_ids(trace_ctx)
+
+
+async def _run_consolidation_job(
+    memory_engine: "MemoryEngine",
+    bank_id: str,
+    request_context: "RequestContext",
+    config: Any,
+    llm_config: Any,
+    operation_id: str | None = None,
+    observation_scopes: list[list[str]] | None = None,
+) -> dict[str, Any]:
+    """Core consolidation flow. See ``run_consolidation_job`` for the public entrypoint."""
     perf = ConsolidationPerfLog(bank_id)
     max_memories_per_batch = config.consolidation_batch_size
     max_memories_per_round = config.consolidation_max_memories_per_round
@@ -984,6 +1056,9 @@ async def _process_memory_batch(
     """
     import asyncio
 
+    # Map the source memories this batch consumes onto the consolidation trace.
+    record_source_memory_ids([str(m["id"]) for m in memories])
+
     # 1. Parallel recalls — one per fact
     # When obs_tags_override is set, use it as the observation scope for all facts.
     t0 = time.time()
@@ -1104,16 +1179,44 @@ async def _process_memory_batch(
         for m in source_mems:
             per_memory_updated.add(str(m["id"]))
 
+    # Deterministic dedup guard: map the observations the LLM was SHOWN by their
+    # normalised text. The model intermittently emits a CREATE whose text is identical
+    # to an observation already in its context (over-aggregation / incoherence — it even
+    # UPDATEs the twin and creates a sibling). When that happens we drop the duplicate
+    # CREATE instead of inserting a redundant row. No extra LLM/embedding cost — the
+    # match is exact text against the in-memory set.
+    shown_obs_by_text = {_norm_obs_text(o.text): o for o in union_observations}
+    # Also collapse a CREATE that reproduces the text of an UPDATE issued in the SAME
+    # response (the model occasionally UPDATEs the twin to text X and also CREATEs X).
+    update_texts = {_norm_obs_text(u.text) for u in llm_result.updates if u.text}
+
     for create in llm_result.creates:
         source_mems = [mem_by_id[fid] for fid in create.source_fact_ids if fid in mem_by_id]
         if not source_mems:
             continue
         agg = _aggregate_source_fields(source_mems, tags=fact_tags)
+        create_source_ids = [m["id"] for m in source_mems]
+
+        # Reconcile against observations shown to the LLM: an exact-text match means
+        # this CREATE reproduces verbatim an observation the model already had in context.
+        # Since that observation already carries this exact text, drop the duplicate CREATE
+        # — no row is inserted, nothing is lost. We deliberately do NOT also UPDATE the twin
+        # here: the LLM frequently UPDATEd it earlier in this same batch, and a second update
+        # would run off the pre-LLM snapshot and clobber that change (see _dedupe_updates).
+        duplicate_of = _duplicate_create_target(create.text, shown_obs_by_text, update_texts)
+        if duplicate_of is not None:
+            logger.warning(
+                "[CONSOLIDATION] dropped duplicate observation CREATE — verbatim match of %s; llm_reason=%r",
+                duplicate_of,
+                create.reason or "(none given)",
+            )
+            continue
+
         await _execute_create_action(
             conn=conn,
             memory_engine=memory_engine,
             bank_id=bank_id,
-            source_memory_ids=[m["id"] for m in source_mems],
+            source_memory_ids=create_source_ids,
             text=create.text,
             source_fact_tags=agg.tags,
             event_date=agg.event_date,
@@ -1265,6 +1368,8 @@ async def _execute_update_action(
     if perf:
         perf.record_timing("db_write", time.time() - t0)
 
+    # Map the updated observation onto the consolidation trace as a produced memory.
+    record_created_memory_ids([observation_id])
     logger.debug(f"Updated observation {observation_id} from {len(source_memory_ids)} source memories")
 
 
@@ -1287,7 +1392,7 @@ async def _execute_create_action(
     Tags are inherited from the source facts (determined algorithmically, not by LLM)
     to maintain visibility scope.
     """
-    await _create_observation_directly(
+    created = await _create_observation_directly(
         conn=conn,
         memory_engine=memory_engine,
         bank_id=bank_id,
@@ -1300,6 +1405,10 @@ async def _execute_create_action(
         mentioned_at=mentioned_at,
         perf=perf,
     )
+    # Map the new observation onto the consolidation trace as a produced memory.
+    new_id = created.get("observation_id")
+    if new_id:
+        record_created_memory_ids([new_id])
     logger.debug(f"Created observation from {len(source_memory_ids)} source memories")
 
 
@@ -1398,6 +1507,13 @@ async def _find_related_observations(
             include_source_facts=True,  # Embed source facts so we avoid a separate DB fetch
             max_source_facts_tokens=config.consolidation_source_facts_max_tokens,
             max_source_facts_tokens_per_observation=config.consolidation_source_facts_max_tokens_per_observation,
+            # Round-robin interleave fusion (no cross-encoder): consolidation is looking
+            # for an existing near-identical observation to merge into. Both the
+            # cross-encoder (semantic #1 -> reranked #37) and RRF (semantic #1 -> outside
+            # the 512-token budget) were measured to bury that twin; interleave guarantees
+            # each retrieval arm's top hits a slot, so the semantic-#1 twin is always shown
+            # to the LLM, which then UPDATEs instead of creating a duplicate.
+            reranking="interleave",
             _quiet=True,  # Suppress logging
         )
     finally:
