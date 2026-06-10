@@ -137,6 +137,76 @@ _VALIDATE_SQL_SCHEMAS = True
 _CONSOLIDATION_RETRY_BACKOFF_BASE_SECONDS = 5
 _CONSOLIDATION_RETRY_BACKOFF_MAX_SECONDS = 1800  # 30 min cap
 
+# Upper bound on the per-bank LLM connectivity probe so a hung provider can't wedge
+# the request. The probe is a deliberate, non-polled action (POST .../health/llm).
+_LLM_PROBE_TIMEOUT_SECONDS = 10.0
+
+# Substrings that identify an authentication/authorization failure across providers.
+# A wrong API key is the single most common probe failure, so it gets its own status.
+_AUTH_ERROR_MARKERS = (
+    "401",
+    "403",
+    "unauthorized",
+    "invalid api key",
+    "invalid_api_key",
+    "incorrect api key",
+    "api key not valid",
+    "api_key_invalid",
+    "authentication",
+    "permission denied",
+    "permissiondenied",
+)
+
+
+def _is_auth_error(error: Exception) -> bool:
+    """Whether a probe exception looks like an auth failure (typically a bad API key).
+
+    Walks the exception chain for an HTTP 401/403 status code, then falls back to
+    matching known auth markers in the (provider-wrapped) message. Used only to pick a
+    status label — the raw error itself is never returned to the client.
+    """
+    seen: list[Exception] = []
+    current: BaseException | None = error
+    for _ in range(6):  # bounded walk to avoid pathological cycles
+        if current is None or current in seen:
+            break
+        seen.append(current)  # type: ignore[arg-type]
+        code = getattr(current, "status_code", None) or getattr(current, "code", None)
+        if code in (401, 403, "401", "403"):
+            return True
+        current = current.__cause__ or current.__context__
+    text = " ".join(str(item) for item in seen).lower()
+    return any(marker in text for marker in _AUTH_ERROR_MARKERS)
+
+
+@dataclass
+class LlmOperationHealthInfo:
+    """Connectivity status for one operation's LLM. Status only — deliberately carries
+    no provider/model/endpoint/error so the probe never leaks the LLM configuration."""
+
+    operation: str
+    ok: bool
+    status: str
+    latency_ms: float | None
+
+
+@dataclass
+class BankLlmHealthInfo:
+    """Per-bank LLM connectivity probe across retain/consolidation/reflect (see
+    MemoryEngine.check_bank_llm)."""
+
+    bank_id: str
+    operations: list[LlmOperationHealthInfo]
+
+
+@dataclass
+class _LlmProbeOutcome:
+    """Internal result of probing a single LLM client (before it's tagged per operation)."""
+
+    ok: bool
+    status: str
+    latency_ms: float | None
+
 
 def _consolidation_retry_backoff_seconds(retry_count: int) -> int:
     """Capped exponential backoff: 5, 10, 20, 40, 80, 160, 320, 640, 1280, 1800, 1800, …"""
@@ -821,6 +891,7 @@ class MemoryEngine(MemoryEngineInterface):
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.llm_litellmrouter_config,
+            bedrock_service_tier=config.llm_bedrock_service_tier,
         )
 
         # Store client and model for convenience (deprecated: use _llm_config.call() instead)
@@ -853,6 +924,7 @@ class MemoryEngine(MemoryEngineInterface):
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.retain_llm_litellmrouter_config or config.llm_litellmrouter_config,
+            bedrock_service_tier=config.llm_bedrock_service_tier,
         )
 
         # Reflect LLM config - for think/observe operations (can use lighter models)
@@ -880,6 +952,7 @@ class MemoryEngine(MemoryEngineInterface):
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.reflect_llm_litellmrouter_config or config.llm_litellmrouter_config,
+            bedrock_service_tier=config.llm_bedrock_service_tier,
         )
 
         # Consolidation LLM config - for mental model consolidation (can use efficient models)
@@ -907,6 +980,7 @@ class MemoryEngine(MemoryEngineInterface):
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.consolidation_llm_litellmrouter_config or config.llm_litellmrouter_config,
+            bedrock_service_tier=config.llm_bedrock_service_tier,
         )
 
         # Initialize cross-encoder reranker (cached for performance)
@@ -975,6 +1049,35 @@ class MemoryEngine(MemoryEngineInterface):
 
             tenant_extension = DefaultTenantExtension(config={})
         self._tenant_extension = tenant_extension
+
+        # Load memory defense extension; default to the regex extension when the
+        # env var is unset. Lazy imports avoid a circular dependency:
+        # extensions/__init__ imports MCPExtension which imports MemoryEngine at
+        # module level.
+        from ..extensions.builtin.memory_defense_regex import (  # noqa: PLC0415
+            MemoryDefenseRegexExtension,
+        )
+        from ..extensions.context import DefaultExtensionContext  # noqa: PLC0415
+        from ..extensions.loader import load_extension  # noqa: PLC0415
+        from ..extensions.memory_defense import MemoryDefenseExtension  # noqa: PLC0415
+
+        # Build the extension context now; webhook_manager is populated later in
+        # initialize() once the pool is ready.  current_schema is a per-request
+        # value written by _authenticate() and execute_task().
+        self._ext_ctx = DefaultExtensionContext(
+            database_url=config.database_url or "",
+            memory_engine=self,
+            webhook_manager=None,
+            current_schema=None,
+        )
+
+        loaded = load_extension("MEMORY_DEFENSE", MemoryDefenseExtension, context=self._ext_ctx)
+        if loaded is not None:
+            self._memory_defense: MemoryDefenseExtension = loaded
+        else:
+            regex_defense = MemoryDefenseRegexExtension({})
+            regex_defense.set_context(self._ext_ctx)
+            self._memory_defense = regex_defense
 
         # Cache for get_bank_stats — short TTL + concurrent-loader coalescing.
         # The query joins memory_links to memory_units and can be a multi-second
@@ -1055,6 +1158,7 @@ class MemoryEngine(MemoryEngineInterface):
         tenant_context = await self._tenant_extension.authenticate(request_context)
 
         _current_schema.set(tenant_context.schema_name)
+        self._ext_ctx.current_schema = tenant_context.schema_name
         return tenant_context.schema_name
 
     async def _handle_import_documents(self, task_dict: dict[str, Any]):
@@ -1540,6 +1644,7 @@ class MemoryEngine(MemoryEngineInterface):
         schema = task_dict.pop("_schema", None)
         if schema:
             _current_schema.set(schema)
+            self._ext_ctx.current_schema = schema
 
         # Check if operation was cancelled (only for tasks with operation_id)
         if operation_id:
@@ -2392,7 +2497,7 @@ class MemoryEngine(MemoryEngineInterface):
                             f"Configuration error: HINDSIGHT_API_RETAIN_BATCH_ENABLED=true "
                             f"but the retain LLM provider '{self._retain_llm_config.provider}' "
                             f"does not support the batch API. Either switch to a provider "
-                            f"that supports batch operations (e.g. 'openai', 'groq') or "
+                            f"that supports batch operations (e.g. 'openai', 'groq', 'gemini') or "
                             f"set HINDSIGHT_API_RETAIN_BATCH_ENABLED=false."
                         )
 
@@ -2632,6 +2737,9 @@ class MemoryEngine(MemoryEngineInterface):
             global_webhooks=webhook_global,
             tenant_extension=self._tenant_extension,
         )
+        # Propagate the now-ready webhook manager to the extension context so
+        # that the Memory Defense extension can fire webhooks.
+        self._ext_ctx.webhook_manager = self._webhook_manager
         logger.debug("Webhook manager initialized")
 
         # Long-lived HTTP client for webhook delivery tasks
@@ -3361,6 +3469,9 @@ class MemoryEngine(MemoryEngineInterface):
                 # Stream chunk-level "storing N/total" progress to the operation row as
                 # the document's chunks commit (more useful than the coarse sub-batch tick).
                 progress_callback=self._write_operation_progress,
+                webhook_manager=self._webhook_manager,
+                memory_defense_extension=self._memory_defense,
+                audit_logger=self._audit_logger,
             )
             # Map the created facts onto this retain's trace so the trace view can
             # show which memories the ingestion produced. result[0] is the
@@ -6202,7 +6313,9 @@ class MemoryEngine(MemoryEngineInterface):
 
             units = await conn.fetch(
                 f"""
-                SELECT id, text, event_date, context, fact_type, mentioned_at, occurred_start, occurred_end, chunk_id, proof_count, tags, consolidated_at, consolidation_failed_at
+                SELECT id, text, event_date, context, fact_type, document_id,
+                       mentioned_at, occurred_start, occurred_end, chunk_id, proof_count,
+                       tags, consolidated_at, consolidation_failed_at
                 FROM {fq_table("memory_units")}
                 {where_clause}
                 ORDER BY mentioned_at DESC NULLS LAST, created_at DESC
@@ -6249,6 +6362,7 @@ class MemoryEngine(MemoryEngineInterface):
                         "context": row["context"] if row["context"] else "",
                         "date": row["event_date"].isoformat() if row["event_date"] else "",
                         "fact_type": row["fact_type"],
+                        "document_id": row["document_id"],
                         "mentioned_at": row["mentioned_at"].isoformat() if row["mentioned_at"] else None,
                         "occurred_start": row["occurred_start"].isoformat() if row["occurred_start"] else None,
                         "occurred_end": row["occurred_end"].isoformat() if row["occurred_end"] else None,
@@ -8623,6 +8737,68 @@ class MemoryEngine(MemoryEngineInterface):
             "pending_consolidation": row["pending"] or 0,
             "failed_consolidation": row["failed"] or 0,
         }
+
+    async def _probe_llm(self, llm: Any) -> _LlmProbeOutcome:
+        """Probe one LLM client (status only). The detailed provider error is logged
+        server-side, never returned, so the probe leaks nothing about the LLM config."""
+        # NoneLLM.verify_connection() is a no-op that succeeds, so detect "no LLM" by
+        # the provider name rather than the probe result.
+        if llm.provider == "none":
+            return _LlmProbeOutcome(ok=False, status="not_configured", latency_ms=None)
+        start = time.monotonic()
+        try:
+            await asyncio.wait_for(llm.verify_connection(), timeout=_LLM_PROBE_TIMEOUT_SECONDS)
+            return _LlmProbeOutcome(ok=True, status="connected", latency_ms=(time.monotonic() - start) * 1000)
+        except (TimeoutError, asyncio.TimeoutError):
+            return _LlmProbeOutcome(ok=False, status="timeout", latency_ms=(time.monotonic() - start) * 1000)
+        except Exception as e:
+            logger.warning("LLM connectivity probe failed (provider=%s): %s", llm.provider, e)
+            # A bad API key is the most common cause, so surface it distinctly (the
+            # category leaks nothing — the raw error is only logged above).
+            status = "auth_failed" if _is_auth_error(e) else "unreachable"
+            return _LlmProbeOutcome(ok=False, status=status, latency_ms=(time.monotonic() - start) * 1000)
+
+    async def check_bank_llm(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> BankLlmHealthInfo:
+        """Probe the LLMs this bank would use for retain / consolidation / reflect (#2034).
+
+        Deliberate, non-polled connectivity test so callers discover "not configured /
+        unreachable" instead of a silent stall. Each operation can resolve to a different
+        LLM, but they often share one; identical configs are probed **once** (keyed on
+        provider/model/base_url/api_key) and the result fanned out. Returns status only —
+        never the provider/model/endpoint or the raw error (those are logged server-side).
+        """
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_bank_stats", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+
+        per_operation_llm = [
+            ("retain", self._retain_llm_config),
+            ("consolidation", self._consolidation_llm_config),
+            ("reflect", self._reflect_llm_config),
+        ]
+        # Dedup key includes api_key so two ops with the same provider/model/url but
+        # different keys are still probed separately. Keys never leave this method.
+        probed: dict[tuple, _LlmProbeOutcome] = {}
+        operations: list[LlmOperationHealthInfo] = []
+        for operation, llm in per_operation_llm:
+            key = (llm.provider, llm.model, llm.base_url, llm.api_key)
+            if key not in probed:
+                probed[key] = await self._probe_llm(llm)
+            outcome = probed[key]
+            operations.append(
+                LlmOperationHealthInfo(
+                    operation=operation, ok=outcome.ok, status=outcome.status, latency_ms=outcome.latency_ms
+                )
+            )
+        return BankLlmHealthInfo(bank_id=bank_id, operations=operations)
 
     async def get_memories_timeseries(
         self,

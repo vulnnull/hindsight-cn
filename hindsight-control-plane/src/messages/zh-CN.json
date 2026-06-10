@@ -60,6 +60,7 @@
     "bankConfiguration": "记忆库配置",
     "bankConfigurationDescription": "管理记忆库设置、配置文件和操作。",
     "actions": "操作",
+    "health": "运行状况",
     "exportTemplate": "导出模板",
     "consolidating": "归纳中...",
     "runConsolidation": "运行归纳",
@@ -393,7 +394,17 @@
     "extractorHintWhichPlaceholder": "提取器提示：何时选择此值",
     "addField": "字段",
     "addValueShort": "值",
-    "noValuesYet": "尚无值。"
+    "noValuesYet": "尚无值。",
+    "memoryDefenseTitle": "记忆防护",
+    "memoryDefenseDescription": "在保留过程中检查内容,并决定在密钥及其他安全问题进入记忆之前如何处理。",
+    "memoryDefenseFailedToSave": "保存记忆防护设置失败",
+    "memoryDefenseSavedToast": "记忆防护已保存",
+    "memoryDefenseActionLabel": "操作",
+    "memoryDefenseAction_allow": "允许",
+    "memoryDefenseAction_redact": "脱敏",
+    "memoryDefenseAction_block": "拦截",
+    "memoryDefenseSecretLeakTitle": "密钥泄露防护",
+    "memoryDefenseSecretLeakDescription": "扫描保留内容中的密钥。44 种模式,涵盖常见提供商密钥、AWS 和个人信息。"
   },
   "bankOperations": {
     "title": "后台操作",
@@ -1364,7 +1375,9 @@
     "linkTypeSemantic": "语义",
     "linkTypeTemporal": "时间",
     "linkTypeEntity": "实体",
-    "linkTypeCausal": "因果"
+    "linkTypeCausal": "因果",
+    "exportSvgTitle": "下载为 SVG 以分享",
+    "exportSvgLabel": "分享"
   },
   "metadata": {
     "title": "Hindsight Cloud",
