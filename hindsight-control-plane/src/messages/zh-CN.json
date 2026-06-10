@@ -1244,7 +1244,11 @@
     "viewHistory": "查看历史",
     "tracedByTitle": "创建来源",
     "tracedBySummary": "{calls} 次调用 · {tokens} 令牌",
-    "consolidatedByTitle": "整合来源"
+    "consolidatedByTitle": "整合来源",
+    "editFieldEntities": "Entities",
+    "editEntityPlaceholder": "Add entity…",
+    "editEntityRemove": "Remove {entity}",
+    "editedBadge": "Edited"
   },
   "documentChunkModal": {
     "documentTitle": "文档详情",
