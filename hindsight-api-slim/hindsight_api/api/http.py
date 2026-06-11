@@ -12,7 +12,7 @@ import re
 import uuid
 from collections.abc import Awaitable
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Literal, TypeVar
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -83,7 +83,7 @@ def FieldWithDefault(default_factory: Callable, **kwargs) -> Any:
 
 
 from hindsight_api.config import get_config
-from hindsight_api.engine.memory_engine import Budget, _current_schema, _get_tiktoken_encoding, fq_table
+from hindsight_api.engine.memory_engine import Budget, _current_schema, _get_tiktoken_encoding
 from hindsight_api.engine.providers.none_llm import LLMNotAvailableError
 from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES, MemoryFact, TokenUsage
 from hindsight_api.engine.search.tags import TagGroup, TagsMatch
@@ -265,7 +265,7 @@ class RecallResult(BaseModel):
 
     id: str
     text: str
-    type: str | None = None  # fact type: world, experience, opinion, observation
+    type: str | None = None  # fact type: world, experience, observation
     entities: list[str] | None = None  # Entity names mentioned in this fact
     context: str | None = None
     occurred_start: str | None = None  # ISO format date when the event started
@@ -852,7 +852,7 @@ class ReflectFact(BaseModel):
     text: str = Field(
         description="Fact text. When type='observation', this contains markdown-formatted consolidated knowledge"
     )
-    type: str | None = None  # fact type: world, experience, opinion, observation
+    type: str | None = None  # fact type: world, experience, observation
     context: str | None = None
     occurred_start: str | None = None
     occurred_end: str | None = None
@@ -1280,6 +1280,33 @@ class GraphDataResponse(BaseModel):
     limit: int
 
 
+class ObservationScope(BaseModel):
+    """A distinct observation scope: an exact tag set plus its observation count."""
+
+    tags: list[str] = Field(
+        description="The exact tag set defining this scope (normalized order). Empty list is the global/untagged scope."
+    )
+    count: int = Field(description="Number of observations that live under this scope")
+
+
+class ObservationScopesResponse(BaseModel):
+    """Response model for the observation scopes enumeration endpoint."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "scopes": [
+                    {"tags": ["user:alice"], "count": 12},
+                    {"tags": ["user:alice", "project:apollo"], "count": 4},
+                    {"tags": [], "count": 2},
+                ]
+            }
+        }
+    )
+
+    scopes: list[ObservationScope] = Field(description="Distinct observation scopes, most populous first")
+
+
 class ListMemoryUnitsResponse(BaseModel):
     """Response model for list memory units endpoint."""
 
@@ -1405,6 +1432,12 @@ class DocumentResponse(BaseModel):
     tags: list[str] = FieldWithDefault(list, description="Tags associated with this document")
     document_metadata: dict[str, Any] | None = Field(default=None, description="Document metadata")
     retain_params: dict[str, Any] | None = Field(default=None, description="Parameters used during retain")
+    observation_scopes: str | list[list[str]] | None = Field(
+        default=None,
+        description="The observation_scopes spec configured at retain time (e.g. 'all_combinations', "
+        "'per_tag', or explicit tag-set lists), captured into retain_params. None when none was set "
+        "(default 'combined' scoping) or for documents retained before this was captured.",
+    )
 
 
 class UpdateDocumentRequest(BaseModel):
@@ -2029,6 +2062,16 @@ class BankTemplateConfig(BaseModel):
     )
     max_observations_per_scope: int | None = Field(
         default=None, description="Max observations to retain per consolidation scope"
+    )
+    observation_scope_limits: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Per-scope overrides of max_observations_per_scope: "
+            '[{"scope": ["run_*", "shared"], "limit": 1}]. Each scope is a list of '
+            "fnmatch tag-globs; a consolidation scope matches under exact cover "
+            "(every tag matched by a glob and every glob matched by a tag). The first "
+            "matching rule wins; unmatched scopes fall back to max_observations_per_scope."
+        ),
     )
     reflect_source_facts_max_tokens: int | None = Field(
         default=None, description="Max tokens of source facts per reflect call"
@@ -2737,7 +2780,6 @@ def _make_audited_http(audit_logger_getter: Callable[[], AuditLogger | None]):
     from datetime import datetime as _dt
     from datetime import timezone as _tz
     from functools import wraps
-    from typing import Callable as _Callable
 
     def audited(action: str, *, request_param: str | None = "request"):
         """Decorator that wraps an HTTP handler with audit logging.
@@ -3081,8 +3123,6 @@ def create_app(
         # Replace UUIDs and numeric IDs with placeholders
         import re
 
-        from starlette.requests import Request
-
         path = request.url.path
         # Replace UUIDs
         path = re.sub(r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "/{id}", path)
@@ -3283,7 +3323,7 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/graph",
         response_model=GraphDataResponse,
         summary="Get memory graph data",
-        description="Retrieve graph data for visualization, optionally filtered by type (world/experience/opinion).",
+        description="Retrieve graph data for visualization, optionally filtered by type (world/experience/observation).",
         operation_id="get_graph",
         tags=["Memory"],
     )
@@ -3350,7 +3390,7 @@ def _register_routes(app: FastAPI):
 
         Args:
             bank_id: Memory Bank ID (from path)
-            type: Filter by fact type (world, experience, opinion)
+            type: Filter by fact type (world, experience, observation)
             q: Search query for full-text search (searches text and context)
             consolidation_state: Filter by consolidation state for source memories
                 (world/experience). One of 'failed', 'pending', or 'done'.
@@ -3700,11 +3740,11 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/reflect",
         response_model=ReflectResponse,
         summary="Reflect and generate answer",
-        description="Reflect and formulate an answer using bank identity, world facts, and opinions.\n\n"
+        description="Reflect and formulate an answer using bank identity, world facts, observations, and mental models.\n\n"
         "This endpoint:\n"
         "1. Retrieves experience (conversations and events)\n"
         "2. Retrieves world facts relevant to the query\n"
-        "3. Retrieves existing opinions (bank's perspectives)\n"
+        "3. Retrieves observations and mental models (bank's synthesized perspectives)\n"
         "4. Uses LLM to formulate a contextual answer\n"
         "5. Returns plain text answer and the facts used",
         operation_id="reflect",
@@ -5774,6 +5814,35 @@ def _register_routes(app: FastAPI):
             logger.error(f"Error in DELETE /v1/default/banks/{bank_id}/observations: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.get(
+        "/v1/default/banks/{bank_id}/observations/scopes",
+        response_model=ObservationScopesResponse,
+        summary="List observation scopes",
+        description=(
+            "Enumerate the distinct scopes across a bank's observations. Each observation lives "
+            "under a scope: the exact set of tags it was consolidated with. Returns every distinct "
+            "scope (tag order normalized) with the number of observations in it; the empty tag list "
+            "is the global/untagged scope. Use a returned scope with the graph endpoint "
+            "(tags=<scope> & tags_match=exact) to filter observations to exactly that scope."
+        ),
+        operation_id="list_observation_scopes",
+        tags=["Memory"],
+    )
+    async def api_list_observation_scopes(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
+        """List the distinct observation scopes (exact tag sets) for a bank."""
+        try:
+            return await app.state.memory.list_observation_scopes(bank_id, request_context=request_context)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except (AuthenticationError, HTTPException):
+            raise
+        except Exception as e:
+            import traceback
+
+            error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Error in GET /v1/default/banks/{bank_id}/observations/scopes: {error_detail}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.post(
         "/v1/default/banks/{bank_id}/consolidation/recover",
         response_model=RecoverConsolidationResponse,
@@ -6585,7 +6654,6 @@ def _register_routes(app: FastAPI):
                 _validate_parsers(_resolve_parser(request_data.parser), "request-level parser")
 
             # Prepare file items and calculate total batch size
-            import io
 
             file_items = []
             total_batch_size = 0
@@ -6664,14 +6732,14 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/memories",
         response_model=DeleteResponse,
         summary="Clear memory bank memories",
-        description="Delete memory units for a memory bank. Optionally filter by type (world, experience, opinion) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (disposition and background) will be preserved.",
+        description="Delete memory units for a memory bank. Optionally filter by type (world, experience, observation) to delete only specific types. This is a destructive operation that cannot be undone. The bank profile (disposition and background) will be preserved.",
         operation_id="clear_bank_memories",
         tags=["Memory"],
     )
     @audited("clear_memories", request_param=None)
     async def api_clear_bank_memories(
         bank_id: str,
-        type: str | None = Query(None, description="Optional fact type filter (world, experience, opinion)"),
+        type: str | None = Query(None, description="Optional fact type filter (world, experience, observation)"),
         request_context: RequestContext = Depends(get_request_context),
     ):
         """Clear memories for a memory bank, optionally filtered by type."""
