@@ -26,6 +26,7 @@ import asyncpg
 import httpx
 
 from .._vector_index import ann_search_tuning_settings, configured_vector_extension
+from ..cancellation import OperationCancelledError
 from ..config import (
     DEFAULT_RECALL_CHUNKS_MAX_TOKENS,
     DEFAULT_RECALL_INCLUDE_CHUNKS,
@@ -445,7 +446,7 @@ def _split_contents_into_sub_batches(
 
     Any single item that already exceeds the budget is chunked via
     ``fact_extraction.chunk_text`` (paragraph/sentence aware, or
-    conversation-turn aware for JSON arrays) and each chunk becomes its
+    conversation-turn aware for JSON arrays and JSONL) and each chunk becomes its
     own single-item sub-batch. Without this, an oversized single item
     would pass through as a ``1/1`` sub-batch holding the entire
     payload — which contradicts the splitter's log and lets the
@@ -3826,6 +3827,12 @@ class MemoryEngine(MemoryEngineInterface):
         # Authenticate tenant and set schema in context (for fq_table())
         await self._authenticate_tenant(request_context)
 
+        # Cooperative cancellation checkpoint: if the client already disconnected
+        # while this request waited to be scheduled, abort before doing any work
+        # (issue #2122). Further checkpoints sit at each pipeline stage boundary
+        # inside _search_with_retries.
+        request_context.raise_if_cancelled()
+
         # Sanitize the query at ingress: a client may serialize a half-emoji as a
         # lone UTF-16 surrogate, which crashes downstream logging, the embedder, and
         # the cross-encoder tokenizer with an HTTP 500 (see issue #1875). Cleaning it
@@ -3941,6 +3948,10 @@ class MemoryEngine(MemoryEngineInterface):
                             reranking=reranking,
                         )
                         break  # Success - exit retry loop
+                    except OperationCancelledError:
+                        # Client disconnected — propagate to the HTTP layer (499);
+                        # not a failure to retry or report via the post-op hook.
+                        raise
                     except Exception as e:
                         # Check if it's a connection error (PG or Oracle)
                         is_connection_error = (
@@ -4149,6 +4160,11 @@ class MemoryEngine(MemoryEngineInterface):
             if tracer:
                 tracer.record_query_embedding(query_embedding)
                 tracer.add_phase_metric("generate_query_embedding", step_duration)
+
+            # Cancellation checkpoint: bail before the DB-heavy retrieval stage
+            # if the client has gone away (issue #2122).
+            if request_context is not None:
+                request_context.raise_if_cancelled()
 
             # Step 2: Optimized parallel retrieval using batched queries
             # - Semantic + BM25 combined in 1 CTE query for ALL fact types
@@ -4477,6 +4493,15 @@ class MemoryEngine(MemoryEngineInterface):
                     merged_candidates = merged_candidates[:reranker_max_candidates]
 
                 if reranking == "cross_encoder":
+                    # Cancellation checkpoint: the cross-encoder rerank is the
+                    # single most CPU-expensive stage and runs in a worker thread
+                    # that cannot be interrupted once dispatched (issue #2122).
+                    # Skip it entirely if the client already disconnected during
+                    # retrieval, rather than burning ~2 CPUs producing a result
+                    # nobody will read.
+                    if request_context is not None:
+                        request_context.raise_if_cancelled()
+
                     # Ensure reranker is initialized (for lazy initialization mode)
                     await reranker_instance.ensure_initialized()
                     scored_results = await reranker_instance.rerank(query, merged_candidates)
@@ -4557,6 +4582,12 @@ class MemoryEngine(MemoryEngineInterface):
                     step_duration,
                     {"reranker_type": rerank_kind, "candidates_reranked": len(scored_results)},
                 )
+
+            # Cancellation checkpoint: reranking is done; skip the remaining
+            # enrichment (chunk/entity/source-fact fetches, each its own DB work)
+            # if the client disconnected while we were reranking (issue #2122).
+            if request_context is not None:
+                request_context.raise_if_cancelled()
 
             # Step 5: Truncate to thinking_budget * 2 for token filtering
             rerank_limit = thinking_budget * 2
@@ -4943,6 +4974,11 @@ class MemoryEngine(MemoryEngineInterface):
                 source_facts=source_facts_dict,
             )
 
+        except OperationCancelledError:
+            # Client disconnected mid-recall — propagate the cancellation so the
+            # HTTP layer can return 499. Must precede the broad handler below,
+            # which would otherwise bury it inside a RuntimeError (issue #2122).
+            raise
         except Exception as e:
             # Use repr(e) so exceptions with empty __str__ (e.g. raise SomeError())
             # still emit a discriminating class+args string into operations.error_message.
@@ -8208,6 +8244,12 @@ class MemoryEngine(MemoryEngineInterface):
         # Authenticate tenant and set schema in context (for fq_table())
         await self._authenticate_tenant(request_context)
 
+        # Cooperative cancellation checkpoint: if the client already disconnected
+        # while this request waited to be scheduled, abort before doing any work
+        # (issue #2122). The agentic loop re-checks between iterations, and the
+        # nested recall tool checks at its own stage boundaries.
+        request_context.raise_if_cancelled()
+
         # Validate operation if validator is configured
         if self._operation_validator:
             from hindsight_api.extensions import ReflectContext
@@ -8420,6 +8462,7 @@ class MemoryEngine(MemoryEngineInterface):
                         budget=effective_budget,
                         max_context_tokens=max_context_tokens,
                         llm_output_language=getattr(resolved_reflect_config, "llm_output_language", None),
+                        cancel_check=request_context.raise_if_cancelled,
                     ),
                     timeout=wall_timeout,
                 )
