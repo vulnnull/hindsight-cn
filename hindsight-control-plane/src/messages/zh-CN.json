@@ -514,7 +514,6 @@
     "allConsolidatedWithDate": "所有记忆已归纳（最近：{date}）",
     "pendingConsolidation": "{count} 条记忆待归纳",
     "constellation": "星座图",
-    "graph": "图谱",
     "table": "表格",
     "timeline": "时间线",
     "hidePanel": "隐藏面板",
@@ -1423,15 +1422,6 @@
     "factTypeObservation": "沉淀认知",
     "actionClearContent": "清除内容",
     "optionsRecallDescription": null
-  },
-  "graph2d": {
-    "loading": "正在加载图谱...",
-    "emptyState": "暂无记忆可显示",
-    "linkTypeCausal": "因果 ({type})",
-    "linkTypeGeneric": "{type} 链接",
-    "linkTooltipEntity": "实体：",
-    "linkTooltipWeight": "权重：",
-    "controlsHint": "拖拽平移 • 滚动缩放 • 双击节点聚焦 • 点击背景重置"
   },
   "constellation": {
     "instructions": "滚动缩放 · 拖拽平移 · 悬停探索 · 点击选择",
