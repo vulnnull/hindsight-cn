@@ -29,6 +29,8 @@ The API service handles all memory operations (retain, recall, reflect).
 
 If not provided, the server uses embedded `pg0` — convenient for development but not recommended for production.
 
+To run against Oracle Database 23ai instead, set `HINDSIGHT_API_DATABASE_BACKEND=oracle` and use an `oracle+oracledb://…` URL. See the [Oracle Database guide](./oracle) for full setup instructions.
+
 The `DATABASE_SCHEMA` setting allows you to use a custom PostgreSQL schema instead of the default `public` schema. This is useful for:
 - Multi-database setups where you want Hindsight tables in a dedicated schema
 - Hosting platforms (e.g., Supabase) where `public` schema is reserved or shared
@@ -145,6 +147,7 @@ If you need to switch from one extension to another:
 | `HINDSIGHT_API_TEXT_SEARCH_EXTENSION` | Text search backend: `native`, `vchord`, `pg_textsearch`, `pgroonga`, or `pg_search` | `native` |
 | `HINDSIGHT_API_TEXT_SEARCH_EXTENSION_NATIVE_LANGUAGE` | PostgreSQL text search dictionary used by the `native` backend (e.g. `english`, `french`, `simple`, `zhparser`) | `english` |
 | `HINDSIGHT_API_TEXT_SEARCH_EXTENSION_PG_SEARCH_TOKENIZER` | ParadeDB `pg_search` tokenizer used when creating BM25 indexes. Empty uses ParadeDB's default tokenizer (`unicode_words`). | unset |
+| `HINDSIGHT_API_BM25_MAX_QUERY_TERMS` | Optional cap on the number of terms in the native PostgreSQL BM25 `tsquery`. Long queries OR-join every normalized token, which can match too much of a large bank. `0` keeps the historical uncapped behavior; a positive value bounds only the `native` backend (other BM25 backends receive the raw query). | `0` |
 | `HINDSIGHT_API_LLM_OUTPUT_LANGUAGE` | When set, forces every LLM-generated artifact (retain facts, consolidation observations, reflect responses) into this language. Free-form (e.g. `Spanish`, `Japanese`). | unset |
 
 Hindsight supports five backends for BM25 keyword retrieval:
