@@ -39,6 +39,7 @@ ARG RERANKER_MODEL=cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
 # =============================================================================
 FROM python:3.11-slim AS api-builder
 
+
 ARG INCLUDE_API
 ARG INCLUDE_LOCAL_MODELS
 RUN if [ "$INCLUDE_API" != "true" ]; then echo "Skipping API build" && exit 0; fi
@@ -51,7 +52,9 @@ RUN apt-get update && apt-get install -y \
     g++ \
     curl \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir uv
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && ln -s /root/.local/bin/uv /usr/local/bin/uv \
+    && ln -s /root/.local/bin/uvx /usr/local/bin/uvx
 
 # Copy dependency files and README (required by pyproject.toml)
 COPY hindsight-api-slim/pyproject.toml ./api/
@@ -81,6 +84,7 @@ RUN uv pip install -e .
 # =============================================================================
 FROM node:20-slim AS sdk-builder
 
+
 ARG INCLUDE_CP
 RUN if [ "$INCLUDE_CP" != "true" ]; then echo "Skipping SDK build" && exit 0; fi
 
@@ -90,14 +94,16 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY hindsight-clients/typescript/ ./hindsight-clients/typescript/
 
-# Install and build SDK using workspace (--ignore-scripts skips git hooks setup)
+# Install SDK deps (--ignore-scripts skips root prepare/git-hooks)
 RUN npm ci --ignore-scripts -w @vectorize-io/hindsight-client
-RUN npm run build -w @vectorize-io/hindsight-client
+# Build SDK (--ignore-scripts skipped bin links, use npx)
+RUN cd hindsight-clients/typescript && npx tsup
 
 # =============================================================================
 # Stage: Control Plane Builder
 # =============================================================================
 FROM node:20-slim AS cp-builder
+
 
 ARG INCLUDE_CP
 RUN if [ "$INCLUDE_CP" != "true" ]; then echo "Skipping CP build" && exit 0; fi
@@ -112,7 +118,7 @@ WORKDIR /app/memory-poc/hindsight-control-plane
 COPY hindsight-control-plane/package.json ./
 # Remove the file: dependency on SDK (we'll copy it directly later)
 RUN sed -i '/"@vectorize-io\/hindsight-client":/d' package.json
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Copy Control Plane source (excluding node_modules via .dockerignore)
 COPY hindsight-control-plane/ ./
@@ -154,6 +160,7 @@ RUN STANDALONE_ROOT=$(find .next/standalone -path '*/node_modules' -prune -o -na
 # =============================================================================
 FROM python:3.11-slim AS api-only
 
+
 WORKDIR /app
 
 # Note: libicu version varies by Debian version - try common versions in order
@@ -166,7 +173,9 @@ RUN apt-get update && apt-get install -y \
     libossp-uuid16 \
     && (apt-get install -y libicu72 2>/dev/null || apt-get install -y libicu74 2>/dev/null || apt-get install -y libicu76 2>/dev/null || true) \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir uv
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && ln -s /root/.local/bin/uv /usr/local/bin/uv \
+    && ln -s /root/.local/bin/uvx /usr/local/bin/uvx
 
 RUN useradd -m -s /bin/bash hindsight
 
@@ -269,6 +278,7 @@ CMD ["/app/start-all.sh"]
 # =============================================================================
 FROM node:20-alpine AS cp-only
 
+
 WORKDIR /app
 
 # Copy built SDK
@@ -303,6 +313,7 @@ CMD ["/app/start-all.sh"]
 # =============================================================================
 FROM python:3.11-slim AS standalone
 
+
 WORKDIR /app
 
 # Install Node.js, curl, uv, and system dependencies
@@ -318,7 +329,9 @@ RUN apt-get update && apt-get install -y \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir uv
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && ln -s /root/.local/bin/uv /usr/local/bin/uv \
+    && ln -s /root/.local/bin/uvx /usr/local/bin/uvx
 
 RUN useradd -m -s /bin/bash hindsight
 
