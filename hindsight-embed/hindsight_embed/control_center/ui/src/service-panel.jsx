@@ -16,13 +16,13 @@ export function ServicePanel({ title, running, statusText, healthOk, url, detail
       <div class="svc-detail">{detail}</div>
       <div class="svc-actions">
         <button class="ghost sm" disabled={busy || running} onClick={onStart}>
-          Start
+          启动
         </button>
         <button class="ghost sm" disabled={busy || !running} onClick={onRestart}>
-          Restart
+          重启
         </button>
         <button class="ghost sm" disabled={busy || !running} onClick={onStop}>
-          Stop
+          停止
         </button>
       </div>
     </div>
