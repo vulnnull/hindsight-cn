@@ -33,6 +33,7 @@ from ..config import (
     DEFAULT_RECALL_INCLUDE_CHUNKS,
     DEFAULT_RECALL_MAX_TOKENS,
     DEFAULT_REFLECT_SOURCE_FACTS_MAX_TOKENS,
+    DEFAULT_STORE_DOCUMENT_TEXT,
     ENV_MODEL_INIT_TIMEOUT,
     HindsightConfig,
     LLMMemberConfig,
@@ -3278,14 +3279,44 @@ class MemoryEngine(MemoryEngineInterface):
 
         try:
             backend = await self._get_backend()
+            # Time the acquire separately from the query. A slow acquire points at
+            # pool exhaustion (readiness), a slow query at the database itself; both
+            # are surfaced in the probe response so a failing/slow /health is
+            # self-diagnosing rather than an opaque restart.
+            acquire_start = time.monotonic()
             async with backend.acquire() as conn:
+                acquire_ms = (time.monotonic() - acquire_start) * 1000.0
                 result = await conn.fetchval("SELECT 1")
-                if result == 1:
-                    return {"status": "healthy", "database": "connected"}
-                else:
-                    return {"status": "unhealthy", "database": "unexpected response"}
+            health = {
+                "status": "healthy" if result == 1 else "unhealthy",
+                "database": "connected" if result == 1 else "unexpected response",
+                "db_acquire_ms": round(acquire_ms, 1),
+            }
+            health.update(self._pool_health_stats(backend))
+            return health
         except Exception as e:
             return {"status": "unhealthy", "database": "error", "error": str(e)}
+
+    @staticmethod
+    def _pool_health_stats(backend: Any) -> dict:
+        """Best-effort pool utilization for the health payload (never raises)."""
+        stats: dict[str, Any] = {}
+        try:
+            from .db.pool_instrumentation import waiting_count
+
+            stats["db_pool_waiting"] = waiting_count()
+        except Exception:
+            pass
+        try:
+            pool_stats = getattr(backend, "_pool_stats", None)
+            snapshot = pool_stats() if callable(pool_stats) else None
+            if snapshot is not None:
+                stats["db_pool_in_use"] = snapshot.in_use
+                stats["db_pool_max"] = snapshot.max
+                stats["db_pool_idle"] = snapshot.idle
+        except Exception:
+            pass
+        return stats
 
     async def close(self):
         """Close the connection pool and shutdown background workers."""
@@ -3586,15 +3617,16 @@ class MemoryEngine(MemoryEngineInterface):
         # Append mode rebuilds the full document by reading back the previously
         # stored original_text and prepending it. With store_document_text
         # disabled there is no stored text to read, so the append would silently
-        # drop all prior content — reject it explicitly instead.
-        if not get_config().store_document_text:
-            for item in contents:
-                if item.get("update_mode") == "append":
-                    raise ValueError(
-                        "update_mode='append' is not supported when HINDSIGHT_API_STORE_DOCUMENT_TEXT "
-                        "is disabled: the prior document text is not stored and cannot be appended to. "
-                        "Use update_mode='replace' instead."
-                    )
+        # drop all prior content — reject it explicitly instead. Resolve the
+        # per-bank setting only when an append is actually requested.
+        if any(item.get("update_mode") == "append" for item in contents):
+            bank_cfg = await self._config_resolver.get_bank_config(bank_id, request_context)
+            if not bank_cfg.get("store_document_text", DEFAULT_STORE_DOCUMENT_TEXT):
+                raise ValueError(
+                    "update_mode='append' is not supported when document text storage "
+                    "(store_document_text / HINDSIGHT_API_STORE_DOCUMENT_TEXT) is disabled: the prior "
+                    "document text is not stored and cannot be appended to. Use update_mode='replace' instead."
+                )
 
         # Auto-chunk large batches by token count to avoid timeouts and memory issues
         # Calculate total token count
@@ -6343,6 +6375,28 @@ class MemoryEngine(MemoryEngineInterface):
 
                         # Delete entities (cascades to unit_entities, entity_cooccurrences, memory_links with entity_id)
                         await conn.execute(f"DELETE FROM {fq_table('entities')} WHERE bank_id = $1", bank_id)
+
+                        # Sweep extension-owned bank-scoped tables (audit receipts,
+                        # per-bank policy state, ...). These scope by bank_id without
+                        # a cascading FK to banks, so deleting the bank row below
+                        # would otherwise leave them as orphaned rows.
+                        extra_tables = self._tenant_extension.extra_bank_tables() if self._tenant_extension else []
+                        if extra_tables:
+                            from .schema import _is_oracle  # noqa: PLC0415
+
+                            for spec in extra_tables:
+                                if not spec.delete_with_bank:
+                                    continue
+                                qualified = fq_table(spec.name)
+                                # PG-only existence guard: a declared-but-unprovisioned
+                                # table must not abort the whole bank delete. (to_regclass
+                                # is PG syntax; extension bank tables are a PG feature.)
+                                if (
+                                    not _is_oracle()
+                                    and await conn.fetchval("SELECT to_regclass($1)", qualified) is None
+                                ):
+                                    continue
+                                await conn.execute(f"DELETE FROM {qualified} WHERE {spec.bank_id_column} = $1", bank_id)
 
                         result = {
                             "memory_units_deleted": units_count,
@@ -9327,7 +9381,7 @@ class MemoryEngine(MemoryEngineInterface):
         # With document text storage disabled there is no raw chunk text, so
         # fetching chunks would only attach empty strings to every recall
         # result. Force it off (pairs with excluding the expand tool below).
-        if not get_config().store_document_text:
+        if not config_dict.get("store_document_text", DEFAULT_STORE_DOCUMENT_TEXT):
             effective_recall_include_chunks = False
         effective_recall_max_tokens = (
             recall_max_tokens_override
@@ -9452,6 +9506,7 @@ class MemoryEngine(MemoryEngineInterface):
                         max_context_tokens=max_context_tokens,
                         llm_output_language=getattr(resolved_reflect_config, "llm_output_language", None),
                         cancel_check=request_context.raise_if_cancelled,
+                        store_document_text=config_dict.get("store_document_text", DEFAULT_STORE_DOCUMENT_TEXT),
                     ),
                     timeout=wall_timeout,
                 )
@@ -10761,6 +10816,26 @@ class MemoryEngine(MemoryEngineInterface):
         logger.info(f"[MENTAL_MODELS] Created pinned mental model '{name}' for bank {bank_id}")
         return self._row_to_mental_model(row)
 
+    async def _mental_model_refresh_cutoff(self, bank_id: str, mental_model_id: str) -> datetime | None:
+        """Database-time snapshot bounding a mental-model refresh.
+
+        Returns the DB's current timestamp scoped to the mental-model row (or
+        ``None`` if the row no longer exists — treated as "refresh nothing").
+        Reflect uses it as ``created_before`` so facts arriving mid-refresh stay
+        newer than the persisted watermark and a later refresh can still see
+        them. Kept as its own method so mock-based unit tests of the refresh
+        kwarg-wiring can stub it instead of reaching a real pool.
+        """
+        backend = await self._get_backend()
+        assert self._dialect is not None
+        async with acquire_with_retry(backend) as conn:
+            return await conn.fetchval(
+                f"SELECT {self._dialect.current_timestamp()} "
+                f"FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2",
+                bank_id,
+                mental_model_id,
+            )
+
     async def refresh_mental_model(
         self,
         bank_id: str,
@@ -10849,15 +10924,7 @@ class MemoryEngine(MemoryEngineInterface):
             # Bound this refresh to a database-time snapshot. Facts arriving while
             # reflect is running must remain newer than the persisted watermark so
             # a later refresh can still see them.
-            backend = await self._get_backend()
-            assert self._dialect is not None
-            async with acquire_with_retry(backend) as conn:
-                refresh_cutoff = await conn.fetchval(
-                    f"SELECT {self._dialect.current_timestamp()} "
-                    f"FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2",
-                    bank_id,
-                    mental_model_id,
-                )
+            refresh_cutoff = await self._mental_model_refresh_cutoff(bank_id, mental_model_id)
             if refresh_cutoff is None:
                 return None
 
