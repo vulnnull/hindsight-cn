@@ -6,6 +6,7 @@ authentication when a TenantExtension is configured.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -13,7 +14,24 @@ if TYPE_CHECKING:
     from hindsight_api.engine.memory_engine import BankLlmHealthInfo, Budget
     from hindsight_api.engine.response_models import RecallResult, ReflectResult
     from hindsight_api.engine.search.tags import TagsMatch
+    from hindsight_api.extensions import BankWriteOperation
     from hindsight_api.models import RequestContext
+
+
+@dataclass(frozen=True)
+class BankConfigState:
+    """Resolved bank configuration and its bank-level overrides."""
+
+    config: dict[str, Any]
+    overrides: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class BankTemplateImportWrite:
+    """One bank-write decision reserved for a specific imported resource."""
+
+    operation: "BankWriteOperation"
+    target: str | None = None
 
 
 class MemoryEngineInterface(ABC):
@@ -181,6 +199,37 @@ class MemoryEngineInterface(ABC):
         ...
 
     @abstractmethod
+    async def get_bank_config(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Return resolved configuration after authenticating and authorizing the read."""
+        ...
+
+    @abstractmethod
+    async def update_bank_config(
+        self,
+        bank_id: str,
+        updates: dict[str, Any],
+        *,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Create a bank if needed and persist validated configuration overrides."""
+        ...
+
+    @abstractmethod
+    async def reset_bank_config(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Remove all bank configuration overrides after authorization."""
+        ...
+
+    @abstractmethod
     async def update_bank_disposition(
         self,
         bank_id: str,
@@ -275,6 +324,7 @@ class MemoryEngineInterface(ABC):
         *,
         fact_type: str | None = None,
         search_query: str | None = None,
+        entity_id: str | None = None,
         created_before: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -287,6 +337,7 @@ class MemoryEngineInterface(ABC):
             bank_id: The memory bank ID.
             fact_type: Filter by fact type.
             search_query: Full-text search query.
+            entity_id: Filter to memory units linked to this entity ID.
             created_before: Keep units with ``created_at`` before this instant.
             limit: Maximum results.
             offset: Pagination offset.
@@ -598,6 +649,8 @@ class MemoryEngineInterface(ABC):
         *,
         name: str | None = None,
         mission: str | None = None,
+        config_updates: dict[str, Any] | None = None,
+        create_if_missing: bool = True,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
         """
@@ -607,6 +660,9 @@ class MemoryEngineInterface(ABC):
             bank_id: The memory bank ID.
             name: New bank name (optional).
             mission: New mission text (optional, replaces existing).
+            config_updates: Bank configuration overrides to apply with the profile update.
+            create_if_missing: Create a missing bank when True; otherwise raise
+                a 404 operation error.
             request_context: Request context for authentication.
 
         Returns:

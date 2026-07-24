@@ -3553,6 +3553,12 @@ export type RetainRequest = {
    * @deprecated
    */
   document_tags?: Array<string> | null;
+  /**
+   * Operation Id
+   *
+   * Optional client-supplied UUID used as the identity of an async retain operation. Re-submitting with the same operation_id returns the original operation and creates no new work, so retrying after a lost or timed-out acknowledgement will not enqueue a duplicate. Reusing an id that belongs to a different operation returns HTTP 409. Ignored for synchronous retain.
+   */
+  operation_id?: string | null;
 };
 
 /**
@@ -4363,6 +4369,10 @@ export type ListMemoriesData = {
      * Document Id
      */
     document_id?: string | null;
+    /**
+     * Entity Id
+     */
+    entity_id?: string | null;
     /**
      * Tags
      */

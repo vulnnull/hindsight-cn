@@ -396,7 +396,13 @@ async def _pre_resolve_phase1(
         if not skip_semantic_ann:
             fact_types = [fact.fact_type for fact in processed_facts]
             semantic_ann_links = await compute_semantic_links_ann(
-                resolve_conn, bank_id, placeholder_unit_ids, embeddings, fact_types=fact_types, log_buffer=log_buffer
+                resolve_conn,
+                bank_id,
+                placeholder_unit_ids,
+                embeddings,
+                fact_types=fact_types,
+                threshold=config.semantic_link_min_similarity,
+                log_buffer=log_buffer,
             )
 
     return Phase1Result(
@@ -515,6 +521,7 @@ async def _insert_facts_and_links(
                 bank_id,
                 unit_ids,
                 embeddings_for_links,
+                threshold=config.semantic_link_min_similarity,
                 pre_computed_ann_links=semantic_ann_links,
                 ops=ops,
             )
@@ -1117,6 +1124,7 @@ async def _run_final_semantic_ann(
     pool: Any,
     bank_id: str,
     unit_ids: list[str],
+    threshold: float,
     log_buffer: list[str],
 ) -> None:
     """
@@ -1195,6 +1203,7 @@ async def _run_final_semantic_ann(
                     chunk_embs,
                     fact_types=chunk_ftypes,
                     top_k=20,  # Recall uses at most 20 neighbors
+                    threshold=threshold,
                     log_buffer=log_buffer,
                 )
                 if ann_links:
@@ -1771,13 +1780,21 @@ async def _streaming_retain_batch(
                 if is_last and outbox_callback is not None:
                     outbox_fired[0] = True
 
-                # Best-effort: flush entity_cooccurrences and other deferred stats.
-                try:
-                    await entity_resolver.flush_pending_stats()
-                except Exception:
-                    logger.warning(
-                        f"Entity stats flush (consumer batch {consumer_batch_idx + 1}) failed", exc_info=True
-                    )
+            # Best-effort: flush entity_cooccurrences and other deferred stats.
+            #
+            # This MUST run after the `acquire_with_retry` block above has exited,
+            # not inside it: flush_pending_stats() acquires its own connection, and
+            # the write above is only committed when the enclosing acquire() block
+            # exits. On Oracle (oracledb does not autocommit — the backend commits
+            # on clean exit of acquire()) doing this inside the block deadlocks
+            # permanently: connection #2 waits on the row locks the still-open
+            # connection #1 holds on `entities`, while connection #1 cannot commit
+            # until this call returns. Oracle never reports ORA-00060 for it,
+            # because session #1 is blocked in Python rather than on the database.
+            try:
+                await entity_resolver.flush_pending_stats()
+            except Exception:
+                logger.warning(f"Entity stats flush (consumer batch {consumer_batch_idx + 1}) failed", exc_info=True)
 
             logger.info(
                 f"[streaming] Consumer batch {consumer_batch_idx + 1} total "
@@ -1974,7 +1991,13 @@ async def _streaming_retain_batch(
     if all_unit_ids and not pipeline_aborted[0]:
         ann_start = time.time()
         try:
-            await _run_final_semantic_ann(pool, bank_id, all_unit_ids, log_buffer)
+            await _run_final_semantic_ann(
+                pool,
+                bank_id,
+                all_unit_ids,
+                config.semantic_link_min_similarity,
+                log_buffer,
+            )
         except Exception:
             # ANN pass is best-effort. FK violations can occur if a concurrent
             # retain cascade-deleted our units between the batch commit and here.
@@ -2427,12 +2450,6 @@ async def _try_delta_retain(
                     ops=pool.ops,
                 )
 
-            # Flush deferred entity_cooccurrences stats (post-transaction, best-effort).
-            try:
-                await entity_resolver.flush_pending_stats()
-            except Exception:
-                logger.warning("Entity stats flush failed — retrieval unaffected", exc_info=True)
-
             total_time = time.time() - start_time
             log_buffer.append(f"{'=' * 60}")
             log_buffer.append(
@@ -2442,6 +2459,14 @@ async def _try_delta_retain(
             log_buffer.append(f"Document: {effective_doc_id}")
             log_buffer.append(f"{'=' * 60}")
             logger.info("\n" + "\n".join(log_buffer) + "\n")
+
+        # Flush deferred entity_cooccurrences stats (best-effort). Must run after
+        # the acquire() block above has exited — see the streaming path for why
+        # doing this while still holding the connection deadlocks on Oracle.
+        try:
+            await entity_resolver.flush_pending_stats()
+        except Exception:
+            logger.warning("Entity stats flush failed — retrieval unaffected", exc_info=True)
 
     if db_semaphore is not None:
         async with db_semaphore:

@@ -11,6 +11,7 @@ This implements a sophisticated memory architecture that combines:
 
 import asyncio
 import contextvars
+import copy
 import functools
 import inspect
 import json
@@ -18,13 +19,15 @@ import logging
 import sys
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, ParamSpec, TypeVar, cast, overload
 
 import asyncpg
 import httpx
+from pydantic import ValidationError
 
 from .._vector_index import ann_search_tuning_settings, configured_vector_extension
 from ..cancellation import OperationCancelledError
@@ -77,6 +80,26 @@ _current_schema: contextvars.ContextVar[str | None] = contextvars.ContextVar("cu
 # downstream provider calls can attribute spend per bank — e.g. tagging the OpenAI `user`
 # field for cost gateways. None outside a bank-scoped operation.
 _current_bank_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_bank_id", default=None)
+
+
+@dataclass
+class _BankTemplateImportAuthorizationState:
+    """Request-local import decisions consumed by the matching engine calls."""
+
+    engine: "MemoryEngine"
+    request_context: "RequestContext"
+    task: asyncio.Task[Any]
+    bank_id: str
+    requested_config_updates: dict[str, Any]
+    normalized_config_updates: dict[str, Any]
+    bank_write_remaining: dict["BankTemplateImportWrite", int]
+    mental_model_refresh_remaining: dict[str, int]
+    mental_model_get_remaining: dict[str, int]
+
+
+_bank_template_import_authorization: contextvars.ContextVar[_BankTemplateImportAuthorizationState | None] = (
+    contextvars.ContextVar("bank_template_import_authorization", default=None)
+)
 MENTAL_MODEL_PENDING_CONTENT = "Generating content..."
 
 
@@ -270,6 +293,15 @@ class UnqualifiedTableError(Exception):
     pass
 
 
+class RetainOperationConflictError(ValueError):
+    """Raised when a caller-supplied async retain operation_id is already in use.
+
+    The id resolves to an existing operation that is not this bank's own
+    batch_retain parent (a different bank, or a different operation type), so it
+    cannot be reused as an idempotency identity. Surfaced to callers as HTTP 409.
+    """
+
+
 class MentalModelRefreshError(Exception):
     """Raised when refresh_mental_model cannot produce new content.
 
@@ -337,10 +369,15 @@ def validate_sql_schema(sql: str) -> None:
 
 from .cross_encoder import CrossEncoderModel
 from .embeddings import Embeddings, create_embeddings_from_env
-from .interface import MemoryEngineInterface
+from .interface import BankConfigState, BankTemplateImportWrite, MemoryEngineInterface
 
 if TYPE_CHECKING:
-    from hindsight_api.extensions import OperationValidatorExtension, TenantExtension, ValidationResult
+    from hindsight_api.extensions import (
+        BankWriteOperation,
+        OperationValidatorExtension,
+        TenantExtension,
+        ValidationResult,
+    )
     from hindsight_api.models import RequestContext
 
     from .audit import AuditLogListResponse, AuditLogStatsResponse
@@ -760,7 +797,7 @@ def _recall_scoring_now(question_date: datetime | None) -> datetime:
 # Logger for memory system
 logger = logging.getLogger(__name__)
 
-from .db_utils import acquire_with_retry
+from .db_utils import acquire_with_retry, retry_with_backoff
 
 
 def _get_tiktoken_encoding():
@@ -817,6 +854,15 @@ class RefreshTagFiltering:
     tags: list[str] | None
     tags_match: TagsMatch
     tag_groups: list[TagGroup] | None
+
+
+@dataclass(frozen=True)
+class _MentalModelScopeFilter:
+    """SQL scope (tag + fact-type filter) shared by the staleness check and the
+    processed-watermark query, so both see an identical set of in-scope memories."""
+
+    where: list[str]
+    params: list[Any]
 
 
 def _resolve_refresh_tag_filtering(
@@ -6265,6 +6311,185 @@ class MemoryEngine(MemoryEngineInterface):
 
         return result
 
+    async def delete_memory_units(
+        self,
+        unit_ids: list[str],
+        *,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """Bulk delete memory units, keeping the same lifecycle as the single-id path.
+
+        Callers pass a list of ``unit_ids`` and this method runs the same steps
+        :meth:`delete_memory_unit` runs for one id, batched by bank:
+
+        1. Look up ``(bank_id, fact_type)`` for every id in one round-trip.
+        2. Group by bank so a caller that hands in ids spanning multiple banks
+           still gets the correct per-bank cascade + async submission (one
+           consolidation / graph_maintenance submission per bank, not per id).
+        3. For each bank whose ids include at least one ``experience`` /
+           ``world`` fact:
+             a. ``enqueue_relink_victims`` BEFORE the cascade — once the rows
+                are gone the join finding them returns nothing.
+             b. Chunked cascade DELETE against ``fq_table('memory_units')``.
+                Cascade handles ``unit_entities``, ``memory_links``, and the
+                observation history tables (see the baseline FK CASCADE
+                constraints in ``o1a2b3c4d5e6_oracle_baseline``).
+             c. ``_delete_stale_observations_for_memories`` sweeps the racing
+                observation-insert edge — same protection ``delete_memory_unit``
+                and ``delete_document`` already ship.
+        4. After the transaction commits, per touched bank:
+             - Invalidate the bank stats cache (counts staled by the delete).
+             - Submit ``async_consolidation`` if any observations were
+               invalidated AND the bank has auto-consolidation enabled.
+             - Submit ``async_graph_maintenance`` if any source facts were
+               removed — the deleted units' entities may now be orphans that
+               the bank-wide sweep should clean up.
+
+        Motivation: retention loops, LRU eviction, and bulk maintenance tools
+        need to remove memory units without open-coding the delete cascade
+        outside the engine — every caller that does that eventually drifts
+        away from the referential-integrity contract that ``delete_memory_unit``
+        already keeps. This is the plural companion so those callers stay
+        inside the same seam.
+
+        Args:
+            unit_ids: List of memory-unit UUIDs to delete. Empty list is a
+                no-op that returns zero counts.
+            request_context: Request context for authentication (tenant
+                resolution runs before any writes).
+
+        Returns:
+            Dict with:
+                - ``requested``: len of ``unit_ids`` as supplied
+                - ``deleted``: number of rows actually removed
+                - ``per_bank``: mapping of ``bank_id -> {deleted, invalidated_observations}``
+
+        Raises:
+            ValueError: if any id in ``unit_ids`` is not a well-formed UUID.
+        """
+        # Empty-list fast path — skip auth so callers can invoke without a
+        # tenant context resolved (matches ``delete_document`` / ``delete_bank``
+        # empty-input behaviour).
+        if not unit_ids:
+            return {"requested": 0, "deleted": 0, "per_bank": {}}
+
+        # Validate every UUID up-front so a bad id doesn't leak through and
+        # surface as an asyncpg InvalidTextRepresentationError mid-cascade.
+        validated_ids: list[str] = []
+        for raw in unit_ids:
+            try:
+                validated_ids.append(str(uuid.UUID(raw)))
+            except (ValueError, AttributeError, TypeError):
+                raise ValueError(f"Invalid unit_id: {raw!r} is not a valid UUID")
+
+        await self._authenticate_tenant(request_context)
+        backend = await self._get_backend()
+
+        per_bank: dict[str, dict[str, int]] = {}
+        # Banks whose deletes touched source facts — used to fan out
+        # graph_maintenance + consolidation after the transaction commits.
+        banks_with_source_deletes: set[str] = set()
+        banks_with_invalidated_obs: set[str] = set()
+        total_deleted = 0
+        CHUNK_SIZE = 10_000
+
+        async with acquire_with_retry(backend) as conn:
+            async with conn.transaction():
+                # Step 1 — resolve (bank_id, fact_type) for every id in one shot.
+                # Ids not found silently drop out of the batch (they might have
+                # been deleted between the caller's discovery query and this
+                # call; a missing id is not an error).
+                rows = await conn.fetch(
+                    f"SELECT id, bank_id, fact_type FROM {fq_table('memory_units')} WHERE id = ANY($1::uuid[])",
+                    validated_ids,
+                )
+
+                # Step 2 — group by bank.
+                by_bank: dict[str, list[str]] = {}
+                source_ids_by_bank: dict[str, list[str]] = {}
+                for row in rows:
+                    bid = row["bank_id"]
+                    by_bank.setdefault(bid, []).append(str(row["id"]))
+                    if row["fact_type"] in ("experience", "world"):
+                        source_ids_by_bank.setdefault(bid, []).append(str(row["id"]))
+
+                # Step 3 — per-bank cascade.
+                for bank_id, ids_for_bank in by_bank.items():
+                    source_ids = source_ids_by_bank.get(bank_id, [])
+
+                    # 3a. Capture relink victims BEFORE the cascade.
+                    if source_ids:
+                        from .graph_maintenance import enqueue_relink_victims
+
+                        await enqueue_relink_victims(conn, bank_id, source_ids, ops=backend.ops)
+
+                    # 3b. Chunked delete. Cascade handles unit_entities /
+                    # memory_links / observation history via FK.
+                    deleted_this_bank = 0
+                    for i in range(0, len(ids_for_bank), CHUNK_SIZE):
+                        chunk = ids_for_bank[i : i + CHUNK_SIZE]
+                        tag = await conn.execute(
+                            f"DELETE FROM {fq_table('memory_units')} WHERE id = ANY($1::uuid[])",
+                            chunk,
+                        )
+                        # asyncpg tag: "DELETE N"
+                        parts = tag.split()
+                        if len(parts) >= 2:
+                            try:
+                                deleted_this_bank += int(parts[-1])
+                            except ValueError:
+                                pass
+
+                    # 3c. Racing-observation sweep — only fires for banks
+                    # whose source facts were touched (observations reference
+                    # source_memory_ids).
+                    invalidated = 0
+                    if source_ids:
+                        invalidated = await self._delete_stale_observations_for_memories(conn, bank_id, source_ids)
+                        if invalidated > 0:
+                            banks_with_invalidated_obs.add(bank_id)
+
+                    if source_ids:
+                        banks_with_source_deletes.add(bank_id)
+
+                    per_bank[bank_id] = {
+                        "deleted": deleted_this_bank,
+                        "invalidated_observations": invalidated,
+                    }
+                    total_deleted += deleted_this_bank
+
+        # Step 4 — post-commit side effects, best-effort per bank.
+        current_schema = get_current_schema()
+        for bank_id, counts in per_bank.items():
+            if counts["deleted"] <= 0:
+                continue
+            try:
+                await self._bank_stats_cache.invalidate(current_schema, bank_id)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to invalidate bank stats cache after bulk memory deletion for bank {bank_id}: {e}"
+                )
+
+        for bank_id in banks_with_invalidated_obs:
+            try:
+                config = await self._config_resolver.resolve_full_config(bank_id, request_context)
+                if config.enable_auto_consolidation:
+                    await self.submit_async_consolidation(bank_id=bank_id, request_context=request_context)
+            except Exception as e:
+                logger.warning(f"Failed to submit consolidation after bulk memory deletion for bank {bank_id}: {e}")
+
+        for bank_id in banks_with_source_deletes:
+            try:
+                await self.submit_async_graph_maintenance(bank_id=bank_id, request_context=request_context)
+            except Exception as e:
+                logger.warning(f"Failed to submit graph maintenance after bulk memory deletion for bank {bank_id}: {e}")
+
+        return {
+            "requested": len(unit_ids),
+            "deleted": total_deleted,
+            "per_bank": per_bank,
+        }
+
     async def delete_bank(
         self,
         bank_id: str,
@@ -6416,11 +6641,16 @@ class MemoryEngine(MemoryEngineInterface):
                 except Exception as e:
                     raise Exception(f"Failed to delete agent data: {str(e)}")
 
-            # Drop per-bank vector indexes AFTER the transaction commits to avoid
-            # AccessExclusiveLock deadlocks with concurrent bank deletions.
-            # (DROP INDEX on memory_units conflicts with RowExclusiveLock from DELETE inside tx)
+            # Drop per-bank vector indexes AFTER the transaction commits: the
+            # drop runs CONCURRENTLY (see ops.drop_bank_vector_indexes), which
+            # cannot run inside a transaction block. retry_with_backoff absorbs
+            # the residual transient deadlock a concurrent index build/drop on
+            # the shared memory_units table can still trigger (sqlstate 40P01 /
+            # ORA-00060) so a delete is never lost to a transient lock cycle.
             if bank_internal_id:
-                await bank_utils.drop_bank_vector_indexes(conn, bank_internal_id, ops=self._backend.ops)
+                await retry_with_backoff(
+                    lambda: bank_utils.drop_bank_vector_indexes(conn, bank_internal_id, ops=self._backend.ops)
+                )
 
         # Drop any cached stats for this bank — counts have changed and the
         # TTL would otherwise serve pre-delete values for up to a minute.
@@ -6730,7 +6960,7 @@ class MemoryEngine(MemoryEngineInterface):
         - **Edit** (``text``/``context``/``occurred_start``/``occurred_end``/
           ``new_fact_type``/``entities``): correct what the LLM extracted.
           Re-embeds (text + dates + entities feed the embedding), drops derived
-          observations + links, and re-consolidates. For date/context fields,
+          observations + temporal/semantic links, and re-consolidates. For date/context fields,
           ``""`` clears to NULL and ``None`` leaves unchanged; ``new_fact_type``
           must be world/experience. ``entities`` (when not None) replaces the
           unit's entity set: names are resolved/find-or-created via the same
@@ -6742,9 +6972,19 @@ class MemoryEngine(MemoryEngineInterface):
         - **Invalidate** (``state='invalidated'``): move the row to the archive
           (cascade-pruning its links/entity associations and re-deriving dependent
           observations). The archive is cold storage, so the embedding is dropped
-          (only an entity-id snapshot travels with it).
+          (an entity-id snapshot and the causal-edge descriptors travel with it).
         - **Revert** (``state='valid'``): move the row back, restore its entity
-          associations, recompute its embedding, and re-consolidate.
+          associations and causal edges, recompute its embedding, and re-consolidate.
+
+        Causal edges (``caused_by`` and the historical ``causes``/``enables``/
+        ``prevents``) are retain-time extraction output that nothing recreates —
+        graph maintenance only rebuilds temporal/semantic links, and no curation
+        path re-runs the extractor. So curation preserves them (#2864): edits
+        leave them in place, and invalidate/revert round-trips them through the
+        archive's ``causal_links`` snapshot instead of losing them to the FK
+        cascade. Correcting a fact's text therefore keeps the causality the
+        extractor asserted for it — preserving the assertion is the reversible
+        choice; deleting it is not, since there is no path that could re-derive it.
 
         Only ``world``/``experience`` facts can be curated — observations are
         derived and regenerate from their sources. Returns the updated memory
@@ -6791,8 +7031,9 @@ class MemoryEngine(MemoryEngineInterface):
             await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
 
         backend = await self._get_backend()
+        from .causal_links import CAUSAL_LINK_TYPES
         from .graph_maintenance import enqueue_relink_victims
-        from .retain.link_utils import resolve_entities_only
+        from .retain.link_utils import rematerialize_causal_links, resolve_entities_only, snapshot_causal_links
 
         # Resolve the bank's entity-label taxonomy once when re-resolving entities,
         # so corrected entities are matched with the same rules retain uses.
@@ -6925,7 +7166,24 @@ class MemoryEngine(MemoryEngineInterface):
                     search_vector_clause = (
                         f",\n                            search_vector = {sv_expr}" if sv_expr else ""
                     )
-                    await enqueue_relink_victims(conn, bank_id, [memory_id], ops=backend.ops)
+                    # The DELETE below drops this unit's incident DERIVED edges (causal
+                    # ones are preserved, #2864), so the unit itself needs its outgoing
+                    # temporal/semantic adjacency rebuilt — not just the neighbours that
+                    # lost an edge to it. Skip that when this same call also invalidates
+                    # the unit (the block below archives it, and the drain no-ops on a
+                    # queue row with no live unit).
+                    #
+                    # Victims and the edited unit go in ONE insert: the queue insert
+                    # sorts its ids, so a single call keeps the (bank_id, unit_id) lock
+                    # order global. Two separate inserts can deadlock when concurrently
+                    # edited units point at each other.
+                    await enqueue_relink_victims(
+                        conn,
+                        bank_id,
+                        [memory_id],
+                        ops=backend.ops,
+                        include_affected_units=state != "invalidated",
+                    )
                     await conn.execute(
                         f"""
                         UPDATE {mu}
@@ -6945,7 +7203,18 @@ class MemoryEngine(MemoryEngineInterface):
                         new_event_date,
                         new_emb,
                     )
-                    await conn.execute(f"DELETE FROM {ml} WHERE from_unit_id = $1 OR to_unit_id = $1", str(memory_uuid))
+                    # Drop only the DERIVED edges — graph maintenance (submitted
+                    # below) recomputes temporal/semantic from the edited dates
+                    # and embedding. Causal edges are retain-time extraction
+                    # output that nothing recreates, so an edit preserves them
+                    # rather than silently destroying them (#2864); a corrected
+                    # fact keeps the causality the extractor asserted for it.
+                    await conn.execute(
+                        f"DELETE FROM {ml} WHERE (from_unit_id = $1 OR to_unit_id = $1) "
+                        f"AND NOT (link_type = ANY($2::text[]))",
+                        str(memory_uuid),
+                        list(CAUSAL_LINK_TYPES),
+                    )
                     await self._delete_stale_observations_for_memories(conn, bank_id, [memory_id])
                     need_consolidation = True
                     need_graph = True
@@ -6958,13 +7227,20 @@ class MemoryEngine(MemoryEngineInterface):
                     ]
                     # Capture relink victims BEFORE the row (and its links) disappear.
                     await enqueue_relink_victims(conn, bank_id, [memory_id], ops=backend.ops)
+                    # Same for the causal edges: temporal/semantic are recomputed
+                    # by graph maintenance on revert, but causal edges are
+                    # retain-time extraction output the cascade would destroy for
+                    # good. Park their descriptors on the archive row (#2864).
+                    causal_links = await snapshot_causal_links(conn, bank_id, str(memory_uuid))
                     await conn.execute(
-                        f"INSERT INTO {arch} ({arch_cols}, invalidation_reason, invalidated_at, entity_ids) "
-                        f"SELECT {arch_cols}, $2, now(), $3::uuid[] FROM {mu} WHERE id = $1 AND bank_id = $4",
+                        f"INSERT INTO {arch} ({arch_cols}, invalidation_reason, invalidated_at, entity_ids, "
+                        f"causal_links) "
+                        f"SELECT {arch_cols}, $2, now(), $3::uuid[], $5::jsonb FROM {mu} WHERE id = $1 AND bank_id = $4",
                         str(memory_uuid),
                         reason,
                         entity_ids,
                         bank_id,
+                        json.dumps([descriptor.as_json_dict() for descriptor in causal_links]),
                     )
                     # Cascade prunes unit_entities + memory_links; sweep runs after
                     # the delete so it also catches a racing observation insert.
@@ -6984,7 +7260,9 @@ class MemoryEngine(MemoryEngineInterface):
                 # --- Revert: move archive → live ---
                 elif state == "valid" and archived:
                     arch_row = await conn.fetchrow(
-                        f"SELECT entity_ids FROM {arch} WHERE id = $1 AND bank_id = $2", str(memory_uuid), bank_id
+                        f"SELECT entity_ids, causal_links FROM {arch} WHERE id = $1 AND bank_id = $2",
+                        str(memory_uuid),
+                        bank_id,
                     )
                     # The archive keeps neither embedding nor search_vector (see arch_cols
                     # above), so both default to NULL on the way back and are recomputed here:
@@ -7028,6 +7306,18 @@ class MemoryEngine(MemoryEngineInterface):
                             arch_row["entity_ids"],
                             bank_id,
                         )
+                    # Rematerialize the causal edges parked at invalidation time.
+                    # Edges whose peer is still archived (or was permanently
+                    # deleted) are skipped — the peer keeps its own copy of the
+                    # descriptor and recreates the edge when it reverts, so the
+                    # restore is order-independent and idempotent.
+                    if arch_row and arch_row["causal_links"]:
+                        await rematerialize_causal_links(
+                            conn,
+                            bank_id,
+                            conn.parse_json(arch_row["causal_links"]) or [],
+                            ops=backend.ops,
+                        )
                     # Recompute the embedding (the archive doesn't keep one) so the reverted
                     # unit is searchable again, using the now-current model's dimension and the
                     # restored entity set — mirroring how an edit re-embeds.
@@ -7057,6 +7347,25 @@ class MemoryEngine(MemoryEngineInterface):
                                 bank_id,
                                 new_emb,
                             )
+                    # Invalidation cascaded away every link incident to this unit. The
+                    # causal ones came back from the archive snapshot above (#2864); the
+                    # derived ones are graph maintenance's job, and it only rebuilds units
+                    # present in the queue — it never scans memory_units for missing
+                    # adjacency. Without this enqueue the submission below short-circuits
+                    # on an empty queue (no_work) and the reverted fact stays off the
+                    # temporal/semantic graph.
+                    # Enqueued last, so the row is fully searchable (text, entities,
+                    # search_vector, embedding) before the drain reads it, and atomic
+                    # with the archive→live move: a rollback takes the work item too.
+                    # Scope: this rebuilds the reverted unit's OUTGOING links. Units
+                    # that pointed at it were relinked elsewhere at invalidation time
+                    # and are not re-queued here.
+                    await backend.ops.enqueue_graph_maintenance(
+                        conn,
+                        fq_table("graph_maintenance_queue"),
+                        bank_id,
+                        [memory_uuid],
+                    )
                     await conn.execute(f"DELETE FROM {arch} WHERE id = $1 AND bank_id = $2", str(memory_uuid), bank_id)
                     need_consolidation = True
                     need_graph = True
@@ -7635,6 +7944,7 @@ class MemoryEngine(MemoryEngineInterface):
         consolidation_state: str | None = None,
         state: str | None = None,
         document_id: str | None = None,
+        entity_id: str | None = None,
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
         created_before: datetime | None = None,
@@ -7650,6 +7960,11 @@ class MemoryEngine(MemoryEngineInterface):
             fact_type: Filter by fact type (world, experience)
             search_query: Full-text search query (searches text and context fields)
             document_id: Optional filter to a single source document.
+            entity_id: Optional filter to memory units linked to this entity ID
+                (via the stored ``unit_entities`` links, not text/semantic match).
+                Note: entity links reference live memory units only, so combining
+                ``entity_id`` with ``state='invalidated'`` returns no results — the
+                archive carries no entity links.
             created_before: Keep only units ingested strictly before this instant
                 (``created_at < created_before``). An ingest-age filter for
                 retention / bulk-maintenance sweeps.
@@ -7685,6 +8000,11 @@ class MemoryEngine(MemoryEngineInterface):
             await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         if state is not None and state not in ("valid", "invalidated"):
             raise ValueError(f"Invalid state '{state}': expected 'valid' or 'invalidated'.")
+        if entity_id is not None:
+            try:
+                uuid.UUID(entity_id)
+            except ValueError:
+                raise ValueError(f"Invalid entity_id: '{entity_id}' is not a valid UUID")
         # Invalidated facts live in a separate archive table; pick the source
         # accordingly. Default (state is None) lists live facts.
         is_archived = state == "invalidated"
@@ -7710,6 +8030,17 @@ class MemoryEngine(MemoryEngineInterface):
                 param_count += 1
                 query_conditions.append(f"document_id = ${param_count}")
                 query_params.append(document_id)
+
+            if entity_id:
+                # Reverse lookup via the stored entity links. Entity links only
+                # reference live memory units, so this yields nothing against the
+                # invalidated archive (documented on the method). The
+                # idx_unit_entities_entity_unit index covers this subquery.
+                param_count += 1
+                query_conditions.append(
+                    f"id IN (SELECT unit_id FROM {fq_table('unit_entities')} WHERE entity_id = ${param_count}::uuid)"
+                )
+                query_params.append(entity_id)
 
             if search_query:
                 # Full-text search on text and context fields using ILIKE
@@ -8937,6 +9268,20 @@ class MemoryEngine(MemoryEngineInterface):
                 bank_id=bank_id, operation=BankReadOperation.GET_BANK_PROFILE, request_context=request_context
             )
             await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+        return await self._get_bank_profile_authenticated(
+            bank_id,
+            request_context=request_context,
+            create_if_missing=create_if_missing,
+        )
+
+    async def _get_bank_profile_authenticated(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+        create_if_missing: bool,
+    ) -> dict[str, Any] | None:
+        """Load a profile after the caller has authenticated and authorized its read."""
         backend = await self._get_backend()
         if not create_if_missing:
             existing = await bank_utils.get_bank_profile_if_exists(backend, bank_id)
@@ -9026,6 +9371,333 @@ class MemoryEngine(MemoryEngineInterface):
             await self._apply_default_bank_template(bank_id, request_context)
         return result.created
 
+    async def get_bank_config(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Return resolved bank configuration after read authorization."""
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext, BankReadOperation
+
+            context = BankReadContext(
+                bank_id=bank_id,
+                operation=BankReadOperation.GET_BANK_CONFIG,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_read(context))
+        return await self._get_bank_config_authenticated(bank_id, request_context)
+
+    async def update_bank_config(
+        self,
+        bank_id: str,
+        updates: dict[str, Any],
+        *,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Create a bank if needed and persist validated configuration overrides."""
+        await self._authenticate_tenant(request_context)
+        preauthorized_updates = self._consume_preauthorized_config_update(bank_id, updates, request_context)
+        if preauthorized_updates is not None:
+            await self._config_resolver._persist_bank_config(bank_id, preauthorized_updates)
+            return await self._get_bank_config_authenticated(bank_id, request_context)
+
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.UPDATE_BANK_CONFIG,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+        await self._update_bank_config_authenticated(
+            bank_id,
+            updates,
+            request_context=request_context,
+        )
+        return await self._get_bank_config_authenticated(bank_id, request_context)
+
+    async def reset_bank_config(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Remove all bank configuration overrides after authorization."""
+        await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            context = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.RESET_BANK_CONFIG,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(context))
+        await self._config_resolver.reset_bank_config(bank_id)
+        return await self._get_bank_config_authenticated(bank_id, request_context)
+
+    async def _get_bank_config_authenticated(
+        self,
+        bank_id: str,
+        request_context: "RequestContext",
+    ) -> BankConfigState:
+        """Load config after the caller has established tenant and operation access."""
+        config = await self._config_resolver.get_bank_config(bank_id, request_context)
+        overrides = await self._config_resolver._load_bank_config(bank_id)
+        return BankConfigState(config=config, overrides=overrides)
+
+    @asynccontextmanager
+    async def bank_template_import_authorization(
+        self,
+        bank_id: str,
+        *,
+        config_updates: dict[str, Any],
+        bank_writes: list[BankTemplateImportWrite],
+        mental_model_ids: list[str],
+        bank_exists: bool,
+        request_context: "RequestContext",
+    ) -> AsyncIterator[None]:
+        """Preauthorize an entire import, create the bank, and reuse each decision once.
+
+        Validators may reserve quota or make time-sensitive decisions, so the
+        subsequent engine calls consume these request-local decisions instead of
+        invoking the hooks a second time. The scope is installed only after bank
+        creation, keeping server-owned default-template work outside it.
+        """
+        await self._authenticate_tenant(request_context)
+        normalized_updates = (
+            await self._validate_bank_config_updates(
+                bank_id,
+                config_updates,
+                request_context=request_context,
+                bank_exists=bank_exists,
+            )
+            if config_updates
+            else {}
+        )
+
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+            from hindsight_api.extensions.operation_validator import MentalModelGetContext, MentalModelRefreshContext
+
+            for write in bank_writes:
+                context = BankWriteContext(
+                    bank_id=bank_id,
+                    operation=write.operation,
+                    request_context=request_context,
+                )
+                await self._validate_operation(self._operation_validator.validate_bank_write(context))
+
+            for mental_model_id in mental_model_ids:
+                refresh_context = MentalModelRefreshContext(
+                    bank_id=bank_id,
+                    mental_model_id=mental_model_id,
+                    request_context=request_context,
+                )
+                await self._validate_operation(self._operation_validator.validate_mental_model_refresh(refresh_context))
+                get_context = MentalModelGetContext(
+                    bank_id=bank_id,
+                    mental_model_id=mental_model_id,
+                    request_context=request_context,
+                )
+                await self._validate_operation(self._operation_validator.validate_mental_model_get(get_context))
+
+        if mental_model_ids:
+            self._raise_if_mental_model_refresh_unavailable()
+
+        # Create the bank only after every validation succeeds. Applying the default
+        # template before installing the scope prevents its operations from
+        # consuming permissions granted specifically for this import.
+        await self._ensure_bank_exists(bank_id, request_context)
+
+        bank_write_remaining: dict[BankTemplateImportWrite, int] = {}
+        for write in bank_writes:
+            bank_write_remaining[write] = bank_write_remaining.get(write, 0) + 1
+        refresh_remaining: dict[str, int] = {}
+        for mental_model_id in mental_model_ids:
+            refresh_remaining[mental_model_id] = refresh_remaining.get(mental_model_id, 0) + 1
+        task = asyncio.current_task()
+        assert task is not None
+        state = _BankTemplateImportAuthorizationState(
+            engine=self,
+            request_context=request_context,
+            task=task,
+            bank_id=bank_id,
+            requested_config_updates=copy.deepcopy(config_updates),
+            normalized_config_updates=normalized_updates,
+            bank_write_remaining=bank_write_remaining,
+            mental_model_refresh_remaining=dict(refresh_remaining),
+            mental_model_get_remaining=dict(refresh_remaining),
+        )
+        token = _bank_template_import_authorization.set(state)
+        try:
+            yield
+        finally:
+            _bank_template_import_authorization.reset(token)
+
+    def _consume_preauthorized_bank_write(
+        self,
+        bank_id: str,
+        operation: "BankWriteOperation",
+        request_context: "RequestContext",
+        *,
+        target: str | None = None,
+    ) -> bool:
+        """Consume the decision reserved for this operation and resource."""
+        state = self._get_bank_template_import_authorization_state(bank_id, request_context)
+        if state is None:
+            return False
+        write = BankTemplateImportWrite(operation=operation, target=target)
+        remaining = state.bank_write_remaining.get(write, 0)
+        if remaining <= 0:
+            raise RuntimeError(
+                f"Bank-template import write was not preauthorized or was already consumed: "
+                f"{operation.value} target={target!r}"
+            )
+        state.bank_write_remaining[write] = remaining - 1
+        return True
+
+    def _consume_preauthorized_mental_model_operation(
+        self,
+        bank_id: str,
+        mental_model_id: str,
+        *,
+        refresh: bool,
+        request_context: "RequestContext",
+    ) -> bool:
+        """Consume one matching mental-model refresh or get decision."""
+        state = self._get_bank_template_import_authorization_state(bank_id, request_context)
+        if state is None:
+            return False
+        remaining_by_id = state.mental_model_refresh_remaining if refresh else state.mental_model_get_remaining
+        remaining = remaining_by_id.get(mental_model_id, 0)
+        if remaining <= 0:
+            return False
+        remaining_by_id[mental_model_id] = remaining - 1
+        return True
+
+    def _consume_preauthorized_config_update(
+        self,
+        bank_id: str,
+        updates: dict[str, Any],
+        request_context: "RequestContext",
+    ) -> dict[str, Any] | None:
+        """Return prevalidated config when this is the authorized import write."""
+        state = self._get_bank_template_import_authorization_state(bank_id, request_context)
+        if state is None:
+            return None
+        if state.requested_config_updates != updates:
+            raise RuntimeError("Imported bank config changed after it was preauthorized")
+
+        from hindsight_api.extensions import BankWriteOperation
+
+        if not self._consume_preauthorized_bank_write(
+            bank_id,
+            BankWriteOperation.UPDATE_BANK_CONFIG,
+            request_context,
+        ):
+            raise RuntimeError("Imported bank config authorization scope disappeared")
+        return state.normalized_config_updates
+
+    def _get_bank_template_import_authorization_state(
+        self,
+        bank_id: str,
+        request_context: "RequestContext",
+    ) -> _BankTemplateImportAuthorizationState | None:
+        """Return the scope only to the task and objects that created it."""
+        state = _bank_template_import_authorization.get()
+        if (
+            state is None
+            or state.engine is not self
+            or state.request_context is not request_context
+            # Context variables propagate into child tasks. Requiring the
+            # originating task prevents a background task from spending the
+            # parent's mutable authorization counters.
+            or state.task is not asyncio.current_task()
+            or state.bank_id != bank_id
+        ):
+            return None
+        return state
+
+    async def _update_bank_config_authenticated(
+        self,
+        bank_id: str,
+        updates: dict[str, Any],
+        *,
+        request_context: "RequestContext",
+    ) -> None:
+        """Persist config after the caller has authenticated and authorized it."""
+        normalized_updates = await self._validate_bank_config_updates(
+            bank_id,
+            updates,
+            request_context=request_context,
+        )
+
+        # Validate before creating the bank so rejected updates do not leave behind
+        # an otherwise empty bank. Creation stays in the engine so every caller
+        # shares its lifecycle hooks.
+        await self._ensure_bank_exists(bank_id, request_context)
+        await self._config_resolver._persist_bank_config(bank_id, normalized_updates)
+
+    async def _validate_bank_config_updates(
+        self,
+        bank_id: str,
+        updates: dict[str, Any],
+        *,
+        request_context: "RequestContext",
+        bank_exists: bool | None = None,
+    ) -> dict[str, Any]:
+        """Validate and normalize config without creating a bank or persisting."""
+
+        # Keep API and MCP configuration updates consistent, including the
+        # endpoint-specific policy validation that existed before this method.
+        if "memory_defense" in updates and updates["memory_defense"] is not None:
+            from hindsight_api.extensions import OperationValidationError
+            from hindsight_api.extensions.memory_defense import parse_policy
+
+            try:
+                parse_policy(updates["memory_defense"])
+            except ValueError as exc:
+                raise OperationValidationError(f"invalid memory_defense policy: {exc}", status_code=422) from exc
+
+        if bank_exists is None:
+            backend = await self._get_backend()
+            bank_exists = bool(await bank_utils.get_bank_profile_if_exists(backend, bank_id))
+
+        projected_bank_overrides: dict[str, Any] | None = None
+        if not bank_exists:
+            from hindsight_api.api.http import load_default_bank_template_manifest
+
+            try:
+                default_manifest = load_default_bank_template_manifest()
+            except (ValueError, ValidationError):
+                default_manifest = None
+            default_updates = (
+                default_manifest.bank.get_config_updates() if default_manifest and default_manifest.bank else {}
+            )
+            if default_updates:
+                projected_bank_overrides = await self._config_resolver.validate_bank_config_updates(
+                    bank_id,
+                    default_updates,
+                    request_context,
+                    projected_bank_overrides={},
+                    # The default template is server-owned. Its values are
+                    # needed only as the base for validating the client update,
+                    # so client field permissions must not apply to them.
+                    check_permissions=False,
+                )
+
+        return await self._config_resolver.validate_bank_config_updates(
+            bank_id,
+            updates,
+            request_context,
+            projected_bank_overrides=projected_bank_overrides,
+        )
+
     async def _apply_default_bank_template(
         self,
         bank_id: str,
@@ -9038,23 +9710,14 @@ class MemoryEngine(MemoryEngineInterface):
         cannot wedge bank creation across all callers. Misconfiguration is
         still surfaced loudly via `logger.error`.
         """
-        from ..config import get_config
-
-        template_dict = get_config().default_bank_template
-        if not template_dict:
-            return
-
         # Lazy import to avoid a cycle (http.py imports memory_engine).
-        from pydantic import ValidationError
-
         from hindsight_api.api.http import (
-            BankTemplateManifest,
-            apply_bank_template_manifest,
-            validate_bank_template,
+            apply_default_bank_template_resources,
+            load_default_bank_template_manifest,
         )
 
         try:
-            manifest = BankTemplateManifest.model_validate(template_dict)
+            manifest = load_default_bank_template_manifest()
         except ValidationError as e:
             errors = [f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in e.errors()]
             logger.error(
@@ -9062,17 +9725,23 @@ class MemoryEngine(MemoryEngineInterface):
                 f"and will be ignored for bank '{bank_id}': {'; '.join(errors)}"
             )
             return
-
-        semantic_errors = validate_bank_template(manifest)
-        if semantic_errors:
+        except ValueError as e:
             logger.error(
                 "HINDSIGHT_API_DEFAULT_BANK_TEMPLATE failed semantic validation "
-                f"and will be ignored for bank '{bank_id}': {'; '.join(semantic_errors)}"
+                f"and will be ignored for bank '{bank_id}': {e}"
             )
+            return
+        if manifest is None:
             return
 
         try:
-            await apply_bank_template_manifest(
+            config_updates = manifest.bank.get_config_updates() if manifest.bank else {}
+            if config_updates:
+                # The bank was created before this server-owned hook runs, so
+                # bank creation and client UPDATE_BANK_CONFIG checks
+                # do not belong in this persistence step.
+                await self._config_resolver.update_bank_config(bank_id, config_updates, request_context)
+            await apply_default_bank_template_resources(
                 memory=self,
                 bank_id=bank_id,
                 manifest=manifest,
@@ -10610,12 +11279,18 @@ class MemoryEngine(MemoryEngineInterface):
         if self._operation_validator:
             from hindsight_api.extensions.operation_validator import MentalModelGetContext
 
-            ctx = MentalModelGetContext(
-                bank_id=bank_id,
-                mental_model_id=mental_model_id,
+            if not self._consume_preauthorized_mental_model_operation(
+                bank_id,
+                mental_model_id,
+                refresh=False,
                 request_context=request_context,
-            )
-            await self._validate_operation(self._operation_validator.validate_mental_model_get(ctx))
+            ):
+                ctx = MentalModelGetContext(
+                    bank_id=bank_id,
+                    mental_model_id=mental_model_id,
+                    request_context=request_context,
+                )
+                await self._validate_operation(self._operation_validator.validate_mental_model_get(ctx))
 
         backend = await self._get_backend()
 
@@ -10742,10 +11417,16 @@ class MemoryEngine(MemoryEngineInterface):
         if self._operation_validator:
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
 
-            ctx = BankWriteContext(
-                bank_id=bank_id, operation=BankWriteOperation.CREATE_MENTAL_MODEL, request_context=request_context
-            )
-            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+            if not self._consume_preauthorized_bank_write(
+                bank_id,
+                BankWriteOperation.CREATE_MENTAL_MODEL,
+                request_context,
+                target=mental_model_id,
+            ):
+                ctx = BankWriteContext(
+                    bank_id=bank_id, operation=BankWriteOperation.CREATE_MENTAL_MODEL, request_context=request_context
+                )
+                await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
 
         # Generate embedding for the content
@@ -10836,6 +11517,43 @@ class MemoryEngine(MemoryEngineInterface):
                 mental_model_id,
             )
 
+    async def _mental_model_processed_watermark(
+        self,
+        bank_id: str,
+        mental_model_id: str,
+        scope_filter: "_MentalModelScopeFilter",
+        refresh_cutoff: datetime,
+    ) -> datetime | None:
+        """Watermark to persist after a refresh: the newest in-scope memory visible at
+        the snapshot, clamped so it never regresses below the current ``last_refreshed_at``.
+
+        A still-uncommitted straddling row is excluded from this max, so when it commits
+        it stays newer than the watermark and is caught next time. Returns ``None`` when
+        no in-scope memory is visible (leave ``last_refreshed_at`` untouched, so an
+        in-flight first row is not skipped). Kept as its own method — like
+        ``_mental_model_refresh_cutoff`` — so mock unit tests of the refresh wiring can
+        stub it instead of reaching a real pool.
+        """
+        backend = await self._get_backend()
+        assert self._dialect is not None
+        watermark_params = [*scope_filter.params, refresh_cutoff]
+        watermark_where = [*scope_filter.where, f"updated_at <= ${len(watermark_params)}"]
+        async with acquire_with_retry(backend) as conn:
+            current_last_refreshed_at = await conn.fetchval(
+                f"SELECT last_refreshed_at FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2",
+                bank_id,
+                mental_model_id,
+            )
+            newest_in_scope = await conn.fetchval(
+                f"SELECT MAX(updated_at) FROM {fq_table('memory_units')} WHERE {' AND '.join(watermark_where)}",
+                *watermark_params,
+            )
+        if newest_in_scope is None:
+            return None
+        if current_last_refreshed_at is not None:
+            return max(newest_in_scope, current_last_refreshed_at)
+        return newest_in_scope
+
     async def refresh_mental_model(
         self,
         bank_id: str,
@@ -10921,12 +11639,22 @@ class MemoryEngine(MemoryEngineInterface):
 
             tag_filtering = _resolve_refresh_tag_filtering(mental_model.get("tags"), trigger_data)
 
-            # Bound this refresh to a database-time snapshot. Facts arriving while
-            # reflect is running must remain newer than the persisted watermark so
-            # a later refresh can still see them.
+            # Bound this refresh to a database-time snapshot. Reflect only reads facts
+            # committed at/before this cutoff (``created_before`` below), so a fact
+            # arriving while reflect runs stays unseen this round.
             refresh_cutoff = await self._mental_model_refresh_cutoff(bank_id, mental_model_id)
             if refresh_cutoff is None:
                 return None
+            # Persist the watermark as the newest in-scope memory actually visible at the
+            # snapshot — NOT now(). now() can sit ahead of the real data: updated_at is the
+            # writing transaction's start time, but a row only becomes visible at COMMIT,
+            # which can land after this snapshot. Anchoring to the newest row we saw means
+            # such a straddling commit stays newer than the watermark and is caught next
+            # time, instead of being stamped "already processed" and dropped forever.
+            scope_filter = self._build_mm_scope_filter(bank_id, tag_filtering, fact_types)
+            processed_watermark = await self._mental_model_processed_watermark(
+                bank_id, mental_model_id, scope_filter, refresh_cutoff
+            )
 
             # Run reflect with the source query, excluding the mental model being refreshed
             # Skip creating a nested "hindsight.reflect" span since we already have "hindsight.mental_model_refresh"
@@ -11097,7 +11825,7 @@ class MemoryEngine(MemoryEngineInterface):
                             mental_model_id,
                             reflect_response=reflect_response_payload,
                             last_refreshed_source_query=current_source_query,
-                            refresh_watermark=refresh_cutoff,
+                            refresh_watermark=processed_watermark,
                             request_context=request_context,
                         )
 
@@ -11205,7 +11933,7 @@ class MemoryEngine(MemoryEngineInterface):
                 content=final_content,
                 reflect_response=reflect_response_payload,
                 last_refreshed_source_query=current_source_query,
-                refresh_watermark=refresh_cutoff,
+                refresh_watermark=processed_watermark,
                 structured_content=(final_structured.model_dump() if final_structured is not None else None),
                 request_context=request_context,
             )
@@ -11239,7 +11967,13 @@ class MemoryEngine(MemoryEngineInterface):
             tags: New tags (if changing)
             trigger: New trigger settings (if changing)
             reflect_response: Full reflect API response payload (if changing)
-            refresh_watermark: Snapshot cutoff consumed by a successful refresh
+            refresh_watermark: Watermark persisted by a successful refresh — the newest
+                ``updated_at`` among the in-scope memories visible at the refresh
+                snapshot (not ``now()``), so a row that commits after the snapshot stays
+                newer than the watermark and is not silently dropped. None means "no
+                in-scope memory was visible": on the no-op path ``last_refreshed_at`` is
+                left unchanged (so an in-flight row is not skipped); on the content path
+                it falls back to NOW().
             request_context: Request context for authentication
 
         Returns:
@@ -11249,10 +11983,16 @@ class MemoryEngine(MemoryEngineInterface):
         if self._operation_validator:
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
 
-            ctx = BankWriteContext(
-                bank_id=bank_id, operation=BankWriteOperation.UPDATE_MENTAL_MODEL, request_context=request_context
-            )
-            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+            if not self._consume_preauthorized_bank_write(
+                bank_id,
+                BankWriteOperation.UPDATE_MENTAL_MODEL,
+                request_context,
+                target=mental_model_id,
+            ):
+                ctx = BankWriteContext(
+                    bank_id=bank_id, operation=BankWriteOperation.UPDATE_MENTAL_MODEL, request_context=request_context
+                )
+                await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
 
         async with acquire_with_retry(backend) as conn:
@@ -11318,9 +12058,11 @@ class MemoryEngine(MemoryEngineInterface):
                     params.append(str(embedding[0]))
                     param_idx += 1
             elif refresh_watermark is not None:
-                # A successful delta refresh can find no topic-relevant facts even
-                # though the coarse staleness query found new rows. Consume that
-                # window without re-embedding unchanged content or adding history.
+                # A successful delta refresh can find no topic-relevant facts even though
+                # the coarse staleness query found new rows. Advance the watermark to the
+                # newest in-scope memory we saw (without re-embedding unchanged content or
+                # adding history) so this no-op window stops re-triggering, while any row
+                # that commits later stays newer than the watermark and is still caught.
                 updates.append(f"last_refreshed_at = ${param_idx}")
                 params.append(refresh_watermark)
                 param_idx += 1
@@ -11518,6 +12260,46 @@ class MemoryEngine(MemoryEngineInterface):
 
         return result == "DELETE 1"
 
+    def _build_mm_scope_filter(
+        self,
+        bank_id: str,
+        tag_filtering: RefreshTagFiltering,
+        fact_types: list[str] | None,
+    ) -> _MentalModelScopeFilter:
+        """Build the tag + fact-type WHERE clause for a mental model's memory scope.
+
+        Deliberately excludes any ``updated_at`` bound so both callers add their own:
+        the staleness check appends ``updated_at > last_refreshed_at``; the refresh
+        appends ``updated_at <= cutoff`` under ``MAX(updated_at)``. ``bank_id`` is
+        ``$1``; the caller appends its extra param last and references it by index.
+        """
+        params: list[Any] = [bank_id]
+        where = ["bank_id = $1"]
+
+        tag_clause, tag_params, next_param = build_tags_where_clause(
+            tag_filtering.tags,
+            param_offset=len(params) + 1,
+            match=tag_filtering.tags_match,
+        )
+        if tag_clause:
+            where.append(tag_clause.removeprefix("AND "))
+            params.extend(tag_params)
+
+        group_clause, group_params, _ = build_tag_groups_where_clause(
+            tag_filtering.tag_groups,
+            param_offset=next_param,
+        )
+        if group_clause:
+            where.append(group_clause.removeprefix("AND "))
+            params.extend(group_params)
+        # Untagged MM without tag_groups → no tag constraint, matching any bank memory.
+
+        if fact_types:
+            params.append(list(fact_types))
+            where.append(f"fact_type = ANY(${len(params)}::text[])")
+
+        return _MentalModelScopeFilter(where=where, params=params)
+
     async def compute_mental_model_is_stale(
         self,
         conn,
@@ -11563,30 +12345,9 @@ class MemoryEngine(MemoryEngineInterface):
         fact_types: list[str] = list(trigger.get("fact_types") or [])
         tag_filtering = _resolve_refresh_tag_filtering(mm_tags, trigger)
 
-        params: list[Any] = [bank_id, last_refreshed_at]
-        where = ["bank_id = $1", "updated_at > $2"]
-
-        tag_clause, tag_params, next_param = build_tags_where_clause(
-            tag_filtering.tags,
-            param_offset=len(params) + 1,
-            match=tag_filtering.tags_match,
-        )
-        if tag_clause:
-            where.append(tag_clause.removeprefix("AND "))
-            params.extend(tag_params)
-
-        group_clause, group_params, _ = build_tag_groups_where_clause(
-            tag_filtering.tag_groups,
-            param_offset=next_param,
-        )
-        if group_clause:
-            where.append(group_clause.removeprefix("AND "))
-            params.extend(group_params)
-        # Untagged MM without tag_groups → no tag constraint, matching any bank memory.
-
-        if fact_types:
-            params.append(fact_types)
-            where.append(f"fact_type = ANY(${len(params)}::text[])")
+        scope_filter = self._build_mm_scope_filter(bank_id, tag_filtering, fact_types)
+        params = [*scope_filter.params, last_refreshed_at]
+        where = [*scope_filter.where, f"updated_at > ${len(params)}"]
 
         row = await conn.fetchrow(
             f"SELECT 1 FROM {fq_table('memory_units')} WHERE {' AND '.join(where)} LIMIT 1",
@@ -11817,10 +12578,16 @@ class MemoryEngine(MemoryEngineInterface):
         if self._operation_validator:
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
 
-            ctx = BankWriteContext(
-                bank_id=bank_id, operation=BankWriteOperation.CREATE_DIRECTIVE, request_context=request_context
-            )
-            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+            if not self._consume_preauthorized_bank_write(
+                bank_id,
+                BankWriteOperation.CREATE_DIRECTIVE,
+                request_context,
+                target=name,
+            ):
+                ctx = BankWriteContext(
+                    bank_id=bank_id, operation=BankWriteOperation.CREATE_DIRECTIVE, request_context=request_context
+                )
+                await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
 
         async with acquire_with_retry(backend) as conn:
@@ -11873,10 +12640,16 @@ class MemoryEngine(MemoryEngineInterface):
         if self._operation_validator:
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
 
-            ctx = BankWriteContext(
-                bank_id=bank_id, operation=BankWriteOperation.UPDATE_DIRECTIVE, request_context=request_context
-            )
-            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+            if not self._consume_preauthorized_bank_write(
+                bank_id,
+                BankWriteOperation.UPDATE_DIRECTIVE,
+                request_context,
+                target=name,
+            ):
+                ctx = BankWriteContext(
+                    bank_id=bank_id, operation=BankWriteOperation.UPDATE_DIRECTIVE, request_context=request_context
+                )
+                await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
 
         # Build update query dynamically
@@ -12411,44 +13184,116 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         name: str | None = None,
         mission: str | None = None,
+        config_updates: dict[str, Any] | None = None,
+        create_if_missing: bool = True,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
-        """Update bank name and/or mission."""
+        """Update bank profile and configuration with one tenant authentication."""
         await self._authenticate_tenant(request_context)
-        if self._operation_validator:
+
+        backend = None
+        if not create_if_missing:
+            if self._operation_validator:
+                from hindsight_api.extensions import BankReadContext, BankReadOperation
+
+                ctx = BankReadContext(
+                    bank_id=bank_id,
+                    operation=BankReadOperation.GET_BANK_PROFILE,
+                    request_context=request_context,
+                )
+                await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+            backend = await self._get_backend()
+            async with acquire_with_retry(backend) as conn:
+                exists = await conn.fetchval(f"SELECT 1 FROM {fq_table('banks')} WHERE bank_id = $1", bank_id)
+            if exists is None:
+                from hindsight_api.extensions import OperationValidationError
+
+                raise OperationValidationError(f"Bank '{bank_id}' not found", status_code=404)
+
+        if self._operation_validator and (name is not None or mission is not None):
             from hindsight_api.extensions import BankWriteContext, BankWriteOperation
 
             ctx = BankWriteContext(
                 bank_id=bank_id, operation=BankWriteOperation.UPDATE_BANK, request_context=request_context
             )
             await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
-        backend = await self._get_backend()
 
-        async with acquire_with_retry(backend) as conn:
-            if name is not None:
+        if self._operation_validator and config_updates:
+            from hindsight_api.extensions import BankWriteContext, BankWriteOperation
+
+            ctx = BankWriteContext(
+                bank_id=bank_id,
+                operation=BankWriteOperation.UPDATE_BANK_CONFIG,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
+
+        normalized_config_updates = None
+        if config_updates:
+            normalized_config_updates = await self._validate_bank_config_updates(
+                bank_id,
+                config_updates,
+                request_context=request_context,
+                bank_exists=True if not create_if_missing else None,
+            )
+
+        if self._operation_validator and create_if_missing:
+            from hindsight_api.extensions import BankReadContext, BankReadOperation
+
+            ctx = BankReadContext(
+                bank_id=bank_id,
+                operation=BankReadOperation.GET_BANK_PROFILE,
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+
+        # All validation is complete before any creation or write. PATCH-style
+        # callers skip creation so a concurrent delete cannot resurrect the bank.
+        if create_if_missing:
+            await self._ensure_bank_exists(bank_id, request_context)
+
+        if normalized_config_updates is not None:
+            try:
+                await self._config_resolver._persist_bank_config(bank_id, normalized_config_updates)
+            except ValueError:
+                # Update-only callers verified the bank above, so the row can only
+                # be gone if it was deleted concurrently. Surface that as the same
+                # 404 the final profile read below would produce, not a 400.
+                if create_if_missing:
+                    raise
+                from hindsight_api.extensions import OperationValidationError
+
+                raise OperationValidationError(f"Bank '{bank_id}' not found", status_code=404) from None
+
+        if backend is None:
+            backend = await self._get_backend()
+
+        if name is not None or mission is not None:
+            async with acquire_with_retry(backend) as conn:
                 await conn.execute(
                     f"""
                     UPDATE {fq_table("banks")}
-                    SET name = $2, updated_at = NOW()
+                    SET name = COALESCE($2, name),
+                        mission = COALESCE($3, mission),
+                        updated_at = NOW()
                     WHERE bank_id = $1
                     """,
                     bank_id,
                     name,
-                )
-
-            if mission is not None:
-                await conn.execute(
-                    f"""
-                    UPDATE {fq_table("banks")}
-                    SET mission = $2, updated_at = NOW()
-                    WHERE bank_id = $1
-                    """,
-                    bank_id,
                     mission,
                 )
+        profile = await self._get_bank_profile_authenticated(
+            bank_id,
+            request_context=request_context,
+            create_if_missing=False,
+        )
+        if profile is None:
+            if not create_if_missing:
+                from hindsight_api.extensions import OperationValidationError
 
-        # Return updated profile
-        return await self.get_bank_profile(bank_id, request_context=request_context)
+                raise OperationValidationError(f"Bank '{bank_id}' not found", status_code=404)
+            raise RuntimeError(f"Bank '{bank_id}' was not found after updating it")
+        return profile
 
     # =========================================================================
     # Webhook configuration methods
@@ -12839,6 +13684,35 @@ class MemoryEngine(MemoryEngineInterface):
             "operation_id": str(operation_id),
         }
 
+    async def _resolve_retain_replay(self, operation_id: uuid.UUID, bank_id: str) -> dict[str, Any] | None:
+        """Resolve a caller-supplied async retain operation_id to a prior submission.
+
+        Returns the replay response when the id is this bank's own batch_retain
+        parent (a retried submission after a lost acknowledgement — no new work),
+        ``None`` when the id is unused (free to create), and raises
+        RetainOperationConflictError when the id is already used by a different
+        bank or a different operation type.
+        """
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT bank_id, operation_type, result_metadata
+                FROM {fq_table("async_operations")}
+                WHERE operation_id = $1
+                """,
+                operation_id,
+            )
+        if row is None:
+            return None
+        if row["bank_id"] != bank_id or row["operation_type"] != "batch_retain":
+            raise RetainOperationConflictError(f"operation_id {operation_id} is already in use")
+        metadata = row["result_metadata"]
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata)
+        items_count = int(metadata.get("items_count", 0)) if metadata else 0
+        return {"operation_id": str(operation_id), "items_count": items_count}
+
     async def submit_async_retain(
         self,
         bank_id: str,
@@ -12847,15 +13721,24 @@ class MemoryEngine(MemoryEngineInterface):
         request_context: "RequestContext",
         document_tags: list[str] | None = None,
         strategy: str | None = None,
+        operation_id: str | None = None,
     ) -> dict[str, Any]:
         """Submit a batch retain operation to run asynchronously.
 
         For large batches (exceeding retain_batch_chars threshold), automatically splits
         into smaller sub-batches and creates a parent operation that tracks all children.
+
+        ``operation_id`` is an optional caller-supplied UUID used as the parent
+        operation identity. Re-submitting with the same id returns the original
+        operation and creates no new work, so a client that retries after a lost
+        acknowledgement does not enqueue a duplicate. The parent primary key is
+        the concurrency authority; no extra bookkeeping columns are needed.
         """
         await self._authenticate_tenant(request_context)
 
-        # Run operation validator (bank access, credits, etc.) before queuing
+        # Run operation validator (bank access, credits, etc.) before queuing.
+        # This runs on every retry too, so a replay cannot bypass access/credit
+        # checks even though it performs no ingestion work.
         if self._operation_validator:
             from hindsight_api.extensions import RetainContext
 
@@ -12867,6 +13750,24 @@ class MemoryEngine(MemoryEngineInterface):
             result = await self._validate_operation(self._operation_validator.validate_retain(ctx))
             if result and result.contents is not None:
                 contents = result.contents
+
+        # Idempotency fast path: a caller-supplied id that already resolves to a
+        # prior submission is a retried request — return the original operation.
+        #
+        # This read is deliberately NOT in the creation transaction below. The
+        # parent primary key — not this SELECT — is the concurrency authority:
+        # two concurrent first submissions both pass this check (neither has
+        # committed), then collide on the INSERT, and the loser is recovered by
+        # the unique-violation backstop. Coupling the read into the transaction
+        # would add nothing under READ COMMITTED (the snapshot still wouldn't see
+        # the other session's uncommitted row); real mutual exclusion would need
+        # SERIALIZABLE or a row lock, both heavier for no benefit. So this stays a
+        # cheap short-circuit for the common sequential-retry case.
+        client_operation_id: uuid.UUID | None = uuid.UUID(operation_id) if operation_id is not None else None
+        if client_operation_id is not None:
+            replay = await self._resolve_retain_replay(client_operation_id, bank_id)
+            if replay is not None:
+                return replay
 
         # Validate no duplicate document_ids in the batch
         # Having duplicate document_ids causes race conditions in document upserts during parallel processing
@@ -12910,10 +13811,9 @@ class MemoryEngine(MemoryEngineInterface):
                     f"max={max(sub_batch_sizes)}, total={sum(sub_batch_sizes)})"
                 )
 
-        # Always create parent operation (even for single batch - simpler, more reliable code path)
-        import uuid
-
-        parent_operation_id = uuid.uuid4()
+        # Always create parent operation (even for single batch - simpler, more reliable code path).
+        # A caller-supplied id becomes the parent id so retries are idempotent.
+        parent_operation_id = client_operation_id if client_operation_id is not None else uuid.uuid4()
         backend = await self._get_backend()
 
         # Create typed metadata for parent operation
@@ -12948,74 +13848,89 @@ class MemoryEngine(MemoryEngineInterface):
         # defer them all uniformly for clarity.
         deferred_child_payloads: list[dict[str, Any]] = []
 
-        async with acquire_with_retry(backend) as conn:
-            async with conn.transaction():
-                # async_operations.bank_id has a FK to banks. Create the bank
-                # lazily inside this same transaction so it is atomic with the
-                # parent + child operation rows.
-                created = await self._ensure_bank_exists(
-                    bank_id,
-                    request_context,
-                    conn=conn,
-                )
-                await conn.execute(
-                    f"""
-                    INSERT INTO {fq_table("async_operations")} (operation_id, bank_id, operation_type, result_metadata, status)
-                    VALUES ($1, $2, $3, $4, $5)
-                    """,
-                    parent_operation_id,
-                    bank_id,
-                    "batch_retain",
-                    json.dumps(parent_metadata.to_dict()),
-                    "pending",  # Will be updated by status aggregation
-                )
-
-                for i, sub_batch in enumerate(sub_batches, 1):
-                    if len(sub_batches) > 1:
-                        sub_batch_tokens = sum(count_tokens(item.get("content", "")) for item in sub_batch)
-                        logger.info(
-                            f"Submitting child {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_tokens:,} tokens"
-                        )
-
-                    task_payload: dict[str, Any] = {"contents": sub_batch}
-                    if document_tags:
-                        task_payload["document_tags"] = document_tags
-                    if strategy:
-                        task_payload["strategy"] = strategy
-                    # Pass tenant_id and api_key_id through task payload
-                    if request_context.tenant_id:
-                        task_payload["_tenant_id"] = request_context.tenant_id
-                    if request_context.api_key_id:
-                        task_payload["_api_key_id"] = request_context.api_key_id
-
-                    child_metadata = BatchRetainChildMetadata(
-                        items_count=len(sub_batch),
-                        parent_operation_id=str(parent_operation_id),
-                        sub_batch_index=i,
-                        total_sub_batches=len(sub_batches),
+        try:
+            async with acquire_with_retry(backend) as conn:
+                async with conn.transaction():
+                    # async_operations.bank_id has a FK to banks. Create the bank
+                    # lazily inside this same transaction so it is atomic with the
+                    # parent + child operation rows.
+                    created = await self._ensure_bank_exists(
+                        bank_id,
+                        request_context,
+                        conn=conn,
                     )
-
-                    child_operation_id = uuid.uuid4()
-                    full_payload = {
-                        "type": "batch_retain",
-                        "operation_id": str(child_operation_id),
-                        "bank_id": bank_id,
-                        **task_payload,
-                    }
-
                     await conn.execute(
                         f"""
-                        INSERT INTO {fq_table("async_operations")} (operation_id, bank_id, operation_type, result_metadata, status, task_payload)
-                        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                        INSERT INTO {fq_table("async_operations")} (operation_id, bank_id, operation_type, result_metadata, status)
+                        VALUES ($1, $2, $3, $4, $5)
                         """,
-                        child_operation_id,
+                        parent_operation_id,
                         bank_id,
-                        "retain",
-                        json.dumps(child_metadata.to_dict(), default=_json_default),
-                        "pending",
-                        json.dumps(full_payload, default=_json_default),
+                        "batch_retain",
+                        json.dumps(parent_metadata.to_dict()),
+                        "pending",  # Will be updated by status aggregation
                     )
-                    deferred_child_payloads.append(full_payload)
+
+                    for i, sub_batch in enumerate(sub_batches, 1):
+                        if len(sub_batches) > 1:
+                            sub_batch_tokens = sum(count_tokens(item.get("content", "")) for item in sub_batch)
+                            logger.info(
+                                f"Submitting child {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_tokens:,} tokens"
+                            )
+
+                        task_payload: dict[str, Any] = {"contents": sub_batch}
+                        if document_tags:
+                            task_payload["document_tags"] = document_tags
+                        if strategy:
+                            task_payload["strategy"] = strategy
+                        # Pass tenant_id and api_key_id through task payload
+                        if request_context.tenant_id:
+                            task_payload["_tenant_id"] = request_context.tenant_id
+                        if request_context.api_key_id:
+                            task_payload["_api_key_id"] = request_context.api_key_id
+
+                        child_metadata = BatchRetainChildMetadata(
+                            items_count=len(sub_batch),
+                            parent_operation_id=str(parent_operation_id),
+                            sub_batch_index=i,
+                            total_sub_batches=len(sub_batches),
+                        )
+
+                        child_operation_id = uuid.uuid4()
+                        full_payload = {
+                            "type": "batch_retain",
+                            "operation_id": str(child_operation_id),
+                            "bank_id": bank_id,
+                            **task_payload,
+                        }
+
+                        await conn.execute(
+                            f"""
+                            INSERT INTO {fq_table("async_operations")} (operation_id, bank_id, operation_type, result_metadata, status, task_payload)
+                            VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                            """,
+                            child_operation_id,
+                            bank_id,
+                            "retain",
+                            json.dumps(child_metadata.to_dict(), default=_json_default),
+                            "pending",
+                            json.dumps(full_payload, default=_json_default),
+                        )
+                        deferred_child_payloads.append(full_payload)
+        except Exception as e:
+            # Concurrency backstop: a caller-supplied id that lost the parent
+            # primary-key race against a simultaneous first submission of the
+            # same id must resolve to the winner's operation, not a 500. Only
+            # a unique violation on our id qualifies; anything else propagates.
+            is_unique_violation = isinstance(
+                e, asyncpg.exceptions.UniqueViolationError
+            ) or _is_oracledb_integrity_error(e)
+            if client_operation_id is None or not is_unique_violation:
+                raise
+            replay = await self._resolve_retain_replay(client_operation_id, bank_id)
+            if replay is not None:
+                return replay
+            raise
 
         # Best-effort default-template hook runs after the bank-create commits.
         if created:
@@ -13277,14 +14192,7 @@ class MemoryEngine(MemoryEngineInterface):
         Returns:
             Dict with operation_id
         """
-        # Block mental model refresh when LLM provider is "none"
-        if self._llm_config.provider == "none":
-            from .providers.none_llm import LLMNotAvailableError
-
-            raise LLMNotAvailableError(
-                "Mental model refresh requires an LLM provider. Current provider is set to 'none'. "
-                "Set HINDSIGHT_API_LLM_PROVIDER to a real provider (e.g., openai, anthropic, gemini)."
-            )
+        self._raise_if_mental_model_refresh_unavailable()
 
         await self._authenticate_tenant(request_context)
 
@@ -13292,12 +14200,18 @@ class MemoryEngine(MemoryEngineInterface):
         if self._operation_validator:
             from hindsight_api.extensions.operation_validator import MentalModelRefreshContext
 
-            ctx = MentalModelRefreshContext(
-                bank_id=bank_id,
-                mental_model_id=mental_model_id,
+            if not self._consume_preauthorized_mental_model_operation(
+                bank_id,
+                mental_model_id,
+                refresh=True,
                 request_context=request_context,
-            )
-            await self._validate_operation(self._operation_validator.validate_mental_model_refresh(ctx))
+            ):
+                ctx = MentalModelRefreshContext(
+                    bank_id=bank_id,
+                    mental_model_id=mental_model_id,
+                    request_context=request_context,
+                )
+                await self._validate_operation(self._operation_validator.validate_mental_model_refresh(ctx))
 
         # Verify mental model exists
         mental_model = await self.get_mental_model(bank_id, mental_model_id, request_context=request_context)
@@ -13321,4 +14235,16 @@ class MemoryEngine(MemoryEngineInterface):
             task_payload=task_payload,
             result_metadata={"mental_model_id": mental_model_id, "name": mental_model["name"]},
             dedupe_by_bank=False,
+        )
+
+    def _raise_if_mental_model_refresh_unavailable(self) -> None:
+        """Reject refresh work before callers make any dependent writes."""
+        if self._llm_config.provider != "none":
+            return
+
+        from .providers.none_llm import LLMNotAvailableError
+
+        raise LLMNotAvailableError(
+            "Mental model refresh requires an LLM provider. Current provider is set to 'none'. "
+            "Set HINDSIGHT_API_LLM_PROVIDER to a real provider (e.g., openai, anthropic, gemini)."
         )

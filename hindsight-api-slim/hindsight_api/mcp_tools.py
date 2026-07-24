@@ -1235,20 +1235,16 @@ def _register_create_bank(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsCo
         """
         try:
             request_context = _get_request_context(config)
-            # create_bank may auto-create the bank; validate that explicit
-            # creation permission before reading the resulting profile.
-            await memory._ensure_bank_exists(bank_id, request_context)
-            profile = await memory.get_bank_profile(bank_id, request_context=request_context)
-
-            # Update name/mission if provided
             if name is not None or mission is not None:
-                await memory.update_bank(
+                profile = await memory.update_bank(
                     bank_id,
                     name=name,
                     mission=mission,
                     request_context=request_context,
                 )
-                # Fetch updated profile
+            else:
+                # The public profile API owns bank creation and its lifecycle
+                # validation when no profile fields need updating.
                 profile = await memory.get_bank_profile(bank_id, request_context=request_context)
 
             # Serialize disposition if it's a Pydantic model
@@ -3290,28 +3286,21 @@ async def _do_update_bank(
     Args:
         name: Display name (stored in banks table).
         mission: Deprecated alias for reflect_mission — mapped into config_updates.
-        config_updates: Arbitrary config overrides passed to config_resolver.update_bank_config().
+        config_updates: Arbitrary config overrides passed to MemoryEngine.update_bank_config().
             Supports all configurable fields (retain_mission, disposition_*, etc.).
             The config resolver validates keys and rejects non-configurable/credential fields.
     """
-    # Update display name via engine (stored in DB banks table)
-    if name is not None:
-        await memory.update_bank(
-            target_bank,
-            name=name,
-            request_context=request_context,
-        )
-
     # Merge deprecated mission alias into config_updates as reflect_mission
     effective_config: dict[str, Any] = dict(config_updates) if config_updates else {}
     if mission is not None and "reflect_mission" not in effective_config:
         effective_config["reflect_mission"] = mission
 
-    if effective_config:
-        await memory._config_resolver.update_bank_config(target_bank, effective_config, request_context)
-
-    # Return updated profile
-    return await memory.get_bank_profile(target_bank, request_context=request_context)
+    return await memory.update_bank(
+        target_bank,
+        name=name,
+        config_updates=effective_config or None,
+        request_context=request_context,
+    )
 
 
 def _register_update_bank(mcp: FastMCP, memory: MemoryEngine, config: MCPToolsConfig) -> None:
