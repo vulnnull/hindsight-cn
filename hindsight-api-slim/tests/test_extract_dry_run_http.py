@@ -78,6 +78,25 @@ async def test_dry_run_extracts_without_persisting(api_client, memory):
 
 
 @pytest.mark.asyncio
+async def test_dry_run_honors_free_form_entities_override(api_client, memory):
+    bank_id = f"dryrun-{uuid.uuid4().hex[:8]}"
+    await memory.get_bank_profile(bank_id=bank_id, request_context=RequestContext())
+
+    resp = await api_client.post(
+        f"/v1/default/banks/{bank_id}/memories/dry-run-extract",
+        json={
+            "content": "Alice moved to Berlin in 2021 and works as a nurse.",
+            "entities_allow_free_form": True,
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    entities = [entity for fact in resp.json()["facts"] for entity in fact["entities"]]
+    assert entities
+    assert all(isinstance(entity, str) for entity in entities)
+
+
+@pytest.mark.asyncio
 async def test_dry_run_does_not_create_missing_bank(api_client, memory):
     bank_id = f"dryrun-missing-{uuid.uuid4().hex[:8]}"
     request_context = RequestContext()

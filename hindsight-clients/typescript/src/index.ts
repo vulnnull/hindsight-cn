@@ -123,6 +123,24 @@ export interface MemoryItemInput {
   update_mode?: "replace" | "append";
 }
 
+/**
+ * Warn when a caller-supplied operationId will be silently ignored.
+ *
+ * operationId only enables idempotent retries for asynchronous retain; on a
+ * synchronous request it is dropped before reaching the API, so surface the
+ * likely mistake instead of failing silently.
+ */
+function warnIfOperationIdDropped(
+  async: boolean | undefined,
+  operationId: string | null | undefined
+): void {
+  if (operationId != null && async !== true) {
+    console.warn(
+      "operationId is ignored for synchronous retain; pass async: true to enable idempotent retries."
+    );
+  }
+}
+
 export class HindsightClient {
   private client: Client;
 
@@ -192,6 +210,8 @@ export class HindsightClient {
       metadata?: Record<string, string>;
       documentId?: string;
       async?: boolean;
+      /** Optional caller-supplied UUID for idempotent async retries */
+      operationId?: string;
       entities?: EntityInput[];
       /** Optional list of tags for this memory */
       tags?: string[];
@@ -204,6 +224,7 @@ export class HindsightClient {
       signal?: AbortSignal;
     }
   ): Promise<RetainResponse> {
+    warnIfOperationIdDropped(options?.async, options?.operationId);
     return this.retainBatch(
       bankId,
       [
@@ -220,7 +241,13 @@ export class HindsightClient {
           strategy: options?.strategy,
         },
       ],
-      { async: options?.async, signal: options?.signal }
+      {
+        async: options?.async,
+        signal: options?.signal,
+        ...(options?.async === true && options.operationId != null
+          ? { operationId: options.operationId }
+          : {}),
+      }
     );
   }
 
@@ -234,9 +261,12 @@ export class HindsightClient {
       documentId?: string;
       documentTags?: string[];
       async?: boolean;
+      /** Optional caller-supplied UUID for idempotent async retries */
+      operationId?: string;
       signal?: AbortSignal;
     }
   ): Promise<RetainResponse> {
+    warnIfOperationIdDropped(options?.async, options?.operationId);
     const processedItems = items.map((item) => ({
       content: item.content,
       context: item.context,
@@ -263,6 +293,9 @@ export class HindsightClient {
         items: itemsWithDocId,
         document_tags: options?.documentTags,
         async: options?.async,
+        ...(options?.async === true && options.operationId != null
+          ? { operation_id: options.operationId }
+          : {}),
       },
       signal: options?.signal,
     });

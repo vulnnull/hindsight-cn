@@ -7,6 +7,7 @@ easy-to-use interface on top of the auto-generated OpenAPI client.
 
 import asyncio
 import json
+import warnings
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
@@ -58,6 +59,20 @@ def _run_async(coro):
         asyncio.set_event_loop(loop)
 
     return loop.run_until_complete(coro)
+
+
+def _warn_if_operation_id_dropped(retain_async: bool, operation_id: str | None) -> None:
+    """Warn when a caller-supplied operation_id will be silently ignored.
+
+    operation_id only enables idempotent retries for asynchronous retain; on a
+    synchronous request it is dropped before reaching the API, so surface the
+    likely mistake instead of failing silently.
+    """
+    if operation_id is not None and not retain_async:
+        warnings.warn(
+            "operation_id is ignored for synchronous retain; pass retain_async=True to enable idempotent retries.",
+            stacklevel=3,
+        )
 
 
 class Hindsight:
@@ -283,6 +298,7 @@ class Hindsight:
         tags: list[str] | None = None,
         update_mode: str | None = None,
         retain_async: bool = False,
+        operation_id: str | None = None,
     ) -> RetainResponse:
         """
         Store a single memory (sync wrapper — prefer :meth:`aretain` in async code).
@@ -298,6 +314,7 @@ class Hindsight:
             tags: Optional list of tags for filtering memories during recall/reflect
             update_mode: How to handle existing documents ('replace' or 'append')
             retain_async: If True, process asynchronously in background (default: False)
+            operation_id: Optional caller-supplied UUID for idempotent async retries; ignored by sync retain
 
         Returns:
             RetainResponse with success status
@@ -312,12 +329,16 @@ class Hindsight:
         }
         if update_mode is not None:
             item["update_mode"] = update_mode
-        return self.retain_batch(
-            bank_id=bank_id,
-            items=[item],
-            document_id=document_id,
-            retain_async=retain_async,
-        )
+        batch_kwargs: dict[str, Any] = {
+            "bank_id": bank_id,
+            "items": [item],
+            "document_id": document_id,
+            "retain_async": retain_async,
+        }
+        _warn_if_operation_id_dropped(retain_async, operation_id)
+        if retain_async and operation_id is not None:
+            batch_kwargs["operation_id"] = operation_id
+        return self.retain_batch(**batch_kwargs)
 
     def retain_batch(
         self,
@@ -326,6 +347,7 @@ class Hindsight:
         document_id: str | None = None,
         document_tags: list[str] | None = None,
         retain_async: bool = False,
+        operation_id: str | None = None,
     ) -> RetainResponse:
         """
         Store multiple memories in batch (sync wrapper — prefer :meth:`aretain_batch` in async code).
@@ -338,19 +360,22 @@ class Hindsight:
             document_id: Optional document ID for grouping memories (applied to items that don't have their own)
             document_tags: Optional list of tags applied to all items in this batch (merged with per-item tags)
             retain_async: If True, process asynchronously in background (default: False)
+            operation_id: Optional caller-supplied UUID for idempotent async retries; ignored by sync retain
 
         Returns:
             RetainResponse with success status and item count
         """
-        return _run_async(
-            self.aretain_batch(
-                bank_id=bank_id,
-                items=items,
-                document_id=document_id,
-                document_tags=document_tags,
-                retain_async=retain_async,
-            )
-        )
+        batch_kwargs: dict[str, Any] = {
+            "bank_id": bank_id,
+            "items": items,
+            "document_id": document_id,
+            "document_tags": document_tags,
+            "retain_async": retain_async,
+        }
+        _warn_if_operation_id_dropped(retain_async, operation_id)
+        if retain_async and operation_id is not None:
+            batch_kwargs["operation_id"] = operation_id
+        return _run_async(self.aretain_batch(**batch_kwargs))
 
     def retain_files(
         self,
@@ -781,6 +806,7 @@ class Hindsight:
         document_id: str | None = None,
         document_tags: list[str] | None = None,
         retain_async: bool = False,
+        operation_id: str | None = None,
     ) -> RetainResponse:
         """
         Store multiple memories in batch (async — preferred over :meth:`retain_batch`).
@@ -793,6 +819,7 @@ class Hindsight:
             document_id: Optional document ID for grouping memories (applied to items that don't have their own)
             document_tags: Optional list of tags applied to all items in this batch (merged with per-item tags)
             retain_async: If True, process asynchronously in background (default: False)
+            operation_id: Optional caller-supplied UUID for idempotent async retries; ignored by sync retain
 
         Returns:
             RetainResponse with success status and item count
@@ -827,11 +854,15 @@ class Hindsight:
                 )
             )
 
-        request_obj = retain_request.RetainRequest(
-            items=memory_items,
-            var_async=retain_async,
-            document_tags=document_tags,
-        )
+        request_kwargs: dict[str, Any] = {
+            "items": memory_items,
+            "var_async": retain_async,
+            "document_tags": document_tags,
+        }
+        _warn_if_operation_id_dropped(retain_async, operation_id)
+        if retain_async and operation_id is not None:
+            request_kwargs["operation_id"] = operation_id
+        request_obj = retain_request.RetainRequest(**request_kwargs)
 
         return await self._memory_api.retain_memories(bank_id, request_obj, _request_timeout=self._timeout)
 
@@ -847,6 +878,7 @@ class Hindsight:
         tags: list[str] | None = None,
         update_mode: str | None = None,
         retain_async: bool = False,
+        operation_id: str | None = None,
     ) -> RetainResponse:
         """
         Store a single memory (async — preferred over :meth:`retain`).
@@ -862,6 +894,7 @@ class Hindsight:
             tags: Optional list of tags for filtering memories during recall/reflect
             update_mode: How to handle existing documents ('replace' or 'append')
             retain_async: If True, process asynchronously in background (default: False)
+            operation_id: Optional caller-supplied UUID for idempotent async retries; ignored by sync retain
 
         Returns:
             RetainResponse with success status
@@ -876,12 +909,16 @@ class Hindsight:
         }
         if update_mode is not None:
             item["update_mode"] = update_mode
-        return await self.aretain_batch(
-            bank_id=bank_id,
-            items=[item],
-            document_id=document_id,
-            retain_async=retain_async,
-        )
+        batch_kwargs: dict[str, Any] = {
+            "bank_id": bank_id,
+            "items": [item],
+            "document_id": document_id,
+            "retain_async": retain_async,
+        }
+        _warn_if_operation_id_dropped(retain_async, operation_id)
+        if retain_async and operation_id is not None:
+            batch_kwargs["operation_id"] = operation_id
+        return await self.aretain_batch(**batch_kwargs)
 
     async def arecall(
         self,

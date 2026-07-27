@@ -464,6 +464,20 @@ openclaw config get plugins.entries.hindsight-openclaw.config.llmProvider
 If you used `--ref-source env`, double-check that the referenced env var
 (e.g. `OPENAI_API_KEY`) is exported in the shell that runs `openclaw gateway`.
 
+## Limitations
+
+### `memory-wiki` bridge mode is not supported
+
+`hindsight-openclaw` does not export OpenClaw `publicArtifacts`, so OpenClaw's
+`memory-wiki` **bridge mode** (`vaultMode: "bridge"`) is not supported. With the
+Hindsight plugin active, `openclaw wiki bridge import` imports `0` artifacts and
+`openclaw wiki status` warns that the active memory plugin isn't exporting any
+public memory artifacts.
+
+This applies only to the wiki bridge. Hindsight's own memory works normally —
+retain / recall / reflect, shared banks, and the external-API setup above are all
+unaffected.
+
 ### Verify it's working
 
 Check gateway logs for memory operations:

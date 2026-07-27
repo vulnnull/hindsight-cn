@@ -7929,7 +7929,7 @@ class MemoryEngine(MemoryEngineInterface):
                 fact_type=fact.fact_type,
                 occurred_start=fact.occurred_start,
                 occurred_end=fact.occurred_end,
-                entities=[e.text for e in (fact.entities or []) if getattr(e, "text", None)],
+                entities=list(fact.entities or []),
             )
             for fact in facts
         ]
