@@ -18,7 +18,10 @@ Each subscribes to Hindsight's webhook API (`POST /webhooks`) and is removed on 
 
 - **Retain Completed** — `retain.completed`
 - **Consolidation Completed** — `consolidation.completed`
-- **Memory Defense Triggered** — `memory_defense.triggered`
+
+> `memory_defense.triggered` is supported by the API but intentionally not exposed as a public
+> Zapier trigger: Memory Defense is a gated capability, so a public trigger for it can't satisfy
+> Zapier's "one live run" review checks for orgs that don't have it enabled.
 
 The **Bank** field on every action/trigger is a dynamic dropdown populated from `GET /v1/default/banks` (you can also type a new bank id — banks are created on first use).
 

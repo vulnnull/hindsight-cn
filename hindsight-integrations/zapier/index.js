@@ -10,7 +10,10 @@ const reflect = require("./searches/reflect");
 const bankList = require("./triggers/banks");
 const retainCompleted = require("./triggers/retainCompleted");
 const consolidationCompleted = require("./triggers/consolidationCompleted");
-const memoryDefenseTriggered = require("./triggers/memoryDefenseTriggered");
+// NOTE: memory_defense.triggered is intentionally NOT exposed. Memory Defense is
+// a gated capability (the `sensitive_data` detector returns 400
+// "detectors_not_entitled" for orgs without it), so a public trigger for it can
+// never satisfy Zapier's T001/S002 "one live run" checks for un-entitled users.
 
 const App = {
   version: require("./package.json").version,
@@ -30,7 +33,6 @@ const App = {
     [bankList.key]: bankList,
     [retainCompleted.key]: retainCompleted,
     [consolidationCompleted.key]: consolidationCompleted,
-    [memoryDefenseTriggered.key]: memoryDefenseTriggered,
   },
 
   creates: {

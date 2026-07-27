@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -79,11 +79,45 @@ export default function BankPage() {
   const view = (searchParams.get("view") || "profile") as NavItem;
   const subTab = (searchParams.get("subTab") || "world") as DataSubTab;
   const bankConfigTab = (searchParams.get("bankConfigTab") || "general") as BankConfigTab;
-  const observationsEnabled = features?.observations ?? false;
   const bankConfigEnabled = features?.bank_config_api ?? false;
-  const auditLogEnabled = features?.audit_log ?? false;
   const llmTraceEnabled = features?.llm_trace ?? false;
   const llmHealthEnabled = features?.bank_llm_health ?? false;
+
+  // `audit_log_enabled` and `enable_observations` are hierarchical
+  // (env -> tenant -> bank): a bank can opt in even when the deployment default
+  // is off. The /version feature flags only report the global default, so gate
+  // these tabs on the bank's *resolved* config instead. Fall back to the global
+  // flag when the bank config API is disabled (per-bank overrides can't exist
+  // then) or the field is unavailable.
+  const [bankAuditLogEnabled, setBankAuditLogEnabled] = useState<boolean | null>(null);
+  const [bankObservationsEnabled, setBankObservationsEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!bankId || !bankConfigEnabled) {
+      setBankAuditLogEnabled(null);
+      setBankObservationsEnabled(null);
+      return;
+    }
+    let cancelled = false;
+    client
+      .getBankConfig(bankId)
+      .then((r) => {
+        if (cancelled) return;
+        const audit = r.config?.audit_log_enabled;
+        const observations = r.config?.enable_observations;
+        setBankAuditLogEnabled(typeof audit === "boolean" ? audit : null);
+        setBankObservationsEnabled(typeof observations === "boolean" ? observations : null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBankAuditLogEnabled(null);
+        setBankObservationsEnabled(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bankId, bankConfigEnabled]);
+  const auditLogEnabled = bankAuditLogEnabled ?? features?.audit_log ?? false;
+  const observationsEnabled = bankObservationsEnabled ?? features?.observations ?? false;
 
   // Bank actions state
   const [showLlmHealthDialog, setShowLlmHealthDialog] = useState(false);
