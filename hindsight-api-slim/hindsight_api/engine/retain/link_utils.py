@@ -7,7 +7,6 @@ import time
 from datetime import UTC, datetime, timedelta
 
 from ..._vector_index import ann_search_tuning_settings, configured_vector_extension
-from ...config import DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY
 from ..causal_links import (
     CANONICAL_CAUSAL_LINK_TYPES,
     CAUSAL_LINK_TYPES,
@@ -527,7 +526,8 @@ async def compute_semantic_links_ann(
     embeddings: list[list[float]],
     fact_types: list[str] | None = None,
     top_k: int = 50,
-    threshold: float = DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
+    *,
+    threshold: float,
     log_buffer: list[str] = None,
 ) -> list[tuple]:
     """
@@ -668,7 +668,8 @@ def compute_semantic_links_within_batch(
     unit_ids: list[str],
     embeddings: list[list[float]],
     top_k: int = 50,
-    threshold: float = DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
+    *,
+    threshold: float,
 ) -> list[tuple]:
     """
     Compute semantic links between units within the same batch (no DB needed).
@@ -728,7 +729,8 @@ async def create_semantic_links_batch(
     unit_ids: list[str],
     embeddings: list[list[float]],
     top_k: int = 50,
-    threshold: float = DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
+    *,
+    threshold: float,
     log_buffer: list[str] = None,
     pre_computed_ann_links: list[tuple] | None = None,
     ops=None,
@@ -763,7 +765,12 @@ async def create_semantic_links_batch(
 
         # Within-batch similarities (numpy, no DB)
         batch_start = time_mod.time()
-        within_batch_links = compute_semantic_links_within_batch(unit_ids, embeddings, top_k, threshold)
+        within_batch_links = compute_semantic_links_within_batch(
+            unit_ids,
+            embeddings,
+            top_k,
+            threshold=threshold,
+        )
         all_links.extend(within_batch_links)
         _log(
             log_buffer,

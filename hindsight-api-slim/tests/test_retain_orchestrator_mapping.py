@@ -286,8 +286,8 @@ class TestSemanticLinkThresholdPropagation:
         assert captured_thresholds == [0.82]
 
     @pytest.mark.asyncio
-    async def test_link_creation_passes_threshold_to_within_batch_path(self, monkeypatch):
-        """The Phase 2 wrapper must not fall back to link_utils' default threshold."""
+    async def test_link_creation_forwards_threshold_to_link_utils(self, monkeypatch):
+        """The Phase 2 wrapper forwards the resolved threshold to link_utils."""
         captured_thresholds: list[float] = []
 
         async def fake_create_semantic_links_batch(*_args, **kwargs):
@@ -326,6 +326,12 @@ class TestSemanticLinkThresholdPropagation:
         monkeypatch.setattr(orchestrator, "acquire_with_retry", fake_acquire_with_retry)
         monkeypatch.setattr(link_utils, "compute_semantic_links_ann", fake_compute_semantic_links_ann)
 
-        await _run_final_semantic_ann(pool, "bank", ["unit"], 0.84, [])
+        await _run_final_semantic_ann(
+            pool,
+            "bank",
+            ["unit"],
+            threshold=0.84,
+            log_buffer=[],
+        )
 
         assert captured_thresholds == [0.84]

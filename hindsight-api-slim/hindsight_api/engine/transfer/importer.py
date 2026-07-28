@@ -633,6 +633,23 @@ async def _import_one_document(
                     ops=ops,
                 )
 
+            # Restore the source consolidation lifecycle. A whole-bank transfer
+            # preserves exact eligibility: a fact that was consolidated (or that
+            # failed consolidation) in the source is never re-consolidated on the
+            # target, so the maintenance reconciler sees no phantom backlog and
+            # observations are not re-derived. Archives predating these fields
+            # carry None for all three -> skipped here, leaving the
+            # observation-driven marking in _import_observations as the only
+            # (lossy) signal, exactly as before.
+            if result_unit_ids:
+                await _restore_fact_lifecycle(
+                    conn,
+                    bank_id,
+                    document.facts,
+                    retained_index_by_original,
+                    result_unit_ids[0],
+                )
+
     # Best-effort, and only after the acquire() block above has exited: this
     # takes its own connection, and on Oracle the write above is not committed
     # until that block exits, so flushing while still holding the connection
@@ -651,6 +668,51 @@ async def _import_one_document(
             original_index
             for original_index, retained_index in enumerate(retained_index_by_original)
             if retained_index is not None
+        ],
+    )
+
+
+async def _restore_fact_lifecycle(
+    conn: Any,
+    bank_id: str,
+    facts: list[TransferFact],
+    retained_index_by_original: list[int | None],
+    retained_unit_ids: list[str],
+) -> None:
+    """Apply each imported fact's source consolidation timestamps to its new row.
+
+    ``retained_unit_ids`` follows the retained fact order; ``retained_index_by_original[i]``
+    maps original fact ``i`` to its position there (or ``None`` if it was dropped
+    on insert, e.g. a duplicate). ``created_at`` restores source provenance only
+    when present (mirroring the document-row handling); ``consolidated_at`` /
+    ``consolidation_failed_at`` are set verbatim — a source-``NULL`` (unconsolidated)
+    fact stays eligible, which is correct.
+    """
+    rows: list[tuple[uuid.UUID, datetime | None, datetime | None, datetime | None]] = []
+    for original_index, fact in enumerate(facts):
+        retained_index = retained_index_by_original[original_index]
+        if retained_index is None:
+            continue
+        if fact.created_at is None and fact.consolidated_at is None and fact.consolidation_failed_at is None:
+            # Legacy archive without lifecycle fields — nothing to restore.
+            continue
+        rows.append(
+            (
+                uuid.UUID(retained_unit_ids[retained_index]),
+                fact.created_at,
+                fact.consolidated_at,
+                fact.consolidation_failed_at,
+            )
+        )
+    if not rows:
+        return
+    await conn.executemany(
+        f"UPDATE {fq_table('memory_units')} "
+        f"SET created_at = COALESCE($2, created_at), consolidated_at = $3, consolidation_failed_at = $4 "
+        f"WHERE id = $1 AND bank_id = $5",
+        [
+            (unit_id, created_at, consolidated_at, failed_at, bank_id)
+            for unit_id, created_at, consolidated_at, failed_at in rows
         ],
     )
 
@@ -736,10 +798,13 @@ async def _import_observations(
                 all_source_ids.update(source_uuids)
                 await _link_observation_sources(conn, ops, bank_id, observation_uuid, source_uuids, obs.proof_count)
 
-            # Mark source facts consolidated so the target consolidator skips them.
+            # Mark source facts consolidated so the target consolidator skips
+            # them. COALESCE keeps the exact source timestamp already restored by
+            # _restore_fact_lifecycle (new archives); now() is the fallback only
+            # for legacy archives that carry no per-fact lifecycle state.
             if all_source_ids:
                 await conn.execute(
-                    f"UPDATE {fq_table('memory_units')} SET consolidated_at = now() "
+                    f"UPDATE {fq_table('memory_units')} SET consolidated_at = COALESCE(consolidated_at, now()) "
                     f"WHERE bank_id = $1 AND id = ANY($2)",
                     bank_id,
                     list(all_source_ids),

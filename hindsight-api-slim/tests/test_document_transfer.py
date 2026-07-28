@@ -407,6 +407,138 @@ async def _bank_content_snapshot(memory, bank_id):
     }
 
 
+async def _fact_lifecycle(memory, bank_id):
+    """Sorted (text, created_at, consolidated_at, consolidation_failed_at) for
+    every world/experience fact — the exact per-fact consolidation lifecycle a
+    whole-bank transfer must preserve."""
+    backend = await memory._get_backend()
+    async with acquire_with_retry(backend) as conn:
+        rows = await conn.fetch(
+            f"SELECT text, created_at, consolidated_at, consolidation_failed_at "
+            f"FROM {fq_table('memory_units')} "
+            f"WHERE bank_id = $1 AND fact_type IN ('world', 'experience')",
+            bank_id,
+        )
+    return sorted((r["text"], r["created_at"], r["consolidated_at"], r["consolidation_failed_at"]) for r in rows)
+
+
+async def _eligible_fact_count(memory, bank_id):
+    """Facts the maintenance reconciler would treat as unconsolidated backlog —
+    the exact predicate of ``banks_needing_consolidation()``."""
+    backend = await memory._get_backend()
+    async with acquire_with_retry(backend) as conn:
+        return await conn.fetchval(
+            f"SELECT COUNT(*) FROM {fq_table('memory_units')} "
+            f"WHERE bank_id = $1 AND fact_type IN ('world', 'experience') "
+            f"AND consolidated_at IS NULL AND consolidation_failed_at IS NULL",
+            bank_id,
+        )
+
+
+async def _observation_count(memory, bank_id):
+    backend = await memory._get_backend()
+    async with acquire_with_retry(backend) as conn:
+        return await conn.fetchval(
+            f"SELECT COUNT(*) FROM {fq_table('memory_units')} WHERE bank_id = $1 AND fact_type = 'observation'",
+            bank_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_bank_import_preserves_consolidation_lifecycle(memory, request_context):
+    """Whole-bank import restores each fact's consolidation lifecycle verbatim, so
+    previously-consolidated and previously-failed facts are never re-consolidated
+    and the reconciler sees no phantom backlog. Regression for #2965.
+
+    Crucially the source has consolidated facts that do NOT back any surviving
+    observation, plus a ``consolidation_failed_at`` fact — state the old
+    observation-lineage reconstruction could not recover, so those facts became
+    re-eligible and the target re-derived observations."""
+    bank = _unique_bank("bank_lifecycle")
+    try:
+        await _retain(
+            memory,
+            bank,
+            "Alice works at Google. Bob works at Microsoft. Carol lives in Paris.",
+            request_context,
+            "doc-1",
+        )
+        backend = await memory._get_backend()
+
+        # Deterministic baseline: drop any auto-consolidation observations so the
+        # only observation is the one created explicitly below.
+        async with acquire_with_retry(backend) as conn:
+            await conn.execute(
+                f"DELETE FROM {fq_table('memory_units')} WHERE bank_id = $1 AND fact_type = 'observation'",
+                bank,
+            )
+
+        async with acquire_with_retry(backend) as conn:
+            wf_ids = [
+                r["id"]
+                for r in await conn.fetch(
+                    f"SELECT id FROM {fq_table('memory_units')} "
+                    f"WHERE bank_id = $1 AND fact_type IN ('world', 'experience') ORDER BY created_at, id",
+                    bank,
+                )
+            ]
+        assert len(wf_ids) >= 3, "need enough facts to exercise the lineage gap"
+
+        # One surviving observation over the first two facts.
+        obs_source_ids = [uuid.UUID(str(i)) for i in wf_ids[:2]]
+        async with acquire_with_retry(backend) as conn:
+            async with conn.transaction():
+                await _create_observation_directly(conn, memory, bank, obs_source_ids, "Alice and Bob are colleagues.")
+
+        # Fully-processed source (zero eligible): every fact is consolidated except
+        # the last — deliberately NOT an observation source — which records a
+        # consolidation failure. Most consolidated facts do not back the
+        # observation, exactly the lineage gap the fix must preserve.
+        consolidated_ts = datetime(2020, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        failed_ts = datetime(2020, 6, 7, 8, 9, 10, tzinfo=timezone.utc)
+        failed_fact_id = wf_ids[-1]
+        assert uuid.UUID(str(failed_fact_id)) not in obs_source_ids
+        async with acquire_with_retry(backend) as conn:
+            await conn.execute(
+                f"UPDATE {fq_table('memory_units')} "
+                f"SET consolidated_at = $2, consolidation_failed_at = NULL "
+                f"WHERE bank_id = $1 AND fact_type IN ('world', 'experience') AND id != $3",
+                bank,
+                consolidated_ts,
+                failed_fact_id,
+            )
+            await conn.execute(
+                f"UPDATE {fq_table('memory_units')} "
+                f"SET consolidated_at = NULL, consolidation_failed_at = $2 "
+                f"WHERE bank_id = $1 AND id = $3",
+                bank,
+                failed_ts,
+                failed_fact_id,
+            )
+
+        source_lifecycle = await _fact_lifecycle(memory, bank)
+        source_obs_count = await _observation_count(memory, bank)
+        assert source_obs_count == 1
+        assert await _eligible_fact_count(memory, bank) == 0
+
+        from hindsight_api.engine.transfer import export_bank
+
+        async with acquire_with_retry(backend) as conn:
+            archive = await export_bank(conn, bank)
+        # Delete then restore into the same id — exact round-trip.
+        await memory.delete_bank(bank, request_context=request_context)
+        await memory.import_bank_async(archive, request_context)
+
+        # Lifecycle preserved verbatim: consolidated stays consolidated (same
+        # timestamp — not now()), the failed fact keeps consolidation_failed_at.
+        assert await _fact_lifecycle(memory, bank) == source_lifecycle
+        # No phantom backlog for the reconciler, observation not re-derived.
+        assert await _eligible_fact_count(memory, bank) == 0
+        assert await _observation_count(memory, bank) == source_obs_count
+    finally:
+        await memory.delete_bank(bank, request_context=request_context)
+
+
 @pytest.mark.asyncio
 async def test_bank_export_import_exact_roundtrip(memory, request_context):
     """A whole-bank archive restores EXACT bank content (config, docs, facts,

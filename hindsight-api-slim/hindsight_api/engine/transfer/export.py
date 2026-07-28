@@ -193,7 +193,12 @@ async def export_documents(
         raise ValueError("include_observations is only supported when exporting the whole bank (omit document_id)")
 
     async with acquire_with_retry(backend) as conn:
-        loaded = await _load_documents(conn, bank_id, document_ids)
+        # Carry per-fact consolidation lifecycle exactly when observations are
+        # carried: with observations in the archive the target must NOT re-derive
+        # them, so imported facts keep their consolidated/failed state. Without
+        # observations (the default document export) the target re-consolidates
+        # from scratch, so lifecycle is deliberately dropped.
+        loaded = await _load_documents(conn, bank_id, document_ids, include_lifecycle=include_observations)
         documents = loaded.documents
         observations = await _load_observations(conn, bank_id, loaded.unit_index) if include_observations else []
 
@@ -293,9 +298,11 @@ async def export_bank(
     ``_current_schema`` and passes its raw connection; the engine acquires one
     after tenant auth).
     """
-    loaded = await _load_documents(conn, bank_id, None)
+    # Whole-bank export always carries observations (they're bank-level state)
+    # and, with them, the per-fact consolidation lifecycle so the target restores
+    # exact eligibility instead of re-consolidating historical facts (#2965).
+    loaded = await _load_documents(conn, bank_id, None, include_lifecycle=True)
     documents = loaded.documents
-    # Whole-bank export always carries observations (they're bank-level state).
     observations = await _load_observations(conn, bank_id, loaded.unit_index)
 
     bank_rows = {table: await _dump_bank_rows(conn, table, bank_id) for table in _BANK_ROW_TABLES}
@@ -356,6 +363,7 @@ async def _load_documents(
     conn: Any,
     bank_id: str,
     document_ids: list[str] | None,
+    include_lifecycle: bool = False,
 ) -> _LoadedExport:
     """Load and assemble TransferDocument payloads for the requested documents."""
     doc_filter = "AND id = ANY($2)" if document_ids else ""
@@ -377,7 +385,7 @@ async def _load_documents(
     selected_ids = [row["id"] for row in doc_rows]
 
     chunks_by_doc = await _load_chunks(conn, bank_id, selected_ids)
-    loaded = await _load_facts(conn, bank_id, selected_ids)
+    loaded = await _load_facts(conn, bank_id, selected_ids, include_lifecycle=include_lifecycle)
     await _attach_entities(conn, loaded)
     await _attach_causal_relations(conn, loaded)
 
@@ -472,17 +480,22 @@ async def _load_chunks(conn: Any, bank_id: str, doc_ids: list[str]) -> dict[str,
     return chunks_by_doc
 
 
-async def _load_facts(conn: Any, bank_id: str, doc_ids: list[str]) -> _LoadedFacts:
+async def _load_facts(conn: Any, bank_id: str, doc_ids: list[str], include_lifecycle: bool = False) -> _LoadedFacts:
     """Load non-observation facts grouped by document, with a unit-id location index.
 
     The ordering is fixed (created_at, id) so that
     ``causal_relations.target_fact_index`` ordinals stay consistent.
+
+    ``include_lifecycle`` carries each fact's ``created_at`` / ``consolidated_at`` /
+    ``consolidation_failed_at`` (whole-bank / with-observations export). It is left
+    off for the plain document export so the target re-consolidates from scratch.
     """
     rows = await conn.fetch(
         f"""
         SELECT id, document_id, text, fact_type, context, event_date,
                occurred_start, occurred_end, mentioned_at, metadata,
-               chunk_id, tags, observation_scopes
+               chunk_id, tags, observation_scopes,
+               created_at, consolidated_at, consolidation_failed_at
         FROM {fq_table("memory_units")}
         WHERE bank_id = $1
           AND document_id = ANY($2)
@@ -511,6 +524,9 @@ async def _load_facts(conn: Any, bank_id: str, doc_ids: list[str]) -> _LoadedFac
             tags=list(row["tags"] or []),
             observation_scopes=_as_jsonb(row["observation_scopes"]),
             chunk_index=_chunk_index_from_chunk_id(row["chunk_id"]),
+            created_at=row["created_at"] if include_lifecycle else None,
+            consolidated_at=row["consolidated_at"] if include_lifecycle else None,
+            consolidation_failed_at=row["consolidation_failed_at"] if include_lifecycle else None,
         )
         bucket.append(fact)
         loaded.unit_index[row["id"]] = _UnitLocation(document_id=doc_id, ordinal=ordinal)

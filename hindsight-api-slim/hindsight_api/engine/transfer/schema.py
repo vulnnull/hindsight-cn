@@ -68,6 +68,15 @@ class TransferFact(BaseModel):
     # Entity canonical names; re-resolved against the target bank on import.
     entities: list[str] = Field(default_factory=list)
     causal_relations: list[TransferCausalRelation] = Field(default_factory=list)
+    # Consolidation lifecycle timestamps, carried verbatim by a whole-bank
+    # transfer so imported facts keep their exact consolidation eligibility: an
+    # already-consolidated or failed fact is never re-consolidated on the target,
+    # and the maintenance reconciler sees no phantom backlog. Absent in archives
+    # produced before these were added (-> None), in which case the importer
+    # falls back to marking only observation-referenced facts consolidated.
+    created_at: datetime | None = None
+    consolidated_at: datetime | None = None
+    consolidation_failed_at: datetime | None = None
 
 
 class TransferChunk(BaseModel):

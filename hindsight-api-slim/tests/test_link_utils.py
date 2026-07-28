@@ -5,7 +5,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
-from hindsight_api.config import clear_config_cache
+from hindsight_api.config import DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY, clear_config_cache
 from hindsight_api.engine.retain.link_utils import (
     _normalize_datetime,
     _cap_links_per_unit,
@@ -321,16 +321,34 @@ class TestComputeSemanticLinksWithinBatch:
     """
 
     def test_empty_returns_empty(self):
-        assert compute_semantic_links_within_batch([], []) == []
+        assert (
+            compute_semantic_links_within_batch(
+                [],
+                [],
+                threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
+            )
+            == []
+        )
 
     def test_single_unit_returns_empty(self):
         emb = [np.random.randn(384).tolist()]
-        assert compute_semantic_links_within_batch(["u1"], emb) == []
+        assert (
+            compute_semantic_links_within_batch(
+                ["u1"],
+                emb,
+                threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
+            )
+            == []
+        )
 
     def test_identical_embeddings_produce_links(self):
         """Two identical embeddings should have similarity=1.0 (above 0.7 threshold)."""
         emb = [0.1] * 384
-        links = compute_semantic_links_within_batch(["u1", "u2"], [emb, emb])
+        links = compute_semantic_links_within_batch(
+            ["u1", "u2"],
+            [emb, emb],
+            threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
+        )
         assert len(links) == 2  # bidirectional: u1→u2, u2→u1
         from_ids = {lnk[0] for lnk in links}
         to_ids = {lnk[1] for lnk in links}
@@ -345,7 +363,11 @@ class TestComputeSemanticLinksWithinBatch:
         """Orthogonal embeddings should have similarity=0 (below 0.7 threshold)."""
         emb1 = [1.0] + [0.0] * 383
         emb2 = [0.0] + [1.0] + [0.0] * 382
-        links = compute_semantic_links_within_batch(["u1", "u2"], [emb1, emb2])
+        links = compute_semantic_links_within_batch(
+            ["u1", "u2"],
+            [emb1, emb2],
+            threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
+        )
         assert len(links) == 0
 
     def test_non_unit_embeddings_use_cosine_similarity(self):
@@ -400,7 +422,11 @@ class TestComputeSemanticLinksWithinBatch:
     def test_link_tuple_structure(self):
         """Verify the tuple format matches what _bulk_insert_links expects."""
         emb = [0.1] * 384
-        links = compute_semantic_links_within_batch(["u1", "u2"], [emb, emb])
+        links = compute_semantic_links_within_batch(
+            ["u1", "u2"],
+            [emb, emb],
+            threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
+        )
         for lnk in links:
             assert len(lnk) == 5
             from_id, to_id, link_type, weight, entity_id = lnk
@@ -462,6 +488,7 @@ class TestComputeSemanticLinksAnnPgBouncerSafety:
             bank_id="bank-1",
             unit_ids=[],
             embeddings=[],
+            threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
         )
         assert result == []
         mock_conn.transaction.assert_not_called()
@@ -478,6 +505,7 @@ class TestComputeSemanticLinksAnnPgBouncerSafety:
             unit_ids=["u1", "u2"],
             embeddings=[emb, emb],
             fact_types=["world", "world"],
+            threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
         )
 
         # Transaction context manager was entered.
@@ -499,6 +527,7 @@ class TestComputeSemanticLinksAnnPgBouncerSafety:
             unit_ids=["u1"],
             embeddings=[emb],
             fact_types=["world"],
+            threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
         )
 
         executed_sql = [call.args[0] for call in mock_conn.execute.call_args_list]
@@ -528,6 +557,7 @@ class TestComputeSemanticLinksAnnPgBouncerSafety:
             unit_ids=["u1"],
             embeddings=[emb],
             fact_types=["world"],
+            threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
         )
 
         executed_sql = [call.args[0] for call in mock_conn.execute.call_args_list]
@@ -555,6 +585,7 @@ class TestComputeSemanticLinksAnnPgBouncerSafety:
             unit_ids=["u1"],
             embeddings=[emb],
             fact_types=["world"],
+            threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
         )
 
         executed_sql = [call.args[0] for call in mock_conn.execute.call_args_list]
@@ -581,6 +612,7 @@ class TestComputeSemanticLinksAnnPgBouncerSafety:
             unit_ids=["u1"],
             embeddings=[emb],
             fact_types=["world"],
+            threshold=DEFAULT_SEMANTIC_LINK_MIN_SIMILARITY,
         )
 
         executed_sql = [call.args[0] for call in mock_conn.execute.call_args_list]
