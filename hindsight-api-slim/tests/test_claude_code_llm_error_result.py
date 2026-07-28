@@ -34,6 +34,7 @@ class _FakeOptions:
     tools: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     mcp_servers: dict[str, Any] = field(default_factory=dict)
+    model: str | None = None
 
 
 class _FakeAssistantMessage:

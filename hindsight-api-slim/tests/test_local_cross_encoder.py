@@ -1,12 +1,12 @@
 """
-Tests for LocalSTCrossEncoder, FlashRankCrossEncoder, and the glibc malloc_trim
-helper that releases heap pages after each rerank batch (issue #1717).
+Tests for LocalSTCrossEncoder and FlashRankCrossEncoder. The post-batch memory
+release (heap trim + GPU empty_cache) is exercised here via its call sites; the
+release helper itself is unit-tested in test_local_device.py.
 
 These tests use mocked models — they do not load real SentenceTransformers or
 FlashRank weights, so they run fast in CI without network access.
 """
 
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,44 +15,7 @@ from hindsight_api.engine import cross_encoder as ce_module
 from hindsight_api.engine.cross_encoder import (
     FlashRankCrossEncoder,
     LocalSTCrossEncoder,
-    _release_rerank_heap,
-    _resolve_malloc_trim,
 )
-
-
-class TestResolveMallocTrim:
-    """The malloc_trim resolver must be safe to call on every platform."""
-
-    def test_returns_callable(self):
-        trim = _resolve_malloc_trim()
-        assert callable(trim)
-
-    def test_callable_returns_none_or_int(self):
-        # Linux/glibc returns the int from malloc_trim; everywhere else the
-        # no-op returns None. Either is acceptable — the call must not raise.
-        result = _resolve_malloc_trim()()
-        assert result is None or isinstance(result, int)
-
-    def test_non_linux_is_noop(self):
-        """On non-Linux platforms the resolver must short-circuit to a no-op."""
-        with patch.object(sys, "platform", "darwin"):
-            trim = _resolve_malloc_trim()
-        assert trim() is None
-
-    def test_module_level_trim_is_resolved(self):
-        """The module caches the resolved callable at import time."""
-        assert callable(ce_module._malloc_trim)
-
-    def test_release_rerank_heap_collects_then_trims(self):
-        """Local reranker cleanup should free Python objects before trimming glibc."""
-        calls = []
-        with (
-            patch.object(ce_module.gc, "collect", lambda: calls.append("gc")),
-            patch.object(ce_module, "_malloc_trim", lambda: calls.append("trim")),
-        ):
-            _release_rerank_heap()
-
-        assert calls == ["gc", "trim"]
 
 
 class TestLocalSTCrossEncoder:
@@ -144,7 +107,7 @@ class TestLocalSTCrossEncoder:
         encoder._model.predict.return_value = [0.5]
 
         cleanup_calls = []
-        with patch.object(ce_module, "_release_rerank_heap", lambda: cleanup_calls.append("cleanup")):
+        with patch.object(ce_module, "release_local_inference_memory", lambda *a: cleanup_calls.append("cleanup")):
             await encoder.predict([("q", "doc")])
 
         assert cleanup_calls == ["cleanup"]
@@ -155,7 +118,7 @@ class TestLocalSTCrossEncoder:
         encoder._model.predict.side_effect = RuntimeError("boom")
 
         cleanup_calls = []
-        with patch.object(ce_module, "_release_rerank_heap", lambda: cleanup_calls.append("cleanup")):
+        with patch.object(ce_module, "release_local_inference_memory", lambda *a: cleanup_calls.append("cleanup")):
             with pytest.raises(RuntimeError, match="boom"):
                 await encoder.predict([("q", "doc")])
 
@@ -235,7 +198,7 @@ class TestFlashRankCrossEncoder:
 
         cleanup_calls = []
         with patch.dict("sys.modules", {"flashrank": fake_flashrank}):
-            with patch.object(ce_module, "_release_rerank_heap", lambda: cleanup_calls.append("cleanup")):
+            with patch.object(ce_module, "release_local_inference_memory", lambda *a: cleanup_calls.append("cleanup")):
                 encoder._predict_sync([("q", "doc")])
 
         assert cleanup_calls == ["cleanup"]
@@ -249,7 +212,7 @@ class TestFlashRankCrossEncoder:
 
         cleanup_calls = []
         with patch.dict("sys.modules", {"flashrank": fake_flashrank}):
-            with patch.object(ce_module, "_release_rerank_heap", lambda: cleanup_calls.append("cleanup")):
+            with patch.object(ce_module, "release_local_inference_memory", lambda *a: cleanup_calls.append("cleanup")):
                 with pytest.raises(RuntimeError, match="flashrank boom"):
                     encoder._predict_sync([("q", "doc")])
 
@@ -262,7 +225,7 @@ class TestFlashRankCrossEncoder:
         encoder = self._make_encoder()
 
         cleanup_calls = []
-        with patch.object(ce_module, "_release_rerank_heap", lambda: cleanup_calls.append("cleanup")):
+        with patch.object(ce_module, "release_local_inference_memory", lambda *a: cleanup_calls.append("cleanup")):
             encoder._predict_sync([])
 
         assert cleanup_calls == []

@@ -880,6 +880,13 @@ class WorkerPoller:
                         async with conn.transaction():
                             await self._maybe_update_parent_operation(str(failed_row["operation_id"]), schema, conn)
 
+                # Finalize batch_retain parents that the aggregation left behind
+                # (crash between a child's terminal commit and the parent update,
+                # or children that never committed). These sit 'pending' with a
+                # NULL payload — unclaimable and invisible to failed_operations —
+                # until reconciled. See issue #2985.
+                await self._reconcile_orphaned_parents(schema)
+
                 pending_count = int(result.split()[-1]) if result else 0
                 failed_count = len(failed_rows)
                 total_count += pending_count
@@ -967,6 +974,126 @@ class WorkerPoller:
             schema_display = f'"{schema}"' if schema else str(schema)
             logger.error(f"Failed to recover batch operations for schema {schema_display}: {e}")
             return 0
+
+    async def _reconcile_orphaned_parents(self, schema: str | None) -> int:
+        """Drive stranded batch_retain parent operations to a terminal state.
+
+        A batch_retain parent is a status *aggregator*: it carries no
+        task_payload (workers never claim it) and is normally promoted to a
+        terminal state by ``_maybe_update_parent_operation`` when its last child
+        sub-batch finishes. Two crash windows can strand a parent 'pending'
+        forever:
+
+          * every child reached a terminal state but the promotion was skipped
+            (the aggregation swallows and logs errors rather than failing the
+            child, so a transient error there leaves the parent behind), or
+          * the children never committed at all, leaving a parent with zero
+            children (older non-atomic create paths, a hard kill mid-submission).
+
+        Either way the parent sits 'pending' with ``task_payload IS NULL``: it is
+        unclaimable, never counted in ``failed_operations``, unretryable via the
+        API, and its documents are silently absent. See issue #2985.
+
+        On worker startup we reconcile every such parent:
+
+          * children present, all terminal -> completed / failed (mirrors the
+            aggregator, inheriting a representative child error on failure),
+          * no children at all -> failed, with an explicit reason so an operator
+            can see the loss and resubmit the source documents.
+
+        Parents with at least one still-live child are left untouched — the
+        normal aggregation path will finish them once their children drain.
+
+        Returns the number of parents driven to a terminal state.
+        """
+        table = fq_table("async_operations", schema)
+        schema_display = f'"{schema}"' if schema else str(schema)
+        reconciled = 0
+        try:
+            async with self._backend.acquire() as conn:
+                parents = await conn.fetch(
+                    f"""
+                    SELECT operation_id, bank_id FROM {table}
+                    WHERE operation_type = 'batch_retain'
+                      AND status = 'pending'
+                      AND task_payload IS NULL
+                    """
+                )
+
+            for parent in parents:
+                parent_id = parent["operation_id"]
+                bank_id = parent["bank_id"]
+                # One transaction per parent so a single problematic row can't
+                # roll back the others (mirrors the per-child rollup above).
+                async with self._backend.acquire() as conn:
+                    async with conn.transaction():
+                        # Re-read under a row lock: skip if the normal aggregation
+                        # path (or another worker) already moved it off 'pending'.
+                        locked = await conn.fetchrow(
+                            f"SELECT status FROM {table} WHERE operation_id = $1 FOR UPDATE",
+                            parent_id,
+                        )
+                        if locked is None or locked["status"] != "pending":
+                            continue
+
+                        siblings = await conn.fetch(
+                            f"""
+                            SELECT status, error_message FROM {table}
+                            WHERE bank_id = $1
+                              AND result_metadata::jsonb @> $2::jsonb
+                            """,
+                            bank_id,
+                            json.dumps({"parent_operation_id": str(parent_id)}),
+                        )
+
+                        # A still-live child will drive the aggregation itself.
+                        if any(s["status"] not in ("completed", "failed") for s in siblings):
+                            continue
+
+                        if not siblings:
+                            await conn.execute(
+                                f"""
+                                UPDATE {table}
+                                SET status = 'failed', error_message = $2,
+                                    completed_at = now(), updated_at = now()
+                                WHERE operation_id = $1
+                                """,
+                                parent_id,
+                                "orphaned batch_retain parent: no child sub-batches were "
+                                "persisted (worker crashed mid-submission); resubmit the "
+                                "source documents",
+                            )
+                        elif any(s["status"] == "failed" for s in siblings):
+                            await conn.execute(
+                                f"""
+                                UPDATE {table}
+                                SET status = 'failed', error_message = $2, updated_at = now()
+                                WHERE operation_id = $1
+                                """,
+                                parent_id,
+                                _summarise_child_error_messages(siblings),
+                            )
+                        else:
+                            await conn.execute(
+                                f"""
+                                UPDATE {table}
+                                SET status = 'completed', completed_at = now(), updated_at = now()
+                                WHERE operation_id = $1
+                                """,
+                                parent_id,
+                            )
+                        reconciled += 1
+
+            if reconciled:
+                logger.warning(
+                    f"Worker {self._worker_id} reconciled {reconciled} stranded "
+                    f"batch_retain parent(s) in schema {schema_display}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Worker {self._worker_id} failed to reconcile orphaned parents in schema {schema_display}: {e}"
+            )
+        return reconciled
 
     async def run(self):
         """

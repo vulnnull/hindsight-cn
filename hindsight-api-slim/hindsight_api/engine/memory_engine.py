@@ -8866,6 +8866,14 @@ class MemoryEngine(MemoryEngineInterface):
         if await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False) is None:
             return None
 
+        from .schema import _is_oracle  # noqa: PLC0415
+
+        if _is_oracle():
+            # llm_requests is PostgreSQL-only (its migration omits the Oracle slot;
+            # LLMTraceRecorder skips writes on Oracle). There is nothing to read, so
+            # return an empty page rather than querying a non-existent table (ORA-00942).
+            return LLMRequestListResponse(bank_id=bank_id, total=0, limit=limit, offset=offset, items=[])
+
         where_clauses = ["bank_id = $1"]
         params: list[Any] = [bank_id]
         idx = 2
@@ -8986,6 +8994,14 @@ class MemoryEngine(MemoryEngineInterface):
             start = now - timedelta(days=30)
         else:  # 7d default
             start = now - timedelta(days=7)
+
+        from .schema import _is_oracle  # noqa: PLC0415
+
+        if _is_oracle():
+            # llm_requests is PostgreSQL-only — no rows on Oracle (see list_llm_requests).
+            return LLMRequestStatsResponse(
+                bank_id=bank_id, period=period, trunc=trunc, start=start.isoformat(), buckets=[]
+            )
 
         where_clauses = ["bank_id = $1", "started_at >= $2"]
         params: list[Any] = [bank_id, start]
@@ -13096,6 +13112,7 @@ class MemoryEngine(MemoryEngineInterface):
                 WHERE operation_id = $1
                   AND bank_id = $2
                   AND status IN ('failed', 'cancelled')
+                  AND NOT (operation_type = 'batch_retain' AND task_payload IS NULL)
                 RETURNING operation_id
                 """,
                 op_uuid,
@@ -13104,12 +13121,24 @@ class MemoryEngine(MemoryEngineInterface):
 
             if updated is None:
                 row = await conn.fetchrow(
-                    f"SELECT status FROM {fq_table('async_operations')} WHERE operation_id = $1 AND bank_id = $2",
+                    f"SELECT status, operation_type, task_payload FROM {fq_table('async_operations')} "
+                    f"WHERE operation_id = $1 AND bank_id = $2",
                     op_uuid,
                     bank_id,
                 )
                 if not row:
                     raise ValueError(f"Operation {operation_id} not found for bank {bank_id}")
+                # A batch_retain parent is a payload-less status aggregator. Retrying
+                # it would only re-strand it 'pending' — no worker can claim a
+                # NULL-payload row, and its already-terminal children won't re-run.
+                # Point the caller at the supported recovery instead. See issue #2985.
+                if row["operation_type"] == "batch_retain" and row["task_payload"] is None:
+                    raise OperationValidationError(
+                        f"Operation {operation_id} is a batch_retain parent (a status aggregator with no "
+                        f"payload) and cannot be retried directly. Resubmit the source documents, then "
+                        f"delete this record via DELETE /operations/{operation_id}/delete.",
+                        409,
+                    )
                 raise OperationValidationError(
                     f"Operation {operation_id} cannot be retried: status is '{row['status']}', expected 'failed' or 'cancelled'",
                     409,

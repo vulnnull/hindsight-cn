@@ -238,6 +238,13 @@ class ClaudeCodeLLM(LLMInterface):
             max_turns=1,  # Single-turn for API-style interactions
             tools=[],  # Disable built-in tools so nothing forces a ToolSearch deferral
             allowed_tools=[],  # Disable tools for standard LLM calls
+            # Pin the configured model (issue #2881). Without this the spawned CLI
+            # runs its own default model — an Opus-class model on Pro/Max OAuth —
+            # regardless of HINDSIGHT_API_*_LLM_MODEL, while metrics/logs still print
+            # self.model, so the mismatch is invisible. The isolated CLAUDE_CONFIG_DIR
+            # (fresh temp dir) means a host settings.json can't reach the CLI either,
+            # so passing it through here is the only channel.
+            model=self.model or None,
             env=_get_isolated_claude_env(),
         )
 
@@ -532,16 +539,33 @@ class ClaudeCodeLLM(LLMInterface):
         # else: tool_choice == "auto" or unspecified - use default behavior (no changes needed)
 
         # Configure SDK options with MCP server
+        #
         # tools=[] disables built-in CLI tools (Read, Write, Bash, ToolSearch, etc.)
         # Without this, Claude Code CLI defers MCP tools when too many built-in tools
-        # are loaded, forcing Claude to use ToolSearch first — which wastes the max_turns
+        # are loaded, forcing Claude to use ToolSearch first — which wastes the turn
         # budget and prevents direct MCP tool calls.
+        #
+        # max_turns=1 is critical (issue #2966). call_with_tools() is one *round* of
+        # an agentic loop the caller drives: the model proposes tool calls, we return
+        # them, and the orchestrator (reflect/agent.py) executes the REAL tools and
+        # feeds the results back on the next call. The SDK, however, runs its own
+        # in-process loop: it invokes our SDK MCP handlers — which are deliberate
+        # placeholders returning "[Tool <name> called successfully]" (no real data) —
+        # and lets the model react. With max_turns >= 2 the model calls recall, sees
+        # the empty placeholder, re-queries with reworded searches, exhausts the turn
+        # budget, and the run ends in error_max_turns with its tool calls discarded —
+        # exactly the "0 tool calls / no information" failure in #2966. Capping at a
+        # single turn stops the SDK from acting on the placeholder results: the model
+        # emits its first tool call (or a text answer) and we return that to the caller
+        # unchanged, matching how every other provider's call_with_tools() behaves.
         options = ClaudeAgentOptions(
             system_prompt=system_prompt if system_prompt else None,
             tools=[],  # Disable built-in tools so MCP tools load eagerly
-            max_turns=2,  # Allow tool call + tool result round-trip
+            max_turns=1,  # One round: propose tool calls (or answer); caller drives the loop
             mcp_servers=mcp_servers_config,
             allowed_tools=allowed_tool_names,
+            # Pin the configured model (issue #2881) — see the call() options block.
+            model=self.model or None,
             env=_get_isolated_claude_env(),
         )
 
@@ -560,9 +584,6 @@ class ClaudeCodeLLM(LLMInterface):
 
                     # Receive response
                     async for message in client.receive_response():
-                        if isinstance(message, ResultMessage) and message.is_error:
-                            # Surface the CLI's actual error text (issue #2702).
-                            raise RuntimeError(_result_error_detail(message))
                         if isinstance(message, AssistantMessage):
                             for block in message.content:
                                 if isinstance(block, TextBlock):
@@ -581,6 +602,21 @@ class ClaudeCodeLLM(LLMInterface):
                                             arguments=block.input,
                                         )
                                     )
+                            if tool_calls:
+                                # This round proposed tool call(s). Stop consuming the
+                                # stream so the SDK does not run another turn against our
+                                # placeholder handlers (issue #2966) — the caller executes
+                                # the real tools and calls us again with the results.
+                                break
+                        elif isinstance(message, ResultMessage) and message.is_error:
+                            # With max_turns=1 the CLI reports error_max_turns whenever
+                            # the model spent its single turn issuing a tool call (there
+                            # was no follow-up turn to emit final text). That is expected
+                            # here and not a failure: we already captured the tool call
+                            # above and break before reaching this branch. Only a genuine
+                            # error with nothing to return should surface (issue #2702).
+                            if not tool_calls:
+                                raise RuntimeError(_result_error_detail(message))
 
                 # Record metrics
                 duration = time.time() - start_time

@@ -272,6 +272,45 @@ async def test_retry_rejects_non_retriable_statuses(api_client, memory, test_ban
 
 
 @pytest.mark.asyncio
+async def test_retry_rejects_batch_retain_parent(api_client, memory, test_bank_id):
+    """A failed batch_retain parent (no payload) must not be retried into a re-stranded state.
+
+    The parent is a payload-less status aggregator: retrying it would set it back to
+    'pending' where no worker can ever claim it and its terminal children won't re-run
+    (issue #2985). The 409 should point the caller at resubmit + delete instead.
+    """
+    pool = memory._pool
+    await _ensure_bank(pool, test_bank_id)
+
+    op_id = uuid.uuid4()
+    await pool.execute(
+        """
+        INSERT INTO async_operations (operation_id, bank_id, operation_type, status, task_payload)
+        VALUES ($1, $2, 'batch_retain', 'failed', NULL)
+        """,
+        op_id,
+        test_bank_id,
+    )
+
+    response = await api_client.post(f"/v1/default/banks/{test_bank_id}/operations/{op_id}/retry")
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "batch_retain parent" in detail
+    assert "delete" in detail.lower()
+
+    # Guard must not have mutated the row.
+    row = await pool.fetchrow(
+        "SELECT status FROM async_operations WHERE operation_id = $1",
+        op_id,
+    )
+    assert row["status"] == "failed"
+
+    # But it remains deletable as the sanctioned cleanup path.
+    response = await api_client.delete(f"/v1/default/banks/{test_bank_id}/operations/{op_id}/delete")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_cancel_rejects_non_pending_operations(api_client, memory, test_bank_id):
     """DELETE /operations/{id} should only cancel pending operations."""
     pool = memory._pool

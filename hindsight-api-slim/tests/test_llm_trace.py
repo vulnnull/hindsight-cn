@@ -96,6 +96,17 @@ def test_recorder_scope_allowlist():
     assert r.is_enabled("retain_extract_facts") is False
 
 
+def test_recorder_disabled_on_oracle_backend(monkeypatch):
+    # llm_requests is a PostgreSQL-only table, so on Oracle the recorder must
+    # report disabled and write nothing — otherwise every LLM call fires an
+    # INSERT that fails with ORA-00903 and spams the error log.
+    monkeypatch.setattr("hindsight_api.engine.schema._is_oracle", lambda: True)
+    rec = _CapturingRecorder()
+    assert rec.is_enabled("memory") is False
+    rec.record_llm_call(provider="mock", model="mock", scope="memory", messages=[], duration=0.1)
+    assert rec.records == []
+
+
 # ── recorder: record_llm_call builds correct records ──────────────────────────
 
 
@@ -519,6 +530,24 @@ async def test_list_empty(trace_api_client, bank_id):
     data = response.json()
     assert data["items"] == []
     assert data["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_llm_requests_read_returns_empty_on_oracle(trace_api_client, bank_id, monkeypatch):
+    # llm_requests is PostgreSQL-only, so the list and stats read paths must
+    # return an empty result on Oracle rather than querying a table that does
+    # not exist there (ORA-00942). The bank still resolves (no 404).
+    await trace_api_client.put(f"/v1/default/banks/{bank_id}", json={"name": "Trace Bank"})
+    monkeypatch.setattr("hindsight_api.engine.schema._is_oracle", lambda: True)
+
+    listing = await trace_api_client.get(f"/v1/default/banks/{bank_id}/llm-requests")
+    assert listing.status_code == 200
+    assert listing.json()["items"] == []
+    assert listing.json()["total"] == 0
+
+    stats = await trace_api_client.get(f"/v1/default/banks/{bank_id}/llm-requests/stats")
+    assert stats.status_code == 200
+    assert stats.json()["buckets"] == []
 
 
 @pytest.mark.asyncio

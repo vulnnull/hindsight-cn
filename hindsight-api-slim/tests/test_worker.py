@@ -1476,6 +1476,188 @@ class TestWorkerRecovery:
         )
         assert parent_row["status"] == "failed"
 
+    @pytest.mark.asyncio
+    async def test_reconcile_completes_parent_when_all_children_completed(self, pool, backend, clean_operations):
+        """A pending batch_retain parent whose children all completed is promoted.
+
+        Models the crash window where the last child committed 'completed' but the
+        parent aggregation was skipped (issue #2985). Recovery must finalize the
+        parent to 'completed' rather than leave it stranded 'pending'.
+        """
+        from hindsight_api.worker import WorkerPoller
+
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
+
+        parent_id = uuid.uuid4()
+        await pool.execute(
+            """
+            INSERT INTO async_operations
+                (operation_id, bank_id, operation_type, status, task_payload, result_metadata)
+            VALUES ($1, $2, 'batch_retain', 'pending', NULL, '{}'::jsonb)
+            """,
+            parent_id,
+            bank_id,
+        )
+        for _ in range(2):
+            await pool.execute(
+                """
+                INSERT INTO async_operations
+                    (operation_id, bank_id, operation_type, status, task_payload, result_metadata)
+                VALUES ($1, $2, 'retain', 'completed', '{}'::jsonb, $3::jsonb)
+                """,
+                uuid.uuid4(),
+                bank_id,
+                json.dumps({"parent_operation_id": str(parent_id)}),
+            )
+
+        poller = WorkerPoller(backend=backend, worker_id="reconcile-worker", executor=lambda x: None)
+        reconciled = await poller._reconcile_orphaned_parents(None)
+        assert reconciled == 1
+
+        parent_row = await pool.fetchrow(
+            "SELECT status, completed_at FROM async_operations WHERE operation_id = $1",
+            parent_id,
+        )
+        assert parent_row["status"] == "completed"
+        assert parent_row["completed_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_reconcile_fails_parent_when_a_child_failed(self, pool, backend, clean_operations):
+        """A pending parent with a failed child is finalized 'failed', inheriting its reason."""
+        from hindsight_api.worker import WorkerPoller
+
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
+
+        parent_id = uuid.uuid4()
+        await pool.execute(
+            """
+            INSERT INTO async_operations
+                (operation_id, bank_id, operation_type, status, task_payload, result_metadata)
+            VALUES ($1, $2, 'batch_retain', 'pending', NULL, '{}'::jsonb)
+            """,
+            parent_id,
+            bank_id,
+        )
+        meta = json.dumps({"parent_operation_id": str(parent_id)})
+        await pool.execute(
+            """
+            INSERT INTO async_operations
+                (operation_id, bank_id, operation_type, status, task_payload, result_metadata)
+            VALUES ($1, $2, 'retain', 'completed', '{}'::jsonb, $3::jsonb)
+            """,
+            uuid.uuid4(),
+            bank_id,
+            meta,
+        )
+        await pool.execute(
+            """
+            INSERT INTO async_operations
+                (operation_id, bank_id, operation_type, status, task_payload,
+                 result_metadata, error_message)
+            VALUES ($1, $2, 'retain', 'failed', '{}'::jsonb, $3::jsonb, 'boom: extraction failed')
+            """,
+            uuid.uuid4(),
+            bank_id,
+            meta,
+        )
+
+        poller = WorkerPoller(backend=backend, worker_id="reconcile-worker", executor=lambda x: None)
+        assert await poller._reconcile_orphaned_parents(None) == 1
+
+        parent_row = await pool.fetchrow(
+            "SELECT status, error_message FROM async_operations WHERE operation_id = $1",
+            parent_id,
+        )
+        assert parent_row["status"] == "failed"
+        # Inherits the representative child reason, not a generic string.
+        assert parent_row["error_message"] == "boom: extraction failed"
+
+    @pytest.mark.asyncio
+    async def test_reconcile_fails_orphaned_parent_with_no_children(self, pool, backend, clean_operations):
+        """A pending parent with zero children is failed with an explicit, resubmit-hint reason.
+
+        This is the exact symptom in issue #2985: task_payload IS NULL, no children,
+        invisible to failed_operations. After reconciliation it is terminal and visible.
+        """
+        from hindsight_api.worker import WorkerPoller
+
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
+
+        parent_id = uuid.uuid4()
+        await pool.execute(
+            """
+            INSERT INTO async_operations
+                (operation_id, bank_id, operation_type, status, task_payload, result_metadata)
+            VALUES ($1, $2, 'batch_retain', 'pending', NULL, '{}'::jsonb)
+            """,
+            parent_id,
+            bank_id,
+        )
+
+        poller = WorkerPoller(backend=backend, worker_id="reconcile-worker", executor=lambda x: None)
+        assert await poller._reconcile_orphaned_parents(None) == 1
+
+        parent_row = await pool.fetchrow(
+            "SELECT status, error_message, completed_at FROM async_operations WHERE operation_id = $1",
+            parent_id,
+        )
+        assert parent_row["status"] == "failed"
+        assert "orphaned batch_retain parent" in parent_row["error_message"]
+        assert parent_row["completed_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_reconcile_leaves_parent_with_live_child_untouched(self, pool, backend, clean_operations):
+        """A parent with a still-pending child must not be finalized prematurely."""
+        from hindsight_api.worker import WorkerPoller
+
+        bank_id = f"test-worker-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(pool, bank_id)
+
+        parent_id = uuid.uuid4()
+        await pool.execute(
+            """
+            INSERT INTO async_operations
+                (operation_id, bank_id, operation_type, status, task_payload, result_metadata)
+            VALUES ($1, $2, 'batch_retain', 'pending', NULL, '{}'::jsonb)
+            """,
+            parent_id,
+            bank_id,
+        )
+        meta = json.dumps({"parent_operation_id": str(parent_id)})
+        # One completed, one still pending — aggregation is not done yet.
+        await pool.execute(
+            """
+            INSERT INTO async_operations
+                (operation_id, bank_id, operation_type, status, task_payload, result_metadata)
+            VALUES ($1, $2, 'retain', 'completed', '{}'::jsonb, $3::jsonb)
+            """,
+            uuid.uuid4(),
+            bank_id,
+            meta,
+        )
+        await pool.execute(
+            """
+            INSERT INTO async_operations
+                (operation_id, bank_id, operation_type, status, task_payload, result_metadata)
+            VALUES ($1, $2, 'retain', 'pending', '{}'::jsonb, $3::jsonb)
+            """,
+            uuid.uuid4(),
+            bank_id,
+            meta,
+        )
+
+        poller = WorkerPoller(backend=backend, worker_id="reconcile-worker", executor=lambda x: None)
+        assert await poller._reconcile_orphaned_parents(None) == 0
+
+        parent_row = await pool.fetchrow(
+            "SELECT status FROM async_operations WHERE operation_id = $1",
+            parent_id,
+        )
+        assert parent_row["status"] == "pending"
+
 
 class TestConcurrentWorkers:
     """Tests for concurrent worker task claiming (FOR UPDATE SKIP LOCKED)."""

@@ -7,7 +7,6 @@ Configuration via environment variables - see hindsight_api.config for all env v
 """
 
 import asyncio
-import gc
 import logging
 import os
 import warnings
@@ -48,51 +47,13 @@ from ..config import (
     ENV_RERANKER_ZEROENTROPY_API_KEY,
 )
 from .bank_attribution import reranker_bank_attribution_headers
+from .local_device import (
+    release_local_inference_memory,
+    resolve_model_device_type,
+    select_local_device,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_malloc_trim():
-    """Return a callable that asks glibc to release freed heap pages to the OS.
-
-    Local CPU rerankers (FlashRank/ONNX, SentenceTransformers/torch) allocate
-    large transient numpy/tensor buffers per call. On Linux glibc, those pages
-    are freed at the Python level but kept by the allocator as a high-water
-    mark — RSS grows monotonically across many recalls (see issue #1717).
-    Calling `malloc_trim(0)` after each batch returns those pages to the OS.
-
-    Resolved once at import; returns a no-op on non-glibc platforms (macOS,
-    musl, Windows) where the call is unavailable or unnecessary.
-    """
-    import sys
-
-    if sys.platform != "linux":
-        return lambda: None
-
-    import ctypes
-    import ctypes.util
-
-    libc_path = ctypes.util.find_library("c")
-    if libc_path is None:
-        return lambda: None
-    try:
-        libc = ctypes.CDLL(libc_path)
-        trim = libc.malloc_trim
-    except (OSError, AttributeError):
-        # Not glibc (musl has no malloc_trim) or libc lookup failed.
-        return lambda: None
-    trim.argtypes = [ctypes.c_size_t]
-    trim.restype = ctypes.c_int
-    return lambda: trim(0)
-
-
-_malloc_trim = _resolve_malloc_trim()
-
-
-def _release_rerank_heap() -> None:
-    """Release transient Python and native heap memory after local reranking."""
-    gc.collect()
-    _malloc_trim()
 
 
 class CrossEncoderModel(ABC):
@@ -159,6 +120,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         fp16: bool = False,
         bucket_batching: bool = False,
         batch_size: int = DEFAULT_RERANKER_LOCAL_BATCH_SIZE,
+        allow_mps: bool = False,
     ):
         """
         Initialize local SentenceTransformers cross-encoder.
@@ -180,6 +142,9 @@ class LocalSTCrossEncoder(CrossEncoderModel):
                             Default: False (opt-in via env var).
             batch_size: Batch size for predict() calls. Optimal values vary by
                        hardware and model (MPS: 32, CUDA: 128+). Default: 32.
+            allow_mps: Opt in to the Apple Silicon MPS GPU. Disabled by default
+                      because MPS leaks memory under variable-length workloads
+                      (see engine/local_device.py). Default: False
         """
         self.model_name = model_name or DEFAULT_RERANKER_LOCAL_MODEL
         self.force_cpu = force_cpu
@@ -187,7 +152,9 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         self.fp16 = fp16
         self.bucket_batching = bucket_batching
         self.batch_size = batch_size
+        self.allow_mps = allow_mps
         self._model = None
+        self._device_type: str = "cpu"
         LocalSTCrossEncoder._max_concurrent = max_concurrent
 
     @property
@@ -209,33 +176,13 @@ class LocalSTCrossEncoder(CrossEncoderModel):
 
         logger.info(f"Reranker: initializing local provider with model {self.model_name}")
 
-        # Determine device based on hardware availability.
-        # We always set low_cpu_mem_usage=False to prevent lazy loading (meta tensors)
-        # which can cause issues when accelerate is installed but no GPU is available.
+        # Determine device based on hardware availability. We always set
+        # low_cpu_mem_usage=False to prevent lazy loading (meta tensors) which can
+        # cause issues when accelerate is installed but no GPU is available.
         # Note: We do NOT use device_map because CrossEncoder internally calls .to(device)
         # after loading, which conflicts with accelerate's device_map handling.
-        import torch
-
-        # Force CPU mode if configured (used in daemon mode to avoid MPS/XPC issues on macOS)
-        if self.force_cpu:
-            device = "cpu"
-            logger.info("Reranker: forcing CPU mode (HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU=1)")
-        else:
-            # Check for GPU (CUDA), Apple Silicon (MPS), or Intel XPU
-            # Wrap in try-except to gracefully handle any device detection issues
-            # (e.g., in CI environments or when PyTorch is built without GPU support)
-            device = "cpu"  # Default to CPU
-            try:
-                has_gpu = torch.cuda.is_available() or (
-                    hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-                )
-                # Intel Arc XPU support — torch.xpu is available when the XPU build is loaded
-                if not has_gpu and hasattr(torch, "xpu"):
-                    has_gpu = torch.xpu.is_available()
-                if has_gpu:
-                    device = None  # Let sentence-transformers auto-detect GPU/MPS/XPU
-            except Exception as e:
-                logger.warning(f"Failed to detect GPU/MPS/XPU, falling back to CPU: {e}")
+        # MPS is opt-in (allow_mps) — see engine/local_device.py for why.
+        device = select_local_device(self.force_cpu, self.allow_mps)
 
         # Patch transformers 5.x compatibility for models using XLM-RoBERTa
         # (e.g., jina-reranker-v2-base-multilingual). transformers 5.x removed
@@ -279,9 +226,11 @@ class LocalSTCrossEncoder(CrossEncoderModel):
                 # Restore original logging level
                 transformers_logger.setLevel(original_level)
 
+        self._device_type = resolve_model_device_type(self._model)
+
         # FP16 inference: convert model weights to half precision.
         # Empirically validated: 27-36% faster on MPS, quality-identical (20/20 overlap).
-        if self.fp16 and device != "cpu":
+        if self.fp16 and self._device_type != "cpu":
             self._model.model.half()
             logger.info("Reranker: FP16 inference enabled")
 
@@ -324,7 +273,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             scores = self._model.predict(pairs, batch_size=self.batch_size, show_progress_bar=False)
             return scores.tolist() if hasattr(scores, "tolist") else list(scores)
         finally:
-            _release_rerank_heap()
+            release_local_inference_memory(self._device_type)
 
     async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
@@ -933,6 +882,7 @@ class FlashRankCrossEncoder(CrossEncoderModel):
         self.max_length = max_length
         self.cpu_mem_arena = cpu_mem_arena
         self._ranker = None
+        self._device_type: str = "cpu"  # FlashRank runs on CPU via ONNX Runtime
         FlashRankCrossEncoder._max_concurrent = max_concurrent
 
     @property
@@ -1037,7 +987,7 @@ class FlashRankCrossEncoder(CrossEncoderModel):
 
             return all_scores
         finally:
-            _release_rerank_heap()
+            release_local_inference_memory(self._device_type)
 
     async def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         """
@@ -1651,6 +1601,7 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
             fp16=config.reranker_local_fp16,
             bucket_batching=config.reranker_local_bucket_batching,
             batch_size=config.reranker_local_batch_size,
+            allow_mps=config.reranker_local_allow_mps,
         )
     elif provider == "cohere":
         api_key = config.reranker_cohere_api_key

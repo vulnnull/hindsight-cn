@@ -48,6 +48,11 @@ from ..config import (
     ENV_LLM_API_KEY,
 )
 from .bank_attribution import apply_bank_attribution
+from .local_device import (
+    release_local_inference_memory,
+    resolve_model_device_type,
+    select_local_device,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +160,13 @@ class LocalSTEmbeddings(Embeddings):
     The embedding dimension is auto-detected from the model.
     """
 
-    def __init__(self, model_name: str | None = None, force_cpu: bool = False, trust_remote_code: bool = False):
+    def __init__(
+        self,
+        model_name: str | None = None,
+        force_cpu: bool = False,
+        trust_remote_code: bool = False,
+        allow_mps: bool = False,
+    ):
         """
         Initialize local SentenceTransformers embeddings.
 
@@ -167,12 +178,17 @@ class LocalSTEmbeddings(Embeddings):
             trust_remote_code: Allow loading models with custom code (security risk).
                               Required for some models with custom architectures.
                               Default: False (disabled for security)
+            allow_mps: Opt in to the Apple Silicon MPS GPU. Disabled by default
+                      because MPS leaks memory under variable-length workloads
+                      (see engine/local_device.py). Default: False
         """
         self.model_name = model_name or DEFAULT_EMBEDDINGS_LOCAL_MODEL
         self.force_cpu = force_cpu
         self.trust_remote_code = trust_remote_code
+        self.allow_mps = allow_mps
         self._model = None
         self._dimension: int | None = None
+        self._device_type: str = "cpu"
 
     @property
     def provider_name(self) -> str:
@@ -199,31 +215,11 @@ class LocalSTEmbeddings(Embeddings):
 
         logger.info(f"Embeddings: initializing local provider with model {self.model_name}")
 
-        # Determine device based on hardware availability.
-        # We always set low_cpu_mem_usage=False to prevent lazy loading (meta tensors)
-        # which can cause issues when accelerate is installed but no GPU is available.
-        import torch
-
-        # Force CPU mode if configured (used in daemon mode to avoid MPS/XPC issues on macOS)
-        if self.force_cpu:
-            device = "cpu"
-            logger.info("Embeddings: forcing CPU mode")
-        else:
-            # Check for GPU (CUDA), Apple Silicon (MPS), or Intel XPU
-            # Wrap in try-except to gracefully handle any device detection issues
-            # (e.g., in CI environments or when PyTorch is built without GPU support)
-            device = "cpu"  # Default to CPU
-            try:
-                has_gpu = torch.cuda.is_available() or (
-                    hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-                )
-                # Intel Arc XPU support — torch.xpu is available when the XPU build is loaded
-                if not has_gpu and hasattr(torch, "xpu"):
-                    has_gpu = torch.xpu.is_available()
-                if has_gpu:
-                    device = None  # Let sentence-transformers auto-detect GPU/MPS/XPU
-            except Exception as e:
-                logger.warning(f"Failed to detect GPU/MPS/XPU, falling back to CPU: {e}")
+        # Determine device based on hardware availability. We always set
+        # low_cpu_mem_usage=False to prevent lazy loading (meta tensors) which can
+        # cause issues when accelerate is installed but no GPU is available.
+        # MPS is opt-in (allow_mps) — see engine/local_device.py for why.
+        device = select_local_device(self.force_cpu, self.allow_mps)
 
         # Suppress verbose transformers warnings during model loading
         # This suppresses the "UNEXPECTED" warnings from BertModel which are harmless
@@ -250,7 +246,8 @@ class LocalSTEmbeddings(Embeddings):
                 transformers_logger.setLevel(original_level)
 
         self._dimension = self._model.get_sentence_embedding_dimension()
-        logger.info(f"Embeddings: local provider initialized (dim: {self._dimension})")
+        self._device_type = resolve_model_device_type(self._model)
+        logger.info(f"Embeddings: local provider initialized (dim: {self._dimension}, device: {self._device_type})")
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         """
@@ -265,8 +262,19 @@ class LocalSTEmbeddings(Embeddings):
         if self._model is None:
             raise RuntimeError("Embeddings not initialized. Call initialize() first.")
 
-        embeddings = self._model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-        return [emb.tolist() for emb in embeddings]
+        try:
+            embeddings = self._model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+            return [emb.tolist() for emb in embeddings]
+        finally:
+            # Only reclaim the GPU allocator pool here, and only when actually on a
+            # GPU (opt-in MPS/CUDA/XPU). encode() runs in tight retain loops, so a
+            # gc.collect()/malloc_trim on every call is too costly on the CPU default
+            # — and unnecessary: refcounting frees the small transient buffers
+            # immediately and the allocator reuses them for the next batch. (The
+            # reranker keeps its per-batch heap trim for the #1717 CPU case; it runs
+            # on the lighter recall path.) See engine/local_device.py.
+            if self._device_type != "cpu":
+                release_local_inference_memory(self._device_type)
 
 
 class OnnxEmbeddings(Embeddings):
@@ -1637,6 +1645,7 @@ def create_embeddings_from_env() -> Embeddings:
             model_name=config.embeddings_local_model,
             force_cpu=config.embeddings_local_force_cpu,
             trust_remote_code=config.embeddings_local_trust_remote_code,
+            allow_mps=config.embeddings_local_allow_mps,
         )
     elif provider == "onnx":
         return OnnxEmbeddings(
