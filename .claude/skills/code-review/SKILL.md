@@ -159,6 +159,18 @@ If any files in `hindsight-api-slim/hindsight_api/api/` were changed:
 - Were the client SDKs regenerated? (`./scripts/generate-clients.sh`)
 - Were the control plane proxy routes updated? (`hindsight-control-plane/src/app/api/`)
 
+### 7a. Check TS/Python wrapper-client parity
+
+Two of the generated SDKs ship a **hand-written, maintained convenience wrapper** on top of the auto-generated low-level client — and *only* these two:
+- **TypeScript**: `hindsight-clients/typescript/src/index.ts` (`HindsightClient`)
+- **Python**: `hindsight-clients/python/hindsight_client/hindsight_client.py` (`Hindsight`)
+
+(The Rust/Go/etc. clients are generated-only — no wrapper to keep in sync.)
+
+These wrappers are what most third-party consumers actually call, and they must expose the same surface. **If a change touches one wrapper's method — adds/removes a parameter, changes a default, forwards a new query/body field — the equivalent method in the *other* wrapper must get the same change in the same (or an immediately-following) PR.** A parameter that exists in the generated SDK but is dropped by one wrapper silently strips it for every consumer of that language (this is exactly what #2975 / #3042 fixed for `detail`/`tags_match`/`limit`/`offset` on `listMentalModels`/`getMentalModel`). **Should fix** — flag any wrapper method that gains capabilities in one language but not the other, and add a matching mapping regression test on both sides.
+
+Note: the `client-coverage-check` CI tool only validates **request-body** fields, not GET **query** parameters — so query-param parity gaps are *not* caught automatically and must be checked by hand here.
+
 ### 7b. Check API-layer data-access boundary
 
 For each changed handler in `hindsight-api-slim/hindsight_api/api/` (e.g. `http.py`, `mcp.py`):

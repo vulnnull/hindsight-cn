@@ -2,11 +2,16 @@
 
 import re
 import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from hindsight_api.engine.reflect.agent import _execute_tool, _summarize_input
-from hindsight_api.engine.reflect.tools import _document_metadata_from_retain_params, tool_expand
+from hindsight_api.engine.reflect.tools import (
+    _document_metadata_from_retain_params,
+    tool_expand,
+    tool_search_mental_models,
+)
 
 
 class _FakeReflectConnection:
@@ -90,6 +95,33 @@ class _FakeMultiMemoryConnection:
             return []
 
         raise AssertionError(f"Unexpected query: {normalized_query}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tags", [None, []], ids=["omitted", "empty"])
+async def test_tool_search_mental_models_exact_empty_scope_selects_global_models(
+    tags: list[str] | None,
+) -> None:
+    """An exact empty scope must exclude tagged mental models."""
+    conn = MagicMock()
+    conn.fetch = AsyncMock(return_value=[])
+
+    result = await tool_search_mental_models(
+        memory_engine=MagicMock(),
+        conn=conn,
+        bank_id="test-global-mental-model-scope",
+        query="global summary",
+        query_embedding=[0.1, 0.2],
+        tags=tags,
+        tags_match="exact",
+    )
+
+    fetch_call = conn.fetch.await_args
+    assert fetch_call is not None
+    query, *args = fetch_call.args
+    assert "(tags IS NULL OR tags = '{}')" in re.sub(r"\s+", " ", query).strip()
+    assert args == ["test-global-mental-model-scope", "[0.1, 0.2]", 5]
+    assert result["mental_models"] == []
 
 
 @pytest.mark.asyncio

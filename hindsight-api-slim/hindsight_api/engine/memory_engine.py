@@ -1182,7 +1182,7 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=retain_api_key,
             base_url=retain_base_url,
             model=retain_model,
-            reasoning_effort=config.llm_reasoning_effort,
+            reasoning_effort=config.retain_llm_reasoning_effort or config.llm_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             ollama_num_ctx=config.llm_ollama_num_ctx,
@@ -1221,7 +1221,7 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=reflect_api_key,
             base_url=reflect_base_url,
             model=reflect_model,
-            reasoning_effort=config.llm_reasoning_effort,
+            reasoning_effort=config.reflect_llm_reasoning_effort or config.llm_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             ollama_num_ctx=config.llm_ollama_num_ctx,
@@ -1260,7 +1260,7 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=consolidation_api_key,
             base_url=consolidation_base_url,
             model=consolidation_model,
-            reasoning_effort=config.llm_reasoning_effort,
+            reasoning_effort=config.consolidation_llm_reasoning_effort or config.llm_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             ollama_num_ctx=config.llm_ollama_num_ctx,
@@ -2200,26 +2200,21 @@ class MemoryEngine(MemoryEngineInterface):
         if not webhook_manager:
             return None
 
+        # Imported lazily: retain.fact_storage imports fq_table from this module.
         from ..webhooks.models import RetainEventData, WebhookEvent, WebhookEventType
+        from .retain import fact_storage
 
         now = datetime.now(UTC)
         op_id = operation_id or uuid.uuid4().hex
-        events = []
+        # memory_unit_count is left unset here and filled in at fire time: it is
+        # only knowable once the retain has written its units — see _callback.
+        event_data = []
         for content in contents:
-            doc_id = content.get("document_id")
             tags = content.get("tags")
-            data = RetainEventData(
-                document_id=doc_id,
-                tags=tags if isinstance(tags, list) else None,
-            )
-            events.append(
-                WebhookEvent(
-                    event=WebhookEventType.RETAIN_COMPLETED,
-                    bank_id=bank_id,
-                    operation_id=op_id,
-                    status="completed",
-                    timestamp=now,
-                    data=data,
+            event_data.append(
+                RetainEventData(
+                    document_id=content.get("document_id"),
+                    tags=tags if isinstance(tags, list) else None,
                 )
             )
 
@@ -2229,7 +2224,27 @@ class MemoryEngine(MemoryEngineInterface):
             # from the HTTP path (http.py calls _build_retain_outbox_callback before
             # retain_batch_async which is where _authenticate_tenant sets the schema).
             resolved_schema = schema or _current_schema.get()
-            for event in events:
+            for data in event_data:
+                if data.document_id:
+                    # Counted on the retain's own connection, so the units written
+                    # by the transaction this callback is queued in are already
+                    # visible. A zero here is the signal that the document
+                    # extracted no facts and needs a reprocess to be found (#3040).
+                    data = data.model_copy(
+                        update={
+                            "memory_unit_count": await fact_storage.count_document_memory_units(
+                                conn, bank_id, data.document_id
+                            )
+                        }
+                    )
+                event = WebhookEvent(
+                    event=WebhookEventType.RETAIN_COMPLETED,
+                    bank_id=bank_id,
+                    operation_id=op_id,
+                    status="completed",
+                    timestamp=now,
+                    data=data,
+                )
                 await webhook_manager.fire_event_with_conn(event, conn, schema=resolved_schema)
 
         return _callback
@@ -9896,6 +9911,7 @@ class MemoryEngine(MemoryEngineInterface):
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
         tag_groups: list[TagGroup] | None = None,
+        apply_all_directives: bool = False,
         exclude_mental_model_ids: list[str] | None = None,
         fact_types: list[str] | None = None,
         exclude_mental_models: bool = False,
@@ -9932,6 +9948,11 @@ class MemoryEngine(MemoryEngineInterface):
             response_schema: Optional JSON Schema for structured output (not yet supported)
             tags: Optional tags to filter memories
             tags_match: How to match tags - "any" (OR), "all" (AND)
+            apply_all_directives: When True, apply every active directive regardless of
+                tags, ignoring the request's tag scope for directives. When False
+                (default), directives are scoped like memories: untagged directives
+                always apply and tagged directives apply only when the request's tags
+                match them.
             exclude_mental_model_ids: Optional list of mental model IDs to exclude from search
                 (used when refreshing a mental model to avoid circular reference)
 
@@ -10119,19 +10140,31 @@ class MemoryEngine(MemoryEngineInterface):
             async with backend.acquire() as conn:
                 return await tool_expand(conn, bank_id, memory_ids, depth)
 
-        # Load directives from the dedicated directives table
-        # Directives are hard rules that must be followed in all responses
-        # Use isolation_mode=True to prevent tag-scoped directives from leaking into untagged operations
-        # Use the same tags_match as the reflect request so directives respect the same scoping rules
-        directives_raw = await self.list_directives(
-            bank_id=bank_id,
-            tags=tags,
-            tags_match=tags_match,
-            tag_groups=tag_groups,
-            active_only=True,
-            request_context=request_context,
-            isolation_mode=True,
-        )
+        # Load directives from the dedicated directives table.
+        # Directives are hard rules that must be followed in all responses.
+        if apply_all_directives:
+            # Caller opted out of tag scoping: apply every active directive regardless
+            # of the request's tags (no tag filter, isolation off).
+            directives_raw = await self.list_directives(
+                bank_id=bank_id,
+                active_only=True,
+                request_context=request_context,
+                isolation_mode=False,
+            )
+        else:
+            # Scope directives like memories: untagged directives always apply, tagged
+            # ones only when the reflect tags match. isolation_mode keeps tag-scoped
+            # directives from leaking into an untagged reflect. Use the same tags_match
+            # as the reflect request so directives respect the same scoping rules.
+            directives_raw = await self.list_directives(
+                bank_id=bank_id,
+                tags=tags,
+                tags_match=tags_match,
+                tag_groups=tag_groups,
+                active_only=True,
+                request_context=request_context,
+                isolation_mode=True,
+            )
         directives = directives_raw
         if directives:
             logger.info(f"[REFLECT {reflect_id}] Loaded {len(directives)} directives")

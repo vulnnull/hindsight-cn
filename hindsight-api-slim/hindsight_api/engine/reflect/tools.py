@@ -95,8 +95,10 @@ async def tool_search_mental_models(
     params: list[Any] = [bank_id, str(query_embedding), max_results]
     next_param = 4
 
-    # Use the centralized tag filtering logic
-    if tags:
+    # Exact matching treats absent or empty tags as the global scope. Do not
+    # skip the filter, or mental models would see every scope while the other
+    # reflect retrieval tools correctly see only untagged data.
+    if tags or tags_match == "exact":
         tag_clause, tag_params, next_param = build_tags_where_clause(tags, param_offset=next_param, match=tags_match)
         filters += f" {tag_clause}"
         params.extend(tag_params)

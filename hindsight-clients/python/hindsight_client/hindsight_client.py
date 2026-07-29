@@ -1164,34 +1164,68 @@ class Hindsight:
             self._mental_models_api.create_mental_model(bank_id, request_obj, _request_timeout=self._timeout)
         )
 
-    def list_mental_models(self, bank_id: str, tags: list[str] | None = None):
+    def list_mental_models(
+        self,
+        bank_id: str,
+        tags: list[str] | None = None,
+        tags_match: Literal["any", "all", "exact"] | None = None,
+        detail: Literal["metadata", "content", "full"] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ):
         """
         List all mental models in a bank (sync wrapper — use ``await client.mental_models.list_mental_models(...)`` in async code).
 
         Args:
             bank_id: The memory bank ID
             tags: Optional tags to filter by
+            tags_match: How to match tags ("any", "all", or "exact")
+            detail: Detail level — "metadata" (names/tags only), "content" (adds
+                content/config), or "full" (includes the large reflect_response
+                provenance chains). Defaults server-side to "full"; pass a lighter
+                level to avoid pulling large payloads you don't need.
+            limit: Maximum number of mental models to return
+            offset: Number of mental models to skip (for pagination)
 
         Returns:
             ListMentalModelsResponse with items
         """
         return _run_async(
-            self._mental_models_api.list_mental_models(bank_id, tags=tags, _request_timeout=self._timeout)
+            self._mental_models_api.list_mental_models(
+                bank_id,
+                tags=tags,
+                tags_match=tags_match,
+                detail=detail,
+                limit=limit,
+                offset=offset,
+                _request_timeout=self._timeout,
+            )
         )
 
-    def get_mental_model(self, bank_id: str, mental_model_id: str):
+    def get_mental_model(
+        self,
+        bank_id: str,
+        mental_model_id: str,
+        detail: Literal["metadata", "content", "full"] | None = None,
+    ):
         """
         Get a specific mental model (sync wrapper — use ``await client.mental_models.get_mental_model(...)`` in async code).
 
         Args:
             bank_id: The memory bank ID
             mental_model_id: The mental model ID
+            detail: Detail level — "metadata" (names/tags only), "content" (adds
+                content/config), or "full" (includes the large reflect_response
+                provenance chains). Defaults server-side to "full"; pass a lighter
+                level to avoid pulling large payloads you don't need.
 
         Returns:
             MentalModelResponse
         """
         return _run_async(
-            self._mental_models_api.get_mental_model(bank_id, mental_model_id, _request_timeout=self._timeout)
+            self._mental_models_api.get_mental_model(
+                bank_id, mental_model_id, detail=detail, _request_timeout=self._timeout
+            )
         )
 
     def refresh_mental_model(self, bank_id: str, mental_model_id: str):
