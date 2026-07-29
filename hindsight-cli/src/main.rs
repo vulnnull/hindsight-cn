@@ -4,7 +4,6 @@ mod config;
 mod errors;
 mod output;
 mod ui;
-mod utils;
 
 use anyhow::Result;
 use api::ApiClient;

@@ -179,21 +179,3 @@ async def store_chunks_batch(
     )
 
     return chunk_id_map
-
-
-def map_facts_to_chunks(facts_chunk_indices: list[int], chunk_id_map: dict[int, str]) -> list[str | None]:
-    """
-    Map fact chunk indices to chunk IDs.
-
-    Args:
-        facts_chunk_indices: List of chunk indices for each fact
-        chunk_id_map: Dictionary mapping chunk index to chunk_id
-
-    Returns:
-        List of chunk_ids (same length as facts_chunk_indices)
-    """
-    chunk_ids = []
-    for chunk_idx in facts_chunk_indices:
-        chunk_id = chunk_id_map.get(chunk_idx)
-        chunk_ids.append(chunk_id)
-    return chunk_ids

@@ -51,11 +51,6 @@ def default_mcp_paths() -> List[Path]:
     return [codeium / "windsurf" / "mcp_config.json", codeium / "mcp_config.json"]
 
 
-def default_mcp_path() -> Path:
-    """The primary Devin Desktop MCP config (``~/.codeium/windsurf/mcp_config.json``)."""
-    return default_mcp_paths()[0]
-
-
 def mcp_endpoint_url(api_url: str) -> str:
     """The Hindsight multi-bank MCP endpoint (no bank pinned in the path)."""
     return f"{api_url.rstrip('/')}/mcp/"

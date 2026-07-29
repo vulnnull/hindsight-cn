@@ -33,36 +33,6 @@ def _validate_embedding_vector(vector: list[float], *, index: int, expected_dime
     return vector
 
 
-def generate_embedding(
-    embeddings_backend: EmbeddingsBackend, text: str, input_type: EmbeddingInputType = "document"
-) -> list[float]:
-    """
-    Generate embedding for text using the provided embeddings backend.
-
-    Args:
-        embeddings_backend: Embeddings instance to use for encoding
-        text: Text to embed
-        input_type: Whether text is retained document text or recall/search query text.
-
-    Returns:
-        Embedding vector (dimension depends on embeddings backend)
-    """
-    try:
-        embeddings = _encode_with_input_type(embeddings_backend, [text], input_type)
-    except Exception as e:
-        raise Exception(f"Failed to generate embedding: {str(e)}")
-
-    if len(embeddings) != 1:
-        raise RuntimeError(
-            f"Embeddings backend returned {len(embeddings)} vectors for 1 input text; expected exact 1:1 alignment"
-        )
-    return _validate_embedding_vector(
-        embeddings[0],
-        index=0,
-        expected_dimension=embeddings_backend.dimension,
-    )
-
-
 def _encode_with_input_type(
     embeddings_backend: EmbeddingsBackend, texts: list[str], input_type: EmbeddingInputType
 ) -> list[list[float]]:

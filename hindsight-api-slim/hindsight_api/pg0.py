@@ -131,29 +131,6 @@ class EmbeddedPostgres:
         return await self.start()
 
 
-_default_instance: EmbeddedPostgres | None = None
-
-
-def get_embedded_postgres() -> EmbeddedPostgres:
-    """Get or create the default EmbeddedPostgres instance."""
-    global _default_instance
-    if _default_instance is None:
-        _default_instance = EmbeddedPostgres()
-    return _default_instance
-
-
-async def start_embedded_postgres() -> str:
-    """Quick start function for embedded PostgreSQL."""
-    return await get_embedded_postgres().ensure_running()
-
-
-async def stop_embedded_postgres() -> None:
-    """Stop the default embedded PostgreSQL instance."""
-    global _default_instance
-    if _default_instance:
-        await _default_instance.stop()
-
-
 @dataclass(frozen=True)
 class Pg0Url:
     """Parsed representation of a ``pg0`` embedded-database URL.

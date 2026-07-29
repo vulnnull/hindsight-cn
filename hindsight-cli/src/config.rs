@@ -77,11 +77,6 @@ impl Config {
         Self::validate_and_create(DEFAULT_API_URL.to_string(), env_api_key, ConfigSource::Default)
     }
 
-    /// Legacy method for backwards compatibility
-    pub fn from_env() -> Result<Self> {
-        Self::load()
-    }
-
     fn validate_and_create(api_url: String, api_key: Option<String>, source: ConfigSource) -> Result<Self> {
         if !api_url.starts_with("http://") && !api_url.starts_with("https://") {
             anyhow::bail!(
@@ -140,10 +135,6 @@ impl Config {
             Some(url) => Ok(Some((url, api_key))),
             None => Ok(None),
         }
-    }
-
-    pub fn save_api_url(api_url: &str) -> Result<PathBuf> {
-        Self::save_config(api_url, None)
     }
 
     pub fn save_config(api_url: &str, api_key: Option<&str>) -> Result<PathBuf> {

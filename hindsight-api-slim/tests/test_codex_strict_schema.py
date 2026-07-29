@@ -122,20 +122,23 @@ async def test_strict_schema_skip_validation_returns_dict():
     response = MagicMock()
     response.raise_for_status.return_value = None
     tool_call = LLMToolCall(id="c", name="structured_response", arguments={"fact": "x"})
+    span_recorder = MagicMock()
 
-    with patch.object(llm._client, "post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = response
-        with patch.object(llm, "_parse_sse_tool_stream", new_callable=AsyncMock) as mock_parse:
-            mock_parse.return_value = (None, [tool_call])
-            result = await llm.call(
-                messages=[{"role": "user", "content": "hi"}],
-                response_format=_Fact,
-                strict_schema=True,
-                skip_validation=True,
-                max_retries=0,
-            )
+    with patch("hindsight_api.tracing.get_span_recorder", return_value=span_recorder):
+        with patch.object(llm._client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = response
+            with patch.object(llm, "_parse_sse_tool_stream", new_callable=AsyncMock) as mock_parse:
+                mock_parse.return_value = (None, [tool_call])
+                result = await llm.call(
+                    messages=[{"role": "user", "content": "hi"}],
+                    response_format=_Fact,
+                    strict_schema=True,
+                    skip_validation=True,
+                    max_retries=0,
+                )
 
     assert result == {"fact": "x"}
+    assert span_recorder.record_llm_call.call_args.kwargs["response_content"] == '{"fact": "x"}'
 
 
 @pytest.mark.asyncio

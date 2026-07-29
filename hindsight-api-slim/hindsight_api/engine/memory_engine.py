@@ -3299,16 +3299,6 @@ class MemoryEngine(MemoryEngineInterface):
             await self.initialize()
         return self._backend
 
-    async def _acquire_connection(self):
-        """
-        Acquire a connection from the database backend.
-
-        Yields a DatabaseConnection from the backend's connection pool.
-        """
-        backend = await self._get_backend()
-        async with backend.acquire() as conn:
-            yield conn
-
     async def health_check(self) -> dict:
         """
         Perform a health check by querying the database.

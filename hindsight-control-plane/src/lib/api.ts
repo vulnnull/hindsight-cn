@@ -616,18 +616,6 @@ export class ControlPlaneClient {
   }
 
   /**
-   * Regenerate entity observations
-   */
-  async regenerateEntityObservations(entityId: string, bankId: string) {
-    return this.fetchApi(
-      `/api/entities/${encodeURIComponent(entityId)}/regenerate?bank_id=${encodeURIComponent(bankId)}`,
-      {
-        method: "POST",
-      }
-    );
-  }
-
-  /**
    * List documents
    */
   async listDocuments(params: { bank_id: string; q?: string; limit?: number; offset?: number }) {
@@ -929,16 +917,6 @@ export class ControlPlaneClient {
   }
 
   /**
-   * Set bank mission
-   */
-  async setBankMission(bankId: string, mission: string) {
-    return this.fetchApi(bankApi(bankId), {
-      method: "PATCH",
-      body: JSON.stringify({ mission }),
-    });
-  }
-
-  /**
    * List directives for a bank
    */
   async listDirectives(bankId: string, tags?: string[], tagsMatch?: string) {
@@ -1086,27 +1064,6 @@ export class ControlPlaneClient {
     }>(bankApi(bankId, `/operations/${encodeURIComponent(operationId)}${qs}`));
   }
 
-  /**
-   * Update bank profile
-   */
-  async updateBankProfile(
-    bankId: string,
-    profile: {
-      name?: string;
-      disposition?: {
-        skepticism: number;
-        literalism: number;
-        empathy: number;
-      };
-      mission?: string;
-    }
-  ) {
-    return this.fetchApi(`/api/profile/${encodeURIComponent(bankId)}`, {
-      method: "PUT",
-      body: JSON.stringify(profile),
-    });
-  }
-
   // ============= OBSERVATIONS (auto-consolidated, read-only) =============
 
   /**
@@ -1146,35 +1103,6 @@ export class ControlPlaneClient {
         updated_at: string;
       }>;
     }>(bankApi(bankId, `/observations${query ? `?${query}` : ""}`));
-  }
-
-  /**
-   * Get an observation with source memories
-   */
-  async getObservation(bankId: string, observationId: string) {
-    return this.fetchApi<{
-      id: string;
-      bank_id: string;
-      text: string;
-      proof_count: number;
-      history: Array<{
-        previous_text: string;
-        changed_at: string;
-        reason: string;
-      }>;
-      tags: string[];
-      source_memory_ids: string[];
-      source_memories: Array<{
-        id: string;
-        text: string;
-        type: string;
-        context?: string;
-        occurred_start?: string;
-        mentioned_at?: string;
-      }>;
-      created_at: string;
-      updated_at: string;
-    }>(bankApi(bankId, `/observations/${encodeURIComponent(observationId)}`));
   }
 
   /**

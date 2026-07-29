@@ -37,10 +37,8 @@ _PROCESSING_RULES = """## PROCESSING RULES
 
 9. KEEP DISTINCT TOPICS DISTINCT: do not merge observations about different people, entities, or unrelated topics. Merging is for the same canonical fact recurring — not for related-but-distinct claims."""
 
-# Field-by-field definitions of the input shape, shared by the cached system
-# prefix (_INPUT_FORMAT_NOTE) and the single-message prompt (_INPUT_SECTION) so
-# the two descriptions cannot drift apart. Both call sites run .format(), so
-# these strings must contain no braces.
+# Field-by-field definitions of the input shape used by the cached system
+# prefix. The call site runs .format(), so these strings must contain no braces.
 _FACT_FIELDS = """One per line, formatted as `[uuid] fact text (temporal fields)`:
 - `[uuid]`: the fact's identifier — copy it verbatim into `source_fact_ids`
 - `occurred_start` / `occurred_end`: when the described event happened. This can be long before the fact was stated — a fact recorded today may describe a 2019 event.
@@ -82,24 +80,6 @@ _SPLIT_INPUT_SECTION = """## INPUT
 ### Existing observations
 
 {observations_text}"""
-
-# Data section — format placeholders {facts_text} and {observations_text} are substituted at call time
-_INPUT_SECTION = f"""## INPUT
-
-Every temporal field below is optional and is omitted when unknown.
-
-### New facts
-
-{_FACT_FIELDS}
-
-{{facts_text}}
-
-### Existing observations
-
-JSON array, pooled from recalls across all new facts above. Each entry has:
-{_OBSERVATION_FIELDS}
-
-{{observations_text}}"""
 
 _DECISION_GUIDE = """## DECISION GUIDE
 
@@ -159,39 +139,6 @@ Expected output (UPDATE for the state change; CREATE for the unrelated work-hour
 - `reason`: REQUIRED on every create/update/delete — one sentence explaining the choice. For a CREATE, state which existing observation(s) you considered and why none matched (a near-identical existing observation means you should UPDATE, not CREATE). This is audited to catch duplicate creates.
 - Do NOT include `tags` — handled automatically.
 - Return `{{"creates": [], "updates": [], "deletes": []}}` if nothing durable is found."""
-
-
-def build_batch_consolidation_prompt(
-    observations_mission: str | None = None,
-    observation_capacity_note: str | None = None,
-    llm_output_language: str | None = None,
-) -> str:
-    """
-    Build the consolidation prompt for batch mode (multiple facts per LLM call).
-
-    The mission defines *what* to track (customisable per bank) and takes
-    priority over the built-in processing rules when the two conflict.
-    Processing rules, decision guide, and output format are always present.
-    When ``llm_output_language`` is set, observations are emitted in that
-    language.
-    """
-    mission = escape_for_prompt(observations_mission or _DEFAULT_MISSION)
-
-    capacity_section = ""
-    if observation_capacity_note:
-        capacity_section = f"\n\n## CAPACITY CONSTRAINT\n\n{escape_for_prompt(observation_capacity_note)}"
-
-    return (
-        "You are a memory consolidation system. Synthesize new facts into "
-        "observations, merging with existing observations when appropriate.\n\n"
-        f"## MISSION\n\n{mission}\n\n"
-        f"{_MISSION_PRIORITY_NOTE}"
-        f"{capacity_section}\n\n"
-        f"{_PROCESSING_RULES}\n\n"
-        f"{_INPUT_SECTION}\n\n"
-        f"{_DECISION_GUIDE}\n\n"
-        f"{_OUTPUT_SECTION}" + output_language_directive(llm_output_language)
-    )
 
 
 def build_consolidation_system_prompt(

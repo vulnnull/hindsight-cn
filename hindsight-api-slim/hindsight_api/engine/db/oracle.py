@@ -447,9 +447,6 @@ def _rewrite_pg_to_oracle(query: str) -> RewriteResult:
     if has_for_update:
         # FOR UPDATE path: use ROWNUM instead of FETCH FIRST.
         # Extract and remove LIMIT clause, inject ROWNUM into WHERE.
-        def _limit_to_rownum(m):
-            return ""  # Remove the LIMIT clause; we'll add ROWNUM below
-
         limit_val = None
         limit_match = re.search(r"\bLIMIT\s+(\d+|:\w+)\b", query, re.IGNORECASE)
         if limit_match:

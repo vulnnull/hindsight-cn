@@ -324,7 +324,7 @@ class ClaudeCodeLLM(LLMInterface):
 
                 # Record trace span
                 try:
-                    from hindsight_api.tracing import get_span_recorder
+                    from hindsight_api.tracing import _serialize_for_span, get_span_recorder
 
                     span_recorder = get_span_recorder()
                     span_recorder.record_llm_call(
@@ -332,15 +332,17 @@ class ClaudeCodeLLM(LLMInterface):
                         model=self.model,
                         scope=scope,
                         messages=messages,
-                        response_content=result if isinstance(result, str) else result.model_dump_json(),
+                        response_content=_serialize_for_span(result),
                         input_tokens=estimated_input,
                         output_tokens=estimated_output,
                         duration=duration,
                         finish_reason=None,
                         error=None,
                     )
-                except Exception:
-                    pass  # logging failure must never affect the operation
+                except Exception as span_error:
+                    # Tracing must remain best-effort, but expose instrumentation
+                    # bugs that would otherwise silently erase spans (#3025).
+                    logger.debug("Claude Code span recording failed: %s", span_error, exc_info=True)
 
                 # Log slow calls
                 if duration > 10.0:

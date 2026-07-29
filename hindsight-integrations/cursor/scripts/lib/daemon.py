@@ -15,7 +15,7 @@ import urllib.request
 
 from .config import DEFAULT_HINDSIGHT_API_URL
 from .llm import detect_llm_config, get_llm_env_vars
-from .state import read_state, write_state
+from .state import write_state
 
 DAEMON_STATE_FILE = "daemon.json"
 PROFILE_NAME = "cursor"
@@ -217,29 +217,3 @@ def _ensure_daemon_running(config: dict, port: int, debug_fn=None):
         time.sleep(1)
 
     raise RuntimeError("Daemon failed to become ready within 30 seconds")
-
-
-def stop_daemon(config: dict, debug_fn=None):
-    """Stop the daemon if it was started by this plugin."""
-    state = read_state(DAEMON_STATE_FILE)
-    if not state or not state.get("started_by_plugin"):
-        if debug_fn:
-            debug_fn("Daemon not started by plugin, skipping stop")
-        return
-
-    if debug_fn:
-        debug_fn("Stopping daemon...")
-
-    try:
-        result = _run_embed(
-            config,
-            ["daemon", "--profile", PROFILE_NAME, "stop"],
-            timeout=10,
-        )
-        if debug_fn:
-            debug_fn(f"Daemon stop: {result.stdout.strip()}")
-    except Exception as e:
-        if debug_fn:
-            debug_fn(f"Daemon stop error: {e}")
-
-    write_state(DAEMON_STATE_FILE, {})

@@ -8,7 +8,6 @@ import {
   applyApiMode,
   applyCloudMode,
   applyEmbeddedMode,
-  defaultApiKeyEnvVar,
   ensurePluginConfig,
   envSecretRef,
   isValidEnvVarName,
@@ -32,13 +31,6 @@ describe("isValidEnvVarName", () => {
     expect(isValidEnvVarName("")).toBe(false);
     expect(isValidEnvVarName(undefined)).toBe(false);
     expect(isValidEnvVarName("has-dash")).toBe(false);
-  });
-});
-
-describe("defaultApiKeyEnvVar", () => {
-  it("UPPERs and snake_cases the provider id", () => {
-    expect(defaultApiKeyEnvVar("openai")).toBe("OPENAI_API_KEY");
-    expect(defaultApiKeyEnvVar("claude-code")).toBe("CLAUDE_CODE_API_KEY");
   });
 });
 

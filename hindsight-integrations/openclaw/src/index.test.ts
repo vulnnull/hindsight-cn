@@ -6,8 +6,6 @@ import {
   formatCurrentTimeForRecall,
   formatMemories,
   prepareRetentionTranscript,
-  countUserTurns,
-  getRetentionTurnIndex,
   sliceLastTurnsByUserBoundary,
   composeRecallQuery,
   truncateRecallQuery,
@@ -323,35 +321,6 @@ describe("formatCurrentTimeForRecall", () => {
 // ---------------------------------------------------------------------------
 // retention helpers
 // ---------------------------------------------------------------------------
-
-describe("countUserTurns", () => {
-  it("counts user messages across a resumed conversation history", () => {
-    expect(
-      countUserTurns([
-        { role: "user", content: "turn 1" },
-        { role: "assistant", content: "reply 1" },
-        { role: "system", content: "meta" },
-        { role: "user", content: "turn 2" },
-        { role: "assistant", content: "reply 2" },
-        { role: "user", content: "turn 3" },
-      ])
-    ).toBe(3);
-  });
-});
-
-describe("getRetentionTurnIndex", () => {
-  it("uses the full conversation turn count for per-turn retention", () => {
-    expect(getRetentionTurnIndex(7, 1)).toBe(7);
-  });
-
-  it("derives a stable window sequence for chunked retention", () => {
-    expect(getRetentionTurnIndex(6, 3)).toBe(2);
-  });
-
-  it("returns null when a chunk boundary has not been reached", () => {
-    expect(getRetentionTurnIndex(5, 3)).toBeNull();
-  });
-});
 
 describe("normalizeRetainTags", () => {
   it("trims, deduplicates, and preserves order for string arrays", () => {

@@ -185,11 +185,6 @@ class ProcessedFact:
     # Observation scopes for consolidation
     observation_scopes: Literal["per_tag", "combined", "all_combinations", "shared"] | list[list[str]] | None = None
 
-    @property
-    def is_duplicate(self) -> bool:
-        """Check if this fact was marked as a duplicate."""
-        return self.unit_id is None
-
     @staticmethod
     def _is_degenerate_text(text: str) -> bool:
         """Check if fact text has zero information content.
@@ -346,11 +341,3 @@ class RetainBatch:
 
     # Results (populated after storage)
     unit_ids_by_content: list[list[str]] = field(default_factory=list)
-
-    def get_facts_for_content(self, content_index: int) -> list[ExtractedFact]:
-        """Get all extracted facts for a specific content item."""
-        return [f for f in self.extracted_facts if f.content_index == content_index]
-
-    def get_chunks_for_content(self, content_index: int) -> list[ChunkMetadata]:
-        """Get all chunks for a specific content item."""
-        return [c for c in self.chunks if c.content_index == content_index]

@@ -236,17 +236,17 @@ class TestWorkerMarkCompleted:
 
 def test_all_operation_types_have_slot_reservation_config():
     """Every operation_type used in memory_engine must be listed in
-    WORKER_SLOT_RESERVATION_TYPES so it can be reserved via env var.
+    WORKER_SLOT_TYPE_DEFAULTS so it can be reserved via env var.
 
     If this test fails, a new operation_type was added to memory_engine.py
-    without a corresponding entry in config.WORKER_SLOT_RESERVATION_TYPES.
-    Add the new type there (single line) and it will automatically get an
+    without a corresponding entry in config.WORKER_SLOT_TYPE_DEFAULTS. Add the
+    new type there (single line) and it will automatically get a RESERVED_SLOTS
     env var, config field, and validation.
     """
     import ast
     import pathlib
 
-    from hindsight_api.config import WORKER_SLOT_RESERVATION_TYPES
+    from hindsight_api.config import WORKER_SLOT_TYPE_DEFAULTS
 
     # Parse memory_engine.py and extract all operation_type="..." string values
     engine_path = pathlib.Path(__file__).parent.parent / "hindsight_api" / "engine" / "memory_engine.py"
@@ -257,11 +257,11 @@ def test_all_operation_types_have_slot_reservation_config():
         if isinstance(node, ast.keyword) and node.arg == "operation_type" and isinstance(node.value, ast.Constant):
             operation_types_in_code.add(node.value.value)
 
-    missing = operation_types_in_code - set(WORKER_SLOT_RESERVATION_TYPES.keys())
+    missing = operation_types_in_code - set(WORKER_SLOT_TYPE_DEFAULTS)
     assert not missing, (
         f"Operation types {missing} are used in memory_engine.py but missing from "
-        f"config.WORKER_SLOT_RESERVATION_TYPES. Add them there so they can be "
-        f"reserved via env var."
+        f"config.WORKER_SLOT_TYPE_DEFAULTS. Add them there so they can be reserved "
+        f"via env var."
     )
 
 

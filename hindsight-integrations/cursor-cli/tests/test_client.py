@@ -27,19 +27,6 @@ class TestUserAgentHeader:
         assert captured["ua"] == USER_AGENT
         assert captured["ua"].startswith("hindsight-cursor-cli/")
 
-    def test_health_check_sends_user_agent(self):
-        c = HindsightClient("http://localhost:9077")
-        captured = {}
-
-        def fake_open(req, timeout=None):
-            captured["ua"] = req.get_header("User-agent")
-            return FakeHTTPResponse({}, status=200)
-
-        with patch("urllib.request.urlopen", side_effect=fake_open):
-            c.health_check(timeout=1)
-
-        assert captured["ua"] == USER_AGENT
-
 
 class TestURLValidation:
     def test_rejects_non_http_scheme(self):

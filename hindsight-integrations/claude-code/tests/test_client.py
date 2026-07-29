@@ -3,7 +3,7 @@
 import json
 import urllib.error
 from io import BytesIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from lib.client import USER_AGENT, HindsightClient, _validate_api_url
@@ -202,36 +202,6 @@ class TestHindsightClientRetain:
         assert "my%3A%3Abank" in captured["url"]
 
 
-class TestHindsightClientHealthCheck:
-    def test_returns_true_on_200(self):
-        c = HindsightClient("http://localhost:9077")
-        with patch("urllib.request.urlopen", return_value=FakeResp({}, status=200)):
-            with patch("time.sleep"):  # don't actually sleep
-                assert c.health_check() is True
-
-    def test_returns_false_after_retries(self):
-        c = HindsightClient("http://localhost:9077")
-        with patch("urllib.request.urlopen", side_effect=OSError("refused")):
-            with patch("time.sleep"):
-                assert c.health_check() is False
-
-    def test_retries_on_failure(self):
-        c = HindsightClient("http://localhost:9077")
-        call_count = 0
-
-        def flaky(*_a, **_kw):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                raise OSError("not yet")
-            return FakeResp({}, status=200)
-
-        with patch("urllib.request.urlopen", side_effect=flaky):
-            with patch("time.sleep"):
-                result = c.health_check()
-
-        assert result is True
-        assert call_count == 3
 
 
 class TestRequestTimeoutOverride:
@@ -304,19 +274,6 @@ class TestRequestTimeoutOverride:
 
         assert captured["timeout"] == 15
 
-    def test_override_does_not_affect_health_check(self):
-        c = HindsightClient("http://localhost:9077", request_timeout_override=60)
-        captured = {}
-
-        def fake_open(req, timeout=None):
-            captured["timeout"] = timeout
-            return FakeResp({}, status=200)
-
-        with patch("urllib.request.urlopen", side_effect=fake_open):
-            with patch("time.sleep"):
-                c.health_check()
-
-        assert captured["timeout"] == 5
 
 
 class TestHindsightClientSetBankMission:

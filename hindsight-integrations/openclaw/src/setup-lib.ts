@@ -131,10 +131,6 @@ export function isValidEnvVarName(value: string | undefined): boolean {
   return !!value && ENV_VAR_RE.test(value.trim());
 }
 
-export function defaultApiKeyEnvVar(provider: string): string {
-  return `${provider.toUpperCase().replace(/-/g, "_")}_API_KEY`;
-}
-
 /**
  * Mask all but the last 4 chars of a secret so we can hint "yes, this is your
  * configured token" without leaking the secret onto the user's terminal

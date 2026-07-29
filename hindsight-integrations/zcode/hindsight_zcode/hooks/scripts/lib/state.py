@@ -68,12 +68,6 @@ def write_state(name, data):
             pass
 
 
-def get_turn_count(session_id):
-    """Get the current turn count for a session."""
-    turns = read_state("turns.json", {})
-    return turns.get(session_id, 0)
-
-
 def increment_turn_count(session_id):
     """Increment and return the turn count for a session.
 

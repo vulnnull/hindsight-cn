@@ -890,3 +890,44 @@ def test_operation_cleanup_batch_size_requires_positive_integer(monkeypatch, raw
 
     with pytest.raises(ValueError, match=ENV_OPERATION_CLEANUP_BATCH_SIZE):
         HindsightConfig.from_env()
+
+
+# --- Worker per-type slot reservations: RESERVED_SLOTS (floor) + deprecated _MAX_SLOTS alias ---
+
+
+def test_worker_reserved_slots_parse(monkeypatch):
+    """RESERVED_SLOTS sets the reservation floor for an operation type."""
+    from hindsight_api.config import HindsightConfig
+
+    monkeypatch.setenv("HINDSIGHT_API_LLM_PROVIDER", "mock")
+    monkeypatch.setenv("HINDSIGHT_API_WORKER_RETAIN_RESERVED_SLOTS", "2")
+
+    config = HindsightConfig.from_env()
+
+    assert config.worker_slot_reservations["retain"] == 2
+
+
+def test_worker_legacy_max_slots_is_deprecated_alias_for_reserved(monkeypatch, caplog):
+    """The legacy _MAX_SLOTS env var maps to the reservation floor and warns."""
+    from hindsight_api.config import HindsightConfig
+
+    monkeypatch.setenv("HINDSIGHT_API_LLM_PROVIDER", "mock")
+    monkeypatch.setenv("HINDSIGHT_API_WORKER_CONSOLIDATION_MAX_SLOTS", "3")
+
+    with caplog.at_level(logging.WARNING):
+        config = HindsightConfig.from_env()
+
+    assert config.worker_slot_reservations["consolidation"] == 3
+    assert any("HINDSIGHT_API_WORKER_CONSOLIDATION_MAX_SLOTS" in r.message for r in caplog.records)
+
+
+def test_worker_reserved_and_legacy_both_set_is_rejected(monkeypatch):
+    """Setting both RESERVED_SLOTS and the deprecated _MAX_SLOTS alias is ambiguous."""
+    from hindsight_api.config import HindsightConfig
+
+    monkeypatch.setenv("HINDSIGHT_API_LLM_PROVIDER", "mock")
+    monkeypatch.setenv("HINDSIGHT_API_WORKER_RETAIN_RESERVED_SLOTS", "2")
+    monkeypatch.setenv("HINDSIGHT_API_WORKER_RETAIN_MAX_SLOTS", "2")
+
+    with pytest.raises(ValueError, match="RESERVED_SLOTS"):
+        HindsightConfig.from_env()

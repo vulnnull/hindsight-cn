@@ -24,7 +24,6 @@ import {
   Database,
   Brain,
   MessageSquare,
-  Shield,
   X,
   Check,
   Play,
@@ -61,9 +60,6 @@ export function ThinkView() {
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
-  const [selectedDirective, setSelectedDirective] = useState<any | null>(null);
-  const [fullDirective, setFullDirective] = useState<any | null>(null);
-  const [loadingDirective, setLoadingDirective] = useState(false);
   const [selectedObservation, setSelectedObservation] = useState<any | null>(null);
   const [fullObservation, setFullObservation] = useState<any | null>(null);
   const [loadingObservation, setLoadingObservation] = useState(false);
@@ -71,25 +67,6 @@ export function ThinkView() {
   const [activeBasedOnTab, setActiveBasedOnTab] = useState<BasedOnTab>("world");
 
   const FEEDBACK_DIRECTIVE_NAME = "General Feedback";
-
-  // Load full directive data when one is selected
-  const handleSelectDirective = async (directive: any) => {
-    setSelectedDirective(directive);
-    setFullDirective(null);
-    if (!currentBank || !directive?.id) return;
-
-    setLoadingDirective(true);
-    try {
-      const directives = await client.listDirectives(currentBank);
-      const fullDir = directives.items?.find((d: any) => d.id === directive.id);
-      setFullDirective(fullDir || directive);
-    } catch (error) {
-      console.error("Failed to load directive:", error);
-      setFullDirective(directive); // Fall back to partial data
-    } finally {
-      setLoadingDirective(false);
-    }
-  };
 
   // Load full observation data when one is selected
   const handleSelectObservation = async (observation: any) => {
@@ -921,83 +898,6 @@ export function ThinkView() {
 
       {/* Memory Detail Modal */}
       <MemoryDetailModal memoryId={selectedMemoryId} onClose={() => setSelectedMemoryId(null)} />
-
-      {/* Directive Detail Panel */}
-      {selectedDirective && (
-        <div className="fixed right-0 top-0 h-screen w-[420px] bg-card border-l shadow-2xl z-50 overflow-y-auto">
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5" />
-                <h2 className="text-lg font-semibold">Directive</h2>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  setSelectedDirective(null);
-                  setFullDirective(null);
-                }}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-            {loadingDirective ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-medium text-muted-foreground">Name</h3>
-                  <p className="mt-1 font-medium">
-                    {fullDirective?.name || selectedDirective.name}
-                  </p>
-                </div>
-                {fullDirective?.description && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground">Description</h3>
-                    <p className="mt-1 text-sm">{fullDirective.description}</p>
-                  </div>
-                )}
-                {fullDirective?.tags && fullDirective.tags.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground mb-1">Tags</h3>
-                    <div className="flex flex-wrap gap-1">
-                      {fullDirective.tags.map((tag: string) => (
-                        <span
-                          key={tag}
-                          className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1"
-                        >
-                          <Tag className="w-2.5 h-2.5" />
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {/* Show content from directive */}
-                {(fullDirective?.content || selectedDirective.content) && (
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground mb-2">Content</h3>
-                    <div className="p-3 bg-muted rounded-lg">
-                      <div className="text-sm text-muted-foreground whitespace-pre-wrap">
-                        {fullDirective?.content || selectedDirective.content}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div className="pt-2 border-t">
-                  <h3 className="text-sm font-medium text-muted-foreground">ID</h3>
-                  <p className="mt-1 font-mono text-xs text-muted-foreground">
-                    {selectedDirective.id}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Observation Detail Panel */}
       {selectedObservation && (

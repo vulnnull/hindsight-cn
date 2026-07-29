@@ -164,35 +164,6 @@ class BudgetedOperation:
         """
         return BudgetedPool(pool, self)
 
-    async def acquire_many(
-        self,
-        pool: Any,
-        count: int,
-    ) -> AsyncIterator[list[Any]]:
-        """
-        Acquire multiple connections within the budget.
-
-        Note: This acquires connections sequentially to respect the budget.
-        For parallel acquisition, use multiple acquire() calls with asyncio.gather().
-        This method is intended for use with raw asyncpg pools only, not DatabaseBackend.
-
-        Args:
-            pool: asyncpg connection pool (raw pool only)
-            count: Number of connections to acquire
-
-        Yields:
-            List of database connections
-        """
-        connections = []
-        try:
-            for _ in range(count):
-                conn = await pool.acquire()
-                connections.append(conn)
-            yield connections
-        finally:
-            for conn in connections:
-                await pool.release(conn)
-
 
 # Global default manager instance
 _default_manager: ConnectionBudgetManager | None = None

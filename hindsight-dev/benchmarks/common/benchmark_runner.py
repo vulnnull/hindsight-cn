@@ -855,28 +855,6 @@ class BenchmarkRunner:
             "detailed_results": judged_results,
         }
 
-    async def _agent_has_data(self, agent_id: str) -> bool:
-        """
-        Check if an agent has any indexed memory units.
-
-        Args:
-            agent_id: Agent ID to check
-
-        Returns:
-            True if agent has at least one memory unit, False otherwise
-        """
-        try:
-            # Use direct database access for local memory
-            pool = await self.memory._get_pool()
-            async with pool.acquire() as conn:
-                result = await conn.fetchrow(
-                    "SELECT COUNT(*) as count FROM memory_units WHERE bank_id = $1 LIMIT 1", agent_id
-                )
-                return result["count"] > 0
-        except Exception as e:
-            console.print(f"  [red]Warning: Error checking agent data: {e}[/red]")
-            return False
-
     async def process_single_item(
         self,
         item: Dict,

@@ -4,7 +4,7 @@ Link creation utilities for temporal, semantic, and entity links.
 
 import logging
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC
 
 from ..._vector_index import ann_search_tuning_settings, configured_vector_extension
 from ..causal_links import (
@@ -117,101 +117,6 @@ def _normalize_datetime(dt):
         # Naive datetime - assume UTC
         return dt.replace(tzinfo=UTC)
     return dt
-
-
-def compute_temporal_links(
-    new_units: dict,
-    candidates: list,
-    time_window_hours: int = 24,
-) -> list:
-    """
-    Compute temporal links between new units and candidate neighbors.
-
-    This is a pure function that takes query results and returns link tuples,
-    making it easy to test without database access.
-
-    Args:
-        new_units: Dict mapping unit_id (str) to event_date (datetime)
-        candidates: List of dicts with 'id' and 'event_date' keys (candidate neighbors)
-        time_window_hours: Time window in hours for temporal links
-
-    Returns:
-        List of tuples: (from_unit_id, to_unit_id, 'temporal', weight, None)
-    """
-    if not new_units:
-        return []
-
-    links = []
-    for unit_id, unit_event_date in new_units.items():
-        # Units without event_date can't form temporal links
-        if unit_event_date is None:
-            continue
-        # Normalize unit_event_date for consistent comparison
-        unit_event_date_norm = _normalize_datetime(unit_event_date)
-
-        # Calculate time window bounds with overflow protection
-        try:
-            time_lower = unit_event_date_norm - timedelta(hours=time_window_hours)
-        except OverflowError:
-            time_lower = datetime.min.replace(tzinfo=UTC)
-        try:
-            time_upper = unit_event_date_norm + timedelta(hours=time_window_hours)
-        except OverflowError:
-            time_upper = datetime.max.replace(tzinfo=UTC)
-
-        # Filter candidates within this unit's time window
-        matching_neighbors = [
-            (row["id"], row["event_date"])
-            for row in candidates
-            if time_lower <= _normalize_datetime(row["event_date"]) <= time_upper
-        ][:10]  # Limit to top 10
-
-        for recent_id, recent_event_date in matching_neighbors:
-            # Calculate temporal proximity weight
-            time_diff_hours = abs(
-                (unit_event_date_norm - _normalize_datetime(recent_event_date)).total_seconds() / 3600
-            )
-            weight = max(0.3, 1.0 - (time_diff_hours / time_window_hours))
-            links.append((unit_id, str(recent_id), "temporal", weight, None))
-
-    return _cap_links_per_unit(links)
-
-
-def compute_temporal_query_bounds(
-    new_units: dict,
-    time_window_hours: int = 24,
-) -> tuple:
-    """
-    Compute the min/max date bounds for querying temporal neighbors.
-
-    Args:
-        new_units: Dict mapping unit_id (str) to event_date (datetime)
-        time_window_hours: Time window in hours
-
-    Returns:
-        Tuple of (min_date, max_date) with overflow protection
-    """
-    if not new_units:
-        return None, None
-
-    # Normalize all dates to be timezone-aware to avoid comparison issues
-    # Filter out None values — units without event_date can't form temporal links
-    all_dates = [_normalize_datetime(d) for d in new_units.values() if d is not None]
-
-    if not all_dates:
-        return None, None
-
-    try:
-        min_date = min(all_dates) - timedelta(hours=time_window_hours)
-    except OverflowError:
-        min_date = datetime.min.replace(tzinfo=UTC)
-
-    try:
-        max_date = max(all_dates) + timedelta(hours=time_window_hours)
-    except OverflowError:
-        max_date = datetime.max.replace(tzinfo=UTC)
-
-    return min_date, max_date
 
 
 def _log(log_buffer, message, level="info"):

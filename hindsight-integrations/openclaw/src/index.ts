@@ -3079,36 +3079,6 @@ function buildToolResultBlock(msg: any): any | null {
   return block;
 }
 
-export function countUserTurns(messages: any[]): number {
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return 0;
-  }
-
-  return messages.reduce(
-    (count: number, message: any) => count + (message?.role === "user" ? 1 : 0),
-    0
-  );
-}
-
-export function getRetentionTurnIndex(
-  conversationTurnCount: number,
-  retainEveryN: number
-): number | null {
-  if (conversationTurnCount <= 0 || retainEveryN <= 0) {
-    return null;
-  }
-
-  if (retainEveryN === 1) {
-    return conversationTurnCount;
-  }
-
-  if (conversationTurnCount % retainEveryN !== 0) {
-    return null;
-  }
-
-  return Math.floor(conversationTurnCount / retainEveryN);
-}
-
 export function sliceLastTurnsByUserBoundary(messages: any[], turns: number): any[] {
   if (!Array.isArray(messages) || messages.length === 0 || turns <= 0) {
     return [];

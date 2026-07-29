@@ -17,7 +17,6 @@ No alembic.ini required - all configuration is done programmatically.
 
 import hashlib
 import logging
-import os
 import threading
 import time
 from pathlib import Path
@@ -388,65 +387,6 @@ def run_migrations(
     except Exception as e:
         logger.error(f"Failed to run database migrations: {e}", exc_info=True)
         raise RuntimeError("Database migration failed") from e
-
-
-def check_migration_status(
-    database_url: str | None = None, script_location: str | None = None
-) -> tuple[str | None, str | None]:
-    """
-    Check current database schema version and latest available version.
-
-    Args:
-        database_url: SQLAlchemy database URL. If None, uses HINDSIGHT_API_DATABASE_URL env var.
-        script_location: Path to alembic migrations directory. If None, uses default location.
-
-    Returns:
-        Tuple of (current_revision, head_revision)
-        Returns (None, None) if unable to determine versions
-    """
-    try:
-        from alembic.runtime.migration import MigrationContext
-        from alembic.script import ScriptDirectory
-        from sqlalchemy import create_engine
-
-        # Get database URL
-        if database_url is None:
-            database_url = os.getenv("HINDSIGHT_API_DATABASE_URL")
-        if not database_url:
-            logger.warning(
-                "Database URL not provided and HINDSIGHT_API_DATABASE_URL not set, cannot check migration status"
-            )
-            return None, None
-
-        # Get current revision from database
-        engine = create_engine(to_libpq_url(database_url), poolclass=NullPool)
-        with engine.connect() as connection:
-            context = MigrationContext.configure(connection)
-            current_rev = context.get_current_revision()
-
-        # Get head revision from migration scripts
-        if script_location is None:
-            package_dir = Path(__file__).parent
-            script_location = str(package_dir / "alembic")
-
-        script_path = Path(script_location)
-        if not script_path.exists():
-            logger.warning(f"Script location not found at {script_location}")
-            return current_rev, None
-
-        # Create config programmatically
-        alembic_cfg = Config()
-        _set_alembic_main_option(alembic_cfg, "script_location", script_location)
-        _set_alembic_main_option(alembic_cfg, "path_separator", "os")
-
-        script = ScriptDirectory.from_config(alembic_cfg)
-        head_rev = script.get_current_head()
-
-        return current_rev, head_rev
-
-    except Exception as e:
-        logger.warning(f"Unable to check migration status: {e}")
-        return None, None
 
 
 def _migrate_table_embedding_dimension(
