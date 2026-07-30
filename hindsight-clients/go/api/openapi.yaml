@@ -1415,6 +1415,375 @@ paths:
       summary: Clear mental model content
       tags:
       - Mental Models
+  /v1/default/banks/{bank_id}/knowledge-base/tree:
+    get:
+      description: Return the knowledge base as a nested tree of folders and pages.
+      operationId: get_knowledge_base_tree
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeTreeResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Get the knowledge-base tree
+      tags:
+      - Knowledge Base
+  /v1/default/banks/{bank_id}/knowledge-base/folders:
+    post:
+      description: "Create a folder, optionally nested under a parent folder."
+      operationId: create_knowledge_folder
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFolderRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeNode'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Create a knowledge-base folder
+      tags:
+      - Knowledge Base
+  /v1/default/banks/{bank_id}/knowledge-base/pages:
+    post:
+      description: Create a page (a mental model + tree node). Content is generated
+        asynchronously; use the returned operation_id to track completion.
+      operationId: create_knowledge_page
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePageRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateKnowledgePageResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Create a knowledge-base page
+      tags:
+      - Knowledge Base
+  /v1/default/banks/{bank_id}/knowledge-base/export:
+    get:
+      description: "Return a portable markdown bundle: a nested index.md, one <id>.md\
+        \ per page, and history logs."
+      operationId: export_knowledge_base
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgePageBundleResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Export the knowledge base as a markdown bundle
+      tags:
+      - Knowledge Base
+  /v1/default/banks/{bank_id}/knowledge-base/search:
+    get:
+      description: "Doc-level hybrid search across a bank's knowledge pages: a full-text\
+        \ (BM25) match and a vector-similarity match, Reciprocal-Rank-Fusion fused.\
+        \ No reranker — tuned for latency."
+      operationId: search_knowledge_base
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - description: Search query
+        explode: true
+        in: query
+        name: q
+        required: true
+        schema:
+          description: Search query
+          minLength: 1
+          title: Q
+          type: string
+        style: form
+      - description: Maximum results to return
+        explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 10
+          description: Maximum results to return
+          maximum: 50
+          minimum: 1
+          title: Limit
+          type: integer
+        style: form
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgePageSearchResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Hybrid search over knowledge pages (BM25 + vector)
+      tags:
+      - Knowledge Base
+  /v1/default/banks/{bank_id}/knowledge-base/pages/{page_id}:
+    get:
+      description: Return a single page as a markdown document (frontmatter + markdown
+        body).
+      operationId: get_knowledge_page
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: page_id
+        required: true
+        schema:
+          title: Page Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgePageResponse'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Get a knowledge-base page
+      tags:
+      - Knowledge Base
+  /v1/default/banks/{bank_id}/knowledge-base/nodes/{node_id}:
+    delete:
+      description: Delete a folder or page and its whole subtree (pages' mental models
+        are removed too).
+      operationId: delete_knowledge_node
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: node_id
+        required: true
+        schema:
+          title: Node Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Delete a knowledge-base node
+      tags:
+      - Knowledge Base
+    patch:
+      description: "Rename a node (set `name`), move it under another folder (set\
+        \ `parent_id`, null for the root), and/or update a page's options (`source_query`,\
+        \ `tags`, `max_tokens`). Changing `source_query` schedules an async refresh\
+        \ so the page rebuilds against the new question."
+      operationId: update_knowledge_node
+      parameters:
+      - explode: false
+        in: path
+        name: bank_id
+        required: true
+        schema:
+          title: Bank Id
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: node_id
+        required: true
+        schema:
+          title: Node Id
+          type: string
+        style: simple
+      - explode: false
+        in: header
+        name: authorization
+        required: false
+        schema:
+          nullable: true
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNodeRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeNode'
+          description: Successful Response
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Rename/move a knowledge-base node or update a page's options
+      tags:
+      - Knowledge Base
   /v1/default/banks/{bank_id}/directives:
     get:
       description: List hard rules that are injected into prompts.
@@ -5181,6 +5550,42 @@ components:
       - content
       - name
       title: CreateDirectiveRequest
+    CreateFolderRequest:
+      description: Create a folder under an optional parent folder.
+      example:
+        parent_id: parent_id
+        name: name
+      properties:
+        name:
+          title: Name
+          type: string
+        parent_id:
+          nullable: true
+          type: string
+      required:
+      - name
+      title: CreateFolderRequest
+    CreateKnowledgePageResponse:
+      description: "Result of creating a page: the node id, its mental model, and\
+        \ the refresh op."
+      example:
+        page_id: page_id
+        operation_id: operation_id
+        mental_model_id: mental_model_id
+      properties:
+        page_id:
+          title: Page Id
+          type: string
+        mental_model_id:
+          title: Mental Model Id
+          type: string
+        operation_id:
+          nullable: true
+          type: string
+      required:
+      - mental_model_id
+      - page_id
+      title: CreateKnowledgePageResponse
     CreateMentalModelRequest:
       description: Request model for creating a mental model.
       example:
@@ -5239,6 +5644,65 @@ components:
       required:
       - operation_id
       title: CreateMentalModelResponse
+    CreatePageRequest:
+      description: Create a page (a mental model + tree node) under an optional parent
+        folder.
+      example:
+        source_query: source_query
+        max_tokens: 0
+        parent_id: parent_id
+        name: name
+        trigger:
+          mode: full
+          refresh_after_consolidation: false
+          recall_chunks_max_tokens: 1
+          refresh_cron: refresh_cron
+          tag_groups:
+          - match: any_strict
+            tags:
+            - tags
+            - tags
+          - match: any_strict
+            tags:
+            - tags
+            - tags
+          fact_types:
+          - world
+          - world
+          exclude_mental_model_ids:
+          - exclude_mental_model_ids
+          - exclude_mental_model_ids
+          include_chunks: true
+          tags_match: any
+          exclude_mental_models: false
+          recall_max_tokens: 6
+        tags:
+        - tags
+        - tags
+      properties:
+        name:
+          title: Name
+          type: string
+        source_query:
+          title: Source Query
+          type: string
+        parent_id:
+          nullable: true
+          type: string
+        tags:
+          items:
+            type: string
+          nullable: true
+          type: array
+        max_tokens:
+          nullable: true
+          type: integer
+        trigger:
+          $ref: '#/components/schemas/MentalModelTrigger-Input'
+      required:
+      - name
+      - source_query
+      title: CreatePageRequest
     CreateWebhookRequest:
       description: Request model for registering a webhook.
       example:
@@ -6064,6 +6528,264 @@ components:
         source_facts:
           $ref: '#/components/schemas/SourceFactsIncludeOptions'
       title: IncludeOptions
+    KnowledgeNode:
+      description: |-
+        A node in the knowledge-base tree — a folder or a page.
+
+        Pages carry ``description``/``tags`` from their backing mental model. The
+        knowledge base is client-managed (CRUD); ``managed`` lets a client tag a node
+        as system-owned vs. hand-authored.
+      example:
+        children:
+        - null
+        - null
+        kind: folder
+        parent_id: parent_id
+        managed: false
+        name: name
+        description: description
+        id: id
+        is_stale: true
+        mental_model_id: mental_model_id
+        tags:
+        - tags
+        - tags
+        timestamp: timestamp
+      properties:
+        id:
+          title: Id
+          type: string
+        kind:
+          enum:
+          - folder
+          - page
+          title: Kind
+          type: string
+        name:
+          title: Name
+          type: string
+        parent_id:
+          nullable: true
+          type: string
+        mental_model_id:
+          nullable: true
+          type: string
+        managed:
+          default: false
+          description: "Client-set flag: true = system-owned, false = hand-authored."
+          title: Managed
+          type: boolean
+        description:
+          nullable: true
+          type: string
+        tags:
+          default: []
+          items:
+            type: string
+          type: array
+        timestamp:
+          nullable: true
+          type: string
+        is_stale:
+          nullable: true
+          type: boolean
+        children:
+          default: []
+          items:
+            $ref: '#/components/schemas/KnowledgeNode'
+          type: array
+      required:
+      - id
+      - kind
+      - name
+      title: KnowledgeNode
+    KnowledgePageBundleFile:
+      description: One file in a portable markdown bundle.
+      example:
+        path: path
+        content: content
+      properties:
+        path:
+          title: Path
+          type: string
+        content:
+          title: Content
+          type: string
+      required:
+      - content
+      - path
+      title: KnowledgePageBundleFile
+    KnowledgePageBundleResponse:
+      description: A portable markdown bundle — a flat set of markdown files (index
+        + pages + logs).
+      example:
+        files:
+        - path: path
+          content: content
+        - path: path
+          content: content
+      properties:
+        files:
+          items:
+            $ref: '#/components/schemas/KnowledgePageBundleFile'
+          type: array
+      required:
+      - files
+      title: KnowledgePageBundleResponse
+    KnowledgePageResponse:
+      description: A knowledge page rendered as a markdown document.
+      example:
+        name: name
+        markdown: markdown
+        description: description
+        id: id
+        type: type
+        body: body
+        tags:
+        - tags
+        - tags
+        timestamp: timestamp
+      properties:
+        id:
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        type:
+          description: "Page type — from a `type:<x>` tag, else 'knowledge-page'."
+          title: Type
+          type: string
+        description:
+          nullable: true
+          type: string
+        tags:
+          default: []
+          items:
+            type: string
+          type: array
+        timestamp:
+          nullable: true
+          type: string
+        body:
+          nullable: true
+          type: string
+        markdown:
+          description: "The full markdown document: YAML frontmatter + markdown body."
+          title: Markdown
+          type: string
+      required:
+      - id
+      - markdown
+      - name
+      - type
+      title: KnowledgePageResponse
+    KnowledgePageSearchResponse:
+      description: "Ranked knowledge-page search results (BM25 + vector, RRF-fused)."
+      example:
+        total: 6
+        results:
+        - snippet: snippet
+          score: 0.8008281904610115
+          updated_at: updated_at
+          name: name
+          id: id
+          mental_model_id: mental_model_id
+        - snippet: snippet
+          score: 0.8008281904610115
+          updated_at: updated_at
+          name: name
+          id: id
+          mental_model_id: mental_model_id
+      properties:
+        results:
+          items:
+            $ref: '#/components/schemas/KnowledgePageSearchResult'
+          type: array
+        total:
+          title: Total
+          type: integer
+      required:
+      - results
+      - total
+      title: KnowledgePageSearchResponse
+    KnowledgePageSearchResult:
+      description: "One hybrid-search hit: a knowledge page and its fused relevance\
+        \ score."
+      example:
+        snippet: snippet
+        score: 0.8008281904610115
+        updated_at: updated_at
+        name: name
+        id: id
+        mental_model_id: mental_model_id
+      properties:
+        id:
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        mental_model_id:
+          nullable: true
+          type: string
+        snippet:
+          title: Snippet
+          type: string
+        score:
+          title: Score
+          type: number
+        updated_at:
+          nullable: true
+          type: string
+      required:
+      - id
+      - name
+      - score
+      - snippet
+      title: KnowledgePageSearchResult
+    KnowledgeTreeResponse:
+      description: The knowledge base as a nested folder/page tree.
+      example:
+        roots:
+        - children:
+          - null
+          - null
+          kind: folder
+          parent_id: parent_id
+          managed: false
+          name: name
+          description: description
+          id: id
+          is_stale: true
+          mental_model_id: mental_model_id
+          tags:
+          - tags
+          - tags
+          timestamp: timestamp
+        - children:
+          - null
+          - null
+          kind: folder
+          parent_id: parent_id
+          managed: false
+          name: name
+          description: description
+          id: id
+          is_stale: true
+          mental_model_id: mental_model_id
+          tags:
+          - tags
+          - tags
+          timestamp: timestamp
+      properties:
+        roots:
+          items:
+            $ref: '#/components/schemas/KnowledgeNode'
+          type: array
+      required:
+      - roots
+      title: KnowledgeTreeResponse
     LLMRequestEntry:
       description: "A single LLM request trace row, as returned by the read API."
       example:
@@ -6852,6 +7574,30 @@ components:
       title: MentalModelResponse
     MentalModelTrigger-Input:
       description: Trigger settings for a mental model.
+      example:
+        mode: full
+        refresh_after_consolidation: false
+        recall_chunks_max_tokens: 1
+        refresh_cron: refresh_cron
+        tag_groups:
+        - match: any_strict
+          tags:
+          - tags
+          - tags
+        - match: any_strict
+          tags:
+          - tags
+          - tags
+        fact_types:
+        - world
+        - world
+        exclude_mental_model_ids:
+        - exclude_mental_model_ids
+        - exclude_mental_model_ids
+        include_chunks: true
+        tags_match: any
+        exclude_mental_models: false
+        recall_max_tokens: 6
       properties:
         mode:
           default: full
@@ -8236,6 +8982,37 @@ components:
         trigger:
           $ref: '#/components/schemas/MentalModelTrigger-Input'
       title: UpdateMentalModelRequest
+    UpdateNodeRequest:
+      description: |-
+        Rename/move a node and/or update a page's options. Each field applies only
+        when present in the request body.
+      example:
+        source_query: source_query
+        max_tokens: 0
+        parent_id: parent_id
+        name: name
+        tags:
+        - tags
+        - tags
+      properties:
+        name:
+          nullable: true
+          type: string
+        parent_id:
+          nullable: true
+          type: string
+        source_query:
+          nullable: true
+          type: string
+        tags:
+          items:
+            type: string
+          nullable: true
+          type: array
+        max_tokens:
+          nullable: true
+          type: integer
+      title: UpdateNodeRequest
     UpdateWebhookRequest:
       description: Request model for updating a webhook. Only provided fields are
         updated.

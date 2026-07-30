@@ -9,6 +9,8 @@ import { Sidebar } from "@/components/sidebar";
 import { DataView } from "@/components/data-view";
 import { DocumentsView } from "@/components/documents-view";
 import { EntitiesView } from "@/components/entities-view";
+import { KnowledgeBaseView } from "@/components/knowledge-base-view";
+import { HomeView } from "@/components/home-view";
 import { ThinkView } from "@/components/think-view";
 import { SearchDebugView } from "@/components/search-debug-view";
 import { BankProfileView } from "@/components/bank-profile-view";
@@ -47,18 +49,27 @@ import {
   Brain,
   Download,
   Trash2,
-  Loader2,
   MoreVertical,
   Pencil,
   RotateCcw,
   Activity,
   FlaskConical,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { LlmHealthDialog } from "@/components/llm-health-dialog";
 import { ExtractDialog } from "@/components/extract-dialog";
 
-type NavItem = "recall" | "reflect" | "data" | "documents" | "entities" | "profile";
-type DataSubTab = "world" | "experience" | "observations" | "mental-models";
+type NavItem =
+  | "home"
+  | "recall"
+  | "reflect"
+  | "data"
+  | "documents"
+  | "entities"
+  | "knowledge"
+  | "profile";
+type DataSubTab = "world" | "experience" | "observations";
+type KnowledgeTab = "pages" | "models";
 type BankConfigTab =
   | "general"
   | "memory-defense"
@@ -76,8 +87,9 @@ export default function BankPage() {
   const { features } = useFeatures();
   const { currentBank: bankId, setCurrentBank, loadBanks } = useBank();
 
-  const view = (searchParams.get("view") || "profile") as NavItem;
+  const view = (searchParams.get("view") || "home") as NavItem;
   const subTab = (searchParams.get("subTab") || "world") as DataSubTab;
+  const knowledgeTab = (searchParams.get("knowledgeTab") || "pages") as KnowledgeTab;
   const bankConfigTab = (searchParams.get("bankConfigTab") || "general") as BankConfigTab;
   const bankConfigEnabled = features?.bank_config_api ?? false;
   const llmTraceEnabled = features?.llm_trace ?? false;
@@ -139,6 +151,11 @@ export default function BankPage() {
   const handleDataSubTabChange = (newSubTab: DataSubTab) => {
     if (!bankId) return;
     router.push(bankRoute(bankId, `?view=data&subTab=${newSubTab}`));
+  };
+
+  const handleKnowledgeTabChange = (tab: KnowledgeTab) => {
+    if (!bankId) return;
+    router.push(bankRoute(bankId, `?view=knowledge&knowledgeTab=${tab}`));
   };
 
   const handleBankConfigTabChange = (newTab: BankConfigTab) => {
@@ -287,7 +304,7 @@ export default function BankPage() {
                         }
                       >
                         {isConsolidating ? (
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          <Spinner size="sm" className="mr-2" />
                         ) : (
                           <Brain className="w-4 h-4 mr-2" />
                         )}
@@ -304,7 +321,7 @@ export default function BankPage() {
                         }
                       >
                         {isRecoveringConsolidation ? (
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          <Spinner size="sm" className="mr-2" />
                         ) : (
                           <RotateCcw className="w-4 h-4 mr-2" />
                         )}
@@ -596,19 +613,6 @@ export default function BankPage() {
                         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
                       )}
                     </button>
-                    <button
-                      onClick={() => handleDataSubTabChange("mental-models")}
-                      className={`px-6 py-3 font-semibold text-sm transition-all relative ${
-                        subTab === "mental-models"
-                          ? "text-primary"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {t("mentalModels")}
-                      {subTab === "mental-models" && (
-                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-                      )}
-                    </button>
                   </div>
                 </div>
 
@@ -649,14 +653,6 @@ export default function BankPage() {
                         })}
                       />
                     ))}
-                  {subTab === "mental-models" && (
-                    <div>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        {t("mentalModelsDescription")}
-                      </p>
-                      <MentalModelsView key="mental-models" />
-                    </div>
-                  )}
                 </div>
               </div>
             )}
@@ -676,6 +672,60 @@ export default function BankPage() {
                 <p className="text-muted-foreground mb-6">{t("entitiesDescription")}</p>
                 <EntitiesView />
               </div>
+            )}
+
+            {/* Knowledge Tab — Pages (knowledge base) + Mental Models sub-tabs. */}
+            {view === "knowledge" && (
+              <div>
+                <h1 className="text-3xl font-bold mb-2 text-foreground">{t("knowledge")}</h1>
+                <p className="text-muted-foreground mb-4">{t("knowledgeDescription")}</p>
+
+                <div className="mb-4 border-b border-border">
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => handleKnowledgeTabChange("pages")}
+                      className={`px-6 py-3 font-semibold text-sm transition-all relative ${
+                        knowledgeTab === "pages"
+                          ? "text-primary"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {t("pages")}
+                      {knowledgeTab === "pages" && (
+                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => handleKnowledgeTabChange("models")}
+                      className={`px-6 py-3 font-semibold text-sm transition-all relative ${
+                        knowledgeTab === "models"
+                          ? "text-primary"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {t("mentalModels")}
+                      {knowledgeTab === "models" && (
+                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {knowledgeTab === "pages" && <KnowledgeBaseView />}
+                {knowledgeTab === "models" && (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      {t("mentalModelsDescription")}
+                    </p>
+                    <MentalModelsView key="mental-models" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Home Tab — bank dashboard. */}
+            {view === "home" && bankId && (
+              <HomeView bankId={bankId} onNavigate={(tab) => handleTabChange(tab as NavItem)} />
             )}
           </div>
         </main>
@@ -720,7 +770,7 @@ export default function BankPage() {
             >
               {isDeleting ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner size="sm" className="mr-2" />
                   {t("deleting")}
                 </>
               ) : (
@@ -757,7 +807,7 @@ export default function BankPage() {
             <AlertDialogAction onClick={handleResetConfig} disabled={isResettingConfig}>
               {isResettingConfig ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner size="sm" className="mr-2" />
                   {t("resetting")}
                 </>
               ) : (
@@ -800,7 +850,7 @@ export default function BankPage() {
             >
               {isClearingObservations ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner size="sm" className="mr-2" />
                   {t("clearing")}
                 </>
               ) : (

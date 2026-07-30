@@ -1845,7 +1845,7 @@ requires-dist = [
     { name = "opentelemetry-semantic-conventions", specifier = ">=0.65b0" },
     { name = "oracledb", marker = "extra == 'oracle'", specifier = ">=2.5.0" },
     { name = "orjson", specifier = ">=3.11.6" },
-    { name = "pg0-embedded", marker = "extra == 'embedded-db'", specifier = ">=0.14.2" },
+    { name = "pg0-embedded", marker = "extra == 'embedded-db'", specifier = ">=0.15.0" },
     { name = "pgvector", specifier = ">=0.4.1" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "protobuf", specifier = ">=7.35.1" },
@@ -3637,15 +3637,15 @@ wheels = [
 
 [[package]]
 name = "pg0-embedded"
-version = "0.14.2"
+version = "0.15.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/55/01/83e47dbc41377a43c04313188c2442dfcda8520af94fa5c6d2af519e8eef/pg0_embedded-0.14.2.tar.gz", hash = "sha256:e3534f6d014a6da230ef372307965fa0a9e8ae26e5882e1319645435cdcf2562", size = 19636, upload-time = "2026-05-28T13:00:29.955Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/35/a276584c2a146923ed43891316d4f913237bfa646918e58b4bf9683fa1b3/pg0_embedded-0.15.0.tar.gz", hash = "sha256:9a4ef5ea6db0b6f600b07ea9517fccb5f35b4dd331ac21aa500db86be1c6cfff", size = 19944, upload-time = "2026-07-29T12:13:25.724Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/04/8abcc770b90d36703ac6ca6e212b71992a7428b836d41c1e860400967021/pg0_embedded-0.14.2-py3-none-macosx_14_0_arm64.whl", hash = "sha256:79c1ae875abc3ee4e4915a6178000e71b2df8073f47f861f882021c913759eb4", size = 13066176, upload-time = "2026-05-28T13:00:11.112Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/37/3d4cc473631c4021d63dccd460c6cf1bb280eff74a47c54a723d09a812a9/pg0_embedded-0.14.2-py3-none-macosx_15_0_x86_64.whl", hash = "sha256:80bfd79075fdf3909134f2d3adf58ea202a95cd219f4081262e894757feec286", size = 13664312, upload-time = "2026-05-28T13:00:14.181Z" },
-    { url = "https://files.pythonhosted.org/packages/c0/27/3ce295cdcacaee32d0a66870b140e81460a20c3866cc3ef73fb0011ec6c4/pg0_embedded-0.14.2-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:f8dac4d2db5b8c2793c016cb8613a367f43a43a42253b5fd46e1bfac3397951c", size = 29383139, upload-time = "2026-05-28T13:00:17.549Z" },
-    { url = "https://files.pythonhosted.org/packages/e0/a2/ee865726818fba05317b061892cf27241a8a4e98ecc05fd92b36e7d224f4/pg0_embedded-0.14.2-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:aef573a21b8b2b64f19162651097ec04df70f302b5042eb5ed7f23539053d1ca", size = 29937947, upload-time = "2026-05-28T13:00:21.621Z" },
-    { url = "https://files.pythonhosted.org/packages/fc/3f/38868a6d42c8255d40754cdd86a90347c651f3fdc561ea4f766ff47b27d1/pg0_embedded-0.14.2-py3-none-win_amd64.whl", hash = "sha256:a0cd6e8f88fce1bb63b36ab0f851e613b397db023c7f0ec086b946b1f549a575", size = 55125680, upload-time = "2026-05-28T13:00:27.393Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/2c/c49730c8eacba9c8c68870510d59fd17c72ce5c9c7b7293a3cde27fbbff5/pg0_embedded-0.15.0-py3-none-macosx_14_0_arm64.whl", hash = "sha256:d233d9b669f1d9db5c76b77895c2135203771c266bf9f7d2b2378dae532ac615", size = 13050182, upload-time = "2026-07-29T12:13:12.329Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/ba/5ad9ba2ce0781e24111f2eb2d78e378156257d1a78d05ba9e9474d7cffdf/pg0_embedded-0.15.0-py3-none-macosx_15_0_x86_64.whl", hash = "sha256:db9910f66f854b34e0797136f6cd9fd0916ef6394a6b3485788258cff3f270a9", size = 13651545, upload-time = "2026-07-29T12:13:14.641Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/ae/77d65fe7a573e18685c8a30c1ba5371edfb608b199997bfdb3c314c87f12/pg0_embedded-0.15.0-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:64d9aa40ee36990967905776d1be7796100e2a3c2eb5e0c3f64912918fa05306", size = 29817121, upload-time = "2026-07-29T12:13:16.964Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/b0/1f18c8418cdd3cfc55d5fd97e0d9277459451903100f62e0a8374fee8315/pg0_embedded-0.15.0-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:7a0ff8b679d82933f6538d1480cfc379be8f17db0f0f98064cb3cb005f36e3c2", size = 30407737, upload-time = "2026-07-29T12:13:20.011Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/30/b0a66fec3572263fc2e230772e459ba2e38aa611057660fe876141c43998/pg0_embedded-0.15.0-py3-none-win_amd64.whl", hash = "sha256:f97dfb420cef7700d2f51fccca37dea424c4c5d88b8bc1b7e26e7e42a1adddc2", size = 55104066, upload-time = "2026-07-29T12:13:23.25Z" },
 ]
 
 [[package]]

@@ -66,6 +66,69 @@ class TestObservationHistory:
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
+    async def test_history_is_reclaimed_when_observations_are_cleared(
+        self, memory: MemoryEngine, request_context: Any
+    ) -> None:
+        """Regression: the observation_history→memory_units FK was dropped (so history can be
+        recorded for observations kept outside SQL), which also removed the cascade that used to
+        reclaim history when an observation went away. clear_observations must now delete the
+        history explicitly — otherwise rows accumulate on the default deployment forever."""
+        bank_id = f"test-obs-hist-clear-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id, request_context=request_context)
+
+        obs_id = uuid.uuid4()
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO memory_units (id, bank_id, text, event_date, fact_type)
+                VALUES ($1, $2, 'current observation', now(), 'observation')
+                """,
+                obs_id,
+                bank_id,
+            )
+            await consolidator_mod._append_observation_history(conn, bank_id, str(obs_id), _entry(1), 5)
+            before = await conn.fetchval("SELECT COUNT(*) FROM observation_history WHERE bank_id = $1", bank_id)
+        assert before == 1
+
+        await memory.clear_observations(bank_id, request_context=request_context)
+
+        async with pool.acquire() as conn:
+            after = await conn.fetchval("SELECT COUNT(*) FROM observation_history WHERE bank_id = $1", bank_id)
+        assert after == 0, "observation_history rows leaked after clear_observations"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    async def test_history_is_reclaimed_when_observations_deleted_by_type(
+        self, memory: MemoryEngine, request_context: Any
+    ) -> None:
+        """The typed delete (``DELETE /banks/{id}/memories?type=observation``) removes the
+        observation rows directly, bypassing the stale-observation sweep — so it must clean the
+        history itself, or the snapshots outlive the observations they belonged to."""
+        bank_id = f"test-obs-hist-type-{uuid.uuid4().hex[:8]}"
+        await memory.get_bank_profile(bank_id, request_context=request_context)
+
+        obs_id = uuid.uuid4()
+        pool = await memory._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO memory_units (id, bank_id, text, event_date, fact_type)
+                VALUES ($1, $2, 'current observation', now(), 'observation')
+                """,
+                obs_id,
+                bank_id,
+            )
+            await consolidator_mod._append_observation_history(conn, bank_id, str(obs_id), _entry(1), 5)
+
+        await memory.delete_bank(bank_id, fact_type="observation", request_context=request_context)
+
+        async with pool.acquire() as conn:
+            after = await conn.fetchval("SELECT COUNT(*) FROM observation_history WHERE bank_id = $1", bank_id)
+        assert after == 0, "observation_history rows leaked after typed observation delete"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
     async def test_returns_none_for_missing_observation(self, memory: MemoryEngine, request_context: Any) -> None:
         bank_id = f"test-obs-hist-{uuid.uuid4().hex[:8]}"
         await memory.get_bank_profile(bank_id, request_context=request_context)

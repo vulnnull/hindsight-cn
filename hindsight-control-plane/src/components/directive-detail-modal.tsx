@@ -6,7 +6,7 @@ import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
-import { Loader2 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { TagChip } from "@/components/ui/facet-chip";
@@ -79,7 +79,7 @@ export function DirectiveDetailModal({ directiveId, onClose }: DirectiveDetailMo
         </VisuallyHidden>
         {loading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            <Spinner size="lg" variant="jump" />
           </div>
         ) : error ? (
           <div className="flex items-center justify-center py-20">

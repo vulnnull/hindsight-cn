@@ -294,14 +294,17 @@ async def test_dedup_update_merge_folds_into_twin_and_deletes_updated() -> None:
     with _patch_probe([_obs("Uzbek content on YouTube is described as very rich.", 0.98)]):
         await _dedup_reconcile_update(**kwargs)
     llm.call.assert_awaited_once()
-    # Two writes: fold-into-twin UPDATE, then DELETE of the updated row.
-    assert conn.execute.await_count == 2
+    # Three writes: fold-into-twin UPDATE, DELETE of the updated row, and DELETE of that row's
+    # observation_history (no longer cascaded from memory_units — that FK was dropped).
+    assert conn.execute.await_count == 3
     fold_args = conn.execute.await_args_list[0].args
     assert fold_args[1] == "Uzbek YouTube content is very rich and growing."  # merged text on the twin
     assert fold_args[2] == uuid.UUID(_TWIN_ID)  # survivor = the twin
     assert fold_args[3] == uuid.UUID(_UPDATED_ID)  # folded-from = the updated row
     delete_args = conn.execute.await_args_list[1].args
     assert delete_args[1] == uuid.UUID(_UPDATED_ID)  # the updated row is deleted
+    history_delete_args = conn.execute.await_args_list[2].args
+    assert history_delete_args[2] == uuid.UUID(_UPDATED_ID)  # its history is reclaimed too
 
 
 async def test_dedup_update_keep_does_not_merge() -> None:

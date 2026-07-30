@@ -15,7 +15,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Loader2,
   Zap,
   FileText,
   History as HistoryIcon,
@@ -28,6 +27,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { toast } from "sonner";
 import { CompactMarkdown } from "./compact-markdown";
 import { CronSchedulePreview } from "./cron-schedule-preview";
@@ -790,7 +790,7 @@ export function MentalModelDetailModal({
 
           {loading ? (
             <div className="flex items-center justify-center flex-1">
-              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              <Spinner size="lg" variant="jump" />
             </div>
           ) : error ? (
             <div className="flex items-center justify-center flex-1">
@@ -931,7 +931,7 @@ export function MentalModelDetailModal({
                 <TabsContent value="history" className="mt-0">
                   {loadingHistory ? (
                     <div className="flex items-center justify-center py-12">
-                      <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                      <Spinner size="md" variant="jump" />
                     </div>
                   ) : history && history.length > 0 ? (
                     <MentalModelHistoryView

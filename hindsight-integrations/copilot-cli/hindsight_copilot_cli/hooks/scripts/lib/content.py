@@ -275,11 +275,25 @@ def _normalize_blocks_content(content):
 def _parse_transcript_entry(entry, *, text_only, include_tools=False):
     """Parse one JSONL transcript line into a message dict, or None.
 
-    Supports flat, type-nested SDK envelopes, and role-nested lines.
-    When text_only is True, content is flattened to a string; tool blocks are
-    surfaced as markers only when include_tools is True (see
-    `_normalize_blocks_to_text`).
+    Supports the Copilot CLI native envelope, flat, type-nested SDK envelopes,
+    and role-nested lines. When text_only is True, content is flattened to a
+    string; tool blocks are surfaced as markers only when include_tools is True
+    (see `_normalize_blocks_to_text`).
     """
+    # Copilot CLI native envelope: {type: "user.message"|"assistant.message",
+    # data: {content: "...", ...}}. Copilot CLI (>= 1.0.76) emits dotted event
+    # names with the message text under `data.content`. Prefer that clean text
+    # over the sibling `transformedContent`, which carries injected system
+    # reminders (datetime, sql_tables, etc.) that we don't want to retain.
+    etype = entry.get("type")
+    if etype in ("user.message", "assistant.message"):
+        role = "user" if etype == "user.message" else "assistant"
+        data = entry.get("data")
+        if not isinstance(data, dict):
+            return None
+        content = _normalize_blocks_content(data.get("content", ""))
+        return _finalize_entry(role, content, text_only=text_only, include_tools=include_tools)
+
     # Flat: {role, content}
     if entry.get("role") in ("user", "assistant") and "content" in entry:
         role = entry["role"]

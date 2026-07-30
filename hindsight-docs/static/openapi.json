@@ -2062,6 +2062,557 @@
         }
       }
     },
+    "/v1/default/banks/{bank_id}/knowledge-base/tree": {
+      "get": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Get the knowledge-base tree",
+        "description": "Return the knowledge base as a nested tree of folders and pages.",
+        "operationId": "get_knowledge_base_tree",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeTreeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/knowledge-base/folders": {
+      "post": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Create a knowledge-base folder",
+        "description": "Create a folder, optionally nested under a parent folder.",
+        "operationId": "create_knowledge_folder",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFolderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeNode"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/knowledge-base/pages": {
+      "post": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Create a knowledge-base page",
+        "description": "Create a page (a mental model + tree node). Content is generated asynchronously; use the returned operation_id to track completion.",
+        "operationId": "create_knowledge_page",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateKnowledgePageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/knowledge-base/export": {
+      "get": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Export the knowledge base as a markdown bundle",
+        "description": "Return a portable markdown bundle: a nested index.md, one <id>.md per page, and history logs.",
+        "operationId": "export_knowledge_base",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgePageBundleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/knowledge-base/search": {
+      "get": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Hybrid search over knowledge pages (BM25 + vector)",
+        "description": "Doc-level hybrid search across a bank's knowledge pages: a full-text (BM25) match and a vector-similarity match, Reciprocal-Rank-Fusion fused. No reranker \u2014 tuned for latency.",
+        "operationId": "search_knowledge_base",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Search query",
+              "title": "Q"
+            },
+            "description": "Search query"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Maximum results to return",
+              "default": 10,
+              "title": "Limit"
+            },
+            "description": "Maximum results to return"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgePageSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/knowledge-base/pages/{page_id}": {
+      "get": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Get a knowledge-base page",
+        "description": "Return a single page as a markdown document (frontmatter + markdown body).",
+        "operationId": "get_knowledge_page",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Page Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgePageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/knowledge-base/nodes/{node_id}": {
+      "patch": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Rename/move a knowledge-base node or update a page's options",
+        "description": "Rename a node (set `name`), move it under another folder (set `parent_id`, null for the root), and/or update a page's options (`source_query`, `tags`, `max_tokens`). Changing `source_query` schedules an async refresh so the page rebuilds against the new question.",
+        "operationId": "update_knowledge_node",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeNode"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Delete a knowledge-base node",
+        "description": "Delete a folder or page and its whole subtree (pages' mental models are removed too).",
+        "operationId": "delete_knowledge_node",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/default/banks/{bank_id}/directives": {
       "get": {
         "tags": [
@@ -7888,6 +8439,61 @@
         "title": "CreateDirectiveRequest",
         "description": "Request model for creating a directive."
       },
+      "CreateFolderRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateFolderRequest",
+        "description": "Create a folder under an optional parent folder."
+      },
+      "CreateKnowledgePageResponse": {
+        "properties": {
+          "page_id": {
+            "type": "string",
+            "title": "Page Id"
+          },
+          "mental_model_id": {
+            "type": "string",
+            "title": "Mental Model Id"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page_id",
+          "mental_model_id"
+        ],
+        "title": "CreateKnowledgePageResponse",
+        "description": "Result of creating a page: the node id, its mental model, and the refresh op."
+      },
       "CreateMentalModelRequest": {
         "properties": {
           "id": {
@@ -7981,6 +8587,71 @@
         ],
         "title": "CreateMentalModelResponse",
         "description": "Response model for mental model creation."
+      },
+      "CreatePageRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source_query": {
+            "type": "string",
+            "title": "Source Query"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MentalModelTrigger-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "source_query"
+        ],
+        "title": "CreatePageRequest",
+        "description": "Create a page (a mental model + tree node) under an optional parent folder."
       },
       "CreateWebhookRequest": {
         "properties": {
@@ -9236,6 +9907,316 @@
         "type": "object",
         "title": "IncludeOptions",
         "description": "Options for including additional data in recall results."
+      },
+      "KnowledgeNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "folder",
+              "page"
+            ],
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "mental_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mental Model Id",
+            "description": "Backing mental model id (pages only)."
+          },
+          "managed": {
+            "type": "boolean",
+            "title": "Managed",
+            "description": "Client-set flag: true = system-owned, false = hand-authored.",
+            "default": false
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Page source query (the page's `description`)."
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "default": []
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp",
+            "description": "Last refresh (page) or last update (folder)."
+          },
+          "is_stale": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Stale",
+            "description": "Pages only: true when memories in scope are newer than the last refresh (out of sync). Populated by the tree endpoint."
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeNode"
+            },
+            "type": "array",
+            "title": "Children",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name"
+        ],
+        "title": "KnowledgeNode",
+        "description": "A node in the knowledge-base tree \u2014 a folder or a page.\n\nPages carry ``description``/``tags`` from their backing mental model. The\nknowledge base is client-managed (CRUD); ``managed`` lets a client tag a node\nas system-owned vs. hand-authored."
+      },
+      "KnowledgePageBundleFile": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "content"
+        ],
+        "title": "KnowledgePageBundleFile",
+        "description": "One file in a portable markdown bundle."
+      },
+      "KnowledgePageBundleResponse": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgePageBundleFile"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "KnowledgePageBundleResponse",
+        "description": "A portable markdown bundle \u2014 a flat set of markdown files (index + pages + logs)."
+      },
+      "KnowledgePageResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Page type \u2014 from a `type:<x>` tag, else 'knowledge-page'."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "The source query that rebuilds the page."
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "default": []
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp",
+            "description": "Last refresh time (falls back to creation)."
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body",
+            "description": "The page's synthesized markdown body."
+          },
+          "markdown": {
+            "type": "string",
+            "title": "Markdown",
+            "description": "The full markdown document: YAML frontmatter + markdown body."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "markdown"
+        ],
+        "title": "KnowledgePageResponse",
+        "description": "A knowledge page rendered as a markdown document."
+      },
+      "KnowledgePageSearchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgePageSearchResult"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results",
+          "total"
+        ],
+        "title": "KnowledgePageSearchResponse",
+        "description": "Ranked knowledge-page search results (BM25 + vector, RRF-fused)."
+      },
+      "KnowledgePageSearchResult": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "mental_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mental Model Id"
+          },
+          "snippet": {
+            "type": "string",
+            "title": "Snippet"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "snippet",
+          "score"
+        ],
+        "title": "KnowledgePageSearchResult",
+        "description": "One hybrid-search hit: a knowledge page and its fused relevance score."
+      },
+      "KnowledgeTreeResponse": {
+        "properties": {
+          "roots": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeNode"
+            },
+            "type": "array",
+            "title": "Roots"
+          }
+        },
+        "type": "object",
+        "required": [
+          "roots"
+        ],
+        "title": "KnowledgeTreeResponse",
+        "description": "The knowledge base as a nested folder/page tree."
       },
       "LLMRequestEntry": {
         "properties": {
@@ -12991,6 +13972,71 @@
             "refresh_after_consolidation": true
           }
         }
+      },
+      "UpdateNodeRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "source_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Query"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          }
+        },
+        "type": "object",
+        "title": "UpdateNodeRequest",
+        "description": "Rename/move a node and/or update a page's options. Each field applies only\nwhen present in the request body."
       },
       "UpdateWebhookRequest": {
         "properties": {

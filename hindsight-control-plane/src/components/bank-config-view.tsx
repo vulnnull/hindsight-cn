@@ -42,7 +42,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, AlertCircle, Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertCircle, Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { Card } from "@/components/ui/card";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -554,7 +555,7 @@ export function BankConfigView() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Spinner size="lg" variant="jump" />
       </div>
     );
   }
@@ -1386,7 +1387,7 @@ function ConfigSection({
           <Button size="sm" disabled={!dirty || saving} onClick={onSave}>
             {saving ? (
               <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <Spinner size="sm" className="mr-2" />
                 {t("saving")}
               </>
             ) : (

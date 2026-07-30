@@ -185,6 +185,52 @@ class TestReadTranscript:
         with_tools = read_transcript(str(f), include_tools=True)
         assert with_tools[0]["content"] == "Listing files\n[tool_use:shell]\n[tool_result]"
 
+    def test_reads_copilot_cli_native_message_envelope(self, tmp_path):
+        """Copilot CLI (>= 1.0.76) writes dotted events with text under `data`.
+
+        Regression test for the format change that silently broke retain: the
+        parser previously recognized none of these events and extracted zero
+        messages, so nothing was ever retained.
+        """
+        f = tmp_path / "events.jsonl"
+        f.write_text(
+            "\n".join(
+                [
+                    json.dumps({"type": "session.start", "data": {"sessionId": "s1"}}),
+                    json.dumps(
+                        {
+                            "type": "user.message",
+                            "data": {
+                                "content": "we use Stripe and store money as integer cents",
+                                # Injected reminders live on transformedContent — must be ignored.
+                                "transformedContent": (
+                                    "<current_datetime>2026-07-30</current_datetime>\n"
+                                    "we use Stripe and store money as integer cents\n"
+                                    "<system_reminder>noise</system_reminder>"
+                                ),
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "assistant.message",
+                            "data": {"content": "Implemented capture_payment with Stripe integer cents."},
+                        }
+                    ),
+                    json.dumps({"type": "tool.execution_start", "data": {"toolName": "view"}}),
+                    json.dumps({"type": "session.shutdown", "data": {}}),
+                ]
+            )
+        )
+        msgs = read_transcript(str(f))
+        assert msgs == [
+            {"role": "user", "content": "we use Stripe and store money as integer cents"},
+            {"role": "assistant", "content": "Implemented capture_payment with Stripe integer cents."},
+        ]
+        # The clean `content` is retained, not the reminder-laden transformedContent.
+        assert "system_reminder" not in msgs[0]["content"]
+        assert "current_datetime" not in msgs[0]["content"]
+
 
 class TestComposeRecallQuery:
     def test_single_turn_returns_latest(self):

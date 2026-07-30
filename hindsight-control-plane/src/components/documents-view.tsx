@@ -79,6 +79,9 @@ import {
 } from "lucide-react";
 import { TagFilterInput } from "./tag-filter-input";
 import { FacetLegend, MetadataChip, TagChip } from "@/components/ui/facet-chip";
+import { Spinner } from "@/components/ui/spinner";
+import { HarnessLogo } from "@/components/ui/harness-logo";
+import { documentHarness, resolveHarnessLogo } from "@/lib/harness-logo";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -168,14 +171,23 @@ function TagsAndMetadataCell({
   metadata,
   selectedTags,
   onToggleTag,
+  harnessShownAsLogo = false,
 }: {
   tags: string[];
   metadata: Record<string, any> | null | undefined;
   selectedTags: string[];
   onToggleTag: (tag: string) => void;
+  /**
+   * The row already shows the harness as a logo, so `harness=…` would be the
+   * same fact twice — and chip slots here are scarce. The `harness:<id>` TAG
+   * stays: unlike the metadata chip it filters the list when clicked.
+   */
+  harnessShownAsLogo?: boolean;
 }) {
   const t = useTranslations("documentsView");
-  const metadataEntries = Object.entries(metadata ?? {});
+  const metadataEntries = Object.entries(metadata ?? {}).filter(
+    ([k]) => !(harnessShownAsLogo && k === "harness")
+  );
   const shownTags = tags.slice(0, ROW_CHIP_LIMIT);
   const shownMetadata = metadataEntries.slice(0, ROW_CHIP_LIMIT - shownTags.length);
   const overflow = [
@@ -679,6 +691,11 @@ export function DocumentsView() {
   const [documents, setDocuments] = useState<any[]>([]);
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [loading, setLoading] = useState(false);
+  // Whether the first document fetch has completed. The mount fetch is debounced
+  // (see the load effect), so without this the empty state ("No documents found")
+  // flashes for the initial paint + debounce window before `loading` ever flips.
+  // Gate the empty state on this so we show the loader until we actually know.
+  const [loaded, setLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   // The UI exposes the two useful modes; both map to their *_strict variant so
@@ -758,6 +775,7 @@ export function DocumentsView() {
         // Error toast is shown automatically by the API client interceptor
       } finally {
         setLoading(false);
+        setLoaded(true);
       }
     },
     [currentBank, searchQuery, selectedTags, tagsMatch]
@@ -848,6 +866,15 @@ export function DocumentsView() {
     [pendingRows]
   );
   const displayTotal = total + pendingRows.length;
+
+  // The detail response nests the document's metadata under `retain_params`,
+  // where the list response returns it flat as `document_metadata` — same map,
+  // two shapes, so the harness is resolved once per surface rather than inline.
+  const selectedHarness = documentHarness(
+    selectedDocument?.retain_params?.metadata,
+    selectedDocument?.tags
+  );
+  const selectedHarnessLogo = resolveHarnessLogo(selectedHarness);
 
   // Handle page change
   const handlePageChange = (newPage: number) => {
@@ -1351,17 +1378,29 @@ export function DocumentsView() {
         )}
       </div>
 
-      <div className="mb-4 text-sm text-muted-foreground">
-        {hasActiveFilters
-          ? t("matchingDocuments", { total: displayTotal })
-          : t("totalDocuments", { total: displayTotal })}
-      </div>
+      {/* Hide the count during the very first load so it doesn't read
+          "0 total documents" above the loading spinner. */}
+      {(loaded || documents.length > 0 || pendingRows.length > 0) && (
+        <div className="mb-4 text-sm text-muted-foreground">
+          {hasActiveFilters
+            ? t("matchingDocuments", { total: displayTotal })
+            : t("totalDocuments", { total: displayTotal })}
+        </div>
+      )}
 
       {/* Documents List Section */}
-      {loading && documents.length === 0 && pendingRows.length === 0 ? (
+      {/* Show the loader until the first fetch resolves (`!loaded`), not just while
+          `loading`. Two reasons the empty state would otherwise flash first:
+          (1) the mount fetch is debounced, and (2) on a hard refresh currentBank
+          is null until bank-context resolves it from the URL in an effect (after
+          the first paint / before hydration + theme). `!loaded` covers both — and
+          it can't get stuck: on any /banks/[id] route currentBank always resolves,
+          the fetch runs, and its `finally` flips `loaded` (even if the bank is
+          invalid and the fetch errors). */}
+      {(loading || !loaded) && documents.length === 0 && pendingRows.length === 0 ? (
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
-            <div className="text-4xl mb-2">⏳</div>
+            <Spinner size="xl" variant="jump" className="mx-auto mb-2" />
             <div className="text-sm text-muted-foreground">{t("loadingDocuments")}</div>
           </div>
         </div>
@@ -1434,47 +1473,63 @@ export function DocumentsView() {
                     </TableRow>
                   ))}
                   {documents.length > 0 ? (
-                    documents.map((doc) => (
-                      <TableRow
-                        key={doc.id}
-                        className={`cursor-pointer hover:bg-muted/50 ${selectedDocument?.id === doc.id ? "bg-primary/10" : ""}`}
-                        onClick={() => viewDocumentText(doc.id)}
-                      >
-                        {/* Identity block: the ID reads first, with when it was
-                            last touched underneath. Created-at was dropped —
-                            for almost every document it repeated updated-at. */}
-                        <TableCell className="text-card-foreground">
-                          <div className="min-w-0">
-                            <div className="font-mono text-sm truncate" title={doc.id}>
-                              {doc.id}
+                    documents.map((doc) => {
+                      const harness = documentHarness(doc.document_metadata, doc.tags);
+                      const harnessLogo = resolveHarnessLogo(harness);
+                      return (
+                        <TableRow
+                          key={doc.id}
+                          className={`cursor-pointer hover:bg-muted/50 ${selectedDocument?.id === doc.id ? "bg-primary/10" : ""}`}
+                          onClick={() => viewDocumentText(doc.id)}
+                        >
+                          {/* Identity block: the ID reads first, with when it was
+                              last touched underneath. Created-at was dropped —
+                              for almost every document it repeated updated-at. */}
+                          <TableCell className="text-card-foreground">
+                            <div className="min-w-0">
+                              <div className="font-mono text-sm truncate" title={doc.id}>
+                                {doc.id}
+                              </div>
+                              {/* The harness logo trails the timestamp rather
+                                  than leading the ID: as a leading mark it only
+                                  exists on some rows, so every ID shifted
+                                  horizontally depending on whether its document
+                                  had one. Here it appends to a line that is
+                                  already ragged, and nothing moves. */}
+                              <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                {doc.updated_at ? (
+                                  <span title={new Date(doc.updated_at).toLocaleString()}>
+                                    {t("colUpdated")} {formatRelativeTime(doc.updated_at)}
+                                  </span>
+                                ) : (
+                                  "N/A"
+                                )}
+                                <HarnessLogo
+                                  harness={harness}
+                                  size={14}
+                                  titlePrefix={tCommon("harness")}
+                                />
+                              </div>
                             </div>
-                            <div className="mt-0.5 text-xs text-muted-foreground">
-                              {doc.updated_at ? (
-                                <span title={new Date(doc.updated_at).toLocaleString()}>
-                                  {t("colUpdated")} {formatRelativeTime(doc.updated_at)}
-                                </span>
-                              ) : (
-                                "N/A"
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-card-foreground">
-                          <TagsAndMetadataCell
-                            tags={doc.tags ?? []}
-                            metadata={doc.document_metadata}
-                            selectedTags={selectedTags}
-                            onToggleTag={toggleTagFilter}
-                          />
-                        </TableCell>
-                        <TableCell className="text-card-foreground text-right tabular-nums whitespace-nowrap font-medium">
-                          {formatBytes(doc.text_length || 0)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-semibold text-foreground">
-                          {doc.memory_unit_count}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                          <TableCell className="text-card-foreground">
+                            <TagsAndMetadataCell
+                              tags={doc.tags ?? []}
+                              metadata={doc.document_metadata}
+                              selectedTags={selectedTags}
+                              onToggleTag={toggleTagFilter}
+                              harnessShownAsLogo={!!harnessLogo}
+                            />
+                          </TableCell>
+                          <TableCell className="text-card-foreground text-right tabular-nums whitespace-nowrap font-medium">
+                            {formatBytes(doc.text_length || 0)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums font-semibold text-foreground">
+                            {doc.memory_unit_count}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   ) : pendingRows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center">
@@ -1540,7 +1595,7 @@ export function DocumentsView() {
       ) : (
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
-            <div className="text-4xl mb-2">📄</div>
+            <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground/50" />
             <div className="text-sm text-muted-foreground">
               {hasActiveFilters ? t("noDocumentsMatchSearch") : t("noDocumentsFound")}
             </div>
@@ -1559,6 +1614,7 @@ export function DocumentsView() {
         <DialogContent className="w-[95vw] max-w-[95vw] h-[92vh] sm:max-w-[95vw] flex flex-col overflow-hidden">
           <DialogHeader className="pr-10">
             <DialogTitle className="flex items-center gap-2">
+              <HarnessLogo harness={selectedHarness} size={18} titlePrefix={tCommon("harness")} />
               <span className="truncate font-mono text-sm">
                 {selectedDocument?.id ?? "Document"}
               </span>
@@ -1568,7 +1624,7 @@ export function DocumentsView() {
           {loadingDocument ? (
             <div className="flex items-center justify-center flex-1">
               <div className="text-center">
-                <div className="text-4xl mb-2">⏳</div>
+                <Spinner size="xl" variant="jump" className="mx-auto mb-2" />
                 <div className="text-sm text-muted-foreground">{t("loadingDocument")}</div>
               </div>
             </div>
@@ -1726,7 +1782,7 @@ export function DocumentsView() {
                                   className="h-7 w-7 p-0"
                                 >
                                   {savingTags ? (
-                                    <span className="animate-spin text-xs">⏳</span>
+                                    <Spinner size="xs" />
                                   ) : (
                                     <Check className="h-3 w-3" />
                                   )}
@@ -1764,6 +1820,21 @@ export function DocumentsView() {
                             )
                           }
                         />
+                        {/* An unknown harness still gets its name spelled out
+                            here — only the logo is registry-gated. */}
+                        {selectedHarness && (
+                          <MetadataRow
+                            label={tCommon("harness")}
+                            value={
+                              <span className="inline-flex items-center gap-1.5">
+                                <HarnessLogo harness={selectedHarness} />
+                                <span className="text-sm">
+                                  {selectedHarnessLogo?.label ?? selectedHarness}
+                                </span>
+                              </span>
+                            }
+                          />
+                        )}
                         {selectedDocument.retain_params?.context && (
                           <MetadataRow
                             label="Context"
@@ -1832,7 +1903,7 @@ export function DocumentsView() {
                                 className="h-7 px-3 gap-1 text-xs"
                               >
                                 {savingContent ? (
-                                  <span className="animate-spin">⏳</span>
+                                  <Spinner size="xs" />
                                 ) : (
                                   <Check className="h-3 w-3" />
                                 )}
@@ -1900,7 +1971,7 @@ export function DocumentsView() {
                   {loadingChunks ? (
                     <div className="flex items-center justify-center py-20">
                       <div className="text-center">
-                        <div className="text-4xl mb-2">⏳</div>
+                        <Spinner size="xl" variant="jump" className="mx-auto mb-2" />
                         <div className="text-sm text-muted-foreground">{t("loadingChunks")}</div>
                       </div>
                     </div>
@@ -1913,7 +1984,7 @@ export function DocumentsView() {
                   ) : chunksLoaded ? (
                     <div className="flex items-center justify-center py-20">
                       <div className="text-center">
-                        <div className="text-4xl mb-2">📄</div>
+                        <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground/50" />
                         <div className="text-sm text-muted-foreground">{t("noChunksFound")}</div>
                       </div>
                     </div>

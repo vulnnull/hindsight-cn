@@ -32,7 +32,6 @@ import {
   Clock,
   AlertCircle,
   CheckCircle,
-  Loader2,
   X,
   RotateCcw,
   Code,
@@ -40,6 +39,7 @@ import {
   Trash2,
   FileText,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { DocumentChunkModal } from "./document-chunk-modal";
 
 interface Operation {
@@ -181,7 +181,7 @@ export function BankOperationsView() {
     if (status === "processing") {
       return (
         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-          <Loader2 className="w-3 h-3 animate-spin" />
+          <Spinner size="xs" />
           {label}
         </span>
       );
@@ -625,7 +625,7 @@ export function BankOperationsView() {
                             disabled={cancellingOpId === op.id}
                           >
                             {cancellingOpId === op.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <Spinner size="xs" />
                             ) : (
                               <X className="w-3 h-3 mr-1" />
                             )}
@@ -644,7 +644,7 @@ export function BankOperationsView() {
                             disabled={retryingOpId === op.id}
                           >
                             {retryingOpId === op.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <Spinner size="xs" />
                             ) : (
                               <RotateCcw className="w-3 h-3 mr-1" />
                             )}
@@ -665,7 +665,7 @@ export function BankOperationsView() {
                             disabled={deletingOpId === op.id}
                           >
                             {deletingOpId === op.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <Spinner size="xs" />
                             ) : (
                               <Trash2 className="w-3 h-3 mr-1" />
                             )}
@@ -731,7 +731,7 @@ export function BankOperationsView() {
           </DialogHeader>
           {loadingDetails ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              <Spinner size="md" variant="jump" />
             </div>
           ) : selectedOperation ? (
             <div className="space-y-4">
@@ -833,7 +833,7 @@ export function BankOperationsView() {
                           disabled={cancellingOpId === selectedOperation.operation_id}
                         >
                           {cancellingOpId === selectedOperation.operation_id ? (
-                            <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                            <Spinner size="xs" className="mr-1" />
                           ) : (
                             <X className="w-3 h-3 mr-1" />
                           )}
@@ -850,7 +850,7 @@ export function BankOperationsView() {
                           disabled={retryingOpId === selectedOperation.operation_id}
                         >
                           {retryingOpId === selectedOperation.operation_id ? (
-                            <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                            <Spinner size="xs" className="mr-1" />
                           ) : (
                             <RotateCcw className="w-3 h-3 mr-1" />
                           )}
@@ -868,7 +868,7 @@ export function BankOperationsView() {
                           disabled={deletingOpId === selectedOperation.operation_id}
                         >
                           {deletingOpId === selectedOperation.operation_id ? (
-                            <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                            <Spinner size="xs" className="mr-1" />
                           ) : (
                             <Trash2 className="w-3 h-3 mr-1" />
                           )}
@@ -976,7 +976,7 @@ export function BankOperationsView() {
                               disabled={loadingPayload}
                             >
                               {loadingPayload ? (
-                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                <Spinner size="xs" className="mr-1" />
                               ) : (
                                 <Code className="w-3 h-3 mr-1" />
                               )}

@@ -1,6 +1,6 @@
 [project]
 name = "hindsight-copilot-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "GitHub Copilot CLI integration for Hindsight - persistent long-term memory via Copilot CLI hooks"
 readme = "README.md"
 requires-python = ">=3.11"

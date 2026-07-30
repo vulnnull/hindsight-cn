@@ -38,6 +38,20 @@ export interface WebhookHttpConfig {
   params: Record<string, string>;
 }
 
+export interface KnowledgeNode {
+  id: string;
+  kind: "folder" | "page";
+  name: string;
+  parent_id: string | null;
+  mental_model_id: string | null;
+  managed: boolean;
+  description: string | null;
+  tags: string[];
+  timestamp: string | null;
+  is_stale: boolean | null;
+  children: KnowledgeNode[];
+}
+
 export interface Webhook {
   id: string;
   bank_id: string | null;
@@ -608,6 +622,115 @@ export class ControlPlaneClient {
   }
 
   /**
+   * Get the knowledge base as a nested folder/page tree.
+   */
+  async getKnowledgeTree(bankId: string) {
+    return this.fetchApi<{ roots: KnowledgeNode[] }>(
+      `/api/knowledge-base/tree?bank_id=${encodeURIComponent(bankId)}`
+    );
+  }
+
+  /**
+   * Hybrid search (BM25 + vector) across a bank's knowledge pages.
+   */
+  async searchKnowledgePages(bankId: string, q: string, limit = 10) {
+    return this.fetchApi<{
+      results: Array<{
+        id: string;
+        name: string;
+        mental_model_id: string | null;
+        snippet: string;
+        score: number;
+        updated_at: string | null;
+      }>;
+      total: number;
+    }>(
+      `/api/knowledge-base/search?bank_id=${encodeURIComponent(bankId)}&q=${encodeURIComponent(q)}&limit=${limit}`
+    );
+  }
+
+  /**
+   * Get a single knowledge page rendered as a markdown document.
+   */
+  async getKnowledgePage(bankId: string, pageId: string) {
+    return this.fetchApi<{
+      id: string;
+      name: string;
+      type: string;
+      description: string | null;
+      tags: string[];
+      timestamp: string | null;
+      body: string | null;
+      markdown: string;
+    }>(
+      `/api/knowledge-base/pages/${encodeURIComponent(pageId)}?bank_id=${encodeURIComponent(bankId)}`
+    );
+  }
+
+  /**
+   * Create a folder, optionally under a parent folder.
+   */
+  async createKnowledgeFolder(bankId: string, body: { name: string; parent_id?: string | null }) {
+    return this.fetchApi<KnowledgeNode>(
+      `/api/knowledge-base/folders?bank_id=${encodeURIComponent(bankId)}`,
+      { method: "POST", body: JSON.stringify(body) }
+    );
+  }
+
+  /**
+   * Create a page (mental model + tree node). Content is generated asynchronously.
+   */
+  async createKnowledgePage(
+    bankId: string,
+    body: { name: string; source_query: string; parent_id?: string | null; tags?: string[] }
+  ) {
+    return this.fetchApi<{ page_id: string; mental_model_id: string; operation_id: string | null }>(
+      `/api/knowledge-base/pages?bank_id=${encodeURIComponent(bankId)}`,
+      { method: "POST", body: JSON.stringify(body) }
+    );
+  }
+
+  /**
+   * Rename/move a node and/or update a page's options. Pass `parent_id: null`
+   * to move to the root. Changing `source_query` rebuilds the page's content.
+   */
+  async updateKnowledgeNode(
+    bankId: string,
+    nodeId: string,
+    body: {
+      name?: string;
+      parent_id?: string | null;
+      source_query?: string;
+      tags?: string[];
+      max_tokens?: number;
+    }
+  ) {
+    return this.fetchApi<KnowledgeNode>(
+      `/api/knowledge-base/nodes/${encodeURIComponent(nodeId)}?bank_id=${encodeURIComponent(bankId)}`,
+      { method: "PATCH", body: JSON.stringify(body) }
+    );
+  }
+
+  /**
+   * Delete a node and its whole subtree.
+   */
+  async deleteKnowledgeNode(bankId: string, nodeId: string) {
+    return this.fetchApi<{ status: string }>(
+      `/api/knowledge-base/nodes/${encodeURIComponent(nodeId)}?bank_id=${encodeURIComponent(bankId)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  /**
+   * Export the knowledge base as a portable markdown bundle (markdown files).
+   */
+  async exportKnowledgeBase(bankId: string) {
+    return this.fetchApi<{ files: Array<{ path: string; content: string }> }>(
+      `/api/knowledge-base/export?bank_id=${encodeURIComponent(bankId)}`
+    );
+  }
+
+  /**
    * Get entity details
    */
   async getEntity(entityId: string, bankId: string) {
@@ -870,6 +993,9 @@ export class ControlPlaneClient {
       document_id: string | null;
       chunk_id: string | null;
       tags: string[];
+      // Inherited from the source document at retain time (so a memory knows
+      // which coding agent wrote it without fetching the document).
+      metadata: Record<string, unknown> | null;
       observation_scopes: string | string[][] | null;
       state: "valid" | "invalidated";
       invalidation_reason: string | null;

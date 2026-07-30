@@ -43,6 +43,7 @@ import {
   LogOut,
   Copy,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { toast } from "sonner";
 import { useTheme } from "@/lib/theme-context";
 import { useFeatures } from "@/lib/features-context";
@@ -98,6 +99,9 @@ function BankSelectorInner() {
   const { theme, toggleTheme } = useTheme();
   const { features } = useFeatures();
   const [open, setOpen] = React.useState(false);
+  // One-shot spin of the header logo, fired by sidebar navigation (see the
+  // "hindsight:logo-spin" listener below). Reset on animationEnd so it can replay.
+  const [logoSpinning, setLogoSpinning] = React.useState(false);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [newBankId, setNewBankId] = React.useState("");
   const [isCreating, setIsCreating] = React.useState(false);
@@ -170,6 +174,18 @@ function BankSelectorInner() {
       .catch(() => {
         setFileUploadEnabled(false);
       });
+  }, []);
+
+  // Spin the header logo whenever a sidebar item is clicked. Decoupled via a
+  // window event (like DOCUMENTS_REFRESH_EVENT) since the sidebar and this header
+  // are siblings, not parent/child. onAnimationEnd clears the flag so the next
+  // click replays it. (A mid-spin re-click is a no-op — the flag is already set —
+  // which is fine; we avoid a requestAnimationFrame restart because rAF is paused
+  // in background tabs, which would drop the spin entirely.)
+  React.useEffect(() => {
+    const spin = () => setLogoSpinning(true);
+    window.addEventListener("hindsight:logo-spin", spin);
+    return () => window.removeEventListener("hindsight:logo-spin", spin);
   }, []);
 
   const sortedBanks = React.useMemo(() => {
@@ -477,15 +493,28 @@ function BankSelectorInner() {
   return (
     <div className="bg-card text-card-foreground px-5 py-3 border-b-4 border-primary-gradient">
       <div className="flex items-center gap-4 text-sm">
-        {/* Logo */}
-        <Image
-          src={withBasePath("/logo.png")}
-          alt="Hindsight"
-          width={40}
-          height={40}
-          className="h-10 w-auto"
-          unoptimized
-        />
+        {/* Logo, split so only the mark spins on navigation while the wordmark
+            stays put. The mark is the standalone favicon.png (so it can rotate
+            freely); the wordmark is the right slice of the full lockup (logo.png)
+            shown via a cropped background. Their widths sum to the full logo, so
+            the two pieces butt together seamlessly at h-10. */}
+        <div className="flex items-center h-10 select-none" aria-label="Hindsight">
+          <img
+            src={withBasePath("/favicon.png")}
+            alt=""
+            className={cn("h-10 w-auto", logoSpinning && "animate-logo-wiggle")}
+            onAnimationEnd={() => setLogoSpinning(false)}
+          />
+          <div
+            className="h-10 w-[99px]"
+            style={{
+              backgroundImage: `url(${withBasePath("/logo.png")})`,
+              backgroundSize: "auto 100%",
+              backgroundPosition: "right center",
+              backgroundRepeat: "no-repeat",
+            }}
+          />
+        </div>
 
         {/* Separator */}
         <div className="h-8 w-px bg-border" />
@@ -520,7 +549,7 @@ function BankSelectorInner() {
                 <CommandEmpty>
                   {banksLoading ? (
                     <div className="flex items-center justify-center gap-2 py-2">
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                      <Spinner size="sm" />
                       <span>{tCommon("loading")}</span>
                     </div>
                   ) : (

@@ -33,16 +33,15 @@ import {
 import {
   RefreshCw,
   Brain,
-  Clock,
   Trash2,
   Target,
   AlertTriangle,
   Plus,
   Tag,
-  Loader2,
   X,
   Pencil,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { TagChip } from "@/components/ui/facet-chip";
 
 interface DispositionTraits {
@@ -281,7 +280,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
     return (
       <Card>
         <CardContent className="text-center py-10">
-          <Clock className="w-12 h-12 mx-auto mb-3 text-muted-foreground animate-pulse" />
+          <Spinner size="lg" variant="jump" className="mx-auto mb-3" />
           <div className="text-lg text-muted-foreground">{t("loadingProfile")}</div>
         </CardContent>
       </Card>
@@ -520,7 +519,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
             >
               {isClearingObservations ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner size="sm" className="mr-2" />
                   {tBank("clearing")}
                 </>
               ) : (
@@ -567,7 +566,7 @@ export function BankProfileView({ hideReflectFields = false }: { hideReflectFiel
               disabled={deletingDirective}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deletingDirective ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+              {deletingDirective ? <Spinner size="sm" className="mr-1" /> : null}
               {tCommon("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -912,7 +911,7 @@ function DirectiveFormDialog({
             disabled={submitting || !form.name.trim() || !form.content.trim()}
             className="bg-rose-500 hover:bg-rose-600"
           >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+            {submitting ? <Spinner size="sm" className="mr-1" /> : null}
             {mode === "create" ? t("create") : t("save")}
           </Button>
         </DialogFooter>

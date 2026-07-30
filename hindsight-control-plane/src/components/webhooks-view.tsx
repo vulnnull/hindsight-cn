@@ -38,7 +38,6 @@ import {
   Trash2,
   Eye,
   EyeOff,
-  Loader2,
   CheckCircle,
   AlertCircle,
   Clock,
@@ -47,6 +46,7 @@ import {
   ChevronRight,
   Pencil,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 
 const AVAILABLE_EVENT_TYPES = [
   "consolidation.completed",
@@ -589,7 +589,7 @@ export function WebhooksView() {
                         aria-label={t("deleteWebhookAriaLabel")}
                       >
                         {deletingId === webhook.id ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <Spinner size="xs" />
                         ) : (
                           <Trash2 className="w-3 h-3" />
                         )}
@@ -783,7 +783,7 @@ export function WebhooksView() {
             <Button onClick={handleCreate} disabled={creating || !form.url}>
               {creating ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner size="sm" className="mr-2" />
                   {t("creating")}
                 </>
               ) : (
@@ -993,7 +993,7 @@ export function WebhooksView() {
             <Button onClick={handleSave} disabled={saving || !editForm.url}>
               {saving ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner size="sm" className="mr-2" />
                   {t("saving")}
                 </>
               ) : (
@@ -1034,7 +1034,7 @@ export function WebhooksView() {
             >
               {deletingId ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner size="sm" className="mr-2" />
                   {t("deleting")}
                 </>
               ) : (
@@ -1068,7 +1068,7 @@ export function WebhooksView() {
 
           {loadingDeliveries ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              <Spinner size="md" variant="jump" />
             </div>
           ) : deliveries.length > 0 ? (
             <>
@@ -1105,7 +1105,7 @@ export function WebhooksView() {
                     onClick={handleLoadMoreDeliveries}
                     disabled={loadingMoreDeliveries}
                   >
-                    {loadingMoreDeliveries && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                    {loadingMoreDeliveries && <Spinner size="sm" className="mr-2" />}
                     {t("loadMore")}
                   </Button>
                 </div>

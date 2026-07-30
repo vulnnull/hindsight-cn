@@ -88,6 +88,12 @@ _SKIP_TABLES = frozenset(
         # to fresh ids, so carrying them would only produce dangling associations.
         # Revert anything worth keeping on the source before migrating.
         "invalidated_memory_units",
+        # Knowledge-base folder/page tree (client-managed metadata over the carried
+        # mental models). Not carried yet: its self-referential parent_id FK needs a
+        # parents-first (topological) restore order, which the generic per-row
+        # _restore_rows doesn't provide — a follow-up. The mental models themselves
+        # ARE carried, so the target can recreate the tree.
+        "knowledge_pages",
     }
 )
 # Derived columns dropped from carried rows so the target regenerates them with
