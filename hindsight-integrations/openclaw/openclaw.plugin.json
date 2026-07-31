@@ -237,6 +237,11 @@
         "description": "Memory types to recall. Defaults to ['observation'] — surfaces only the consolidated, deduplicated view; raw world/experience facts can drive the same answer multiple times when many memories say the same thing.",
         "default": ["observation"]
       },
+      "preferObservations": {
+        "type": "boolean",
+        "description": "When true, recall drops raw facts already consolidated into an observation while keeping unconsolidated ones. Pair with recallTypes including raw types (e.g. ['observation', 'world', 'experience']) to surface just-retained facts before consolidation, without duplicating already-consolidated content. Default: false.",
+        "default": false
+      },
       "recallRoles": {
         "type": "array",
         "items": {
@@ -277,8 +282,8 @@
       "recallInjectionPosition": {
         "type": "string",
         "enum": ["prepend", "append", "user"],
-        "description": "Where to inject recalled memories. 'prepend' = start of system prompt (default), 'append' = end of system prompt (preserves prompt cache), 'user' = before user message.",
-        "default": "prepend"
+        "description": "Where to inject recalled memories. 'user' = before the user message (default, preserves system prompt cache), 'prepend' = start of system prompt, 'append' = end of system prompt.",
+        "default": "user"
       },
       "debug": {
         "type": "boolean",
@@ -500,6 +505,10 @@
     "recallTypes": {
       "label": "Recall Types",
       "placeholder": "['observation'] (default)"
+    },
+    "preferObservations": {
+      "label": "Prefer Observations",
+      "placeholder": "false (default)"
     },
     "recallRoles": {
       "label": "Recall Roles",

@@ -1,0 +1,217 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readClaudeTranscript } from "./transcript";
+import { buildSystemInjection } from "./inject";
+
+let root: string;
+let file: string;
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "hs-transcript-"));
+  file = join(root, "session.jsonl");
+});
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+describe("readClaudeTranscript", () => {
+  it("captures text + compact action turns, dropping tool_result/non-message/isMeta/isSidechain/thinking/empty lines and tolerating malformed or non-object JSON lines", () => {
+    const lines = [
+      // non-message line: dropped
+      JSON.stringify({ type: "last-prompt", leafUuid: "x" }),
+      // kept: string content
+      JSON.stringify({
+        type: "user",
+        timestamp: "2026-01-01T00:00:00Z",
+        message: { role: "user", content: "how do we validate input?" },
+      }),
+      // kept: only the text block survives (thinking dropped)
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-01-01T00:00:01Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "hmm" },
+            { type: "text", text: "We use zod." },
+          ],
+        },
+      }),
+      // kept: a tool_use-only assistant line becomes a compact role:"action" turn (name + target)
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "Bash", input: { command: "npm test" } }],
+        },
+      }),
+      // dropped: a tool_result-only user line — outputs are mechanical noise for extraction
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: [{ type: "tool_result", content: "12 passed" }] },
+      }),
+      // dropped: isMeta
+      JSON.stringify({
+        type: "user",
+        isMeta: true,
+        message: { role: "user", content: "<system-injected>" },
+      }),
+      // dropped: isSidechain (subagent/Task turn, not the main conversation)
+      JSON.stringify({
+        type: "assistant",
+        isSidechain: true,
+        message: { role: "assistant", content: "subagent output" },
+      }),
+      // malformed line: must not throw
+      "{ not json",
+      // JSON.parse succeeds but yields a non-object value: must not throw
+      "null",
+      "42",
+      "[]",
+      // blank line: must be skipped
+      "",
+    ];
+    writeFileSync(file, lines.join("\n"));
+
+    const result = readClaudeTranscript(file);
+
+    expect(result).toEqual([
+      { role: "user", content: "how do we validate input?", timestamp: "2026-01-01T00:00:00Z" },
+      { role: "assistant", content: "We use zod.", timestamp: "2026-01-01T00:00:01Z" },
+      { role: "action", content: "Bash npm test" },
+    ]);
+  });
+
+  it("splits a mixed text + tool_use message into a prose turn plus an action turn; drops the tool_result", () => {
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-01-01T00:00:02Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Editing the uploader." },
+            {
+              type: "tool_use",
+              name: "Edit",
+              input: { file_path: "uploader.ts", old_string: "a" },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: [{ type: "tool_result", content: "x".repeat(5000) }] },
+      }),
+    ];
+    writeFileSync(file, lines.join("\n"));
+
+    const result = readClaudeTranscript(file);
+
+    expect(result).toEqual([
+      { role: "assistant", content: "Editing the uploader.", timestamp: "2026-01-01T00:00:02Z" },
+      // Action line: tool name + primary target only — no arguments, no output.
+      { role: "action", content: "Edit uploader.ts", timestamp: "2026-01-01T00:00:02Z" },
+    ]);
+  });
+
+  it("caps a very long action target at 100 chars, and falls back to the bare tool name when the input has no target key", () => {
+    const longCmd = "echo " + "y".repeat(200);
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "Bash", input: { command: longCmd } }],
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "TodoWrite", input: { todos: [] } }],
+        },
+      }),
+    ];
+    writeFileSync(file, lines.join("\n"));
+
+    const result = readClaudeTranscript(file);
+
+    expect(result[0].role).toBe("action");
+    expect(result[0].content).toBe(`Bash ${longCmd.slice(0, 100)}…`);
+    expect(result[1]).toEqual({ role: "action", content: "TodoWrite" });
+  });
+
+  it("strips injected recall context so retained turns can't feed memory back into the bank", () => {
+    writeFileSync(
+      file,
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content:
+            "<hindsight_memories>\nsecret prior fact\n</hindsight_memories>\nWhy does upload retry?",
+        },
+      })
+    );
+
+    const result = readClaudeTranscript(file);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toContain("Why does upload retry?");
+    expect(result[0].content).not.toContain("secret prior fact");
+    expect(result[0].content).not.toContain("hindsight_memories");
+  });
+
+  it("strips the reflect hook's <hindsight_memory> injection block (buildSystemInjection output)", () => {
+    // The exact block the UserPromptSubmit hook injects — wrapper tags, preamble, attribution
+    // text and the surfaced memory itself must ALL be gone from retained text, or the session
+    // write-back would re-ingest the injected synthesis (a retain→reflect feedback loop).
+    writeFileSync(
+      file,
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: `${buildSystemInjection("SECRET")}\nWhy does upload retry?`,
+        },
+      })
+    );
+
+    const result = readClaudeTranscript(file);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toContain("Why does upload retry?");
+    expect(result[0].content).not.toContain("SECRET");
+    expect(result[0].content).not.toContain("Relevant project memory");
+    expect(result[0].content).not.toContain("hindsight_memory");
+  });
+
+  it("fails open (returns []) when the file cannot be read", () => {
+    expect(readClaudeTranscript(join(root, "does-not-exist.jsonl"))).toEqual([]);
+  });
+
+  it("joins multiple text blocks in a single message with newlines", () => {
+    writeFileSync(
+      file,
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "First paragraph." },
+            { type: "thinking", thinking: "irrelevant" },
+            { type: "text", text: "Second paragraph." },
+          ],
+        },
+      })
+    );
+
+    const result = readClaudeTranscript(file);
+
+    expect(result).toEqual([{ role: "assistant", content: "First paragraph.\nSecond paragraph." }]);
+  });
+});

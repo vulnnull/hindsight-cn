@@ -272,8 +272,16 @@ export type BankListItem = {
   fact_count?: number;
   /**
    * Last Document At
+   *
+   * When a document was last *ingested* into this bank. Appending to an existing document does not move this — use `last_write_at` for write activity.
    */
   last_document_at?: string | null;
+  /**
+   * Last Write At
+   *
+   * When anything was last written to this bank: a document retained (including appends to an existing document) or a fact stored. Null if the bank is empty.
+   */
+  last_write_at?: string | null;
 };
 
 /**

@@ -2061,8 +2061,9 @@ paths:
       - Directives
   /v1/default/banks/{bank_id}/documents:
     get:
-      description: List documents with pagination and optional search. Documents are
-        the source content from which memory units are extracted.
+      description: "List documents with pagination and optional search, most recently\
+        \ written first (`updated_at` descending). Documents are the source content\
+        \ from which memory units are extracted."
       operationId: list_documents
       parameters:
       - explode: false
@@ -4754,6 +4755,9 @@ components:
         last_document_at:
           nullable: true
           type: string
+        last_write_at:
+          nullable: true
+          type: string
       required:
       - bank_id
       - disposition
@@ -4770,6 +4774,7 @@ components:
             skepticism: 3
           fact_count: 156
           last_document_at: 2024-01-16T14:20:00Z
+          last_write_at: 2024-01-17T09:05:00Z
           mission: I am a software engineer helping my team ship quality code
           name: Alice
           updated_at: 2024-01-16T14:20:00Z

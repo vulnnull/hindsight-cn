@@ -6,6 +6,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TypedDict
 
 from pydantic import BaseModel, Field
@@ -412,15 +413,33 @@ Merged mission:"""
         return {"mission": merged}
 
 
+# Sort floor for banks that have never been written to and carry no created_at.
+_UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _as_utc(ts: datetime | None) -> datetime | None:
+    """Normalize a DB timestamp to an aware UTC datetime so values stay comparable."""
+    if ts is None:
+        return None
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
+
+
 async def list_banks(pool) -> list:
     """
     List all banks in the system with summary stats.
+
+    ``last_document_at`` is document *ingestion* time (when a document first
+    landed), while ``last_write_at`` is the last time anything was written to
+    the bank — a document re-retained/appended to, or a fact stored. Appending
+    to a long-lived document does not move ``last_document_at``, which is why
+    the two differ and why UIs showing "last write" must use ``last_write_at``.
 
     Args:
         pool: Database connection pool
 
     Returns:
-        List of dicts with bank info and stats (document_count, fact_count, last_event_at)
+        List of dicts with bank info and stats (fact_count, last_document_at, last_write_at),
+        most recently written bank first.
     """
     banks_table = fq_table("banks")
     docs_table = fq_table("documents")
@@ -433,23 +452,32 @@ async def list_banks(pool) -> list:
                 b.bank_id, b.name, b.disposition, b.mission,
                 b.created_at, b.updated_at,
                 COALESCE(m.fact_count, 0) AS fact_count,
-                d.last_document_at
+                d.last_document_at,
+                d.last_document_write_at,
+                m.last_fact_at
             FROM {banks_table} b
             LEFT JOIN (
-                SELECT bank_id, MAX(created_at) AS last_document_at
+                SELECT bank_id,
+                       MAX(created_at) AS last_document_at,
+                       MAX(updated_at) AS last_document_write_at
                 FROM {docs_table}
                 GROUP BY bank_id
             ) d ON d.bank_id = b.bank_id
             LEFT JOIN (
-                SELECT bank_id, COUNT(*) AS fact_count
+                SELECT bank_id,
+                       COUNT(*) AS fact_count,
+                       MAX(created_at) AS last_fact_at
                 FROM {mu_table}
                 GROUP BY bank_id
             ) m ON m.bank_id = b.bank_id
-            ORDER BY d.last_document_at DESC NULLS LAST, b.updated_at DESC
+            ORDER BY b.bank_id
             """
         )
 
         result = []
+        # Banks are ordered by last write in Python rather than SQL: GREATEST() has
+        # different NULL semantics on PostgreSQL vs Oracle, and the bank list is small.
+        sort_keys: dict[str, datetime] = {}
         # A store that keeps memories outside SQL leaves the memory_units join empty, so its
         # per-bank fact_count comes from the store instead (one live count per bank).
         from ..memories import get_memories
@@ -461,7 +489,14 @@ async def list_banks(pool) -> list:
             if isinstance(disposition_data, str):
                 disposition_data = json.loads(disposition_data)
 
-            last_doc = row["last_document_at"]
+            last_doc = _as_utc(row["last_document_at"])
+            created_at = _as_utc(row["created_at"])
+            updated_at = _as_utc(row["updated_at"])
+            # Last write = newest of "a document was (re-)retained" and "a fact was stored".
+            # Appending to an existing document only bumps documents.updated_at, and facts
+            # written outside a retain (consolidation, curation, import) only bump memory_units.
+            write_times = [t for t in (_as_utc(row["last_document_write_at"]), _as_utc(row["last_fact_at"])) if t]
+            last_write = max(write_times) if write_times else None
 
             fact_count = row["fact_count"]
             if not _store.writes_memory_rows_in_sql:
@@ -469,17 +504,20 @@ async def list_banks(pool) -> list:
                     (await _store.count_memories(conn=conn, fq_table=fq_table, bank_id=row["bank_id"])).values()
                 )
 
+            sort_keys[row["bank_id"]] = last_write or created_at or _UNIX_EPOCH
             result.append(
                 {
                     "bank_id": row["bank_id"],
                     "name": row["name"],
                     "disposition": disposition_data,
                     "mission": row["mission"] or "",
-                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                    "created_at": created_at.isoformat() if created_at else None,
+                    "updated_at": updated_at.isoformat() if updated_at else None,
                     "fact_count": fact_count,
                     "last_document_at": last_doc.isoformat() if last_doc else None,
+                    "last_write_at": last_write.isoformat() if last_write else None,
                 }
             )
 
+        result.sort(key=lambda bank: sort_keys[bank["bank_id"]], reverse=True)
         return result

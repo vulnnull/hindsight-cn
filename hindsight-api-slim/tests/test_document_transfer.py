@@ -484,11 +484,16 @@ async def test_bank_import_preserves_consolidation_lifecycle(memory, request_con
             ]
         assert len(wf_ids) >= 3, "need enough facts to exercise the lineage gap"
 
-        # One surviving observation over the first two facts.
+        # One surviving observation over the first two facts. The helper now self-acquires a
+        # short-lived connection (the embed runs off-connection), so pass the backend, not a conn.
         obs_source_ids = [uuid.UUID(str(i)) for i in wf_ids[:2]]
-        async with acquire_with_retry(backend) as conn:
-            async with conn.transaction():
-                await _create_observation_directly(conn, memory, bank, obs_source_ids, "Alice and Bob are colleagues.")
+        await _create_observation_directly(
+            pool=backend,
+            memory_engine=memory,
+            bank_id=bank,
+            source_memory_ids=obs_source_ids,
+            observation_text="Alice and Bob are colleagues.",
+        )
 
         # Fully-processed source (zero eligible): every fact is consolidated except
         # the last — deliberately NOT an observation source — which records a
@@ -933,19 +938,25 @@ async def test_export_import_observations(memory, request_context):
         source_ids = [uuid.UUID(str(i["id"])) for i in units["items"][:2]]
         assert len(source_ids) == 2
 
-        # Create a real observation over those source facts.
+        # Create a real observation over those source facts. The helper self-acquires a
+        # short-lived connection now (the embed runs off-connection), so pass the backend.
         backend = await memory._get_backend()
         archived_event_date = datetime(2001, 2, 3, 4, 5, 6, tzinfo=timezone.utc)
+        await _create_observation_directly(
+            pool=backend,
+            memory_engine=memory,
+            bank_id=src,
+            source_memory_ids=source_ids,
+            observation_text="Alice and Bob are colleagues.",
+        )
         async with acquire_with_retry(backend) as conn:
-            async with conn.transaction():
-                await _create_observation_directly(conn, memory, src, source_ids, "Alice and Bob are colleagues.")
-                await conn.execute(
-                    f"UPDATE {fq_table('memory_units')} SET event_date = $1 "
-                    f"WHERE bank_id = $2 AND fact_type = 'observation' AND text = $3",
-                    archived_event_date,
-                    src,
-                    "Alice and Bob are colleagues.",
-                )
+            await conn.execute(
+                f"UPDATE {fq_table('memory_units')} SET event_date = $1 "
+                f"WHERE bank_id = $2 AND fact_type = 'observation' AND text = $3",
+                archived_event_date,
+                src,
+                "Alice and Bob are colleagues.",
+            )
 
         # Export WITHOUT observations -> none in the archive (the bank may also
         # contain auto-consolidation observations; the flag is what gates them).

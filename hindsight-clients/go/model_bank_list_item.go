@@ -29,6 +29,7 @@ type BankListItem struct {
 	UpdatedAt NullableString `json:"updated_at,omitempty"`
 	FactCount *int32 `json:"fact_count,omitempty"`
 	LastDocumentAt NullableString `json:"last_document_at,omitempty"`
+	LastWriteAt NullableString `json:"last_write_at,omitempty"`
 }
 
 type _BankListItem BankListItem
@@ -346,6 +347,48 @@ func (o *BankListItem) UnsetLastDocumentAt() {
 	o.LastDocumentAt.Unset()
 }
 
+// GetLastWriteAt returns the LastWriteAt field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *BankListItem) GetLastWriteAt() string {
+	if o == nil || IsNil(o.LastWriteAt.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.LastWriteAt.Get()
+}
+
+// GetLastWriteAtOk returns a tuple with the LastWriteAt field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *BankListItem) GetLastWriteAtOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.LastWriteAt.Get(), o.LastWriteAt.IsSet()
+}
+
+// HasLastWriteAt returns a boolean if a field has been set.
+func (o *BankListItem) HasLastWriteAt() bool {
+	if o != nil && o.LastWriteAt.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetLastWriteAt gets a reference to the given NullableString and assigns it to the LastWriteAt field.
+func (o *BankListItem) SetLastWriteAt(v string) {
+	o.LastWriteAt.Set(&v)
+}
+// SetLastWriteAtNil sets the value for LastWriteAt to be an explicit nil
+func (o *BankListItem) SetLastWriteAtNil() {
+	o.LastWriteAt.Set(nil)
+}
+
+// UnsetLastWriteAt ensures that no value is present for LastWriteAt, not even an explicit nil
+func (o *BankListItem) UnsetLastWriteAt() {
+	o.LastWriteAt.Unset()
+}
+
 func (o BankListItem) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -375,6 +418,9 @@ func (o BankListItem) ToMap() (map[string]interface{}, error) {
 	}
 	if o.LastDocumentAt.IsSet() {
 		toSerialize["last_document_at"] = o.LastDocumentAt.Get()
+	}
+	if o.LastWriteAt.IsSet() {
+		toSerialize["last_write_at"] = o.LastWriteAt.Get()
 	}
 	return toSerialize, nil
 }

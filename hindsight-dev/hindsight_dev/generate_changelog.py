@@ -54,6 +54,8 @@ INTEGRATIONS: dict[str, IntegrationMeta] = {
     "claude-agent-sdk": IntegrationMeta("hindsight-claude-agent-sdk", "Claude Agent SDK"),
     "llamaindex": IntegrationMeta("hindsight-llamaindex", "LlamaIndex"),
     "codex": IntegrationMeta("hindsight-codex", "Codex"),
+    # npm-published under the @vectorize-io scope, unlike the PyPI integrations above.
+    "coding-agents": IntegrationMeta("@vectorize-io/hindsight-coding-agents", "Coding Agents"),
     "github-copilot": IntegrationMeta("hindsight-copilot", "GitHub Copilot"),
     "cline": IntegrationMeta("hindsight-cline", "Cline"),
     "cursor-cli": IntegrationMeta("hindsight-cursor-cli", "Cursor CLI"),

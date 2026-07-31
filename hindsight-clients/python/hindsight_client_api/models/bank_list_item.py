@@ -35,7 +35,8 @@ class BankListItem(BaseModel):
     updated_at: Optional[StrictStr] = None
     fact_count: Optional[StrictInt] = 0
     last_document_at: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "mission", "created_at", "updated_at", "fact_count", "last_document_at"]
+    last_write_at: Optional[StrictStr] = None
+    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "mission", "created_at", "updated_at", "fact_count", "last_document_at", "last_write_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -104,6 +105,11 @@ class BankListItem(BaseModel):
         if self.last_document_at is None and "last_document_at" in self.model_fields_set:
             _dict['last_document_at'] = None
 
+        # set to None if last_write_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.last_write_at is None and "last_write_at" in self.model_fields_set:
+            _dict['last_write_at'] = None
+
         return _dict
 
     @classmethod
@@ -123,7 +129,8 @@ class BankListItem(BaseModel):
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at"),
             "fact_count": obj.get("fact_count") if obj.get("fact_count") is not None else 0,
-            "last_document_at": obj.get("last_document_at")
+            "last_document_at": obj.get("last_document_at"),
+            "last_write_at": obj.get("last_write_at")
         })
         return _obj
 

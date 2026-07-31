@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from hindsight_api import RequestContext
+from hindsight_api.engine.db_utils import acquire_with_retry
 from hindsight_api.engine.memories import FactRecord, get_memories
 from hindsight_api.engine.memory_engine import MemoryEngine, fq_table
 
@@ -871,24 +872,27 @@ class TestConsolidationSourceMemoryFiltering:
         bank_id = f"test-race-create-filter-{uuid.uuid4().hex[:8]}"
         await _ensure_bank(memory, bank_id, request_context)
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
+        # The helper now self-acquires a short-lived connection (the embed runs off-connection),
+        # so we pass the backend, not a conn.
+        backend = await memory._get_backend()
+        async with acquire_with_retry(backend) as conn:
             live = await _insert_memory(memory, conn, bank_id, "Alice loves hiking.")
-            dead = uuid.uuid4()  # never existed — stands in for a concurrently deleted source
+        dead = uuid.uuid4()  # never existed — stands in for a concurrently deleted source
 
-            result = await _create_observation_directly(
-                conn=conn,
-                memory_engine=memory,
-                bank_id=bank_id,
-                source_memory_ids=[live, dead],
-                observation_text="Alice enjoys hiking regularly.",
-            )
+        result = await _create_observation_directly(
+            pool=backend,
+            memory_engine=memory,
+            bank_id=bank_id,
+            source_memory_ids=[live, dead],
+            observation_text="Alice enjoys hiking regularly.",
+        )
 
-            assert result["action"] == "created"
+        assert result["action"] == "created"
+        async with acquire_with_retry(backend) as conn:
             stored = (await _get_memory(conn, bank_id, result["observation_id"])).source_memory_ids
-            stored_set = {str(s) for s in stored}
-            assert str(live) in stored_set
-            assert str(dead) not in stored_set, "Deleted source must not appear in stored observation"
+        stored_set = {str(s) for s in stored}
+        assert str(live) in stored_set
+        assert str(dead) not in stored_set, "Deleted source must not appear in stored observation"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -901,21 +905,21 @@ class TestConsolidationSourceMemoryFiltering:
         bank_id = f"test-race-create-skip-{uuid.uuid4().hex[:8]}"
         await _ensure_bank(memory, bank_id, request_context)
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            result = await _create_observation_directly(
-                conn=conn,
-                memory_engine=memory,
-                bank_id=bank_id,
-                source_memory_ids=[uuid.uuid4(), uuid.uuid4()],
-                observation_text="All sources gone.",
-            )
+        backend = await memory._get_backend()
+        result = await _create_observation_directly(
+            pool=backend,
+            memory_engine=memory,
+            bank_id=bank_id,
+            source_memory_ids=[uuid.uuid4(), uuid.uuid4()],
+            observation_text="All sources gone.",
+        )
 
-            assert result["action"] == "skipped"
-            assert result["reason"] == "sources_deleted"
+        assert result["action"] == "skipped"
+        assert result["reason"] == "sources_deleted"
 
+        async with acquire_with_retry(backend) as conn:
             obs_ids = await _get_observation_ids(conn, bank_id)
-            assert obs_ids == [], "No observation row should exist"
+        assert obs_ids == [], "No observation row should exist"
 
         await memory.delete_bank(bank_id, request_context=request_context)
 
@@ -929,33 +933,96 @@ class TestConsolidationSourceMemoryFiltering:
         bank_id = f"test-race-update-skip-{uuid.uuid4().hex[:8]}"
         await _ensure_bank(memory, bank_id, request_context)
 
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
+        backend = await memory._get_backend()
+        async with acquire_with_retry(backend) as conn:
             original_source = await _insert_memory(memory, conn, bank_id, "Alice hikes.")
             obs_id = await _insert_observation(memory, conn, bank_id, "Alice is a hiker.", [original_source])
-            original_text = "Alice is a hiker."
+        original_text = "Alice is a hiker."
 
-            observation_model = MemoryFact(
-                id=str(obs_id),
-                text=original_text,
-                fact_type="observation",
-                source_fact_ids=[str(original_source)],
-                tags=[],
-            )
+        observation_model = MemoryFact(
+            id=str(obs_id),
+            text=original_text,
+            fact_type="observation",
+            source_fact_ids=[str(original_source)],
+            tags=[],
+        )
 
-            await _execute_update_action(
-                conn=conn,
+        result = await _execute_update_action(
+            pool=backend,
+            memory_engine=memory,
+            bank_id=bank_id,
+            source_memory_ids=[uuid.uuid4(), uuid.uuid4()],  # all dead
+            observation_id=str(obs_id),
+            new_text="This update must not land.",
+            observations=[observation_model],
+        )
+        assert result is None, "a skipped update returns None so the caller runs no follow-on dedup"
+
+        async with acquire_with_retry(backend) as conn:
+            row = await _get_memory(conn, bank_id, obs_id)
+        assert row.text == original_text, "Observation text must not change"
+        stored_sources = {str(s) for s in row.source_memory_ids}
+        assert stored_sources == {str(original_source)}, "Dead sources must not be appended"
+
+        await memory.delete_bank(bank_id, request_context=request_context)
+
+    @pytest.mark.asyncio
+    async def test_update_observation_skipped_when_source_deleted_after_preflight(
+        self, memory: MemoryEngine, request_context: RequestContext
+    ):
+        # The preflight sees the source live, but it is deleted while the embedder runs
+        # off-connection. The authoritative in-txn FOR SHARE liveness guard (not the preflight) must
+        # then skip the update, so a dead source is never written back into the observation.
+        from hindsight_api.engine.consolidation.consolidator import _execute_update_action
+        from hindsight_api.engine.response_models import MemoryFact
+
+        bank_id = f"test-race-update-inflight-{uuid.uuid4().hex[:8]}"
+        await _ensure_bank(memory, bank_id, request_context)
+
+        backend = await memory._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            source = await _insert_memory(memory, conn, bank_id, "Alice hikes.")
+            obs_id = await _insert_observation(memory, conn, bank_id, "Alice is a hiker.", [source])
+        original_text = "Alice is a hiker."
+
+        observation_model = MemoryFact(
+            id=str(obs_id),
+            text=original_text,
+            fact_type="observation",
+            source_fact_ids=[str(source)],
+            tags=[],
+        )
+
+        deleted = {"done": False}
+
+        async def _embed_spy(_embeddings, _texts):
+            # Delete the (preflight-live) source DURING the off-connection embed, so only the in-txn
+            # FOR SHARE guard can catch it.
+            if not deleted["done"]:
+                deleted["done"] = True
+                async with acquire_with_retry(backend) as c:
+                    await c.execute("DELETE FROM memory_units WHERE id = $1", source)
+            return [[0.1, 0.2, 0.3]]
+
+        with patch(
+            "hindsight_api.engine.retain.embedding_utils.generate_embeddings_batch",
+            new=_embed_spy,
+        ):
+            result = await _execute_update_action(
+                pool=backend,
                 memory_engine=memory,
                 bank_id=bank_id,
-                source_memory_ids=[uuid.uuid4(), uuid.uuid4()],  # all dead
+                source_memory_ids=[source],
                 observation_id=str(obs_id),
                 new_text="This update must not land.",
                 observations=[observation_model],
             )
 
+        assert result is None, "the in-txn FOR SHARE liveness skip returns None (no follow-on dedup)"
+        async with acquire_with_retry(backend) as conn:
             row = await _get_memory(conn, bank_id, obs_id)
-            assert row.text == original_text, "Observation text must not change"
-            stored_sources = {str(s) for s in row.source_memory_ids}
-            assert stored_sources == {str(original_source)}, "Dead sources must not be appended"
+        assert row.text == original_text, "observation text unchanged after the skipped update"
+        stored_sources = {str(s) for s in row.source_memory_ids}
+        assert stored_sources == {str(source)}, "no dead source appended"
 
         await memory.delete_bank(bank_id, request_context=request_context)

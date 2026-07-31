@@ -34,6 +34,11 @@ describe("openclaw.plugin.json", () => {
     expect(manifest.configSchema.properties).toBeDefined();
   });
 
+  it("defaults recalled memories to user context", () => {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+    expect(manifest.configSchema.properties.recallInjectionPosition.default).toBe("user");
+  });
+
   it("declares every PluginConfig field in configSchema and uiHints", () => {
     // Manifest must stay in sync with the runtime type or OpenClaw's strict
     // schema validation (additionalProperties: false) will reject user config

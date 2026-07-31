@@ -189,10 +189,11 @@ function BankSelectorInner() {
   }, []);
 
   const sortedBanks = React.useMemo(() => {
-    // Sort by last document inserted descending, then by created_at
+    // Sort by last write descending, then by created_at. last_write_at covers appends to
+    // an existing document, which leave last_document_at (ingestion time) untouched.
     return [...bankInfos].sort((a, b) => {
-      const aTime = a.last_document_at || a.created_at || "";
-      const bTime = b.last_document_at || b.created_at || "";
+      const aTime = a.last_write_at || a.last_document_at || a.created_at || "";
+      const bTime = b.last_write_at || b.last_document_at || b.created_at || "";
       return bTime.localeCompare(aTime);
     });
   }, [bankInfos]);
@@ -560,6 +561,9 @@ function BankSelectorInner() {
                   {sortedBanks.map((bank) => {
                     const barPct = (bank.fact_count / maxFactCount) * 100;
                     const isSelected = currentBank === bank.bank_id;
+                    // Last write, not last ingestion: appends to an existing document
+                    // bump last_write_at only.
+                    const lastWriteAt = bank.last_write_at || bank.last_document_at;
                     return (
                       <CommandItem
                         key={bank.bank_id}
@@ -619,9 +623,7 @@ function BankSelectorInner() {
                               <>
                                 {formatCompact(bank.fact_count)}
                                 <span className="ml-1.5 text-muted-foreground/40">
-                                  {bank.last_document_at
-                                    ? formatTimeAgo(bank.last_document_at)
-                                    : ""}
+                                  {lastWriteAt ? formatTimeAgo(lastWriteAt) : ""}
                                 </span>
                               </>
                             ) : (

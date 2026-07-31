@@ -609,7 +609,7 @@ func (r ApiListDocumentsRequest) Execute() (*ListDocumentsResponse, *http.Respon
 /*
 ListDocuments List documents
 
-List documents with pagination and optional search. Documents are the source content from which memory units are extracted.
+List documents with pagination and optional search, most recently written first (`updated_at` descending). Documents are the source content from which memory units are extracted.
 
  @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
  @param bankId

@@ -889,7 +889,7 @@ export const updateDirective = <ThrowOnError extends boolean = false>(
 /**
  * List documents
  *
- * List documents with pagination and optional search. Documents are the source content from which memory units are extracted.
+ * List documents with pagination and optional search, most recently written first (`updated_at` descending). Documents are the source content from which memory units are extracted.
  */
 export const listDocuments = <ThrowOnError extends boolean = false>(
   options: Options<ListDocumentsData, ThrowOnError>

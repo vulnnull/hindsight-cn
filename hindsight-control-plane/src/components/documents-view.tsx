@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
 import { client, LLMRequestEntry } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
@@ -90,6 +90,10 @@ const ITEMS_PER_PAGE = 50;
 // client-side store — so the status survives reloads, tabs and devices.
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PENDING_POLL_INTERVAL_MS = 4000;
+// Idle cadence for auto-refreshing the whole table (new/updated docs, counts,
+// "Updating" badges) so it stays live without a manual reload. Gentler than the
+// active poll above — a quiet table shouldn't hammer the API.
+const DOCUMENTS_AUTO_REFRESH_MS = 8000;
 // A file_convert_retain operation flips to "completed" a couple of seconds
 // before the document becomes visible in listDocuments. Keep showing the
 // pending row for recently-completed operations so it stays on screen until
@@ -121,6 +125,35 @@ function formatRelativeTime(dateStr: string): string {
   const months = Math.floor(days / 30);
   if (months < 12) return `${months}mo ago`;
   return `${Math.floor(months / 12)}y ago`;
+}
+
+// Live "Refreshed N seconds ago" label next to the documents count. It owns a
+// 1s ticker so only this label re-renders each second (not the whole table), and
+// uses Intl.RelativeTimeFormat with the active locale — no per-unit translation
+// keys needed. The list's own formatRelativeTime floors anything under a minute
+// to "just now", which is useless for an ~8s auto-refresh, so we format seconds
+// here directly.
+function LastRefreshedLabel({ at }: { at: number }) {
+  const t = useTranslations("documentsView");
+  const locale = useLocale();
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const sec = Math.max(0, Math.round((Date.now() - at) / 1000));
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const rel =
+    sec < 60
+      ? rtf.format(-sec, "second")
+      : sec < 3600
+        ? rtf.format(-Math.round(sec / 60), "minute")
+        : rtf.format(-Math.round(sec / 3600), "hour");
+
+  return (
+    <span className="text-xs text-muted-foreground/70">· {t("lastRefreshed", { time: rel })}</span>
+  );
 }
 
 function formatBytes(bytes: number): string {
@@ -690,12 +723,17 @@ export function DocumentsView() {
   const { features } = useFeatures();
   const [documents, setDocuments] = useState<any[]>([]);
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  // Document IDs targeted by a pending/processing retain op → badged as "updating".
+  const [inFlightDocIds, setInFlightDocIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   // Whether the first document fetch has completed. The mount fetch is debounced
   // (see the load effect), so without this the empty state ("No documents found")
   // flashes for the initial paint + debounce window before `loading` ever flips.
   // Gate the empty state on this so we show the loader until we actually know.
   const [loaded, setLoaded] = useState(false);
+  // Wall-clock time of the last list refresh, shown next to the count so the
+  // auto-refresh is visible ("Refreshed 14:41:32").
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   // The UI exposes the two useful modes; both map to their *_strict variant so
@@ -776,6 +814,7 @@ export function DocumentsView() {
       } finally {
         setLoading(false);
         setLoaded(true);
+        setLastRefreshedAt(Date.now());
       }
     },
     [currentBank, searchQuery, selectedTags, tagsMatch]
@@ -825,6 +864,38 @@ export function DocumentsView() {
       // Keep whatever we had; the Operations tab remains the detailed source of truth.
     }
   }, [currentBank]);
+
+  // Cross-check in-flight retain operations against the visible documents: a
+  // pending/processing op that targets an existing document_id means that
+  // document is being rewritten. Fetched broadly (not just file uploads) so text
+  // re-retains and reprocesses are caught too — the API surfaces the target
+  // document_id for single-document retains (batch/file), which is the case here.
+  const loadUpdatingOps = useCallback(async () => {
+    if (!currentBank) {
+      setInFlightDocIds(new Set());
+      return;
+    }
+    try {
+      const data = await client.listOperations(currentBank, { limit: 100 });
+      const ids = new Set<string>();
+      for (const op of data.operations || []) {
+        if ((op.status === "pending" || op.status === "processing") && op.document_id) {
+          ids.add(op.document_id);
+        }
+      }
+      setInFlightDocIds(ids);
+    } catch {
+      // Keep the previous set; the Operations tab is the detailed source of truth.
+    }
+  }, [currentBank]);
+
+  // Only badge documents that are actually visible in the table.
+  const updatingDocIds = useMemo(() => {
+    if (inFlightDocIds.size === 0) return new Set<string>();
+    const realIds = new Set(documents.map((doc) => doc.id));
+    return new Set([...inFlightDocIds].filter((id) => realIds.has(id)));
+  }, [inFlightDocIds, documents]);
+  const hasUpdatingDocs = updatingDocIds.size > 0;
 
   // Pending rows: in-flight/failed uploads that aren't yet in the real list.
   // A tag filter hides them entirely — their tags only exist on the document
@@ -936,6 +1007,9 @@ export function DocumentsView() {
         success: true,
         message: `Reprocessing started (operation: ${result.operation_id})`,
       });
+      // Surface the "Updating" badge immediately instead of waiting for the next
+      // poll tick; the poll then keeps it live and clears it when the op finishes.
+      loadUpdatingOps();
     } catch (error) {
       setReprocessResult({
         success: false,
@@ -1083,23 +1157,38 @@ export function DocumentsView() {
   useEffect(() => {
     if (currentBank) {
       loadPendingUploads();
+      loadUpdatingOps();
     } else {
       setPendingUploads([]);
+      setInFlightDocIds(new Set());
     }
-  }, [currentBank, loadPendingUploads]);
+  }, [currentBank, loadPendingUploads, loadUpdatingOps]);
 
-  // While any upload is converting, poll the operations endpoint and refresh
-  // the document list so finished uploads flip from "Processing" to a real row.
+  // Auto-refresh the whole table on a timer so new/updated documents, counts,
+  // pending uploads, and "Updating" badges all appear without a manual reload.
+  // Refresh faster while something is actively in flight (uploads converting or a
+  // document being rewritten), and on the gentler idle cadence otherwise.
   useEffect(() => {
-    if (!currentBank || !hasActiveUploads) return;
+    if (!currentBank) return;
 
+    const period =
+      hasActiveUploads || hasUpdatingDocs ? PENDING_POLL_INTERVAL_MS : DOCUMENTS_AUTO_REFRESH_MS;
     const interval = window.setInterval(() => {
+      loadUpdatingOps();
       loadPendingUploads();
       loadDocuments(currentPage);
-    }, PENDING_POLL_INTERVAL_MS);
+    }, period);
 
     return () => window.clearInterval(interval);
-  }, [currentBank, hasActiveUploads, currentPage, loadDocuments, loadPendingUploads]);
+  }, [
+    currentBank,
+    hasActiveUploads,
+    hasUpdatingDocs,
+    currentPage,
+    loadDocuments,
+    loadPendingUploads,
+    loadUpdatingOps,
+  ]);
 
   // Refresh immediately after an upload is submitted elsewhere (bank selector).
   useEffect(() => {
@@ -1107,11 +1196,12 @@ export function DocumentsView() {
 
     const onRefresh = () => {
       loadPendingUploads();
+      loadUpdatingOps();
       loadDocuments(currentPage);
     };
     window.addEventListener(DOCUMENTS_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(DOCUMENTS_REFRESH_EVENT, onRefresh);
-  }, [currentBank, currentPage, loadDocuments, loadPendingUploads]);
+  }, [currentBank, currentPage, loadDocuments, loadPendingUploads, loadUpdatingOps]);
 
   const triggerDownload = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -1381,10 +1471,13 @@ export function DocumentsView() {
       {/* Hide the count during the very first load so it doesn't read
           "0 total documents" above the loading spinner. */}
       {(loaded || documents.length > 0 || pendingRows.length > 0) && (
-        <div className="mb-4 text-sm text-muted-foreground">
-          {hasActiveFilters
-            ? t("matchingDocuments", { total: displayTotal })
-            : t("totalDocuments", { total: displayTotal })}
+        <div className="mb-4 flex items-baseline gap-2 text-sm text-muted-foreground">
+          <span>
+            {hasActiveFilters
+              ? t("matchingDocuments", { total: displayTotal })
+              : t("totalDocuments", { total: displayTotal })}
+          </span>
+          {lastRefreshedAt !== null && <LastRefreshedLabel at={lastRefreshedAt} />}
         </div>
       )}
 
@@ -1509,6 +1602,15 @@ export function DocumentsView() {
                                   size={14}
                                   titlePrefix={tCommon("harness")}
                                 />
+                                {updatingDocIds.has(doc.id) && (
+                                  <span
+                                    className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                                    title={t("documentUpdating")}
+                                  >
+                                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500/70 animate-pulse" />
+                                    {t("documentUpdating")}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </TableCell>

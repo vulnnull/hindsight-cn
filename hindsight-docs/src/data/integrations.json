@@ -3,7 +3,7 @@
     {
       "id": "litellm",
       "name": "LiteLLM",
-      "description": "Add long-term memory to any LLM via LiteLLM proxy callbacks. Zero code changes — configure once and every model gets memory.",
+      "description": "Add long-term memory to any LLM via LiteLLM proxy callbacks. Zero code changes \u2014 configure once and every model gets memory.",
       "type": "official",
       "by": "hindsight",
       "category": "framework",
@@ -23,7 +23,7 @@
     {
       "id": "composio",
       "name": "Composio",
-      "description": "Hindsight memory as Composio custom tools. Retain, recall, and reflect drop into any Composio agent — memory is isolated per session user automatically.",
+      "description": "Hindsight memory as Composio custom tools. Retain, recall, and reflect drop into any Composio agent \u2014 memory is isolated per session user automatically.",
       "type": "official",
       "by": "hindsight",
       "category": "framework",
@@ -93,7 +93,7 @@
     {
       "id": "hermes-desktop",
       "name": "Hermes Desktop",
-      "description": "Configure Hindsight as your memory provider directly in the Hermes desktop app — pick a mode, paste an API key, no config files.",
+      "description": "Configure Hindsight as your memory provider directly in the Hermes desktop app \u2014 pick a mode, paste an API key, no config files.",
       "type": "native",
       "by": "hermes",
       "category": "tool",
@@ -313,7 +313,7 @@
     {
       "id": "nemoclaw",
       "name": "NemoClaw",
-      "description": "Persistent memory for NemoClaw sandboxed agents. One-command setup — no code changes required.",
+      "description": "Persistent memory for NemoClaw sandboxed agents. One-command setup \u2014 no code changes required.",
       "type": "official",
       "by": "hindsight",
       "category": "framework",
@@ -323,7 +323,7 @@
     {
       "id": "paperclip",
       "name": "Paperclip",
-      "description": "Persistent memory for Paperclip AI agents. Install the plugin once and every agent gets automatic recall before runs and retain after — no code changes.",
+      "description": "Persistent memory for Paperclip AI agents. Install the plugin once and every agent gets automatic recall before runs and retain after \u2014 no code changes.",
       "type": "official",
       "by": "hindsight",
       "category": "framework",
@@ -333,7 +333,7 @@
     {
       "id": "right-agent",
       "name": "Right Agent",
-      "description": "Persistent memory for Right Agent — closed-box AI agents that run Claude Code inside OpenShell sandboxes. Hindsight is the native memory provider, selected during initialization.",
+      "description": "Persistent memory for Right Agent \u2014 closed-box AI agents that run Claude Code inside OpenShell sandboxes. Hindsight is the native memory provider, selected during initialization.",
       "type": "official",
       "by": "hindsight",
       "category": "framework",
@@ -503,7 +503,7 @@
     {
       "id": "omo",
       "name": "OMO (oh-my-openagent)",
-      "description": "Automatic long-term memory for OMO agent harness via Hindsight hooks. Recalls context before each prompt and retains session learnings — zero config for cloud users.",
+      "description": "Automatic long-term memory for OMO agent harness via Hindsight hooks. Recalls context before each prompt and retains session learnings \u2014 zero config for cloud users.",
       "type": "official",
       "by": "hindsight",
       "category": "tool",
@@ -523,7 +523,7 @@
     {
       "id": "obsidian",
       "name": "Obsidian",
-      "description": "Sync your Obsidian vault into Hindsight and chat with an agent grounded on your notes. Your vault stays the source of truth — every answer cites the note it came from.",
+      "description": "Sync your Obsidian vault into Hindsight and chat with an agent grounded on your notes. Your vault stays the source of truth \u2014 every answer cites the note it came from.",
       "type": "official",
       "by": "hindsight",
       "category": "tool",
@@ -533,7 +533,7 @@
     {
       "id": "hindclaw",
       "name": "HindClaw",
-      "description": "Production memory infrastructure for AI agents — server-side access control via Hindsight extensions, Terraform provider for users/groups/banks/permissions, and an OpenClaw plugin with auto-managed embed.",
+      "description": "Production memory infrastructure for AI agents \u2014 server-side access control via Hindsight extensions, Terraform provider for users/groups/banks/permissions, and an OpenClaw plugin with auto-managed embed.",
       "type": "community",
       "by": "mrkhachaturov",
       "category": "framework",
@@ -553,7 +553,7 @@
     {
       "id": "gemini-spark",
       "name": "Gemini Spark",
-      "description": "Persistent memory for Google's Gemini Spark assistant via MCP. Spark calls Hindsight's recall and retain tools through its built-in MCP client — works with Hindsight Cloud or self-hosted via an OAuth proxy.",
+      "description": "Persistent memory for Google's Gemini Spark assistant via MCP. Spark calls Hindsight's recall and retain tools through its built-in MCP client \u2014 works with Hindsight Cloud or self-hosted via an OAuth proxy.",
       "type": "official",
       "by": "hindsight",
       "category": "tool",
@@ -573,7 +573,7 @@
     {
       "id": "agrasandhany",
       "name": "agrasandhany",
-      "description": "Turns your local notes into long-term memory any agent can recall over MCP — with automatic sync, folder-scoped recall, and living summaries.",
+      "description": "Turns your local notes into long-term memory any agent can recall over MCP \u2014 with automatic sync, folder-scoped recall, and living summaries.",
       "type": "community",
       "by": "yugandhar-maram",
       "category": "tool",
@@ -611,24 +611,34 @@
       "icon": "/img/icons/omnigent.png"
     },
     {
-     "id": "epimetheus",
-     "name": "Epimetheus",
-     "description": "Memory for pi coding agent. Retain, recall, reflect, past-session ingestion, and much more, with a focus on flexibility and memory quality/best practices.",
-     "type": "community",
-     "by": "noctuid",
-     "category": "tool",
-     "link": "https://github.com/noctuid/epimetheus",
-     "icon": "/img/icons/epimetheus.png"
-   },
-   {
-     "id": "tealtiger",
-     "name": "TealTiger",
-     "description": "Governance-aware agent memory — importance-weighted storage of AI agent governance decisions. Critical denials persist for compliance; routine approvals decay naturally.",
-     "type": "community",
-     "by": "agentguard-ai",
-     "category": "framework",
-     "link": "https://github.com/agentguard-ai/tealtiger/tree/main/packages/tealtiger-hindsight",
-     "icon": "/img/icons/tealtiger.png"
-   }
+      "id": "epimetheus",
+      "name": "Epimetheus",
+      "description": "Memory for pi coding agent. Retain, recall, reflect, past-session ingestion, and much more, with a focus on flexibility and memory quality/best practices.",
+      "type": "community",
+      "by": "noctuid",
+      "category": "tool",
+      "link": "https://github.com/noctuid/epimetheus",
+      "icon": "/img/icons/epimetheus.png"
+    },
+    {
+      "id": "coding-agents",
+      "name": "Coding Agents",
+      "description": "One memory plugin for coding agents: per-repo banks from git history and past conversations, injected into opencode, Claude Code, Codex CLI, and Cursor CLI.",
+      "type": "official",
+      "by": "hindsight",
+      "category": "tool",
+      "link": "/sdks/integrations/coding-agents",
+      "icon": "/img/icons/github.png"
+    },
+    {
+      "id": "tealtiger",
+      "name": "TealTiger",
+      "description": "Governance-aware agent memory \u2014 importance-weighted storage of AI agent governance decisions. Critical denials persist for compliance; routine approvals decay naturally.",
+      "type": "community",
+      "by": "agentguard-ai",
+      "category": "framework",
+      "link": "https://github.com/agentguard-ai/tealtiger/tree/main/packages/tealtiger-hindsight",
+      "icon": "/img/icons/tealtiger.png"
+    }
   ]
 }

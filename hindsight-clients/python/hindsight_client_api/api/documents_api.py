@@ -1262,7 +1262,7 @@ class DocumentsApi:
     ) -> ListDocumentsResponse:
         """List documents
 
-        List documents with pagination and optional search. Documents are the source content from which memory units are extracted.
+        List documents with pagination and optional search, most recently written first (`updated_at` descending). Documents are the source content from which memory units are extracted.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1354,7 +1354,7 @@ class DocumentsApi:
     ) -> ApiResponse[ListDocumentsResponse]:
         """List documents
 
-        List documents with pagination and optional search. Documents are the source content from which memory units are extracted.
+        List documents with pagination and optional search, most recently written first (`updated_at` descending). Documents are the source content from which memory units are extracted.
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1446,7 +1446,7 @@ class DocumentsApi:
     ) -> RESTResponseType:
         """List documents
 
-        List documents with pagination and optional search. Documents are the source content from which memory units are extracted.
+        List documents with pagination and optional search, most recently written first (`updated_at` descending). Documents are the source content from which memory units are extracted.
 
         :param bank_id: (required)
         :type bank_id: str

@@ -20,9 +20,9 @@ This guide shows what each injection mode does, how to switch it safely, which r
 
 > **Quick answer**
 >
-> 1. Use `prepend` if you want recalled memories injected before the system prompt, which is the default.
-> 2. Use `append` if you want your large static system prompt to stay stable for caching and put memories after it.
-> 3. Use `user` only when you intentionally want recalled memories to behave more like additional user context.
+> 1. The default is `user`, which injects memories before the user message and preserves the system prompt cache.
+> 2. Use `append` if memories need system-level context while keeping a large static system-prompt prefix cacheable.
+> 3. Use `prepend` only when memories must appear before the system prompt and the cache tradeoff is acceptable.
 > 4. Restart the gateway after changing the setting.
 > 5. Test with a real memory-heavy prompt and watch the logs, not just the config file.
 
@@ -44,7 +44,7 @@ path = pathlib.Path.home() / '.openclaw' / 'openclaw.json'
 config = json.loads(path.read_text())
 plugin = config['plugins']['entries']['hindsight-openclaw']['config']
 print('autoRecall:', plugin.get('autoRecall', True))
-print('recallInjectionPosition:', plugin.get('recallInjectionPosition', 'prepend'))
+print('recallInjectionPosition:', plugin.get('recallInjectionPosition', 'user'))
 print('recallBudget:', plugin.get('recallBudget', 'mid'))
 print('recallMaxTokens:', plugin.get('recallMaxTokens', 1024))
 print('recallContextTurns:', plugin.get('recallContextTurns', 1))
@@ -63,9 +63,9 @@ OpenClaw supports three values for `recallInjectionPosition`.
 
 | Value | What it does | Best for |
 |---|---|---|
-| `prepend` | injects memories before the system prompt | default behavior, strongest memory framing |
+| `prepend` | injects memories before the system prompt | strongest memory framing when caching is not a concern |
 | `append` | injects memories after the system prompt | large static prompts, prompt caching friendliness |
-| `user` | injects memories as a user message | specialized prompt flows where memory should sit closer to the user turn |
+| `user` | injects memories before the user message | default behavior, prompt caching, user-side context |
 
 A simple mental model:
 
@@ -75,9 +75,9 @@ A simple mental model:
 
 This is why the setting matters. You are not changing which memories are recalled. You are changing where those memories land in the model's input.
 
-### 2. Keep `prepend` when you want the strongest default behavior
+### 2. Use `prepend` when you want the strongest memory framing
 
-`prepend` is the default for a reason. It is the simplest mental model and the easiest place to start.
+`prepend` puts changing recall content at the beginning of the system prompt. This gives memories strong framing, but it also invalidates prefix-based prompt caches on most turns.
 
 Set it explicitly like this:
 
@@ -95,11 +95,10 @@ PY
 
 Use `prepend` when:
 
-- you want the most straightforward recall behavior
-- you are debugging and want the least surprising setup
+- you need memories to appear before all other system context
 - you are not trying to optimize prompt caching on a large static system prompt
 
-If you are unsure, stay here first.
+If you are unsure, keep the `user` default instead.
 
 ### 3. Switch to `append` when prompt stability matters
 
@@ -127,9 +126,9 @@ Use `append` when:
 
 This is especially attractive for carefully designed production prompts where the instructions are long, expensive, and intentionally stable.
 
-### 4. Use `user` only with intention
+### 4. Keep `user` for the cache-friendly default
 
-`user` mode is the most specialized option. It can be useful, but it is not the default for a reason.
+`user` mode keeps recalled memories outside the system prompt. This preserves the stable system-prompt cache while treating memories as contextual input rather than system-level instructions.
 
 Set it like this:
 
@@ -147,11 +146,11 @@ PY
 
 Use `user` when:
 
-- you explicitly want memories to read as near-user context
-- you are experimenting with a prompt shape where memory should sit closer to the incoming message
-- you understand that this can change how the model interprets memory relative to instructions
+- you want to preserve the system prompt cache
+- you want system instructions to retain priority over recalled content
+- near-user context is appropriate for your memory data
 
-In other words, this is an advanced tool. It is not the first thing I would reach for in a new setup.
+This is the default for new and existing configurations that do not set `recallInjectionPosition` explicitly.
 
 ### 5. Tune the settings that interact with injection position
 
@@ -284,7 +283,7 @@ Try `prepend`, raise `recallBudget`, or increase `recallMaxTokens`. The [Retain 
 
 ### Which recall injection position should most people use?
 
-Start with `prepend`. It is the default and the easiest to reason about.
+Start with `user`. It is the cache-friendly default and keeps recalled content below system instructions.
 
 ### When should I switch to `append`?
 
@@ -292,7 +291,7 @@ When you have a large, stable system prompt and want recalled memories added aft
 
 ### When should I use `user`?
 
-Only when you intentionally want recalled memories to behave more like user-side context. It is an advanced option.
+Use it when recalled memories should behave like user-side context and preserving the system prompt cache matters.
 
 ### Does this change what Hindsight recalls?
 

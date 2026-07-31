@@ -923,6 +923,44 @@ def _overlay_bank_config_disposition_mission(
     return ResolvedDispositionMission(disposition=resolved_disposition, mission=resolved_mission)
 
 
+@dataclass
+class _MemoryEditPlan:
+    """Inputs for the edit path of ``update_memory_unit``, carried from the read/resolve phase to
+    the short write transaction so the embedding is computed with no pooled connection held."""
+
+    new_text: str
+    new_context: str | None
+    new_fact: str
+    new_occ_start: datetime | None
+    new_occ_end: datetime | None
+    new_event_date: datetime | None
+    mentioned_at: datetime | None
+    # Entity resolution carried from Phase 1 when ``entities`` is being changed (None otherwise).
+    # Its ``resolved_entities`` are reasserted on the Phase-2 connection before linking so a
+    # concurrent graph-maintenance prune blocks until the edit commits (the retain #2662 race).
+    entity_resolution: Any | None
+    resolved_for_unit: list | None
+    edit_entity_ids: list[str] | None
+    entity_date: datetime | None
+    # Canonical entity names the embedding was built from. Re-read under the Phase-2 write lock; a
+    # mismatch (a concurrent entity-only edit landed between the phases) triggers a bounded in-txn
+    # re-embed so the stored vector stays consistent with the committed entity set.
+    names: list[str]
+    embedding: str | None = None
+
+
+@dataclass
+class _MemoryRevertPlan:
+    """Inputs for the revert path of ``update_memory_unit`` (see :class:`_MemoryEditPlan`)."""
+
+    text: str
+    occurred_start: datetime | None
+    occurred_end: datetime | None
+    mentioned_at: datetime | None
+    names: list[str]
+    embedding: str | None = None
+
+
 class MemoryEngine(MemoryEngineInterface):
     """
     Advanced memory system using temporal and semantic linking with PostgreSQL.
@@ -7374,211 +7412,348 @@ class MemoryEngine(MemoryEngineInterface):
 
         need_consolidation = False
         need_graph = False
-        found = False
+
+        from .memories import get_memories
+
+        store = get_memories()
+
+        # -- Phase 1: read current state, resolve entities, and compute embeddings with NO write
+        # transaction held. A slow embedder must never pin a pooled connection across the decision,
+        # so all embed work happens here, between two short-lived connections. Entity resolution
+        # (idempotent find-or-create) also runs here on a short autocommit connection; the canonical
+        # names it yields feed the embedding. The authoritative writes happen in the Phase-2
+        # transaction, which re-reads the row and applies the precomputed embedding + resolved set.
+        edit_plan: _MemoryEditPlan | None = None
+        revert_plan: _MemoryRevertPlan | None = None
+        do_invalidate = False
+        do_reason_update = False
+        do_revert = False
+        # resolve_entities_only autocommits new entities on the Phase-1 connection; if the edit then
+        # fails to apply (row concurrently invalidated, or Phase 2 raises) those entities are
+        # orphans, reclaimed by forcing a graph-maintenance sweep in the finally block.
+        entities_resolved = False
 
         async with acquire_with_retry(backend) as conn:
-            async with conn.transaction():
-                from .memories import get_memories
-
-                store = get_memories()
-                # The store decides existence and drives the state changes, so
-                # invalidate/revert work whichever store owns the memory. `live`
-                # is the live record (used for the edit path's fields too);
-                # `archived` is its counterpart in the curation archive.
-                live_batch = await store.get_memories(
-                    conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(memory_uuid)]
+            # The store decides existence and drives the state changes, so invalidate/revert work
+            # whichever store owns the memory. `live` is the live record (used for the edit path's
+            # fields too); `archived` is its counterpart in the curation archive.
+            live_batch = await store.get_memories(
+                conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(memory_uuid)]
+            )
+            live = live_batch[0] if live_batch else None
+            archived = (
+                None
+                if live
+                else await store.get_archived_memory(
+                    conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid)
                 )
-                live = live_batch[0] if live_batch else None
-                archived = (
-                    None
-                    if live
-                    else await store.get_archived_memory(
-                        conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid)
-                    )
+            )
+            record = live or archived
+            if record is None:
+                return None
+            current_fact_type = record.fact_type
+            if current_fact_type not in ("experience", "world"):
+                raise ValueError(
+                    f"Memory '{memory_id}' is a {current_fact_type}; only world/experience facts can be "
+                    "curated. Observations are derived and regenerate from their sources."
                 )
-                record = live or archived
-                if record is None:
-                    return None
-                found = True
-                # One cross-store write-group for this curation edit/invalidate/revert: the
-                # store's writes below (apply_edit + re-embed, or the archive move) are tagged so
-                # they commit together with this Postgres transaction; decided after it commits.
-                _curation_txn = await store.begin_txn(conn=conn, fq_table=fq_table, bank_id=bank_id, mutating=True)
-                current_fact_type = record.fact_type
-                if current_fact_type not in ("experience", "world"):
-                    raise ValueError(
-                        f"Memory '{memory_id}' is a {current_fact_type}; only world/experience facts can be "
-                        "curated. Observations are derived and regenerate from their sources."
-                    )
 
-                # --- Edit fields (live rows only): text / context / dates / fact_type / entities ---
-                doing_edit = any(
-                    v is not None for v in (text, context, occurred_start, occurred_end, new_fact_type)
-                ) or (new_entities is not None)
-                if doing_edit:
-                    if not live:
-                        raise ValueError("Cannot edit an invalidated memory; revert it to 'valid' first.")
-                    new_text = text if text is not None else live.text
-                    new_context = (context or None) if context is not None else live.context
-                    new_fact = new_fact_type if new_fact_type is not None else live.fact_type
-                    new_occ_start = (
-                        _parse_edit_date(occurred_start) if occurred_start is not None else live.occurred_start
-                    )
-                    new_occ_end = _parse_edit_date(occurred_end) if occurred_end is not None else live.occurred_end
-                    # event_date (NOT NULL, legacy single date + used by temporal links)
-                    # tracks the occurred start when it's set.
-                    new_event_date = new_occ_start or live.event_date
+            # --- Edit fields (live rows only): text / context / dates / fact_type / entities ---
+            doing_edit = any(v is not None for v in (text, context, occurred_start, occurred_end, new_fact_type)) or (
+                new_entities is not None
+            )
+            if doing_edit:
+                if not live:
+                    raise ValueError("Cannot edit an invalidated memory; revert it to 'valid' first.")
+                new_text = text if text is not None else live.text
+                new_context = (context or None) if context is not None else live.context
+                new_fact = new_fact_type if new_fact_type is not None else live.fact_type
+                new_occ_start = _parse_edit_date(occurred_start) if occurred_start is not None else live.occurred_start
+                new_occ_end = _parse_edit_date(occurred_end) if occurred_end is not None else live.occurred_end
+                # event_date (NOT NULL, legacy single date + used by temporal links) tracks the
+                # occurred start when it's set.
+                new_event_date = new_occ_start or live.event_date
 
-                    # Rebuild the unit's entity set FIRST, so the re-embed below picks
-                    # up the corrected canonical names. Reuses retain's resolver
-                    # (find-or-create + cooccurrence) rather than touching entities
-                    # directly. Orphaned entities + stale cooccurrence are swept by
-                    # the graph-maintenance run this edit submits.
-                    edit_entity_ids = None
-                    if new_entities is not None:
-                        entity_date = new_occ_start or live.mentioned_at
-                        entity_resolution = await resolve_entities_only(
-                            self.entity_resolver,
-                            conn,
+                entity_resolution = None
+                resolved_for_unit = None
+                edit_entity_ids = None
+                entity_date = None
+                if new_entities is not None:
+                    entity_date = new_occ_start or live.mentioned_at
+                    # resolve_entities_only find-or-creates the corrected entities (idempotent) and
+                    # autocommits them on this short connection; the Phase-2 relink writes exactly
+                    # this resolved set, keeping the stored embedding consistent with the links.
+                    entities_resolved = True
+                    entity_resolution = await resolve_entities_only(
+                        self.entity_resolver,
+                        conn,
+                        bank_id,
+                        [str(memory_uuid)],
+                        [new_text],
+                        new_context or "",
+                        [entity_date],
+                        [[{"text": name, "type": "CONCEPT"} for name in new_entities]],
+                        entity_labels=entity_labels,
+                    )
+                    resolved_for_unit = entity_resolution.unit_to_entity_ids.get(str(memory_uuid), [])
+                    edit_entity_ids = [str(eid) for eid in resolved_for_unit]
+                    # Canonical names of the newly-resolved set (the entity registry is always in
+                    # SQL, whichever store owns the memory rows), used to build the embedding.
+                    name_rows = (
+                        await conn.fetch(
+                            f"SELECT canonical_name FROM {fq_table('entities')} "
+                            f"WHERE id = ANY($1::uuid[]) AND bank_id = $2 ORDER BY id",
+                            resolved_for_unit,
                             bank_id,
-                            [str(memory_uuid)],
-                            [new_text],
-                            new_context or "",
-                            [entity_date],
-                            [[{"text": name, "type": "CONCEPT"} for name in new_entities]],
-                            entity_labels=entity_labels,
                         )
-                        # Clear the old postings before re-linking — a no-op for a
-                        # store that carries entity ids on the memory.
-                        await store.clear_unit_entities(
-                            conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid)
-                        )
-                        resolved_for_unit = entity_resolution.unit_to_entity_ids.get(str(memory_uuid), [])
-                        edit_entity_ids = [str(eid) for eid in resolved_for_unit]
-                        if resolved_for_unit:
-                            # Same prune race as retain (#2662): a found (not newly
-                            # created) parent can be deleted by graph maintenance
-                            # between resolution and this link. Reassert on this
-                            # connection first so the pruner blocks until commit.
-                            await self.entity_resolver.reassert_entities_batch(
-                                bank_id, entity_resolution.resolved_entities, conn=conn
-                            )
-                            await self.entity_resolver.link_units_to_entities_batch(
-                                [(str(memory_uuid), eid, entity_date) for eid in resolved_for_unit],
-                                conn=conn,
-                                bank_id=bank_id,
-                            )
-
-                    # Capture relink victims before this memory's links change, then
-                    # apply the field edit + new entity set through the store: it
-                    # resets consolidation, stamps the edit, and drops the derived
-                    # links. The embedding is written separately, after the re-embed.
-                    # The edit leaves the unit live but drops its derived links, so it needs its own
-                    # outgoing adjacency rebuilt too — one combined insert with its victims (#2864).
-                    await enqueue_relink_victims(conn, bank_id, [memory_id], include_affected_units=True)
-                    await store.apply_edit(
-                        conn=conn,
-                        fq_table=fq_table,
-                        bank_id=bank_id,
-                        unit_id=str(memory_uuid),
-                        text=new_text,
-                        context=new_context,
-                        fact_type=new_fact,
-                        occurred_start=new_occ_start,
-                        occurred_end=new_occ_end,
-                        event_date=new_event_date,
-                        mentioned_at=live.mentioned_at,
-                        entity_ids=edit_entity_ids,
-                        txn=_curation_txn,
+                        if resolved_for_unit
+                        else []
                     )
-
-                    # Re-embed from the now-current fields + entity names (through the
-                    # store, so a memory carrying its entities inline resolves too).
+                    names = [r["canonical_name"] for r in name_rows]
+                else:
+                    # Entities untouched: the embedding uses the unit's current linked names.
                     emap = await store.entity_map_for_units(
                         conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(memory_uuid)]
                     )
                     names = [e["canonical_name"] for e in emap.get(str(memory_uuid), [])]
-                    new_emb = await self._reembed_memory_text(
-                        text=new_text,
-                        occurred_start=new_occ_start,
-                        occurred_end=new_occ_end,
-                        mentioned_at=live.mentioned_at,
-                        entities=names,
+                edit_plan = _MemoryEditPlan(
+                    new_text=new_text,
+                    new_context=new_context,
+                    new_fact=new_fact,
+                    new_occ_start=new_occ_start,
+                    new_occ_end=new_occ_end,
+                    new_event_date=new_event_date,
+                    mentioned_at=live.mentioned_at,
+                    entity_resolution=entity_resolution,
+                    resolved_for_unit=resolved_for_unit,
+                    edit_entity_ids=edit_entity_ids,
+                    entity_date=entity_date,
+                    names=names,
+                )
+
+            # --- Classify the state change (applied in Phase 2). Edit + invalidate can co-occur
+            # (edit then archive); edit + revert cannot (revert needs an archived row). ---
+            if state == "invalidated" and live:
+                do_invalidate = True
+            elif state == "invalidated" and archived and reason is not None:
+                do_reason_update = True
+            elif state == "valid" and archived:
+                do_revert = True
+                # Read the archive snapshot the re-embed needs: its text/dates ARE the reverted
+                # values, and its entity_ids snapshot yields the (surviving) entity names.
+                rev_entity_ids = list(record.entity_ids or [])
+                rev_name_rows = (
+                    await conn.fetch(
+                        f"SELECT canonical_name FROM {fq_table('entities')} "
+                        f"WHERE id = ANY($1::uuid[]) AND bank_id = $2 ORDER BY id",
+                        rev_entity_ids,
+                        bank_id,
                     )
-                    if new_emb is not None:
-                        await store.set_memory_embedding(
+                    if rev_entity_ids
+                    else []
+                )
+                revert_plan = _MemoryRevertPlan(
+                    text=record.text,
+                    occurred_start=record.occurred_start,
+                    occurred_end=record.occurred_end,
+                    mentioned_at=record.mentioned_at,
+                    names=[r["canonical_name"] for r in rev_name_rows],
+                )
+
+        # -- Embed OFF any connection --
+        if edit_plan is not None:
+            edit_plan.embedding = await self._reembed_memory_text(
+                text=edit_plan.new_text,
+                occurred_start=edit_plan.new_occ_start,
+                occurred_end=edit_plan.new_occ_end,
+                mentioned_at=edit_plan.mentioned_at,
+                entities=edit_plan.names,
+            )
+        if revert_plan is not None:
+            revert_plan.embedding = await self._reembed_memory_text(
+                text=revert_plan.text,
+                occurred_start=revert_plan.occurred_start,
+                occurred_end=revert_plan.occurred_end,
+                mentioned_at=revert_plan.mentioned_at,
+                entities=revert_plan.names,
+            )
+
+        # -- Phase 2: short write transaction -- all visible mutations atomic --
+        _curation_txn = None
+        phase2_committed = False
+        edit_applied = False
+        try:
+            async with acquire_with_retry(backend) as conn:
+                async with conn.transaction():
+                    # Re-read under the write txn: moving the embed out widened the read→write
+                    # window, so re-validate existence and skip cleanly if the row was concurrently
+                    # moved or deleted between the phases.
+                    live_batch2 = await store.get_memories(
+                        conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(memory_uuid)]
+                    )
+                    live2 = live_batch2[0] if live_batch2 else None
+                    archived2 = (
+                        None
+                        if live2
+                        else await store.get_archived_memory(
+                            conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid)
+                        )
+                    )
+                    if live2 is None and archived2 is None:
+                        return None
+
+                    # One cross-store write-group for this curation edit/invalidate/revert: the
+                    # store's writes below are tagged so they commit together with this Postgres
+                    # transaction; decided (published) after it commits.
+                    _curation_txn = await store.begin_txn(conn=conn, fq_table=fq_table, bank_id=bank_id, mutating=True)
+
+                    # --- Apply edit (live rows only) ---
+                    if edit_plan is not None and live2:
+                        if edit_plan.resolved_for_unit is not None:
+                            # Entities are being changed: rebuild unit_entities to the resolved set.
+                            await store.clear_unit_entities(
+                                conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid)
+                            )
+                            if edit_plan.resolved_for_unit:
+                                # Reassert on this connection first so a concurrent graph-maintenance
+                                # prune (retain #2662 race) blocks until commit, then link exactly
+                                # the resolved set the embedding named.
+                                await self.entity_resolver.reassert_entities_batch(
+                                    bank_id, edit_plan.entity_resolution.resolved_entities, conn=conn
+                                )
+                                await self.entity_resolver.link_units_to_entities_batch(
+                                    [
+                                        (str(memory_uuid), eid, edit_plan.entity_date)
+                                        for eid in edit_plan.resolved_for_unit
+                                    ],
+                                    conn=conn,
+                                    bank_id=bank_id,
+                                )
+                            edit_embedding = edit_plan.embedding
+                        else:
+                            # Entities NOT changing: the precomputed embedding used the Phase-1
+                            # names. Re-read them under the write lock — a concurrent entity-only
+                            # edit between the phases could have changed the set, leaving the
+                            # embedding naming stale entities. Only on that (rare) mismatch do we
+                            # re-embed in-txn, keeping the stored vector consistent with the links.
+                            emap2 = await store.entity_map_for_units(
+                                conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(memory_uuid)]
+                            )
+                            locked_names = [e["canonical_name"] for e in emap2.get(str(memory_uuid), [])]
+                            if locked_names != edit_plan.names:
+                                edit_embedding = await self._reembed_memory_text(
+                                    text=edit_plan.new_text,
+                                    occurred_start=edit_plan.new_occ_start,
+                                    occurred_end=edit_plan.new_occ_end,
+                                    mentioned_at=edit_plan.mentioned_at,
+                                    entities=locked_names,
+                                )
+                            else:
+                                edit_embedding = edit_plan.embedding
+                        # Capture relink victims before this memory's links change, then apply the
+                        # field edit through the store: it resets consolidation, stamps the edit, and
+                        # drops the derived links (rebuilt with victims — the edit leaves the unit
+                        # live, so its own outgoing adjacency is rebuilt too, #2864).
+                        await enqueue_relink_victims(conn, bank_id, [memory_id], include_affected_units=True)
+                        await store.apply_edit(
                             conn=conn,
                             fq_table=fq_table,
                             bank_id=bank_id,
                             unit_id=str(memory_uuid),
-                            embedding=new_emb,
+                            text=edit_plan.new_text,
+                            context=edit_plan.new_context,
+                            fact_type=edit_plan.new_fact,
+                            occurred_start=edit_plan.new_occ_start,
+                            occurred_end=edit_plan.new_occ_end,
+                            event_date=edit_plan.new_event_date,
+                            mentioned_at=edit_plan.mentioned_at,
+                            entity_ids=edit_plan.edit_entity_ids,
                             txn=_curation_txn,
                         )
-                    await self._delete_stale_observations_for_memories(conn, bank_id, [memory_id])
-                    need_consolidation = True
-                    need_graph = True
-
-                # --- Invalidate: move live → archive ---
-                if state == "invalidated" and live:
-                    # Capture relink victims before the row (and its links) go.
-                    await enqueue_relink_victims(conn, bank_id, [memory_id])
-                    await store.invalidate_memory(
-                        conn=conn,
-                        fq_table=fq_table,
-                        bank_id=bank_id,
-                        unit_id=str(memory_uuid),
-                        reason=reason,
-                        txn=_curation_txn,
-                    )
-                    # Sweep after the move, so a racing observation insert is caught too.
-                    await self._delete_stale_observations_for_memories(conn, bank_id, [memory_id])
-                    need_consolidation = True
-                    need_graph = True
-                elif state == "invalidated" and archived and reason is not None:
-                    # Already archived — just update the recorded reason.
-                    await store.set_invalidation_reason(
-                        conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid), reason=reason
-                    )
-
-                # --- Revert: move archive → live ---
-                elif state == "valid" and archived:
-                    restored = await store.restore_memory(
-                        conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid), txn=_curation_txn
-                    )
-                    if restored is not None:
-                        # Recompute the embedding — the archive need not keep one — from the
-                        # restored fields and current entity names, with the now-current model
-                        # (the same re-embed an edit does). Names come through the store, so a
-                        # memory whose entities ride on it rather than on a join table resolves too.
-                        emap = await store.entity_map_for_units(
-                            conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(memory_uuid)]
-                        )
-                        names = [e["canonical_name"] for e in emap.get(str(memory_uuid), [])]
-                        new_emb = await self._reembed_memory_text(
-                            text=restored.text,
-                            occurred_start=restored.occurred_start,
-                            occurred_end=restored.occurred_end,
-                            mentioned_at=restored.mentioned_at,
-                            entities=names,
-                        )
-                        if new_emb is not None:
+                        if edit_embedding is not None:
                             await store.set_memory_embedding(
                                 conn=conn,
                                 fq_table=fq_table,
                                 bank_id=bank_id,
                                 unit_id=str(memory_uuid),
-                                embedding=new_emb,
+                                embedding=edit_embedding,
                                 txn=_curation_txn,
                             )
-                    need_consolidation = True
-                    need_graph = True
+                        await self._delete_stale_observations_for_memories(conn, bank_id, [memory_id])
+                        need_consolidation = True
+                        need_graph = True
+                        edit_applied = True
 
-        if not found:
-            return None
+                    # --- Invalidate: move live → archive ---
+                    if do_invalidate and live2:
+                        # Capture relink victims before the row (and its links) go.
+                        await enqueue_relink_victims(conn, bank_id, [memory_id])
+                        await store.invalidate_memory(
+                            conn=conn,
+                            fq_table=fq_table,
+                            bank_id=bank_id,
+                            unit_id=str(memory_uuid),
+                            reason=reason,
+                            txn=_curation_txn,
+                        )
+                        # Sweep after the move, so a racing observation insert is caught too.
+                        await self._delete_stale_observations_for_memories(conn, bank_id, [memory_id])
+                        need_consolidation = True
+                        need_graph = True
+                    elif do_reason_update and archived2 and reason is not None:
+                        # Already archived — just update the recorded reason.
+                        await store.set_invalidation_reason(
+                            conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid), reason=reason
+                        )
 
-        # Postgres committed the curation change: publish the store's write-group. On a crash
-        # before here the writes stay invisible and the recovery sweep resolves them (spec §5).
-        await store.decide_txn(_curation_txn, commit=True)
+                    # --- Revert: move archive → live ---
+                    elif do_revert and archived2 and revert_plan is not None:
+                        restored = await store.restore_memory(
+                            conn=conn, fq_table=fq_table, bank_id=bank_id, unit_id=str(memory_uuid), txn=_curation_txn
+                        )
+                        if restored is not None:
+                            # The Phase-1 embedding used the archive snapshot's entity names. If the
+                            # restored (surviving) entity set differs — some pruned as orphans after
+                            # the original move — re-embed in-txn so the stored vector matches.
+                            emap2 = await store.entity_map_for_units(
+                                conn=conn, fq_table=fq_table, bank_id=bank_id, unit_ids=[str(memory_uuid)]
+                            )
+                            locked_names = [e["canonical_name"] for e in emap2.get(str(memory_uuid), [])]
+                            revert_embedding = revert_plan.embedding
+                            if locked_names != revert_plan.names:
+                                revert_embedding = await self._reembed_memory_text(
+                                    text=restored.text,
+                                    occurred_start=restored.occurred_start,
+                                    occurred_end=restored.occurred_end,
+                                    mentioned_at=restored.mentioned_at,
+                                    entities=locked_names,
+                                )
+                            if revert_embedding is not None:
+                                await store.set_memory_embedding(
+                                    conn=conn,
+                                    fq_table=fq_table,
+                                    bank_id=bank_id,
+                                    unit_id=str(memory_uuid),
+                                    embedding=revert_embedding,
+                                    txn=_curation_txn,
+                                )
+                        need_consolidation = True
+                        need_graph = True
+
+                # Postgres committed the curation change: publish the store's write-group. On a
+                # crash before here the writes stay invisible and the recovery sweep resolves them.
+                await store.decide_txn(_curation_txn, commit=True)
+                phase2_committed = True
+        finally:
+            # Entities were resolved (and possibly autocommitted) in Phase 1 but the edit did not
+            # durably apply (row concurrently invalidated → live2 None, or Phase 2 raised): those
+            # entities may now be orphans, and the edit's own relink-victim enqueue never ran. Force
+            # a bank-wide graph-maintenance sweep to reclaim them.
+            if entities_resolved and not (edit_applied and phase2_committed):
+                try:
+                    await self.submit_async_graph_maintenance(bank_id=bank_id, request_context=request_context)
+                except Exception as e:
+                    logger.warning(f"Failed to submit orphan-entity cleanup after a failed edit in bank {bank_id}: {e}")
 
         if need_consolidation:
             config = await self._config_resolver.resolve_full_config(bank_id, request_context)
@@ -8203,6 +8378,9 @@ class MemoryEngine(MemoryEngineInterface):
         """
         List documents with optional search and pagination.
 
+        Ordered by ``updated_at`` DESC so a long-lived document that keeps receiving
+        appends stays on the first page instead of sinking to its creation position.
+
         Args:
             bank_id: bank ID (required)
             search_query: Search in document ID
@@ -8282,7 +8460,7 @@ class MemoryEngine(MemoryEngineInterface):
                     tags
                 FROM {fq_table("documents")}
                 {where_clause}
-                ORDER BY created_at DESC
+                ORDER BY updated_at DESC, created_at DESC, id
                 LIMIT {limit_param} OFFSET {offset_param}
             """,
                 *query_params,
@@ -11825,6 +12003,16 @@ class MemoryEngine(MemoryEngineInterface):
                 await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         backend = await self._get_backend()
 
+        # Compute the new embedding BEFORE acquiring a pooled connection: a slow
+        # embedder must never pin a DB connection. The embedding text depends only
+        # on the incoming name/content, never on DB state, so it can be done here.
+        new_embedding_str: str | None = None
+        if content is not None:
+            embedding_text = f"{name or ''} {content}"
+            embedding = await embedding_utils.generate_embeddings_batch(self.embeddings, [embedding_text])
+            if embedding:
+                new_embedding_str = str(embedding[0])
+
         async with acquire_with_retry(backend) as conn:
             # If content is changing, fetch current content + reflect_response to record history
             previous_content: str | None = None
@@ -11880,12 +12068,10 @@ class MemoryEngine(MemoryEngineInterface):
                         if based_on is not None:
                             slim_reflect_response = {"based_on": based_on}
                     record_mm_history = True
-                # Also update embedding (convert to string for asyncpg vector type)
-                embedding_text = f"{name or ''} {content}"
-                embedding = await embedding_utils.generate_embeddings_batch(self.embeddings, [embedding_text])
-                if embedding:
+                # Apply the embedding computed above (off-connection).
+                if new_embedding_str is not None:
                     updates.append(f"embedding = ${param_idx}")
-                    params.append(str(embedding[0]))
+                    params.append(new_embedding_str)
                     param_idx += 1
             elif refresh_watermark is not None:
                 # A successful delta refresh can find no topic-relevant facts even though
@@ -14226,11 +14412,15 @@ class MemoryEngine(MemoryEngineInterface):
         parent_operation_id = client_operation_id if client_operation_id is not None else uuid.uuid4()
         backend = await self._get_backend()
 
-        # Create typed metadata for parent operation
+        # Create typed metadata for parent operation. `doc_ids` was validated
+        # above to be duplicate-free, so a length of 1 means the batch targets a
+        # single document (e.g. a reprocess) — surface it so the documents UI can
+        # badge that row as "updating" while the op is in flight.
         parent_metadata = BatchRetainParentMetadata(
             items_count=len(contents),
             total_tokens=total_tokens,
             num_sub_batches=len(sub_batches),
+            document_id=doc_ids[0] if len(doc_ids) == 1 else None,
         )
 
         # Persist the parent row and all child rows in a single transaction.
@@ -14299,11 +14489,16 @@ class MemoryEngine(MemoryEngineInterface):
                         if request_context.api_key_id:
                             task_payload["_api_key_id"] = request_context.api_key_id
 
+                        # Per-child single-document surfacing (see parent note):
+                        # in a multi-document batch, each single-document child
+                        # still lets the UI badge its row.
+                        child_doc_ids = [item.get("document_id") for item in sub_batch if item.get("document_id")]
                         child_metadata = BatchRetainChildMetadata(
                             items_count=len(sub_batch),
                             parent_operation_id=str(parent_operation_id),
                             sub_batch_index=i,
                             total_sub_batches=len(sub_batches),
+                            document_id=child_doc_ids[0] if len(child_doc_ids) == 1 else None,
                         )
 
                         child_operation_id = uuid.uuid4()

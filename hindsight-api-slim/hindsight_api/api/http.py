@@ -1223,7 +1223,20 @@ class BankListItem(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     fact_count: int = 0
-    last_document_at: str | None = None
+    last_document_at: str | None = Field(
+        default=None,
+        description=(
+            "When a document was last *ingested* into this bank. Appending to an existing "
+            "document does not move this — use `last_write_at` for write activity."
+        ),
+    )
+    last_write_at: str | None = Field(
+        default=None,
+        description=(
+            "When anything was last written to this bank: a document retained (including "
+            "appends to an existing document) or a fact stored. Null if the bank is empty."
+        ),
+    )
 
 
 class BankListResponse(BaseModel):
@@ -1242,6 +1255,7 @@ class BankListResponse(BaseModel):
                         "updated_at": "2024-01-16T14:20:00Z",
                         "fact_count": 156,
                         "last_document_at": "2024-01-16T14:20:00Z",
+                        "last_write_at": "2024-01-17T09:05:00Z",
                     }
                 ]
             }
@@ -5799,7 +5813,7 @@ def _register_routes(app: FastAPI):
         "/v1/default/banks/{bank_id}/documents",
         response_model=ListDocumentsResponse,
         summary="List documents",
-        description="List documents with pagination and optional search. Documents are the source content from which memory units are extracted.",
+        description="List documents with pagination and optional search, most recently written first (`updated_at` descending). Documents are the source content from which memory units are extracted.",
         operation_id="list_documents",
         tags=["Documents"],
     )

@@ -113,6 +113,7 @@ export interface BankScopedClient {
       maxTokens?: number;
       budget?: "low" | "mid" | "high";
       types?: Array<"world" | "experience" | "observation">;
+      preferObservations?: boolean;
     },
     timeoutMs?: number
   ): Promise<RecallResponse>;
@@ -143,6 +144,7 @@ function scopeClient(c: HindsightClient, bankId: string): BankScopedClient {
         maxTokens: req.maxTokens,
         budget: req.budget,
         types: req.types,
+        preferObservations: req.preferObservations,
       });
       if (!timeoutMs) return call;
       // The generated client doesn't accept a per-call AbortSignal, so we race
@@ -1624,6 +1626,7 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     recallBudget: config.recallBudget || "mid",
     recallMaxTokens: config.recallMaxTokens || 1024,
     recallTypes: Array.isArray(config.recallTypes) ? config.recallTypes : ["observation"],
+    preferObservations: config.preferObservations === true, // Default: false — backward compatible
     recallRoles: Array.isArray(config.recallRoles) ? config.recallRoles : ["user", "assistant"],
     retainEveryNTurns:
       typeof config.retainEveryNTurns === "number" && config.retainEveryNTurns >= 1
@@ -1651,7 +1654,7 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
       typeof config.recallInjectionPosition === "string" &&
       ["prepend", "append", "user"].includes(config.recallInjectionPosition)
         ? (config.recallInjectionPosition as PluginConfig["recallInjectionPosition"])
-        : undefined,
+        : "user",
     recallTimeoutMs:
       typeof config.recallTimeoutMs === "number" && config.recallTimeoutMs >= 1000
         ? config.recallTimeoutMs
@@ -2278,6 +2281,7 @@ export default function (api: MoltbotPluginAPI) {
               maxTokens: pluginConfig.recallMaxTokens || 1024,
               budget: pluginConfig.recallBudget,
               types: pluginConfig.recallTypes,
+              preferObservations: pluginConfig.preferObservations,
             },
             recallTimeoutMs
           );
@@ -2339,9 +2343,10 @@ ${memoriesFormatted}
           );
         }
 
-        // Inject recalled memories. Position is configurable to preserve prompt caching
-        // when agents have large static system prompts.
-        const position = pluginConfig.recallInjectionPosition || "prepend";
+        // Keep recalled memories outside the system prompt by default so the
+        // provider can reuse its stable prompt prefix across turns. Users who
+        // need system-level memory context can still opt into prepend or append.
+        const position = pluginConfig.recallInjectionPosition ?? "user";
         switch (position) {
           case "append":
             return { appendSystemContext: contextMessage };
