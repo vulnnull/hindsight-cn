@@ -850,7 +850,10 @@
     "clearDialogConfirm": "Borrar",
     "actionClearContent": "Borrar contenido",
     "emptyContent": "Aún no hay contenido. Actualiza este modelo mental para generar contenido.",
-    "selectModelPrompt": "Selecciona un modelo mental para ver su contenido."
+    "selectModelPrompt": "Selecciona un modelo mental para ver su contenido.",
+    "optionsSectionTroubleshooting": "Diagnóstico",
+    "optionsKeepTraceLabel": "Conservar trazas de actualización",
+    "optionsKeepTraceDescription": "Registra cómo llegó cada actualización a su resultado: modo, alcance, ventana temporal, hechos recuperados frente a usados y operaciones delta. Es la única forma de diagnosticar las actualizaciones programadas después de ejecutarse."
   },
   "cronPreview": {
     "invalid": "Expresión cron no válida",
@@ -936,7 +939,8 @@
     "observationTextField": "Texto",
     "observationTagsField": "Etiquetas",
     "observationSourceMemoriesField": "Memorias fuente ({count})",
-    "observationIdField": "ID"
+    "observationIdField": "ID",
+    "structuredOutputTitle": "Salida estructurada"
   },
   "searchDebug": {
     "noBankSelected": "Ningún banco seleccionado",
@@ -1458,7 +1462,13 @@
     "factTypeWorld": "mundo",
     "factTypeExperience": "experiencia",
     "factTypeObservation": "observación",
-    "actionClearContent": "Borrar contenido"
+    "actionClearContent": "Borrar contenido",
+    "structuredOutput": "Salida estructurada",
+    "responseSchemaTitle": "Esquema de salida estructurada",
+    "refreshTrace": "Traza de la actualización",
+    "traceNotCaptured": "No se registró ninguna traza para esta actualización. Activa «Conservar trazas de actualización» en los ajustes del modelo.",
+    "actionDryRun": "Ejecutar simulación",
+    "actionDryRunRunning": "Ejecutando simulación…"
   },
   "constellation": {
     "instructions": "Desplaza para hacer zoom · Arrastra para mover · Pasa el cursor para explorar · Haz clic para seleccionar",
@@ -1656,7 +1666,8 @@
         "refresh": "No se pudo actualizar el modelo mental",
         "history": "No se pudo obtener el historial del modelo mental",
         "notFound": "Modelo mental no encontrado",
-        "clear": "No se pudo borrar el modelo mental"
+        "clear": "No se pudo borrar el modelo mental",
+        "dryRunRefresh": "No se pudo simular la actualización del modelo mental"
       },
       "observations": {
         "list": "No se pudieron listar las observaciones",
@@ -1786,5 +1797,51 @@
     "pagesEmptyCta": "Create your first page",
     "recentDocsTitle": "Recent documents",
     "recentDocsEmpty": "No documents yet"
+  },
+  "schemaBuilder": {
+    "title": "Esquema de salida estructurada",
+    "subtitle": "Agrega campos de forma visual o edita el JSON directamente. El modelo devuelve un objeto con esta forma.",
+    "visualTab": "Visual",
+    "codeTab": "Código",
+    "addField": "Agregar campo",
+    "namePlaceholder": "nombre del campo",
+    "descriptionPlaceholder": "descripción (opcional)",
+    "required": "Obligatorio",
+    "removeField": "Eliminar campo",
+    "emptyState": "Agrega al menos un campo para definir la salida.",
+    "duplicateNames": "Los nombres de los campos deben ser únicos.",
+    "visualUnavailable": "Este esquema es demasiado avanzado para el editor visual; edítalo como código.",
+    "invalidJson": "Sintaxis JSON no válida.",
+    "cancel": "Cancelar",
+    "apply": "Aplicar",
+    "openBuilder": "Crear esquema",
+    "edit": "Editar",
+    "clear": "Quitar esquema",
+    "fieldsSummary": "{count, plural, one {# campo} other {# campos}}",
+    "invalidSchema": "Esquema no válido: abre el generador para corregirlo.",
+    "fieldDescription": "Si se define, la respuesta también se devuelve como structured_output según este esquema.",
+    "itemsLabel": "cada elemento"
+  },
+  "mentalModelDiagnostics": {
+    "fallbackNoBaseline": "No hay contenido existente que editar",
+    "fallbackQueryChanged": "La consulta de origen cambió",
+    "fallbackDocUnreadable": "No se pudo leer el documento almacenado",
+    "fallbackOpsFailed": "La llamada de operaciones delta falló",
+    "outcomeWritten": "Contenido nuevo escrito",
+    "outcomePreserved": "Sin hechos nuevos, contenido conservado",
+    "outcomeFailed": "Resultado vacío, la actualización falla",
+    "warningsTitle": "Advertencias",
+    "traceResults": "{count} resultados",
+    "executionTraceTitle": "Traza de ejecución",
+    "noOperations": "Sin operaciones",
+    "responseGenerated": "Respuesta generada",
+    "agentDecided": "El agente decidió",
+    "toolInputLabel": "Entrada:",
+    "executionTraceDescription": "{iterations} llamadas al LLM • {totalMs}ms en total",
+    "executingTools": "Herramientas llamadas: {count}",
+    "resultTitle": "Simulación: {name}",
+    "toolOutputLabel": "Salida:",
+    "toolWindowBound": "ventana: solo memorias actualizadas después de {time}",
+    "toolWindowUnbounded": "ventana: ninguna — esta herramienta no está acotada en el tiempo"
   }
 }

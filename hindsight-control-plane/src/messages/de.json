@@ -850,7 +850,10 @@
     "clearDialogConfirm": "Löschen",
     "actionClearContent": "Inhalt löschen",
     "emptyContent": "Noch kein Inhalt. Aktualisieren Sie dieses mentale Modell, um Inhalt zu erzeugen.",
-    "selectModelPrompt": "Wählen Sie ein mentales Modell aus, um dessen Inhalt anzuzeigen."
+    "selectModelPrompt": "Wählen Sie ein mentales Modell aus, um dessen Inhalt anzuzeigen.",
+    "optionsSectionTroubleshooting": "Fehlersuche",
+    "optionsKeepTraceLabel": "Aktualisierungs-Traces behalten",
+    "optionsKeepTraceDescription": "Zeichnet auf, wie jede Aktualisierung zu ihrem Ergebnis kam – Modus, Geltungsbereich, Zeitfenster, abgerufene gegenüber verwendeten Fakten und Delta-Operationen. Die einzige Möglichkeit, geplante Aktualisierungen im Nachhinein zu diagnostizieren."
   },
   "cronPreview": {
     "invalid": "Ungültiger Cron-Ausdruck",
@@ -936,7 +939,8 @@
     "observationTextField": "Text",
     "observationTagsField": "Tags",
     "observationSourceMemoriesField": "Quellerinnerungen ({count})",
-    "observationIdField": "ID"
+    "observationIdField": "ID",
+    "structuredOutputTitle": "Strukturierte Ausgabe"
   },
   "searchDebug": {
     "noBankSelected": "Keine Bank ausgewählt",
@@ -1458,7 +1462,13 @@
     "factTypeWorld": "Welt",
     "factTypeExperience": "Erfahrung",
     "factTypeObservation": "Beobachtung",
-    "actionClearContent": "Inhalt löschen"
+    "actionClearContent": "Inhalt löschen",
+    "structuredOutput": "Strukturierte Ausgabe",
+    "responseSchemaTitle": "Schema für strukturierte Ausgabe",
+    "refreshTrace": "Aktualisierungs-Trace",
+    "traceNotCaptured": "Für diese Aktualisierung wurde kein Trace aufgezeichnet. Aktivieren Sie „Aktualisierungs-Traces behalten“ in den Modelleinstellungen.",
+    "actionDryRun": "Probelauf starten",
+    "actionDryRunRunning": "Probelauf läuft…"
   },
   "constellation": {
     "instructions": "Scrollen zum Zoomen · Ziehen zum Verschieben · Hover zum Erkunden · Klicken zum Auswählen",
@@ -1656,7 +1666,8 @@
         "refresh": "Mentales Modell konnte nicht aktualisiert werden",
         "history": "Verlauf des mentalen Modells konnte nicht abgerufen werden",
         "notFound": "Mentales Modell nicht gefunden",
-        "clear": "Mentales Modell konnte nicht geleert werden"
+        "clear": "Mentales Modell konnte nicht geleert werden",
+        "dryRunRefresh": "Probelauf der Aktualisierung des mentalen Modells fehlgeschlagen"
       },
       "observations": {
         "list": "Beobachtungen konnten nicht aufgelistet werden",
@@ -1786,5 +1797,51 @@
     "pagesEmptyCta": "Create your first page",
     "recentDocsTitle": "Recent documents",
     "recentDocsEmpty": "No documents yet"
+  },
+  "schemaBuilder": {
+    "title": "Schema für strukturierte Ausgabe",
+    "subtitle": "Felder visuell hinzufügen oder das rohe JSON bearbeiten. Das Modell gibt ein Objekt in dieser Form zurück.",
+    "visualTab": "Visuell",
+    "codeTab": "Code",
+    "addField": "Feld hinzufügen",
+    "namePlaceholder": "Feldname",
+    "descriptionPlaceholder": "Beschreibung (optional)",
+    "required": "Erforderlich",
+    "removeField": "Feld entfernen",
+    "emptyState": "Fügen Sie mindestens ein Feld hinzu, um die Ausgabe zu definieren.",
+    "duplicateNames": "Feldnamen müssen eindeutig sein.",
+    "visualUnavailable": "Dieses Schema ist zu komplex für den visuellen Editor – bearbeiten Sie es als Code.",
+    "invalidJson": "Ungültige JSON-Syntax.",
+    "cancel": "Abbrechen",
+    "apply": "Übernehmen",
+    "openBuilder": "Schema erstellen",
+    "edit": "Bearbeiten",
+    "clear": "Schema entfernen",
+    "fieldsSummary": "{count, plural, one {# Feld} other {# Felder}}",
+    "invalidSchema": "Ungültiges Schema – zum Beheben den Generator öffnen.",
+    "fieldDescription": "Wenn gesetzt, wird die Antwort zusätzlich als structured_output gemäß diesem Schema zurückgegeben.",
+    "itemsLabel": "jedes Element"
+  },
+  "mentalModelDiagnostics": {
+    "fallbackNoBaseline": "Kein vorhandener Inhalt zum Bearbeiten",
+    "fallbackQueryChanged": "Die Quellabfrage hat sich geändert",
+    "fallbackDocUnreadable": "Das gespeicherte Dokument war nicht lesbar",
+    "fallbackOpsFailed": "Der Delta-Operationsaufruf ist fehlgeschlagen",
+    "outcomeWritten": "Neuer Inhalt geschrieben",
+    "outcomePreserved": "Keine neuen Fakten, Inhalt behalten",
+    "outcomeFailed": "Leeres Ergebnis, Aktualisierung schlägt fehl",
+    "warningsTitle": "Warnungen",
+    "traceResults": "{count} Ergebnisse",
+    "executionTraceTitle": "Ausführungsablauf",
+    "noOperations": "Keine Operationen",
+    "responseGenerated": "Antwort generiert",
+    "agentDecided": "Agent hat entschieden",
+    "toolInputLabel": "Eingabe:",
+    "executionTraceDescription": "{iterations} LLM-Aufrufe • {totalMs}ms gesamt",
+    "executingTools": "Aufgerufene Tools: {count}",
+    "resultTitle": "Probelauf – {name}",
+    "toolOutputLabel": "Ausgabe:",
+    "toolWindowBound": "Fenster: nur Erinnerungen, die nach {time} aktualisiert wurden",
+    "toolWindowUnbounded": "Fenster: keines – dieses Tool ist nicht zeitlich begrenzt"
   }
 }

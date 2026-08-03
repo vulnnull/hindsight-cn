@@ -850,7 +850,10 @@
     "clearDialogConfirm": "Clear",
     "actionClearContent": "Clear Content",
     "emptyContent": "No content yet. Refresh this mental model to generate content.",
-    "selectModelPrompt": "Select a mental model to view its content."
+    "selectModelPrompt": "Select a mental model to view its content.",
+    "optionsSectionTroubleshooting": "Troubleshooting",
+    "optionsKeepTraceLabel": "Keep refresh traces",
+    "optionsKeepTraceDescription": "Record how each refresh reached its result — mode, scope, time window, facts retrieved versus used, and delta operations. The only way to diagnose scheduled refreshes after they run."
   },
   "cronPreview": {
     "invalid": "Invalid cron expression",
@@ -936,7 +939,8 @@
     "observationTextField": "Text",
     "observationTagsField": "Tags",
     "observationSourceMemoriesField": "Source Memories ({count})",
-    "observationIdField": "ID"
+    "observationIdField": "ID",
+    "structuredOutputTitle": "Structured Output"
   },
   "searchDebug": {
     "noBankSelected": "No Bank Selected",
@@ -1458,7 +1462,13 @@
     "factTypeWorld": "world",
     "factTypeExperience": "experience",
     "factTypeObservation": "observation",
-    "actionClearContent": "Clear Content"
+    "actionClearContent": "Clear Content",
+    "structuredOutput": "Structured Output",
+    "responseSchemaTitle": "Structured output schema",
+    "refreshTrace": "Refresh trace",
+    "traceNotCaptured": "No trace recorded for this refresh. Turn on “Keep refresh traces” in the model's settings to record how each refresh reaches its result.",
+    "actionDryRun": "Run dry run",
+    "actionDryRunRunning": "Running dry run…"
   },
   "constellation": {
     "instructions": "Scroll to zoom · Drag to pan · Hover to explore · Click to select",
@@ -1656,7 +1666,8 @@
         "refresh": "Failed to refresh mental model",
         "history": "Failed to fetch mental model history",
         "notFound": "Mental model not found",
-        "clear": "Failed to clear mental model"
+        "clear": "Failed to clear mental model",
+        "dryRunRefresh": "Failed to dry-run mental model refresh"
       },
       "observations": {
         "list": "Failed to list observations",
@@ -1786,5 +1797,51 @@
     "pagesEmptyCta": "Create your first page",
     "recentDocsTitle": "Recent documents",
     "recentDocsEmpty": "No documents yet"
+  },
+  "schemaBuilder": {
+    "title": "Structured output schema",
+    "subtitle": "Add fields visually, or edit the raw JSON. The model returns an object in this shape.",
+    "visualTab": "Visual",
+    "codeTab": "Code",
+    "addField": "Add field",
+    "namePlaceholder": "field name",
+    "descriptionPlaceholder": "description (optional)",
+    "required": "Required",
+    "removeField": "Remove field",
+    "emptyState": "Add at least one field to define the output.",
+    "duplicateNames": "Field names must be unique.",
+    "visualUnavailable": "This schema is too advanced for the visual editor — edit it as code.",
+    "invalidJson": "Invalid JSON syntax.",
+    "cancel": "Cancel",
+    "apply": "Apply",
+    "openBuilder": "Build schema",
+    "edit": "Edit",
+    "clear": "Remove schema",
+    "fieldsSummary": "{count, plural, one {# field} other {# fields}}",
+    "invalidSchema": "Invalid schema — open the builder to fix it.",
+    "fieldDescription": "When set, the answer is also returned as structured_output matching this schema.",
+    "itemsLabel": "each item"
+  },
+  "mentalModelDiagnostics": {
+    "fallbackNoBaseline": "No existing content to edit",
+    "fallbackQueryChanged": "The source query changed",
+    "fallbackDocUnreadable": "The stored document could not be read",
+    "fallbackOpsFailed": "The delta operations call failed",
+    "outcomeWritten": "New content written",
+    "outcomePreserved": "No new facts, content kept",
+    "outcomeFailed": "Empty result, refresh fails",
+    "warningsTitle": "Warnings",
+    "traceResults": "{count} results",
+    "executionTraceTitle": "Execution Trace",
+    "noOperations": "No operations",
+    "responseGenerated": "Response generated",
+    "agentDecided": "Agent decided",
+    "toolInputLabel": "Input:",
+    "executionTraceDescription": "{iterations} LLM calls • {totalMs}ms total",
+    "executingTools": "Tools called: {count}",
+    "resultTitle": "Dry run — {name}",
+    "toolOutputLabel": "Output:",
+    "toolWindowBound": "window: only memories updated after {time}",
+    "toolWindowUnbounded": "window: none — this tool is not time-bounded"
   }
 }

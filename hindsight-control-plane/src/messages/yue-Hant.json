@@ -850,7 +850,10 @@
     "clearDialogConfirm": "清除",
     "actionClearContent": "清除內容",
     "emptyContent": "目前沒有內容。請重新整理此心智模型以產生內容。",
-    "selectModelPrompt": "選擇一個心智模型以檢視其內容。"
+    "selectModelPrompt": "選擇一個心智模型以檢視其內容。",
+    "optionsSectionTroubleshooting": "問題排查",
+    "optionsKeepTraceLabel": "保留重新整理追蹤",
+    "optionsKeepTraceDescription": "記錄每次重新整理點樣得出結果：模式、範圍、時間範圍、擷取到嘅事實同實際用到嘅事實，以及增量操作。呢個係事後診斷排程重新整理嘅唯一方法。"
   },
   "cronPreview": {
     "invalid": "無效嘅 cron 運算式",
@@ -936,7 +939,8 @@
     "observationTextField": "文字",
     "observationTagsField": "標籤",
     "observationSourceMemoriesField": "來源記憶（{count}）",
-    "observationIdField": "ID"
+    "observationIdField": "ID",
+    "structuredOutputTitle": "結構化輸出"
   },
   "searchDebug": {
     "noBankSelected": "未選擇記憶庫",
@@ -1458,7 +1462,13 @@
     "factTypeWorld": "世界",
     "factTypeExperience": "經驗",
     "factTypeObservation": "觀察",
-    "actionClearContent": "清除內容"
+    "actionClearContent": "清除內容",
+    "structuredOutput": "結構化輸出",
+    "responseSchemaTitle": "結構化輸出結構",
+    "refreshTrace": "重新整理追蹤",
+    "traceNotCaptured": "今次重新整理冇記錄追蹤。喺模型設定開啟「保留重新整理追蹤」啦。",
+    "actionDryRun": "執行試行",
+    "actionDryRunRunning": "試行緊…"
   },
   "constellation": {
     "instructions": "滾動縮放 · 拖曳平移 · 懸停探索 · 選取項目",
@@ -1656,7 +1666,8 @@
         "refresh": "未能重新整理心智模型",
         "history": "未能載入心智模型歷史",
         "notFound": "找不到心智模型",
-        "clear": "清除心智模型失敗"
+        "clear": "清除心智模型失敗",
+        "dryRunRefresh": "心智模型重新整理試行失敗"
       },
       "observations": {
         "list": "未能列出觀察",
@@ -1786,5 +1797,51 @@
     "pagesEmptyCta": "Create your first page",
     "recentDocsTitle": "Recent documents",
     "recentDocsEmpty": "No documents yet"
+  },
+  "schemaBuilder": {
+    "title": "結構化輸出結構",
+    "subtitle": "用視覺化方式加欄位，或者直接編輯 JSON。模型會傳回呢個結構嘅物件。",
+    "visualTab": "視覺化",
+    "codeTab": "程式碼",
+    "addField": "新增欄位",
+    "namePlaceholder": "欄位名稱",
+    "descriptionPlaceholder": "描述（選填）",
+    "required": "必填",
+    "removeField": "移除欄位",
+    "emptyState": "最少加一個欄位嚟定義輸出。",
+    "duplicateNames": "欄位名稱必須唯一。",
+    "visualUnavailable": "呢個結構對視覺化編輯器嚟講太複雜，請用程式碼方式編輯。",
+    "invalidJson": "JSON 語法無效。",
+    "cancel": "取消",
+    "apply": "套用",
+    "openBuilder": "建立結構",
+    "edit": "編輯",
+    "clear": "移除結構",
+    "fieldsSummary": "{count} 個欄位",
+    "invalidSchema": "結構無效——開啟建立器修正。",
+    "fieldDescription": "設定後，回答亦會以符合呢個結構嘅 structured_output 形式傳回。",
+    "itemsLabel": "每個元素"
+  },
+  "mentalModelDiagnostics": {
+    "fallbackNoBaseline": "冇現有內容可以編輯",
+    "fallbackQueryChanged": "來源查詢已經改咗",
+    "fallbackDocUnreadable": "讀唔到已儲存嘅文件",
+    "fallbackOpsFailed": "增量操作呼叫失敗",
+    "outcomeWritten": "寫入新內容",
+    "outcomePreserved": "冇新事實，保留內容",
+    "outcomeFailed": "結果係空，重新整理失敗",
+    "warningsTitle": "警告",
+    "traceResults": "{count} 筆結果",
+    "executionTraceTitle": "執行追蹤",
+    "noOperations": "未有操作",
+    "responseGenerated": "已經產生回應",
+    "agentDecided": "代理已決策",
+    "toolInputLabel": "輸入：",
+    "executionTraceDescription": "{iterations} 次 LLM 呼叫 • 總共 {totalMs} 毫秒",
+    "executingTools": "呼叫咗嘅工具：{count}",
+    "resultTitle": "試行 — {name}",
+    "toolOutputLabel": "輸出：",
+    "toolWindowBound": "範圍：只有 {time} 之後更新嘅記憶",
+    "toolWindowUnbounded": "範圍：冇 — 呢個工具唔受時間限制"
   }
 }

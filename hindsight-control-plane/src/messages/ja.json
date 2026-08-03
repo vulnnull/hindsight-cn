@@ -850,7 +850,10 @@
     "clearDialogConfirm": "クリア",
     "actionClearContent": "内容をクリア",
     "emptyContent": "まだコンテンツがありません。このメンタルモデルを更新してコンテンツを生成します。",
-    "selectModelPrompt": "メンタルモデルを選択して内容を表示します。"
+    "selectModelPrompt": "メンタルモデルを選択して内容を表示します。",
+    "optionsSectionTroubleshooting": "トラブルシューティング",
+    "optionsKeepTraceLabel": "更新トレースを保持",
+    "optionsKeepTraceDescription": "各更新がどのように結果に至ったかを記録します（モード、スコープ、時間範囲、取得した事実と使用した事実、デルタ操作）。スケジュール実行された更新を後から診断する唯一の方法です。"
   },
   "cronPreview": {
     "invalid": "無効な cron 式",
@@ -936,7 +939,8 @@
     "observationTextField": "テキスト",
     "observationTagsField": "タグ",
     "observationSourceMemoriesField": "ソースメモリ（{count}件）",
-    "observationIdField": "ID"
+    "observationIdField": "ID",
+    "structuredOutputTitle": "構造化出力"
   },
   "searchDebug": {
     "noBankSelected": "バンクが選択されていません",
@@ -1458,7 +1462,13 @@
     "factTypeWorld": "世界",
     "factTypeExperience": "経験",
     "factTypeObservation": "オブザベーション",
-    "actionClearContent": "内容をクリア"
+    "actionClearContent": "内容をクリア",
+    "structuredOutput": "構造化出力",
+    "responseSchemaTitle": "構造化出力スキーマ",
+    "refreshTrace": "更新トレース",
+    "traceNotCaptured": "この更新のトレースは記録されていません。モデル設定で「更新トレースを保持」を有効にしてください。",
+    "actionDryRun": "ドライランを実行",
+    "actionDryRunRunning": "ドライラン実行中…"
   },
   "constellation": {
     "instructions": "スクロールでズーム · ドラッグで移動 · ホバーで探索 · クリックで選択",
@@ -1656,7 +1666,8 @@
         "refresh": "メンタルモデルの更新に失敗しました",
         "history": "メンタルモデル履歴の取得に失敗しました",
         "notFound": "メンタルモデルが見つかりません",
-        "clear": "メンタルモデルのクリアに失敗しました"
+        "clear": "メンタルモデルのクリアに失敗しました",
+        "dryRunRefresh": "メンタルモデル更新のドライランに失敗しました"
       },
       "observations": {
         "list": "観察の一覧取得に失敗しました",
@@ -1786,5 +1797,51 @@
     "pagesEmptyCta": "Create your first page",
     "recentDocsTitle": "Recent documents",
     "recentDocsEmpty": "No documents yet"
+  },
+  "schemaBuilder": {
+    "title": "構造化出力スキーマ",
+    "subtitle": "フィールドを視覚的に追加するか、生の JSON を編集します。モデルはこの形式のオブジェクトを返します。",
+    "visualTab": "ビジュアル",
+    "codeTab": "コード",
+    "addField": "フィールドを追加",
+    "namePlaceholder": "フィールド名",
+    "descriptionPlaceholder": "説明（任意）",
+    "required": "必須",
+    "removeField": "フィールドを削除",
+    "emptyState": "出力を定義するには、フィールドを少なくとも 1 つ追加してください。",
+    "duplicateNames": "フィールド名は一意である必要があります。",
+    "visualUnavailable": "このスキーマはビジュアルエディタには複雑すぎます。コードとして編集してください。",
+    "invalidJson": "JSON 構文が無効です。",
+    "cancel": "キャンセル",
+    "apply": "適用",
+    "openBuilder": "スキーマを作成",
+    "edit": "編集",
+    "clear": "スキーマを削除",
+    "fieldsSummary": "{count} 個のフィールド",
+    "invalidSchema": "無効なスキーマです。ビルダーを開いて修正してください。",
+    "fieldDescription": "設定すると、回答はこのスキーマに一致する structured_output としても返されます。",
+    "itemsLabel": "各要素"
+  },
+  "mentalModelDiagnostics": {
+    "fallbackNoBaseline": "編集対象の既存コンテンツがありません",
+    "fallbackQueryChanged": "ソースクエリが変更されました",
+    "fallbackDocUnreadable": "保存された文書を読み取れませんでした",
+    "fallbackOpsFailed": "デルタ操作の呼び出しが失敗しました",
+    "outcomeWritten": "新しいコンテンツを書き込み",
+    "outcomePreserved": "新しい事実なし、コンテンツを維持",
+    "outcomeFailed": "結果が空のため更新は失敗します",
+    "warningsTitle": "警告",
+    "traceResults": "{count} 件の結果",
+    "executionTraceTitle": "実行トレース",
+    "noOperations": "オペレーションなし",
+    "responseGenerated": "レスポンスが生成されました",
+    "agentDecided": "エージェントが決定しました",
+    "toolInputLabel": "入力：",
+    "executionTraceDescription": "LLM 呼び出し {iterations} 回 • 合計 {totalMs}ms",
+    "executingTools": "呼び出したツール: {count}",
+    "resultTitle": "ドライラン — {name}",
+    "toolOutputLabel": "出力：",
+    "toolWindowBound": "範囲: {time} 以降に更新された記憶のみ",
+    "toolWindowUnbounded": "範囲: なし — このツールは時間で絞り込まれません"
   }
 }

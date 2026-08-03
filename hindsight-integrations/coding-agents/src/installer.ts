@@ -26,15 +26,17 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { HOOK_HARNESSES, type HookHarnessName } from "./harness/hook-lifecycle";
+import { importLocalHistory } from "./core/history";
 
 /**
  * Substring that identifies OUR entries in a host's config, so a re-install replaces them and
@@ -753,47 +755,111 @@ const HARNESS_ALIASES: Record<string, string> = { agy: "antigravity-cli" };
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * Backfill this repo's past sessions for one harness, by handing them to the same deepen engine a
+ * session start uses. Deepen dedups by document id, so re-running is safe.
+ *
+ * Scoped to the current directory: history is per-repo, and a machine can hold thousands of
+ * sessions across unrelated projects that nobody wants extracted.
+ */
+function importConversations(harness: string, ctx: InstallCtx): void {
+  const repo = process.cwd();
+  const found = importLocalHistory(harness, repo);
+  if (!found.supported) {
+    ctx.log?.(`${harness}: --import-conversations skipped — ${found.reason}`);
+    return;
+  }
+  if (found.unattributed) {
+    // Never silently: a session we cannot attribute is one the user might expect to see imported.
+    ctx.log?.(
+      `${harness}: skipped ${found.unattributed} session(s) that do not record which directory ` +
+        `they ran in — importing them could file another repo's conversation into this bank`
+    );
+  }
+  if (!found.sessions.length) {
+    ctx.log?.(`${harness}: no past sessions found on disk for ${repo}`);
+    return;
+  }
+  const turns = found.sessions.reduce((n, s) => n + s.turns.length, 0);
+  const file = join(mkdtempSync(join(tmpdir(), "hindsight-import-")), "conversations.json");
+  writeFileSync(file, JSON.stringify(found.sessions));
+  ctx.log?.(
+    `${harness}: importing ${found.sessions.length} past sessions (${turns} turns) from ${repo} — ` +
+      `this runs extraction and may take a while`
+  );
+  try {
+    execFileSync("node", [join(ctx.dist, "deepen.js"), "--repo", repo, "--conversations", file], {
+      stdio: "inherit",
+    });
+  } catch {
+    // The wiring is already in place; a failed backfill must not make `install` look failed.
+    ctx.log?.(`${harness}: conversation import did not finish — re-run it any time with:`);
+    ctx.log?.(`  node "${join(ctx.dist, "deepen.js")}" --repo "${repo}" --conversations "${file}"`);
+  }
+}
+
 export function run(argv: string[], ctx: InstallCtx): number {
-  const [command, ...names] = argv;
+  const [command, ...rawArgs] = argv;
+  // `--import-conversations` backfills this repo's PAST sessions for the harness being installed —
+  // the migration path off the older per-agent plugins, whose banks the server cannot merge into
+  // this one. Opt-in: it re-extracts history and therefore costs tokens.
+  const importHistory = rawArgs.includes("--import-conversations");
+  const names = rawArgs.filter((a) => !a.startsWith("--"));
   // The wiring we write is ABSOLUTE paths into this package's dist. From an npx/pnpm-dlx cache
   // those paths die on cache eviction — every hook silently stops. Refuse and say what to do.
   if (command === "install" && /\/(_npx|\.npm\/_npx|dlx-)\/|\/_cacache\//.test(ctx.pkgRoot)) {
     ctx.log?.(
       "refusing to install from an npx/dlx cache: the hook wiring would point into a cache npm can " +
         "evict, silently breaking every session.\nInstall the package permanently, then re-run:\n" +
-        "  npm install -g hindsight-coding-agents && hindsight-coding-agents install"
+        "  npm install -g @vectorize-io/hindsight-coding-agents\n" +
+        "  hindsight-coding-agents install all"
     );
     return 1;
   }
   if (command !== "install" && command !== "uninstall") {
     ctx.log?.(
-      `usage: hindsight-coding-agents <install|uninstall> [harness...]\n` +
-        `harnesses: ${INSTALLERS.map((i) => i.name).join(", ")} (agy is an alias for antigravity-cli; default: every one detected on this machine)`
+      `usage: hindsight-coding-agents <install|uninstall> <all|harness...> [--import-conversations]\n` +
+        `  all      every agent detected on this machine\n` +
+        `  harness  ${INSTALLERS.map((i) => i.name).join(", ")} (agy aliases antigravity-cli)`
     );
     return command ? 1 : 0;
   }
   let targets: HarnessInstaller[];
-  if (names.length) {
+  // `all` is spelled out rather than implied by a bare command: this rewrites the config of EVERY
+  // detected agent — hooks, MCP registration and the companion skill — which is too much of a
+  // machine to change by accident from `install` alone.
+  if (names.includes("all")) {
+    targets = INSTALLERS.filter((i) => i.detect(ctx));
+    if (!targets.length) {
+      ctx.log?.("no supported coding agents detected — name one explicitly to wire it anyway");
+      return 1;
+    }
+    ctx.log?.(`detected: ${targets.map((t) => t.name).join(", ")}`);
+  } else if (names.length) {
     targets = [];
     for (const n of names) {
       const hit = INSTALLERS.find((i) => i.name === (HARNESS_ALIASES[n] ?? n));
       if (!hit) {
         ctx.log?.(
-          `unknown harness "${n}" — expected one of: ${INSTALLERS.map((i) => i.name).join(", ")} (agy aliases antigravity-cli)`
+          `unknown harness "${n}" — expected "all" or one of: ${INSTALLERS.map((i) => i.name).join(", ")} (agy aliases antigravity-cli)`
         );
         return 1;
       }
       targets.push(hit);
     }
   } else {
-    targets = INSTALLERS.filter((i) => i.detect(ctx));
-    if (!targets.length) {
-      ctx.log?.("no supported coding agents detected — pass harness names explicitly");
-      return 1;
-    }
-    ctx.log?.(`detected: ${targets.map((t) => t.name).join(", ")}`);
+    ctx.log?.(
+      `${command}: name a harness, or "all" for every agent detected on this machine.\n` +
+        `  hindsight-coding-agents ${command} claude-code\n` +
+        `  hindsight-coding-agents ${command} all\n` +
+        `harnesses: ${INSTALLERS.map((i) => i.name).join(", ")} (agy aliases antigravity-cli)`
+    );
+    return 1;
   }
   for (const t of targets) t[command](ctx);
+  if (command === "install" && importHistory) {
+    for (const t of targets) importConversations(t.name, ctx);
+  }
   ctx.log?.(
     command === "install"
       ? `\n✅ installed. Configure the server in ~/.hindsight/coding-agent.json (apiUrl/apiToken) and start a session.`

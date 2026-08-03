@@ -129,36 +129,51 @@ async def _generate_structured_output(
 
         from pydantic import create_model
 
-        def _json_schema_type_to_python(field_schema: dict) -> type:
-            """Map JSON schema type to Python type for better LLM guidance."""
+        def _python_type_for(field_schema: dict, name: str) -> TypingAny:
+            """Map a JSON-schema node to a Python type, recursing into nested
+            objects/arrays. Nested objects become real Pydantic models (with
+            declared properties) rather than a bare ``dict`` — a bare dict/list
+            serialises with ``additionalProperties``, which Gemini's structured
+            output rejects. Properly-typed nested models avoid that and also let
+            the provider grammar-enforce the shape."""
             json_type = field_schema.get("type", "string")
+            if json_type == "object":
+                nested_props = field_schema.get("properties")
+                if isinstance(nested_props, dict) and nested_props:
+                    return _model_for(field_schema, name)
+                return dict  # free-form object with no declared properties
             if json_type == "array":
+                items = field_schema.get("items")
+                if isinstance(items, dict):
+                    item_type = _python_type_for(items, f"{name}Item")
+                    return list[item_type]
                 return list
-            elif json_type == "object":
-                return dict
-            elif json_type == "integer":
+            if json_type == "integer":
                 return int
-            elif json_type == "number":
+            if json_type == "number":
                 return float
-            elif json_type == "boolean":
+            if json_type == "boolean":
                 return bool
-            else:
-                return str
+            return str
 
-        # Build fields from JSON schema properties
+        def _model_for(schema: dict, name: str) -> type:
+            props = schema.get("properties", {})
+            required = set(schema.get("required", []))
+            model_fields: dict[str, TypingAny] = {}
+            for fname, fschema in props.items():
+                ftype = _python_type_for(fschema if isinstance(fschema, dict) else {}, f"{name}_{fname}")
+                default = ... if fname in required else None
+                model_fields[fname] = (ftype, default)
+            return create_model(name, **model_fields)
+
         schema_props = response_schema.get("properties", {})
         required_fields = set(response_schema.get("required", []))
-        fields: dict[str, TypingAny] = {}
-        for field_name, field_schema in schema_props.items():
-            field_type = _json_schema_type_to_python(field_schema)
-            default = ... if field_name in required_fields else None
-            fields[field_name] = (field_type, default)
 
-        if not fields:
+        if not schema_props:
             logger.warning(f"[REFLECT {reflect_id}] No fields found in response_schema, skipping structured output")
             return StructuredOutputResult()
 
-        DynamicModel = create_model("StructuredResponse", **fields)
+        DynamicModel = _model_for(response_schema, "StructuredResponse")
 
         # Include the full schema in the prompt for better LLM guidance
         schema_str = json.dumps(response_schema, indent=2, ensure_ascii=False)

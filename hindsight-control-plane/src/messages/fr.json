@@ -850,7 +850,10 @@
     "clearDialogConfirm": "Effacer",
     "actionClearContent": "Effacer le contenu",
     "emptyContent": "Aucun contenu pour le moment. Actualisez ce modèle mental pour générer du contenu.",
-    "selectModelPrompt": "Sélectionnez un modèle mental pour afficher son contenu."
+    "selectModelPrompt": "Sélectionnez un modèle mental pour afficher son contenu.",
+    "optionsSectionTroubleshooting": "Diagnostic",
+    "optionsKeepTraceLabel": "Conserver les traces d'actualisation",
+    "optionsKeepTraceDescription": "Enregistre comment chaque actualisation a abouti à son résultat : mode, portée, fenêtre temporelle, faits récupérés par rapport aux faits utilisés, et opérations delta. Le seul moyen de diagnostiquer les actualisations planifiées après coup."
   },
   "cronPreview": {
     "invalid": "Expression cron non valide",
@@ -936,7 +939,8 @@
     "observationTextField": "Texte",
     "observationTagsField": "Tags",
     "observationSourceMemoriesField": "Souvenirs sources ({count})",
-    "observationIdField": "ID"
+    "observationIdField": "ID",
+    "structuredOutputTitle": "Sortie structurée"
   },
   "searchDebug": {
     "noBankSelected": "Aucune banque sélectionnée",
@@ -1458,7 +1462,13 @@
     "factTypeWorld": "monde",
     "factTypeExperience": "expérience",
     "factTypeObservation": "observation",
-    "actionClearContent": "Effacer le contenu"
+    "actionClearContent": "Effacer le contenu",
+    "structuredOutput": "Sortie structurée",
+    "responseSchemaTitle": "Schéma de sortie structurée",
+    "refreshTrace": "Trace de l'actualisation",
+    "traceNotCaptured": "Aucune trace enregistrée pour cette actualisation. Activez « Conserver les traces d'actualisation » dans les réglages du modèle.",
+    "actionDryRun": "Lancer la simulation",
+    "actionDryRunRunning": "Simulation en cours…"
   },
   "constellation": {
     "instructions": "Défiler pour zoomer · Glisser pour déplacer · Survoler pour explorer · Cliquer pour sélectionner",
@@ -1656,7 +1666,8 @@
         "refresh": "Impossible d'actualiser le modèle mental",
         "history": "Impossible de récupérer l'historique du modèle mental",
         "notFound": "Modèle mental introuvable",
-        "clear": "Impossible d'effacer le modèle mental"
+        "clear": "Impossible d'effacer le modèle mental",
+        "dryRunRefresh": "Échec de la simulation d'actualisation du modèle mental"
       },
       "observations": {
         "list": "Impossible de lister les observations",
@@ -1786,5 +1797,51 @@
     "pagesEmptyCta": "Create your first page",
     "recentDocsTitle": "Recent documents",
     "recentDocsEmpty": "No documents yet"
+  },
+  "schemaBuilder": {
+    "title": "Schéma de sortie structurée",
+    "subtitle": "Ajoutez des champs visuellement ou modifiez le JSON brut. Le modèle renvoie un objet de cette forme.",
+    "visualTab": "Visuel",
+    "codeTab": "Code",
+    "addField": "Ajouter un champ",
+    "namePlaceholder": "nom du champ",
+    "descriptionPlaceholder": "description (facultatif)",
+    "required": "Requis",
+    "removeField": "Supprimer le champ",
+    "emptyState": "Ajoutez au moins un champ pour définir la sortie.",
+    "duplicateNames": "Les noms des champs doivent être uniques.",
+    "visualUnavailable": "Ce schéma est trop complexe pour l'éditeur visuel — modifiez-le en code.",
+    "invalidJson": "Syntaxe JSON invalide.",
+    "cancel": "Annuler",
+    "apply": "Appliquer",
+    "openBuilder": "Créer le schéma",
+    "edit": "Modifier",
+    "clear": "Supprimer le schéma",
+    "fieldsSummary": "{count, plural, one {# champ} other {# champs}}",
+    "invalidSchema": "Schéma invalide — ouvrez le générateur pour le corriger.",
+    "fieldDescription": "S'il est défini, la réponse est aussi renvoyée en tant que structured_output conforme à ce schéma.",
+    "itemsLabel": "chaque élément"
+  },
+  "mentalModelDiagnostics": {
+    "fallbackNoBaseline": "Aucun contenu existant à modifier",
+    "fallbackQueryChanged": "La requête source a changé",
+    "fallbackDocUnreadable": "Le document enregistré était illisible",
+    "fallbackOpsFailed": "L'appel des opérations delta a échoué",
+    "outcomeWritten": "Nouveau contenu écrit",
+    "outcomePreserved": "Aucun fait nouveau, contenu conservé",
+    "outcomeFailed": "Résultat vide, l'actualisation échoue",
+    "warningsTitle": "Avertissements",
+    "traceResults": "{count} résultats",
+    "executionTraceTitle": "Trace d'exécution",
+    "noOperations": "Aucune opération",
+    "responseGenerated": "Réponse générée",
+    "agentDecided": "L'agent a décidé",
+    "toolInputLabel": "Entrée :",
+    "executionTraceDescription": "{iterations} appels LLM • {totalMs}ms au total",
+    "executingTools": "Outils appelés : {count}",
+    "resultTitle": "Simulation — {name}",
+    "toolOutputLabel": "Sortie :",
+    "toolWindowBound": "fenêtre : uniquement les mémoires mises à jour après {time}",
+    "toolWindowUnbounded": "fenêtre : aucune — cet outil n'est pas borné dans le temps"
   }
 }

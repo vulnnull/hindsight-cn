@@ -12,54 +12,127 @@ tie-break policy. Those decisions live in git history and past conversations. Th
 in front of the agent at the moment it starts working, and keeps a curated set of **knowledge pages**
 (architecture, conventions, in-flight initiatives) that future sessions start from.
 
+## Install
+
+```bash
+npm install -g @vectorize-io/hindsight-coding-agents
+hindsight-coding-agents install all          # every detected agent, wired natively
+hindsight-coding-agents install claude-code  # or just one
+hindsight-coding-agents uninstall all        # removes exactly what install added
+```
+
+`install` takes an explicit target — `all`, or one or more harness names. A bare
+`hindsight-coding-agents install` changes nothing and prints the choice, so wiring every agent on
+the machine is never something that happens by accident.
+
+### Per agent
+
+Same command, only the harness name changes. Run after installing the package globally.
+
+| agent              | command                                       | what it wires                                                                                    |
+| ------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Claude Code        | `hindsight-coding-agents install claude-code` | 3 hooks in `~/.claude/settings.json` + MCP (`claude mcp add`, user scope) + companion skill      |
+| opencode           | `hindsight-coding-agents install opencode`    | plugin entry in `~/.config/opencode/opencode.json` (native tools, no MCP needed)                 |
+| Kilo CLI           | `hindsight-coding-agents install kilo`        | plugin entry in `~/.config/kilo/kilo.json[c]`                                                    |
+| Codex CLI          | `hindsight-coding-agents install codex`       | 3 hooks in `~/.codex/hooks.json` + `[mcp_servers]` in `config.toml` (needs `codex_hooks = true`) |
+| Cursor CLI         | `hindsight-coding-agents install cursor-cli`  | hooks in `~/.cursor/hooks.json` + `~/.cursor/mcp.json` + skill                                   |
+| GitHub Copilot CLI | `hindsight-coding-agents install copilot-cli` | `~/.copilot/hooks/` + `mcp-config.json` + skill                                                  |
+| Grok Build         | `hindsight-coding-agents install grok-build`  | native hooks + MCP in `~/.grok/config.toml` + skill                                              |
+| Antigravity CLI    | `hindsight-coding-agents install agy`         | lifecycle hooks + MCP + the `Hindsight · <bank>` status line                                     |
+| Devin CLI          | `hindsight-coding-agents install devin-cli`   | hooks in `~/.config/devin/config.json` + MCP                                                     |
+| Cline CLI          | `hindsight-coding-agents install cline-cli`   | native plugin via `cline plugin install` + MCP + skill                                           |
+
+Uninstall the same way: `hindsight-coding-agents uninstall claude-code` (or `uninstall all`).
+
+Install globally (not `npx`): the wiring points at this package's files, so it must live at a
+stable path — the installer refuses to run from an npx cache. **Updating** is just
+`npm update -g @vectorize-io/hindsight-coding-agents`: the wired paths stay valid, every new session runs the
+new version; re-run `install` (idempotent) only when a release note says the wiring changed.
+
+`install` merges the native wiring (hooks + MCP registration where the host wants them) into each
+agent's own config, preserving everything already there; it is idempotent (re-run after moving the
+package) and backs up any pre-existing file it touches as `<file>.hindsight-backup`. `uninstall`
+removes only our entries. On Claude Code the install also ships a **companion skill**
+(`~/.claude/skills/hindsight-coding-agent`) that teaches the agent how this memory works — what
+"store this in hindsight" should do, the tool surface, per-repo configuration, debugging — so users
+can ask the agent itself. Manual wiring per harness, if you prefer:
+
+**opencode** installs directly — point `opencode.json` at the package dir:
+
+```json
+{ "plugin": ["/path/to/hindsight-coding-agents"] }
+```
+
+**Claude Code** and **Codex** get their full three-hook + MCP wiring from this package's own
+installer — `hindsight-coding-agents install claude-code` / `install codex`. This package's `bin`
+entries (`hindsight-claude-hook`, `hindsight-codex-hook`,
+`hindsight-cursor-hook`) are the individual injection-only `UserPromptSubmit` entrypoints for a
+minimal, hand-wired setup.
+
+Adding an agent: hook-based → write a `HookSpec` entry point (see `src/cursor-hook.ts`) and register
+a `hookAdapter` in `src/harness/registry.ts`; persistent-plugin → implement `HarnessAdapter`
+(`src/core/types.ts`) fully (see `src/harness/opencode.ts`).
+
+## Migrating from the per-agent plugins
+
+The older per-agent integrations (`hindsight-claude-code`, `hindsight-cursor-cli`, `hindsight-codex`, …) are superseded by this package. Their memory does **not** carry over automatically, and it cannot be merged:
+
+- They scope a bank **per agent per project** (`claude-code::myrepo`); this package uses one **per repo** (`coding-agent::myrepo`) so every agent shares it. Two old banks map onto one new one.
+- The server restores a whole bank rather than merging into an existing one, so the old bank can't be folded in.
+
+Instead, re-import the conversations the agent already wrote to disk — they get re-extracted into the current bank:
+
+```bash
+cd /path/to/your/repo
+hindsight-coding-agents install claude-code --import-conversations
+```
+
+**How sessions are matched.** A conversation is imported only when the session itself records the
+directory it ran in — never inferred from a file or folder name. Claude Code writes that directory
+on its entries and Codex in its `session_meta` header, so both can be attributed exactly, including
+sessions started in a subdirectory of the repo. Guessing was tempting (Claude names its history
+folders after the project path) but unsafe: `/` and `.` both encode to `-`, so `repo-sub` is either
+the subdirectory `repo/sub` or an unrelated sibling repo — and a wrong guess files someone else's
+conversation into your bank. Sessions that record nothing are skipped and the count is reported.
+The other harnesses (opencode, Kilo, Cursor, Cline, Copilot, Devin) keep history in internal SQLite
+databases with unversioned schemas and are skipped with a reason.
+
+The import is scoped to the **current repo**, safe to re-run (ingestion dedups by document id), and
+runs extraction — so it costs tokens roughly in proportion to the history imported.
+
+Prefer to keep the old bank instead? Point this package at it — no data moves:
+
+```jsonc
+{ "bankIdTemplate": "{harness}::{gitProject}" } // reproduces the old per-agent naming
+```
+
 ## How it works
 
-1. **Seed a cold repo (automatic, once).** The first time an agent opens a repo whose bank is empty,
-   the entry point deterministically kicks off a background **seed**: it aggregates the last N commit
-   **messages** into a single cheap document (`gitlog` strategy) and spawns a short headless
-   **codebase survey** — run under the current agent's own CLI (claude/codex/antigravity/opencode),
-   read-only sandboxed — to map the structure. Both feed the knowledge pages.
-1. **Deepen progressively (automatic, every session).** Every session start also fires the
-   idempotent background **deepen engine**: it ingests any conversations not yet in the bank and the
-   next batch of recent commits **individually with their full diffs, newest first** — so full
-   decision-level precision arrives across sessions without a big-bang ingest. A per-bank lock and
-   document-id dedup make concurrent or repeated runs a no-op. Ask the agent
-   `hindsight_sync_status` to see where ingestion stands (`synced: true` = seeded memory fully
-   queryable).
-1. **Reflect once per session.** On the session's first prompt, the entry point runs Hindsight
-   `reflect` — an agentic synthesis over the bank that returns the past decision explaining the task
-   at hand, with its exact rule and literal values. The answer is cached for the session and
-   re-injected on every turn, wrapped in a visible-attribution directive so the agent surfaces a
-   `🧠 Using Hindsight Memories` header when memory informs its answer.
-1. **Knowledge-page sections every turn.** The repo's knowledge pages are fetched on a cadence and
-   matched **locally** against each prompt (a lexical section index — no server round-trip, no LLM
-   call, ~ms): the top-scoring page sections are injected with provenance and a pointer to the full
-   page. Fast like recall, organized like reflect; below a relevance floor nothing is injected.
-1. **Knowledge pages + tools.** At session start the agent is given the repo's page roster plus a
-   guide to the `hindsight_*` tools; it lists/reads pages to ground itself, searches raw memory for
-   specifics (`hindsight_search_memory` is where recall lives now), and calls
-   `hindsight_capture_initiative` right after a plan is approved to record a new feature as a tracked
-   page. On opencode these tools are registered natively; the hook harnesses get them through the
-   bundled **MCP server**.
-1. **Write back.** The live session is upserted into the bank as a JSON transcript — user/assistant
-   turns plus a compact `action` turn per tool call (tool name + primary target, e.g.
-   `Edit boltons/strutils.py`; no arguments or outputs) — so sessions compound into memory without
-   burying decisions in mechanical noise. On Stop for the hook harnesses; for the plugin harnesses
-   (opencode, Kilo) on the turn cadence **and** again when the session goes idle. The idle pass is
-   what captures the agent's reply: the per-turn hook fires while the host is building a request, so
-   the transcript it sees always stops short of the answer that request produces — without the idle
-   pass, write-back lagged a turn and a session's final exchange was never stored at all.
-1. **Never break the agent — never fail silently.** A failed reflect or page fetch degrades to
-   no-memory, but every outcome (`reflect_ok` / `reflect_empty` / `reflect_failed`, `pages_ok` /
-   `pages_failed`, with duration and error) is appended to a diagnostics file, so a memory-less
-   session can't masquerade as a memory session.
+**Ingestion — automatic, no command to run**
 
-If the configured Hindsight server predates knowledge pages, the client detects that capability at
-session start, skips page seeding and page lookups, and records `knowledge_pages_unavailable`.
-Legacy bank configuration, git/session ingestion, reflection, and retention continue normally.
+- On a **cold repo**, the first session kicks off a background seed: recent commit **messages** as one cheap document, plus a short headless **codebase survey** to map the structure.
+- On **every** session, a background "deepen" pass ingests conversations not yet stored and the next batch of recent commits **with full diffs, newest first** — precision arrives across sessions instead of one big ingest.
+- Repeated or concurrent runs are a no-op (per-bank lock + document-id dedup).
+- Ask the agent `hindsight_sync_status` to see where ingestion stands — `synced: true` means everything is queryable.
 
-When memories **conflict** on the same rule, reflect prefers the latest/superseding decision — a rule
-amended in a later conversation wins over the original.
+**In the session — what the agent actually receives**
+
+- On the first prompt, a **reflect** call returns the past decision behind the task, with its exact rule and values. It's cached and re-injected each turn.
+- Every turn, the repo's **knowledge pages** are matched locally against the prompt (lexical index — no server call, no LLM, ~ms) and the best sections are injected with provenance. Below a relevance floor, nothing is injected.
+- The agent also gets the page roster and the `hindsight_*` tools, so it can read a page, search raw memory, or record a new initiative itself.
+- Injected memory carries a visible-attribution directive, so the agent shows a `🧠 Using Hindsight Memories` header when memory shaped its answer.
+
+**Write-back — sessions become memory**
+
+- The live session is stored as a transcript: user/assistant turns plus a compact `action` line per tool call (name + target, no arguments or output) — decisions without the mechanical noise.
+- Hook harnesses write on `Stop`. Plugin harnesses (opencode, Kilo) write on a turn cadence **and** when the session goes idle — the idle pass is what captures the agent's own reply, which the per-turn pass runs too early to see.
+
+**Guarantees**
+
+- A failed reflect or page fetch degrades to a no-memory turn; it never breaks the agent.
+- It never fails _silently_ either: every outcome is written to a diagnostics file, so a memory-less session can't pass for a memory session.
+- When two memories conflict on the same rule, the later decision wins and the superseded one is reported as no longer in effect.
+- Against a Hindsight server that predates knowledge pages, page features are skipped (recorded as `knowledge_pages_unavailable`) and everything else continues.
 
 ## Harnesses
 
@@ -108,52 +181,19 @@ Its write-back retains only user-visible user/assistant text; tool arguments, to
 command output, tool-role messages, reasoning parts, and Hindsight's injected context are excluded.
 Cline IDE extensions are not currently supported by this CLI integration.
 
-### Install — one command, every agent
-
-```bash
-npm install -g @vectorize-io/hindsight-coding-agents
-hindsight-coding-agents install            # detects your agents, wires each natively
-hindsight-coding-agents install codex      # or pick specific harnesses
-hindsight-coding-agents uninstall          # removes exactly what install added
-```
-
-Install globally (not `npx`): the wiring points at this package's files, so it must live at a
-stable path — the installer refuses to run from an npx cache. **Updating** is just
-`npm update -g @vectorize-io/hindsight-coding-agents`: the wired paths stay valid, every new session runs the
-new version; re-run `install` (idempotent) only when a release note says the wiring changed.
-
-`install` merges the native wiring (hooks + MCP registration where the host wants them) into each
-agent's own config, preserving everything already there; it is idempotent (re-run after moving the
-package) and backs up any pre-existing file it touches as `<file>.hindsight-backup`. `uninstall`
-removes only our entries. On Claude Code the install also ships a **companion skill**
-(`~/.claude/skills/hindsight-coding-agent`) that teaches the agent how this memory works — what
-"store this in hindsight" should do, the tool surface, per-repo configuration, debugging — so users
-can ask the agent itself. Manual wiring per harness, if you prefer:
-
-**opencode** installs directly — point `opencode.json` at the package dir:
-
-```json
-{ "plugin": ["/path/to/hindsight-coding-agents"] }
-```
-
-**Claude Code** and **Codex** get their full three-hook + MCP wiring from this package's own
-installer — `hindsight-coding-agents install claude-code` / `install codex`. This package's `bin`
-entries (`hindsight-claude-hook`, `hindsight-codex-hook`,
-`hindsight-cursor-hook`) are the individual injection-only `UserPromptSubmit` entrypoints for a
-minimal, hand-wired setup.
-
-Adding an agent: hook-based → write a `HookSpec` entry point (see `src/cursor-hook.ts`) and register
-a `hookAdapter` in `src/harness/registry.ts`; persistent-plugin → implement `HarnessAdapter`
-(`src/core/types.ts`) fully (see `src/harness/opencode.ts`).
-
 ## Configuration
 
-All configuration is **ONE JSON file, no environment variables** (exception: `HINDSIGHT_DIAG_FILE`
-for the diagnostics path): `~/.hindsight/coding-agent.json`. Layering, later wins per field:
+Configuration is **one JSON file**: `~/.hindsight/coding-agent.json`. Layering, later wins per field:
 
 1. built-in defaults
-2. the file's top level
-3. its `harnesses.<name>` section — per-agent override
+2. environment variables — `HINDSIGHT_API_URL`, `HINDSIGHT_API_TOKEN`, and one per scalar setting
+   (`HINDSIGHT_<FIELD_IN_CAPS>`), for containers and CI that inject config rather than write a file
+3. the file's top level
+4. its `harnesses.<name>` section — per-agent override
+
+Environment variables are a **fallback**: the file wins wherever it sets a value, so adding env to
+an existing setup changes nothing. The map-valued settings (`mapPathToBank`, `harnesses`, `banks`)
+are file-only — nested branching doesn't survive flattening into one variable.
 
 There is deliberately no repo-carried config file — per-repo bank routing is `mapPathToBank`,
 per-agent differences are `harnesses.<name>`.
@@ -313,22 +353,3 @@ as a JSON line to `/tmp/hindsight-plugin.log` (override with `HINDSIGHT_DIAG_FIL
 `reflect_failed` / `pages_failed` record the error; if you're comparing memory-on vs memory-off,
 check this file — a run whose reflects failed is a no-memory run. Seed starts are logged as
 `seed_started`.
-
-## Layout
-
-```
-src/
-  core/          # harness-agnostic: config (layered), bank resolution, hindsight client, missions,
-                 # git + chat ingest, git-sync, seed + survey, pages-index (local section matching),
-                 # knowledge-injection, knowledge-tools, session-start, transcript readers,
-                 # hook runtime, RuntimeCore
-  harness/       # per-agent adapters + registry (opencode persistent; claude/codex/antigravity/cursor/copilot as hooks)
-  index.ts       # opencode plugin entrypoint
-  claude-hook.ts / claude-sessionstart-hook.ts / claude-stop-hook.ts   # Claude Code entrypoints
-  codex-hook.ts  / codex-sessionstart-hook.ts  / codex-stop-hook.ts    # Codex CLI entrypoints
-  antigravity-hook.ts / antigravity-stop-hook.ts # Antigravity CLI entrypoints
-  cursor-hook.ts # Cursor CLI hook entrypoint   (bin: hindsight-cursor-hook)
-  copilot-*.ts   # GitHub Copilot CLI SessionStart/prompt/agentStop entrypoints
-  mcp-server.ts  # hindsight_* knowledge/recall tools for the hook harnesses (MCP)
-  backfill.ts    # backfill CLI                  (bin: hindsight-coding-backfill)
-```

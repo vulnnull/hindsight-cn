@@ -94,7 +94,7 @@ name, or by one `mapPathToBank` prefix over their parent directory.
 ## Install / update (for setting up another machine or harness)
 
 ```bash
-npm install -g @vectorize-io/hindsight-coding-agents && hindsight-coding-agents install   # detects all agents
+npm install -g @vectorize-io/hindsight-coding-agents && hindsight-coding-agents install all   # every detected agent
 hindsight-coding-agents install codex        # or specific: opencode|claude-code|codex|antigravity-cli|cursor-cli
 hindsight-coding-agents uninstall            # removes exactly what install added
 npm update -g @vectorize-io/hindsight-coding-agents        # update; wired paths stay valid

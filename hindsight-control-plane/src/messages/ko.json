@@ -850,7 +850,10 @@
     "clearDialogConfirm": "지우기",
     "actionClearContent": "콘텐츠 지우기",
     "emptyContent": "아직 콘텐츠가 없습니다. 이 멘탈 모델을 새로 고쳐 콘텐츠를 생성하세요.",
-    "selectModelPrompt": "콘텐츠를 보려면 멘탈 모델을 선택하세요."
+    "selectModelPrompt": "콘텐츠를 보려면 멘탈 모델을 선택하세요.",
+    "optionsSectionTroubleshooting": "문제 해결",
+    "optionsKeepTraceLabel": "새로 고침 트레이스 보관",
+    "optionsKeepTraceDescription": "각 새로 고침이 어떻게 결과에 도달했는지 기록합니다(모드, 범위, 시간 범위, 검색된 사실과 사용된 사실, 델타 작업). 예약된 새로 고침을 사후에 진단할 수 있는 유일한 방법입니다."
   },
   "cronPreview": {
     "invalid": "잘못된 cron 표현식",
@@ -936,7 +939,8 @@
     "observationTextField": "텍스트",
     "observationTagsField": "태그",
     "observationSourceMemoriesField": "소스 메모리 ({count})",
-    "observationIdField": "ID"
+    "observationIdField": "ID",
+    "structuredOutputTitle": "구조화된 출력"
   },
   "searchDebug": {
     "noBankSelected": "선택된 뱅크 없음",
@@ -1458,7 +1462,13 @@
     "factTypeWorld": "세계",
     "factTypeExperience": "경험",
     "factTypeObservation": "관찰",
-    "actionClearContent": "콘텐츠 지우기"
+    "actionClearContent": "콘텐츠 지우기",
+    "structuredOutput": "구조화된 출력",
+    "responseSchemaTitle": "구조화된 출력 스키마",
+    "refreshTrace": "새로 고침 트레이스",
+    "traceNotCaptured": "이 새로 고침에 대한 트레이스가 기록되지 않았습니다. 모델 설정에서 ‘새로 고침 트레이스 보관’을 켜세요.",
+    "actionDryRun": "드라이런 실행",
+    "actionDryRunRunning": "드라이런 실행 중…"
   },
   "constellation": {
     "instructions": "스크롤하여 확대/축소 · 드래그하여 이동 · 호버하여 탐색 · 클릭하여 선택",
@@ -1656,7 +1666,8 @@
         "refresh": "멘탈 모델을 새로 고치지 못했습니다",
         "history": "멘탈 모델 기록을 가져오지 못했습니다",
         "notFound": "멘탈 모델을 찾을 수 없습니다",
-        "clear": "멘탈 모델을 지우지 못했습니다"
+        "clear": "멘탈 모델을 지우지 못했습니다",
+        "dryRunRefresh": "멘탈 모델 새로 고침 드라이런에 실패했습니다"
       },
       "observations": {
         "list": "관찰 목록을 가져오지 못했습니다",
@@ -1786,5 +1797,51 @@
     "pagesEmptyCta": "Create your first page",
     "recentDocsTitle": "Recent documents",
     "recentDocsEmpty": "No documents yet"
+  },
+  "schemaBuilder": {
+    "title": "구조화된 출력 스키마",
+    "subtitle": "필드를 시각적으로 추가하거나 원본 JSON을 편집하세요. 모델은 이 형태의 객체를 반환합니다.",
+    "visualTab": "비주얼",
+    "codeTab": "코드",
+    "addField": "필드 추가",
+    "namePlaceholder": "필드 이름",
+    "descriptionPlaceholder": "설명(선택 사항)",
+    "required": "필수",
+    "removeField": "필드 제거",
+    "emptyState": "출력을 정의하려면 필드를 하나 이상 추가하세요.",
+    "duplicateNames": "필드 이름은 고유해야 합니다.",
+    "visualUnavailable": "이 스키마는 비주얼 편집기에 너무 복잡합니다. 코드로 편집하세요.",
+    "invalidJson": "잘못된 JSON 구문입니다.",
+    "cancel": "취소",
+    "apply": "적용",
+    "openBuilder": "스키마 만들기",
+    "edit": "편집",
+    "clear": "스키마 제거",
+    "fieldsSummary": "{count}개 필드",
+    "invalidSchema": "잘못된 스키마입니다. 빌더를 열어 수정하세요.",
+    "fieldDescription": "설정하면 응답이 이 스키마에 맞는 structured_output으로도 반환됩니다.",
+    "itemsLabel": "각 항목"
+  },
+  "mentalModelDiagnostics": {
+    "fallbackNoBaseline": "편집할 기존 콘텐츠가 없음",
+    "fallbackQueryChanged": "소스 쿼리가 변경됨",
+    "fallbackDocUnreadable": "저장된 문서를 읽을 수 없음",
+    "fallbackOpsFailed": "델타 작업 호출이 실패함",
+    "outcomeWritten": "새 콘텐츠 기록됨",
+    "outcomePreserved": "새 사실 없음, 콘텐츠 유지",
+    "outcomeFailed": "결과가 비어 새로 고침 실패",
+    "warningsTitle": "경고",
+    "traceResults": "결과 {count}건",
+    "executionTraceTitle": "실행 추적",
+    "noOperations": "작업 없음",
+    "responseGenerated": "응답이 생성되었습니다",
+    "agentDecided": "에이전트가 결정했습니다",
+    "toolInputLabel": "입력:",
+    "executionTraceDescription": "LLM 호출 {iterations}회 • 총 {totalMs}ms",
+    "executingTools": "호출한 도구: {count}",
+    "resultTitle": "드라이런 — {name}",
+    "toolOutputLabel": "출력:",
+    "toolWindowBound": "범위: {time} 이후에 업데이트된 기억만",
+    "toolWindowUnbounded": "범위: 없음 — 이 도구는 시간으로 제한되지 않습니다"
   }
 }

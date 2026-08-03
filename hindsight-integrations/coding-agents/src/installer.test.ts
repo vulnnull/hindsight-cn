@@ -585,6 +585,48 @@ describe("run() CLI behavior", () => {
   });
 });
 
+/**
+ * `all` is an explicit target rather than the default for a bare command: wiring every detected
+ * agent rewrites a lot of a machine's config and should not happen by accident.
+ */
+describe("all vs named harnesses", () => {
+  it("`install all` wires every DETECTED agent", () => {
+    const ctx = makeCtx();
+    mkdirSync(join(ctx.home, ".claude"), { recursive: true });
+    mkdirSync(join(ctx.home, ".codex"), { recursive: true });
+    expect(run(["install", "all"], ctx)).toBe(0);
+    expect(existsSync(join(ctx.home, ".claude", "settings.json"))).toBe(true);
+    expect(existsSync(join(ctx.home, ".codex", "hooks.json"))).toBe(true);
+  });
+
+  it("a bare `install` changes NOTHING and explains the choice", () => {
+    const ctx = makeCtx();
+    const logs: string[] = [];
+    ctx.log = (m) => logs.push(m);
+    mkdirSync(join(ctx.home, ".claude"), { recursive: true });
+    expect(run(["install"], ctx)).toBe(1);
+    expect(existsSync(join(ctx.home, ".claude", "settings.json"))).toBe(false);
+    expect(logs.join("\n")).toContain("all");
+  });
+
+  it("a named harness wires only that one", () => {
+    const ctx = makeCtx();
+    mkdirSync(join(ctx.home, ".claude"), { recursive: true });
+    mkdirSync(join(ctx.home, ".codex"), { recursive: true });
+    run(["install", "claude-code"], ctx);
+    expect(existsSync(join(ctx.home, ".claude", "settings.json"))).toBe(true);
+    expect(existsSync(join(ctx.home, ".codex", "hooks.json"))).toBe(false);
+  });
+
+  it("`uninstall all` is accepted too, so the pair stays symmetric", () => {
+    const ctx = makeCtx();
+    mkdirSync(join(ctx.home, ".claude"), { recursive: true });
+    run(["install", "all"], ctx);
+    expect(run(["uninstall", "all"], ctx)).toBe(0);
+    expect(readJson(join(ctx.home, ".claude", "settings.json")).hooks).toBeUndefined();
+  });
+});
+
 describe("npx-cache guard", () => {
   it("refuses install when pkgRoot is inside an npx cache (wiring would die on eviction)", () => {
     const logs: string[] = [];
