@@ -287,6 +287,13 @@ const claudeCode: HarnessInstaller = {
     // codex via the ~/.agents/skills standard).
     installSkill(c, join(c.home, ".claude", "skills"));
     const mcp = c.claudeMcp ?? defaultClaudeMcp;
+    // `claude mcp add` REFUSES when the name is taken ("MCP server hindsight already exists in
+    // user config") — so on a machine that already had Hindsight, a re-install could never
+    // repoint the server. After the package moved, the stale registration survived and Claude
+    // Code reported "Failed to connect — Connection closed" with the hindsight_* tools dead.
+    // Remove first (a no-op when absent) so the add always lands, matching how every other host
+    // wiring is replaced rather than skipped.
+    mcp(["mcp", "remove", "--scope", "user", "hindsight"]);
     if (
       mcp([
         "mcp",
@@ -410,6 +417,14 @@ const antigravity: HarnessInstaller = {
     const hooks = readJson(hooksPath);
     // Antigravity's hooks.json is a map of named customizations, not a direct event map. Keep
     // Hindsight in its own namespace so it cannot collide with other global hook bundles.
+    // Drop any namespace we wrote under a PREVIOUS marker value. This file is keyed BY the marker,
+    // so unlike every other host — where entries are matched by substring — a changed marker
+    // orphans the old namespace instead of replacing it, leaving both registered and every hook
+    // firing twice. Match on our own name rather than an exact string so past and future renames
+    // are both cleaned up.
+    for (const key of Object.keys(hooks)) {
+      if (key !== MARKER && key.includes(MARKER)) delete hooks[key];
+    }
     hooks[MARKER] = hooks[MARKER] ?? {};
     mergeHarnessHooks(hooks[MARKER], "antigravity-cli", c.dist);
     // Clean up the short-lived root-level shape written by the first Antigravity adapter release.

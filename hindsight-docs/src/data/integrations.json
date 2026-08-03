@@ -621,16 +621,6 @@
       "icon": "/img/icons/epimetheus.png"
     },
     {
-      "id": "coding-agents",
-      "name": "Coding Agents",
-      "description": "One memory plugin for coding agents: per-repo banks from git history and past conversations, injected into opencode, Claude Code, Codex CLI, and Cursor CLI.",
-      "type": "official",
-      "by": "hindsight",
-      "category": "tool",
-      "link": "/sdks/integrations/coding-agents",
-      "icon": "/img/icons/github.png"
-    },
-    {
       "id": "tealtiger",
       "name": "TealTiger",
       "description": "Governance-aware agent memory \u2014 importance-weighted storage of AI agent governance decisions. Critical denials persist for compliance; routine approvals decay naturally.",

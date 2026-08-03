@@ -167,10 +167,90 @@ function applyLayer(raw: RawConfig, layer: RawConfig, harness?: string): RawConf
   return out;
 }
 
-/** Load + resolve config from THE config file. Missing file -> silent defaults. */
+/**
+ * Env var backing each scalar setting: `HINDSIGHT_` + the field in SCREAMING_SNAKE.
+ *
+ * These are a FALLBACK, not an override — the config file still wins wherever it sets a value, so
+ * an existing file behaves exactly as before. They exist for the places a file is awkward:
+ * containers, CI, and secret managers that inject `HINDSIGHT_API_TOKEN` rather than writing a
+ * credential to disk.
+ *
+ * The map-valued settings (mapPathToBank, harnesses, banks) are deliberately absent: they are
+ * nested structures whose whole point is per-repo/per-harness branching, which does not survive
+ * flattening into one env var. They stay file-only.
+ */
+const ENV_KEYS = {
+  apiUrl: "HINDSIGHT_API_URL",
+  apiToken: "HINDSIGHT_API_TOKEN",
+  bankId: "HINDSIGHT_BANK_ID",
+  dynamicBankId: "HINDSIGHT_DYNAMIC_BANK_ID",
+  bankIdTemplate: "HINDSIGHT_BANK_ID_TEMPLATE",
+  resolveWorktrees: "HINDSIGHT_RESOLVE_WORKTREES",
+  harness: "HINDSIGHT_HARNESS",
+  disabled: "HINDSIGHT_DISABLED",
+  retainSessions: "HINDSIGHT_RETAIN_SESSIONS",
+  retainEveryTurns: "HINDSIGHT_RETAIN_EVERY_TURNS",
+  reflectTimeoutMs: "HINDSIGHT_REFLECT_TIMEOUT_MS",
+  autoReflect: "HINDSIGHT_AUTO_REFLECT",
+  pageRefreshEveryTurns: "HINDSIGHT_PAGE_REFRESH_EVERY_TURNS",
+  autoSeed: "HINDSIGHT_AUTO_SEED",
+  seedLimit: "HINDSIGHT_SEED_LIMIT",
+  codebaseSurvey: "HINDSIGHT_CODEBASE_SURVEY",
+  surveyModel: "HINDSIGHT_SURVEY_MODEL",
+  surveyBudgetUsd: "HINDSIGHT_SURVEY_BUDGET_USD",
+  surveyRefreshCommits: "HINDSIGHT_SURVEY_REFRESH_COMMITS",
+  logLevel: "HINDSIGHT_LOG_LEVEL",
+  gitIngest: "HINDSIGHT_GIT_INGEST",
+} as const satisfies Partial<Record<keyof RawConfig, string>>;
+
+/** Fields parsed as booleans/numbers; everything else is taken as a string. */
+const ENV_BOOLEANS = new Set<keyof RawConfig>([
+  "dynamicBankId",
+  "resolveWorktrees",
+  "disabled",
+  "retainSessions",
+  "autoReflect",
+  "autoSeed",
+  "codebaseSurvey",
+]);
+const ENV_NUMBERS = new Set<keyof RawConfig>([
+  "retainEveryTurns",
+  "reflectTimeoutMs",
+  "pageRefreshEveryTurns",
+  "seedLimit",
+  "surveyBudgetUsd",
+  "surveyRefreshCommits",
+]);
+
+/**
+ * Read the env fallback layer. An unset or empty var contributes nothing (so it can't mask a file
+ * value), and a malformed number is ignored with a warning rather than silently becoming NaN —
+ * which would otherwise disable a timeout or cadence in a way that is very hard to trace.
+ */
+export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): RawConfig {
+  const out: Record<string, unknown> = {};
+  for (const [key, name] of Object.entries(ENV_KEYS) as [keyof RawConfig, string][]) {
+    const value = env[name];
+    if (value === undefined || value.trim() === "") continue;
+    if (ENV_BOOLEANS.has(key)) {
+      out[key] = ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+    } else if (ENV_NUMBERS.has(key)) {
+      const n = Number(value);
+      if (Number.isFinite(n)) out[key] = n;
+      else console.error(`hindsight: ignoring ${name}=${value} — not a number`);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out as RawConfig;
+}
+
+/** Load + resolve config from THE config file, with env as a fallback. Missing file -> defaults. */
 export function loadConfig(opts: LoadOptions | string = {}): Config {
   const o: LoadOptions = typeof opts === "string" ? { path: opts } : opts; // legacy: loadConfig(path)
-  return resolveConfig(applyLayer({}, readRaw(o.path ?? CONFIG_PATH), o.harness));
+  // Env first so the FILE wins on any field it sets.
+  const withEnv = applyLayer({}, readEnvConfig(), o.harness);
+  return resolveConfig(applyLayer(withEnv, readRaw(o.path ?? CONFIG_PATH), o.harness));
 }
 
 /** Bank-resolution fields are meaningless inside a `banks.<id>` section (they can't change the id

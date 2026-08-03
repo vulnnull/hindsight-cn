@@ -1,6 +1,11 @@
 {
   "name": "@vectorize-io/hindsight-coding-agents",
-  "version": "0.1.0",
+  "version": "0.0.2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vectorize-io/hindsight.git",
+    "directory": "hindsight-integrations/coding-agents"
+  },
   "description": "Reflect-only Hindsight long-term memory for coding agents (harness-pluggable: opencode, …), with automatic background ingestion (no setup CLI).",
   "type": "module",
   "main": "dist/index.js",

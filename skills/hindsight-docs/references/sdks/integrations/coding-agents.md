@@ -68,12 +68,12 @@ One-command install (detects the coding agents on the machine, wires each native
 idempotent, with `uninstall` removing exactly what it added):
 
 ```bash
-npm install -g hindsight-coding-agents && hindsight-coding-agents install
+npm install -g @vectorize-io/hindsight-coding-agents && hindsight-coding-agents install
 ```
 
 On Claude Code the install also ships a companion skill (`hindsight-coding-agent`) so the agent
 answers "how does this memory work / store this in hindsight / configure per-repo memory" from an
-authoritative reference. Update with `npm update -g hindsight-coding-agents` — wired paths stay valid; re-run `install`
+authoritative reference. Update with `npm update -g @vectorize-io/hindsight-coding-agents` — wired paths stay valid; re-run `install`
 (idempotent) only when a release notes a wiring change.
 
 Antigravity's status line is a local formatter that identifies the resolved Hindsight bank without

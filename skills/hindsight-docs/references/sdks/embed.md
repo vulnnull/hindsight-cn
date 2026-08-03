@@ -170,6 +170,16 @@ hindsight-embed daemon logs -f
 hindsight-embed daemon stop
 ```
 
+### Reclaiming Disk Space
+
+When the daemon is launched with `uvx` (the default for the npm package and the editor plugins), every Hindsight version it has run keeps its own cached Python environment — around 1.5 GB each — and these are not removed automatically. If disk space gets tight, stop the daemon before clearing the cache: unused entries can only be reclaimed while no daemon is running.
+
+```bash
+hindsight-embed daemon stop
+uv cache prune
+hindsight-embed daemon status   # starts fresh on the current version
+```
+
 ### Control Center Commands
 
 ```bash

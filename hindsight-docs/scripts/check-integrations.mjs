@@ -33,7 +33,11 @@ const integrationsDocsDir = join(docsDir, 'docs-integrations');
 // Released integrations that intentionally have no gallery/doc page.
 // cloudflare-oauth-proxy is internal infrastructure (an OAuth proxy Worker,
 // `"private": true`), not a user-facing framework integration.
-const EXCLUDED = new Set(['cloudflare-oauth-proxy']);
+// coding-agents is released but deliberately unlisted for now: the package ships
+// so it can be installed and tested end to end, while its page stays out of the
+// gallery and sidebar until it is announced. Remove from this set (and restore
+// its integrations.json entry + drop `unlisted` from the doc page) to publish it.
+const EXCLUDED = new Set(['cloudflare-oauth-proxy', 'coding-agents']);
 
 const { integrations } = JSON.parse(readFileSync(integrationsJson, 'utf8'));
 const internal = integrations.filter((entry) => entry.link.startsWith('/sdks/integrations/'));

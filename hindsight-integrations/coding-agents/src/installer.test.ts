@@ -85,6 +85,19 @@ describe("claude-code installer", () => {
     }
   });
 
+  it("removes before adding so an existing registration is REPOINTED, not skipped", () => {
+    const ctx = makeCtx();
+    run(["install", "claude-code"], ctx);
+    const calls = ctx.claudeMcp.mock.calls.map((c) => c[0]);
+    const removeAt = calls.findIndex((a) => a[1] === "remove");
+    const addAt = calls.findIndex((a) => a[1] === "add");
+    // `claude mcp add` refuses a name that already exists, so without the remove a re-install
+    // silently leaves a stale (possibly dead) server path registered.
+    expect(removeAt).toBeGreaterThanOrEqual(0);
+    expect(removeAt).toBeLessThan(addAt);
+    expect(calls[removeAt]).toEqual(["mcp", "remove", "--scope", "user", "hindsight"]);
+  });
+
   it("registers the MCP server via `claude mcp add` (user scope)", () => {
     const ctx = makeCtx();
     run(["install", "claude-code"], ctx);
@@ -230,6 +243,27 @@ describe("cline-cli installer", () => {
 });
 
 describe("antigravity-cli installer", () => {
+  it("removes a namespace written under a PREVIOUS marker instead of leaving both live", () => {
+    const ctx = makeCtx();
+    const hooksPath = join(ctx.home, ".gemini", "config", "hooks.json");
+    // Exactly what a marker rename produced: our old namespace, still pointing at a stale path.
+    writeJsonAt(hooksPath, {
+      "hindsight-coding-agents": {
+        PreInvocation: [{ command: 'node "/old/path/coding-agents/dist/antigravity-hook.js"' }],
+      },
+      "someone-elses-bundle": { PreInvocation: [{ command: "echo other" }] },
+    });
+    run(["install", "antigravity-cli"], ctx);
+
+    const hooks = readJson(hooksPath);
+    // The stale namespace is gone — otherwise Antigravity fires every hook twice.
+    expect(hooks["hindsight-coding-agents"]).toBeUndefined();
+    expect(hooks[MARKER]).toBeDefined();
+    expect(JSON.stringify(hooks)).not.toContain("/old/path/");
+    // An unrelated bundle is untouched.
+    expect(hooks["someone-elses-bundle"]).toBeDefined();
+  });
+
   const hooksPath = (ctx: InstallCtx) => join(ctx.home, ".gemini", "config", "hooks.json");
   const mcpPath = (ctx: InstallCtx) => join(ctx.home, ".gemini", "config", "mcp_config.json");
   const settingsPath = (ctx: InstallCtx) =>

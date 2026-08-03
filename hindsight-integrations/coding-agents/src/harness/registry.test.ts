@@ -13,9 +13,11 @@ describe("HARNESS_NAMES", () => {
         "codex",
         "antigravity-cli",
         "devin-cli",
+        "copilot-cli",
+        "grok-build",
       ])
     );
-    expect(HARNESS_NAMES).toHaveLength(8);
+    expect(HARNESS_NAMES).toHaveLength(10);
   });
 });
 
@@ -48,5 +50,19 @@ describe("getHarness", () => {
 
   it("rejects unknown harness names", async () => {
     await expect(getHarness("nope")).rejects.toThrow(/unknown harness/);
+  });
+});
+
+/**
+ * The registry and the installer are separate lists that must agree: `deepen` resolves a harness
+ * through the registry, so an installer the registry doesn't know throws "unknown harness" and the
+ * background git-diff enrichment dies. That is exactly how grok-build and copilot-cli shipped
+ * broken in 0.0.1 — installable, but unusable by deepen.
+ */
+describe("registry covers every installable harness", () => {
+  it("has no harness the installer wires but the registry rejects", async () => {
+    const { INSTALLERS } = await import("../installer");
+    const missing = INSTALLERS.map((i) => i.name).filter((n) => !HARNESS_NAMES.includes(n));
+    expect(missing).toEqual([]);
   });
 });

@@ -143,3 +143,61 @@ describe("banks.<id>.bank — rename inside the banks tree", () => {
     expect(r.cfg.disabled).toBe(false);
   });
 });
+
+/**
+ * Env vars are a FALLBACK beneath the config file — for containers, CI and secret managers that
+ * inject a token rather than writing a credential to disk. The file must keep winning wherever it
+ * sets a value, or an existing setup would change behaviour just by having env present.
+ */
+describe("environment fallback", () => {
+  const ENV = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ENV };
+  });
+
+  it("supplies apiUrl and apiToken when the file omits them", () => {
+    writeJson(globalCfg, { bankId: "b" }); // no apiUrl/apiToken
+    process.env.HINDSIGHT_API_URL = "http://localhost:8888";
+    process.env.HINDSIGHT_API_TOKEN = "tok-from-env";
+    const cfg = loadConfig({ path: globalCfg });
+    expect(cfg.apiUrl).toBe("http://localhost:8888");
+    expect(cfg.apiToken).toBe("tok-from-env");
+  });
+
+  it("the FILE wins over env — env is a fallback, not an override", () => {
+    writeJson(globalCfg, { apiUrl: "https://from-file", apiToken: "tok-from-file" });
+    process.env.HINDSIGHT_API_URL = "https://from-env";
+    process.env.HINDSIGHT_API_TOKEN = "tok-from-env";
+    const cfg = loadConfig({ path: globalCfg });
+    expect(cfg.apiUrl).toBe("https://from-file");
+    expect(cfg.apiToken).toBe("tok-from-file");
+  });
+
+  it("parses booleans and numbers rather than passing strings through", () => {
+    writeJson(globalCfg, {});
+    process.env.HINDSIGHT_AUTO_REFLECT = "false";
+    process.env.HINDSIGHT_DISABLED = "1";
+    process.env.HINDSIGHT_RETAIN_EVERY_TURNS = "5";
+    const cfg = loadConfig({ path: globalCfg });
+    expect(cfg.autoReflect).toBe(false);
+    expect(cfg.disabled).toBe(true);
+    expect(cfg.retainEveryTurns).toBe(5);
+  });
+
+  it("ignores a malformed number instead of resolving it to NaN", () => {
+    writeJson(globalCfg, {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    process.env.HINDSIGHT_REFLECT_TIMEOUT_MS = "soon";
+    // NaN here would silently break the reflect timeout in a way that is very hard to trace.
+    expect(loadConfig({ path: globalCfg }).reflectTimeoutMs).toBe(120000);
+  });
+
+  it("an empty env var does not mask the file or the default", () => {
+    writeJson(globalCfg, { apiUrl: "https://from-file" });
+    process.env.HINDSIGHT_API_URL = "";
+    process.env.HINDSIGHT_SURVEY_MODEL = "   ";
+    const cfg = loadConfig({ path: globalCfg });
+    expect(cfg.apiUrl).toBe("https://from-file");
+    expect(cfg.surveyModel).toBe("haiku");
+  });
+});

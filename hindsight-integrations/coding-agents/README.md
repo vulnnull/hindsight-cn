@@ -111,7 +111,7 @@ Cline IDE extensions are not currently supported by this CLI integration.
 ### Install — one command, every agent
 
 ```bash
-npm install -g hindsight-coding-agents
+npm install -g @vectorize-io/hindsight-coding-agents
 hindsight-coding-agents install            # detects your agents, wires each natively
 hindsight-coding-agents install codex      # or pick specific harnesses
 hindsight-coding-agents uninstall          # removes exactly what install added
@@ -119,7 +119,7 @@ hindsight-coding-agents uninstall          # removes exactly what install added
 
 Install globally (not `npx`): the wiring points at this package's files, so it must live at a
 stable path — the installer refuses to run from an npx cache. **Updating** is just
-`npm update -g hindsight-coding-agents`: the wired paths stay valid, every new session runs the
+`npm update -g @vectorize-io/hindsight-coding-agents`: the wired paths stay valid, every new session runs the
 new version; re-run `install` (idempotent) only when a release note says the wiring changed.
 
 `install` merges the native wiring (hooks + MCP registration where the host wants them) into each
