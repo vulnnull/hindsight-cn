@@ -11,7 +11,7 @@ import uuid
 import pytest
 
 from hindsight_api.config import HindsightConfig, normalize_config_dict, normalize_config_key
-from hindsight_api.config_resolver import ConfigResolver
+from hindsight_api.config_resolver import BankConfigPersistenceConflictError, ConfigResolver
 from hindsight_api.extensions.tenant import TenantExtension
 from hindsight_api.models import RequestContext
 
@@ -613,7 +613,7 @@ async def test_update_bank_config_rejects_missing_bank(memory, request_context):
     bank_id = f"test-resolver-missing-bank-{uuid.uuid4().hex[:8]}"
     resolver = ConfigResolver(backend=memory._backend)
 
-    with pytest.raises(ValueError, match="does not exist"):
+    with pytest.raises(BankConfigPersistenceConflictError, match="does not exist"):
         await resolver.update_bank_config(bank_id, {"enable_observations": False}, request_context)
 
     profile = await memory.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False)

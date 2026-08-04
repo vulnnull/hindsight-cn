@@ -900,8 +900,8 @@ async def test_transfer_preserves_legacy_causal_links(memory, request_context):
         async with acquire_with_retry(backend) as conn:
             await conn.executemany(
                 f"INSERT INTO {fq_table('memory_links')} "
-                "(from_unit_id, to_unit_id, link_type, entity_id, bank_id, weight) "
-                "VALUES ($1, $2, $3, NULL, $4, 1.0)",
+                "(from_unit_id, to_unit_id, link_type, bank_id, weight) "
+                "VALUES ($1, $2, $3, $4, 1.0)",
                 [(from_unit_id, to_unit_id, link_type, src) for link_type in legacy_types],
             )
 

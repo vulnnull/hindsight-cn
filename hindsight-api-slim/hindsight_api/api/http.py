@@ -54,6 +54,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from hindsight_api import MemoryEngine
 from hindsight_api.config import RETAIN_EXTRACTION_MODES
+from hindsight_api.config_resolver import BankConfigPersistenceConflictError
 
 
 def _annotation_is_nullable(annotation: Any) -> bool:
@@ -620,7 +621,11 @@ class MemoryItem(BaseModel):
     )
     context: str | None = None
     metadata: dict[str, str] | None = None
-    document_id: str | None = Field(default=None, description="Optional document ID for this memory item.")
+    document_id: str | None = Field(
+        default=None,
+        description="Optional document ID for this memory item. Provide a distinct document_id per source "
+        "document — items sharing a document_id are grouped into the same document. Auto-generated when omitted.",
+    )
     entities: list[EntityInput] | None = Field(
         default=None,
         description="Optional entities to combine with auto-extracted entities.",
@@ -1891,6 +1896,7 @@ class BankStatsResponse(BaseModel):
                 "pending_operations": 2,
                 "failed_operations": 0,
                 "last_consolidated_at": "2024-01-15T10:30:00Z",
+                "last_memory_write_at": "2024-01-15T11:05:00Z",
                 "pending_consolidation": 0,
                 "failed_consolidation": 0,
                 "total_observations": 45,
@@ -1914,6 +1920,15 @@ class BankStatsResponse(BaseModel):
     )
     # Consolidation stats
     last_consolidated_at: str | None = Field(default=None, description="When consolidation last ran (ISO format)")
+    last_memory_write_at: str | None = Field(
+        default=None,
+        description=(
+            "When a memory was last written in this bank — stored, edited, or consolidated (ISO format). "
+            "Null if the bank has no memories. A mental model whose `last_refreshed_at` is at or after this "
+            "is up to date whatever its tags; an older one may need a refresh, which only the single "
+            "mental-model read can confirm."
+        ),
+    )
     pending_consolidation: int = Field(default=0, description="Number of memories not yet processed into observations")
     failed_consolidation: int = Field(
         default=0,
@@ -2211,9 +2226,11 @@ class MentalModelResponse(BaseModel):
     is_stale: bool | None = Field(
         default=None,
         description=(
-            "True when new memories matching this mental model's tag/fact_type scope have been "
-            "ingested since last_refreshed_at, or consolidation has pending items. Only populated "
-            "when detail=full."
+            "True when memories matching this mental model's tag/fact_type scope have been written "
+            "since last_refreshed_at. Exact, and costly to compute, so it is populated only by the "
+            "single mental-model read at detail=full — never when listing. For a whole list, compare "
+            "each `last_refreshed_at` against the bank's `last_memory_write_at` from GET /stats: "
+            "at or after it means up to date, older means it may need a refresh."
         ),
     )
 
@@ -2248,8 +2265,10 @@ class KnowledgeNode(BaseModel):
     timestamp: str | None = Field(default=None, description="Last refresh (page) or last update (folder).")
     is_stale: bool | None = Field(
         default=None,
-        description="Pages only: true when memories in scope are newer than the last refresh (out of sync). "
-        "Populated by the tree endpoint.",
+        description="Pages only, populated by the tree endpoint. False means the page is up to date — nothing "
+        "in the bank has been written since its last refresh. True means it *may* need a refresh: something "
+        "was written, but possibly outside the page's tags. Read the page's mental model for the exact answer. "
+        "Shares the bank-stats freshness, so it can lag a just-written memory by up to a minute.",
     )
     children: list["KnowledgeNode"] = FieldWithDefault(list)
 
@@ -4747,6 +4766,8 @@ def _register_routes(app: FastAPI):
                 failed_operations=ops.get("failed", 0),
                 operations_by_status=ops,
                 last_consolidated_at=stats["last_consolidated_at"],
+                # .get(): a row cached by an older build has no watermark key.
+                last_memory_write_at=stats.get("last_memory_write_at"),
                 pending_consolidation=stats["pending_consolidation"],
                 failed_consolidation=stats.get("failed_consolidation", 0),
                 total_observations=stats["total_observations"],
@@ -6795,6 +6816,11 @@ def _register_routes(app: FastAPI):
                 bank_id=bank_id,
                 manifest=body,
                 request_context=request_context,
+            )
+        except BankConfigPersistenceConflictError as e:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Bank '{e.bank_id}' changed or was deleted during template import; retry the import.",
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))

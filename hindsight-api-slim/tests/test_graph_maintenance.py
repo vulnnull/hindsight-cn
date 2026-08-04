@@ -191,24 +191,10 @@ class TestEnqueueRelinkVictims:
             assert count == 0
             assert await _queue_unit_ids(conn, bank_id) == []
 
-    @pytest.mark.asyncio
-    async def test_skips_entity_links(self, memory: MemoryEngine, request_context: RequestContext):
-        """Entity links are being removed from the product — we don't enqueue for them."""
-        bank_id = f"test-gm-ent-{uuid.uuid4().hex[:8]}"
-        await _ensure_bank(memory, bank_id, request_context)
-
-        pool = await memory._get_pool()
-        async with pool.acquire() as conn:
-            doomed = await _insert_unit(conn, bank_id, "doomed")
-            survivor = await _insert_unit(conn, bank_id, "survivor")
-            # Only an entity link — should NOT trigger enqueue.
-            await _insert_link(conn, bank_id, survivor, doomed, "entity")
-
-            backend = await memory._get_backend()
-            async with conn.transaction():
-                count = await enqueue_relink_victims(conn, bank_id, [str(doomed)])
-
-            assert count == 0
+    # Entity links used to be skipped here by the ``link_type IN ('temporal',
+    # 'semantic')`` filter; they can no longer be stored in memory_links at all
+    # (the CHECK constraint rejects link_type = 'entity'), so there is nothing
+    # left to construct a "skips entity links" scenario from.
 
     @pytest.mark.asyncio
     async def test_dedupes_via_on_conflict(self, memory: MemoryEngine, request_context: RequestContext):

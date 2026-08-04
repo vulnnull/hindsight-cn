@@ -574,6 +574,7 @@ server-level only (not overridable per tenant/bank) and a change requires a rest
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_EMBEDDINGS_PROVIDER` | Provider: `local`, `onnx`, `tei`, `openai`, `openai-codex`, `openrouter`, `requesty`, `cohere`, `google`, `zeroentropy`, `litellm`, or `litellm-sdk` | `local` |
+| `HINDSIGHT_API_EMBEDDINGS_MAX_INPUT_TOKENS` | Applies to **every** provider. If set, truncate each text to this many tokens (tiktoken `cl100k_base`, approximate) before embedding. Set it to the model's real input limit (e.g. `8192` for Bedrock Titan V2, or a llama.cpp server's context, with a little headroom) so oversized content is truncated instead of failing the embed call permanently. Off by default. (Deprecated alias: `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MAX_INPUT_TOKENS`.) | - |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL` | Model for local provider | `BAAI/bge-small-en-v1.5` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE` | Allow loading models with custom code (security risk, disabled by default) | `false` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU` | Force CPU mode for local embeddings (avoids MPS/XPC issues on macOS) | `false` |
@@ -618,7 +619,6 @@ server-level only (not overridable per tenant/bank) and a change requires a rest
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_BASE` | Custom base URL for LiteLLM SDK embeddings (optional) | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_OUTPUT_DIMENSIONS` | Optional output embedding dimensions (provider-dependent, e.g., `768` for Gemini embedding models) | - |
 | `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_ENCODING_FORMAT` | Encoding format for embedding responses. Set to empty string to omit the parameter (needed for Voyage AI, Gemini). | `float` |
-| `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MAX_INPUT_TOKENS` | If set, truncate each text to this many tokens (tiktoken `cl100k_base`, approximate) before embedding. Set it to the model's real input limit (e.g. `8192` for Bedrock Titan V2, with a little headroom) so oversized content is truncated instead of failing the embed call permanently. Off by default. | - |
 | `HINDSIGHT_API_EMBEDDINGS_GEMINI_API_KEY` | Gemini API key for embeddings (falls back to `HINDSIGHT_API_LLM_API_KEY`) | - |
 | `HINDSIGHT_API_EMBEDDINGS_GEMINI_MODEL` | Gemini embedding model. The `gemini-embedding-2` family (e.g. `gemini-embedding-2-preview`) is supported on both the Gemini API and Vertex AI — because these multimodal models aggregate a multi-input request into one embedding, Hindsight automatically embeds one input per call to keep per-fact vectors. | `gemini-embedding-001` |
 | `HINDSIGHT_API_EMBEDDINGS_GEMINI_OUTPUT_DIMENSIONALITY` | Output embedding dimensions (Gemini supports configurable dimensionality) | `768` |
@@ -835,8 +835,9 @@ export HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_API_KEY=your-provider-api-key
 export HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MODEL=cohere/embed-english-v3.0
 # Optional: request a specific output dimension when the provider supports it
 # export HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_OUTPUT_DIMENSIONS=768
-# Optional: truncate oversized inputs to the model's input-token limit (e.g. Bedrock Titan V2)
-# export HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_MAX_INPUT_TOKENS=8192
+# Optional (any provider): truncate oversized inputs to the model's input-token limit
+# (e.g. Bedrock Titan V2, or a llama.cpp server's context)
+# export HINDSIGHT_API_EMBEDDINGS_MAX_INPUT_TOKENS=8192
 
 # Supported LiteLLM SDK embedding providers:
 # - cohere/embed-english-v3.0 (1024 dimensions)
@@ -924,6 +925,61 @@ ZeroEntropy's `zembed-1` supports Matryoshka dimensions: `2560`, `1280`, `640`, 
 | `HINDSIGHT_API_RERANKER_FLASHRANK_CACHE_DIR` | Cache directory for FlashRank models | System default |
 | `HINDSIGHT_API_RERANKER_FLASHRANK_CPU_MEM_ARENA` | Enable ONNX Runtime CPU memory arena for FlashRank. When `true`, ONNX pre-allocates a memory arena that never shrinks, causing RSS to grow monotonically. `false` trades slightly slower per-call allocation for bounded RSS. | `false` |
 | `HINDSIGHT_API_RERANKER_JINA_MLX_MODEL_PATH` | Local path to downloaded `jina-reranker-v3-mlx` model (auto-downloads from HuggingFace if unset) | - |
+
+#### Reranker failover chain
+
+Reranking is a refinement stage, but by default a reranker that is unreachable takes
+recall down with it. Configure extra rerankers **by index** and Hindsight tries them
+in order: if a member fails (timeout, connection error, HTTP error, or an unusable
+response), the next one serves the request.
+
+The unindexed `HINDSIGHT_API_RERANKER_*` config is the **primary** (member 0). Extra
+members are numbered from 1, and every setting of member `n` carries the same index —
+`HINDSIGHT_API_RERANKER_<n>_<SETTING>` for any `<SETTING>` in the table above:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_RERANKER_<n>_PROVIDER` | Provider for fallback member `n` (`n` = 1, 2, ...). Presence of this var defines the member; indices must be contiguous from 1. Unset = no fallback (default). | - |
+| `HINDSIGHT_API_RERANKER_<n>_<SETTING>` | Any other reranker setting, for member `n` — e.g. `HINDSIGHT_API_RERANKER_1_TEI_URL`, `HINDSIGHT_API_RERANKER_1_COHERE_API_KEY`, `HINDSIGHT_API_RERANKER_1_TEI_HTTP_TIMEOUT`. | Same built-in default as the primary |
+
+An indexed member is read **in isolation**: it inherits nothing from the primary and
+nothing from the shared provider keys (`HINDSIGHT_API_COHERE_API_KEY` and friends), so
+spell out every setting it needs with its own index. Unset settings fall back to the
+same built-in defaults the primary uses. Chain-level settings
+(`HINDSIGHT_API_RERANKER_MAX_CANDIDATES`, `HINDSIGHT_API_RERANKER_SEND_BANK_AS_HEADER`)
+stay global and are not indexed.
+
+```bash
+# Primary: a self-hosted reranker that is not always up.
+export HINDSIGHT_API_RERANKER_PROVIDER=tei
+export HINDSIGHT_API_RERANKER_TEI_URL=http://workstation:8081
+
+# Member 1: a hosted reranker to fall back on.
+export HINDSIGHT_API_RERANKER_1_PROVIDER=cohere
+export HINDSIGHT_API_RERANKER_1_COHERE_API_KEY=...
+
+# Member 2: last resort — no reranking, keep the fusion order rather than fail.
+export HINDSIGHT_API_RERANKER_2_PROVIDER=rrf
+```
+
+Ending the chain with `rrf` makes recall **fail open**: results come back in the order
+the retrieval stages produced, exactly as if no reranker were configured, instead of
+the request failing. Without an `rrf` member (or with every member down) the error still
+surfaces, which is the default behaviour.
+
+Notes:
+
+- Members are tried in order on every request; there is no circuit breaker, so a member
+  that is down costs its own timeout on each request before the next one is tried. Keep
+  the timeouts of an unreliable primary short (`HINDSIGHT_API_RERANKER_TEI_HTTP_TIMEOUT`
+  and the per-provider `*_TIMEOUT` settings).
+- A member that fails to initialize at startup is logged, not fatal — it is retried on
+  the next request that reaches it.
+- Scores are not comparable across providers (some return calibrated `[0, 1]` relevance,
+  others logits), so a request served by a fallback member can score differently from one
+  served by the primary. Failovers are logged at `WARNING`.
+- The indexed members are credential fields — never returned by the bank-config API, and
+  server-level only (not per-bank configurable).
 
 :::tip Sizing a TEI reranker
 

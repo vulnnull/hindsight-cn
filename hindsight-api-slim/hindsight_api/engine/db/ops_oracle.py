@@ -142,7 +142,6 @@ class OracleOps(DataAccessOps):
         table: str,
         sorted_links: list[tuple],
         bank_id: str,
-        nil_entity_uuid: str,
         exists_clause: str,
         chunk_size: int = 5000,
     ) -> None:
@@ -153,18 +152,16 @@ class OracleOps(DataAccessOps):
         to_ids = [lnk[1] for lnk in sorted_links]
         types = [lnk[2] for lnk in sorted_links]
         weights = [lnk[3] for lnk in sorted_links]
-        entity_ids = [lnk[4] for lnk in sorted_links]
 
         await conn.executemany(
             f"""
             INSERT INTO {table}
-                (from_unit_id, to_unit_id, link_type, weight, entity_id, bank_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (from_unit_id, to_unit_id, link_type,
-                         COALESCE(entity_id, '{nil_entity_uuid}'::uuid))
+                (from_unit_id, to_unit_id, link_type, weight, bank_id)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (from_unit_id, to_unit_id, link_type)
             DO NOTHING
             """,
-            [(from_ids[i], to_ids[i], types[i], weights[i], entity_ids[i], bank_id) for i in range(len(sorted_links))],
+            [(from_ids[i], to_ids[i], types[i], weights[i], bank_id) for i in range(len(sorted_links))],
         )
 
     async def bulk_insert_entities(
