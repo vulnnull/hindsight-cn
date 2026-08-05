@@ -241,11 +241,38 @@ class LocalSTEmbeddings(Embeddings):
         Returns:
             List of embedding vectors
         """
+        return self._encode_local(texts)
+
+    def encode_query(self, texts: list[str]) -> list[list[float]]:
+        return self._encode_local(texts, input_type="query")
+
+    def encode_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._encode_local(texts, input_type="document")
+
+    def _encode_local(
+        self, texts: list[str], input_type: Literal["query", "document"] | None = None
+    ) -> list[list[float]]:
         if self._model is None:
             raise RuntimeError("Embeddings not initialized. Call initialize() first.")
 
         try:
-            embeddings = self._model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+            # Delegate to SentenceTransformers' own asymmetric entry points rather than
+            # prefixing here: they apply whatever prompts the model ships with (and route
+            # the task for models exposing a Router module), so asymmetric models such as
+            # Qwen3-Embedding get their configured query prompt without Hindsight carrying
+            # per-model prefix config the way the ONNX provider has to. Models that declare
+            # no prompts are unaffected — SentenceTransformers defaults them to empty
+            # strings and skips prompt handling entirely, so this is byte-identical to
+            # encode() for e.g. the default BAAI/bge-small-en-v1.5.
+            # encode_query/encode_document exist only in sentence-transformers >= 5.0,
+            # which is why local-ml pins that floor.
+            if input_type == "query":
+                encode = self._model.encode_query
+            elif input_type == "document":
+                encode = self._model.encode_document
+            else:
+                encode = self._model.encode
+            embeddings = encode(texts, convert_to_numpy=True, show_progress_bar=False)
             return [emb.tolist() for emb in embeddings]
         finally:
             # Only reclaim the GPU allocator pool here, and only when actually on a
