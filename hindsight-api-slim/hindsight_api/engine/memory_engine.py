@@ -24,7 +24,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Literal, ParamSpec, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, ParamSpec, TypeVar, cast, overload
 
 import asyncpg
 import httpx
@@ -794,6 +794,24 @@ def _resolve_thinking_budget(config_dict: dict, budget: "Budget | None", max_tok
     return int(fixed[effective_budget])
 
 
+def _resolve_reranker_max_candidates(config: HindsightConfig, budget: "Budget | None") -> int:
+    """Map a Budget level to the cross-encoder candidate cap.
+
+    Returns the per-level override (reranker_max_candidates_<level>) when it is set (> 0),
+    otherwise falls back to the flat reranker_max_candidates. The per-level values default to 0,
+    so recall behavior is unchanged until an operator sets one of the env vars. A None budget
+    falls back to MID (matches _resolve_thinking_budget).
+    """
+    effective_budget = budget if budget is not None else Budget.MID
+    per_level = {
+        Budget.LOW: config.reranker_max_candidates_low,
+        Budget.MID: config.reranker_max_candidates_mid,
+        Budget.HIGH: config.reranker_max_candidates_high,
+    }
+    override = per_level[effective_budget]
+    return int(override) if override > 0 else config.reranker_max_candidates
+
+
 def utcnow():
     """Get current UTC time with timezone info."""
     return datetime.now(UTC)
@@ -1339,7 +1357,7 @@ class MemoryEngine(MemoryEngineInterface):
         else:
             from .query_analyzer import DateparserQueryAnalyzer
 
-            self.query_analyzer = DateparserQueryAnalyzer()
+            self.query_analyzer = DateparserQueryAnalyzer(languages=config.query_analyzer_languages)
 
         # Resolve each operation's effective per-request defaults: a per-op override
         # (``HINDSIGHT_API_RETAIN_LLM_TIMEOUT``, ``..._MAX_RETRIES``, ``..._INITIAL_BACKOFF``,
@@ -2837,7 +2855,8 @@ class MemoryEngine(MemoryEngineInterface):
 
         content = refreshed.get("content") or ""
         stripped = content.strip()
-        based_on = (refreshed.get("reflect_response") or {}).get("based_on") or {}
+        reflect_response = refreshed.get("reflect_response") or {}
+        based_on = reflect_response.get("based_on") or {}
         outcome = RefreshMentalModelOutcomeMetadata(
             content_len=len(content),
             # The no-answer stub and the pending placeholder complete
@@ -2845,6 +2864,8 @@ class MemoryEngine(MemoryEngineInterface):
             # alone would read them as populated.
             populated_content=bool(stripped) and stripped not in (MENTAL_MODEL_PENDING_CONTENT, NO_ANSWER_TEXT),
             based_on_counts={fact_type: len(facts or []) for fact_type, facts in based_on.items()},
+            delta_ops_applied=len(reflect_response.get("delta_operations_applied") or []),
+            delta_ops_skipped=len(reflect_response.get("delta_operations_skipped") or []),
         )
         try:
             backend = await self._get_backend()
@@ -4728,6 +4749,9 @@ class MemoryEngine(MemoryEngineInterface):
         # derives from max_tokens and clamps to [recall_budget_min, recall_budget_max].
         budget_config_dict = await self._config_resolver.get_bank_config(bank_id, request_context)
         thinking_budget = _resolve_thinking_budget(budget_config_dict, budget, max_tokens)
+        # Reranker candidate cap, optionally scaled by the same budget level (env-configured,
+        # 0/unset → flat reranker_max_candidates). Static config, so read from get_config().
+        reranker_max_candidates = _resolve_reranker_max_candidates(get_config(), budget)
 
         # Log recall start with tags if present (skip if quiet mode for internal operations)
         if not _quiet:
@@ -4785,6 +4809,7 @@ class MemoryEngine(MemoryEngineInterface):
                             max_source_facts_tokens=max_source_facts_tokens,
                             max_source_facts_tokens_per_observation=max_source_facts_tokens_per_observation,
                             reranking=reranking,
+                            reranker_max_candidates=reranker_max_candidates,
                         )
                         break  # Success - exit retry loop
                     except OperationCancelledError:
@@ -4923,6 +4948,7 @@ class MemoryEngine(MemoryEngineInterface):
         max_source_facts_tokens: int = 4096,
         max_source_facts_tokens_per_observation: int = -1,
         reranking: RecallReranking = "cross_encoder",
+        reranker_max_candidates: int | None = None,
     ) -> RecallResultModel:
         """
         Search implementation with modular retrieval and reranking.
@@ -5322,8 +5348,14 @@ class MemoryEngine(MemoryEngineInterface):
             try:
                 # Pre-filter candidates by RRF before the (optional) cross-encoder.
                 # RRF already provides good ranking; this caps cross-encoder cost.
-                reranker_max_candidates = get_config().reranker_max_candidates
-                if len(merged_candidates) > reranker_max_candidates:
+                # The cap comes from the caller's budget-resolved value when provided
+                # (recall), else the flat global default (internal callers).
+                max_candidates = (
+                    reranker_max_candidates
+                    if reranker_max_candidates is not None
+                    else get_config().reranker_max_candidates
+                )
+                if len(merged_candidates) > max_candidates:
                     # Sort by RRF score (boosted per-strategy if configured) and take top
                     # candidates. The weighted-RRF boost keeps boosted-arm candidates from
                     # being trimmed out of the reranker's global budget.
@@ -5331,8 +5363,8 @@ class MemoryEngine(MemoryEngineInterface):
 
                     strategy_boosts = get_config().recall_strategy_boosts
                     merged_candidates.sort(key=lambda mc: boosted_rrf_score(mc, strategy_boosts), reverse=True)
-                    pre_filtered_count = len(merged_candidates) - reranker_max_candidates
-                    merged_candidates = merged_candidates[:reranker_max_candidates]
+                    pre_filtered_count = len(merged_candidates) - max_candidates
+                    merged_candidates = merged_candidates[:max_candidates]
 
                 if reranking == "cross_encoder":
                     # Cancellation checkpoint: the cross-encoder rerank is the
@@ -12153,18 +12185,31 @@ class MemoryEngine(MemoryEngineInterface):
             # Use the previously stored structured doc when available; otherwise
             # parse the existing markdown so the very first delta refresh can
             # still operate without waiting for a full rebuild.
-            try:
-                if stored_structured_content is not None:
+            #
+            # A stored doc that fails validation (hand-edited JSON, a shape from an
+            # older schema) is NOT fatal: the markdown in ``content`` is the same
+            # document and ``parse_markdown`` is lenient, so re-deriving the baseline
+            # from it keeps the delta path alive and rebuilds the structured doc as a
+            # side effect. Giving up here would refuse every subsequent refresh
+            # (nothing else repairs the column) over a baseline we can reconstruct.
+            current_doc: StructuredDocument | None = None
+            if stored_structured_content is not None:
+                try:
                     current_doc = StructuredDocument.model_validate(stored_structured_content)
-                else:
+                except Exception as exc:
+                    logger.warning(
+                        f"[MENTAL_MODELS] Stored structured doc for {mental_model_id} is unusable "
+                        f"({exc}); re-deriving the delta baseline from the stored markdown"
+                    )
+            if current_doc is None:
+                try:
                     current_doc = parse_markdown(current_content)
-            except Exception as exc:
-                logger.warning(
-                    f"[MENTAL_MODELS] Could not load structured doc for {mental_model_id} "
-                    f"({exc}); falling back to full synthesis"
-                )
-                current_doc = None
-                mode_fallback_reason = "structured_doc_unreadable"
+                except Exception as exc:
+                    logger.warning(
+                        f"[MENTAL_MODELS] Could not load structured doc for {mental_model_id} "
+                        f"({exc}); delta has no baseline to edit"
+                    )
+                    mode_fallback_reason = "structured_doc_unreadable"
 
             if current_doc is not None:
                 supporting_facts = delta_supporting_facts
@@ -12215,38 +12260,61 @@ class MemoryEngine(MemoryEngineInterface):
                     )
                     op_list = parse_delta_operation_list(raw)
                     apply_outcome = apply_operations(current_doc, op_list.operations)
-                    final_structured = apply_outcome.document
-                    final_content = render_document(apply_outcome.document)
                     delta_operations = MentalModelDeltaOperations(
                         applied=apply_outcome.applied, skipped=apply_outcome.skipped
                     )
-                    delta_applied = True
-                    logger.info(
-                        f"[MENTAL_MODELS] Delta refresh for {mental_model_id}: "
-                        f"applied {len(apply_outcome.applied)} op(s), "
-                        f"skipped {len(apply_outcome.skipped)}"
-                    )
+                    if op_list.operations and not apply_outcome.applied:
+                        # Every op the model emitted was rejected (unknown section_id,
+                        # index out of range, name collision), so the document is
+                        # unchanged. Persisting it would look like a clean refresh
+                        # while advancing the watermark past facts that never landed —
+                        # they would fall outside every future delta window. Treat it
+                        # as a failed delta, same as an outright error.
+                        logger.warning(
+                            f"[MENTAL_MODELS] Delta refresh for {mental_model_id}: all "
+                            f"{len(apply_outcome.skipped)} op(s) were skipped, nothing applied"
+                        )
+                        mode_fallback_reason = "delta_ops_all_skipped"
+                    else:
+                        final_structured = apply_outcome.document
+                        final_content = render_document(apply_outcome.document)
+                        delta_applied = True
+                        logger.info(
+                            f"[MENTAL_MODELS] Delta refresh for {mental_model_id}: "
+                            f"applied {len(apply_outcome.applied)} op(s), "
+                            f"skipped {len(apply_outcome.skipped)}"
+                        )
+                        if apply_outcome.skipped:
+                            warnings.append(
+                                f"{len(apply_outcome.skipped)} of {len(op_list.operations)} delta operation(s) "
+                                "were rejected and their content did not reach the document. See the skipped "
+                                "operations for the reason each was dropped."
+                            )
                 except Exception as exc:
                     logger.warning(
                         f"[MENTAL_MODELS] Structured delta failed for {mental_model_id} "
-                        f"({exc}); falling back to full synthesis"
+                        f"({exc}); delta operations were not applied"
                     )
                     mode_fallback_reason = "delta_ops_failed"
 
             reflect_response_payload["delta_applied"] = delta_applied
-            if delta_applied and delta_operations is not None:
+            # Skipped ops are recorded whether or not the delta landed: when it did
+            # they explain a partial edit, and when it didn't they are the evidence
+            # for why the refresh is being refused.
+            if delta_operations is not None:
                 reflect_response_payload["delta_operations_applied"] = delta_operations.applied
                 reflect_response_payload["delta_operations_skipped"] = delta_operations.skipped
-            else:
+            if not delta_applied and created_after is not None:
                 # The candidate was synthesised from a delta-scoped recall, so it
                 # only reflects memories newer than the last refresh. Writing it
-                # whole would drop everything the document knew from older ones.
+                # whole would drop everything the document knew from older ones —
+                # the caller refuses it below (``refresh_failed_delta_not_applied``).
                 warnings.append(
                     "Delta operations were not applied "
-                    f"({mode_fallback_reason or 'unknown reason'}), so the refresh falls back to the "
-                    "reflect candidate — which was synthesised only from memories created after "
-                    f"{created_after.isoformat() if created_after else 'the last refresh'}. "
-                    "Content grounded in older memories is not carried over."
+                    f"({mode_fallback_reason or 'unknown reason'}), and the reflect candidate was "
+                    "synthesised only from memories created after "
+                    f"{created_after.isoformat()} — writing it would drop everything the document "
+                    "knew from older memories. The existing content is preserved and the refresh fails."
                 )
 
         effective_mode: RefreshMode = "delta" if delta_applied else "full"
@@ -12260,7 +12328,6 @@ class MemoryEngine(MemoryEngineInterface):
         # failures from callers (workers, tests). So the caller preserves the
         # existing content and raises, rather than persisting the empty render.
         if not final_content.strip():
-            reflect_response_payload["refresh_skipped"] = "empty_candidate"
             warnings.append(
                 "The refresh produced empty content, which usually means an upstream LLM failure. "
                 "A real refresh would preserve the existing content and fail."
@@ -12272,6 +12339,27 @@ class MemoryEngine(MemoryEngineInterface):
                 final_structured=None,
                 delta_operations=delta_operations,
                 outcome="refresh_failed_empty_candidate",
+            )
+
+        # Refuse to write a delta-window candidate as the whole document (#3112).
+        # ``final_content`` is only the reflect candidate when the delta failed, and
+        # that candidate was synthesised under ``created_after`` — one window of new
+        # facts, not the document's whole history. Storing it deletes everything
+        # grounded in older memories AND advances the watermark past it, so the loss
+        # is permanent. The guard is on the window rather than on each failure branch
+        # so any future one inherits it. ``created_after`` is unset only when the model
+        # has no ``last_refreshed_at`` — the column is NOT NULL and defaults to creation
+        # time, so a delta refresh always has a window today; keying on the window keeps
+        # this correct anyway, because a candidate read over full history IS a document
+        # and writing it is a legitimate full regeneration.
+        if use_delta and not delta_applied and created_after is not None:
+            return _finish(
+                effective_mode=effective_mode,
+                mode_fallback_reason=mode_fallback_reason,
+                final_content=final_content,
+                final_structured=None,
+                delta_operations=delta_operations,
+                outcome="refresh_failed_delta_not_applied",
             )
 
         # When delta is not applied (full mode, or delta fallback), parse the
@@ -12323,8 +12411,11 @@ class MemoryEngine(MemoryEngineInterface):
             Updated pinned mental model dict or None if not found
 
         Raises:
-            MentalModelRefreshError: The refresh produced empty content. The
-                previous content is preserved in the DB.
+            MentalModelRefreshError: The refresh could not produce a document that is
+                safe to store — it came back empty, its delta operations never reached
+                the document, or structured-output extraction failed. In every case the
+                previous content and the watermark are left untouched, so a retry reads
+                the same window again.
         """
         await self._authenticate_tenant(request_context)
 
@@ -12382,13 +12473,19 @@ class MemoryEngine(MemoryEngineInterface):
                     request_context=request_context,
                 )
 
-            if run.outcome == "refresh_failed_empty_candidate":
-                logger.warning(
-                    f"[MENTAL_MODELS] Refresh for {mental_model_id} produced empty content; "
-                    "preserving previous content and raising MentalModelRefreshError."
-                )
-                # Persist the reflect_response (so the failure is auditable) and
-                # the source-query tracking, but do NOT touch content/structured.
+            async def _preserve_and_fail(reason: str, detail: str) -> NoReturn:
+                """Fail the refresh without touching the document.
+
+                Every failure mode is handled the same way: persist the
+                reflect_response (so the failure is auditable under
+                ``refresh_skipped``) but write no content, no structured document
+                and no watermark — leaving ``last_refreshed_at`` where it was, so a
+                retry re-reads the same window instead of skipping past the facts
+                this run failed on. Then raise, because a caller that is told
+                nothing assumes the document was refreshed.
+                """
+                logger.warning(f"[MENTAL_MODELS] Refresh for {mental_model_id} failed ({reason}); {detail}")
+                reflect_response_payload["refresh_skipped"] = reason
                 await self.update_mental_model(
                     bank_id,
                     mental_model_id,
@@ -12397,27 +12494,36 @@ class MemoryEngine(MemoryEngineInterface):
                     request_context=request_context,
                 )
                 raise MentalModelRefreshError(
-                    f"Refresh produced empty content for mental_model_id={mental_model_id} "
-                    "(likely an upstream LLM failure). Previous content preserved in DB; "
-                    "reflect_response.refresh_skipped == 'empty_candidate' for audit."
+                    f"Refresh failed for mental_model_id={mental_model_id}: {detail} "
+                    f"Previous content preserved in DB; reflect_response.refresh_skipped == '{reason}' for audit."
+                )
+
+            if run.outcome == "refresh_failed_empty_candidate":
+                await _preserve_and_fail(
+                    "empty_candidate",
+                    "the refresh produced empty content (likely an upstream LLM failure).",
+                )
+
+            if run.outcome == "refresh_failed_delta_not_applied":
+                # #3112: the reflect candidate only covers the delta window, so it is
+                # not a document — see the guard in _execute_mental_model_refresh.
+                await _preserve_and_fail(
+                    run.mode_fallback_reason or "delta_not_applied",
+                    "delta operations did not reach the document, and the reflect candidate covers only "
+                    "memories newer than the last refresh, so writing it would drop the rest of the document.",
                 )
 
             # Parse the final stored content into structured_output when a schema is
             # configured. If extraction fails, fail the refresh loudly rather than
             # persisting content with no structured view (which would also clobber the
-            # previously-stored value); raising here skips update_mental_model, so the
-            # prior content and structured_output are preserved for retry.
+            # previously-stored value); failing here leaves content/structured untouched,
+            # so the prior content and structured_output are preserved for retry.
             if response_schema:
                 structured_output = await _structured_output_for(run.final_content)
                 if structured_output is None:
-                    logger.warning(
-                        f"[MENTAL_MODELS] Structured output extraction failed for {mental_model_id}; "
-                        "failing the refresh (prior content and structured_output preserved)."
-                    )
-                    raise MentalModelRefreshError(
-                        f"Structured output extraction failed for mental_model_id={mental_model_id} "
-                        "(a response_schema is configured). Prior content and structured_output preserved; "
-                        "the refresh can be retried."
+                    await _preserve_and_fail(
+                        "structured_output_failed",
+                        "structured output extraction failed while a response_schema is configured.",
                     )
                 reflect_response_payload["structured_output"] = structured_output
 

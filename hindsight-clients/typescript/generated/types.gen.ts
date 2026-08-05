@@ -523,9 +523,7 @@ export type BankTemplateConfig = {
    *
    * Controlled vocabulary for entity labels
    */
-  entity_labels?: Array<{
-    [key: string]: unknown;
-  }> | null;
+  entity_labels?: Array<LabelGroupOutput> | null;
   /**
    * Entities Allow Free Form
    *
@@ -1638,8 +1636,10 @@ export type DryRunExtractRequest = {
   retain_chunk_size?: number | null;
   /**
    * Entity Labels
+   *
+   * Controlled vocabulary for entity labels (overrides the bank's config for this call)
    */
-  entity_labels?: Array<unknown> | null;
+  entity_labels?: Array<LabelGroupInput> | null;
   /**
    * Entities Allow Free Form
    */
@@ -2497,6 +2497,98 @@ export type LlmRequestTokenSums = {
 };
 
 /**
+ * LabelGroup
+ *
+ * A label group (dimension) with its type and allowed values.
+ */
+export type LabelGroupInput = {
+  /**
+   * Key
+   */
+  key: string;
+  /**
+   * Description
+   */
+  description?: string;
+  /**
+   * Type
+   */
+  type?: "value" | "multi-values" | "text" | "map";
+  /**
+   * Optional
+   */
+  optional?: boolean;
+  /**
+   * Tag
+   */
+  tag?: boolean;
+  /**
+   * Values
+   */
+  values?: Array<LabelValue>;
+  /**
+   * Fields
+   */
+  fields?: {
+    [key: string]: MapFieldInput;
+  };
+};
+
+/**
+ * LabelGroup
+ *
+ * A label group (dimension) with its type and allowed values.
+ */
+export type LabelGroupOutput = {
+  /**
+   * Key
+   */
+  key: string;
+  /**
+   * Description
+   */
+  description?: string;
+  /**
+   * Type
+   */
+  type?: "value" | "multi-values" | "text" | "map";
+  /**
+   * Optional
+   */
+  optional?: boolean;
+  /**
+   * Tag
+   */
+  tag?: boolean;
+  /**
+   * Values
+   */
+  values?: Array<LabelValue>;
+  /**
+   * Fields
+   */
+  fields?: {
+    [key: string]: MapFieldOutput;
+  };
+};
+
+/**
+ * LabelValue
+ *
+ * A single allowed value for a label group.
+ */
+export type LabelValue = {
+  /**
+   * Value
+   */
+  value: string;
+  /**
+   * Description
+   */
+  description?: string;
+};
+
+/**
  * ListChunksResponse
  *
  * Response model for listing chunks of a document.
@@ -2627,6 +2719,58 @@ export type LlmOperationHealth = {
    * Round-trip latency of the probe call
    */
   latency_ms?: number | null;
+};
+
+/**
+ * MapField
+ *
+ * A field within a map-type entity label group. Supports recursion via type='map'.
+ */
+export type MapFieldInput = {
+  /**
+   * Type
+   */
+  type?: "text" | "value" | "multi-values" | "map";
+  /**
+   * Description
+   */
+  description?: string;
+  /**
+   * Values
+   */
+  values?: Array<LabelValue>;
+  /**
+   * Fields
+   */
+  fields?: {
+    [key: string]: MapFieldInput;
+  };
+};
+
+/**
+ * MapField
+ *
+ * A field within a map-type entity label group. Supports recursion via type='map'.
+ */
+export type MapFieldOutput = {
+  /**
+   * Type
+   */
+  type?: "text" | "value" | "multi-values" | "map";
+  /**
+   * Description
+   */
+  description?: string;
+  /**
+   * Values
+   */
+  values?: Array<LabelValue>;
+  /**
+   * Fields
+   */
+  fields?: {
+    [key: string]: MapFieldOutput;
+  };
 };
 
 /**
@@ -2837,13 +2981,18 @@ export type MentalModelDryRunRefreshResult = {
     | "source_query_changed"
     | "structured_doc_unreadable"
     | "delta_ops_failed"
+    | "delta_ops_all_skipped"
     | null;
   /**
    * Outcome
    *
    * What a real refresh would do with the document.
    */
-  outcome: "content_written" | "content_preserved_no_new_facts" | "refresh_failed_empty_candidate";
+  outcome:
+    | "content_written"
+    | "content_preserved_no_new_facts"
+    | "refresh_failed_empty_candidate"
+    | "refresh_failed_delta_not_applied";
   /**
    * Would Persist
    *
@@ -3046,13 +3195,18 @@ export type MentalModelRefreshTrace = {
     | "source_query_changed"
     | "structured_doc_unreadable"
     | "delta_ops_failed"
+    | "delta_ops_all_skipped"
     | null;
   /**
    * Outcome
    *
    * What the refresh did with the document.
    */
-  outcome: "content_written" | "content_preserved_no_new_facts" | "refresh_failed_empty_candidate";
+  outcome:
+    | "content_written"
+    | "content_preserved_no_new_facts"
+    | "refresh_failed_empty_candidate"
+    | "refresh_failed_delta_not_applied";
   /**
    * Tool Calls
    *
