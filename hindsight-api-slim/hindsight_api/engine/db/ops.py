@@ -182,6 +182,7 @@ class DataAccessOps(ABC):
         table: str,
         sorted_links: list[tuple],
         bank_id: str,
+        nil_entity_uuid: str,
         exists_clause: str,
         chunk_size: int = 5000,
     ) -> None:

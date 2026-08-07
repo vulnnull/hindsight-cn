@@ -182,6 +182,7 @@ class PostgreSQLOps(DataAccessOps):
         table: str,
         sorted_links: list[tuple],
         bank_id: str,
+        nil_entity_uuid: str,
         exists_clause: str,
         chunk_size: int = 5000,
     ) -> None:
@@ -206,6 +207,7 @@ class PostgreSQLOps(DataAccessOps):
         to_ids = [lnk[1] for lnk in sorted_links]
         types = [lnk[2] for lnk in sorted_links]
         weights = [lnk[3] for lnk in sorted_links]
+        entity_ids = [lnk[4] for lnk in sorted_links]
 
         for chunk_start in range(0, len(sorted_links), chunk_size):
             chunk_end = min(chunk_start + chunk_size, len(sorted_links))
@@ -219,23 +221,25 @@ class PostgreSQLOps(DataAccessOps):
                 f"""
                 WITH locked AS (
                     SELECT id FROM {mu_table}
-                    WHERE id = ANY($6::uuid[])
+                    WHERE id = ANY($7::uuid[])
                     ORDER BY id
                     FOR KEY SHARE
                 )
                 INSERT INTO {table}
-                    (from_unit_id, to_unit_id, link_type, weight, bank_id)
-                SELECT f, t, tp, w, $5
-                FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::float8[])
-                    AS u(f, t, tp, w)
+                    (from_unit_id, to_unit_id, link_type, weight, entity_id, bank_id)
+                SELECT f, t, tp, w, e, $6
+                FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::float8[], $5::uuid[])
+                    AS u(f, t, tp, w, e)
                 WHERE f IN (SELECT id FROM locked) AND t IN (SELECT id FROM locked)
-                ON CONFLICT (from_unit_id, to_unit_id, link_type)
+                ON CONFLICT (from_unit_id, to_unit_id, link_type,
+                             COALESCE(entity_id, '{nil_entity_uuid}'::uuid))
                 DO NOTHING
                 """,
                 chunk_from,
                 chunk_to,
                 types[chunk_start:chunk_end],
                 weights[chunk_start:chunk_end],
+                entity_ids[chunk_start:chunk_end],
                 bank_id,
                 referenced,
                 timeout=300,

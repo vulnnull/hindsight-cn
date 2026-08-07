@@ -467,7 +467,7 @@ def _remap_phase1_results(
 
     # Remap semantic ANN links (from_id uses placeholder)
     remapped_semantic = [
-        (placeholder_to_actual.get(lnk[0], lnk[0]), lnk[1], lnk[2], lnk[3]) for lnk in semantic_ann_links
+        (placeholder_to_actual.get(lnk[0], lnk[0]), lnk[1], lnk[2], lnk[3], lnk[4]) for lnk in semantic_ann_links
     ]
 
     return remapped_entity_to_unit, remapped_unit_to_entity_ids, remapped_semantic

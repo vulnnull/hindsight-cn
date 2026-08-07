@@ -812,6 +812,18 @@ def _resolve_reranker_max_candidates(config: HindsightConfig, budget: "Budget | 
     return int(override) if override > 0 else config.reranker_max_candidates
 
 
+def _resolve_reranking(config_dict: dict, reranking: "RecallReranking") -> "RecallReranking":
+    """Apply the bank's enable_reranking setting to the requested ranking strategy.
+
+    Only "cross_encoder" is downgraded, and only to "rrf" — the fused ordering without
+    the cross-encoder pass. "interleave" is an explicit caller choice (consolidation
+    dedup relies on it) and "rrf" is already rerank-free, so neither is overridden.
+    """
+    if reranking == "cross_encoder" and not config_dict.get("enable_reranking", True):
+        return "rrf"
+    return reranking
+
+
 def utcnow():
     """Get current UTC time with timezone info."""
     return datetime.now(UTC)
@@ -2558,6 +2570,7 @@ class MemoryEngine(MemoryEngineInterface):
         """
         from ..webhooks.manager import MAX_ATTEMPTS, RETRY_DELAYS
         from ..webhooks.models import WebhookHttpConfig
+        from ..webhooks.url_guard import WebhookURLError
 
         url = task_dict["url"]
         secret = task_dict.get("secret")
@@ -2597,6 +2610,13 @@ class MemoryEngine(MemoryEngineInterface):
             response.raise_for_status()
             if operation_id:
                 await self._update_webhook_delivery_metadata(operation_id, response.status_code, response.text)
+        except WebhookURLError as e:
+            # Destination is disallowed (SSRF guard). This never becomes valid on
+            # retry, so fail permanently instead of burning the retry schedule.
+            logger.error(f"webhook_delivery blocked url={url}: {e}")
+            if operation_id:
+                await self._update_webhook_delivery_metadata(operation_id, None, None)
+            raise
         except Exception as e:
             status_code = response.status_code if response is not None else None
             response_body = response.text if response is not None else None
@@ -3558,8 +3578,17 @@ class MemoryEngine(MemoryEngineInterface):
         self._ext_ctx.webhook_manager = self._webhook_manager
         logger.debug("Webhook manager initialized")
 
-        # Long-lived HTTP client for webhook delivery tasks
-        self._http_client = httpx.AsyncClient(timeout=30.0)
+        # Long-lived HTTP client for webhook delivery tasks. All delivery
+        # traffic flows through the guarded transport, which rejects
+        # private/loopback/link-local destinations (SSRF) and pins the
+        # connection to a validated IP. See webhooks/url_guard.py.
+        from ..webhooks.url_guard import GuardedAsyncTransport, parse_allowlist
+
+        _webhook_allowlist = parse_allowlist(get_config().webhook_allowed_hosts)
+        self._http_client = httpx.AsyncClient(
+            timeout=30.0,
+            transport=GuardedAsyncTransport(_webhook_allowlist),
+        )
 
         # Set executor for task backend and initialize
         self._task_backend.set_executor(self.execute_task)
@@ -4411,12 +4440,21 @@ class MemoryEngine(MemoryEngineInterface):
                 request_context=request_context,
             )
             await self._validate_operation(self._operation_validator.validate_create_bank(ctx))
-        resolved_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
+
+        async def _resolve_restored_config() -> HindsightConfig:
+            # import_bank calls this once it has restored the archive's bank row.
+            # Resolving here rather than before the call is the whole point: the
+            # target bank does not exist yet (import refuses to write into an
+            # existing bank), so a config resolved now would hold global + tenant
+            # values and none of the bank's own — which left every label entity in
+            # an imported bank classified as regular (#3236).
+            return await self._config_resolver.resolve_full_config(bank_id, request_context)
+
         return await import_bank(
             backend=backend,
             embeddings_model=self.embeddings,
             entity_resolver=self.entity_resolver,
-            config=resolved_config,
+            resolve_config=_resolve_restored_config,
             format_date_fn=self._format_readable_date,
             archive_bytes=archive_bytes,
             target_bank_id=target_bank_id,
@@ -4757,6 +4795,12 @@ class MemoryEngine(MemoryEngineInterface):
         # 0/unset → flat reranker_max_candidates). Static config, so read from get_config().
         reranker_max_candidates = _resolve_reranker_max_candidates(get_config(), budget)
 
+        # Recall pipeline stages, resolved per bank. A bank can switch off arms its
+        # content cannot use, trading recall breadth for latency.
+        enable_temporal_retrieval = bool(budget_config_dict.get("enable_temporal_retrieval", True))
+        enable_graph_retrieval = bool(budget_config_dict.get("enable_graph_retrieval", True))
+        reranking = _resolve_reranking(budget_config_dict, reranking)
+
         # Log recall start with tags if present (skip if quiet mode for internal operations)
         if not _quiet:
             tags_info = f", tags={tags} ({tags_match})" if tags else ""
@@ -4814,6 +4858,8 @@ class MemoryEngine(MemoryEngineInterface):
                             max_source_facts_tokens_per_observation=max_source_facts_tokens_per_observation,
                             reranking=reranking,
                             reranker_max_candidates=reranker_max_candidates,
+                            enable_temporal_retrieval=enable_temporal_retrieval,
+                            enable_graph_retrieval=enable_graph_retrieval,
                         )
                         break  # Success - exit retry loop
                     except OperationCancelledError:
@@ -4953,6 +4999,8 @@ class MemoryEngine(MemoryEngineInterface):
         max_source_facts_tokens_per_observation: int = -1,
         reranking: RecallReranking = "cross_encoder",
         reranker_max_candidates: int | None = None,
+        enable_temporal_retrieval: bool = True,
+        enable_graph_retrieval: bool = True,
     ) -> RecallResultModel:
         """
         Search implementation with modular retrieval and reranking.
@@ -5085,6 +5133,8 @@ class MemoryEngine(MemoryEngineInterface):
                         created_before=created_before,
                         min_semantic=min_scores.semantic if min_scores else None,
                         min_keyword=min_scores.keyword if min_scores else None,
+                        enable_temporal_retrieval=enable_temporal_retrieval,
+                        enable_graph_retrieval=enable_graph_retrieval,
                     )
                     parallel_duration = time.time() - parallel_start
             finally:
@@ -5246,15 +5296,21 @@ class MemoryEngine(MemoryEngineInterface):
                         fact_type=ft_name,
                     )
 
-                    # Add graph retrieval results for this fact type
-                    tracer.add_retrieval_results(
-                        method_name="graph",
-                        results=to_tuple_format(rr.graph),
-                        duration_seconds=rr.timings.get("graph", 0.0),
-                        score_field="activation",
-                        metadata={"budget": thinking_budget},
-                        fact_type=ft_name,
-                    )
+                    # Add graph retrieval results for this fact type.
+                    # Skipped entirely when the arm is off: an empty graph entry is
+                    # indistinguishable from "ran and matched nothing", which would
+                    # read as the arm being free rather than absent — the opposite of
+                    # what someone comparing traces to tune latency needs to see.
+                    # Mirrors the temporal guard below.
+                    if enable_graph_retrieval:
+                        tracer.add_retrieval_results(
+                            method_name="graph",
+                            results=to_tuple_format(rr.graph),
+                            duration_seconds=rr.timings.get("graph", 0.0),
+                            score_field="activation",
+                            metadata={"budget": thinking_budget},
+                            fact_type=ft_name,
+                        )
 
                     # Add temporal retrieval results for this fact type
                     # Show temporal even with 0 results if constraint was detected
@@ -7193,7 +7249,7 @@ class MemoryEngine(MemoryEngineInterface):
                             f"DELETE FROM {fq_table('invalidated_memory_units')} WHERE bank_id = $1", bank_id
                         )
 
-                        # Delete entities (cascades to unit_entities, entity_cooccurrences)
+                        # Delete entities (cascades to unit_entities, entity_cooccurrences, memory_links with entity_id)
                         await conn.execute(f"DELETE FROM {fq_table('entities')} WHERE bank_id = $1", bank_id)
 
                         # Sweep extension-owned bank-scoped tables (audit receipts,

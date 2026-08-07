@@ -23,12 +23,26 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_DAEMON_PORT } from "./config";
 
-/** Where the old plugin told users to put their config (`~/.hindsight/claude-code.json`). */
-export function legacyConfigPath(home: string = homedir()): string {
-  return join(home, ".hindsight", "claude-code.json");
+/**
+ * The old per-agent plugins that shipped a user config, and its filename.
+ *
+ * Only these two ever adopted the `~/.hindsight/<agent>.json` convention — the other superseded
+ * integrations (Cursor CLI, Copilot CLI, opencode, Cline) have no such file, so there is no
+ * endpoint of theirs to carry. Both use IDENTICAL key names, which is why one reader serves both.
+ */
+export const LEGACY_CONFIG_FILES: Record<string, string> = {
+  "claude-code": "claude-code.json",
+  codex: "codex.json",
+};
+
+/** Where an old plugin told users to put their config. */
+export function legacyConfigPath(harness: string, home: string = homedir()): string {
+  return join(home, ".hindsight", LEGACY_CONFIG_FILES[harness] ?? `${harness}.json`);
 }
 
 export interface LegacyEndpoint {
+  /** Which old plugin it came from, for the installer's output. */
+  harness: string;
   serverMode: "cloud" | "self-hosted" | "daemon";
   apiUrl?: string;
   apiToken?: string;
@@ -47,8 +61,25 @@ const CLOUD_URL = "https://api.hindsight.vectorize.io";
  * URL as "use the local daemon on `apiPort`" (`daemon.py:get_api_url`), so a config file that
  * never set one describes daemon mode, not an unconfigured user.
  */
-export function readLegacyEndpoint(home: string = homedir()): LegacyEndpoint | undefined {
-  const source = legacyConfigPath(home);
+export function readLegacyEndpoint(
+  home: string = homedir(),
+  prefer: readonly string[] = []
+): LegacyEndpoint | undefined {
+  // Look at the agents being installed FIRST: someone wiring Codex should get Codex's endpoint even
+  // if a stale claude-code.json is also lying around. Falls back to any known legacy config, since
+  // the common case is one server shared by both.
+  const order = [...prefer, ...Object.keys(LEGACY_CONFIG_FILES)].filter(
+    (h, i, all) => h in LEGACY_CONFIG_FILES && all.indexOf(h) === i
+  );
+  for (const harness of order) {
+    const found = readOne(harness, home);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function readOne(harness: string, home: string): LegacyEndpoint | undefined {
+  const source = legacyConfigPath(harness, home);
   if (!existsSync(source)) return undefined;
   let raw: Record<string, unknown>;
   try {
@@ -63,6 +94,7 @@ export function readLegacyEndpoint(home: string = homedir()): LegacyEndpoint | u
 
   if (url) {
     return {
+      harness,
       serverMode: url.replace(/\/+$/, "") === CLOUD_URL ? "cloud" : "self-hosted",
       apiUrl: url,
       ...(apiToken ? { apiToken } : {}),
@@ -71,6 +103,7 @@ export function readLegacyEndpoint(home: string = homedir()): LegacyEndpoint | u
   }
   const port = typeof raw.apiPort === "number" ? raw.apiPort : undefined;
   return {
+    harness,
     serverMode: "daemon",
     ...(apiToken ? { apiToken } : {}),
     ...(port && port !== DEFAULT_DAEMON_PORT ? { apiPort: port } : {}),

@@ -107,6 +107,45 @@
           "description": "Controls what gets synthesised",
           "title": "Observations Mission"
         },
+        "enable_temporal_retrieval": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Toggle the temporal arm (and its date-aware query analysis) during recall",
+          "title": "Enable Temporal Retrieval"
+        },
+        "enable_graph_retrieval": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Toggle the entity/link graph arm during recall",
+          "title": "Enable Graph Retrieval"
+        },
+        "enable_reranking": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Toggle cross-encoder reranking during recall",
+          "title": "Enable Reranking"
+        },
         "disposition_skepticism": {
           "anyOf": [
             {

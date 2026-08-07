@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -41,7 +41,14 @@ function writeJsonAt(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
 }
 
+// configureServer honors HINDSIGHT_CONFIG — a developer shell exporting it must not leak the
+// suite's --server writes into their real config file ("" is falsy → the per-test home is used).
+beforeEach(() => {
+  vi.stubEnv("HINDSIGHT_CONFIG", "");
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   while (homes.length) rmSync(homes.pop()!, { recursive: true, force: true });
   vi.clearAllMocks();
 });
@@ -632,18 +639,115 @@ describe("all vs named harnesses", () => {
   });
 });
 
-describe("npx-cache guard", () => {
-  it("refuses install when pkgRoot is inside an npx cache (wiring would die on eviction)", () => {
-    const logs: string[] = [];
-    const ctx = {
-      home: "/tmp/never-touched",
-      pkgRoot: "/Users/x/.npm/_npx/abc123/node_modules/hindsight-coding-agents",
-      dist: "/Users/x/.npm/_npx/abc123/node_modules/hindsight-coding-agents/dist",
-      claudeMcp: () => true,
-      log: (m: string) => logs.push(m),
-    };
-    expect(run(["install", "claude-code"], ctx)).toBe(1);
-    expect(logs.join("\n")).toContain("npm install -g");
+/**
+ * Running from an npx cache used to be refused: the wiring is absolute paths into this package, and
+ * a cache eviction would break every hook silently. The runtime is now copied somewhere stable
+ * first, so `npx` works and nobody needs a global install of a tool that only sets other tools up.
+ */
+describe("runtime staging", () => {
+  /** A package layout convincing enough to be staged: staging keys off a built dist. */
+  function fakePackage(root: string): { pkgRoot: string; dist: string } {
+    const dist = join(root, "dist");
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(join(dist, "installer.js"), "// built");
+    writeFileSync(join(dist, "claude-hook.js"), "// built");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "x", main: "dist/index.js" }));
+    mkdirSync(join(root, "skill"), { recursive: true });
+    writeFileSync(join(root, "skill", "SKILL.md"), "# skill");
+    return { pkgRoot: root, dist };
+  }
+
+  it("installs from an npx cache, wiring the stable copy instead of the cache", () => {
+    const ctx = makeCtx();
+    const cache = mkdtempSync(join(tmpdir(), "npx-cache-"));
+    homes.push(cache);
+    Object.assign(ctx, fakePackage(join(cache, "_npx", "abc123", "node_modules", "coding-agents")));
+
+    expect(run(["install", "claude-code"], ctx)).toBe(0);
+    const staged = join(ctx.home, ".hindsight", "coding-agents");
+    const command = readJson(join(ctx.home, ".claude", "settings.json")).hooks.SessionStart[0]
+      .hooks[0].command as string;
+    expect(command).toContain(join(staged, "dist"));
+    // The whole point: nothing in a host config may reference the evictable cache.
+    expect(command).not.toContain("_npx");
+    expect(existsSync(join(staged, "dist", "claude-hook.js"))).toBe(true);
+  });
+
+  // MARKER matching is what makes re-install replace and uninstall remove, and it looks for this
+  // substring in the command path — so the staged location must keep it.
+  it("stages somewhere the marker still matches", () => {
+    const ctx = makeCtx();
+    const src = mkdtempSync(join(tmpdir(), "pkg-"));
+    homes.push(src);
+    Object.assign(ctx, fakePackage(src));
+
+    run(["install", "claude-code"], ctx);
+    expect(join(ctx.home, ".hindsight", "coding-agents")).toContain(MARKER);
+    run(["uninstall", "claude-code"], ctx);
+    expect(readJson(join(ctx.home, ".claude", "settings.json")).hooks).toBeUndefined();
+  });
+
+  it("copies the plugin entry point too, since opencode loads the directory", () => {
+    const ctx = makeCtx();
+    const src = mkdtempSync(join(tmpdir(), "pkg-"));
+    homes.push(src);
+    Object.assign(ctx, fakePackage(src));
+
+    run(["install", "opencode"], ctx);
+    const staged = join(ctx.home, ".hindsight", "coding-agents");
+    expect(existsSync(join(staged, "package.json"))).toBe(true);
+    expect(existsSync(join(staged, "skill", "SKILL.md"))).toBe(true);
+    const cfg = readJson(join(ctx.home, ".config", "opencode", "opencode.json"));
+    expect(cfg.plugin).toContain(staged);
+  });
+
+  it("upgrading replaces the staged runtime, stale files and all", () => {
+    const ctx = makeCtx();
+    const v1 = mkdtempSync(join(tmpdir(), "v1-"));
+    const v2 = mkdtempSync(join(tmpdir(), "v2-"));
+    homes.push(v1, v2);
+    fakePackage(v1);
+    writeFileSync(join(v1, "dist", "old-only.js"), "// dropped in the next version");
+    fakePackage(v2);
+    writeFileSync(join(v2, "dist", "new-only.js"), "// added in the next version");
+
+    Object.assign(ctx, { pkgRoot: v1, dist: join(v1, "dist") });
+    run(["install", "claude-code"], ctx);
+    Object.assign(ctx, { pkgRoot: v2, dist: join(v2, "dist") });
+    run(["install", "claude-code"], ctx);
+
+    const staged = join(ctx.home, ".hindsight", "coding-agents", "dist");
+    expect(existsSync(join(staged, "new-only.js"))).toBe(true);
+    // Merging instead of replacing would leave an entry point a host config could still name.
+    expect(existsSync(join(staged, "old-only.js"))).toBe(false);
+    const events = readJson(join(ctx.home, ".claude", "settings.json")).hooks.SessionStart;
+    expect(events).toHaveLength(1);
+  });
+
+  // Re-running the STAGED installer must not delete the dist it is executing from.
+  it("is a no-op when run from the staged copy itself", () => {
+    const ctx = makeCtx();
+    const src = mkdtempSync(join(tmpdir(), "pkg-"));
+    homes.push(src);
+    fakePackage(src);
+    Object.assign(ctx, { pkgRoot: src, dist: join(src, "dist") });
+    run(["install", "claude-code"], ctx);
+
+    const staged = join(ctx.home, ".hindsight", "coding-agents");
+    Object.assign(ctx, { pkgRoot: staged, dist: join(staged, "dist") });
+    expect(run(["install", "claude-code"], ctx)).toBe(0);
+    expect(existsSync(join(staged, "dist", "installer.js"))).toBe(true);
+  });
+
+  // A checkout whose dist was never built has nothing to copy; wiring the source path is better
+  // than pointing every hook at a directory that does not exist.
+  it("wires in place when there is nothing to stage", () => {
+    const ctx = makeCtx();
+    run(["install", "claude-code"], ctx);
+    const command = readJson(join(ctx.home, ".claude", "settings.json")).hooks.SessionStart[0]
+      .hooks[0].command as string;
+    expect(command).toContain(ctx.dist);
+    expect(existsSync(join(ctx.home, ".hindsight", "coding-agents", "dist"))).toBe(false);
   });
 });
 
@@ -733,6 +837,42 @@ describe("devin-cli preflight", () => {
 describe("server setup", () => {
   const configPath = (ctx: InstallCtx) => join(ctx.home, ".hindsight", "coding-agent.json");
 
+  // The runtime reads HINDSIGHT_CONFIG first (core/config.ts CONFIG_PATH); the wizard must write
+  // that same file, or a user with the var set is configured into a file sessions never read.
+  it("honors HINDSIGHT_CONFIG for both the already-configured check and the write", () => {
+    const ctx = makeCtx();
+    const override = join(ctx.home, "elsewhere", "config.json");
+    vi.stubEnv("HINDSIGHT_CONFIG", override);
+    try {
+      expect(run(["install", "claude-code", "--server", "daemon"], ctx)).toBe(0);
+      expect(readJson(override).serverMode).toBe("daemon");
+      expect(existsSync(configPath(ctx))).toBe(false); // the default path stays untouched
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("uses the injected arrow-key picker when interactive, mapping index → mode", () => {
+    const ctx = makeCtx();
+    ctx.interactive = true;
+    ctx.hasUvx = () => true;
+    ctx.hasRust = () => true;
+    ctx.detectLlm = () => ({ provider: "openai", apiKey: "sk", source: "OPENAI_API_KEY" });
+    ctx.selectPrompt = vi.fn(() => 2); // third row = daemon
+    expect(run(["install", "claude-code"], ctx)).toBe(0);
+    expect(ctx.selectPrompt).toHaveBeenCalledOnce();
+    expect(readJson(configPath(ctx)).serverMode).toBe("daemon");
+  });
+
+  it("a cancelled picker leaves the server config untouched but still installs", () => {
+    const ctx = makeCtx();
+    ctx.interactive = true;
+    ctx.selectPrompt = () => null;
+    expect(run(["install", "claude-code"], ctx)).toBe(0);
+    expect(existsSync(configPath(ctx))).toBe(false);
+    expect(existsSync(join(ctx.home, ".claude", "settings.json"))).toBe(true);
+  });
+
   it("--server daemon records the mode and leaves apiUrl to the port", () => {
     const ctx = makeCtx();
     ctx.hasUvx = () => true;
@@ -810,6 +950,7 @@ describe("server setup", () => {
   it("adopts the old plugin's endpoint instead of asking or defaulting to Cloud", () => {
     const ctx = makeCtx();
     ctx.readLegacy = () => ({
+      harness: "claude-code",
       serverMode: "self-hosted" as const,
       apiUrl: "http://legacy:8888",
       apiToken: "tok",
@@ -829,14 +970,37 @@ describe("server setup", () => {
   it("an explicit --server still overrides what the old plugin used", () => {
     const ctx = makeCtx();
     ctx.readLegacy = () => ({
+      harness: "claude-code",
       serverMode: "self-hosted" as const,
       apiUrl: "http://legacy:8888",
       source: "/x",
     });
-    expect(run(["install", "claude-code", "--server", "cloud"], ctx)).toBe(0);
+    expect(run(["install", "claude-code", "--server", "cloud", "--api-token", "tok"], ctx)).toBe(0);
     const cfg = readJson(configPath(ctx));
     expect(cfg.serverMode).toBe("cloud");
     expect(cfg.apiUrl).toBeUndefined();
+  });
+
+  it("--server cloud stores the required token", () => {
+    const ctx = makeCtx();
+    expect(
+      run(["install", "claude-code", "--server", "cloud", "--api-token", "sk-cloud"], ctx)
+    ).toBe(0);
+    const cfg = readJson(configPath(ctx));
+    expect(cfg.serverMode).toBe("cloud");
+    expect(cfg.apiToken).toBe("sk-cloud");
+  });
+
+  // A Cloud config without a token only surfaces later as 401s on the first session — refuse
+  // up front instead, like self-hosted without a URL.
+  it("--server cloud without a token fails instead of writing a config that 401s", () => {
+    const ctx = makeCtx();
+    const logs: string[] = [];
+    ctx.log = (m) => logs.push(m);
+    expect(run(["install", "claude-code", "--server", "cloud"], ctx)).toBe(1);
+    expect(logs.join("\n")).toContain("--api-token");
+    expect(existsSync(configPath(ctx))).toBe(false);
+    expect(existsSync(join(ctx.home, ".claude", "settings.json"))).toBe(false);
   });
 
   // litellm publishes no macOS wheel, so a Mac compiles it from source and needs cargo. Without

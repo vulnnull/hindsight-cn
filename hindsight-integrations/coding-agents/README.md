@@ -15,14 +15,13 @@ in front of the agent at the moment it starts working, and keeps a curated set o
 ## Install
 
 ```bash
-npm install -g @vectorize-io/hindsight-coding-agents
-hindsight-coding-agents install all          # every detected agent, wired natively
-hindsight-coding-agents install claude-code  # or just one
-hindsight-coding-agents uninstall all        # removes exactly what install added
+npx @vectorize-io/hindsight-coding-agents install all          # every detected agent, wired natively
+npx @vectorize-io/hindsight-coding-agents install claude-code  # or just one
+npx @vectorize-io/hindsight-coding-agents uninstall all        # removes exactly what install added
 ```
 
 `install` takes an explicit target — `all`, or one or more harness names. A bare
-`hindsight-coding-agents install` changes nothing and prints the choice, so wiring every agent on
+`npx @vectorize-io/hindsight-coding-agents install` changes nothing and prints the choice, so wiring every agent on
 the machine is never something that happens by accident.
 
 On a terminal it also asks **where memory should live** — Hindsight Cloud, a server you run, or a
@@ -33,30 +32,96 @@ local daemon on this machine (see [Where memory lives](#where-memory-lives)). Sc
 
 Same command, only the harness name changes. Run after installing the package globally.
 
-| agent              | command                                       | what it wires                                                                                    |
-| ------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Claude Code        | `hindsight-coding-agents install claude-code` | 3 hooks in `~/.claude/settings.json` + MCP (`claude mcp add`, user scope) + companion skill      |
-| opencode           | `hindsight-coding-agents install opencode`    | plugin entry in `~/.config/opencode/opencode.json` (native tools, no MCP needed)                 |
-| Kilo CLI           | `hindsight-coding-agents install kilo`        | plugin entry in `~/.config/kilo/kilo.json[c]`                                                    |
-| Codex CLI          | `hindsight-coding-agents install codex`       | 3 hooks in `~/.codex/hooks.json` + `[mcp_servers]` in `config.toml` (needs `codex_hooks = true`) |
-| Cursor CLI         | `hindsight-coding-agents install cursor-cli`  | hooks in `~/.cursor/hooks.json` + `~/.cursor/mcp.json` + skill                                   |
-| GitHub Copilot CLI | `hindsight-coding-agents install copilot-cli` | `~/.copilot/hooks/` + `mcp-config.json` + skill                                                  |
-| Grok Build         | `hindsight-coding-agents install grok-build`  | native hooks + MCP in `~/.grok/config.toml` + skill                                              |
-| Antigravity CLI    | `hindsight-coding-agents install agy`         | lifecycle hooks + MCP + the `Hindsight · <bank>` status line                                     |
-| Devin CLI          | `hindsight-coding-agents install devin-cli`   | hooks in `~/.config/devin/config.json` + MCP (needs Node 22.5+, see below)                       |
-| Cline CLI          | `hindsight-coding-agents install cline-cli`   | native plugin via `cline plugin install` + MCP + skill                                           |
+#### <img src="https://hindsight.vectorize.io/img/harness/claude-code.png" alt="" width="20" height="20" /> Claude Code
 
-Uninstall the same way: `hindsight-coding-agents uninstall claude-code` (or `uninstall all`).
+```bash
+npx @vectorize-io/hindsight-coding-agents install claude-code
+```
+
+3 hooks in `~/.claude/settings.json`, MCP via `claude mcp add` (user scope), and the companion skill.
+
+#### <img src="https://hindsight.vectorize.io/img/harness/codex.svg" alt="" width="20" height="20" /> Codex CLI
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install codex
+```
+
+3 hooks in `~/.codex/hooks.json` plus `[mcp_servers]` in `config.toml` (needs `codex_hooks = true`).
+
+#### <img src="https://hindsight.vectorize.io/img/harness/opencode.png" alt="" width="20" height="20" /> opencode
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install opencode
+```
+
+A plugin entry in `~/.config/opencode/opencode.json` — native tools, no MCP needed.
+
+#### <img src="https://hindsight.vectorize.io/img/harness/kilo.svg" alt="" width="20" height="20" /> Kilo CLI
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install kilo
+```
+
+A plugin entry in `~/.config/kilo/kilo.json[c]`.
+
+#### <img src="https://hindsight.vectorize.io/img/harness/cursor-cli.svg" alt="" width="20" height="20" /> Cursor CLI
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install cursor-cli
+```
+
+Hooks in `~/.cursor/hooks.json`, `~/.cursor/mcp.json`, and the companion skill.
+
+#### <img src="https://hindsight.vectorize.io/img/harness/copilot-cli.svg" alt="" width="20" height="20" /> GitHub Copilot CLI
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install copilot-cli
+```
+
+`~/.copilot/hooks/`, `mcp-config.json`, and the companion skill.
+
+#### <img src="https://hindsight.vectorize.io/img/harness/grok-build.svg" alt="" width="20" height="20" /> Grok Build
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install grok-build
+```
+
+Native hooks and MCP in `~/.grok/config.toml`, plus the companion skill.
+
+#### <img src="https://hindsight.vectorize.io/img/harness/antigravity-cli.png" alt="" width="20" height="20" /> Antigravity CLI
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install agy
+```
+
+Lifecycle hooks, MCP, and the `Hindsight · <bank>` status line.
+
+#### <img src="https://hindsight.vectorize.io/img/harness/devin-cli.svg" alt="" width="20" height="20" /> Devin CLI
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install devin-cli
+```
+
+Hooks in `~/.config/devin/config.json` plus MCP. Needs Node 22.5+ — see below.
+
+#### <img src="https://hindsight.vectorize.io/img/harness/cline-cli.svg" alt="" width="20" height="20" /> Cline CLI
+
+```bash
+npx @vectorize-io/hindsight-coding-agents install cline-cli
+```
+
+A native plugin via `cline plugin install`, plus MCP and the companion skill.
+
+Uninstall the same way: `npx @vectorize-io/hindsight-coding-agents uninstall claude-code` (or `uninstall all`).
 
 **Devin CLI needs Node 22.5 or newer.** Its hooks pass only a session id — the conversation itself
 lives in `~/.local/share/devin/cli/sessions.db` — so reading it depends on Node's built-in
 `node:sqlite`. Installing `devin-cli` checks for this first and refuses (with the reason) rather
 than wiring hooks that could never retain anything. Every other agent works on any supported Node.
 
-Install globally (not `npx`): the wiring points at this package's files, so it must live at a
-stable path — the installer refuses to run from an npx cache. **Updating** is just
-`npm update -g @vectorize-io/hindsight-coding-agents`: the wired paths stay valid, every new session runs the
-new version; re-run `install` (idempotent) only when a release note says the wiring changed.
+`install` copies what it needs into `~/.hindsight/coding-agents` and points each agent's wiring
+there, so nothing depends on where you ran it from. **Updating** is the same command again — it
+re-copies the runtime in place, leaving the wiring valid and every new session on the new version.
 
 `install` merges the native wiring (hooks + MCP registration where the host wants them) into each
 agent's own config, preserving everything already there; it is idempotent (re-run after moving the
@@ -73,7 +138,7 @@ can ask the agent itself. Manual wiring per harness, if you prefer:
 ```
 
 **Claude Code** and **Codex** get their full three-hook + MCP wiring from this package's own
-installer — `hindsight-coding-agents install claude-code` / `install codex`. This package's `bin`
+installer — `npx @vectorize-io/hindsight-coding-agents install claude-code` / `install codex`. This package's `bin`
 entries (`hindsight-claude-hook`, `hindsight-codex-hook`,
 `hindsight-cursor-hook`) are the individual injection-only `UserPromptSubmit` entrypoints for a
 minimal, hand-wired setup.
@@ -86,16 +151,19 @@ a `hookAdapter` in `src/harness/registry.ts`; persistent-plugin → implement `H
 
 The older per-agent integrations (`hindsight-claude-code`, `hindsight-cursor-cli`, `hindsight-codex`, …) are superseded by this package. Two things move; nothing else does.
 
-**Your server moves automatically.** If `~/.hindsight/claude-code.json` exists, `install` adopts its
-endpoint — `hindsightApiUrl` → `apiUrl`, `hindsightApiToken` → `apiToken`, and an empty URL means
-the local daemon, as it did there. You already chose where your memory lives; defaulting to Cloud
-instead would quietly send your prompts somewhere else. Pass `--server` to override.
+**Your server moves automatically.** If `~/.hindsight/claude-code.json` or `~/.hindsight/codex.json`
+exists, `install` adopts its endpoint — `hindsightApiUrl` → `apiUrl`, `hindsightApiToken` →
+`apiToken`, and an empty URL means the local daemon, as it did there. The agent you are installing
+is checked first, so wiring Codex takes Codex's server even if an old `claude-code.json` is still
+lying around. You already chose where your memory lives; defaulting to Cloud instead would quietly
+send your prompts somewhere else. Pass `--server` to override. (Those two are the only old plugins
+that shipped a user config — Cursor CLI, Copilot CLI, opencode and Cline have no endpoint to carry.)
 
 **Your conversations are re-imported from local disk**, as new documents:
 
 ```bash
 cd /path/to/your/repo
-hindsight-coding-agents install claude-code --import-conversations
+npx @vectorize-io/hindsight-coding-agents install claude-code --import-conversations   # or: install codex --import-conversations
 ```
 
 This re-extracts the transcripts the agent already wrote, so it costs tokens roughly in proportion
@@ -138,9 +206,9 @@ Three modes, chosen once when you install (`install` asks on a terminal; pass `-
 | `daemon`      | a local `hindsight-embed` on this machine | `uv` on PATH + an LLM key for extraction |
 
 ```bash
-hindsight-coding-agents install claude-code --server daemon
-hindsight-coding-agents install claude-code --server self-hosted --api-url http://localhost:8888
-hindsight-coding-agents install claude-code --server cloud --api-token <token>
+npx @vectorize-io/hindsight-coding-agents install claude-code --server daemon
+npx @vectorize-io/hindsight-coding-agents install claude-code --server self-hosted --api-url http://localhost:8888
+npx @vectorize-io/hindsight-coding-agents install claude-code --server cloud --api-token <token>
 ```
 
 Re-running `install` never re-asks: a config that already names a server is left alone.

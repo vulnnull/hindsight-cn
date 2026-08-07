@@ -1,7 +1,7 @@
 """Repair: drop the stale global memory_units vector index on per-bank backends.
 
 Revision ID: f2a6d8c4b1e9
-Revises: c1e7a9d3f5b2
+Revises: e4a7c1b9d2f6
 Create Date: 2026-08-06
 
 Migration d5e6f7a8b9c0 dropped the global ``idx_memory_units_embedding`` for
@@ -33,7 +33,7 @@ from alembic import context, op
 from hindsight_api.alembic._dialect import run_for_dialect
 
 revision: str = "f2a6d8c4b1e9"
-down_revision: str | Sequence[str] | None = "c1e7a9d3f5b2"
+down_revision: str | Sequence[str] | None = "e4a7c1b9d2f6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

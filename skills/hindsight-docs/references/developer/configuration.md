@@ -1223,6 +1223,59 @@ Two functions are available:
 | `HINDSIGHT_API_RECALL_BUDGET_MIN` | Floor for the adaptive function (after clamping). | `20` |
 | `HINDSIGHT_API_RECALL_BUDGET_MAX` | Ceiling for the adaptive function (after clamping). | `2000` |
 
+#### Recall pipeline stages
+
+Recall runs four retrieval arms (semantic, BM25, graph, temporal) and then reranks the
+fused candidates with a cross-encoder. Each stage costs latency, and a bank whose content
+has no relational or temporal structure pays for arms it cannot use — for example a bank
+ingested with `retain_extraction_mode: chunks` and used as plain retrieval.
+
+These switch the individual stages off. All are hierarchical — overridable per bank via the
+[config API](#hierarchical-configuration) — so one bank can run lean without changing how the
+rest of the deployment recalls. Semantic and BM25 always run; they are the baseline retrieval.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_ENABLE_TEMPORAL_RETRIEVAL` | Run the temporal retrieval arm. `false` also skips the date-aware query analysis that feeds it — without a detected constraint there is nothing to filter on. | `true` |
+| `HINDSIGHT_API_ENABLE_GRAPH_RETRIEVAL` | Run the entity/link graph traversal arm. `false` skips those queries and returns no graph results. | `true` |
+| `HINDSIGHT_API_ENABLE_RERANKING` | Rerank fused candidates with the cross-encoder. `false` returns the RRF-fused ordering directly — faster, but less precise. | `true` |
+
+Turning all three off leaves semantic + BM25 fused by RRF, which is the lowest-latency
+recall configuration.
+
+##### Pairing with the retain side: plain-retrieval ("RAG") banks
+
+These recall toggles only remove work from the *read* path. If a bank is being used as
+plain retrieval, the ingestion path should be configured to match — otherwise it still
+pays for LLM work whose output recall no longer uses:
+
+- **`retain_extraction_mode: chunks`** skips LLM fact extraction entirely and stores each
+  chunk as-is. This returns before any LLM queue or lock is acquired, so it removes the
+  LLM call from retain rather than just shortening it — normally the dominant cost of
+  ingestion.
+- **`enable_observations: false`** skips consolidation, the other background LLM workload.
+
+Configured together, the bank behaves like a conventional vector store: chunks in, hybrid
+search out, no LLM on either path. Set both sides in one call:
+
+```bash
+curl -X PUT "$HINDSIGHT_API_URL/v1/default/banks/my-bank" \
+  -H "Authorization: Bearer $HINDSIGHT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "retain_extraction_mode": "chunks",
+    "enable_observations": false,
+    "enable_temporal_retrieval": false,
+    "enable_graph_retrieval": false,
+    "enable_reranking": false
+  }'
+```
+
+The trade-off is the point of the product: no extracted facts, entities, or links means no
+graph or temporal structure to retrieve, and no mental models to reflect over. Use it for
+banks that are genuinely plain retrieval — or to benchmark Hindsight against a baseline
+vector store on equal terms — not as a general latency fix.
+
 ### Retain
 
 Controls the retain (memory ingestion) pipeline.
@@ -1850,6 +1903,12 @@ For a server handling many concurrent requests, lower values (down to `1`) favor
 | `HINDSIGHT_API_WEBHOOK_SECRET` | HMAC signing secret for webhook payloads | - (unsigned) |
 | `HINDSIGHT_API_WEBHOOK_EVENT_TYPES` | Comma-separated list of event types to deliver via webhook | `consolidation.completed` |
 | `HINDSIGHT_API_WEBHOOK_DELIVERY_POLL_INTERVAL_SECONDS` | How often the webhook delivery worker polls for pending deliveries (seconds) | `30` |
+| `HINDSIGHT_API_WEBHOOK_ALLOWED_HOSTS` | Comma-separated hosts or IP/CIDR ranges permitted as webhook destinations in addition to public addresses. Private, loopback, and link-local ranges (including the cloud metadata address) are blocked unless listed here. | - (public only) |
+| `HINDSIGHT_API_WEBHOOK_EXPOSE_RESPONSE_BODY` | Return the raw upstream response body in the delivery-history API. Off by default to avoid exposing internal response contents; the delivery status code is always returned. | `false` |
+
+:::warning Webhook destinations are SSRF-guarded
+Because webhook URLs are caller-supplied, the delivery worker refuses to send to private, loopback, or link-local addresses (e.g. `169.254.169.254`, `127.0.0.1`, `10.0.0.0/8`) by default, and it does not return upstream response bodies to callers. Use `HINDSIGHT_API_WEBHOOK_ALLOWED_HOSTS` to allow specific internal destinations (such as `127.0.0.1` for local testing), and `HINDSIGHT_API_WEBHOOK_EXPOSE_RESPONSE_BODY=true` only if you trust those destinations and need the response body for debugging.
+:::
 
 ### Audit Logging
 

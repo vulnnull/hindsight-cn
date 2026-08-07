@@ -454,7 +454,22 @@
     "memoryDefenseEnterpriseFeaturePromptInjection": "提示词注入检测:阻止覆盖代理行为的尝试",
     "memoryDefenseEnterpriseFeatureSizeAnomaly": "大小异常:拒绝可疑的过大负载",
     "memoryDefenseEnterpriseFeatureProtectedKeys": "受保护的标签命名空间:强制使用不可变的身份标签",
-    "memoryDefenseEnterpriseCta": "申请演示"
+    "memoryDefenseEnterpriseCta": "申请演示",
+    "recallTitle": "召回流水线",
+    "recallDescription": "该记忆库召回时执行的检索阶段",
+    "recallServerDefault": "服务器默认值",
+    "recallFailedToSave": "保存召回流水线设置失败",
+    "recallTemporalRetrievalLabel": "时间检索",
+    "recallTemporalRetrievalDescription": "执行日期感知的查询分析。禁用后也会跳过时间检索分支。当该记忆库的内容不含有意义的日期时很有用。",
+    "recallGraphRetrievalLabel": "图检索",
+    "recallGraphRetrievalDescription": "在召回时遍历实体与链接关系。禁用可用关系检索换取更低的延迟。",
+    "recallRerankingLabel": "重排序",
+    "recallRerankingDescription": "使用交叉编码器对融合后的候选重新排序。禁用后直接返回 RRF 排序，更快但精度较低。",
+    "extractionModeConcise": "简洁",
+    "extractionModeVerbose": "详尽",
+    "extractionModeVerbatim": "逐字",
+    "extractionModeChunks": "分块（不用 LLM）",
+    "extractionModeCustom": "自定义"
   },
   "bankOperations": {
     "title": "后台操作",
