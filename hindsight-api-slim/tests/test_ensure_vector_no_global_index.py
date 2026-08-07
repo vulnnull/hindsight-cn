@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, create_engine, text
 
 import hindsight_api
@@ -66,6 +67,10 @@ def _reset_schema(db_url: str, schema: str) -> None:
             conn.commit()
     finally:
         engine.dispose()
+
+
+# The repair migration under test: drops the stale global memory_units index.
+_REPAIR_REVISION = "f2a6d8c4b1e9"
 
 
 def _alembic_config(db_url: str, schema: str) -> Config:
@@ -151,7 +156,18 @@ def test_migration_drops_stale_global_index(vec_db_url):
     cfg = _alembic_config(vec_db_url, schema)
     # Step back below the repair migration, then plant the legacy index the
     # way an older reconcile would have left it.
-    command.downgrade(cfg, "f2a6d8c4b1e9@-1")
+    #
+    # The parent is resolved from the revision map rather than written as
+    # "f2a6d8c4b1e9@-1": that is alembic's branch@relative syntax, which counts
+    # back from the *head* of the branch containing the revision, not from the
+    # revision itself. It meant "the parent" only while the repair migration was
+    # head, so the first migration added on top of it (b3e8d1c6f4a9) made this
+    # downgrade stop ON the repair migration instead of below it — the stale index
+    # was then planted after the drop had already run, the upgrade never re-ran it,
+    # and the test failed for reasons unrelated to the behaviour under test.
+    parent = ScriptDirectory.from_config(cfg).get_revision(_REPAIR_REVISION).down_revision
+    assert isinstance(parent, str), f"expected a single parent for {_REPAIR_REVISION}, got {parent!r}"
+    command.downgrade(cfg, parent)
 
     engine = create_engine(vec_db_url)
     try:
